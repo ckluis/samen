@@ -797,6 +797,108 @@ far more (the whole watch-list is 6 nightly slices of ≤ 12.8 min). That fails 
 patches holds 8 where the old policy planned 4 (est 285 s within the 300 s target, margin 1.39) — "unknown items keep the
 old rate" is true of the weight, not of the wall-clock; an item far above 64 lane-seconds could overrun one call.
 
+### 2.9 As built (P6) — the cold path: a sound compiled-dependency cache for the gen probes, diff-scaled Actions timeouts
+
+Measured 2026-10-13 on the same 10-core dev machine with other sessions running (1-minute load 7-20 throughout; every
+figure below is one run, so the ratios matter more than the seconds). Branch `feat/adr-053-p6-cold-path`, sabotages
+601-607, driver cases SELTMO and GENDEPS.
+
+**1. Where a probe's time goes.** One generated app (the deploy probe's shape), run alone at load 5-9, phase by phase:
+`mix deps.get` 4-5 s · compile of the 62 HEX dependencies 61-78 s · compile of `samen_core` + `samen_web` (path deps)
+8-12 s · compile of the app 3-4 s · catalog dump + API contract 0 s · the app's own `ci.sh` 21 s (≈ 120 s total). So
+≈ 60% of a probe is third-party code that depends only on the generated `mix.lock`, the toolchain and the config the
+dependencies compile under — not on the code the probe tests. Concurrently (three probes + the rest of `pr`) that
+compile is what makes a probe 150-400 s.
+
+**2. The cache (`scripts/gen_deps_cache.py`).** `Gen.compile_and_dump!` runs `seed` after `deps.get` and `store` after a
+green `compile` when `SAMEN_GEN_DEPS_CACHE_HELPER` is set — which only `run_gen_probe` does (`local -x`; the driver
+strips it from every step, like the registry seams), so `mix samen.gen.app` for a user is unchanged. Entries live in
+`${XDG_CACHE_HOME:-~/.cache}/samen/gen_deps/v1/<key>/lib/<hex dep>` (≈ 70 MB each, 4 newest kept; `SAMEN_GEN_DEPS_CACHE=off`
+disables, `=<dir>` relocates). Alternatives rejected: a shared `MIX_DEPS_PATH` checkout with per-probe `_build` still
+compiles every dependency in every probe (the saving IS the compiled output), and caching all of `_build` would freeze
+`samen_core`/`samen_web`, the code under test.
+
+*Soundness, each proof mechanical (case GENDEPS, 63 assertions, ≈ 20 s, plus a live run):*
+- (a) **Key.** sha-256 over: the generated `mix.lock` bytes (every package, version and checksum), the `mix_exs*.eex`
+  templates, Elixir + OTP release + `OTP_VERSION` + architecture, `MIX_ENV`, the build-relevant environment (`MIX_*`
+  except quiet/home/archives, `ELIXIR_*`, `ERL_*`, `REBAR*`, `CC`/`CXX`/`*FLAGS`), and the Application env of every hex
+  dependency AS THE APP'S CONFIG SETS IT, printed by Elixir itself (`mix run --no-compile -e … Application.get_all_env`) —
+  the compile-env question the P5 note raised (22 `Application.compile_env(:ash, …)` sites; the generated config sets
+  `:ash`, `:phoenix`, `:opentelemetry`). GENDEPS: a changed lock checksum, a changed dependency config value,
+  `ELIXIR_ERL_OPTIONS`, `CFLAGS`, another `MIX_ENV`, another Elixir/OTP (a fake `elixir` earlier in `PATH`) each give a
+  different key; an unrelated variable, `MIX_QUIET` and the app's own name/directory do not (positive controls — so the
+  three probes DO share one key: flagship, post and deploy printed the same `2c283ae1bcff…`). Sabotage 603 (config
+  dropped from the key).
+- (b) **Code under test is never cached.** Only names in the lock's `{:hex, …}` entries are stored or seeded, and `samen_*`
+  is excluded even if it were listed; `samen_core`/`samen_web`/the app are path deps/the app itself, absent from the lock.
+  GENDEPS: with `samen_extra`, `samen_core`, `samen_web` and the app all built, the entry holds exactly `jason telemetry`
+  and a seeded app has no `samen_*`; an entry that names one is CORRUPT. Sabotage 605. **Live:** with a warm cache
+  (`HIT … seeded 62 compiled hex dependencies in 0.6s`) an edit that breaks `samen_web/lib/samen/web/account_health.ex`
+  makes `gen_deploy_probe` FAIL in 23 s with `Compilation error in file lib/samen/web/account_health.ex` — the path dep
+  was compiled from source, not served; reverted byte-exact.
+- (c) **Partial/corrupt entries fail closed.** An entry is built in `<key>.tmp.<pid>.<ms>`, gets a `MANIFEST`
+  (sha-256 of every file, target of every symlink) and a `COMPLETE` marker holding the MANIFEST's digest, and is
+  published by ONE `rename`; a temp dir is never an entry. Before a HIT the whole tree is re-hashed against the MANIFEST
+  and the dependency set against COMPLETE and the lock. GENDEPS: a flipped byte, a deleted file, a stray extra file, a
+  missing COMPLETE, a tampered MANIFEST, a foreign `samen_core` directory — each is reported `CORRUPT`, the entry deleted,
+  nothing seeded, the probe compiles from scratch; a store with nothing compiled publishes nothing; a lock edited between
+  seed and store is not stored. A failed compile never reaches `store`. Sabotage 604 (re-hash skipped). Any error inside
+  the helper degrades to "compile from scratch" (exit 0), never to a wrong build.
+- (d) **P5 untouched.** `run_gen_probe`'s registry snapshot/private copy/trap/scratch sweep are byte-identical; the helper
+  adds three `local -x` lines. GENPROBE and the T107 interrupt harness stay green (see the closing `pr`).
+- **Concurrency.** The first probe to miss `mkdir`s `<key>.lock` (owner = the probe's `mix` pid); the others wait up to
+  420 s for the entry (a dead owner's lock is taken over, a live one is waited for, then the waiter compiles its own),
+  seed from it and skip publishing. Entries are immutable per key, so there is no write-after-read hazard. Sabotage 606.
+  `reads = scripts/gen_deps_cache.py` on the four gen steps puts the helper in their cache key (a change to the helper
+  re-runs them); it is a `reads`, not an `inputs` edit, so patch 567's anchor is unchanged. Sabotage 607 (the guard
+  stops arming it).
+- **Actions.** The composite action carries `~/.cache/samen/gen_deps` with `actions/cache` (same pinned SHA) for jobs
+  whose `only` names a `gen_*` step. It is transport only — entries are re-verified before use — and its key carries the
+  ISO week because the generated app's lock resolves from hex at run time (nothing in the repo pins it), so a
+  valid-but-aging cache is refreshed weekly instead of missing forever. Not validated on a hosted runner here (no
+  push); the YAML parses and the pin/`${{ }}`-in-`run:` rules hold.
+
+*Numbers (the three probes concurrently, `-j 3`, `--no-cache`; load noted):*
+
+| run | gen_deploy | gen_post | gen_flagship | wall | load |
+|---|---|---|---|---|---|
+| before (no cache; first measurement) | 270.8 s | 302.8 s | 383.0 s | 383.5 s | 10-17 |
+| before (`SAMEN_GEN_DEPS_CACHE=off`, same code) | 253.2 s | 283.7 s | 339.8 s | 340.3 s | 10-12 |
+| cache COLD (empty; one probe compiles, two wait then seed) | 138.4 s | 179.8 s | 233.2 s | 233.7 s | 7-17 |
+| cache COLD (second sample) | 171.9 s | 199.8 s | 265.2 s | 265.7 s | 11 |
+| cache WARM | 69.4 s | 89.1 s | 141.6 s | 142.1 s | 10 |
+| cache WARM (second sample, load 12) | 90.8 s | 140.5 s | 243.0 s | 243.8 s | 11-13 |
+
+The seeding itself costs 0.6-0.8 s (62 dependencies, 70 MB, with re-hash). Cold-with-cache is already faster than
+before because two of the three probes stop compiling; warm removes ≈ 60-75 s per probe at idle and more under
+contention. What remains (flagship ≈ 140-240 s) is `samen_core` + `samen_web` + the app compile, the probe's own
+`ci.sh` and its sabotages/boot checks — all code under test, uncached by design.
+
+*Cold `pr` (`scripts/ci pr --no-cache`, deps cache emptied, 7 invocations, `-j 5`, load 10-20 from other sessions):* the
+closing run's steps before the diff-scaled sabotage replay took ≈ 16 min of driver time (invocation 1 ended at 706 s with
+`gen_flagship_probe` 410.8 s, `gen_post_probe` 264.4 s, `gen_deploy_probe` 57.4 s once the first two had published);
+the old figure was ≈ 18 min with an empty selection. This branch edits the driver, so `sabotage_changed` selected the
+whole driver-reachable set (5 chunks, 3.8-9 min each, 2,006 s) and the full `cumulative_s` was 3,139.6 s — not a
+comparable cold-`pr` figure; the probes are no longer the long pole of the first 16 minutes.
+
+**3. Diff-scaled Actions timeouts (Gate P5 N2).** `scripts/ci actions plan pr --selection --base <ref>` asks each
+sharded, un-sliced step's own lister (`shard_list`/`shard_total`) how many items this diff selects and sets
+`timeout = min(360, max(history, 5·ceil(2·selected·shard_each_s / 60 / 5)))` — twice the lane-seconds at the manifest's
+conservative per-item rate (32 s per sabotage patch, 6 s per mutant), never below the `actions_timeouts.tsv` value, never
+over GitHub's 360. The PR workflow's `plan` job passes the PR base and now sets up the pinned toolchain (`mutate.sh
+--list` runs the mutation engine); a lister that fails or has no count line REFUSES the plan (the job it sizes would fail
+the same way). The plain `actions plan` (no flag) is unchanged. SELTMO: 3 selected → the 15 min floor; 100 → 110; 5,000 →
+360; a larger history value (80) is kept for 10 selected and exceeded for 100; a missing count line → exit 2. Sabotages
+601 (floor dropped), 602 (selection ignored). Checked on this repo: `scripts/ci actions plan pr --selection` prints the
+real plan (empty selection → unchanged 60/15); the guard-vs-ordinary distinction in the PR text was not built — one
+conservative rate per step, the 2x margin and the cap carry it.
+
+**Deferred.** (a) The Actions side of the cache is wired but unproven on a hosted runner (it needs a push). (b)
+`flagship`'s own remaining time (≈ 140-240 s warm under load) is `ci.sh` + sabotages; a second cache would have to
+cover compiled `samen_core`/`samen_web`, which the probes must compile fresh — not attempted. (c) Cost-weighting of
+`modulo` shards is still open (P5 deferred b). (d) A cache entry is trusted for what its own MANIFEST says; a
+local attacker who rewrites an entry AND its MANIFEST is out of scope (same trust as `~/.hex`).
+
 ## 3. Red paths (each with a test; sabotage where it guards a property)
 
 | # | Must fail when |
@@ -826,6 +928,8 @@ evicts the cached PASS of the same content) likewise.
 | RECHUNK | a resume re-runs a chunk that already passed because the learned rate re-chunked the plan (P5) |
 | COSTW | chunks ignore what each item cost, or the cost model plans a chunk shorter than one that ran / far past any that completed (P5) |
 | TIMEOUT | an Actions job keeps a flat limit, or a timeout row drifts from its observation (P5) |
+| SELTMO | a `--changed` job's timeout ignores its selection, drops the history floor, exceeds 360, or the plan survives a lister with no count (P6) |
+| GENDEPS | the compiled-dependency cache is keyed on too little, stores/serves `samen_*`/path deps, uses a corrupt or partial entry, or is no longer armed by `run_gen_probe` (P6) |
 
 P5 (as built): GENPROBE, NARROW, RECHUNK, COSTW, TIMEOUT (and C7's extension to the samen_core scratch databases) are cases
 of `scripts/ci_test.sh`, named in `ci_driver_guard_test.exs`; the sandbox helper has its own tests
@@ -849,6 +953,7 @@ P2 (as built): A1–A3 (and the gate's WAE) are cases of `scripts/ci_test.sh` (n
 | P3 | **BUILT.** Sabotage/mutation ergonomics: N-lane corpus, `sabotage new`, `sabotage reanchor`, `scripts/counts`. C7, C8, C10. |
 | P4 | **BUILT.** CLAUDE.md "Suites / CI" + "Mutation gate" rewritten around the three modes (104 → 37 lines); `docs/ci.md`; `scripts/docs_check` (doc-drift guard, DOCS, sabotages 554–563); before/after numbers for a typical round (§2.9 P4). |
 | P5 | **BUILT.** Follow-ups: gen probes concurrent on a private abbrev-registry copy + `*_test.exs` out of the probe/dialyzer keys; finished chunks survive a re-plan (persisted partitions); cost-weighted chunks with a fitted model; samen_core scratch DBs lane-suffixed; per-job Actions timeouts from observed runs; `Samen.TestSandbox.shared!/1` replacing the raw shared-sandbox pair (123 files + templates) with a guard. Sabotages 564-596 (§2.9 P5). |
+| P6 | **BUILT.** The cold path: a content-keyed cache of the gen probes' compiled HEX dependencies (`scripts/gen_deps_cache.py`; `samen_core`/`samen_web`/the app always compile fresh) and Actions timeouts for the two `--changed` jobs sized from the diff's selection (Gate P5 N2). Sabotages 601-607 (§2.9 P6). |
 
 ## 5. Consequences
 
