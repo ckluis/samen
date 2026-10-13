@@ -513,10 +513,32 @@ def clone_step(step, sid):
     return s
 
 
+PRIOR_MODEL = (10.0, 1.0, 1.0)  # (fixed overhead s, share of lane-seconds the wall-clock pays, margin)
+
+
+def cost_model(obs):
+    """(P5) chunk wall-clock ~ margin * (overhead + share * sum of the items' lane-seconds), fitted to the last
+    twelve (lane-seconds, wall-clock) observations of PASSED chunks (the fixed part is lane/worktree start-up, the
+    share is how much the parallel lanes overlap: measured 60 s + 0.32 on this machine). With fewer than four
+    observations, or all of one size, the prior stands (10 s, share 1: every lane-second paid in full). The margin
+    is the worst observed wall-clock over its own prediction (never under 1), so no plan is shorter than a chunk
+    has recently run: G10 stays on the pessimistic side by construction."""
+    pts = [(float(w), float(d)) for w, d in (obs or [])][-12:]
+    if len(pts) < 4 or max(w for w, _ in pts) - min(w for w, _ in pts) < 20:
+        return PRIOR_MODEL
+    mx = sum(w for w, _ in pts) / len(pts)
+    my = sum(d for _, d in pts) / len(pts)
+    var = sum((w - mx) ** 2 for w, _ in pts)
+    b = min(1.0, max(0.1, sum((w - mx) * (d - my) for w, d in pts) / var))
+    a = min(120.0, max(10.0, my - b * mx))
+    margin = max(1.0, max(d / (a + b * w) for w, d in pts))
+    return (a, b, margin)
+
+
 def learn_costs(seen, step, text, dur):
-    """(P5) Per-item wall-clock out of a PASSED sub-step's log (`shard_cost`: name, seconds) and the share of the
-    lane-seconds the wall-clock really paid. Items blend old and new (a loaded machine must not pin a cost);
-    the share keeps the last five observations (the plan uses the worst of them)."""
+    """(P5) Per-item wall-clock out of a PASSED sub-step's log (`shard_cost`: name, seconds), and one (lane-seconds,
+    wall-clock) observation of the chunk for `cost_model`. Items blend old and new (a loaded machine must not pin a
+    cost)."""
     got = dict((m.group(1), float(m.group(2))) for m in re.finditer(step.shard_cost, text, re.M))
     if not got:
         return
@@ -524,10 +546,10 @@ def learn_costs(seen, step, text, dur):
     for name, secs in got.items():
         table[name] = round(secs if name not in table else 0.5 * table[name] + 0.5 * secs, 1)
     seen[step.parent + "#item_cost"] = table
-    total = sum(got.values())
-    if total > 0 and len(got) == (step.expected or len(got)):
-        obs = round(max(0.0, dur - 10.0) / total, 3)
-        seen[step.parent + "#alpha"] = (list(seen.get(step.parent + "#alpha") or []) + [obs])[-5:]
+    if len(got) == (step.expected or len(got)):  # every item of the chunk reported: the sum is the chunk's
+        obs = list(seen.get(step.parent + "#chunk_obs") or [])
+        obs.append([round(sum(got.values()), 1), round(dur, 1)])
+        seen[step.parent + "#chunk_obs"] = obs[-12:]
 
 
 def per_item_bucket(old, rate):
@@ -620,11 +642,10 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
     learned = float(seen.get(step.id + "#per_item", 0))
     each = max(step.shard_each, learned)
     # (P5) cost-weighted ranges: what each item LAST cost (lane-seconds, read from the sub-step logs through
-    # `shard_cost`) and how much of that the wall-clock really paid (lanes overlap) — the worst of the last few
-    # observations, so a chunk is never planned shorter than it has recently run.
+    # `shard_cost`) and what a chunk of that many lane-seconds really took (cost_model).
     costs = seen.get(step.id + "#item_cost") or {} if step.shard_cost else {}
-    alphas = seen.get(step.id + "#alpha") or [] if step.shard_cost else []
-    alpha = min(1.0, max(0.2, max(alphas))) if alphas else 1.0
+    ovh, share, margin = cost_model(seen.get(step.id + "#chunk_obs")) if step.shard_cost else PRIOR_MODEL
+    chunk_est = lambda lane_s: margin * (ovh + share * lane_s)
     if step.shard_kind == "ranges":
         items = [m.group(1) for m in re.finditer(step.shard_item, text, re.M)]
         if len(items) != total:
@@ -656,7 +677,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
             per = max(1, int(step.shard_target // max(each, 0.001)))
             for n, it in run:
                 if cur and n != cur[-1][0]:
-                    full = ((tot + weight(it)) * alpha + 10 > step.shard_target) if step.shard_cost else len(cur) >= per
+                    full = (chunk_est(tot + weight(it)) > step.shard_target) if step.shard_cost else len(cur) >= per
                     if full:
                         out_chunks.append(cur)
                         cur, tot = [], 0.0
@@ -758,7 +779,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
         s.est = (s.expected * each) + 10
         if step.shard_cost and step.shard_kind == "ranges":
             s.cost_sum = sum(float(costs.get(it) or each) for it in its)
-            s.est = s.cost_sum * alpha + 10
+            s.est = chunk_est(s.cost_sum)
         s.group = step.id  # the parent's markers print once every shard passed
         subs.append(s)
     return subs

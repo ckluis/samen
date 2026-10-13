@@ -63,8 +63,9 @@
 #          stretches are re-planned at the new rate (ranges AND modulo shards); each sub-step still reports exactly
 #          its chunk (shard_check), no re-planned chunk outgrows the target (G10), the shards still sum to the selection.
 #   COSTW    (P5) `shard_cost`: ranges chunks are weighted by what each item last cost (read from the sub-step logs),
-#          so one slow item no longer sizes a chunk of cheap ones; the share of lane-seconds the wall-clock paid is
-#          learned too; an unknown item is planned at the old per-item rate.
+#          so one slow item no longer sizes a chunk of cheap ones; a fitted model (fixed overhead + share of the lane-seconds
+#          + a margin covering every observed chunk) turns lane-seconds into a wall-clock estimate; an unknown item is
+#          planned at the old per-item rate.
 #
 #   TIMEOUT  (P5) every Actions matrix job carries a `timeout_min` from ci/actions_timeouts.tsv (2x the slowest observed
 #          run, floor 15, a job with no row gets 60); a row that is not that formula is refused, no row is stale, the
@@ -1455,11 +1456,12 @@ CONF
   eq "$RC" 0 "COSTW: the first run passes"
   eq "$(jsonget "$SAMEN_CI_HOME/timings.json" 'd["shd#item_cost"]["4-a.patch"]')" 40.0 "COSTW: the 40 s item's cost was read from the log"
   eq "$(jsonget "$SAMEN_CI_HOME/timings.json" 'd["shd#item_cost"]["1-a.patch"]')" 1.0 "COSTW: ... and a 1 s item's"
-  eq "$(jsonget "$SAMEN_CI_HOME/timings.json" 'len(d["shd#alpha"])')" 3 "COSTW: one wall-clock share observed per chunk"
-  # pin the share at 1.0 so the arithmetic is the weights', then re-plan
+  eq "$(jsonget "$SAMEN_CI_HOME/timings.json" 'len(d["shd#chunk_obs"])')" 3 "COSTW: one (lane-seconds, wall-clock) observation per chunk"
+  eq "$(jsonget "$SAMEN_CI_HOME/timings.json" 'd["shd#chunk_obs"][0][0]')" 43.0 "COSTW: ... the first chunk (items 1-4: 1+1+1+40) is 43 lane-seconds"
+  # fewer than four observations: the prior (10 s fixed, every lane-second paid in full) stands
   python3 - "$SAMEN_CI_HOME/timings.json" <<'PY'
 import json, sys
-d = json.load(open(sys.argv[1])); d["shd#alpha"] = [1.0]; d["shd#per_item"] = 0; json.dump(d, open(sys.argv[1], "w"))
+d = json.load(open(sys.argv[1])); d["shd#per_item"] = 0; json.dump(d, open(sys.argv[1], "w"))
 PY
   drive "$T/cw3" pr --plan --no-cache
   eq "$(grep -c '^PLAN shd\[' "$T/cw3")" 3 "COSTW: weighted by cost: [1-3] | [4] | [5-12]"
@@ -1469,14 +1471,25 @@ PY
   drive "$T/cw4" pr --budget 0 -j 1 --no-cache
   eq "$RC" 0 "COSTW: the weighted plan runs and every sub-step reports exactly its chunk"
   eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'sum(s["processed"] for s in d["steps"])')" 12 "COSTW: PROCESSED sums to the selection (12)"
-  # a smaller observed share shrinks the estimate, never below 20% of the lane-seconds
+  # four exact observations on  wall = 30 + 0.5 * lane-seconds  : the fitted model replaces the prior, the fixed
+  # overhead (lane start-up) now counts per chunk, so the cheap items no longer ride free next to the slow one
   python3 - "$SAMEN_CI_HOME/timings.json" <<'PY'
 import json, sys
-d = json.load(open(sys.argv[1])); d["shd#alpha"] = [0.0, 0.01]; json.dump(d, open(sys.argv[1], "w"))
+d = json.load(open(sys.argv[1])); d["shd#chunk_obs"] = [[10, 35], [40, 50], [80, 70], [120, 90]]; json.dump(d, open(sys.argv[1], "w"))
 PY
   drive "$T/cw5" pr --plan --no-cache
-  eq "$(grep -c '^PLAN shd\[' "$T/cw5")" 1 "COSTW: at the 0.2 floor all 51 lane-seconds fit one chunk (51 x 0.2 + 10 = 20.2 s)"
-  has "$T/cw5" '^PLAN shd\[1/1\] est 20\.2s ' "COSTW: ... estimated at 20.2 s"
+  has "$T/cw5" '^PLAN shd\[1/3\] est 31\.5s ' "COSTW: fitted 30 s + 0.5/lane-second: the three cheap items = 31.5 s"
+  has "$T/cw5" '^PLAN shd\[2/3\] est 50\.0s ' "COSTW: ... the slow item = 50.0 s (30 + 0.5 x 40)"
+  has "$T/cw5" '^PLAN shd\[3/3\] est 34\.0s ' "COSTW: ... the eight cheap items = 34.0 s"
+  # the model itself: exact on exact data, never shorter than any observed chunk (margin), clamped, prior when thin
+  eq "$(python3 -B -c 'import sys; sys.path.insert(0, sys.argv[1]); import ci_driver as c
+print(c.cost_model([[10,35],[40,50],[80,70],[120,90]]), c.cost_model([[10,35],[40,50],[80,70]]), c.cost_model([[10,35]]*6))' "$ROOT/scripts")" \
+     "(30.0, 0.5, 1.0) (10.0, 1.0, 1.0) (10.0, 1.0, 1.0)" "COSTW: cost_model — exact fit; < 4 observations or no spread = the prior"
+  eq "$(python3 -B -c 'import sys; sys.path.insert(0, sys.argv[1]); import ci_driver as c
+obs = [[10,35],[40,50],[80,70],[120,90],[60,200]]
+a, b, m = c.cost_model(obs)
+print(all(d <= m * (a + b * w) + 1e-9 for w, d in obs), m > 1.0, c.cost_model([[10,50],[40,300],[80,700],[120,1000]])[1], c.cost_model([[10,5],[40,10],[80,30],[120,50]])[0])' "$ROOT/scripts")" \
+     "True True 1.0 10.0" "COSTW: cost_model — the margin covers every observed chunk (G10); slope clamped to <= 1, overhead to >= 10 s"
   # an item with no recorded cost keeps the old rate: a step WITHOUT shard_cost plans exactly as before
   mkrepo cw0
   { echo "$APPS"; sed -n '/^\[step shd\]/,$p' "$T/cw.conf" | grep -v '^shard_cost'; } > "$SAMEN_CI_MANIFEST"
