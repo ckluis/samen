@@ -12,13 +12,18 @@ defmodule Samen.AbbrevRegistryOverrideTest do
   alias Samen.AbbrevRegistry, as: Reg
 
   @env "SAMEN_ABBREV_REGISTRY"
+  # the companion only scripts/gen_probe_guard.sh sets (gate P5): without it the override is refused
+  @guard "SAMEN_ABBREV_REGISTRY_GUARD"
 
   setup do
-    prior = System.get_env(@env)
+    priors = for var <- [@env, @guard], do: {var, System.get_env(var)}
     System.delete_env(@env)
+    System.put_env(@guard, "gen_probe_guard")
 
     on_exit(fn ->
-      if prior, do: System.put_env(@env, prior), else: System.delete_env(@env)
+      for {var, prior} <- priors do
+        if prior, do: System.put_env(var, prior), else: System.delete_env(var)
+      end
     end)
 
     :ok
@@ -64,6 +69,31 @@ defmodule Samen.AbbrevRegistryOverrideTest do
     System.put_env(@env, "registry.json")
     assert_raise RuntimeError, ~r/must be an absolute path/, fn -> Reg.path() end
     assert_raise RuntimeError, ~r/must be an absolute path/, fn -> Reg.load() end
+  end
+
+  test "an override without the probe guard's companion is refused - a stray export never redirects a reservation" do
+    private = private_registry!()
+    committed = Reg.path()
+    committed_before = File.read!(committed)
+    System.put_env(@env, private)
+
+    for companion <- [nil, "", "1", "yes"] do
+      if companion, do: System.put_env(@guard, companion), else: System.delete_env(@guard)
+      assert_raise RuntimeError, ~r/set outside the gen-probe guard/, fn -> Reg.path() end
+      assert_raise RuntimeError, ~r/set outside the gen-probe guard/, fn -> Reg.load() end
+
+      # the allocator's default path is path/0: the reservation is refused, not written to the stray file
+      assert_raise RuntimeError, ~r/set outside the gen-probe guard/, fn ->
+        Samen.Abbrev.Allocator.reserve!("gatep5", "zqy", "GateP5.Stray.Owner")
+      end
+    end
+
+    assert File.read!(private) == ~s({"abbrevs": {"zqx": "Override.Only.Owner"}})
+    assert File.read!(committed) == committed_before
+
+    # positive control: the same override WITH the companion is honoured
+    System.put_env(@guard, "gen_probe_guard")
+    assert Reg.path() == private
   end
 
   test "an override to a missing file fails closed (the registry can never read as empty)" do

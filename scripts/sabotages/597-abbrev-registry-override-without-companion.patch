@@ -1,0 +1,20 @@
+# SABOTAGE: gate P5: SAMEN_ABBREV_REGISTRY is honoured without the gen-probe guard's companion, so a stray 
+#   export silently redirects a real reservation
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/abbrev_registry_override_test.exs
+# MUST_FAIL: an override without the probe guard's companion is refused
+diff --git a/samen_core/lib/samen/abbrev_registry.ex b/samen_core/lib/samen/abbrev_registry.ex
+index 58c8b33..8f8df51 100644
+--- a/samen_core/lib/samen/abbrev_registry.ex
++++ b/samen_core/lib/samen/abbrev_registry.ex
+@@ -123,7 +123,7 @@ defmodule Samen.AbbrevRegistry do
+         blank
+ 
+       override ->
+-        if System.get_env(@guard_env) != @guard_value do
++        if false and System.get_env(@guard_env) != @guard_value do
+           raise "#{@registry_env}=#{inspect(override)} is set outside the gen-probe guard " <>
+                   "(#{@guard_env} is not #{inspect(@guard_value)}). It is the gen probes' private-registry seam " <>
+                   "only: unset it, or a reservation would land in that file instead of #{@default_registry_path}."

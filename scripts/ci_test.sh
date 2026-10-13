@@ -1173,6 +1173,7 @@ probe="$2"
 reg="${SAMEN_ABBREV_REGISTRY:-$REPO_ROOT/samen_core/priv/abbrev_registry.json}"
 echo "reserved-by-$probe" >> "$reg"
 echo "$probe saw ${SAMEN_ABBREV_REGISTRY:-<unset>}" >> "$GP_LOG"
+echo "$probe companion ${SAMEN_ABBREV_REGISTRY_GUARD:-<unset>}" >> "$GP_LOG"
 case "${GP_MODE:-quick}" in
   committed) echo oops >> "$REPO_ROOT/samen_core/priv/abbrev_registry.json" ;;   # ignores the seam
   scratch)  # keep a working dir for the whole run, then report whether it is still there at the end
@@ -1229,6 +1230,20 @@ STUB
     eq "$(awk -v s="[step $id]" '$0==s{f=1;next} /^\[/{f=0} f && /^serial *=/' "$m")" "" "GENPROBE: $id is not serial"
   done
   eq "$(awk -v s="[step gen_agent_probe]" '$0==s{f=1;next} /^\[/{f=0} f && /^serial *= *1/' "$m")" "serial = 1" "GENPROBE: gen_agent_probe stays serial (it mutates samen_core/lib and test)"
+  # 7. (gate P5) the companion: Samen.AbbrevRegistry honours SAMEN_ABBREV_REGISTRY only next to it, and only the guard sets it
+  has "$T/gp.log" 'gen_post_probe.exs companion gen_probe_guard' "GENPROBE: the guard hands the probe the registry seam's companion"
+  # 8. (gate P5) the driver strips the probe seams from every step: an inherited GEN_PROBE_SHARED_REGISTRY=1 would run the
+  # concurrent probes in shared mode (a later-started probe restores an earlier one's reservation INTO the committed
+  # file, both PASS), an inherited SAMEN_ABBREV_REGISTRY would check every compile against another registry
+  mkrepo gpenv
+  { echo "$APPS"
+    printf '[step seams]\ncmd = echo "shared=${GEN_PROBE_SHARED_REGISTRY:-unset} reg=${SAMEN_ABBREV_REGISTRY:-unset} guard=${SAMEN_ABBREV_REGISTRY_GUARD:-unset} control=${SAMEN_GATE_P5_CONTROL:-unset}" >> "$CI_TEST_RUNS"\nmodes = pr\ninputs = core/\nest_s = 1\n'
+  } > "$SAMEN_CI_MANIFEST"
+  GEN_PROBE_SHARED_REGISTRY=1 SAMEN_ABBREV_REGISTRY=/stray/registry.json SAMEN_ABBREV_REGISTRY_GUARD=gen_probe_guard \
+    SAMEN_GATE_P5_CONTROL=kept drive "$T/gp8" pr --no-cache
+  eq "$RC" 0 "GENPROBE: the seam-stripping run passes"
+  eq "$(cat "$CI_TEST_RUNS")" "shared=unset reg=unset guard=unset control=kept" \
+    "GENPROBE: no step inherits the probe seams (positive control: another SAMEN_ variable still passes through)"
 }
 
 # NARROW (ADR-053 P5): the gen probes and the ten dialyzer steps declare `!<app>/test/*_test.exs`. That is sound ONLY

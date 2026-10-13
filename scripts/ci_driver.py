@@ -406,8 +406,15 @@ WRAPPER_FLAGS = ("SAMEN_SABOTAGE", "SAMEN_MUTATION", "SAMEN_MULTINODE")
 ENV_KEYED = re.compile(r"^(SAMEN_|MIX_|ELIXIR_|ERL_|HEX_|REBAR|PG|DATABASE_URL$|DRILL_|DRIFTWOOD_|GEN_PROBE_|LOG_LEVEL$)")
 
 
+# (gate P5) The gen-probe registry seams are set by scripts/gen_probe_guard.sh for ONE probe's `mix run`, never by a
+# caller. Inherited by the driver they would run the concurrent flagship/post/deploy probes in the legacy shared mode
+# (each restores the committed registry from its own snapshot: a later-started probe restores an earlier one's
+# reservation INTO the committed file and both pass), or check every compile against another registry file.
+PROBE_SEAMS = ("GEN_PROBE_SHARED_REGISTRY", "SAMEN_ABBREV_REGISTRY", "SAMEN_ABBREV_REGISTRY_GUARD")
+
+
 def step_base_env():
-    return {k: v for k, v in os.environ.items() if k not in WRAPPER_FLAGS}
+    return {k: v for k, v in os.environ.items() if k not in WRAPPER_FLAGS and k not in PROBE_SEAMS}
 
 
 def env_fingerprint():

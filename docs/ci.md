@@ -189,7 +189,8 @@ ignore `Samen.`-scoped unknown calls. Cached runs are ~8 s per project; a first 
 
 The old `ci.sh` order (spikes → samen_core → AI tier → adapters → gen probes → sabotage → app gates) is now
 the manifest's: parallel DB-isolated steps first (the flagship/post/deploy gen probes among them: each works on a
-private copy of the abbrev registry, `SAMEN_ABBREV_REGISTRY`, set by `scripts/gen_probe_guard.sh`), then the
+private copy of the abbrev registry, `SAMEN_ABBREV_REGISTRY` + its companion `SAMEN_ABBREV_REGISTRY_GUARD`, both set
+only by `scripts/gen_probe_guard.sh` and stripped by the driver from every step's environment), then the
 `serial` steps (`gen_agent_probe`, which writes a scratch scope into `samen_core/lib` + `test`, selection self-tests,
 `--changed` replays) as a tail. Markers are the same set in a different order.
 

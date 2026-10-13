@@ -120,6 +120,9 @@ run_gen_probe() {
     GEN_PROBE_PRIVATE="$(mktemp "${TMPDIR:-/tmp}/samen_ci_registry_private.XXXXXX")"
     cp "$GEN_PROBE_REGISTRY" "$GEN_PROBE_PRIVATE"
   fi
+  # the companion without which Samen.AbbrevRegistry refuses SAMEN_ABBREV_REGISTRY (a stray export alone must never
+  # redirect a real reservation); `local -x` exports it to this probe's children only, for this call only
+  local -x SAMEN_ABBREV_REGISTRY_GUARD=gen_probe_guard
   GEN_PROBE_RESTORED=0
 
   # GEN_PROBE_GUARD_DISABLE_TRAP=1 skips installing the interrupt trap while keeping

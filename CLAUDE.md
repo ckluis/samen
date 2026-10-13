@@ -30,10 +30,10 @@ Use the driver; never hand-segment `ci.sh`, never background a run and poll it (
   new` — `git add` your fix FIRST, make ONLY the sabotage edit unstaged, then run it. `MUST_FAIL` is a literal test
   name, never interpolated. A patch that stopped applying: `scripts/sabotage reanchor <n>`; never delete it.
   Replay: `scripts/sabotage.sh` (filters) / `scripts/sabotage-lanes.sh` (N lanes). Unfiltered runs need `scripts/ci full`.
-- Counts are generated (`scripts/counts --write`, never by hand): <!--count:sabotages-->589<!--/count--> sabotages
-  (driver red paths `scripts/ci_test.sh` <!--count:driver_sabotages-->496–596<!--/count-->), watch-list <!--count:watchlist_modules-->12<!--/count-->
+- Counts are generated (`scripts/counts --write`, never by hand): <!--count:sabotages-->592<!--/count--> sabotages
+  (driver red paths `scripts/ci_test.sh` <!--count:driver_sabotages-->496–598<!--/count-->), watch-list <!--count:watchlist_modules-->12<!--/count-->
   modules / <!--count:watchlist_mutants-->166<!--/count--> mutants, corpus <!--count:corpus_targets-->228<!--/count--> targets /
-  <!--count:corpus_mutants-->3,959<!--/count--> mutants.
+  <!--count:corpus_mutants-->3,960<!--/count--> mutants.
 - Toolchain floor `.tool-versions` (Elixir 1.20.4 / OTP 29.1.1); the `toolchain` step fails on older — raise the pin
   when upgrading. Prerequisite: Postgres WITH `pgvector` (`brew install pgvector`; ADR-043 §7.1/M3) — else the
   samen_core suite fails at setup with "pgvector not installed".
@@ -94,7 +94,8 @@ Enforced by `run_gen_probe` (`scripts/gen_probe_guard.sh`) around each `samen_co
 run concurrently (`gen_agent_probe` stays serial) and the committed file is never written; the guard still snapshots it
 and, in a trap covering SIGINT/SIGTERM/ERR/EXIT (SIGINT is not trappable inside the BEAM at all), verifies it
 byte-identical — a difference is repaired from the snapshot and FAILS the probe. `GEN_PROBE_SHARED_REGISTRY=1` is the old
-in-place mode, used only by the T107 interrupt harness.
+in-place mode, used only by the T107 interrupt harness. `Samen.AbbrevRegistry` refuses `SAMEN_ABBREV_REGISTRY` unless the
+guard's companion `SAMEN_ABBREV_REGISTRY_GUARD` is set, and `scripts/ci` strips all three from every step — never export them.
 
 ## Framework-first, ≈0-LOC vertical mounts
 Features live in samen_core/samen_web; verticals adopt via one router/macro call

@@ -84,16 +84,23 @@ defmodule Samen.AbbrevRegistry do
   # the registry so the committed file is never touched and probes can run concurrently. Read at CALL time (the
   # generated app's compile asks `path()`/`load()` while it compiles), never baked into a module attribute.
   @registry_env "SAMEN_ABBREV_REGISTRY"
+  # ...honoured ONLY next to this companion, which only `run_gen_probe` sets. A stray `SAMEN_ABBREV_REGISTRY` alone (an
+  # export left in a shell) must never send a real `mix samen.abbrev.reserve` / `mix samen.gen.*` reservation to
+  # some other file while the committed registry silently lacks it (gate P5): it is refused, loudly.
+  @guard_env "SAMEN_ABBREV_REGISTRY_GUARD"
+  @guard_value "gen_probe_guard"
 
   @abbrev_pattern ~r/\A[a-z]{3}\z/
 
   @doc """
   Absolute path to the registry file: the committed one, unless `SAMEN_ABBREV_REGISTRY` names an
-  absolute path (the gen probes' private copy — never set it in a real build).
+  absolute path (the gen probes' private copy — never set it in a real build). The override is honoured only
+  together with `SAMEN_ABBREV_REGISTRY_GUARD=gen_probe_guard` (set by `scripts/gen_probe_guard.sh`); without it
+  `path/0` raises rather than redirect an allocation away from the committed registry.
   """
   @spec path() :: String.t()
   def path do
-    case System.get_env(@registry_env) do
+    case guarded_override() do
       nil ->
         @default_registry_path
 
@@ -103,6 +110,23 @@ defmodule Samen.AbbrevRegistry do
       override ->
         if Path.type(override) != :absolute do
           raise "#{@registry_env} must be an absolute path, got #{inspect(override)}"
+        end
+
+        override
+    end
+  end
+
+  # the env override, or nil/"" when unset; set WITHOUT the probe guard's companion it is refused (fail closed)
+  defp guarded_override do
+    case System.get_env(@registry_env) do
+      blank when blank in [nil, ""] ->
+        blank
+
+      override ->
+        if System.get_env(@guard_env) != @guard_value do
+          raise "#{@registry_env}=#{inspect(override)} is set outside the gen-probe guard " <>
+                  "(#{@guard_env} is not #{inspect(@guard_value)}). It is the gen probes' private-registry seam " <>
+                  "only: unset it, or a reservation would land in that file instead of #{@default_registry_path}."
         end
 
         override
