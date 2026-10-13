@@ -1481,7 +1481,51 @@ def step_dirs(man, s):
     return dirs
 
 
-def job_entry(man, name, steps, slice_, cache=None):
+TIMEOUTS = os.path.join(os.path.dirname(MANIFEST), "actions_timeouts.tsv")
+DEFAULT_TIMEOUT_MIN = 60  # a job with no observed run yet
+TIMEOUT_FLOOR_MIN = 15
+MAX_TIMEOUT_MIN = 360     # GitHub's own ceiling for a hosted job
+
+
+def timeout_formula(observed_min):
+    """The ONE rule: twice the slowest successful run seen, rounded up to 5 minutes, never under 15."""
+    return max(TIMEOUT_FLOOR_MIN, 5 * int(math.ceil(2.0 * observed_min / 5.0)))
+
+
+def load_timeouts():
+    """ci/actions_timeouts.tsv -> [(job glob, observed_max_min, timeout_min, runs)]. A row whose timeout is not the
+    formula of its own observation is an error: the timeout follows the data, never the other way round."""
+    rows = []
+    if not os.path.isfile(TIMEOUTS):
+        return rows
+    with open(TIMEOUTS) as f:
+        for n, line in enumerate(f, 1):
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            c = line.rstrip("\n").split("\t")
+            try:
+                if len(c) != 4:
+                    raise ValueError("want 4 tab-separated columns (job, observed_max_min, timeout_min, runs)")
+                name, obs, tmo, runs = c[0].strip(), float(c[1]), int(c[2]), int(c[3])
+            except ValueError as e:
+                raise UsageError("%s:%d: %s" % (os.path.relpath(TIMEOUTS, REPO), n, e))
+            if tmo != timeout_formula(obs) or not (TIMEOUT_FLOOR_MIN <= tmo <= MAX_TIMEOUT_MIN) or runs < 1:
+                raise UsageError("%s:%d: %s: timeout_min %d is not max(%d, 5*ceil(2*%.1f/5)) = %d (or runs < 1) — "
+                                 "change the observation, not the timeout alone" % (
+                                     os.path.relpath(TIMEOUTS, REPO), n, name, tmo, TIMEOUT_FLOOR_MIN, obs, timeout_formula(obs)))
+            rows.append((name, obs, tmo, runs))
+    return rows
+
+
+def job_timeout(name, rows):
+    """-> (minutes, basis). The most specific row wins: an exact job name before a glob."""
+    for pat, obs, tmo, runs in sorted(rows, key=lambda r: ("*" in r[0], -len(r[0]))):
+        if fnmatch.fnmatchcase(name, pat):
+            return tmo, "observed max %.1f min over %d run(s)" % (obs, runs)
+    return DEFAULT_TIMEOUT_MIN, "default (no observed run yet — add a row to ci/actions_timeouts.tsv)"
+
+
+def job_entry(man, name, steps, slice_, cache=None, timeouts=()):
     dirs = []
     for x in steps:
         for d in step_dirs(man, x):
@@ -1492,8 +1536,10 @@ def job_entry(man, name, steps, slice_, cache=None):
         paths += [d + "/deps", d + "/_build"]
         if any(x.id.startswith("dialyzer_") for x in steps):
             paths.append(d + "/priv/plts")
+    tmo, basis = job_timeout(name, timeouts)
     return {"name": name, "steps": [x.id for x in steps], "only": ",".join(x.id for x in steps),
             "slice": "%d/%d" % slice_ if slice_ else "", "est_s": round(sum(x.est for x in steps)),
+            "timeout_min": tmo, "timeout_basis": basis,
             "cache_paths": "\n".join(paths),
             # the actions/cache key's job part: the N slices of one step build the same projects, so they
             # share ONE cache (24 copies of the same deps/_build would eat the repo's 10 GB cache budget)
@@ -1527,14 +1573,15 @@ def actions_plan(man, mode):
     if errors:
         raise UsageError("actions plan (%s) is not a partition of `scripts/ci list %s`:\n  - %s" % (mode, mode, "\n  - ".join(errors)))
     out_jobs = []
+    timeouts = load_timeouts()
     for n, v in jobs.items():
         plain = [x for x in v if not x.actions_slices]
         if plain:
-            out_jobs.append(job_entry(man, n, plain, None))
+            out_jobs.append(job_entry(man, n, plain, None, timeouts=timeouts))
         for x in v:
             if x.actions_slices:  # one job per slice: name_NN, `--slice i/N`
                 for i in range(1, x.actions_slices + 1):
-                    out_jobs.append(job_entry(man, "%s_%02d" % (x.id, i), [x], (i, x.actions_slices), cache=x.id))
+                    out_jobs.append(job_entry(man, "%s_%02d" % (x.id, i), [x], (i, x.actions_slices), cache=x.id, timeouts=timeouts))
     names = [j["name"] for j in out_jobs]
     if len(set(names)) != len(names):
         raise UsageError("actions plan (%s): duplicate job name(s): %s" % (mode, ", ".join(sorted({x for x in names if names.count(x) > 1}))))
@@ -1557,7 +1604,7 @@ def cmd_actions(pos, opts):
             return 0
         out("Actions plan (%s): %d step(s) -> %d job(s), %d excluded" % (rest[0], len(plan["steps"]), len(plan["jobs"]), len(plan["excluded"])))
         for j in plan["jobs"]:
-            out("  job %-14s est %5ds  %s" % (j["name"], j["est_s"], j["only"]))
+            out("  job %-14s est %5ds  timeout %3dm  %s" % (j["name"], j["est_s"], j["timeout_min"], j["only"]))
         for e in plan["excluded"]:
             out("  EXCLUDED %-22s %s" % (e["id"], e["reason"]))
         return 0

@@ -41,7 +41,8 @@ jobs:
     name: ci (${{ matrix.name }})
     needs: plan
     runs-on: ubuntu-24.04
-    timeout-minutes: 350
+    # per job, from ci/actions_timeouts.tsv (2x the slowest observed run; was a flat 350)
+    timeout-minutes: ${{ matrix.timeout_min }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}

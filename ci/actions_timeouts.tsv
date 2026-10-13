@@ -1,0 +1,36 @@
+# GitHub Actions job timeouts (ADR-053 P5) - DATA, not folklore. `scripts/ci actions plan` puts `timeout_min` on every
+# matrix job and the workflows use `timeout-minutes: ${{ matrix.timeout_min }}` (it was a flat 350 / 120).
+#
+#   job              the plan's job name, or a glob (`sabotage_corpus_*` covers the 24 nightly slices)
+#   observed_max_min the longest SUCCESSFUL run of that job in `gh run list` / `gh run view --json jobs`
+#                    (pr.yml + nightly.yml, 2026-10-10 .. 2026-10-13: 16 PR runs, 5 nightly runs), job start -> end
+#   timeout_min      = max(15, 5 * ceil(2 * observed_max_min / 5)): twice the slowest run seen, a 15 min floor.
+#                    `scripts/ci actions plan` REFUSES a row that is not this formula: change the observation,
+#                    never the timeout alone.
+#   runs             how many successful runs the maximum is over (a thin sample is visible here)
+#
+# A job with no row gets 60 minutes (`default`) - add its row once it has run. To refresh the table:
+#   gh run list --workflow pr.yml --limit 25 --json databaseId,conclusion ; gh run view <id> --json jobs
+# and take the max over successful runs per job. pre-P5 flat limits: pr 350, nightly 120.
+# job	observed_max_min	timeout_min	runs
+adapters	9.8	20	21
+app_demo	4.2	15	21
+app_driftwood	8.0	20	21
+app_pawchart	3.9	15	21
+app_samen_web	5.5	15	20
+dialyzer_adapters_a	19.9	40	21
+dialyzer_adapters_b	13.7	30	21
+dialyzer_core	17.4	35	21
+dialyzer_verticals	25.0	50	21
+gen_flagship	8.7	20	20
+gen_probes	13.1	30	20
+multinode	2.9	15	5
+mutation	1.6	15	21
+mutation_changed	0.9	15	16
+mutation_watchlist_*	12.8	30	30
+preflight	1.9	15	20
+sabotage	1.7	15	21
+sabotage_changed	29.8	60	13
+sabotage_corpus_*	17.4	35	120
+samen_core	7.9	20	19
+spikes	7.0	15	21

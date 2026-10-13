@@ -66,6 +66,10 @@
 #          so one slow item no longer sizes a chunk of cheap ones; the share of lane-seconds the wall-clock paid is
 #          learned too; an unknown item is planned at the old per-item rate.
 #
+#   TIMEOUT  (P5) every Actions matrix job carries a `timeout_min` from ci/actions_timeouts.tsv (2x the slowest observed
+#          run, floor 15, a job with no row gets 60); a row that is not that formula is refused, no row is stale, the
+#          workflows read `matrix.timeout_min` and no job keeps the old flat 350 / 120.
+#
 # Usage: scripts/ci_test.sh [CASE…]      (default: every case)
 # Exit:  0 all assertions pass · 1 otherwise. Residue: none (temp dirs, trap on EXIT/INT/TERM).
 set -uo pipefail
@@ -1481,7 +1485,58 @@ PY
   has "$T/cw6" '^PLAN shd\[1/3\] est 60\.0s ' "COSTW: ... each estimated at 5 x 10 + 10 (the pre-P5 numbers)"
 }
 
-ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS GENPROBE NARROW RECHUNK COSTW)
+# TIMEOUT (ADR-053 P5): the Actions jobs ran under a flat `timeout-minutes: 350` (pr) / 120 (nightly) - a hung job held a
+# runner for six hours. Each plan job now has a timeout from observed runs (ci/actions_timeouts.tsv).
+case_TIMEOUT() {
+  local W="$ROOT/.github/workflows" tsv="$ROOT/ci/actions_timeouts.tsv" mode
+  for mode in pr full; do
+    env -u SAMEN_CI_MANIFEST -u SAMEN_CI_REPO -u SAMEN_CI_HOME "$CI" actions plan "$mode" --json > "$T/to.$mode" 2>&1
+    eq "$?" 0 "TIMEOUT: the real $mode plan builds"
+    eq "$(jsonget "$T/to.$mode" 'all(isinstance(j["timeout_min"], int) and 15 <= j["timeout_min"] <= 360 for j in d["jobs"])')" True "TIMEOUT: every $mode job has a timeout_min in [15, 360]"
+  done
+  eq "$(jsonget "$T/to.pr" 'max(j["timeout_min"] for j in d["jobs"])')" 60 "TIMEOUT: positive control — the longest PR job (sabotage_changed) is 60 min, not 350"
+  eq "$(jsonget "$T/to.pr" '[j["timeout_min"] for j in d["jobs"] if j["name"] == "preflight"][0]')" 15 "TIMEOUT: ... and a 1.9 min job gets the 15 min floor"
+  # the table: every row is its own formula, and no row names a job neither plan has (a stale row hides a rename)
+  python3 - "$tsv" "$T/to.pr" "$T/to.full" <<'PY' > "$T/to.rows" 2>&1
+import fnmatch, json, math, sys
+rows = [l.rstrip("\n").split("\t") for l in open(sys.argv[1]) if l.strip() and not l.lstrip().startswith("#")]
+names = {j["name"] for f in sys.argv[2:] for j in json.load(open(f))["jobs"]}
+bad = 0
+for name, obs, tmo, runs in rows:
+    want = max(15, 5 * math.ceil(2 * float(obs) / 5))
+    if int(tmo) != want: print("BAD %s: %s != %s" % (name, tmo, want)); bad += 1
+    if not any(fnmatch.fnmatchcase(n, name) for n in names): print("STALE %s matches no job" % name); bad += 1
+print("rows=%d bad=%d" % (len(rows), bad))
+PY
+  has "$T/to.rows" '^rows=2[0-9] bad=0$' "TIMEOUT: every row of ci/actions_timeouts.tsv is max(15, 5*ceil(2*observed/5)) and names a real job"
+  # the workflows use it; the flat limits are gone from the ci jobs
+  has "$W/pr.yml" 'timeout-minutes: \$\{\{ matrix\.timeout_min \}\}' "TIMEOUT: pr.yml's ci job reads matrix.timeout_min"
+  has "$W/nightly.yml" 'timeout-minutes: \$\{\{ matrix\.timeout_min \}\}' "TIMEOUT: nightly.yml's ci job reads matrix.timeout_min"
+  hasnt "$W/pr.yml" 'timeout-minutes: (350|120)' "TIMEOUT: pr.yml keeps no flat 350"
+  hasnt "$W/nightly.yml" 'timeout-minutes: (350|120)' "TIMEOUT: nightly.yml keeps no flat 120"
+  # fixture: the refusals and the default
+  mkrepo to
+  { echo "$APPS"; step a core/ group=g1 'actions_job=alpha'; step b core/ 'actions_job=beta'; } > "$SAMEN_CI_MANIFEST"
+  mkdir -p "$SAMEN_CI_REPO/ci"; cp "$SAMEN_CI_MANIFEST" "$SAMEN_CI_REPO/ci/steps.conf"
+  export SAMEN_CI_MANIFEST="$SAMEN_CI_REPO/ci/steps.conf"
+  printf 'alpha\t3.0\t15\t4\nbet*\t40.2\t85\t2\n' > "$SAMEN_CI_REPO/ci/actions_timeouts.tsv"
+  drive "$T/to1" actions plan pr --json
+  eq "$RC" 0 "TIMEOUT: a consistent table plans"
+  eq "$(jsonget "$T/to1" '{j["name"]: j["timeout_min"] for j in d["jobs"]}')" "{'alpha': 15, 'beta': 85}" "TIMEOUT: an exact row and a glob row apply (3.0 -> floor 15; 40.2 -> 85)"
+  printf 'alpha\t3.0\t15\t4\n' > "$SAMEN_CI_REPO/ci/actions_timeouts.tsv"
+  drive "$T/to2" actions plan pr --json
+  eq "$(jsonget "$T/to2" '{j["name"]: j["timeout_min"] for j in d["jobs"]}')" "{'alpha': 15, 'beta': 60}" "TIMEOUT: a job with no row gets the 60 min default"
+  has "$T/to2" 'default \(no observed run yet' "TIMEOUT: ... and says it is a default"
+  printf 'alpha\t3.0\t300\t4\n' > "$SAMEN_CI_REPO/ci/actions_timeouts.tsv"
+  drive "$T/to3" actions plan pr --json
+  eq "$RC" 2 "TIMEOUT: a row whose timeout is not the formula of its observation is REFUSED"
+  has "$T/to3" 'change the observation, not the timeout alone' "TIMEOUT: ... saying why"
+  printf 'alpha\t3.0\t15\n' > "$SAMEN_CI_REPO/ci/actions_timeouts.tsv"
+  drive "$T/to4" actions plan pr --json
+  eq "$RC" 2 "TIMEOUT: a malformed row (3 columns) is refused"
+}
+
+ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS GENPROBE NARROW RECHUNK COSTW TIMEOUT)
 CASES=("$@")
 [[ ${#CASES[@]} -gt 0 ]] || CASES=("${ALL[@]}")
 for c in "${CASES[@]}"; do

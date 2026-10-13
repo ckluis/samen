@@ -220,3 +220,11 @@ defmodule Samen.Meta.CiDriverGuardTest.CostWeightedChunks do
     Samen.Meta.CiDriverGuard.run_case!("COSTW")
   end
 end
+
+defmodule Samen.Meta.CiDriverGuardTest.ActionsTimeouts do
+  use ExUnit.Case, async: true
+
+  test "TIMEOUT every Actions job has a timeout from observed runs, never a flat 350" do
+    Samen.Meta.CiDriverGuard.run_case!("TIMEOUT")
+  end
+end
