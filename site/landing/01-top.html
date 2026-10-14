@@ -1,0 +1,96 @@
+<nav class="top" aria-label="Sections">
+  <div class="wrap in">
+    <a class="logo" href="#top">samen<i>.</i></a>
+    <ol>
+      <li><a href="#generate"><span>01</span>Generate</a></li>
+      <li><a href="#vault"><span>02</span>Vault</a></li>
+      <li><a href="#reveal"><span>03</span>Reveal</a></li>
+      <li><a href="#planes"><span>04</span>Planes</a></li>
+      <li class="x"><a href="#erasure"><span>05</span>Erasure</a></li>
+      <li class="x"><a href="#replay"><span>06</span>Replay</a></li>
+      <li class="x"><a href="#agent"><span>08</span>Agent</a></li>
+      <li class="x"><a href="#surfaces"><span>09</span>Surfaces</a></li>
+      <li class="x"><a href="#cockpit"><span>11</span>Cockpit</a></li>
+      <li><a href="#proof"><span>12</span>Proof</a></li>
+    </ol>
+    <a class="gh" href="https://github.com/ckluis/samen">GitHub ↗</a>
+  </div>
+  <div class="prog" aria-hidden="true"></div>
+</nav>
+
+<main id="main">
+<!-- ======================= HERO ======================= -->
+<header class="hero" id="top">
+  <div class="glow" style="left:-380px;top:-420px" aria-hidden="true"></div>
+  <div class="glow" style="right:-460px;top:80px;--accent:var(--sky);opacity:.35" aria-hidden="true"></div>
+  <div class="wrap">
+    <div class="grid">
+      <div class="rv">
+        <div class="tech">Elixir <span>·</span> Ash <span>·</span> Phoenix <span>·</span> Postgres <span>·</span> MIT</div>
+        <h1>The hard 80% of a B2B SaaS. Solved once. <em>Proven on every commit.</em></h1>
+        <p class="sub">Samen is a foundry for launching <b>many</b> B2B products from one substrate. Customer data is <b>masked by default</b>, support sees it only through <b>a second person's approval</b>, erasure <b>destroys keys</b> instead of rows, and the AI agent can only <b>propose</b>. One command emits a running product that passes its own gate. Every guarantee ships with a sabotage that proves its test can fail.</p>
+        <div class="cta">
+          <a class="btn a" href="#generate">Take the tour <span class="ar">↓</span></a>
+          <a class="btn" href="https://github.com/ckluis/samen">Read the source <span class="ar">↗</span></a>
+        </div>
+      </div>
+      <div class="stage rv" data-label="one field · every surface · no grant present" role="img" aria-label="An email address enters the vault and becomes a token; the UI, the JSON API, the CSV export and the logs all render four bullets, and the CSV leaves the column out entirely.">
+<svg viewBox="0 0 560 440" aria-hidden="true">
+  <defs>
+    <linearGradient id="hg" x1="0" x2="1"><stop offset="0" stop-color="#8C98F8"/><stop offset="1" stop-color="#6CC3E8"/></linearGradient>
+    <radialGradient id="hv"><stop offset="0" stop-color="#8C98F8" stop-opacity=".45"/><stop offset="1" stop-color="#8C98F8" stop-opacity="0"/></radialGradient>
+  </defs>
+  <!-- input -->
+  <rect x="14" y="24" width="210" height="62" rx="12" class="f-raised2" stroke="#2A2E42"/>
+  <text x="30" y="47" class="t-mono t-faint" font-size="10" letter-spacing="1.2">pii_attribute :email</text>
+  <text x="30" y="70" class="t-mono t-ink" font-size="14">ada@whitfield.co</text>
+  <path d="M224 55 C 268 55, 262 150, 292 160" fill="none" stroke="url(#hg)" stroke-width="2" class="flow"/>
+  <!-- vault -->
+  <circle cx="352" cy="160" r="92" fill="url(#hv)"/>
+  <rect x="292" y="112" width="122" height="96" rx="16" fill="#12141F" stroke="#8C98F8" stroke-width="1.4"/>
+  <text x="353" y="138" text-anchor="middle" class="t-mono t-indigo" font-size="10" letter-spacing="1.6">VAULT</text>
+  <text x="353" y="160" text-anchor="middle" class="t-mono t-mute" font-size="10.5">per-subject key</text>
+  <rect x="318" y="172" width="70" height="22" rx="6" fill="#181B28" stroke="#2A2E42"/>
+  <text x="353" y="187" text-anchor="middle" class="t-mono t-ink" font-size="11">AES-256-GCM</text>
+  <!-- token -->
+  <path d="M414 160 H 470" stroke="#2A2E42" stroke-width="1.5"/>
+  <rect x="440" y="140" width="110" height="40" rx="10" fill="#181B28" stroke="#2A2E42"/>
+  <text x="495" y="157" text-anchor="middle" class="t-mono t-faint" font-size="9">row stores</text>
+  <text x="495" y="172" text-anchor="middle" class="t-mono t-ink" font-size="12">vt_9f2c…</text>
+  <!-- surfaces -->
+  <g font-size="12.5">
+    <path d="M352 208 V 252" stroke="#2A2E42" stroke-width="1.5"/>
+    <path d="M60 252 H 500" stroke="#2A2E42" stroke-width="1.5"/>
+    <g transform="translate(14,268)"><rect width="122" height="150" rx="12" class="f-raised" stroke="#2A2E42"/><text x="14" y="26" class="t-mono t-faint" font-size="10" letter-spacing="1.2">UI</text><text x="14" y="60" class="t-mute" font-size="11">Email</text><text x="14" y="82" class="t-mono t-ink" font-size="16" letter-spacing="2">••••</text><text x="14" y="122" class="t-mono t-green" font-size="10">same value</text></g>
+    <g transform="translate(150,268)"><rect width="122" height="150" rx="12" class="f-raised" stroke="#2A2E42"/><text x="14" y="26" class="t-mono t-faint" font-size="10" letter-spacing="1.2">JSON:API</text><text x="14" y="60" class="t-mono t-mute" font-size="11">"email":</text><text x="14" y="82" class="t-mono t-ink" font-size="16" letter-spacing="2">"••••"</text><text x="14" y="122" class="t-mono t-green" font-size="10">same value</text></g>
+    <g transform="translate(286,268)"><rect width="122" height="150" rx="12" class="f-raised" stroke="#2A2E42"/><text x="14" y="26" class="t-mono t-faint" font-size="10" letter-spacing="1.2">CSV</text><text x="14" y="60" class="t-mono t-mute" font-size="10.5">id,name,created</text><text x="14" y="82" class="t-mono t-rose" font-size="11.5">no email column</text><text x="14" y="122" class="t-mono t-green" font-size="10">masked by omission</text></g>
+    <g transform="translate(422,268)"><rect width="128" height="150" rx="12" class="f-raised" stroke="#2A2E42"/><text x="14" y="26" class="t-mono t-faint" font-size="10" letter-spacing="1.2">LOGS · CDC</text><text x="14" y="60" class="t-mono t-mute" font-size="10.5">com_email=</text><text x="14" y="82" class="t-mono t-ink" font-size="16" letter-spacing="2">••••</text><text x="14" y="122" class="t-mono t-green" font-size="10">same value</text></g>
+  </g>
+</svg>
+        <p class="cap">Nothing is configured per surface. Each one renders what the field already returns.</p>
+      </div>
+    </div>
+    <div class="stats rv">
+      <div class="stat"><div class="v"><em>{{SABOTAGES}}</em></div><div class="k">committed sabotages, each proving a named test <b>can fail</b></div><div class="s">ls scripts/sabotages/*.patch</div></div>
+      <div class="stat"><div class="v">{{VERIFIERS}}</div><div class="k">verifiers in the gate, from <code>no_plaintext_pii</code> to <code>no_pan_columns</code></div><div class="s">mix samen.verify.*</div></div>
+      <div class="stat"><div class="v">{{SCOPES}}</div><div class="k">scope blueprints a product mounts as-is: CRM, billing, support, work, automation…</div><div class="s">samen_core/lib/samen/scopes</div></div>
+      <div class="stat"><div class="v">0</div><div class="k">hand-edits for a generated app to pass its own {{GEN_GATE_STEPS}}-step gate</div><div class="s">gen_app_flagship_probe.exs</div></div>
+    </div>
+  </div>
+</header>
+
+<!-- ======================= THE MAP ======================= -->
+<section class="map" id="map">
+  <div class="glow" style="right:-420px;top:-300px;--accent:var(--violet);opacity:.3" aria-hidden="true"></div>
+  <div class="wrap">
+    <div class="eyebrow rv"><span class="n">00</span>The whole story</div>
+    <h2 class="rv" style="margin-top:20px">Every B2B product rebuilds the same 80%. <em>And the same leak with it.</em></h2>
+    <p class="punch rv">Auth, billing, a CRM, a support desk, files, search, exports, an admin tool for your own staff. Every one of those surfaces is also a door onto customer data, each with its own idea of who may open it. Samen builds the 80% once, at the substrate, and makes the safe answer the <b>default value</b> of a field, not a feature someone remembers to add. Then it tries to break every promise it makes.</p>
+    <div class="acts">
+      <div class="actc rv" style="--ac:var(--indigo)"><div class="an">Act I · Start</div><h3>One command, a running product</h3><p>Not a scaffold. A thing you can boot, with its own gate.</p><ul><li><a href="#generate"><span>01</span>Generate</a></li></ul></div>
+      <div class="actc rv" style="--ac:var(--amber)"><div class="an">Act II · Trust, by construction</div><h3>Customer data that defaults to safe</h3><p>Seven features that only work because the planes share one core.</p><ul><li><a href="#vault"><span>02</span>The vault</a></li><li><a href="#reveal"><span>03</span>Reveal</a></li><li><a href="#planes"><span>04</span>Two planes</a></li><li><a href="#erasure"><span>05</span>Erasure</a></li><li><a href="#replay"><span>06</span>Replay</a></li><li><a href="#chat"><span>07</span>Cross-plane chat</a></li><li><a href="#agent"><span>08</span>The AI agent</a></li></ul></div>
+      <div class="actc rv" style="--ac:var(--green)"><div class="an">Act III · The rest of the 80%</div><h3>Everything else a B2B SaaS needs</h3><p>Surfaces, vendors and a cockpit for running many products.</p><ul><li><a href="#surfaces"><span>09</span>Working surfaces</a></li><li><a href="#vendors"><span>10</span>Billing &amp; email</a></li><li><a href="#cockpit"><span>11</span>Portfolio cockpit</a></li></ul></div>
+      <div class="actc rv" style="--ac:var(--rose)"><div class="an">Act IV · Proof</div><h3>A test that cannot fail is a bug</h3><p>Sabotages, mutants, and CI an agent can afford to run.</p><ul><li><a href="#proof"><span>12</span>Sabotage &amp; mutation</a></li><li><a href="#ci"><span>13</span>CI for agents</a></li><li><a href="#not"><span>—</span>What this is not</a></li></ul></div>
+    </div>
+  </div>
+</section>

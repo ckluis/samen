@@ -1,0 +1,268 @@
+
+<!-- ======================= ACT III ======================= -->
+<div class="actbar" style="--ac:var(--green)"><div class="wrap"><div class="an rv">Act III · The rest of the 80%</div><h2 class="rv">Everything else a B2B SaaS needs, <em style="color:var(--green)">built on the same decision.</em></h2><p class="rv">Table stakes are where products quietly leak: the export that writes every column, the search index that holds names, the vendor SDK in the kernel. Here each one inherits the masking default instead of re-deciding it.</p></div></div>
+
+<!-- ======================= 09 SURFACES ======================= -->
+<section class="band" id="surfaces" style="--accent:var(--green)">
+  <div class="glow" style="right:-380px;top:-200px" aria-hidden="true"></div>
+  <div class="wrap vh">
+    <div class="copy rv">
+      <div class="eyebrow"><span class="n">09</span>Working surfaces</div>
+      <h2>The table stakes, <em>without the leaks.</em></h2>
+      <p class="punch">CRM, billing, a support desk, work tracking, automation, files, search, CSV, settings, notifications, flags, analytics. Each ships as a <b>scope blueprint a product mounts in one call</b>, and each renders through the same masking default as everything else.</p>
+      <div class="big"><span class="n" data-count="{{SCOPES}}">{{SCOPES}}</span><span class="l">scope blueprints plus <b>{{ROUTE_MACROS}} route macros</b> a vertical mounts at roughly zero authored lines. <span class="tag built">built</span></span></div>
+      <ul class="ticks">
+        <li><b>Search over a non-PII index</b>: ⌘K finds the record without the index ever holding the name</li>
+        <li><b>Files quarantined by default</b>: promoted only after a clean scan</li>
+        <li><b>Automation with approvals</b>: workflows compile to Reactor; approvals carry the distinct-party CHECK</li>
+      </ul>
+      <div class="more"><a class="btn o" href="#p-surfaces" data-panel>Every surface and its twist <span class="ar">→</span></a></div>
+    </div>
+    <div class="stage rv" data-label="mounted scopes · one call each">
+<svg viewBox="0 0 560 420" aria-hidden="true">
+  <g font-size="12.5">
+    {{SCOPE_TILES}}
+    <text x="0" y="414" class="t-mono t-mute" font-size="10.5">use Samen.Scopes.Crm · use Samen.Scopes.Billing · samen_search_routes …</text>
+  </g>
+</svg>
+    </div>
+  </div>
+</section>
+<aside class="panel" id="p-surfaces" role="dialog" aria-labelledby="h-surfaces" tabindex="-1" style="--accent:var(--green)">
+  <div class="ph"><div class="eyebrow"><span class="n">09</span>Surfaces</div><a class="x" href="#surfaces" data-close>Close ✕</a></div>
+  <div class="pb">
+    <h3 id="h-surfaces">Every surface, and the twist that keeps it honest</h3>
+    <table>
+      <tr><th>Surface</th><th>The governed part</th></tr>
+      <tr><td>CRM</td><td>Contacts, companies, activity timeline, sequences, prospecting; PII through the vault</td></tr>
+      <tr><td>Support desk</td><td>The SaaS's own help desk runs on the same scope its tenants use</td></tr>
+      <tr><td>Work</td><td>One canonical Project/Task/Subtask tree, archivable</td></tr>
+      <tr><td>Automation</td><td>Workflows, runs, reminders, escalations; compiled to Reactor</td></tr>
+      <tr><td>Approvals</td><td>A state machine with a distinct-party <code>CHECK</code>, reused by reveal and the agent</td></tr>
+      <tr><td>Search</td><td><code>Search.query/2</code> over a non-PII tsvector, org-scoped, ⌘K in the UI</td></tr>
+      <tr><td>CSV</td><td>Export is a masking surface (omission); import goes through the write chokepoint</td></tr>
+      <tr><td>Files</td><td>One upload chokepoint mints storage keys; fresh files are quarantined</td></tr>
+      <tr><td>Settings</td><td>Profile self-edit through the vault, API-key minting, sessions</td></tr>
+      <tr><td>Notifications</td><td>Masking-aware rendering, an inbox, one send chokepoint</td></tr>
+      <tr><td>Feature flags</td><td>Kernel evaluation, deterministic bucketing, non-PII keys, fail-safe kill switch</td></tr>
+      <tr><td>Product analytics</td><td>A governed event resource that refuses PII at capture</td></tr>
+      <tr><td>Marketing · outreach · calendar · docs · CMS</td><td>Mountable scopes on the same primitives</td></tr>
+    </table>
+    <h4>Shaped per customer, without bending the guarantees</h4>
+    <p>A malleability ladder in order of blast radius: config rows, then JSONB custom fields validated at write, then tenant-defined objects, then builder code. Types are declared, not stringly (Money, Percent, Score, Duration, Priority, URL, Email, Phone, Address), and the vault path re-runs each type's cast before tokenizing.</p>
+    <h4>Mobile, once</h4>
+    <p>One kit-level stylesheet and one shell component made every vertical usable on a phone at once, with no per-app CSS.</p>
+    <div class="src">source · ADR-011 CRM · ADR-016 kit + notifications · ADR-020 flags · ADR-021 analytics · ADR-026 files · ADR-027 search · ADR-028 CSV · ADR-029 settings · ADR-030 responsive · ADR-039 automation · ADR-040 lifecycle · ADR-041 work</div>
+  </div>
+</aside>
+<a class="scrim" href="#surfaces" tabindex="-1" aria-hidden="true"></a>
+
+<!-- ======================= 10 VENDORS ======================= -->
+<section class="band flip" id="vendors" style="--accent:var(--indigo)">
+  <div class="glow" style="left:-380px;top:-160px" aria-hidden="true"></div>
+  <div class="wrap vh">
+    <div class="copy rv">
+      <div class="eyebrow"><span class="n">10</span>Billing &amp; email</div>
+      <h2 class="w">Delete every vendor package. <em>The kernel still passes.</em></h2>
+      <p class="punch">Payments and email are where frameworks quietly marry a vendor: a webhook signature here, a customer id there, until leaving costs a quarter. Samen's kernel names <b>zero Stripe strings</b>. Adapters live in sibling packages, and removing all of them leaves <code>samen_core</code> and <code>samen_web</code> green.</p>
+      <div class="big"><span class="n">0</span><span class="l">card-number columns that can compile. <b>Payment methods are hosted-only</b>, and a verifier refuses any PAN-shaped column. <span class="tag built">built</span></span></div>
+      <ul class="ticks">
+        <li><b>Three email vendors that disagree</b>: Basic-Auth, SNS-RSA and Svix-HMAC behind one conformance suite</li>
+        <li><b>Webhooks are hints, not facts</b>: verify, fetch current state, apply idempotently, survive reordering</li>
+        <li><b>Usage metering</b> as an insert-only ledger, with quotas summed from it</li>
+      </ul>
+      <div class="more"><a class="btn o" href="#p-vendors" data-panel>What the keyless lane proves <span class="ar">→</span></a></div>
+    </div>
+    <div class="stage rv" data-label="the vendor seam · one behaviour per concern">
+<svg viewBox="0 0 560 400" aria-hidden="true">
+  <g font-size="12.5">
+    <rect x="150" y="140" width="260" height="120" rx="18" fill="#12141F" stroke="#8C98F8" stroke-width="1.4"/>
+    <text x="280" y="176" text-anchor="middle" class="t-mono t-indigo" font-size="10.5" letter-spacing="1.6">KERNEL</text>
+    <text x="280" y="202" text-anchor="middle" class="t-ink" font-size="13">Billing.Provider · Delivery.Provider</text>
+    <text x="280" y="226" text-anchor="middle" class="t-mono t-green" font-size="11">green with every adapter removed</text>
+    <g>
+      <rect x="10" y="20" width="160" height="70" rx="14" class="f-raised" stroke="#2A2E42"/><text x="26" y="48" class="t-mono t-ink" font-size="12">samen_stripe</text><text x="26" y="70" class="t-mute" font-size="11">billing lifecycle</text>
+      <path d="M90 90 C 90 120, 160 130, 190 140" fill="none" stroke="#2A2E42" stroke-width="1.5" class="flow"/>
+      <rect x="390" y="10" width="160" height="70" rx="14" class="f-raised" stroke="#8C98F8" stroke-dasharray="5 5" transform="rotate(-4 470 45)"/><text x="406" y="40" class="t-mono t-ink" font-size="12" transform="rotate(-4 470 45)">samen_postmark</text><text x="406" y="62" class="t-mute" font-size="11" transform="rotate(-4 470 45)">Basic-Auth · detached</text>
+      <rect x="10" y="310" width="160" height="70" rx="14" class="f-raised" stroke="#2A2E42"/><text x="26" y="338" class="t-mono t-ink" font-size="12">samen_ses</text><text x="26" y="360" class="t-mute" font-size="11">SNS · RSA signatures</text>
+      <path d="M90 310 C 90 280, 160 270, 190 260" fill="none" stroke="#2A2E42" stroke-width="1.5" class="flow"/>
+      <rect x="390" y="310" width="160" height="70" rx="14" class="f-raised" stroke="#2A2E42"/><text x="406" y="338" class="t-mono t-ink" font-size="12">samen_resend</text><text x="406" y="360" class="t-mute" font-size="11">Svix · HMAC</text>
+      <path d="M470 310 C 470 280, 400 270, 370 260" fill="none" stroke="#2A2E42" stroke-width="1.5" class="flow"/>
+      <rect x="230" y="310" width="140" height="70" rx="14" class="f-raised" stroke="#2A2E42"/><text x="246" y="338" class="t-mono t-ink" font-size="12">samen_anthropic</text><text x="246" y="360" class="t-mute" font-size="11">AI provider</text>
+      <path d="M300 310 V 260" stroke="#2A2E42" stroke-width="1.5" class="flow"/>
+    </g>
+  </g>
+</svg>
+    </div>
+  </div>
+</section>
+<aside class="panel" id="p-vendors" role="dialog" aria-labelledby="h-vendors" tabindex="-1" style="--accent:var(--indigo)">
+  <div class="ph"><div class="eyebrow"><span class="n">10</span>Billing &amp; email</div><a class="x" href="#vendors" data-close>Close ✕</a></div>
+  <div class="pb">
+    <h3 id="h-vendors">The seams are proven. The wires are yours.</h3>
+    <p>A vendor boundary you can only argue about isn't a boundary. One you can falsify in a command is: remove the four adapter packages and the kernel stays green; if a Stripe string ever leaks into the kernel, that check turns red.</p>
+    <h4>Billing, the unglamorous correct part</h4>
+    <ul>
+      <li>Hosted checkout and hosted-only payment methods: no column for a card number to land in</li>
+      <li>Webhook signatures fail closed; a verified event triggers a fetch of current state</li>
+      <li>Idempotent, out-of-order safe; anything unappliable lands in a dead-letter queue a human can see</li>
+      <li>Invoice and tax mirroring, dunning, a subscription-change ledger for MRR movements</li>
+      <li>Metered usage: an insert-only event ledger behind one chokepoint, tallies derived from it, quotas checked against it</li>
+    </ul>
+    <h4>Email: one behaviour, three vendors that disagree</h4>
+    <p>A seam is only proven by vendors that disagree at the most awkward layer, inbound webhook authentication. Postmark uses Basic-Auth, SES uses SNS with RSA certificate chains, and Resend uses Svix HMAC with its own replay window. All three pass one shared, non-vacuous conformance suite, and a sabotage proves the suite can fail.</p>
+    <div class="not"><b>Honest scope: the keyless lane.</b> Dispatch is proven against hermetic fakes and injected-transport cassettes. No host wires a live provider, and every generated app boots with billing and email unconfigured and <b>says so</b>, a <code>:not_configured</code> state rather than a fake success. The live lanes are documented and runnable by hand; they aren't in CI, so nothing here rests on them.</div>
+    <div class="src">source · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-038-adapter-architecture.md">ADR-038</a> adapter architecture · ADR-038-A billing persistence · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-051-usage-metering-capture.md">ADR-051</a> usage metering (P1–P3 built) · ADR-014 fail-honest delivery · mix samen.verify.no_pan_columns</div>
+  </div>
+</aside>
+<a class="scrim" href="#vendors" tabindex="-1" aria-hidden="true"></a>
+
+<!-- ======================= 11 COCKPIT ======================= -->
+<section class="band" id="cockpit" style="--accent:var(--green)">
+  <div class="glow" style="right:-380px;top:-160px" aria-hidden="true"></div>
+  <div class="wrap vh">
+    <div class="copy rv">
+      <div class="eyebrow"><span class="n">11</span>Portfolio cockpit</div>
+      <h2 class="w">Run ten products <em>from one seat.</em></h2>
+      <p class="punch">Samen exists to launch <b>many</b> products, so the operator needs one view across them: which app is healthy, which tenant is churning, which flag is rolled out where. The cockpit reads every product over a <b>token-blind report wire</b>, so the portfolio view never becomes the leak.</p>
+      <div class="big"><span class="n">1</span><span class="l">notion of "up". <b>The public status page is a projection of the fleet's own health</b>, not a second opinion. <span class="tag built">built</span></span></div>
+      <ul class="ticks">
+        <li><b>Tenant names masked by default</b>, unmasked per role down to account level: a salesperson sees their accounts</li>
+        <li><b>Fleet directives</b> push flags across products; an unreachable app degrades honestly, never a fake "applied"</li>
+        <li><b>Explainable health scores</b> and an MRR-movement ledger per tenant</li>
+      </ul>
+      <div class="more"><a class="btn o" href="#p-cockpit" data-panel>How the cockpit stays token-blind <span class="ar">→</span></a></div>
+    </div>
+    <div class="stage rv" data-label="operator cockpit · fleet">
+<svg viewBox="0 0 560 400" aria-hidden="true">
+  <g font-size="12">
+    <text x="0" y="16" class="t-mono t-faint" font-size="10" letter-spacing="1.2">APP</text><text x="170" y="16" class="t-mono t-faint" font-size="10" letter-spacing="1.2">STATUS</text><text x="270" y="16" class="t-mono t-faint" font-size="10" letter-spacing="1.2">MRR Δ 30D</text><text x="380" y="16" class="t-mono t-faint" font-size="10" letter-spacing="1.2">AT RISK</text><text x="470" y="16" class="t-mono t-faint" font-size="10" letter-spacing="1.2">FLAGS</text>
+    <g transform="translate(0,28)"><rect width="560" height="52" rx="12" class="f-raised" stroke="#2A2E42"/><text x="16" y="31" class="t-ink" font-weight="600">driftwood</text><circle cx="178" cy="26" r="5" fill="#4CC294"/><text x="190" y="30" class="t-green" font-size="11">up</text><text x="270" y="31" class="t-green">+$4.1k</text><text x="380" y="31" class="t-mono t-ink" font-size="12" letter-spacing="1">•••• +1</text><text x="470" y="31" class="t-mono t-mute" font-size="11">12 on</text></g>
+    <g transform="translate(0,88)"><rect width="560" height="52" rx="12" class="f-raised" stroke="#2A2E42"/><text x="16" y="31" class="t-ink" font-weight="600">pawchart</text><circle cx="178" cy="26" r="5" fill="#4CC294"/><text x="190" y="30" class="t-green" font-size="11">up</text><text x="270" y="31" class="t-green">+$1.2k</text><text x="380" y="31" class="t-mono t-mute" font-size="11">none</text><text x="470" y="31" class="t-mono t-mute" font-size="11">7 on</text></g>
+    <g transform="translate(0,148)"><rect width="560" height="52" rx="12" class="f-raised" stroke="#2A2E42"/><text x="16" y="31" class="t-ink" font-weight="600">harbor</text><circle cx="178" cy="26" r="5" fill="#E3A54F" class="pulse"/><text x="190" y="30" class="t-amber" font-size="11">degraded</text><text x="270" y="31" class="t-rose">−$0.3k</text><text x="380" y="31" class="t-mono t-ink" font-size="12" letter-spacing="1">•••• +2</text><text x="470" y="31" class="t-mono t-mute" font-size="11">4 on</text></g>
+    <g transform="translate(0,208)"><rect width="560" height="52" rx="12" class="f-raised" stroke="#2A2E42" opacity=".75"/><text x="16" y="31" class="t-ink" font-weight="600">kelp</text><circle cx="178" cy="26" r="5" fill="none" stroke="#5D6078" stroke-width="1.5"/><text x="190" y="30" class="t-mute" font-size="11">unreachable</text><text x="270" y="31" class="t-mute">stale 2h</text><text x="380" y="31" class="t-mono t-mute" font-size="11">—</text><text x="470" y="31" class="t-mono t-amber" font-size="11">pending</text></g>
+    <g transform="translate(0,282)"><rect width="560" height="110" rx="14" class="f-raised2" stroke="#2A2E42"/>
+      <text x="16" y="28" class="t-mono t-green" font-size="10" letter-spacing="1.2">WHAT CROSSES THE REPORT WIRE</text>
+      <text x="16" y="54" class="t-ink" font-size="12">counts · rates · status · MRR movement · health factors</text>
+      <text x="16" y="78" class="t-mono t-rose" font-size="11">never: a vault value, a vt_ token, a tenant's customer</text>
+      <text x="16" y="98" class="t-mono t-mute" font-size="10">mix samen.verify.fleet_wire</text>
+    </g>
+  </g>
+</svg>
+    </div>
+  </div>
+</section>
+<aside class="panel" id="p-cockpit" role="dialog" aria-labelledby="h-cockpit" tabindex="-1" style="--accent:var(--green)">
+  <div class="ph"><div class="eyebrow"><span class="n">11</span>Cockpit</div><a class="x" href="#cockpit" data-close>Close ✕</a></div>
+  <div class="pb">
+    <h3 id="h-cockpit">One portfolio, still token-blind</h3>
+    <p>A cross-product dashboard is where a careful company's data model goes to die: it wants everything from everywhere. Samen's cockpit gets a <b>report</b> from each product, never a query into it.</p>
+    <table>
+      <tr><th>Piece</th><th>What it does</th></tr>
+      <tr><td>Fleet registry</td><td>Manual registration for any app, plus opt-in self-registration and heartbeat for generated apps, with a signed heartbeat credential</td></tr>
+      <tr><td>Report wire</td><td>Token-blind by construction, verified by <code>fleet_wire</code>; dead-man staleness when an app goes quiet</td></tr>
+      <tr><td>Operator identity</td><td>One operator across products; tenant identity masked by default, unmasked per role and account assignment</td></tr>
+      <tr><td>Fleet directives</td><td>Push a flag to many products; an app that can't confirm shows observability without the flag, never a fake "applied"</td></tr>
+      <tr><td>Public status page</td><td>Opt-in per app, rate-limited, a lossy projection of the same status the cockpit shows</td></tr>
+      <tr><td>Health score</td><td>Composite and explainable, computed over already-assembled operational data, not a new PII surface</td></tr>
+      <tr><td>Observability</td><td>Wide events with id-shape checks, metric labels verified, the telemetry plane on by default</td></tr>
+    </table>
+    <div class="src">source · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-044-fleet-cockpit.md">ADR-044</a> portfolio cockpit · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-050-public-status-page.md">ADR-050</a> status page · ADR-017 subscription movements · ADR-019 health score · ADR-052 observability</div>
+  </div>
+</aside>
+<a class="scrim" href="#cockpit" tabindex="-1" aria-hidden="true"></a>
+
+<!-- ======================= ACT IV ======================= -->
+<div class="actbar" style="--ac:var(--rose)"><div class="wrap"><div class="an rv">Act IV · Proof</div><h2 class="rv">Every claim above is attached to something that <em style="color:var(--rose)">can go red.</em></h2><p class="rv">A guarantee nobody has tried to break is a decoration. So samen tries, on every pull request, and keeps the attempts.</p></div></div>
+
+<!-- ======================= 12 PROOF ======================= -->
+<section class="band flip" id="proof" style="--accent:var(--rose)">
+  <div class="glow" style="left:-380px;top:-180px" aria-hidden="true"></div>
+  <div class="wrap vh">
+    <div class="copy rv">
+      <div class="eyebrow"><span class="n">12</span>Sabotage &amp; mutation</div>
+      <h2>A test that can't fail <em>is a bug.</em></h2>
+      <p class="punch">Each guarantee ships with a <b>sabotage</b>: a committed patch that breaks exactly that behaviour. The harness applies it, demands that the <b>named</b> tests fail (not just that something breaks), reverts, and checks the tree is restored byte for byte. Then a mutation gate asks the converse: what break did nobody think to sabotage?</p>
+      <div class="big"><span class="n" data-count="{{SABOTAGES}}">{{SABOTAGES}}</span><span class="l">committed sabotages, <b>replayed on every PR</b> where they touch the diff and in full every night. <span class="tag meas">counted from the tree</span></span></div>
+      <ul class="ticks">
+        <li><b>{{MUT_CORPUS_MUTANTS}} mutants</b> across {{MUT_CORPUS_TARGETS}} targets, enumerated from the AST, each run against only its owning tests</li>
+        <li><b>A survivor fails the build</b> until a test kills it or a ledger row proves it can't matter</li>
+        <li><b>{{VERIFIERS}} verifiers</b> check structure the tests can't: no PII columns, catalog parity, fleet wire…</li>
+      </ul>
+      <div class="more"><a class="btn o" href="#p-proof" data-panel>The sabotage loop, step by step <span class="ar">→</span></a><a class="btn" href="https://github.com/ckluis/samen/tree/main/scripts/sabotages">Read the patches ↗</a></div>
+    </div>
+    <div class="stage rv" data-label="sabotage harness · one patch">
+<div class="term"><span class="ln"><span class="p">$</span> <span class="c">scripts/sabotage.sh --range 187-187</span></span><span class="ln"><span class="mu">187-pp13-reveal-approver-distinct-party-…patch</span></span><span class="ln"><span class="mu">  APP samen_core · TEST_FILES test/reveal_approver_test.exs</span></span><span class="ln"><span class="mu">  MUST_FAIL "a self-approval is refused with :self_approval"</span></span><span class="ln"> </span><span class="ln"><span class="ac">1</span> preflight   tree clean, header linted</span><span class="ln"><span class="ac">2</span> apply       disable both policy-layer self-approval checks</span><span class="ln"><span class="ac">3</span> run         <span class="no">✗ a self-approval is refused with :self_approval</span></span><span class="ln"><span class="ac">4</span> revert      git apply -R</span><span class="ln"><span class="ac">5</span> restore     <span class="ok">sha-256 byte-exact ✓</span></span><span class="ln"> </span><span class="ln"><span class="ok">FLIPPED</span> the named test went red, then green again</span><span class="ln"> </span><span class="ln"><span class="p">$</span> <span class="c">./scripts/mutate.sh --file samen_core/lib/samen/approvals/gate.ex</span></span><span class="ln"><span class="mu">  EQ · REL · BOOLOP · BOOLLIT mutants, owning tests only</span></span><span class="ln"><span class="ok">MUTATION GATE: ALL PASSED</span></span></div>
+      <p class="cap">Sabotage 187 is real: the database CHECK still backstops the write, but the clean policy refusal degrades, and the named test catches it. Both layers are load-bearing.</p>
+    </div>
+  </div>
+</section>
+<aside class="panel" id="p-proof" role="dialog" aria-labelledby="h-proof" tabindex="-1" style="--accent:var(--rose)">
+  <div class="ph"><div class="eyebrow"><span class="n">12</span>Proof</div><a class="x" href="#proof" data-close>Close ✕</a></div>
+  <div class="pb">
+    <h3 id="h-proof">Proving the proofs</h3>
+    <p>A test suite can be large and still prove nothing. The sabotage count is the number that carries weight, because each one is a demonstration that a specific test notices a specific break.</p>
+    <h4>A sabotage, mechanically</h4>
+    <ol>
+      <li>The patch carries a header: the app, the test files, and the literal names of the tests that <b>must</b> fail</li>
+      <li>Apply it to a clean tree</li>
+      <li>Run the named tests: they must fail, by name; "something else broke" doesn't count</li>
+      <li>Revert, then check every touched file's SHA-256 against the original</li>
+      <li>New sabotages must <b>anchor</b>: they have to attack code the change actually added, or a double sweep rejects them</li>
+    </ol>
+    <p>Agents add sabotages with <code>scripts/sabotage new</code>, which refuses one that can't flip, breaks the build instead of a test, or names its test with string interpolation the harness can't find.</p>
+    <h4>The mutation gate</h4>
+    <p>Sabotages prove the guarantees someone thought to claim. The mutation gate enumerates four operator families (equality, relational, boolean operators, boolean literals) from the AST and splices each mutant at an exact line and column. A watch-list of {{MUT_WATCH_MODULES}} chokepoint modules ({{MUT_WATCH_MUTANTS}} mutants) runs on PRs; the full corpus ({{MUT_CORPUS_MUTANTS}} mutants) runs as a soak. A compiler refusal isn't a kill; only a named test failure is.</p>
+    <h4>The verifiers</h4>
+    <p>{{VERIFIERS}} <code>mix samen.verify.*</code> tasks check what tests can't express, for example: no plaintext PII in any tier, no PII or card-number columns, catalog and vault-declaration parity, same-org foreign keys, the API contract, the AI prompt masking and agent coverage, the fleet wire, the replay schema.</p>
+    <div class="src">source · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-049-mutation-gate.md">ADR-049</a> mutation gate · <a href="https://github.com/ckluis/samen/blob/main/docs/ci.md">docs/ci.md</a> · scripts/sabotage.sh · scripts/mutate.sh</div>
+  </div>
+</aside>
+<a class="scrim" href="#proof" tabindex="-1" aria-hidden="true"></a>
+
+<!-- ======================= 13 CI ======================= -->
+<section class="band" id="ci" style="--accent:var(--indigo)">
+  <div class="glow" style="right:-380px;top:-160px" aria-hidden="true"></div>
+  <div class="wrap vh">
+    <div class="copy rv">
+      <div class="eyebrow"><span class="n">13</span>CI for agents</div>
+      <h2>Verdicts, <em>not logs.</em></h2>
+      <p class="punch">This codebase is written by AI agents, so its CI is built for them: <b>cheap, fast and mechanical</b>. <code>quick</code> during a round, <code>pr</code> before a pull request, <code>full</code> nightly. Every call fits a single tool call, ends in one verdict line, and resumes where it stopped.</p>
+      <div class="big"><span class="n">0.4</span><span class="l">seconds for <code>quick</code> when nothing changed, because every step is <b>cached by the content it reads</b>. A failure is never cached. <span class="tag meas">measured</span></span></div>
+      <ul class="ticks">
+        <li><b>A flaky test still fails the run</b>: fix the flake, don't retry it green</li>
+        <li><b>Mirrored on GitHub Actions</b>: the PR check verifies every step ran once, on this commit</li>
+        <li><b>The old <code>ci.sh</code></b> took about 13 minutes and never fit one tool call; agents cut it up by hand</li>
+      </ul>
+      <div class="more"><a class="btn o" href="#p-ci" data-panel>The measured before and after <span class="ar">→</span></a><a class="btn" href="https://github.com/ckluis/samen/blob/main/docs/ci.md">docs/ci.md ↗</a></div>
+    </div>
+    <div class="stage rv" data-label="an agent's round">
+<div class="term"><span class="ln"><span class="p">$</span> <span class="c">scripts/ci quick</span></span><span class="ln"><span class="mu">  CACHED dialyzer_samen_core</span></span><span class="ln"><span class="mu">  PASS   samen_core 151.2s</span></span><span class="ln"><span class="ok">CI(quick): PASS 19/19 in 197.5s</span> <span class="mu">— NOT PR-READY — run: scripts/ci pr</span></span><span class="ln"> </span><span class="ln"><span class="p">$</span> <span class="c">scripts/ci pr</span></span><span class="ln"><span class="mu">  CI(pr): budget — next step sabotage_changed[3/5] would overrun</span></span><span class="ln"><span class="am">CI(pr): INCOMPLETE 49/52</span> <span class="mu">— continue: scripts/ci resume</span></span><span class="ln"> </span><span class="ln"><span class="p">$</span> <span class="c">scripts/ci resume</span></span><span class="ln"><span class="mu">  PASS sabotage_changed[4/5] 226.6s</span></span><span class="ln"><span class="mu">  PASS sabotage_changed[5/5] 211.7s</span></span><span class="ln"><span class="ok">CI(pr): PASS 52/52 in 212.3s — PR-READY</span></span></div>
+      <p class="cap">Lines from real runs on this repo, trimmed. A red step prints a digest and its log path; the verdict also lands in <code>_ci/last.json</code>.</p>
+    </div>
+  </div>
+</section>
+<aside class="panel" id="p-ci" role="dialog" aria-labelledby="h-ci" tabindex="-1" style="--accent:var(--indigo)">
+  <div class="ph"><div class="eyebrow"><span class="n">13</span>CI for agents</div><a class="x" href="#ci" data-close>Close ✕</a></div>
+  <div class="pb">
+    <h3 id="h-ci">Measured: a one-line kernel change</h3>
+    <table>
+      <tr><th></th><th>Before</th><th>Now</th></tr>
+      <tr><td>During a round</td><td><code>ci-fast.sh</code>, 174–195 s every time</td><td><code>quick</code>, ~200 s in one call; 0.4 s when nothing changed</td></tr>
+      <tr><td>Before a PR</td><td><code>ci.sh</code>, ~13 min, hand-cut into 3+ calls</td><td><code>pr</code>, 708 s over 2 calls warm; 0.6 s unchanged</td></tr>
+      <tr><td>Full sabotage corpus</td><td>~79 min serial (about 4 h hand-chunked)</td><td>51 min in parallel lanes, or nightly on Actions</td></tr>
+      <tr><td>PR check on GitHub</td><td>none</td><td>9–30 min, sharded into 18 jobs</td></tr>
+    </table>
+    <div class="not"><b>Not everything got faster.</b> A cold run with nothing cached isn't faster than before. The wins are the cache, every call fitting the budget, and verdicts instead of logs.</div>
+    <h4>What can't be weakened</h4>
+    <ul>
+      <li>A failure evicts any cached pass for that step</li>
+      <li>A flaky test is reported FLAKY and still fails the run</li>
+      <li><code>quick</code> never claims PR-ready</li>
+      <li>The GitHub aggregate check verifies every step ran exactly once, on this commit's tree, against this base</li>
+      <li>Counts in the docs are generated; drift fails <code>quick</code></li>
+    </ul>
+    <div class="src">source · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-053-ci-as-an-agent-tool.md">ADR-053</a> CI as an agent tool · <a href="https://github.com/ckluis/samen/blob/main/docs/ci.md">docs/ci.md</a> · ci/steps.conf</div>
+  </div>
+</aside>
+<a class="scrim" href="#ci" tabindex="-1" aria-hidden="true"></a>

@@ -1,0 +1,63 @@
+
+<!-- ======================= WHAT THIS IS NOT ======================= -->
+<section class="plain" id="not" style="--accent:var(--amber)">
+  <div class="glow" style="right:-420px;top:-260px;opacity:.3" aria-hidden="true"></div>
+  <div class="wrap">
+    <div class="eyebrow rv"><span class="n">—</span>Scope, stated on purpose</div>
+    <h2 class="rv" style="margin-top:20px;max-width:18ch">What this is not, stated as precisely as <em>what it is.</em></h2>
+    <p class="punch rv">A project that can draw its own boundary is one whose other claims you can price. Each limit below is written in the repo in the same words. When a reviewer finds a claim that outruns its evidence, the fix is a commit, and the retraction stays visible.</p>
+    <div class="nots">
+      <div class="notc rv"><div class="k">01 · Keyless lane</div><h3>No live vendor is wired in CI.</h3><p>Billing and email are proven against hermetic fakes and recorded transports through a real conformance suite, never a real account. Generated apps boot with both unconfigured and say so. The seams are proven; the wires are yours.</p></div>
+      <div class="notc rv"><div class="k">02 · Support access</div><h3>Support can see PII.</h3><p>Through a grant a second person approved, that expires on its own and that the tenant can audit. "Support never sees plaintext" was once on this page; it was false by construction and was retired.</p></div>
+      <div class="notc rv"><div class="k">03 · Verticals</div><h3>The verticals are proof, not product.</h3><p>driftwood (freight), pawchart (veterinary) and demo exist so the substrate must survive unrelated domains. They aren't for sale. If a vertical does something clever, that's a bug in the kernel.</p></div>
+      <div class="notc rv"><div class="k">04 · Leverage</div><h3>188 lines is a mount number, not an app size.</h3><p>pawchart mounts framework surfaces in about 188 authored lines; pawchart itself is about 3,900. An earlier page conflated the two, and the overclaim was corrected rather than reworded.</p></div>
+      <div class="notc rv"><div class="k">05 · Residency &amp; distribution</div><h3>US-only, and not on Hex yet.</h3><p>One Postgres per host, no per-tenant region selection. The framework ships as path dependencies inside this monorepo; publishing waits on a stated trigger.</p></div>
+      <div class="notc rv"><div class="k">06 · Erasure's edge</div><h3>Erasure can't reach what samen never wrote.</h3><p>A spreadsheet someone exported, or a downstream system that stored its own plaintext, is outside the boundary. The page won't pretend otherwise.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= START ======================= -->
+<section class="plain" id="start" style="--accent:var(--indigo)">
+  <div class="glow" style="left:-420px;top:-260px;opacity:.35" aria-hidden="true"></div>
+  <div class="wrap">
+    <div class="eyebrow rv"><span class="n">—</span>Two ways in</div>
+    <h2 class="rv" style="margin-top:20px;max-width:18ch">Run it in ten minutes, or <em>read it for an afternoon.</em></h2>
+    <div class="paths">
+      <div class="pathc rv">
+        <div class="eyebrow">Path A · Use it</div>
+        <h3>Generate an app and make it prove itself.</h3>
+        <p>You need Elixir 1.20 on OTP 29 and a local PostgreSQL with pgvector. No Docker, no API keys, no accounts.</p>
+<div class="term" style="margin-top:16px"><span class="ln"><span class="p">$</span> <span class="c">git clone https://github.com/ckluis/samen &amp;&amp; cd samen/samen_core</span></span><span class="ln"><span class="p">$</span> <span class="c">mix samen.gen.app --module Harbor --prefix hb --abbrev hrb</span></span><span class="ln"><span class="p">$</span> <span class="c">cd ../harbor &amp;&amp; MIX_ENV=test bash ci.sh</span></span><span class="ln"><span class="ok">{{GEN_GATE_STEPS}}/{{GEN_GATE_STEPS}} steps ALL PASSED</span>  <span class="mu"># zero hand-edits</span></span></div>
+        <p style="margin-top:16px;font-size:15px">If the generated app needs a fix from you to go green, the generator is broken, not your setup.</p>
+      </div>
+      <div class="pathc rv">
+        <div class="eyebrow">Path B · Take the ideas</div>
+        <h3>For readers who'll never run it.</h3>
+        <p>Most of what's interesting here transfers to a stack that has nothing to do with Elixir.</p>
+        <div class="links">
+          <a href="https://github.com/ckluis/samen/tree/main/docs/adr">The decisions, with their losers <span>{{ADRS}} ADRs ↗</span></a>
+          <a href="https://github.com/ckluis/samen/blob/main/docs/claim-evidence.md">Claim → evidence map <span>claim-evidence.md ↗</span></a>
+          <a href="https://github.com/ckluis/samen/blob/main/docs/compliance-story.md">The compliance story <span>for an auditor ↗</span></a>
+          <a href="https://github.com/ckluis/samen/blob/main/docs/guides/getting-started.md">Zero to first feature <span>getting-started.md ↗</span></a>
+          <a href="https://github.com/ckluis/samen/tree/main/scripts/sabotages">How to prove a test can fail <span>{{SABOTAGES}} patches ↗</span></a>
+          <a href="https://github.com/ckluis/samen/blob/main/docs/ci.md">CI an agent can afford <span>docs/ci.md ↗</span></a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap fi">
+    <div>
+      <div class="logo" style="font-size:26px">samen<i>.</i></div>
+      <p style="margin:10px 0 0">An Elixir · Ash · Phoenix SaaS foundry. MIT licensed.<br><a href="https://github.com/ckluis/samen">github.com/ckluis/samen</a></p>
+    </div>
+    <div class="credit">
+      <p style="margin:0 0 10px"><b>On authorship.</b> Every commit in this repository was written by Claude under human direction and marked <code>Co-Authored-By</code>. A human operator set the direction, reviewed the work and gated it adversarially. The sabotages, verifiers and decision records exist largely because an AI-authored codebase has to be checkable by someone who didn't type it.</p>
+      <p style="margin:0">Session replay is inspired by <a href="https://github.com/elixir-vibe/phoenix_replay">phoenix_replay</a> by Danila Poyarkov (MIT). Counts on this page are generated from the tree at build time ({{BUILD_SHA}}).</p>
+    </div>
+  </div>
+</footer>
