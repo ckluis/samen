@@ -127,6 +127,11 @@ defmodule Samen.Web.Operator.Live do
           proves no bare-tenant/off-plane href remains; there is no `active: :deliverability |
           :automation | :activity` case here because no top-level surface exists to be active.
         --%>
+        <.nav_item label="Data map" href="/operator/data-map" active={@active == :data_map}>
+          <:icon>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="6" rx="1.5" /><rect x="14" y="3" width="7" height="6" rx="1.5" /><rect x="8.5" y="15" width="7" height="6" rx="1.5" /><path d="M6.5 9v2.5H12V15M17.5 9v2.5H12" /></svg>
+          </:icon>
+        </.nav_item>
         <.nav_item label="Portfolio" href="/operator/aggregate" active={@active == :aggregate}>
           <:icon>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V9m6 10V5m6 14v-7" /></svg>

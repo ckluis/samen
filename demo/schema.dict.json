@@ -45,6 +45,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.Aggregate.HealthByBand",
       "table_name": "ahb_health_by_band"
     },
@@ -99,6 +100,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.Aggregate.MrrByTier",
       "table_name": "amr_mrr_by_tier"
     },
@@ -165,6 +167,17 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Demo.Identity.Credential",
+          "destination_attribute": "id",
+          "destination_table": "crd_credential",
+          "name": "credential",
+          "source_attribute": "credential_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Demo.Identity.AuthToken",
       "table_name": "atk_auth_token"
     },
@@ -219,6 +232,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.Aggregate.TicketQueueDepth",
       "table_name": "atq_ticket_queue_depth"
     },
@@ -297,6 +311,35 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Demo.CrmScope.Company",
+          "destination_attribute": "id",
+          "destination_table": "cmp_company",
+          "name": "company",
+          "source_attribute": "company_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Demo.CrmScope.Opportunity",
+          "destination_attribute": "id",
+          "destination_table": "opp_opportunity",
+          "name": "opportunity",
+          "source_attribute": "opportunity_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Demo.CrmScope.Person",
+          "destination_attribute": "id",
+          "destination_table": "per_person",
+          "name": "person",
+          "source_attribute": "person_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Demo.CrmScope.Attachment",
       "table_name": "att_attachment"
     },
@@ -363,6 +406,7 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [],
       "resource": "Demo.BillingScope.Customer",
       "table_name": "bcu_customer"
     },
@@ -439,6 +483,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Demo.BillingScope.Plan",
+          "destination_attribute": "id",
+          "destination_table": "bpl_plan",
+          "name": "plan",
+          "source_attribute": "plan_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Demo.BillingScope.Subscription",
+          "destination_attribute": "id",
+          "destination_table": "bsb_subscription",
+          "name": "subscription",
+          "source_attribute": "subscription_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Demo.BillingScope.Entitlement",
@@ -579,6 +643,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Demo.BillingScope.Customer",
+          "destination_attribute": "id",
+          "destination_table": "bcu_customer",
+          "name": "customer",
+          "source_attribute": "customer_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Demo.BillingScope.Subscription",
+          "destination_attribute": "id",
+          "destination_table": "bsb_subscription",
+          "name": "subscription",
+          "source_attribute": "subscription_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Demo.BillingScope.Invoice",
       "table_name": "bin_invoice"
     },
@@ -663,6 +747,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.BillingScope.Plan",
       "table_name": "bpl_plan"
     },
@@ -733,6 +818,17 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Demo.BillingScope.Plan",
+          "destination_attribute": "id",
+          "destination_table": "bpl_plan",
+          "name": "plan",
+          "source_attribute": "plan_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Demo.BillingScope.Price",
@@ -831,6 +927,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Demo.BillingScope.Customer",
+          "destination_attribute": "id",
+          "destination_table": "bcu_customer",
+          "name": "customer",
+          "source_attribute": "customer_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Demo.BillingScope.Invoice",
+          "destination_attribute": "id",
+          "destination_table": "bin_invoice",
+          "name": "invoice",
+          "source_attribute": "invoice_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Demo.BillingScope.Payment",
       "table_name": "bpy_payment"
     },
@@ -921,6 +1037,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Demo.BillingScope.Customer",
+          "destination_attribute": "id",
+          "destination_table": "bcu_customer",
+          "name": "customer",
+          "source_attribute": "customer_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Demo.BillingScope.Plan",
+          "destination_attribute": "id",
+          "destination_table": "bpl_plan",
+          "name": "plan",
+          "source_attribute": "plan_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Demo.BillingScope.Subscription",
       "table_name": "bsb_subscription"
     },
@@ -993,6 +1129,17 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Demo.BillingScope.Subscription",
+          "destination_attribute": "id",
+          "destination_table": "bsb_subscription",
+          "name": "subscription",
+          "source_attribute": "subscription_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Demo.BillingScope.Usage",
       "table_name": "bus_usage"
     },
@@ -1053,6 +1200,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.BillingScope.UsageEvent",
       "table_name": "bux_usage_event"
     },
@@ -1125,6 +1273,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Demo.CmsScope.Page",
+          "destination_attribute": "id",
+          "destination_table": "cpg_page",
+          "name": "page",
+          "source_attribute": "page_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Demo.CmsScope.Block.Version",
+          "destination_attribute": "version_source_id",
+          "destination_table": "cbl_block_versions",
+          "name": "paper_trail_versions",
+          "source_attribute": "id",
+          "through": null,
+          "type": "has_many"
+        }
+      ],
       "resource": "Demo.CmsScope.Block",
       "table_name": "cbl_block"
     },
@@ -1183,6 +1351,17 @@
           "logical_name": "version_updated_at",
           "pii": false,
           "type": "UtcDatetimeUsec"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Demo.CmsScope.Block",
+          "destination_attribute": "id",
+          "destination_table": "cbl_block",
+          "name": "version_source",
+          "source_attribute": "version_source_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Demo.CmsScope.Block.Version",
@@ -1257,6 +1436,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.CmsScope.Media",
       "table_name": "cmd_media"
     },
@@ -1335,6 +1515,7 @@
           "type": "String"
         }
       ],
+      "relationships": [],
       "resource": "Demo.CrmScope.Company",
       "table_name": "cmp_company"
     },
@@ -1393,6 +1574,17 @@
           "logical_name": "dob",
           "pii": true,
           "type": "Samen.Type.VaultField"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Demo.Crm.Membership",
+          "destination_attribute": "contact_id",
+          "destination_table": "mbr_membership",
+          "name": "memberships",
+          "source_attribute": "id",
+          "through": null,
+          "type": "has_many"
         }
       ],
       "resource": "Demo.Crm.Contact",
@@ -1467,6 +1659,7 @@
           "type": "String"
         }
       ],
+      "relationships": [],
       "resource": "Demo.CmsScope.Navigation",
       "table_name": "cnv_navigation"
     },
@@ -1539,6 +1732,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Demo.CmsScope.Block",
+          "destination_attribute": "page_id",
+          "destination_table": "cbl_block",
+          "name": "blocks",
+          "source_attribute": "id",
+          "through": null,
+          "type": "has_many"
+        },
+        {
+          "destination": "Demo.CmsScope.Page.Version",
+          "destination_attribute": "version_source_id",
+          "destination_table": "cpg_page_versions",
+          "name": "paper_trail_versions",
+          "source_attribute": "id",
+          "through": null,
+          "type": "has_many"
+        }
+      ],
       "resource": "Demo.CmsScope.Page",
       "table_name": "cpg_page"
     },
@@ -1597,6 +1810,17 @@
           "logical_name": "version_updated_at",
           "pii": false,
           "type": "UtcDatetimeUsec"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Demo.CmsScope.Page",
+          "destination_attribute": "id",
+          "destination_table": "cpg_page",
+          "name": "version_source",
+          "source_attribute": "version_source_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Demo.CmsScope.Page.Version",
@@ -1683,6 +1907,17 @@
           "type": "Atom"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Demo.CmsScope.Post.Version",
+          "destination_attribute": "version_source_id",
+          "destination_table": "cpt_post_versions",
+          "name": "paper_trail_versions",
+          "source_attribute": "id",
+          "through": null,
+          "type": "has_many"
+        }
+      ],
       "resource": "Demo.CmsScope.Post",
       "table_name": "cpt_post"
     },
@@ -1741,6 +1976,17 @@
           "logical_name": "version_updated_at",
           "pii": false,
           "type": "UtcDatetimeUsec"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Demo.CmsScope.Post",
+          "destination_attribute": "id",
+          "destination_table": "cpt_post",
+          "name": "version_source",
+          "source_attribute": "version_source_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Demo.CmsScope.Post.Version",
@@ -1821,6 +2067,7 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [],
       "resource": "Demo.Identity.Credential",
       "table_name": "crd_credential"
     },
@@ -1909,6 +2156,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Demo.CmsScope.Page",
+          "destination_attribute": "id",
+          "destination_table": "cpg_page",
+          "name": "page",
+          "source_attribute": "page_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Demo.CmsScope.Post",
+          "destination_attribute": "id",
+          "destination_table": "cpt_post",
+          "name": "post",
+          "source_attribute": "post_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Demo.CmsScope.SeoMeta",
@@ -2013,6 +2280,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.CalendarScope.Event",
       "table_name": "dce_event"
     },
@@ -2091,6 +2359,7 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [],
       "resource": "Demo.DocsScope.Doc",
       "table_name": "ddd_doc"
     },
@@ -2163,6 +2432,7 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [],
       "resource": "Demo.DocsScope.Note",
       "table_name": "ddn_note"
     },
@@ -2223,6 +2493,7 @@
           "type": "UtcDatetimeUsec"
         }
       ],
+      "relationships": [],
       "resource": "Demo.Identity.LoginFailure",
       "table_name": "dil_login_failure"
     },
@@ -2271,6 +2542,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.LocationsScope.Location",
       "table_name": "dll_location"
     },
@@ -2335,6 +2607,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Demo.SupportScope.Agent",
+          "destination_attribute": "id",
+          "destination_table": "sag_agent",
+          "name": "agent",
+          "source_attribute": "agent_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Demo.SupportScope.Ticket",
+          "destination_attribute": "id",
+          "destination_table": "stk_ticket",
+          "name": "ticket",
+          "source_attribute": "ticket_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Demo.SupportScope.CsatSurveyToken",
@@ -2445,6 +2737,26 @@
           "type": "Samen.Type.Money"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Demo.CrmScope.Opportunity",
+          "destination_attribute": "id",
+          "destination_table": "opp_opportunity",
+          "name": "converted_opportunity",
+          "source_attribute": "converted_opportunity_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Demo.CrmScope.Person",
+          "destination_attribute": "id",
+          "destination_table": "per_person",
+          "name": "converted_person",
+          "source_attribute": "converted_person_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Demo.SalesOps.Lead",
       "table_name": "dsl_lead"
     },
@@ -2529,6 +2841,7 @@
           "type": "String"
         }
       ],
+      "relationships": [],
       "resource": "Demo.SalesOps.Vendor",
       "table_name": "dsv_vendor"
     },
@@ -2577,6 +2890,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.Tags.Tag",
       "table_name": "dtt_tag"
     },
@@ -2637,6 +2951,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.Identity.Org",
       "table_name": "ido_org"
     },
@@ -2715,6 +3030,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.Identity.Invitation",
       "table_name": "inv_invitation"
     },
@@ -2769,6 +3085,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.Identity.Role",
       "table_name": "iro_role"
     },
@@ -2847,6 +3164,17 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Demo.Identity.Membership",
+          "destination_attribute": "id",
+          "destination_table": "mbs_membership",
+          "name": "membership",
+          "source_attribute": "membership_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Demo.Identity.ApiKey",
       "table_name": "key_api_key"
     },
@@ -2895,6 +3223,17 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Demo.Crm.Contact",
+          "destination_attribute": "id",
+          "destination_table": "cnt_contact",
+          "name": "contact",
+          "source_attribute": "contact_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Demo.Crm.Membership",
       "table_name": "mbr_membership"
     },
@@ -2941,6 +3280,17 @@
           "logical_name": "user_id",
           "pii": false,
           "type": "UUID"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Demo.Identity.User",
+          "destination_attribute": "id",
+          "destination_table": "usr_user",
+          "name": "user",
+          "source_attribute": "user_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Demo.Identity.Membership",
@@ -3015,6 +3365,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.MarketingScope.Campaign",
       "table_name": "mca_campaign"
     },
@@ -3081,6 +3432,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.MarketingScope.ConsentEvent",
       "table_name": "mce_consent_event"
     },
@@ -3139,6 +3491,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Demo.MarketingScope.Send",
+          "destination_attribute": "id",
+          "destination_table": "msn_send",
+          "name": "send",
+          "source_attribute": "send_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Demo.MarketingScope.Subscriber",
+          "destination_attribute": "id",
+          "destination_table": "msu_subscriber",
+          "name": "subscriber",
+          "source_attribute": "subscriber_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Demo.MarketingScope.EmailEvent",
@@ -3243,6 +3615,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.BillingScope.SubscriptionEvent",
       "table_name": "mov_subscription_event"
     },
@@ -3309,6 +3682,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.MarketingScope.Segment",
       "table_name": "msg_segment"
     },
@@ -3393,6 +3767,35 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Demo.MarketingScope.Campaign",
+          "destination_attribute": "id",
+          "destination_table": "mca_campaign",
+          "name": "campaign",
+          "source_attribute": "campaign_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Demo.MarketingScope.Subscriber",
+          "destination_attribute": "id",
+          "destination_table": "msu_subscriber",
+          "name": "subscriber",
+          "source_attribute": "subscriber_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Demo.MarketingScope.Template",
+          "destination_attribute": "id",
+          "destination_table": "mtp_template",
+          "name": "template",
+          "source_attribute": "template_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Demo.MarketingScope.Send",
       "table_name": "msn_send"
     },
@@ -3451,6 +3854,17 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Demo.MarketingScope.Subscriber",
+          "destination_attribute": "id",
+          "destination_table": "msu_subscriber",
+          "name": "subscriber",
+          "source_attribute": "subscriber_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Demo.MarketingScope.Suppression",
@@ -3519,6 +3933,7 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [],
       "resource": "Demo.MarketingScope.Subscriber",
       "table_name": "msu_subscriber"
     },
@@ -3603,6 +4018,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.MarketingScope.Template",
       "table_name": "mtp_template"
     },
@@ -3681,6 +4097,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.PrimitivesScope.NotificationPreference",
       "table_name": "npr_notification_preference"
     },
@@ -3771,6 +4188,26 @@
           "type": "Samen.Type.Money"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Demo.CrmScope.Company",
+          "destination_attribute": "id",
+          "destination_table": "cmp_company",
+          "name": "company",
+          "source_attribute": "company_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Demo.CrmScope.Pipeline",
+          "destination_attribute": "id",
+          "destination_table": "pip_pipeline",
+          "name": "pipeline",
+          "source_attribute": "pipeline_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Demo.CrmScope.Opportunity",
       "table_name": "opp_opportunity"
     },
@@ -3819,6 +4256,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.Crm.Org",
       "table_name": "org_org"
     },
@@ -3885,6 +4323,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.Analytics.ProductEvent",
       "table_name": "pae_product_event"
     },
@@ -3961,6 +4400,17 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Demo.CrmScope.Company",
+          "destination_attribute": "id",
+          "destination_table": "cmp_company",
+          "name": "company",
+          "source_attribute": "company_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Demo.CrmScope.Person",
@@ -4047,6 +4497,7 @@
           "type": "Map"
         }
       ],
+      "relationships": [],
       "resource": "Demo.PrimitivesScope.FeatureFlag",
       "table_name": "pff_feature_flag"
     },
@@ -4131,6 +4582,7 @@
           "type": "UUID"
         }
       ],
+      "relationships": [],
       "resource": "Demo.PrimitivesScope.File",
       "table_name": "pfl_file"
     },
@@ -4197,6 +4649,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.CrmScope.Pipeline",
       "table_name": "pip_pipeline"
     },
@@ -4275,6 +4728,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.PrimitivesScope.Notification",
       "table_name": "pnt_notification"
     },
@@ -4341,6 +4795,7 @@
           "type": "String"
         }
       ],
+      "relationships": [],
       "resource": "Demo.PrimitivesScope.SearchIndex",
       "table_name": "psh_search_index"
     },
@@ -4425,6 +4880,7 @@
           "type": "String"
         }
       ],
+      "relationships": [],
       "resource": "Demo.PrimitivesScope.Webhook",
       "table_name": "pwh_webhook"
     },
@@ -4509,6 +4965,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.SupportScope.Agent",
       "table_name": "sag_agent"
     },
@@ -4575,6 +5032,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Demo.SupportScope.Agent",
+          "destination_attribute": "id",
+          "destination_table": "sag_agent",
+          "name": "agent",
+          "source_attribute": "agent_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Demo.SupportScope.Ticket",
+          "destination_attribute": "id",
+          "destination_table": "stk_ticket",
+          "name": "ticket",
+          "source_attribute": "ticket_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Demo.SupportScope.Csat",
       "table_name": "scs_csat"
     },
@@ -4633,6 +5110,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Demo.SupportScope.Message",
+          "destination_attribute": "conversation_id",
+          "destination_table": "smg_message",
+          "name": "messages",
+          "source_attribute": "id",
+          "through": null,
+          "type": "has_many"
+        },
+        {
+          "destination": "Demo.SupportScope.Ticket",
+          "destination_attribute": "id",
+          "destination_table": "stk_ticket",
+          "name": "ticket",
+          "source_attribute": "ticket_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Demo.SupportScope.Conversation",
@@ -4699,6 +5196,17 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Demo.Identity.Credential",
+          "destination_attribute": "id",
+          "destination_table": "crd_credential",
+          "name": "credential",
+          "source_attribute": "credential_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Demo.Identity.Session",
@@ -4773,6 +5281,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.SupportScope.Macro",
       "table_name": "smc_macro"
     },
@@ -4857,6 +5366,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Demo.SupportScope.Agent",
+          "destination_attribute": "id",
+          "destination_table": "sag_agent",
+          "name": "agent",
+          "source_attribute": "agent_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Demo.SupportScope.Conversation",
+          "destination_attribute": "id",
+          "destination_table": "scv_conversation",
+          "name": "conversation",
+          "source_attribute": "conversation_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Demo.SupportScope.Message",
       "table_name": "smg_message"
     },
@@ -4929,6 +5458,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.SupportScope.Sla",
       "table_name": "ssl_sla"
     },
@@ -5025,6 +5555,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Demo.SupportScope.Conversation",
+          "destination_attribute": "ticket_id",
+          "destination_table": "scv_conversation",
+          "name": "conversations",
+          "source_attribute": "id",
+          "through": null,
+          "type": "has_many"
+        },
+        {
+          "destination": "Demo.SupportScope.Sla",
+          "destination_attribute": "id",
+          "destination_table": "ssl_sla",
+          "name": "sla",
+          "source_attribute": "sla_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Demo.SupportScope.Ticket",
       "table_name": "stk_ticket"
     },
@@ -5071,6 +5621,17 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Demo.Tags.Tag",
+          "destination_attribute": "id",
+          "destination_table": "dtt_tag",
+          "name": "tag",
+          "source_attribute": "tag_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Demo.Tags.Tagging",
@@ -5125,6 +5686,17 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Demo.Identity.Credential",
+          "destination_attribute": "id",
+          "destination_table": "crd_credential",
+          "name": "credential",
+          "source_attribute": "credential_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Demo.Identity.UserIdentity",
@@ -5187,6 +5759,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.Identity.User",
       "table_name": "usr_user"
     },
@@ -5241,6 +5814,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Demo.WorkScope.Project",
       "table_name": "wpj_project"
     },
@@ -5353,6 +5927,35 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Demo.WorkScope.Task",
+          "destination_attribute": "id",
+          "destination_table": "wtk_task",
+          "name": "parent",
+          "source_attribute": "parent_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Demo.WorkScope.Project",
+          "destination_attribute": "id",
+          "destination_table": "wpj_project",
+          "name": "project",
+          "source_attribute": "project_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Demo.WorkScope.Task",
+          "destination_attribute": "parent_id",
+          "destination_table": "wtk_task",
+          "name": "subtasks",
+          "source_attribute": "id",
+          "through": null,
+          "type": "has_many"
         }
       ],
       "resource": "Demo.WorkScope.Task",

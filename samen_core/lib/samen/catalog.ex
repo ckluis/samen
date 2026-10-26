@@ -68,6 +68,44 @@ defmodule Samen.Catalog do
   end
 
   @doc """
+  The DECLARED relationships of a resource — one description per Ash relationship,
+  sorted by name. Each carries `{name, type, destination, destination_table,
+  source_attribute, destination_attribute, through}` as strings (`through` and
+  `destination_table` are `nil` when absent), so the catalog records the edges of the
+  schema as faithfully as `fields/1` records its columns.
+
+  Declared only: an undeclared `*_id` scalar (a plain-scalar subject anchor, ADR-041
+  §4.1, or an external id) is a field, not an edge — the catalog never guesses one.
+  """
+  def relationships(resource) do
+    resource
+    |> Ash.Resource.Info.relationships()
+    |> Enum.map(fn rel ->
+      %{
+        name: to_string(rel.name),
+        type: to_string(rel.type),
+        destination: inspect(rel.destination),
+        destination_table: destination_table(rel.destination),
+        source_attribute: to_string(rel.source_attribute),
+        destination_attribute: to_string(rel.destination_attribute),
+        through: through(rel)
+      }
+    end)
+    |> Enum.sort_by(& &1.name)
+  end
+
+  defp destination_table(resource) do
+    if has_postgres_table?(resource), do: table_name(resource)
+  rescue
+    _ -> nil
+  end
+
+  defp through(%{through: through}) when is_atom(through) and not is_nil(through),
+    do: inspect(through)
+
+  defp through(_), do: nil
+
+  @doc """
   All Ash resources registered in the given domain(s) that have an AshPostgres
   data layer (i.e. have a physical table). Returns deduplicated modules.
   """

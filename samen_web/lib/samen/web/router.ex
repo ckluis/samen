@@ -275,6 +275,12 @@ defmodule Samen.Web.Router do
         # `:require_operator` on_mount gates it. Inherited at 0 vertical LOC.
         live("#{path}/replays/:org_id", Samen.Web.Replay.IndexLive)
         live("#{path}/replays/:org_id/:id", Samen.Web.Replay.PlayerLive)
+        # Issue #97 — the DATA MAP: the host's ERD + architectural separation (app scopes ·
+        # framework substrate · token-blind aggregate plane), generated from the catalog
+        # (`Samen.DataMap`). Metadata only — no row is read for any org, so there is nothing
+        # to mask. Rides this SAME live_session (`:require_operator`). Inherited at 0 vertical LOC.
+        live("#{path}/data-map", Samen.Web.Operator.DataMapLive)
+        live("#{path}/data-map/:domain", Samen.Web.Operator.DataMapLive)
 
         if include_aggregate do
           live("#{path}/aggregate", Samen.Web.Operator.AggregateLive)

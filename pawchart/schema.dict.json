@@ -63,6 +63,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Clinic.Patient",
       "table_name": "own_patient"
     },
@@ -117,6 +118,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Aggregate.PatientVolumeBySpecies",
       "table_name": "pag_patient_volume_by_species"
     },
@@ -183,6 +185,7 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Billing.Customer",
       "table_name": "pbc_customer"
     },
@@ -259,6 +262,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "PawChart.Billing.Plan",
+          "destination_attribute": "id",
+          "destination_table": "pbl_plan",
+          "name": "plan",
+          "source_attribute": "plan_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "PawChart.Billing.Subscription",
+          "destination_attribute": "id",
+          "destination_table": "pbs_subscription",
+          "name": "subscription",
+          "source_attribute": "subscription_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "PawChart.Billing.Entitlement",
@@ -399,6 +422,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "PawChart.Billing.Customer",
+          "destination_attribute": "id",
+          "destination_table": "pbc_customer",
+          "name": "customer",
+          "source_attribute": "customer_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "PawChart.Billing.Subscription",
+          "destination_attribute": "id",
+          "destination_table": "pbs_subscription",
+          "name": "subscription",
+          "source_attribute": "subscription_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "PawChart.Billing.Invoice",
       "table_name": "pbi_invoice"
     },
@@ -483,6 +526,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Billing.Plan",
       "table_name": "pbl_plan"
     },
@@ -573,6 +617,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "PawChart.Billing.Customer",
+          "destination_attribute": "id",
+          "destination_table": "pbc_customer",
+          "name": "customer",
+          "source_attribute": "customer_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "PawChart.Billing.Plan",
+          "destination_attribute": "id",
+          "destination_table": "pbl_plan",
+          "name": "plan",
+          "source_attribute": "plan_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "PawChart.Billing.Subscription",
       "table_name": "pbs_subscription"
     },
@@ -643,6 +707,17 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "PawChart.Billing.Subscription",
+          "destination_attribute": "id",
+          "destination_table": "pbs_subscription",
+          "name": "subscription",
+          "source_attribute": "subscription_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "PawChart.Billing.Usage",
@@ -747,6 +822,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Billing.SubscriptionEvent",
       "table_name": "pbv_subscription_event"
     },
@@ -807,6 +883,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Billing.UsageEvent",
       "table_name": "pbx_usage_event"
     },
@@ -901,6 +978,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "PawChart.Billing.Customer",
+          "destination_attribute": "id",
+          "destination_table": "pbc_customer",
+          "name": "customer",
+          "source_attribute": "customer_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "PawChart.Billing.Invoice",
+          "destination_attribute": "id",
+          "destination_table": "pbi_invoice",
+          "name": "invoice",
+          "source_attribute": "invoice_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "PawChart.Billing.Payment",
@@ -1005,6 +1102,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Calendar.Event",
       "table_name": "pce_event"
     },
@@ -1083,6 +1181,7 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Docs.Doc",
       "table_name": "pdd_doc"
     },
@@ -1155,6 +1254,7 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Docs.Note",
       "table_name": "pdn_note"
     },
@@ -1227,6 +1327,17 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [
+        {
+          "destination": "PawChart.Clinic.Patient",
+          "destination_attribute": "id",
+          "destination_table": "own_patient",
+          "name": "owner",
+          "source_attribute": "owner_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "PawChart.Clinic.Pet",
       "table_name": "pet_pet"
     },
@@ -1275,6 +1386,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Locations.Location",
       "table_name": "pll_location"
     },
@@ -1341,6 +1453,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Operator.Customer",
       "table_name": "pmc_customer"
     },
@@ -1417,6 +1530,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "PawChart.Operator.Plan",
+          "destination_attribute": "id",
+          "destination_table": "pmp_plan",
+          "name": "plan",
+          "source_attribute": "plan_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "PawChart.Operator.Subscription",
+          "destination_attribute": "id",
+          "destination_table": "pms_subscription",
+          "name": "subscription",
+          "source_attribute": "subscription_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "PawChart.Operator.Entitlement",
@@ -1557,6 +1690,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "PawChart.Operator.Customer",
+          "destination_attribute": "id",
+          "destination_table": "pmc_customer",
+          "name": "customer",
+          "source_attribute": "customer_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "PawChart.Operator.Subscription",
+          "destination_attribute": "id",
+          "destination_table": "pms_subscription",
+          "name": "subscription",
+          "source_attribute": "subscription_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "PawChart.Operator.Invoice",
       "table_name": "pmi_invoice"
     },
@@ -1641,6 +1794,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Operator.Plan",
       "table_name": "pmp_plan"
     },
@@ -1711,6 +1865,17 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "PawChart.Operator.Plan",
+          "destination_attribute": "id",
+          "destination_table": "pmp_plan",
+          "name": "plan",
+          "source_attribute": "plan_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "PawChart.Operator.Price",
@@ -1803,6 +1968,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "PawChart.Operator.Customer",
+          "destination_attribute": "id",
+          "destination_table": "pmc_customer",
+          "name": "customer",
+          "source_attribute": "customer_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "PawChart.Operator.Plan",
+          "destination_attribute": "id",
+          "destination_table": "pmp_plan",
+          "name": "plan",
+          "source_attribute": "plan_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "PawChart.Operator.Subscription",
       "table_name": "pms_subscription"
     },
@@ -1873,6 +2058,17 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "PawChart.Operator.Subscription",
+          "destination_attribute": "id",
+          "destination_table": "pms_subscription",
+          "name": "subscription",
+          "source_attribute": "subscription_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "PawChart.Operator.Usage",
@@ -1977,6 +2173,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Operator.SubscriptionEvent",
       "table_name": "pmv_subscription_event"
     },
@@ -2037,6 +2234,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Operator.UsageEvent",
       "table_name": "pmx_usage_event"
     },
@@ -2133,6 +2331,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "PawChart.Operator.Customer",
+          "destination_attribute": "id",
+          "destination_table": "pmc_customer",
+          "name": "customer",
+          "source_attribute": "customer_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "PawChart.Operator.Invoice",
+          "destination_attribute": "id",
+          "destination_table": "pmi_invoice",
+          "name": "invoice",
+          "source_attribute": "invoice_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "PawChart.Operator.Payment",
       "table_name": "pmy_payment"
     },
@@ -2211,6 +2429,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Operator.Credential",
       "table_name": "poc_credential"
     },
@@ -2263,6 +2482,17 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "PawChart.Operator.Credential",
+          "destination_attribute": "id",
+          "destination_table": "poc_credential",
+          "name": "credential",
+          "source_attribute": "credential_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "PawChart.Operator.UserIdentity",
@@ -2343,6 +2573,17 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "PawChart.Operator.Membership",
+          "destination_attribute": "id",
+          "destination_table": "pom_membership",
+          "name": "membership",
+          "source_attribute": "membership_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "PawChart.Operator.ApiKey",
       "table_name": "pok_api_key"
     },
@@ -2403,6 +2644,7 @@
           "type": "UtcDatetimeUsec"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Operator.LoginFailure",
       "table_name": "pol_login_failure"
     },
@@ -2449,6 +2691,17 @@
           "logical_name": "user_id",
           "pii": false,
           "type": "UUID"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "PawChart.Operator.User",
+          "destination_attribute": "id",
+          "destination_table": "pou_user",
+          "name": "user",
+          "source_attribute": "user_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "PawChart.Operator.Membership",
@@ -2529,6 +2782,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Operator.Invitation",
       "table_name": "pon_invitation"
     },
@@ -2589,6 +2843,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Operator.Org",
       "table_name": "poo_org"
     },
@@ -2643,6 +2898,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Operator.Role",
       "table_name": "por_role"
     },
@@ -2707,6 +2963,17 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "PawChart.Operator.Credential",
+          "destination_attribute": "id",
+          "destination_table": "poc_credential",
+          "name": "credential",
+          "source_attribute": "credential_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "PawChart.Operator.Session",
@@ -2775,6 +3042,17 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "PawChart.Operator.Credential",
+          "destination_attribute": "id",
+          "destination_table": "poc_credential",
+          "name": "credential",
+          "source_attribute": "credential_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "PawChart.Operator.AuthToken",
       "table_name": "pot_auth_token"
     },
@@ -2835,6 +3113,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Operator.User",
       "table_name": "pou_user"
     },
@@ -2907,6 +3186,17 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "PawChart.Billing.Plan",
+          "destination_attribute": "id",
+          "destination_table": "pbl_plan",
+          "name": "plan",
+          "source_attribute": "plan_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "PawChart.Billing.Price",
       "table_name": "ppc_price"
     },
@@ -2965,6 +3255,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "PawChart.Operator.Message",
+          "destination_attribute": "conversation_id",
+          "destination_table": "pqm_message",
+          "name": "messages",
+          "source_attribute": "id",
+          "through": null,
+          "type": "has_many"
+        },
+        {
+          "destination": "PawChart.Operator.Ticket",
+          "destination_attribute": "id",
+          "destination_table": "pqk_ticket",
+          "name": "ticket",
+          "source_attribute": "ticket_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "PawChart.Operator.Conversation",
@@ -3051,6 +3361,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Operator.Agent",
       "table_name": "pqg_agent"
     },
@@ -3147,6 +3458,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "PawChart.Operator.Conversation",
+          "destination_attribute": "ticket_id",
+          "destination_table": "pqc_conversation",
+          "name": "conversations",
+          "source_attribute": "id",
+          "through": null,
+          "type": "has_many"
+        },
+        {
+          "destination": "PawChart.Operator.Sla",
+          "destination_attribute": "id",
+          "destination_table": "pql_sla",
+          "name": "sla",
+          "source_attribute": "sla_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "PawChart.Operator.Ticket",
       "table_name": "pqk_ticket"
     },
@@ -3219,6 +3550,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Operator.Sla",
       "table_name": "pql_sla"
     },
@@ -3303,6 +3635,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "PawChart.Operator.Agent",
+          "destination_attribute": "id",
+          "destination_table": "pqg_agent",
+          "name": "agent",
+          "source_attribute": "agent_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "PawChart.Operator.Conversation",
+          "destination_attribute": "id",
+          "destination_table": "pqc_conversation",
+          "name": "conversation",
+          "source_attribute": "conversation_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "PawChart.Operator.Message",
       "table_name": "pqm_message"
     },
@@ -3375,6 +3727,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Operator.Macro",
       "table_name": "pqn_macro"
     },
@@ -3439,6 +3792,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "PawChart.Operator.Agent",
+          "destination_attribute": "id",
+          "destination_table": "pqg_agent",
+          "name": "agent",
+          "source_attribute": "agent_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "PawChart.Operator.Ticket",
+          "destination_attribute": "id",
+          "destination_table": "pqk_ticket",
+          "name": "ticket",
+          "source_attribute": "ticket_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "PawChart.Operator.CsatSurveyToken",
@@ -3507,6 +3880,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "PawChart.Operator.Agent",
+          "destination_attribute": "id",
+          "destination_table": "pqg_agent",
+          "name": "agent",
+          "source_attribute": "agent_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "PawChart.Operator.Ticket",
+          "destination_attribute": "id",
+          "destination_table": "pqk_ticket",
+          "name": "ticket",
+          "source_attribute": "ticket_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "PawChart.Operator.Csat",
       "table_name": "pqs_csat"
     },
@@ -3571,6 +3964,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "PawChart.Support.Agent",
+          "destination_attribute": "id",
+          "destination_table": "vsd_agent",
+          "name": "agent",
+          "source_attribute": "agent_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "PawChart.Support.Ticket",
+          "destination_attribute": "id",
+          "destination_table": "vsa_ticket",
+          "name": "ticket",
+          "source_attribute": "ticket_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "PawChart.Support.CsatSurveyToken",
@@ -3681,6 +4094,26 @@
           "type": "Samen.Type.Money"
         }
       ],
+      "relationships": [
+        {
+          "destination": "PawChart.Crm.Opportunity",
+          "destination_attribute": "id",
+          "destination_table": "vcd_opportunity",
+          "name": "converted_opportunity",
+          "source_attribute": "converted_opportunity_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "PawChart.Crm.Person",
+          "destination_attribute": "id",
+          "destination_table": "vcb_person",
+          "name": "converted_person",
+          "source_attribute": "converted_person_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "PawChart.SalesOps.Lead",
       "table_name": "psl_lead"
     },
@@ -3765,6 +4198,7 @@
           "type": "String"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.SalesOps.Vendor",
       "table_name": "psv_vendor"
     },
@@ -3813,6 +4247,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Tags.Tag",
       "table_name": "ptt_tag"
     },
@@ -3867,6 +4302,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Work.Project",
       "table_name": "pwp_project"
     },
@@ -3981,6 +4417,35 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "PawChart.Work.Task",
+          "destination_attribute": "id",
+          "destination_table": "pwt_task",
+          "name": "parent",
+          "source_attribute": "parent_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "PawChart.Work.Project",
+          "destination_attribute": "id",
+          "destination_table": "pwp_project",
+          "name": "project",
+          "source_attribute": "project_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "PawChart.Work.Task",
+          "destination_attribute": "parent_id",
+          "destination_table": "pwt_task",
+          "name": "subtasks",
+          "source_attribute": "id",
+          "through": null,
+          "type": "has_many"
+        }
+      ],
       "resource": "PawChart.Work.Task",
       "table_name": "pwt_task"
     },
@@ -4041,6 +4506,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Samen.Replay.Frame",
       "table_name": "replay_frame"
     },
@@ -4137,6 +4603,7 @@
           "type": "String"
         }
       ],
+      "relationships": [],
       "resource": "Samen.Replay.Session",
       "table_name": "replay_session"
     },
@@ -4183,6 +4650,17 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "PawChart.Tags.Tag",
+          "destination_attribute": "id",
+          "destination_table": "ptt_tag",
+          "name": "tag",
+          "source_attribute": "tag_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "PawChart.Tags.Tagging",
@@ -4251,6 +4729,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Analytics.ProductEvent",
       "table_name": "vae_product_event"
     },
@@ -4329,6 +4808,7 @@
           "type": "String"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Crm.Company",
       "table_name": "vca_company"
     },
@@ -4407,6 +4887,17 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "PawChart.Crm.Company",
+          "destination_attribute": "id",
+          "destination_table": "vca_company",
+          "name": "company",
+          "source_attribute": "company_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "PawChart.Crm.Person",
       "table_name": "vcb_person"
     },
@@ -4473,6 +4964,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Crm.Pipeline",
       "table_name": "vcc_pipeline"
     },
@@ -4563,6 +5055,26 @@
           "type": "Samen.Type.Money"
         }
       ],
+      "relationships": [
+        {
+          "destination": "PawChart.Crm.Company",
+          "destination_attribute": "id",
+          "destination_table": "vca_company",
+          "name": "company",
+          "source_attribute": "company_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "PawChart.Crm.Pipeline",
+          "destination_attribute": "id",
+          "destination_table": "vcc_pipeline",
+          "name": "pipeline",
+          "source_attribute": "pipeline_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "PawChart.Crm.Opportunity",
       "table_name": "vcd_opportunity"
     },
@@ -4639,6 +5151,35 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "PawChart.Crm.Company",
+          "destination_attribute": "id",
+          "destination_table": "vca_company",
+          "name": "company",
+          "source_attribute": "company_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "PawChart.Crm.Opportunity",
+          "destination_attribute": "id",
+          "destination_table": "vcd_opportunity",
+          "name": "opportunity",
+          "source_attribute": "opportunity_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "PawChart.Crm.Person",
+          "destination_attribute": "id",
+          "destination_table": "vcb_person",
+          "name": "person",
+          "source_attribute": "person_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "PawChart.Crm.Attachment",
@@ -4725,6 +5266,7 @@
           "type": "Map"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Primitives.FeatureFlag",
       "table_name": "vff_feature_flag"
     },
@@ -4809,6 +5351,7 @@
           "type": "UUID"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Primitives.File",
       "table_name": "vfl_file"
     },
@@ -4881,6 +5424,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Marketing.Campaign",
       "table_name": "vmc_campaign"
     },
@@ -4939,6 +5483,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "PawChart.Marketing.Send",
+          "destination_attribute": "id",
+          "destination_table": "vmn_send",
+          "name": "send",
+          "source_attribute": "send_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "PawChart.Marketing.Subscriber",
+          "destination_attribute": "id",
+          "destination_table": "vms_subscriber",
+          "name": "subscriber",
+          "source_attribute": "subscriber_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "PawChart.Marketing.EmailEvent",
@@ -5007,6 +5571,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Marketing.Segment",
       "table_name": "vmg_segment"
     },
@@ -5091,6 +5656,35 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "PawChart.Marketing.Campaign",
+          "destination_attribute": "id",
+          "destination_table": "vmc_campaign",
+          "name": "campaign",
+          "source_attribute": "campaign_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "PawChart.Marketing.Subscriber",
+          "destination_attribute": "id",
+          "destination_table": "vms_subscriber",
+          "name": "subscriber",
+          "source_attribute": "subscriber_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "PawChart.Marketing.Template",
+          "destination_attribute": "id",
+          "destination_table": "vmt_template",
+          "name": "template",
+          "source_attribute": "template_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "PawChart.Marketing.Send",
       "table_name": "vmn_send"
     },
@@ -5149,6 +5743,17 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "PawChart.Marketing.Subscriber",
+          "destination_attribute": "id",
+          "destination_table": "vms_subscriber",
+          "name": "subscriber",
+          "source_attribute": "subscriber_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "PawChart.Marketing.Suppression",
@@ -5217,6 +5822,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Marketing.Subscriber",
       "table_name": "vms_subscriber"
     },
@@ -5301,6 +5907,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Marketing.Template",
       "table_name": "vmt_template"
     },
@@ -5367,6 +5974,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Marketing.ConsentEvent",
       "table_name": "vmv_consent_event"
     },
@@ -5445,6 +6053,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Primitives.NotificationPreference",
       "table_name": "vnp_notification_preference"
     },
@@ -5523,6 +6132,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Primitives.Notification",
       "table_name": "vnt_notification"
     },
@@ -5619,6 +6229,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "PawChart.Support.Conversation",
+          "destination_attribute": "ticket_id",
+          "destination_table": "vsb_conversation",
+          "name": "conversations",
+          "source_attribute": "id",
+          "through": null,
+          "type": "has_many"
+        },
+        {
+          "destination": "PawChart.Support.Sla",
+          "destination_attribute": "id",
+          "destination_table": "vse_sla",
+          "name": "sla",
+          "source_attribute": "sla_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "PawChart.Support.Ticket",
       "table_name": "vsa_ticket"
     },
@@ -5677,6 +6307,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "PawChart.Support.Message",
+          "destination_attribute": "conversation_id",
+          "destination_table": "vsc_message",
+          "name": "messages",
+          "source_attribute": "id",
+          "through": null,
+          "type": "has_many"
+        },
+        {
+          "destination": "PawChart.Support.Ticket",
+          "destination_attribute": "id",
+          "destination_table": "vsa_ticket",
+          "name": "ticket",
+          "source_attribute": "ticket_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "PawChart.Support.Conversation",
@@ -5763,6 +6413,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "PawChart.Support.Agent",
+          "destination_attribute": "id",
+          "destination_table": "vsd_agent",
+          "name": "agent",
+          "source_attribute": "agent_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "PawChart.Support.Conversation",
+          "destination_attribute": "id",
+          "destination_table": "vsb_conversation",
+          "name": "conversation",
+          "source_attribute": "conversation_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "PawChart.Support.Message",
       "table_name": "vsc_message"
     },
@@ -5847,6 +6517,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Support.Agent",
       "table_name": "vsd_agent"
     },
@@ -5919,6 +6590,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Support.Sla",
       "table_name": "vse_sla"
     },
@@ -5991,6 +6663,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Support.Macro",
       "table_name": "vsf_macro"
     },
@@ -6055,6 +6728,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "PawChart.Support.Agent",
+          "destination_attribute": "id",
+          "destination_table": "vsd_agent",
+          "name": "agent",
+          "source_attribute": "agent_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "PawChart.Support.Ticket",
+          "destination_attribute": "id",
+          "destination_table": "vsa_ticket",
+          "name": "ticket",
+          "source_attribute": "ticket_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "PawChart.Support.Csat",
@@ -6123,6 +6816,7 @@
           "type": "String"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Primitives.SearchIndex",
       "table_name": "vsh_search_index"
     },
@@ -6207,6 +6901,7 @@
           "type": "String"
         }
       ],
+      "relationships": [],
       "resource": "PawChart.Primitives.Webhook",
       "table_name": "vwh_webhook"
     }

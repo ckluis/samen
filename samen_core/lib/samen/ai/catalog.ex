@@ -76,8 +76,15 @@ defmodule Samen.AI.Catalog do
       %{"tables" => [
         %{"table_name" => ..., "resource" => ..., "fields" => [
           %{"column_name" => ..., "logical_name" => ..., "type" => ..., "pii" => bool}
+        ], "relationships" => [
+          %{"name" => ..., "type" => "belongs_to" | "has_one" | "has_many" | "many_to_many",
+            "destination" => ..., "destination_table" => ..., "source_attribute" => ...,
+            "destination_attribute" => ..., "through" => ... | nil}
         ]}
       ]}
+
+  `relationships` are the DECLARED Ash relationships only (issue #97 D5): an
+  undeclared `*_id` scalar stays a plain field and is never guessed into an edge.
 
   Deterministic: tables sorted by `table_name`, fields sorted by `column_name`
   (via `Samen.Catalog.fields/1`). THE source of truth `mix samen.catalog.dump`
@@ -121,6 +128,18 @@ defmodule Samen.AI.Catalog do
             "logical_name" => f.logical_name,
             "type" => f.type,
             "pii" => MapSet.member?(pii_columns, f.column_name)
+          }
+        end),
+      "relationships" =>
+        Enum.map(Samen.Catalog.relationships(resource), fn r ->
+          %{
+            "name" => r.name,
+            "type" => r.type,
+            "destination" => r.destination,
+            "destination_table" => r.destination_table,
+            "source_attribute" => r.source_attribute,
+            "destination_attribute" => r.destination_attribute,
+            "through" => r.through
           }
         end)
     }

@@ -268,6 +268,34 @@ defmodule SamenCore.CatalogTest do
       end)
     end
 
+    # Issue #97 D1 — the dict records the schema's EDGES as well as its columns: every
+    # DECLARED Ash relationship, so the ERD (`Samen.DataMap`) and an agent read the same
+    # graph from the same artifact.
+    test "every table entry carries its declared relationships (issue #97 D1)" do
+      dict =
+        Mix.Tasks.Samen.Catalog.Dump.build_dict([
+          SamenCore.Support.Crm.Company,
+          SamenCore.Support.Crm.Contact
+        ])
+
+      by_resource = Map.new(dict["tables"], &{&1["resource"], &1})
+
+      assert by_resource["SamenCore.Support.Crm.Contact"]["relationships"] == [
+               %{
+                 "name" => "company",
+                 "type" => "belongs_to",
+                 "destination" => "SamenCore.Support.Crm.Company",
+                 "destination_table" => "cpy_company",
+                 "source_attribute" => "company_id",
+                 "destination_attribute" => "id",
+                 "through" => nil
+               }
+             ]
+
+      # ANTI-VACUITY: a resource that declares none records an empty list, not a guess.
+      assert by_resource["SamenCore.Support.Crm.Company"]["relationships"] == []
+    end
+
     test "the `pii` flag keys on the vault DECLARATION for BOTH composite and scalar PII" do
       # Patient declares composite PII (full_name/emails/phones → pat_ prefix, NO
       # pii_ prefix) AND scalar PII (dob/mrn → pii_pat_ prefix). Both must be
