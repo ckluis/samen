@@ -1,0 +1,21 @@
+# SABOTAGE: the local-path guard stops matching /Users/<name>/, so a maintainer's macOS home path can be 
+#   committed again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: LOCALPATHS no tracked file names a path on someone's machine
+diff --git a/scripts/no_local_paths.py b/scripts/no_local_paths.py
+index fd8bd02a..64a4e34d 100644
+--- a/scripts/no_local_paths.py
++++ b/scripts/no_local_paths.py
+@@ -15,8 +15,7 @@ import sys
+ 
+ ROOT = os.environ.get("SAMEN_LOCAL_PATHS_REPO") or os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+ PATTERN = re.compile(
+-    r"/Users/[A-Za-z0-9_-]+/"
+-    r"|/home/[a-z][a-z0-9_-]*/"
++    r"/home/[a-z][a-z0-9_-]*/"
+     r"|~/(?:Desktop|Downloads|Documents)/"
+     r"|/private/(?:tmp|var)/"
+     r"|/tmp/claude-"
