@@ -4,10 +4,15 @@
 # repo :username → RAISE), never a laptop role that would ship `REVOKE ... FROM clank` into a
 # fresh prod deploy (whose first release_command then aborts). This sabotage restores the "clank"
 # literal, so the vertical migration once again names the laptop role. The named O4 fold red path
-# (the vertical migration must NOT contain "clank" and must derive its role) MUST flip.
-# APP: driftwood
+# (no app's migration may name the laptop role) MUST flip.
+# Proven from samen_core's repo-wide source scan, NOT from driftwood's suite: driftwood's
+# test_helper RUNS its migrations, and on a database with no "clank" role (every CI runner) the
+# sabotaged REVOKE aborts the suite before any test can fail by name — the harness then refuses
+# the patch ("no test-failure headers"), which broke every nightly from 2026-10-13. It only ever
+# "passed" on the maintainer's laptop, where the role exists. Same shape as sabotage 530.
+# APP: samen_core
 # TEST_FILES: test/aud_role_derivation_test.exs
-# MUST_FAIL: derives its REVOKE role and never ships the literal 'clank'
+# MUST_FAIL: no app's migrations hardcode the maintainer's laptop role (repo-wide)
 diff --git a/driftwood/priv/repo/migrations/20260705020000_aud_event.exs b/driftwood/priv/repo/migrations/20260705020000_aud_event.exs
 index a8ffe38..4c42d99 100644
 --- a/driftwood/priv/repo/migrations/20260705020000_aud_event.exs
