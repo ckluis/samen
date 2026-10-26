@@ -63,7 +63,7 @@ defmodule Samen.UI.DataMap do
         id={@id}
         class="dmap-svg"
         viewBox={"0 0 #{@g.width} #{@g.height}"}
-        style={"min-width:#{min(@g.width, 760)}px;max-width:#{@g.width}px"}
+        style={"--dmap-w:#{@g.width}px;min-width:#{min(@g.width, 760)}px;max-width:#{@g.width}px"}
         role="img"
         aria-label={"Entity relationship diagram: #{length(@g.nodes)} tables, #{length(@g.edges)} relationships"}
         font-family="Inter, -apple-system, sans-serif"

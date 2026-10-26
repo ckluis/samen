@@ -1080,6 +1080,9 @@ td.right { text-align: right; }
 .dmap-ref table td { padding: 5px 14px; font-size: 12px; }
 .dmap-ref td.t { font-family: var(--mono); font-size: 10.5px; color: var(--faint); text-align: right; }
 .dmap-ref tr.pii td { color: var(--violet); background: #FBF9FE; }
+.dmap-layer-h { flex-wrap: wrap; }
 @media (max-width: 720px) {
   .dmap-grid, .dmap-ref { grid-template-columns: 1fr; }
+  /* On a phone the ERD stays at 1:1 (legible) and scrolls sideways instead of shrinking. */
+  .dmap-svg { width: var(--dmap-w); max-width: none !important; }
 }
