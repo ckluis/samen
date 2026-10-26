@@ -25,7 +25,7 @@ restructure (2026-02), so it is young and moving fast.
 ## Why this evaluation is short
 
 Samen has already run exactly this evaluation, in depth, five days before this scan:
-`/Users/clank/Desktop/projects/samen/_orch/jido-eval-report.md` (dated 2026-08-13, verified
+`_orch/jido-eval-report.md` (dated 2026-08-13, verified
 against hex.pm/GitHub at that time). Verdict: **DON'T ADOPT**, ratified in ADR-037's
 ecosystem posture. A freshness check for this scan (GitHub releases, 2026-08-19) confirms
 the latest release is still 2.3.3 (2026-08-10) — nothing has shipped since that eval that
@@ -90,6 +90,6 @@ Nothing as a dependency. Two idea-level items only:
 
 ## Sources
 
-- `/Users/clank/Desktop/projects/samen/_orch/jido-eval-report.md` (samen's full evaluation, 2026-08-13)
-- `/Users/clank/Desktop/projects/samen-oss-scan/samen-digest.md` (§5 ADR-037 posture, §6 ADR-047 agent loop)
+- `_orch/jido-eval-report.md` (samen's full evaluation, 2026-08-13)
+- https://github.com/ckluis/samen/blob/19630407710d3c98722ab51a7df721894fabab93/docs/research/oss-scan/samen-digest.md (§5 ADR-037 posture, §6 ADR-047 agent loop)
 - github.com/agentjido/jido releases page (fetched 2026-08-19; latest 2.3.3, 2026-08-10)

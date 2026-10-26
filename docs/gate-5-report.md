@@ -180,7 +180,7 @@ stated stricter posture.
 
 ## Doc-parity audit
 
-The full CLAIM → EVIDENCE table is at **`/Users/clank/Desktop/projects/samen/docs/claim-evidence.md`**.
+The full CLAIM → EVIDENCE table is at **https://github.com/ckluis/samen/blob/55294e1c75e66048b824833d2cfbcaa5c0bcda69/docs/claim-evidence.md**.
 It maps **every** load-bearing claim in §runs (R1–R8), §control (C1–C7), §data (D1–D6),
 §external-surface (E1–E4), §honest-edges (H1–H6), and the Driftwood freight table (DW1–DW3)
 to a passing Driftwood test, a game-day artifact, a substrate-inherited proof, or a named

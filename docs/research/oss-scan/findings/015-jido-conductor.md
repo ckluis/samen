@@ -16,7 +16,7 @@ Maturity is prototype-grade: 4 stars, 26 commits, no packaged releases, a single
 
 ## What samen could adopt
 
-Little to nothing directly — samen has already litigated the core question this project sits on: Jido itself was formally evaluated and **rejected** (`/Users/clank/Desktop/projects/samen/_orch/jido-eval-report.md`), and ADR-047 shipped a first-party durable agent loop with zero new dependencies, EG2 governed egress, and E3 approvals gating all side effects. A desktop front-end for the rejected framework inherits that rejection.
+Little to nothing directly — samen has already litigated the core question this project sits on: Jido itself was formally evaluated and **rejected** (`_orch/jido-eval-report.md`), and ADR-047 shipped a first-party durable agent loop with zero new dependencies, EG2 governed egress, and E3 approvals gating all side effects. A desktop front-end for the rejected framework inherits that rejection.
 
 Marginal idea-level (not code-level, given the license gap) takeaways:
 

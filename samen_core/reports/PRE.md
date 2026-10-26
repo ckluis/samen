@@ -44,7 +44,7 @@ Files changed:
 
 ### Anti-tautology probe
 
-**Setup:** created a scratch directory at `/Users/clank/Desktop/projects/samen/_probe_prea`
+**Setup:** created a scratch directory at `_probe_prea`
 (outside `/tmp` root; self-cleaned after probe).
 
 **Probe:** wrote a stray file `/tmp/stray_bogus_N.ex` containing `:xyz_stale_column`

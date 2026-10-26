@@ -632,8 +632,8 @@ All six ruled by the operator on **2026-09-05** (E-09). Every row below is **RAT
   threaded unchanged into `seal_db_tiers/11` as a new argument, with `Kms.shred/1` left in its
   current position relative to the `Ecto.Multi` (`samen_core/lib/samen/erasure.ex:251`;
   `Ecto.Multi` begins at `samen_core/lib/samen/erasure.ex:280`). Full derivation:
-  `/Users/clank/Desktop/projects/samen-uxd-continuation-2/_orch/nodes/Z9/work/o3-spike.md` (run
-  state, outside this repo). Two residuals the spike surfaces for C4, neither settled by this
+  the Z9 spike notes `o3-spike.md` (run
+  state, never published). Two residuals the spike surfaces for C4, neither settled by this
   answer: the AWS KMS adapter's `pseudonym/2` is still a stub
   (`samen_core/lib/samen/kms/aws_kms_dynamo.ex:144-145`), and the fail-closed policy for a
   pre-step-1 pseudonym read that fails for a reason other than `:absent` is unspecified — C4

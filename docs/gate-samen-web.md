@@ -13,7 +13,7 @@ Date: 2026-07-08 · Reviewer: framework gate (world-class rigor)
 
 ## (1) FRAMEWORK-LEVEL — PASS
 
-- **The lib exists and is real.** `/Users/clank/Desktop/projects/samen/samen_web`
+- **The lib exists and is real.** https://github.com/ckluis/samen/tree/6fea9fe1ac3ace066ac5bb2c91c7f3e6fc125e1b/samen_web
   carries `Samen.UI` (`lib/samen/ui.ex`), the CRM/Billing/Support/Operator LiveViews
   (`lib/samen/web/{crm,billing,support,operator}/*.ex`), their reads
   (`lib/samen/web/{crm,billing,support}/reads.ex`), the parameterization seam

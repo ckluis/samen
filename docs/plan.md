@@ -1,7 +1,7 @@
 # Samen — Implementation Plan (v1)
 
 **Date:** 2026-07-04
-**Source of truth:** `~/Downloads/samen-foundry.html` (canonical combined doc, 2026-06-23). `samen-concept.html` (Zig-era) and `samen-foundry-thesis.html` are superseded and used only for scope-level object lists already restated in the canonical doc.
+**Source of truth:** https://github.com/ckluis/samen/blob/main/docs/archive/samen-foundry.html (canonical combined doc, 2026-06-23). `samen-concept.html` (Zig-era) and `samen-foundry-thesis.html` are superseded and used only for scope-level object lists already restated in the canonical doc.
 **Status of the project:** greenfield. The doc describes what must be built; **no code exists**. Every mechanism below is "to be implemented," not "exists." Where the doc itself marks something as posture-under-construction (the DP query budget) or a carve-out (trace-sink pseudonyms, `non_pii!`), the plan preserves that honesty rather than promising more.
 **Execution model:** later sessions drive this plan via the Workflow tool. Every phase has a workflow spec (fan-out shape, subagent roster, verify stages, gate). A machine-readable task graph is at the end.
 
@@ -226,7 +226,7 @@ Standing pattern per non-trivial component: **opus designs (spec + acceptance) �
 
 ## 7 · Phased plan
 
-Conventions: every task row = `id | objective | inputs | deliverable | acceptance (testable) | verification | model | effort | deps | worktree?`. All phases assume the repo at `/Users/clank/Desktop/projects/samen` (Open Decision OD-1). "Gate" tasks use the find→verify→gate pattern from §6.4.
+Conventions: every task row = `id | objective | inputs | deliverable | acceptance (testable) | verification | model | effort | deps | worktree?`. All phases assume the repo at https://github.com/ckluis/samen (Open Decision OD-1). "Gate" tasks use the find→verify→gate pattern from §6.4.
 
 ---
 
@@ -390,9 +390,9 @@ export const meta = {
   ],
 }
 
-const REPO = '/Users/clank/Desktop/projects/samen'
-const DOC = '/Users/clank/Downloads/samen-foundry.html'
-const PLAN = '/Users/clank/Downloads/samen-implementation-plan.md'
+const REPO = 'https://github.com/ckluis/samen'
+const DOC = 'https://github.com/ckluis/samen/blob/main/docs/archive/samen-foundry.html'
+const PLAN = 'https://github.com/ckluis/samen/blob/cceb192461dc231c11d14b2c65b982cb30b08399/docs/plan.md'
 
 const SPIKE_SCHEMA = {
   type: 'object',
@@ -608,7 +608,7 @@ phases:
 
 | id | decision | recommended default | why / when it must be locked |
 |---|---|---|---|
-| OD-1 | Repo location & shape | `/Users/clank/Desktop/projects/samen`; single repo, `samen_core` as a path-dep library + `demo/` + `spikes/` + later `apps/driftwood`; NOT an umbrella | matches working dir; extraction to a hex-style lib can happen at P6. Lock at S0.1. |
+| OD-1 | Repo location & shape | https://github.com/ckluis/samen; single repo, `samen_core` as a path-dep library + `demo/` + `spikes/` + later `apps/driftwood`; NOT an umbrella | matches working dir; extraction to a hex-style lib can happen at P6. Lock at S0.1. |
 | OD-2 | Reference vertical | **Driftwood (freight)** | exercises bounded-context + billing reshape + vaulted PII without HIPAA scope; PawChart too easy, Lumen drags compliance. Lock before T5.1. **The one I most want a human to confirm.** |
 | OD-3 | KMS / key-store architecture | per-subject DEKs wrapped by a small set of KMS master keys; wrapped DEKs in a dedicated external store with backups/PITR disabled (DynamoDB PITR-off first choice; HashiCorp Vault transit the alternative); destruction = delete + attestation = store query | per-subject AWS CMKs cost ~$1/mo each — non-viable. This is S0.8/ADR-001's job; the default is the hypothesis it tests. |
 | OD-4 | Encryption library | evaluate AshCloak; expect custom `Cloak.Vault`-per-subject wrapper (AshCloak assumes app-level keys) | resolved by S0.5 → ADR-003. |

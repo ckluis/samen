@@ -28,7 +28,7 @@ No masking regression. No blocking issues.
 
 ---
 
-## (1) DOC — /Users/clank/Desktop/projects/experimentalArchitectures/samen.html
+## (1) DOC — the samen concept page (`experimentalArchitectures/samen.html`, never published)
 
 **House style — MATCHES, with its own identity.** Same `:root` token system, same
 Fraunces + Inter + JetBrains Mono stack, same `.fade` rise animation, same nav

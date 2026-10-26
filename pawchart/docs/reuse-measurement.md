@@ -1,7 +1,7 @@
 # PawChart — Reuse Measurement (T6.2)
 
 **Date:** 2026-07-07
-**App:** `/Users/clank/Desktop/projects/samen/pawchart/` — the second-vertical thin slice, the plan's reuse-measurement probe (plan row T6.2).
+**App:** https://github.com/ckluis/samen/tree/55294e1c75e66048b824833d2cfbcaa5c0bcda69/pawchart — the second-vertical thin slice, the plan's reuse-measurement probe (plan row T6.2).
 **Thesis under test:** *"Build the 20%, inherit the 80%."*
 **Vision-doc framing:** PawChart is the doc's declared **EASY ADDITIVE case** — "Billing: kept as plain subscriptions. Tier-2: a VaccineLot object clinics define themselves. Ticketing & CMS untouched" — the deliberate contrast with Driftwood, which *reshaped* the money model under a bounded-context anti-corruption layer.
 

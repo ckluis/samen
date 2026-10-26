@@ -1,6 +1,6 @@
 # Samen — Capability Digest
 
-Source repo: `/Users/clank/Desktop/projects/samen` (branch `saas-readiness-phase-1`; public at github.com/ckluis/samen, MIT). Snapshot date: 2026-08-18.
+Source repo: https://github.com/ckluis/samen (branch `saas-readiness-phase-1`; public at github.com/ckluis/samen, MIT). Snapshot date: 2026-08-18.
 
 ## 1. What Samen is
 

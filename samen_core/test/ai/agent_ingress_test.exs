@@ -485,7 +485,7 @@ defmodule Samen.AI.AgentIngressTest do
     end
     test "RED against pre-A11: a packed-label-opener flood renders well under the pre-fix cost" do
       # The exact "packed-labels-4096-htmlopen" bait from V14 attempt-3's verdict
-      # (~/Desktop/projects/samen-uxd-remediation/_orch/verify/T14-verdict.json,
+      # (the UXD remediation's T14 verifier verdict, unpublished run notes;
       # `strongest_attack` / `iii_independent_performance_table`): "api_key=" + 4096 bytes of
       # "<!--" repeated + " ", tiled to 64KB — measured on THIS machine, via this exact
       # `ToolResult.render/2` call, at 140.37ms BEFORE this item's fix

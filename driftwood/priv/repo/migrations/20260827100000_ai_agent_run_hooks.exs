@@ -1,6 +1,6 @@
 defmodule Driftwood.Repo.Migrations.AiAgentRunHooks do
   @moduledoc """
-  UXD-08/UXD-09 (`/Users/clank/Desktop/projects/samen-oss-burndown/_orch/verify/T21-verdict.json`)
+  UXD-08/UXD-09 (the burn-down's T21 verifier verdict; unpublished run notes)
   — the driftwood mount of one additive column on the already-catalogued `ai_agent_run`
   table (the samen_core-owned `Samen.AI.Agent.Run` resource rides this host's repo).
   Replicates `samen_core/priv/test_repo/migrations/20260827100000_ai_agent_run_hooks.exs`

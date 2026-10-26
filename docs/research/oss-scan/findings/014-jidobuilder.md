@@ -14,7 +14,7 @@ JidoBuilder is a visual management console for building, configuring, deploying,
 
 ## Why relevance is low for samen
 
-1. **Samen already evaluated and rejected Jido itself** (`/Users/clank/Desktop/projects/samen/_orch/jido-eval-report.md`, 2026-08-13, verdict DON'T ADOPT; reaffirmed by ADR-037/ADR-047). Samen's agent loop is first-party, zero-new-deps, built on Reactor/AshStateMachine/Oban with the EG2 governed-egress class. A console *for Jido agents* manages an abstraction samen deliberately does not use.
+1. **Samen already evaluated and rejected Jido itself** (`_orch/jido-eval-report.md`, 2026-08-13, verdict DON'T ADOPT; reaffirmed by ADR-037/ADR-047). Samen's agent loop is first-party, zero-new-deps, built on Reactor/AshStateMachine/Oban with the EG2 governed-egress class. A console *for Jido agents* manages an abstraction samen deliberately does not use.
 2. **License is disqualifying for code reuse.** PolyForm-Noncommercial forbids the commercial use samen exists for (MIT SaaS foundry). Even pattern-lifting must stay at the idea level, never vendored code.
 3. **Architecture contradicts samen invariants.** SQLite persistence, single-node, LLM clients invoked without any masking chokepoint concept, no PII governance, no approval gating on agent side effects — the exact failure modes samen's AI plane (ADR-043/047: token-blind MaskedPayload minting, AI-writes-do-not-exist, E3 approvals) is built to make structurally impossible.
 4. **No adoption signal.** Zero stars/forks despite 571 commits; single-author; 23 open PRs against itself.
@@ -36,4 +36,4 @@ Nothing as code. Two idea-level notes, both already substantially covered:
 
 ## Evaluation notes
 
-Single-pass evaluation (low-relevance calibration): README/repo fetched 2026-08-19; cross-checked against `/Users/clank/Desktop/projects/samen/_orch/jido-eval-report.md` and the samen digest.
+Single-pass evaluation (low-relevance calibration): README/repo fetched 2026-08-19; cross-checked against `_orch/jido-eval-report.md` and the samen digest.

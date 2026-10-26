@@ -5,7 +5,7 @@
   (verifier evasion, egress leak, shred-vs-restore, doc drift) + a Gate-0 fix-task re-verification.
 - **Inputs:** all `samen_core/reports/*` (T1.1–T1.9, audit-fixes, vault-stack-fixes, vault-stack-reaudit),
   `docs/plan.md` §7 Phase 1, `docs/gate-0-report.md`, the vision doc §runs CI-gate block
-  (`~/Downloads/samen-foundry.html` lines 693–771), and direct inspection + execution of the code.
+  (https://github.com/ckluis/samen/blob/main/docs/archive/samen-foundry.html lines 693–771), and direct inspection + execution of the code.
 - **Gate rule applied (plan §6.4):** a refuted report claim or a false red-path is an automatic no-go.
   `green_with_caveats` is a **go only if** each caveat is a named in-phase fix task or an explicit,
   plan-sanctioned Phase-2 deferral.

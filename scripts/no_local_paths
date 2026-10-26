@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# scripts/no_local_paths — no tracked file names a path on someone's machine (a home directory, a
+# Desktop/Downloads folder, a macOS temp dir, an agent scratchpad). On GitHub a file is named by its
+# GitHub URL; a local path means nothing to a reader there and leaks a laptop's layout.
+# `exec` on the first command line (like scripts/docs_check): bash never reads this file again.
+exec python3 -I "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/no_local_paths.py" "$@"

@@ -12,8 +12,8 @@ public API and webhooks"), and **honest edges** sections is mapped to ONE of:
 - **🟡 RESIDUE** — an explicitly-named honest residue / operator-TODO (not faked), OR
 - **🔴 FINDING** — a claim with NO evidence and NO honest-residue label (a Gate-5 finding).
 
-Source doc: `/Users/clank/Desktop/projects/samen/docs/samen-foundry.txt` (line refs in
-parens). Driftwood app: `/Users/clank/Desktop/projects/samen/driftwood/`.
+Source doc: https://github.com/ckluis/samen/blob/eb79c4c669020b59ea99caa45ac8093bc8dd4e55/docs/samen-foundry.txt (line refs in
+parens). Driftwood app: https://github.com/ckluis/samen/tree/986cfd2949875371d97731b8d6051463cca3ee85/driftwood.
 
 Legend for verdicts: a claim is **MET** if a ✅/🎯 lands it on the *running Driftwood
 app*; **MET (substrate)** if only ♻️; **CAVEAT** if 🟡; **GAP** if 🔴.

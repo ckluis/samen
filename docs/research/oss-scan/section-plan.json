@@ -1,7 +1,7 @@
 {
   "report_title": "samen OSS Scan: Backlog Adoption Report",
   "reader": "Product leader selecting samen backlog items (Elixir/Ash SaaS foundry)",
-  "source_dir": "/Users/clank/Desktop/projects/samen-oss-scan/findings/",
+  "source_dir": "https://github.com/ckluis/samen/tree/19630407710d3c98722ab51a7df721894fabab93/docs/research/oss-scan/findings",
   "total_files": 127,
   "design_notes": [
     "Every one of the 127 findings files is assigned to exactly one section's `files` array.",
