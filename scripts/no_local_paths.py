@@ -45,6 +45,8 @@ def main():
             continue
         if b"\0" in data[:8192]:
             continue  # binary
+        if rel.startswith("scripts/sabotages/") and b"b/scripts/no_local_paths.py" in data:
+            continue  # a sabotage of this checker quotes its patterns in the diff context
         for n, line in enumerate(data.decode("utf-8", "replace").splitlines(), 1):
             m = PATTERN.search(line)
             if m:
