@@ -1,0 +1,27 @@
+# SABOTAGE: the data map guesses edges from *_id field names instead of drawing only declared 
+#   relationships, so the documentation would claim links the code never declares (issue #97 D5)
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/data_map_test.exs
+# MUST_FAIL: DECLARED ONLY: belongs_to is an edge
+diff --git a/samen_core/lib/samen/data_map.ex b/samen_core/lib/samen/data_map.ex
+index 37c3aa48..622aeafb 100644
+--- a/samen_core/lib/samen/data_map.ex
++++ b/samen_core/lib/samen/data_map.ex
+@@ -155,7 +155,14 @@ defmodule Samen.DataMap do
+         end
+       end
+ 
+-    declared = Enum.reject(declared, &is_nil/1)
++    declared =
++      Enum.reject(declared, &is_nil/1) ++
++        for e <- entries,
++            f <- e["fields"],
++            String.ends_with?(f["logical_name"], "_id"),
++            f["logical_name"] not in ["id", "org_id"],
++            do: %{from: e["resource"], to: e["resource"], name: f["logical_name"],
++                  type: :belongs_to, via: f["logical_name"], through: nil}
+     belongs = MapSet.new(for e <- declared, e.type == :belongs_to, do: {e.from, e.to, e.via})
+ 
+     declared

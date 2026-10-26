@@ -1,0 +1,19 @@
+# SABOTAGE: the data map stops classifying AggregateActorOnly resources as the token-blind aggregate plane, 
+#   so the map would draw cross-tenant rollups as ordinary app tables
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/data_map_test.exs
+# MUST_FAIL: LAYERS: aggregate from its policy
+diff --git a/samen_core/lib/samen/data_map.ex b/samen_core/lib/samen/data_map.ex
+index 37c3aa48..19b1f53f 100644
+--- a/samen_core/lib/samen/data_map.ex
++++ b/samen_core/lib/samen/data_map.ex
+@@ -212,7 +212,6 @@ defmodule Samen.DataMap do
+ 
+   defp layer(module, domain_mod) do
+     cond do
+-      aggregate_only?(module) -> :aggregate
+       domain_mod && String.starts_with?(inspect(domain_mod), "Samen.") -> :framework
+       true -> :app
+     end

@@ -51,6 +51,7 @@
           "type": "UtcDatetimeUsec"
         }
       ],
+      "relationships": [],
       "resource": "Samen.AI.Agent.FoldSource",
       "table_name": "ai_agent_fold_source"
     },
@@ -117,6 +118,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Samen.AI.Agent.Kill",
       "table_name": "ai_agent_kill"
     },
@@ -297,6 +299,7 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [],
       "resource": "Samen.AI.Agent.Run",
       "table_name": "ai_agent_run"
     },
@@ -405,6 +408,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Samen.AI.Agent.Turn",
       "table_name": "ai_agent_turn"
     },
@@ -453,6 +457,7 @@
           "type": "Integer"
         }
       ],
+      "relationships": [],
       "resource": "Samen.AI.Prompt",
       "table_name": "ai_prompt"
     },
@@ -525,6 +530,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Samen.AI.SupportReplyDraft",
       "table_name": "ai_support_reply_draft"
     },
@@ -585,6 +591,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Aggregate.LoadVolumeByLane",
       "table_name": "dag_load_volume_by_lane"
     },
@@ -651,6 +658,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Freight.ApiKey",
       "table_name": "dak_api_key"
     },
@@ -687,6 +695,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Chat.ChatDisclosureSetting",
       "table_name": "dcd_disclosure_setting"
     },
@@ -765,6 +774,26 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Chat.ChatParticipant",
+          "destination_attribute": "id",
+          "destination_table": "dcp_participant",
+          "name": "participant",
+          "source_attribute": "participant_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Chat.ChatThread",
+          "destination_attribute": "id",
+          "destination_table": "dct_thread",
+          "name": "thread",
+          "source_attribute": "thread_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Driftwood.Chat.ChatMessage",
       "table_name": "dcm_message"
     },
@@ -829,6 +858,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Operator.Agent",
+          "destination_attribute": "id",
+          "destination_table": "dqg_agent",
+          "name": "agent",
+          "source_attribute": "agent_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Operator.Ticket",
+          "destination_attribute": "id",
+          "destination_table": "dqk_ticket",
+          "name": "ticket",
+          "source_attribute": "ticket_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Driftwood.Operator.CsatSurveyToken",
@@ -921,6 +970,17 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Chat.ChatThread",
+          "destination_attribute": "id",
+          "destination_table": "dct_thread",
+          "name": "thread",
+          "source_attribute": "thread_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Driftwood.Chat.ChatParticipant",
       "table_name": "dcp_participant"
     },
@@ -987,6 +1047,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Support.Agent",
+          "destination_attribute": "id",
+          "destination_table": "fsa_agent",
+          "name": "agent",
+          "source_attribute": "agent_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Support.Ticket",
+          "destination_attribute": "id",
+          "destination_table": "fsk_ticket",
+          "name": "ticket",
+          "source_attribute": "ticket_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Driftwood.Support.CsatSurveyToken",
       "table_name": "dcs_csat_survey_token"
     },
@@ -1051,6 +1131,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Chat.ChatMessage",
+          "destination_attribute": "thread_id",
+          "destination_table": "dcm_message",
+          "name": "messages",
+          "source_attribute": "id",
+          "through": null,
+          "type": "has_many"
+        },
+        {
+          "destination": "Driftwood.Chat.ChatParticipant",
+          "destination_attribute": "thread_id",
+          "destination_table": "dcp_participant",
+          "name": "participants",
+          "source_attribute": "id",
+          "through": null,
+          "type": "has_many"
         }
       ],
       "resource": "Driftwood.Chat.ChatThread",
@@ -1137,6 +1237,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Automation.Escalation",
       "table_name": "des_escalation"
     },
@@ -1245,6 +1346,26 @@
           "type": "Samen.Type.Money"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Crm.Opportunity",
+          "destination_attribute": "id",
+          "destination_table": "fop_opportunity",
+          "name": "converted_opportunity",
+          "source_attribute": "converted_opportunity_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Crm.Person",
+          "destination_attribute": "id",
+          "destination_table": "fpr_person",
+          "name": "converted_person",
+          "source_attribute": "converted_person_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Driftwood.SalesOps.Lead",
       "table_name": "dls_lead"
     },
@@ -1323,6 +1444,7 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Operator.Credential",
       "table_name": "doc_credential"
     },
@@ -1375,6 +1497,17 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Operator.Credential",
+          "destination_attribute": "id",
+          "destination_table": "doc_credential",
+          "name": "credential",
+          "source_attribute": "credential_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Driftwood.Operator.UserIdentity",
@@ -1455,6 +1588,17 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Operator.Membership",
+          "destination_attribute": "id",
+          "destination_table": "dom_membership",
+          "name": "membership",
+          "source_attribute": "membership_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Driftwood.Operator.ApiKey",
       "table_name": "dok_api_key"
     },
@@ -1515,6 +1659,7 @@
           "type": "UtcDatetimeUsec"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Operator.LoginFailure",
       "table_name": "dol_login_failure"
     },
@@ -1561,6 +1706,17 @@
           "logical_name": "user_id",
           "pii": false,
           "type": "UUID"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Operator.User",
+          "destination_attribute": "id",
+          "destination_table": "dou_user",
+          "name": "user",
+          "source_attribute": "user_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Driftwood.Operator.Membership",
@@ -1641,6 +1797,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Operator.Invitation",
       "table_name": "don_invitation"
     },
@@ -1701,6 +1858,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Operator.Org",
       "table_name": "doo_org"
     },
@@ -1755,6 +1913,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Operator.Role",
       "table_name": "dor_role"
     },
@@ -1819,6 +1978,17 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Operator.Credential",
+          "destination_attribute": "id",
+          "destination_table": "doc_credential",
+          "name": "credential",
+          "source_attribute": "credential_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Driftwood.Operator.Session",
@@ -1887,6 +2057,17 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Operator.Credential",
+          "destination_attribute": "id",
+          "destination_table": "doc_credential",
+          "name": "credential",
+          "source_attribute": "credential_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Driftwood.Operator.AuthToken",
       "table_name": "dot_auth_token"
     },
@@ -1947,6 +2128,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Operator.User",
       "table_name": "dou_user"
     },
@@ -2013,6 +2195,7 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Operator.Customer",
       "table_name": "dpc_customer"
     },
@@ -2089,6 +2272,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Operator.Plan",
+          "destination_attribute": "id",
+          "destination_table": "dpp_plan",
+          "name": "plan",
+          "source_attribute": "plan_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Operator.Subscription",
+          "destination_attribute": "id",
+          "destination_table": "dps_subscription",
+          "name": "subscription",
+          "source_attribute": "subscription_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Driftwood.Operator.Entitlement",
@@ -2229,6 +2432,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Operator.Customer",
+          "destination_attribute": "id",
+          "destination_table": "dpc_customer",
+          "name": "customer",
+          "source_attribute": "customer_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Operator.Subscription",
+          "destination_attribute": "id",
+          "destination_table": "dps_subscription",
+          "name": "subscription",
+          "source_attribute": "subscription_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Driftwood.Operator.Invoice",
       "table_name": "dpi_invoice"
     },
@@ -2313,6 +2536,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Operator.Plan",
       "table_name": "dpp_plan"
     },
@@ -2383,6 +2607,17 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Operator.Plan",
+          "destination_attribute": "id",
+          "destination_table": "dpp_plan",
+          "name": "plan",
+          "source_attribute": "plan_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Driftwood.Operator.Price",
@@ -2475,6 +2710,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Operator.Customer",
+          "destination_attribute": "id",
+          "destination_table": "dpc_customer",
+          "name": "customer",
+          "source_attribute": "customer_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Operator.Plan",
+          "destination_attribute": "id",
+          "destination_table": "dpp_plan",
+          "name": "plan",
+          "source_attribute": "plan_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Driftwood.Operator.Subscription",
       "table_name": "dps_subscription"
     },
@@ -2545,6 +2800,17 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Operator.Subscription",
+          "destination_attribute": "id",
+          "destination_table": "dps_subscription",
+          "name": "subscription",
+          "source_attribute": "subscription_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Driftwood.Operator.Usage",
@@ -2649,6 +2915,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Operator.SubscriptionEvent",
       "table_name": "dpv_subscription_event"
     },
@@ -2709,6 +2976,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Operator.UsageEvent",
       "table_name": "dpx_usage_event"
     },
@@ -2805,6 +3073,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Operator.Customer",
+          "destination_attribute": "id",
+          "destination_table": "dpc_customer",
+          "name": "customer",
+          "source_attribute": "customer_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Operator.Invoice",
+          "destination_attribute": "id",
+          "destination_table": "dpi_invoice",
+          "name": "invoice",
+          "source_attribute": "invoice_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Driftwood.Operator.Payment",
       "table_name": "dpy_payment"
     },
@@ -2863,6 +3151,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Operator.Message",
+          "destination_attribute": "conversation_id",
+          "destination_table": "dqm_message",
+          "name": "messages",
+          "source_attribute": "id",
+          "through": null,
+          "type": "has_many"
+        },
+        {
+          "destination": "Driftwood.Operator.Ticket",
+          "destination_attribute": "id",
+          "destination_table": "dqk_ticket",
+          "name": "ticket",
+          "source_attribute": "ticket_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Driftwood.Operator.Conversation",
@@ -2949,6 +3257,7 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Operator.Agent",
       "table_name": "dqg_agent"
     },
@@ -3045,6 +3354,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Operator.Conversation",
+          "destination_attribute": "ticket_id",
+          "destination_table": "dqc_conversation",
+          "name": "conversations",
+          "source_attribute": "id",
+          "through": null,
+          "type": "has_many"
+        },
+        {
+          "destination": "Driftwood.Operator.Sla",
+          "destination_attribute": "id",
+          "destination_table": "dql_sla",
+          "name": "sla",
+          "source_attribute": "sla_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Driftwood.Operator.Ticket",
       "table_name": "dqk_ticket"
     },
@@ -3117,6 +3446,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Operator.Sla",
       "table_name": "dql_sla"
     },
@@ -3201,6 +3531,26 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Operator.Agent",
+          "destination_attribute": "id",
+          "destination_table": "dqg_agent",
+          "name": "agent",
+          "source_attribute": "agent_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Operator.Conversation",
+          "destination_attribute": "id",
+          "destination_table": "dqc_conversation",
+          "name": "conversation",
+          "source_attribute": "conversation_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Driftwood.Operator.Message",
       "table_name": "dqm_message"
     },
@@ -3273,6 +3623,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Operator.Macro",
       "table_name": "dqn_macro"
     },
@@ -3337,6 +3688,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Operator.Agent",
+          "destination_attribute": "id",
+          "destination_table": "dqg_agent",
+          "name": "agent",
+          "source_attribute": "agent_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Operator.Ticket",
+          "destination_attribute": "id",
+          "destination_table": "dqk_ticket",
+          "name": "ticket",
+          "source_attribute": "ticket_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Driftwood.Operator.Csat",
@@ -3411,6 +3782,7 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Automation.Reminder",
       "table_name": "drm_reminder"
     },
@@ -3519,6 +3891,7 @@
           "type": "UUID"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Automation.Run",
       "table_name": "dru_run"
     },
@@ -3621,6 +3994,17 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Crm.Company",
+          "destination_attribute": "id",
+          "destination_table": "fcm_company",
+          "name": "carrier",
+          "source_attribute": "carrier_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Driftwood.Freight.Driver",
       "table_name": "drv_driver"
     },
@@ -3673,6 +4057,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Freight.Driver",
+          "destination_attribute": "id",
+          "destination_table": "drv_driver",
+          "name": "driver",
+          "source_attribute": "driver_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Crm.Opportunity",
+          "destination_attribute": "id",
+          "destination_table": "fop_opportunity",
+          "name": "load",
+          "source_attribute": "load_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Driftwood.Freight.DispatchEvent",
@@ -3729,6 +4133,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Aggregate.MrrByTier",
       "table_name": "dtq_mrr_by_tier"
     },
@@ -3813,6 +4218,7 @@
           "type": "String"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.SalesOps.Vendor",
       "table_name": "dvs_vendor"
     },
@@ -3921,6 +4327,7 @@
           "type": "String"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Automation.Workflow",
       "table_name": "dwf_workflow"
     },
@@ -3975,6 +4382,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Work.Project",
       "table_name": "dwp_project"
     },
@@ -4089,6 +4497,35 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Work.Task",
+          "destination_attribute": "id",
+          "destination_table": "dwt_task",
+          "name": "parent",
+          "source_attribute": "parent_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Work.Project",
+          "destination_attribute": "id",
+          "destination_table": "dwp_project",
+          "name": "project",
+          "source_attribute": "project_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Work.Task",
+          "destination_attribute": "parent_id",
+          "destination_table": "dwt_task",
+          "name": "subtasks",
+          "source_attribute": "id",
+          "through": null,
+          "type": "has_many"
+        }
+      ],
       "resource": "Driftwood.Work.Task",
       "table_name": "dwt_task"
     },
@@ -4155,6 +4592,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Analytics.ProductEvent",
       "table_name": "fae_product_event"
     },
@@ -4233,6 +4671,35 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Crm.Company",
+          "destination_attribute": "id",
+          "destination_table": "fcm_company",
+          "name": "company",
+          "source_attribute": "company_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Crm.Opportunity",
+          "destination_attribute": "id",
+          "destination_table": "fop_opportunity",
+          "name": "opportunity",
+          "source_attribute": "opportunity_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Crm.Person",
+          "destination_attribute": "id",
+          "destination_table": "fpr_person",
+          "name": "person",
+          "source_attribute": "person_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Driftwood.Crm.Attachment",
       "table_name": "fat_attachment"
     },
@@ -4299,6 +4766,7 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Billing.Customer",
       "table_name": "fbc_customer"
     },
@@ -4375,6 +4843,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Billing.Plan",
+          "destination_attribute": "id",
+          "destination_table": "fbp_plan",
+          "name": "plan",
+          "source_attribute": "plan_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Billing.Subscription",
+          "destination_attribute": "id",
+          "destination_table": "fbs_subscription",
+          "name": "subscription",
+          "source_attribute": "subscription_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Driftwood.Billing.Entitlement",
@@ -4515,6 +5003,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Billing.Customer",
+          "destination_attribute": "id",
+          "destination_table": "fbc_customer",
+          "name": "customer",
+          "source_attribute": "customer_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Billing.Subscription",
+          "destination_attribute": "id",
+          "destination_table": "fbs_subscription",
+          "name": "subscription",
+          "source_attribute": "subscription_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Driftwood.Billing.Invoice",
       "table_name": "fbi_invoice"
     },
@@ -4599,6 +5107,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Billing.Plan",
       "table_name": "fbp_plan"
     },
@@ -4669,6 +5178,17 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Billing.Plan",
+          "destination_attribute": "id",
+          "destination_table": "fbp_plan",
+          "name": "plan",
+          "source_attribute": "plan_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Driftwood.Billing.Price",
@@ -4761,6 +5281,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Billing.Customer",
+          "destination_attribute": "id",
+          "destination_table": "fbc_customer",
+          "name": "customer",
+          "source_attribute": "customer_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Billing.Plan",
+          "destination_attribute": "id",
+          "destination_table": "fbp_plan",
+          "name": "plan",
+          "source_attribute": "plan_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Driftwood.Billing.Subscription",
       "table_name": "fbs_subscription"
     },
@@ -4831,6 +5371,17 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Billing.Subscription",
+          "destination_attribute": "id",
+          "destination_table": "fbs_subscription",
+          "name": "subscription",
+          "source_attribute": "subscription_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Driftwood.Billing.Usage",
@@ -4935,6 +5486,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Billing.SubscriptionEvent",
       "table_name": "fbv_subscription_event"
     },
@@ -4995,6 +5547,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Billing.UsageEvent",
       "table_name": "fbx_usage_event"
     },
@@ -5089,6 +5642,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Billing.Customer",
+          "destination_attribute": "id",
+          "destination_table": "fbc_customer",
+          "name": "customer",
+          "source_attribute": "customer_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Billing.Invoice",
+          "destination_attribute": "id",
+          "destination_table": "fbi_invoice",
+          "name": "invoice",
+          "source_attribute": "invoice_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Driftwood.Billing.Payment",
@@ -5193,6 +5766,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Calendar.Event",
       "table_name": "fce_event"
     },
@@ -5271,6 +5845,7 @@
           "type": "String"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Crm.Company",
       "table_name": "fcm_company"
     },
@@ -5349,6 +5924,7 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Docs.Doc",
       "table_name": "fdd_doc"
     },
@@ -5421,6 +5997,7 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Docs.Note",
       "table_name": "fdn_note"
     },
@@ -5505,6 +6082,7 @@
           "type": "Map"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Primitives.FeatureFlag",
       "table_name": "fff_feature_flag"
     },
@@ -5589,6 +6167,7 @@
           "type": "UUID"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Primitives.File",
       "table_name": "ffl_file"
     },
@@ -5637,6 +6216,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Locations.Location",
       "table_name": "fll_location"
     },
@@ -5709,6 +6289,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Marketing.Campaign",
       "table_name": "fmc_campaign"
     },
@@ -5767,6 +6348,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Marketing.Send",
+          "destination_attribute": "id",
+          "destination_table": "fmn_send",
+          "name": "send",
+          "source_attribute": "send_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Marketing.Subscriber",
+          "destination_attribute": "id",
+          "destination_table": "fms_subscriber",
+          "name": "subscriber",
+          "source_attribute": "subscriber_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Driftwood.Marketing.EmailEvent",
@@ -5835,6 +6436,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Marketing.Segment",
       "table_name": "fmg_segment"
     },
@@ -5919,6 +6521,35 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Marketing.Campaign",
+          "destination_attribute": "id",
+          "destination_table": "fmc_campaign",
+          "name": "campaign",
+          "source_attribute": "campaign_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Marketing.Subscriber",
+          "destination_attribute": "id",
+          "destination_table": "fms_subscriber",
+          "name": "subscriber",
+          "source_attribute": "subscriber_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Marketing.Template",
+          "destination_attribute": "id",
+          "destination_table": "fmt_template",
+          "name": "template",
+          "source_attribute": "template_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Driftwood.Marketing.Send",
       "table_name": "fmn_send"
     },
@@ -5977,6 +6608,17 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Marketing.Subscriber",
+          "destination_attribute": "id",
+          "destination_table": "fms_subscriber",
+          "name": "subscriber",
+          "source_attribute": "subscriber_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Driftwood.Marketing.Suppression",
@@ -6045,6 +6687,7 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Marketing.Subscriber",
       "table_name": "fms_subscriber"
     },
@@ -6129,6 +6772,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Marketing.Template",
       "table_name": "fmt_template"
     },
@@ -6195,6 +6839,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Marketing.ConsentEvent",
       "table_name": "fmv_consent_event"
     },
@@ -6273,6 +6918,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Primitives.NotificationPreference",
       "table_name": "fnp_notification_preference"
     },
@@ -6351,6 +6997,7 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Primitives.Notification",
       "table_name": "fnt_notification"
     },
@@ -6441,6 +7088,26 @@
           "type": "Samen.Type.Money"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Crm.Company",
+          "destination_attribute": "id",
+          "destination_table": "fcm_company",
+          "name": "company",
+          "source_attribute": "company_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Crm.Pipeline",
+          "destination_attribute": "id",
+          "destination_table": "fpp_pipeline",
+          "name": "pipeline",
+          "source_attribute": "pipeline_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Driftwood.Crm.Opportunity",
       "table_name": "fop_opportunity"
     },
@@ -6507,6 +7174,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Crm.Pipeline",
       "table_name": "fpp_pipeline"
     },
@@ -6583,6 +7251,17 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Crm.Company",
+          "destination_attribute": "id",
+          "destination_table": "fcm_company",
+          "name": "company",
+          "source_attribute": "company_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Driftwood.Crm.Person",
@@ -6669,6 +7348,7 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Support.Agent",
       "table_name": "fsa_agent"
     },
@@ -6727,6 +7407,26 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Support.Message",
+          "destination_attribute": "conversation_id",
+          "destination_table": "fsm_message",
+          "name": "messages",
+          "source_attribute": "id",
+          "through": null,
+          "type": "has_many"
+        },
+        {
+          "destination": "Driftwood.Support.Ticket",
+          "destination_attribute": "id",
+          "destination_table": "fsk_ticket",
+          "name": "ticket",
+          "source_attribute": "ticket_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Driftwood.Support.Conversation",
@@ -6795,6 +7495,7 @@
           "type": "String"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Primitives.SearchIndex",
       "table_name": "fsh_search_index"
     },
@@ -6891,6 +7592,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Support.Conversation",
+          "destination_attribute": "ticket_id",
+          "destination_table": "fsc_conversation",
+          "name": "conversations",
+          "source_attribute": "id",
+          "through": null,
+          "type": "has_many"
+        },
+        {
+          "destination": "Driftwood.Support.Sla",
+          "destination_attribute": "id",
+          "destination_table": "fsl_sla",
+          "name": "sla",
+          "source_attribute": "sla_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Driftwood.Support.Ticket",
       "table_name": "fsk_ticket"
     },
@@ -6963,6 +7684,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Support.Sla",
       "table_name": "fsl_sla"
     },
@@ -7047,6 +7769,26 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Support.Agent",
+          "destination_attribute": "id",
+          "destination_table": "fsa_agent",
+          "name": "agent",
+          "source_attribute": "agent_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Support.Conversation",
+          "destination_attribute": "id",
+          "destination_table": "fsc_conversation",
+          "name": "conversation",
+          "source_attribute": "conversation_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Driftwood.Support.Message",
       "table_name": "fsm_message"
     },
@@ -7119,6 +7861,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Support.Macro",
       "table_name": "fsn_macro"
     },
@@ -7185,6 +7928,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Support.Agent",
+          "destination_attribute": "id",
+          "destination_table": "fsa_agent",
+          "name": "agent",
+          "source_attribute": "agent_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Support.Ticket",
+          "destination_attribute": "id",
+          "destination_table": "fsk_ticket",
+          "name": "ticket",
+          "source_attribute": "ticket_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Driftwood.Support.Csat",
       "table_name": "fss_csat"
     },
@@ -7233,6 +7996,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Tags.Tag",
       "table_name": "ftt_tag"
     },
@@ -7317,6 +8081,7 @@
           "type": "Samen.Type.VaultField"
         }
       ],
+      "relationships": [],
       "resource": "Driftwood.Primitives.Webhook",
       "table_name": "fwh_webhook"
     },
@@ -7377,6 +8142,7 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [],
       "resource": "Samen.Replay.Frame",
       "table_name": "replay_frame"
     },
@@ -7473,6 +8239,7 @@
           "type": "String"
         }
       ],
+      "relationships": [],
       "resource": "Samen.Replay.Session",
       "table_name": "replay_session"
     },
@@ -7563,6 +8330,26 @@
           "type": "UtcDatetime"
         }
       ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Crm.Company",
+          "destination_attribute": "id",
+          "destination_table": "fcm_company",
+          "name": "carrier",
+          "source_attribute": "carrier_id",
+          "through": null,
+          "type": "belongs_to"
+        },
+        {
+          "destination": "Driftwood.Crm.Opportunity",
+          "destination_attribute": "id",
+          "destination_table": "fop_opportunity",
+          "name": "load",
+          "source_attribute": "load_id",
+          "through": null,
+          "type": "belongs_to"
+        }
+      ],
       "resource": "Driftwood.Freight.Settlement",
       "table_name": "stl_settlement"
     },
@@ -7609,6 +8396,17 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        }
+      ],
+      "relationships": [
+        {
+          "destination": "Driftwood.Tags.Tag",
+          "destination_attribute": "id",
+          "destination_table": "ftt_tag",
+          "name": "tag",
+          "source_attribute": "tag_id",
+          "through": null,
+          "type": "belongs_to"
         }
       ],
       "resource": "Driftwood.Tags.Tagging",

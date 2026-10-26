@@ -1015,3 +1015,74 @@ td.right { text-align: right; }
 .geo-map-data { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
 .geo-map-data th, .geo-map-data td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line, #E7E7EC); }
 .geo-map-data td { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------------------------
+ * Data map (issue #97) — the catalog-generated ERD + architecture overview.
+ * Server-computed SVG (Samen.UI.DataMap); no JS. Layer hues: app = brand,
+ * framework = violet, aggregate = green (token-blind).
+ * ------------------------------------------------------------------------- */
+.dmap-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line2); border-radius: 12px; background:
+  radial-gradient(circle, #E4E4EA 1px, transparent 1.2px) 0 0 / 18px 18px, var(--panel); }
+.dmap-svg { width: 100%; height: auto; display: block; }
+.dmap-box { fill: var(--card); stroke: var(--line2); stroke-width: 1; filter: drop-shadow(0 1px 1.5px rgba(25,26,32,.06)); }
+.dmap-head { stroke: none; }
+.dmap-head-app { fill: var(--brand-wash); }
+.dmap-head-framework { fill: var(--violet-wash); }
+.dmap-head-aggregate { fill: var(--green-wash); }
+.dmap-name { font-size: 13.5px; font-weight: 650; fill: var(--ink); letter-spacing: -0.01em; }
+.dmap-table { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); }
+.dmap-chip { fill: var(--card); stroke: var(--line2); }
+.dmap-chip-t { font-size: 9.5px; font-weight: 550; fill: var(--muted); }
+.dmap-fname { font-size: 11.5px; fill: #3A3B45; }
+.dmap-ftype { font-family: var(--mono); font-size: 10px; fill: var(--faint); }
+.dmap-field-fk .dmap-ftype { fill: var(--brand); font-weight: 600; }
+.dmap-field-pii .dmap-fname { fill: var(--violet); font-weight: 600; }
+.dmap-field-pii .dmap-ftype { fill: var(--violet); }
+.dmap-pii-row { fill: var(--violet-wash); }
+.dmap-more { font-size: 11px; fill: var(--faint); font-style: italic; }
+.dmap-rule { stroke: var(--line); }
+.dmap-foot { font-family: var(--mono); font-size: 9.5px; fill: var(--faint); }
+.dmap-global { fill: var(--amber); font-weight: 600; }
+.dmap-stub-box { fill: var(--card); fill-opacity: .7; stroke: var(--faint); stroke-dasharray: 4 3; }
+.dmap-n-stub a:hover .dmap-stub-box { stroke: var(--brand); }
+.dmap-stub-name { font-size: 12.5px; font-weight: 600; fill: var(--ink); }
+.dmap-stub-dom { font-size: 11px; fill: var(--brand); }
+.dmap-edge path { fill: none; stroke: #A9AAB8; stroke-width: 1.3; }
+.dmap-edge-many_to_many path { stroke-dasharray: 5 4; }
+.dmap-mark { fill: none; stroke: #8E8FA0; stroke-width: 1.3; }
+.dmap-edge-label { font-size: 10px; font-weight: 550; fill: var(--muted); paint-order: stroke; stroke: var(--panel); stroke-width: 4px; stroke-linejoin: round; }
+
+.dmap-layer { margin: 0 0 26px; }
+.dmap-layer-h { display: flex; align-items: baseline; gap: 10px; margin: 0 0 10px; }
+.dmap-layer-h h2 { font-size: 13px; font-weight: 650; letter-spacing: -0.01em; }
+.dmap-layer-h p { font-size: 12.5px; color: var(--muted); }
+.dmap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; align-items: start; }
+.dmap-card { display: block; border: 1px solid var(--line2); border-radius: 12px; background: var(--card); padding: 14px 16px 13px;
+  color: inherit; text-decoration: none; border-top: 3px solid var(--brand); min-width: 0; }
+.dmap-card:hover { border-color: var(--brand); }
+.dmap-card.dmap-l-framework { border-top-color: var(--violet); }
+.dmap-card.dmap-l-aggregate { border-top-color: var(--green); }
+.dmap-card h3 { font-size: 14px; font-weight: 650; display: flex; justify-content: space-between; gap: 8px; }
+.dmap-card h3 span { font-size: 11.5px; font-weight: 500; color: var(--faint); }
+.dmap-card .mod { font-family: var(--mono); font-size: 10.5px; color: var(--faint); margin: 2px 0 9px; }
+.dmap-tables { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 9px; }
+.dmap-tables span { font-size: 11px; padding: 2px 7px; border-radius: 6px; background: #F3F3F6; color: #4A4B56; }
+.dmap-tables span.pii { background: var(--violet-wash); color: var(--violet); font-weight: 550; }
+.dmap-meta { font-size: 11.5px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.dmap-meta b { color: var(--ink); font-weight: 600; }
+.dmap-links { font-size: 11.5px; color: var(--brand); margin-top: 6px; }
+.dmap-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 11.5px; color: var(--muted); margin: 0 0 12px; }
+.dmap-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.dmap-ref { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin-top: 18px; }
+.dmap-ref details { border: 1px solid var(--line2); border-radius: 10px; background: var(--card); }
+.dmap-ref summary { cursor: pointer; padding: 10px 14px; font-size: 13px; font-weight: 600; }
+.dmap-ref summary span { font-family: var(--mono); font-size: 10.5px; color: var(--faint); font-weight: 400; margin-left: 6px; }
+.dmap-ref table td { padding: 5px 14px; font-size: 12px; }
+.dmap-ref td.t { font-family: var(--mono); font-size: 10.5px; color: var(--faint); text-align: right; }
+.dmap-ref tr.pii td { color: var(--violet); background: #FBF9FE; }
+.dmap-layer-h { flex-wrap: wrap; }
+@media (max-width: 720px) {
+  .dmap-grid, .dmap-ref { grid-template-columns: 1fr; }
+  /* On a phone the ERD stays at 1:1 (legible) and scrolls sideways instead of shrinking. */
+  .dmap-svg { width: var(--dmap-w); max-width: none !important; }
+}

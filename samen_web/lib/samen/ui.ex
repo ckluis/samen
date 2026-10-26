@@ -158,6 +158,9 @@ defmodule Samen.UI do
   defdelegate line_chart(assigns), to: Samen.UI.Chart
   defdelegate pie_chart(assigns), to: Samen.UI.Chart
 
+  # Data map (issue #97 — the catalog-generated ERD)
+  defdelegate erd(assigns), to: Samen.UI.DataMap
+
   # Dashboard (the tile-grid that composes metric + chart tiles, G8)
   defdelegate dashboard(assigns), to: Samen.UI.Dashboard
 
