@@ -268,7 +268,7 @@ defmodule Samen.UI.DataMap do
 
   # Longest-path rank, parents above children; a cycle is cut where it is first re-entered.
   defp rank_all(ids, parents) do
-    Enum.reduce(ids, %{}, fn id, memo -> elem(rank(id, parents, memo, MapSet.new()), 1) end)
+    Enum.reduce(ids, %{}, fn id, memo -> elem(rank(id, parents, memo, %{}), 1) end)
   end
 
   defp rank(id, parents, memo, visiting) do
@@ -276,11 +276,11 @@ defmodule Samen.UI.DataMap do
       Map.has_key?(memo, id) ->
         {memo[id], memo}
 
-      MapSet.member?(visiting, id) ->
+      Map.has_key?(visiting, id) ->
         {0, memo}
 
       true ->
-        visiting = MapSet.put(visiting, id)
+        visiting = Map.put(visiting, id, true)
 
         {r, memo} =
           Enum.reduce(parents[id] || [], {0, memo}, fn p, {acc, m} ->
