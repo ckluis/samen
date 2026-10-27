@@ -3,8 +3,8 @@
 The Samen foundry kernel: **self-qualifying storage**, the **machine catalog**,
 and the **PII vault** as one governed substrate for Ash/AshPostgres resources.
 
-Elixir 1.20.4 / OTP 29.1.1 (the floor, pinned in `.tool-versions`), Ash 3.34.4,
-AshPostgres 2.14.2, Spark 2.7.6 (versions pinned in `mix.lock`; the S0.1 spike baseline
+Elixir 1.20.4 / OTP 29.1.1 (the floor, pinned in `.tool-versions`), Ash 3.37.2,
+AshPostgres 2.15.2, Spark 2.7.6 (versions pinned in `mix.lock`; the S0.1 spike baseline
 is `spikes/s00_smoke/VERSIONS.md`).
 
 ## What T1.1 ships (`Samen.Resource`)
