@@ -116,6 +116,10 @@ defmodule SamenCore.Support.SignalsFixture.Taxpayer do
     defaults [:read]
 
     update :record do
+      # Samen.Vault.Change and Samen.Pii.WriteGuard (attached for the pii block) are not
+      # atomic, and Ash warns, which fails a --warnings-as-errors compile.
+      require_atomic? false
+
       emit SamenCore.Support.SignalsFixture.TaxSignals, :tax_id_recorded, fields: [record_id: :id]
     end
   end
