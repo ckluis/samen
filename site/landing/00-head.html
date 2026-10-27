@@ -482,6 +482,31 @@ footer .credit{max-width:44em}
   html:not(.js) .ui-fit .ui-app{grid-template-columns:minmax(0,1fr)}
   html:not(.js) .ui-fit .rpx{grid-template-columns:minmax(0,1fr) 330px}
 }
+/* 12 data map — the REAL Samen.UI.DataMap SVG (scripts/landing/data_map_export.exs), its
+   samen_ui.css rules ported onto the .ui light tokens */
+.ui .dmap-scroll{border:1px solid var(--u-ln2);border-radius:12px;background:radial-gradient(circle,#E4E4EA 1px,transparent 1.2px) 0 0/18px 18px,var(--u-pn);overflow:hidden}
+.ui .dmap-svg{width:100%;height:auto;display:block;min-width:0!important;max-width:none!important}
+.ui .dmap-box{fill:var(--u-cd);stroke:var(--u-ln2);stroke-width:1}
+.ui .dmap-head{stroke:none}.ui .dmap-head-app{fill:var(--u-brw)}.ui .dmap-head-framework{fill:var(--u-viw)}.ui .dmap-head-aggregate{fill:var(--u-grw)}
+.ui .dmap-name{font:650 13.5px var(--sans);fill:var(--u-ink);letter-spacing:-.01em}
+.ui .dmap-table{font:10.5px var(--mono);fill:var(--u-mut)}
+.ui .dmap-chip{fill:var(--u-cd);stroke:var(--u-ln2)}.ui .dmap-chip-t{font:550 9.5px var(--sans);fill:var(--u-mut)}
+.ui .dmap-fname{font:11.5px var(--sans);fill:#3A3B45}
+.ui .dmap-ftype{font:10px var(--mono);fill:var(--u-fnt)}
+.ui .dmap-field-fk .dmap-ftype{fill:var(--u-br);font-weight:600}
+.ui .dmap-field-pii .dmap-fname{fill:var(--u-vi);font-weight:600}.ui .dmap-field-pii .dmap-ftype{fill:var(--u-vi)}
+.ui .dmap-pii-row{fill:var(--u-viw)}
+.ui .dmap-more{font:italic 11px var(--sans);fill:var(--u-fnt)}
+.ui .dmap-rule{stroke:var(--u-ln)}
+.ui .dmap-foot{font:9.5px var(--mono);fill:var(--u-fnt)}.ui .dmap-global{fill:var(--u-am);font-weight:600}
+.ui .dmap-stub-box{fill:var(--u-cd);fill-opacity:.7;stroke:var(--u-fnt);stroke-dasharray:4 3}
+.ui .dmap-stub-name{font:600 12.5px var(--sans);fill:var(--u-ink)}.ui .dmap-stub-dom{font:11px var(--sans);fill:var(--u-br)}
+.ui .dmap-edge path{fill:none;stroke:#A9AAB8;stroke-width:1.3}.ui .dmap-edge-many_to_many path{stroke-dasharray:5 4}
+.ui .dmap-mark{fill:none;stroke:#8E8FA0;stroke-width:1.3}
+.ui .dmap-edge-label{font:550 10px var(--sans);fill:var(--u-mut);paint-order:stroke;stroke:var(--u-pn);stroke-width:4px;stroke-linejoin:round}
+.ui .dm-leg{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:11.5px;color:var(--u-mut);margin:0 0 12px}
+.ui .dm-leg i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.ui .dm-leg u{text-decoration:none;color:var(--u-br)}
 </style>
 </head>
 <body>

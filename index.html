@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Samen — the B2B SaaS foundry where every guarantee can fail</title>
-<meta name="description" content="Samen is an Elixir · Ash · Phoenix foundry for launching many B2B SaaS products from one substrate: PII masked by default, second-party reveal, crypto-shred erasure, an AI agent that can only propose, and 604 committed sabotages proving every test can fail.">
+<meta name="description" content="Samen is an Elixir · Ash · Phoenix foundry for launching many B2B SaaS products from one substrate: PII masked by default, second-party reveal, crypto-shred erasure, an AI agent that can only propose, and 606 committed sabotages proving every test can fail.">
 <meta property="og:title" content="Samen — the hard 80% of a B2B SaaS, solved once and proven on every commit">
 <meta property="og:description" content="One command emits a running product. PII is masked by default. Every guarantee ships with a sabotage that proves its test can fail.">
 <meta name="theme-color" content="#0A0B11">
@@ -482,6 +482,31 @@ footer .credit{max-width:44em}
   html:not(.js) .ui-fit .ui-app{grid-template-columns:minmax(0,1fr)}
   html:not(.js) .ui-fit .rpx{grid-template-columns:minmax(0,1fr) 330px}
 }
+/* 12 data map — the REAL Samen.UI.DataMap SVG (scripts/landing/data_map_export.exs), its
+   samen_ui.css rules ported onto the .ui light tokens */
+.ui .dmap-scroll{border:1px solid var(--u-ln2);border-radius:12px;background:radial-gradient(circle,#E4E4EA 1px,transparent 1.2px) 0 0/18px 18px,var(--u-pn);overflow:hidden}
+.ui .dmap-svg{width:100%;height:auto;display:block;min-width:0!important;max-width:none!important}
+.ui .dmap-box{fill:var(--u-cd);stroke:var(--u-ln2);stroke-width:1}
+.ui .dmap-head{stroke:none}.ui .dmap-head-app{fill:var(--u-brw)}.ui .dmap-head-framework{fill:var(--u-viw)}.ui .dmap-head-aggregate{fill:var(--u-grw)}
+.ui .dmap-name{font:650 13.5px var(--sans);fill:var(--u-ink);letter-spacing:-.01em}
+.ui .dmap-table{font:10.5px var(--mono);fill:var(--u-mut)}
+.ui .dmap-chip{fill:var(--u-cd);stroke:var(--u-ln2)}.ui .dmap-chip-t{font:550 9.5px var(--sans);fill:var(--u-mut)}
+.ui .dmap-fname{font:11.5px var(--sans);fill:#3A3B45}
+.ui .dmap-ftype{font:10px var(--mono);fill:var(--u-fnt)}
+.ui .dmap-field-fk .dmap-ftype{fill:var(--u-br);font-weight:600}
+.ui .dmap-field-pii .dmap-fname{fill:var(--u-vi);font-weight:600}.ui .dmap-field-pii .dmap-ftype{fill:var(--u-vi)}
+.ui .dmap-pii-row{fill:var(--u-viw)}
+.ui .dmap-more{font:italic 11px var(--sans);fill:var(--u-fnt)}
+.ui .dmap-rule{stroke:var(--u-ln)}
+.ui .dmap-foot{font:9.5px var(--mono);fill:var(--u-fnt)}.ui .dmap-global{fill:var(--u-am);font-weight:600}
+.ui .dmap-stub-box{fill:var(--u-cd);fill-opacity:.7;stroke:var(--u-fnt);stroke-dasharray:4 3}
+.ui .dmap-stub-name{font:600 12.5px var(--sans);fill:var(--u-ink)}.ui .dmap-stub-dom{font:11px var(--sans);fill:var(--u-br)}
+.ui .dmap-edge path{fill:none;stroke:#A9AAB8;stroke-width:1.3}.ui .dmap-edge-many_to_many path{stroke-dasharray:5 4}
+.ui .dmap-mark{fill:none;stroke:#8E8FA0;stroke-width:1.3}
+.ui .dmap-edge-label{font:550 10px var(--sans);fill:var(--u-mut);paint-order:stroke;stroke:var(--u-pn);stroke-width:4px;stroke-linejoin:round}
+.ui .dm-leg{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:11.5px;color:var(--u-mut);margin:0 0 12px}
+.ui .dm-leg i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.ui .dm-leg u{text-decoration:none;color:var(--u-br)}
 </style>
 </head>
 <body>
@@ -499,7 +524,8 @@ footer .credit{max-width:44em}
       <li class="x"><a href="#agent"><span>08</span>Agent</a></li>
       <li class="x"><a href="#surfaces"><span>09</span>Surfaces</a></li>
       <li class="x"><a href="#cockpit"><span>11</span>Cockpit</a></li>
-      <li><a href="#proof"><span>12</span>Proof</a></li>
+      <li class="x"><a href="#datamap"><span>12</span>Data map</a></li>
+      <li><a href="#proof"><span>13</span>Proof</a></li>
     </ol>
     <a class="gh" href="https://github.com/ckluis/samen">GitHub ↗</a>
   </div>
@@ -559,7 +585,7 @@ footer .credit{max-width:44em}
       </div>
     </div>
     <div class="stats rv">
-      <div class="stat"><div class="v"><em>604</em></div><div class="k">committed sabotages, each proving a named test <b>can fail</b></div><div class="s">ls scripts/sabotages/*.patch</div></div>
+      <div class="stat"><div class="v"><em>606</em></div><div class="k">committed sabotages, each proving a named test <b>can fail</b></div><div class="s">ls scripts/sabotages/*.patch</div></div>
       <div class="stat"><div class="v">25</div><div class="k">verifiers in the gate, from <code>no_plaintext_pii</code> to <code>no_pan_columns</code></div><div class="s">mix samen.verify.*</div></div>
       <div class="stat"><div class="v">18</div><div class="k">scope blueprints a product mounts as-is: CRM, billing, support, work, automation…</div><div class="s">samen_core/lib/samen/scopes</div></div>
       <div class="stat"><div class="v">0</div><div class="k">hand-edits for a generated app to pass its own 19-step gate</div><div class="s">gen_app_flagship_probe.exs</div></div>
@@ -577,8 +603,8 @@ footer .credit{max-width:44em}
     <div class="acts">
       <div class="actc rv" style="--ac:var(--indigo)"><div class="an">Act I · Start</div><h3>One command, a running product</h3><p>Not a scaffold. A thing you can boot, with its own gate.</p><ul><li><a href="#generate"><span>01</span>Generate</a></li></ul></div>
       <div class="actc rv" style="--ac:var(--amber)"><div class="an">Act II · Trust, by construction</div><h3>Customer data that defaults to safe</h3><p>Seven features that only work because the planes share one core.</p><ul><li><a href="#vault"><span>02</span>The vault</a></li><li><a href="#reveal"><span>03</span>Reveal</a></li><li><a href="#planes"><span>04</span>Two planes</a></li><li><a href="#erasure"><span>05</span>Erasure</a></li><li><a href="#replay"><span>06</span>Replay</a></li><li><a href="#chat"><span>07</span>Cross-plane chat</a></li><li><a href="#agent"><span>08</span>The AI agent</a></li></ul></div>
-      <div class="actc rv" style="--ac:var(--green)"><div class="an">Act III · The rest of the 80%</div><h3>Everything else a B2B SaaS needs</h3><p>Surfaces, vendors and a cockpit for running many products.</p><ul><li><a href="#surfaces"><span>09</span>Working surfaces</a></li><li><a href="#vendors"><span>10</span>Billing &amp; email</a></li><li><a href="#cockpit"><span>11</span>Portfolio cockpit</a></li></ul></div>
-      <div class="actc rv" style="--ac:var(--rose)"><div class="an">Act IV · Proof</div><h3>A test that cannot fail is a bug</h3><p>Sabotages, mutants, and CI an agent can afford to run.</p><ul><li><a href="#proof"><span>12</span>Sabotage &amp; mutation</a></li><li><a href="#ci"><span>13</span>CI for agents</a></li><li><a href="#not"><span>—</span>What this is not</a></li></ul></div>
+      <div class="actc rv" style="--ac:var(--green)"><div class="an">Act III · The rest of the 80%</div><h3>Everything else a B2B SaaS needs</h3><p>Surfaces, vendors, a cockpit for running many products, and a map of the data model.</p><ul><li><a href="#surfaces"><span>09</span>Working surfaces</a></li><li><a href="#vendors"><span>10</span>Billing &amp; email</a></li><li><a href="#cockpit"><span>11</span>Portfolio cockpit</a></li><li><a href="#datamap"><span>12</span>Data map</a></li></ul></div>
+      <div class="actc rv" style="--ac:var(--rose)"><div class="an">Act IV · Proof</div><h3>A test that cannot fail is a bug</h3><p>Sabotages, mutants, and CI an agent can afford to run.</p><ul><li><a href="#proof"><span>13</span>Sabotage &amp; mutation</a></li><li><a href="#ci"><span>14</span>CI for agents</a></li><li><a href="#not"><span>—</span>What this is not</a></li></ul></div>
     </div>
   </div>
 </section>
@@ -1535,20 +1561,370 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
 </aside>
 <a class="scrim" href="#cockpit" tabindex="-1" aria-hidden="true"></a>
 
+<!-- ======================= 12 DATA MAP ======================= -->
+<section class="band flip" id="datamap" style="--accent:var(--violet)">
+  <div class="glow" style="left:-380px;top:-180px" aria-hidden="true"></div>
+  <div class="wrap vh">
+    <div class="copy rv">
+      <div class="eyebrow"><span class="n">12</span>Data map</div>
+      <h2 class="w">The architecture diagram <em>that can't go stale.</em></h2>
+      <p class="punch">Every SaaS has an ERD on a wiki somewhere, drawn once and wrong by the next migration. Samen draws it inside the admin from the <b>same catalog CI checks</b>: every scope domain, every declared relationship, every vaulted field, grouped by the plane it lives on.</p>
+      <div class="big"><span class="n" data-count="66">66</span><span class="l">relationships in driftwood across <b>99 tables and 39 vaulted fields</b>, every one declared in code, none guessed from a name. <span class="tag built">built</span></span></div>
+      <ul class="ticks">
+        <li><b>The separation, read from the code</b>: the app's scopes, the framework substrate, and the token-blind aggregate plane, found by its policy</li>
+        <li><b>Metadata only</b>: no row is read, so there's nothing to mask; a PII field shows as a name with a lock</li>
+        <li><b>Server-rendered SVG</b>: renders with JS off; every vertical inherits it with zero code</li>
+      </ul>
+      <div class="more"><a class="btn o" href="#p-datamap" data-panel>Why the map is generated, and what's next <span class="ar">→</span></a></div>
+    </div>
+    <div class="stage rv" data-label="the code → the map · Samen.DataMap">
+<svg viewBox="0 0 560 420" aria-hidden="true">
+  <g font-size="12">
+    <text x="0" y="14" class="t-mono t-faint" font-size="10" letter-spacing="1.2">THE CODE</text>
+    <text x="300" y="14" class="t-mono t-faint" font-size="10" letter-spacing="1.2">THE MAP</text>
+    <g transform="translate(0,28)"><rect width="232" height="70" rx="12" class="f-raised" stroke="#2A2E42"/>
+      <text x="14" y="22" class="t-mono t-faint" font-size="10">freight/driver.ex</text>
+      <text x="14" y="42" class="t-mono t-indigo" font-size="11.5">belongs_to :carrier,</text>
+      <text x="30" y="58" class="t-mono t-ink" font-size="11.5">Crm.Company</text></g>
+    <g transform="translate(0,110)"><rect width="232" height="70" rx="12" class="f-raised" stroke="#2A2E42"/>
+      <text x="14" y="22" class="t-mono t-faint" font-size="10">crm/person.ex</text>
+      <text x="14" y="42" class="t-mono t-violet" font-size="11.5">pii do</text>
+      <text x="30" y="58" class="t-mono t-ink" font-size="11.5">attribute :full_name</text></g>
+    <g transform="translate(0,192)"><rect width="232" height="70" rx="12" class="f-raised" stroke="#2A2E42"/>
+      <text x="14" y="22" class="t-mono t-faint" font-size="10">aggregate/mrr_by_tier.ex</text>
+      <text x="14" y="42" class="t-mono t-green" font-size="11.5">authorize_if</text>
+      <text x="30" y="58" class="t-mono t-ink" font-size="11.5">AggregateActorOnly</text></g>
+    <path d="M240 63 C 270 63, 270 70, 296 70" fill="none" stroke="#8C98F8" stroke-width="1.4" class="flow"/>
+    <path d="M240 145 C 270 145, 270 92, 296 92" fill="none" stroke="#B79CF5" stroke-width="1.4" class="flow"/>
+    <path d="M240 227 C 270 227, 270 236, 296 236" fill="none" stroke="#4CC294" stroke-width="1.4" class="flow"/>
+    <g transform="translate(300,28)"><rect width="260" height="128" rx="14" class="f-raised2" stroke="#2A2E42"/>
+      <text x="14" y="22" class="t-mono t-indigo" font-size="10" letter-spacing="1.2">YOUR APP</text>
+      <g transform="translate(14,34)"><rect width="100" height="40" rx="9" class="f-raised" stroke="#8C98F8"/><text x="12" y="25" class="t-ink" font-weight="600">Freight</text></g>
+      <g transform="translate(146,34)"><rect width="100" height="40" rx="9" class="f-raised" stroke="#8C98F8"/><text x="12" y="25" class="t-ink" font-weight="600">CRM</text><text x="62" y="25" class="t-violet" font-size="11">🔒 3</text></g>
+      <path d="M114 54 L146 54" stroke="#8C98F8" stroke-width="1.4"/><path d="M140 49 L146 54 L140 59" fill="none" stroke="#8C98F8" stroke-width="1.4"/>
+      <text x="130" y="96" text-anchor="middle" class="t-mute" font-size="11">carrier · declared, so drawn</text>
+      <text x="130" y="114" text-anchor="middle" class="t-faint t-mono" font-size="10">owner_id · not declared, not drawn</text></g>
+    <g transform="translate(300,166)"><rect width="260" height="50" rx="14" class="f-raised2" stroke="#2A2E42"/>
+      <text x="14" y="22" class="t-mono t-violet" font-size="10" letter-spacing="1.2">FRAMEWORK SUBSTRATE</text>
+      <text x="14" y="40" class="t-mute" font-size="11">agent runs · replay frames</text></g>
+    <g transform="translate(300,226)"><rect width="260" height="50" rx="14" class="f-raised2" stroke="#2A2E42"/>
+      <text x="14" y="22" class="t-mono t-green" font-size="10" letter-spacing="1.2">TOKEN-BLIND AGGREGATE</text>
+      <text x="14" y="40" class="t-mute" font-size="11">MrrByTier · no PII column exists</text></g>
+    <g transform="translate(0,300)"><rect width="560" height="100" rx="14" class="f-raised2" stroke="#2A2E42"/>
+      <text x="16" y="28" class="t-mono t-violet" font-size="10" letter-spacing="1.2">ONE SOURCE</text>
+      <text x="16" y="50" class="t-ink" font-size="12">one function, <tspan class="t-mono" font-size="11.5">Samen.AI.Catalog.dict/1</tspan>, feeds all three:</text>
+      <text x="16" y="70" class="t-mute" font-size="12">schema.dict.json (drift-checked in CI) · this map · the agent's grounding</text>
+      <text x="16" y="90" class="t-mono t-mute" font-size="10">metadata only · no row is read for any org</text></g>
+  </g>
+</svg>
+    </div>
+  </div>
+  <div class="wrap">
+    <div class="ip rv">
+      <div class="ip-h"><span class="ip-k">In the product</span><code>/operator/data-map/crm</code><span class="ip-n">driftwood's CRM domain, as the operator sees it</span></div>
+      <p class="ip-t">Every box and every line below came from the code, not a drawing tool.</p>
+      <div class="ui-fit" style="--dw:1180px"><div class="ui-fit-in">
+<div class="ui">
+        <div class="ui-main">
+          <div class="ui-top"><span class="ui-crumb">Driftwood Ops<i>/</i>Data map<i>/</i>CRM</span><span class="ui-who"><span class="ui-av">OP</span><span><b>Operator</b><br>SaaS staff</span><span class="ui-chip o">operator plane</span></span></div>
+          <div class="ui-wrap">
+            <div class="dm-leg"><span><u>← All domains</u></span><span><i style="background:var(--u-brw);border:1px solid var(--u-ln2)"></i>Driftwood.Crm</span><span><i style="background:var(--u-viw)"></i>🔒 PII, vault-routed, masked off-plane</span><span><i style="border:1px dashed var(--u-fnt)"></i>table in another domain</span><span>crow's foot = many · bars = one</span></div>
+<div class="dmap-scroll">
+  <svg id="lp-erd" class="dmap-svg" viewBox="0 0 1152 954" style="--dmap-w:1152px;min-width:760px;max-width:1152px" role="img" aria-label="Entity relationship diagram: 9 tables, 12 relationships" font-family="Inter, -apple-system, sans-serif">
+    <defs>
+      <marker id="lp-erd-many-s" viewBox="0 0 14 14" refX="1" refY="7" markerWidth="14" markerHeight="14" orient="auto" markerUnits="userSpaceOnUse">
+        <path d="M1 1 L13 7 M1 7 L13 7 M1 13 L13 7" class="dmap-mark"></path>
+      </marker>
+      <marker id="lp-erd-many-e" viewBox="0 0 14 14" refX="13" refY="7" markerWidth="14" markerHeight="14" orient="auto" markerUnits="userSpaceOnUse">
+        <path d="M13 1 L1 7 M13 7 L1 7 M13 13 L1 7" class="dmap-mark"></path>
+      </marker>
+      <marker id="lp-erd-one-s" viewBox="0 0 14 14" refX="1" refY="7" markerWidth="14" markerHeight="14" orient="auto" markerUnits="userSpaceOnUse">
+        <path d="M3 2 L3 12 M7 2 L7 12" class="dmap-mark"></path>
+      </marker>
+      <marker id="lp-erd-one-e" viewBox="0 0 14 14" refX="13" refY="7" markerWidth="14" markerHeight="14" orient="auto" markerUnits="userSpaceOnUse">
+        <path d="M7 2 L7 12 M11 2 L11 12" class="dmap-mark"></path>
+      </marker>
+    </defs>
+    <g class="dmap-edges">
+      <g class="dmap-edge dmap-edge-belongs_to">
+        <path d="M97.6 698 L97.6 664.0 Q97.6 654.0 87.6 654.0 L24.0 654.0 Q14.0 654.0 14.0 644.0 L14.0 310.0 Q14.0 300.0 24.0 300.0 L78.3 300.0 Q88.3 300.0 88.3 290.0 L88.3 256" marker-start="url(#lp-erd-many-s)" marker-end="url(#lp-erd-one-e)"></path>
+        <text x="20.0" y="481.0" class="dmap-edge-label" text-anchor="start">company</text>
+      </g><g class="dmap-edge dmap-edge-belongs_to">
+        <path d="M190.4 698 C190.4 654.0 667.8 654.0 667.8 610" marker-start="url(#lp-erd-many-s)" marker-end="url(#lp-erd-one-e)"></path>
+        <text x="429.1" y="658.0" class="dmap-edge-label" text-anchor="middle">opportunity</text>
+      </g><g class="dmap-edge dmap-edge-belongs_to">
+        <path d="M144.0 698 C144.0 635.0 109.2 635.0 109.2 572" marker-start="url(#lp-erd-many-s)" marker-end="url(#lp-erd-one-e)"></path>
+        <text x="126.6" y="639.0" class="dmap-edge-label" text-anchor="middle">person</text>
+      </g><g class="dmap-edge dmap-edge-belongs_to">
+        <path d="M685.2 344 C685.2 300.0 199.7 300.0 199.7 256" marker-start="url(#lp-erd-many-s)" marker-end="url(#lp-erd-one-e)"></path>
+        <text x="442.4" y="304.0" class="dmap-edge-label" text-anchor="middle">company</text>
+      </g><g class="dmap-edge dmap-edge-belongs_to">
+        <path d="M754.8 344 C754.8 281.0 432.0 281.0 432.0 218" marker-start="url(#lp-erd-many-s)" marker-end="url(#lp-erd-one-e)"></path>
+        <text x="593.4" y="285.0" class="dmap-edge-label" text-anchor="middle">pipeline</text>
+      </g><g class="dmap-edge dmap-edge-belongs_to">
+        <path d="M144.0 344 C144.0 300.0 116.2 300.0 116.2 256" marker-start="url(#lp-erd-many-s)" marker-end="url(#lp-erd-one-e)"></path>
+        <text x="130.1" y="304.0" class="dmap-edge-label" text-anchor="middle">company</text>
+      </g><g class="dmap-edge dmap-edge-belongs_to">
+        <path d="M1008.0 698 C1008.0 654.0 772.2 654.0 772.2 610" marker-start="url(#lp-erd-many-s)" marker-end="url(#lp-erd-one-e)"></path>
+        <text x="890.1" y="658.0" class="dmap-edge-label" text-anchor="middle">load</text>
+      </g><g class="dmap-edge dmap-edge-belongs_to">
+        <path d="M432.0 344 C432.0 300.0 144.0 300.0 144.0 256" marker-start="url(#lp-erd-many-s)" marker-end="url(#lp-erd-one-e)"></path>
+        <text x="288.0" y="304.0" class="dmap-edge-label" text-anchor="middle">carrier</text>
+      </g><g class="dmap-edge dmap-edge-belongs_to">
+        <path d="M685.2 698 L685.2 664.0 Q685.2 654.0 675.2 654.0 L298.0 654.0 Q288.0 654.0 288.0 644.0 L288.0 310.0 Q288.0 300.0 278.0 300.0 L181.8 300.0 Q171.8 300.0 171.8 290.0 L171.8 256" marker-start="url(#lp-erd-many-s)" marker-end="url(#lp-erd-one-e)"></path>
+        <text x="294.0" y="481.0" class="dmap-edge-label" text-anchor="start">carrier</text>
+      </g><g class="dmap-edge dmap-edge-belongs_to">
+        <path d="M754.8 698 C754.8 654.0 737.4 654.0 737.4 610" marker-start="url(#lp-erd-many-s)" marker-end="url(#lp-erd-one-e)"></path>
+        <text x="746.1" y="658.0" class="dmap-edge-label" text-anchor="middle">load</text>
+      </g><g class="dmap-edge dmap-edge-belongs_to">
+        <path d="M466.8 698 C466.8 654.0 702.6 654.0 702.6 610" marker-start="url(#lp-erd-many-s)" marker-end="url(#lp-erd-one-e)"></path>
+        <text x="584.7" y="658.0" class="dmap-edge-label" text-anchor="middle">converted_opportunity</text>
+      </g><g class="dmap-edge dmap-edge-belongs_to">
+        <path d="M397.2 698 C397.2 635.0 178.8 635.0 178.8 572" marker-start="url(#lp-erd-many-s)" marker-end="url(#lp-erd-one-e)"></path>
+        <text x="288.0" y="639.0" class="dmap-edge-label" text-anchor="middle">converted_person</text>
+      </g>
+    </g>
+    <g class="dmap-node dmap-n-table" data-resource="Driftwood.Crm.Company">
+        <rect x="28" y="28" width="232" height="228" rx="10" class="dmap-box"></rect>
+        <path d="M28 74 V38 Q28 28 38 28 H250 Q260 28 260 38 V74 Z" class="dmap-head dmap-head-app"></path>
+        <text x="42" y="48" class="dmap-name">Company</text>
+        <text x="42" y="64" class="dmap-table">fcm_company</text>
+        <g class="dmap-field">
+          <text x="42" y="87" class="dmap-fname">archived_at</text>
+          <text x="248" y="87" text-anchor="end" class="dmap-ftype">UtcDatetimeUs…</text>
+        </g><g class="dmap-field">
+          <text x="42" y="106" class="dmap-fname">custom</text>
+          <text x="248" y="106" text-anchor="end" class="dmap-ftype">Map</text>
+        </g><g class="dmap-field">
+          <text x="42" y="125" class="dmap-fname">domain</text>
+          <text x="248" y="125" text-anchor="end" class="dmap-ftype">String</text>
+        </g><g class="dmap-field">
+          <text x="42" y="144" class="dmap-fname">industry</text>
+          <text x="248" y="144" text-anchor="end" class="dmap-ftype">String</text>
+        </g><g class="dmap-field">
+          <text x="42" y="163" class="dmap-fname">name</text>
+          <text x="248" y="163" text-anchor="end" class="dmap-ftype">String</text>
+        </g><g class="dmap-field">
+          <text x="42" y="182" class="dmap-fname">notes</text>
+          <text x="248" y="182" text-anchor="end" class="dmap-ftype">String</text>
+        </g><g class="dmap-field">
+          <text x="42" y="201" class="dmap-fname">size</text>
+          <text x="248" y="201" text-anchor="end" class="dmap-ftype">String</text>
+        </g><g class="dmap-field">
+          <text x="42" y="220" class="dmap-fname">website</text>
+          <text x="248" y="220" text-anchor="end" class="dmap-ftype">String</text>
+        </g>
+        <line x1="28" x2="260" y1="232" y2="232" class="dmap-rule"></line>
+        <text x="42" y="248" class="dmap-foot">
+          id · org_id · timestamps
+        </text>
+    </g><g class="dmap-node dmap-n-table" data-resource="Driftwood.Crm.Pipeline">
+        <rect x="316" y="28" width="232" height="190" rx="10" class="dmap-box"></rect>
+        <path d="M316 74 V38 Q316 28 326 28 H538 Q548 28 548 38 V74 Z" class="dmap-head dmap-head-app"></path>
+        <text x="330" y="48" class="dmap-name">Pipeline</text>
+        <text x="330" y="64" class="dmap-table">fpp_pipeline</text>
+        <g class="dmap-field">
+          <text x="330" y="87" class="dmap-fname">archived_at</text>
+          <text x="536" y="87" text-anchor="end" class="dmap-ftype">UtcDatetimeUs…</text>
+        </g><g class="dmap-field">
+          <text x="330" y="106" class="dmap-fname">enabled</text>
+          <text x="536" y="106" text-anchor="end" class="dmap-ftype">Boolean</text>
+        </g><g class="dmap-field">
+          <text x="330" y="125" class="dmap-fname">label</text>
+          <text x="536" y="125" text-anchor="end" class="dmap-ftype">String</text>
+        </g><g class="dmap-field">
+          <text x="330" y="144" class="dmap-fname">name</text>
+          <text x="536" y="144" text-anchor="end" class="dmap-ftype">String</text>
+        </g><g class="dmap-field">
+          <text x="330" y="163" class="dmap-fname">stage_order</text>
+          <text x="536" y="163" text-anchor="end" class="dmap-ftype">Integer</text>
+        </g><g class="dmap-field">
+          <text x="330" y="182" class="dmap-fname">stage_type</text>
+          <text x="536" y="182" text-anchor="end" class="dmap-ftype">Atom</text>
+        </g>
+        <line x1="316" x2="548" y1="194" y2="194" class="dmap-rule"></line>
+        <text x="330" y="210" class="dmap-foot">
+          id · org_id · timestamps
+        </text>
+    </g><g class="dmap-node dmap-n-table" data-resource="Driftwood.Crm.Person">
+        <rect x="28" y="344" width="232" height="228" rx="10" class="dmap-box"></rect>
+        <path d="M28 390 V354 Q28 344 38 344 H250 Q260 344 260 354 V390 Z" class="dmap-head dmap-head-app"></path>
+        <text x="42" y="364" class="dmap-name">Person</text>
+        <text x="42" y="380" class="dmap-table">fpr_person</text>
+        <g class="dmap-field">
+          <text x="42" y="403" class="dmap-fname">archived_at</text>
+          <text x="248" y="403" text-anchor="end" class="dmap-ftype">UtcDatetimeUs…</text>
+        </g><g class="dmap-field dmap-field-fk">
+          <text x="42" y="422" class="dmap-fname">company_id</text>
+          <text x="248" y="422" text-anchor="end" class="dmap-ftype">→ Company</text>
+        </g><g class="dmap-field">
+          <text x="42" y="441" class="dmap-fname">custom</text>
+          <text x="248" y="441" text-anchor="end" class="dmap-ftype">Map</text>
+        </g><g class="dmap-field">
+          <text x="42" y="460" class="dmap-fname">display_name</text>
+          <text x="248" y="460" text-anchor="end" class="dmap-ftype">String</text>
+        </g><g class="dmap-field dmap-field-pii">
+          <rect x="29" y="466" width="230" height="19" class="dmap-pii-row"></rect>
+          <text x="42" y="479" class="dmap-fname">🔒 emails</text>
+          <text x="248" y="479" text-anchor="end" class="dmap-ftype">VaultField</text>
+        </g><g class="dmap-field dmap-field-pii">
+          <rect x="29" y="485" width="230" height="19" class="dmap-pii-row"></rect>
+          <text x="42" y="498" class="dmap-fname">🔒 full_name</text>
+          <text x="248" y="498" text-anchor="end" class="dmap-ftype">VaultField</text>
+        </g><g class="dmap-field">
+          <text x="42" y="517" class="dmap-fname">job_title</text>
+          <text x="248" y="517" text-anchor="end" class="dmap-ftype">String</text>
+        </g><g class="dmap-field dmap-field-pii">
+          <rect x="29" y="523" width="230" height="19" class="dmap-pii-row"></rect>
+          <text x="42" y="536" class="dmap-fname">🔒 phones</text>
+          <text x="248" y="536" text-anchor="end" class="dmap-ftype">VaultField</text>
+        </g>
+        <line x1="28" x2="260" y1="548" y2="548" class="dmap-rule"></line>
+        <text x="42" y="564" class="dmap-foot">
+          id · org_id · timestamps
+        </text>
+    </g><g class="dmap-node dmap-n-stub" data-resource="Driftwood.Freight.Driver">
+        <a href="/operator/data-map/freight">
+          <rect x="316" y="344" width="232" height="42" rx="10" class="dmap-stub-box"></rect>
+          <text x="330" y="362" class="dmap-stub-name">Driver</text>
+          <text x="330" y="377" class="dmap-stub-dom">in Freight →</text>
+        </a>
+    </g><g class="dmap-node dmap-n-table" data-resource="Driftwood.Crm.Opportunity">
+        <rect x="604" y="344" width="232" height="266" rx="10" class="dmap-box"></rect>
+        <path d="M604 390 V354 Q604 344 614 344 H826 Q836 344 836 354 V390 Z" class="dmap-head dmap-head-app"></path>
+        <text x="618" y="364" class="dmap-name">Opportunity</text>
+        <text x="618" y="380" class="dmap-table">fop_opportunity</text>
+        <g class="dmap-field">
+          <text x="618" y="403" class="dmap-fname">archived_at</text>
+          <text x="824" y="403" text-anchor="end" class="dmap-ftype">UtcDatetimeUs…</text>
+        </g><g class="dmap-field">
+          <text x="618" y="422" class="dmap-fname">close_date</text>
+          <text x="824" y="422" text-anchor="end" class="dmap-ftype">Date</text>
+        </g><g class="dmap-field dmap-field-fk">
+          <text x="618" y="441" class="dmap-fname">company_id</text>
+          <text x="824" y="441" text-anchor="end" class="dmap-ftype">→ Company</text>
+        </g><g class="dmap-field">
+          <text x="618" y="460" class="dmap-fname">custom</text>
+          <text x="824" y="460" text-anchor="end" class="dmap-ftype">Map</text>
+        </g><g class="dmap-field">
+          <text x="618" y="479" class="dmap-fname">name</text>
+          <text x="824" y="479" text-anchor="end" class="dmap-ftype">String</text>
+        </g><g class="dmap-field">
+          <text x="618" y="498" class="dmap-fname">notes</text>
+          <text x="824" y="498" text-anchor="end" class="dmap-ftype">String</text>
+        </g><g class="dmap-field dmap-field-fk">
+          <text x="618" y="517" class="dmap-fname">pipeline_id</text>
+          <text x="824" y="517" text-anchor="end" class="dmap-ftype">→ Pipeline</text>
+        </g><g class="dmap-field">
+          <text x="618" y="536" class="dmap-fname">probability</text>
+          <text x="824" y="536" text-anchor="end" class="dmap-ftype">Integer</text>
+        </g><g class="dmap-field">
+          <text x="618" y="555" class="dmap-fname">status</text>
+          <text x="824" y="555" text-anchor="end" class="dmap-ftype">Atom</text>
+        </g><g class="dmap-field">
+          <text x="618" y="574" class="dmap-fname">value</text>
+          <text x="824" y="574" text-anchor="end" class="dmap-ftype">Money</text>
+        </g>
+        <line x1="604" x2="836" y1="586" y2="586" class="dmap-rule"></line>
+        <text x="618" y="602" class="dmap-foot">
+          id · org_id · timestamps
+        </text>
+    </g><g class="dmap-node dmap-n-table" data-resource="Driftwood.Crm.Attachment">
+        <rect x="28" y="698" width="232" height="228" rx="10" class="dmap-box"></rect>
+        <path d="M28 744 V708 Q28 698 38 698 H250 Q260 698 260 708 V744 Z" class="dmap-head dmap-head-app"></path>
+        <text x="42" y="718" class="dmap-name">Attachment</text>
+        <text x="42" y="734" class="dmap-table">fat_attachment</text>
+        <g class="dmap-field">
+          <text x="42" y="757" class="dmap-fname">archived_at</text>
+          <text x="248" y="757" text-anchor="end" class="dmap-ftype">UtcDatetimeUs…</text>
+        </g><g class="dmap-field dmap-field-fk">
+          <text x="42" y="776" class="dmap-fname">company_id</text>
+          <text x="248" y="776" text-anchor="end" class="dmap-ftype">→ Company</text>
+        </g><g class="dmap-field">
+          <text x="42" y="795" class="dmap-fname">content_type</text>
+          <text x="248" y="795" text-anchor="end" class="dmap-ftype">String</text>
+        </g><g class="dmap-field">
+          <text x="42" y="814" class="dmap-fname">file_name</text>
+          <text x="248" y="814" text-anchor="end" class="dmap-ftype">String</text>
+        </g><g class="dmap-field dmap-field-fk">
+          <text x="42" y="833" class="dmap-fname">opportunity_id</text>
+          <text x="248" y="833" text-anchor="end" class="dmap-ftype">→ Opportunity</text>
+        </g><g class="dmap-field dmap-field-fk">
+          <text x="42" y="852" class="dmap-fname">person_id</text>
+          <text x="248" y="852" text-anchor="end" class="dmap-ftype">→ Person</text>
+        </g><g class="dmap-field">
+          <text x="42" y="871" class="dmap-fname">size_bytes</text>
+          <text x="248" y="871" text-anchor="end" class="dmap-ftype">Integer</text>
+        </g><g class="dmap-field">
+          <text x="42" y="890" class="dmap-fname">storage_key</text>
+          <text x="248" y="890" text-anchor="end" class="dmap-ftype">String</text>
+        </g>
+        <line x1="28" x2="260" y1="902" y2="902" class="dmap-rule"></line>
+        <text x="42" y="918" class="dmap-foot">
+          id · org_id · timestamps
+        </text>
+    </g><g class="dmap-node dmap-n-stub" data-resource="Driftwood.SalesOps.Lead">
+        <a href="/operator/data-map/sales_ops">
+          <rect x="316" y="698" width="232" height="42" rx="10" class="dmap-stub-box"></rect>
+          <text x="330" y="716" class="dmap-stub-name">Lead</text>
+          <text x="330" y="731" class="dmap-stub-dom">in Sales Ops →</text>
+        </a>
+    </g><g class="dmap-node dmap-n-stub" data-resource="Driftwood.Freight.Settlement">
+        <a href="/operator/data-map/freight">
+          <rect x="604" y="698" width="232" height="42" rx="10" class="dmap-stub-box"></rect>
+          <text x="618" y="716" class="dmap-stub-name">Settlement</text>
+          <text x="618" y="731" class="dmap-stub-dom">in Freight →</text>
+        </a>
+    </g><g class="dmap-node dmap-n-stub" data-resource="Driftwood.Freight.DispatchEvent">
+        <a href="/operator/data-map/freight">
+          <rect x="892" y="698" width="232" height="42" rx="10" class="dmap-stub-box"></rect>
+          <text x="906" y="716" class="dmap-stub-name">DispatchEvent</text>
+          <text x="906" y="731" class="dmap-stub-dom">in Freight →</text>
+        </a>
+    </g>
+  </svg>
+</div>
+          </div>
+        </div>
+</div></div></div>
+<p class="ui-fit-hint">Pinch to zoom: the desktop screen, scaled to fit.</p>
+      <p class="ip-cap">Rendered by the real <code>Samen.UI.DataMap.erd/1</code> from driftwood's catalog (<code>scripts/landing/data_map_export.exs</code>), not redrawn. The dashed boxes are tables in other domains: Driver and Settlement live in Freight, Lead in Sales Ops, and each links to its own domain's diagram. Person's name, emails and phones are vault-routed, so they're tinted and locked; <b>the page never reads a value</b>.</p>
+    </div>
+  </div>
+</section>
+<aside class="panel" id="p-datamap" role="dialog" aria-labelledby="h-datamap" tabindex="-1" style="--accent:var(--violet)">
+  <div class="ph"><div class="eyebrow"><span class="n">12</span>Data map</div><a class="x" href="#datamap" data-close>Close ✕</a></div>
+  <div class="pb">
+    <h3 id="h-datamap">Documentation that is the code</h3>
+    <p>A hand-drawn diagram starts lying the day after it's drawn, and nobody notices until a new hire trusts it. Samen's map is built from the catalog that <code>mix samen.catalog.dump</code> commits and CI drift-checks, so the only way to change the picture is to change the code.</p>
+    <table>
+      <tr><th>Question</th><th>Answer</th></tr>
+      <tr><td>Where do the edges come from?</td><td>Declared Ash relationships, now recorded per table in the catalog. A bare <code>*_id</code> stays a field; a record that attaches to anything gets an "any object" chip.</td></tr>
+      <tr><td>How is it drawn?</td><td>Server-side SVG with a deterministic layout: parents above children, cross-domain tables as links, long edges routed through the gutters.</td></tr>
+      <tr><td>Who sees it?</td><td>The operator plane, behind the same operator gate as every <code>/operator</code> route.</td></tr>
+      <tr><td>Can I edit the schema from it?</td><td>Not live. When editing comes, it produces a proposal (the generator command or a draft PR) that goes through the verifiers and CI, the same propose-then-approve shape as the agent.</td></tr>
+    </table>
+    <h4>Next: a map for your customers</h4>
+    <p>The same model, aimed at a tenant admin: what the app stores about people, which fields are vaulted, how long they're kept, and what erasure removes. It's the page a security questionnaire, a DPA appendix or a records-of-processing request asks for, generated rather than written.</p>
+    <div class="src">source · <a href="https://github.com/ckluis/samen/issues/97">issue #97</a> decisions D1–D5 · Samen.DataMap · Samen.UI.DataMap · sabotages 612 (aggregate layer) and 613 (inferred edges)</div>
+  </div>
+</aside>
+<a class="scrim" href="#datamap" tabindex="-1" aria-hidden="true"></a>
+
 <!-- ======================= ACT IV ======================= -->
 <div class="actbar" style="--ac:var(--rose)"><div class="wrap"><div class="an rv">Act IV · Proof</div><h2 class="rv">Every claim above is attached to something that <em style="color:var(--rose)">can go red.</em></h2><p class="rv">A guarantee nobody has tried to break is a decoration. So samen tries, on every pull request, and keeps the attempts.</p></div></div>
 
-<!-- ======================= 12 PROOF ======================= -->
+<!-- ======================= 13 PROOF ======================= -->
 <section class="band flip" id="proof" style="--accent:var(--rose)">
   <div class="glow" style="left:-380px;top:-180px" aria-hidden="true"></div>
   <div class="wrap vh">
     <div class="copy rv">
-      <div class="eyebrow"><span class="n">12</span>Sabotage &amp; mutation</div>
+      <div class="eyebrow"><span class="n">13</span>Sabotage &amp; mutation</div>
       <h2>A test that can't fail <em>is a bug.</em></h2>
       <p class="punch">Each guarantee ships with a <b>sabotage</b>: a committed patch that breaks exactly that behaviour. The harness applies it, demands that the <b>named</b> tests fail (not just that something breaks), reverts, and checks the tree is restored byte for byte. Then a mutation gate asks the converse: what break did nobody think to sabotage?</p>
-      <div class="big"><span class="n" data-count="604">604</span><span class="l">committed sabotages, <b>replayed on every PR</b> where they touch the diff and in full every night. <span class="tag meas">counted from the tree</span></span></div>
+      <div class="big"><span class="n" data-count="606">606</span><span class="l">committed sabotages, <b>replayed on every PR</b> where they touch the diff and in full every night. <span class="tag meas">counted from the tree</span></span></div>
       <ul class="ticks">
-        <li><b>3,960 mutants</b> across 228 targets, enumerated from the AST, each run against only its owning tests</li>
+        <li><b>3,979 mutants</b> across 229 targets, enumerated from the AST, each run against only its owning tests</li>
         <li><b>A survivor fails the build</b> until a test kills it or a ledger row proves it can't matter</li>
         <li><b>25 verifiers</b> check structure the tests can't: no PII columns, catalog parity, fleet wire…</li>
       </ul>
@@ -1561,7 +1937,7 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
   </div>
 </section>
 <aside class="panel" id="p-proof" role="dialog" aria-labelledby="h-proof" tabindex="-1" style="--accent:var(--rose)">
-  <div class="ph"><div class="eyebrow"><span class="n">12</span>Proof</div><a class="x" href="#proof" data-close>Close ✕</a></div>
+  <div class="ph"><div class="eyebrow"><span class="n">13</span>Proof</div><a class="x" href="#proof" data-close>Close ✕</a></div>
   <div class="pb">
     <h3 id="h-proof">Proving the proofs</h3>
     <p>A test suite can be large and still prove nothing. The sabotage count is the number that carries weight, because each one is a demonstration that a specific test notices a specific break.</p>
@@ -1575,7 +1951,7 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
     </ol>
     <p>Agents add sabotages with <code>scripts/sabotage new</code>, which refuses one that can't flip, breaks the build instead of a test, or names its test with string interpolation the harness can't find.</p>
     <h4>The mutation gate</h4>
-    <p>Sabotages prove the guarantees someone thought to claim. The mutation gate enumerates four operator families (equality, relational, boolean operators, boolean literals) from the AST and splices each mutant at an exact line and column. A watch-list of 12 chokepoint modules (166 mutants) runs on PRs; the full corpus (3,960 mutants) runs as a soak. A compiler refusal isn't a kill; only a named test failure is.</p>
+    <p>Sabotages prove the guarantees someone thought to claim. The mutation gate enumerates four operator families (equality, relational, boolean operators, boolean literals) from the AST and splices each mutant at an exact line and column. A watch-list of 12 chokepoint modules (166 mutants) runs on PRs; the full corpus (3,979 mutants) runs as a soak. A compiler refusal isn't a kill; only a named test failure is.</p>
     <h4>The verifiers</h4>
     <p>25 <code>mix samen.verify.*</code> tasks check what tests can't express, for example: no plaintext PII in any tier, no PII or card-number columns, catalog and vault-declaration parity, same-org foreign keys, the API contract, the AI prompt masking and agent coverage, the fleet wire, the replay schema.</p>
     <div class="src">source · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-049-mutation-gate.md">ADR-049</a> mutation gate · <a href="https://github.com/ckluis/samen/blob/main/docs/ci.md">docs/ci.md</a> · scripts/sabotage.sh · scripts/mutate.sh</div>
@@ -1583,12 +1959,12 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
 </aside>
 <a class="scrim" href="#proof" tabindex="-1" aria-hidden="true"></a>
 
-<!-- ======================= 13 CI ======================= -->
+<!-- ======================= 14 CI ======================= -->
 <section class="band" id="ci" style="--accent:var(--indigo)">
   <div class="glow" style="right:-380px;top:-160px" aria-hidden="true"></div>
   <div class="wrap vh">
     <div class="copy rv">
-      <div class="eyebrow"><span class="n">13</span>CI for agents</div>
+      <div class="eyebrow"><span class="n">14</span>CI for agents</div>
       <h2>Verdicts, <em>not logs.</em></h2>
       <p class="punch">This codebase is written by AI agents, so its CI is built for them: <b>cheap, fast and mechanical</b>. <code>quick</code> during a round, <code>pr</code> before a pull request, <code>full</code> nightly. Every call fits a single tool call, ends in one verdict line, and resumes where it stopped.</p>
       <div class="big"><span class="n">0.4</span><span class="l">seconds for <code>quick</code> when nothing changed, because every step is <b>cached by the content it reads</b>. A failure is never cached. <span class="tag meas">measured</span></span></div>
@@ -1606,7 +1982,7 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
   </div>
 </section>
 <aside class="panel" id="p-ci" role="dialog" aria-labelledby="h-ci" tabindex="-1" style="--accent:var(--indigo)">
-  <div class="ph"><div class="eyebrow"><span class="n">13</span>CI for agents</div><a class="x" href="#ci" data-close>Close ✕</a></div>
+  <div class="ph"><div class="eyebrow"><span class="n">14</span>CI for agents</div><a class="x" href="#ci" data-close>Close ✕</a></div>
   <div class="pb">
     <h3 id="h-ci">Measured: a one-line kernel change</h3>
     <table>
@@ -1671,7 +2047,7 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
           <a href="https://github.com/ckluis/samen/blob/main/docs/claim-evidence.md">Claim → evidence map <span>claim-evidence.md ↗</span></a>
           <a href="https://github.com/ckluis/samen/blob/main/docs/compliance-story.md">The compliance story <span>for an auditor ↗</span></a>
           <a href="https://github.com/ckluis/samen/blob/main/docs/guides/getting-started.md">Zero to first feature <span>getting-started.md ↗</span></a>
-          <a href="https://github.com/ckluis/samen/tree/main/scripts/sabotages">How to prove a test can fail <span>604 patches ↗</span></a>
+          <a href="https://github.com/ckluis/samen/tree/main/scripts/sabotages">How to prove a test can fail <span>606 patches ↗</span></a>
           <a href="https://github.com/ckluis/samen/blob/main/docs/ci.md">CI an agent can afford <span>docs/ci.md ↗</span></a>
         </div>
       </div>
@@ -1688,7 +2064,7 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
     </div>
     <div class="credit">
       <p style="margin:0 0 10px"><b>On authorship.</b> Every commit in this repository was written by Claude under human direction and marked <code>Co-Authored-By</code>. A human operator set the direction, reviewed the work and gated it adversarially. The sabotages, verifiers and decision records exist largely because an AI-authored codebase has to be checkable by someone who didn't type it.</p>
-      <p style="margin:0">Session replay is inspired by <a href="https://github.com/elixir-vibe/phoenix_replay">phoenix_replay</a> by Danila Poyarkov (MIT). Counts on this page are generated from the tree at build time (8ab119c).</p>
+      <p style="margin:0">Session replay is inspired by <a href="https://github.com/elixir-vibe/phoenix_replay">phoenix_replay</a> by Danila Poyarkov (MIT). Counts on this page are generated from the tree at build time (bb9b5f98).</p>
     </div>
   </div>
 </footer>

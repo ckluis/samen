@@ -60,6 +60,29 @@ def scope_tiles(names):
     return "\n    ".join(out)
 
 
+def data_map():
+    """The data-map numbers, from driftwood's committed catalog (the same dict the map is
+    built from): tables, PII fields, and edges counted the way Samen.DataMap draws them
+    (declared belongs_to + many_to_many, plus a has_one/has_many no belongs_to declares)."""
+    import json
+    d = json.load(open(rel("driftwood", "schema.dict.json")))
+    tables = d["tables"]
+    pii = sum(1 for t in tables for f in t["fields"] if f["pii"])
+    belongs = {(t["resource"], r["destination"], r["source_attribute"])
+               for t in tables for r in t.get("relationships", []) if r["type"] == "belongs_to"}
+    edges = set(belongs)
+    for t in tables:
+        for r in t.get("relationships", []):
+            if r["type"] in ("has_many", "has_one"):
+                edges.add((r["destination"], t["resource"], r["destination_attribute"]))
+            elif r["type"] == "many_to_many":
+                edges.add((t["resource"], r["destination"], "m2m:" + str(r["through"])))
+    if not tables or not edges:
+        sys.exit("build: driftwood/schema.dict.json has no tables or no relationships — refusing to print a zero")
+    erd = open(os.path.join(HERE, "data-map-crm.frag.html")).read().strip()
+    return {"DM_TABLES": str(len(tables)), "DM_EDGES": str(len(edges)), "DM_PII": str(pii), "DATA_MAP_ERD": erd}
+
+
 def build_sha():
     try:
         return subprocess.check_output(["git", "-C", ROOT, "rev-parse", "--short", "HEAD"], text=True).strip()
@@ -86,6 +109,7 @@ def values():
         "MUT_WATCH_MUTANTS": claude_md_count("watchlist_mutants"),
         "MUT_CORPUS_TARGETS": claude_md_count("corpus_targets"),
         "MUT_CORPUS_MUTANTS": claude_md_count("corpus_mutants"),
+        **data_map(),
         # the commit the counts were read from; --check ignores it so a rebuild is not "stale" per commit
         "BUILD_SHA": build_sha(),
     }
@@ -116,7 +140,7 @@ def main(argv):
     with open(out, "w") as f:
         f.write(html)
     print("LANDING: wrote %s (%d KB) · %s" % (out, len(html) // 1024,
-          " · ".join("%s=%s" % (k, v) for k, v in vals.items() if k not in ("SCOPE_TILES",))))
+          " · ".join("%s=%s" % (k, v) for k, v in vals.items() if k not in ("SCOPE_TILES", "DATA_MAP_ERD"))))
     return 0
 
 
