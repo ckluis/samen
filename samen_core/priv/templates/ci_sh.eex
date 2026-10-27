@@ -61,9 +61,10 @@ echo "--- step 7/18: mix samen.verify.migrations"
 mix samen.verify.migrations
 echo "    PASSED"
 
-echo "--- step 8/18: mix samen.verify.sink_schema + replay_schema"
+echo "--- step 8/18: mix samen.verify.sink_schema + replay_schema + signals_no_pii"
 mix samen.verify.sink_schema
 mix samen.verify.replay_schema
+mix samen.verify.signals_no_pii
 echo "    PASSED"
 
 echo "--- step 9/18: mix samen.verify.metric_labels"

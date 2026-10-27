@@ -216,6 +216,28 @@ outside the reserved fields, or an unbounded keep-listed text field.
 view that wants a string kept declares the ASSIGN on its keep-list (`use Samen.Replay,
 keep_assigns: [...]`) — it never widens the schema.
 
+### Step 8 (same step) — `mix samen.verify.signals_no_pii`
+
+**Errors** (`samen_core/lib/samen/signals/no_pii.ex`):
+
+```text
+<SignalModule> :<signal> argument :<name> — type <Type> classifies :pii; a signal argument must be a bounded non-PII type ...
+<Resource> action :<action> emits <SignalModule> :<signal> — signal field :<field> is taken from the PII attribute :<attr>; ...
+discovered ZERO resources — cannot check their signals. ...
+```
+
+**Meaning:** an `Ash.Signals` signal could carry PII (issue #96 D2). A listener may run in
+a job (`AshOban.Signals`), which writes the signal's arguments into `oban_jobs.args`, and
+the emitter cannot know which delivery its listeners use. So every signal argument must be
+a type `Samen.Pii.Classification` calls `:non_pii`. Unknown types count as PII, so a free
+`:string` fails. Separately, no `emit` may fill a signal field from a declared
+`pii_attribute`, by the same name or through `fields:`. "ZERO resources" means the host's
+`:ash_domains` is mis-keyed.
+**Fix:** carry the record's id and let the listener read what it needs on its own plane,
+which keeps the masking rules in force. A label belongs in a closed enum (an `:atom` with
+`one_of:`), never a string. A type that is genuinely not PII goes through the reviewed
+two-party type clearance (ADR-034); this check has no allow-list of its own.
+
 ---
 
 ## Step 9 — `mix samen.verify.metric_labels`

@@ -1,0 +1,23 @@
+# SABOTAGE: #96 D2 rule 1 — signals_no_pii no longer refuses a PII-typed signal argument, so an email (or 
+#   any free string) could ride a signal into oban_jobs.args
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/signals/no_pii_test.exs
+# MUST_FAIL: RED: a PII-typed signal argument is a violation
+# MUST_FAIL: RED: a free :string signal argument is a violation (mask-unknown-by-default)
+# MUST_FAIL: RED: mix samen.verify.signals_no_pii exits 1 on a PII signal
+diff --git a/samen_core/lib/samen/signals/no_pii.ex b/samen_core/lib/samen/signals/no_pii.ex
+index 6870e584..67faff03 100644
+--- a/samen_core/lib/samen/signals/no_pii.ex
++++ b/samen_core/lib/samen/signals/no_pii.ex
+@@ -59,7 +59,8 @@ defmodule Samen.Signals.NoPii do
+   def argument_violations(signal_module) do
+     for signal <- Ash.Signals.Info.signals(signal_module),
+         argument <- signal.arguments,
+-        Classification.pii?(element_type(argument.type)) do
++        # SABOTAGE (#96 D2 rule 1): no signal argument type is ever refused.
++        Classification.pii?(element_type(argument.type)) and false do
+       "#{inspect(signal_module)} :#{signal.name} argument :#{argument.name} — type " <>
+         "#{inspect(argument.type)} classifies :pii; a signal argument must be a bounded " <>
+         "non-PII type (ids, enums, numbers, booleans, timestamps), because a listener may " <>
