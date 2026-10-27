@@ -884,7 +884,7 @@ cp = configparser.ConfigParser(interpolation=None, delimiters=("=",), comment_pr
 cp.optionxform = str
 cp.read(conf)
 apps = {sec.split(" ", 1)[1]: cp[sec]["path"].strip().rstrip("/") for sec in cp.sections() if sec.startswith("app ")}
-WAE = re.compile(r"^(MIX_ENV=test\s+)?mix compile --warnings-as-errors(\s|$)")
+WAE = re.compile(r"^(MIX_ENV=test\s+)?mix compile (--force )?--warnings-as-errors(\s|$)")
 bad = []
 for app, path in sorted(apps.items()):
     lines = []
@@ -914,7 +914,7 @@ case_WAE() {
   eq "$?" 0 "WAE: every product project's lib/ is compiled with --warnings-as-errors in pr"
   has "$T/wae1" '^WAE: all 10 projects' "WAE: ... all ten projects are checked"
   # control: drop the flag from samen_core's step => the lint names samen_core
-  sed 's/^cmd = mix deps.get --quiet \&\& MIX_ENV=test mix compile --warnings-as-errors \&\& /cmd = mix deps.get --quiet \&\& /' "$ROOT/ci/steps.conf" > "$T/wae.conf"
+  sed 's/^cmd = mix deps.get --quiet \&\& MIX_ENV=test mix compile --force --warnings-as-errors \&\& /cmd = mix deps.get --quiet \&\& /' "$ROOT/ci/steps.conf" > "$T/wae.conf"
   diff -q "$ROOT/ci/steps.conf" "$T/wae.conf" >/dev/null && bad "WAE: the control edit changed nothing" || ok
   wae_lint "$T/wae.conf" "$ROOT" > "$T/wae2" 2>&1
   eq "$?" 1 "WAE: a project whose step only runs mix test --warnings-as-errors fails the lint (control)"

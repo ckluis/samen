@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # samen_web/ci.sh — the framework UI library gate (ADR-009 §9).
 #
-#   1. mix compile --warnings-as-errors  (the lib + test-support host compile clean)
+#   1. mix compile --force --warnings-as-errors  (the lib + test-support host compile clean)
 #   2. mix test                          (component + Mount/Plane/Router unit tests +
 #                                         the two-plane render tests against the scratch
 #                                         samen_web_test DB — tenant clear / operator ••••
@@ -18,7 +18,7 @@ echo "==> samen_web: mix deps.get"
 mix deps.get --quiet
 
 echo "==> samen_web: compile --warnings-as-errors"
-MIX_ENV=test mix compile --warnings-as-errors
+MIX_ENV=test mix compile --force --warnings-as-errors
 
 echo "==> samen_web: test (component + two-plane render/masking suite)"
 MIX_ENV=test mix test --warnings-as-errors

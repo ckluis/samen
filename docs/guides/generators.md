@@ -185,7 +185,7 @@ With `--compile` (the default), after writing files the generator, in the new ap
 `<app>/ci.sh` runs the full 17-step gate (identical shape to `pawchart/ci.sh`):
 
 ```
-1   mix compile --warnings-as-errors
+1   mix compile --force --warnings-as-errors
 1a  DB bootstrap (recreate + migrate the test DB)
 1b  schema.dict.json drift check
 2   samen.verify.catalog_parity        10  samen.verify.vault_declared_parity

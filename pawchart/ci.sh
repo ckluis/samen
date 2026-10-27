@@ -4,7 +4,7 @@
 # Clinical resources (Patient / Pet) + the Tier-2 VaccineLot machinery + the token-blind
 # aggregate plane.
 #
-#   mix compile --warnings-as-errors
+#   mix compile --force --warnings-as-errors
 #   schema.dict.json drift check
 #   samen.verify.catalog_parity / prefixes / pii_reads / pii_classify / no_plaintext_pii
 #   samen.verify.migrations / sink_schema / metric_labels / vault_declared_parity
@@ -27,8 +27,8 @@ cd "$PC_DIR"
 echo "==> pawchart CI gate: starting (MIX_ENV=$MIX_ENV)"
 
 # 1. Compile (warnings are errors).
-echo "--- step 1/17: mix compile --warnings-as-errors"
-mix compile --warnings-as-errors
+echo "--- step 1/17: mix compile --force --warnings-as-errors"
+mix compile --force --warnings-as-errors
 echo "    PASSED"
 
 # 1a. Bootstrap: recreate + migrate pawchart_test, so the standalone verifiers (which

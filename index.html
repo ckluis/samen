@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Samen — the B2B SaaS foundry where every guarantee can fail</title>
-<meta name="description" content="Samen is an Elixir · Ash · Phoenix foundry for launching many B2B SaaS products from one substrate: PII masked by default, second-party reveal, crypto-shred erasure, an AI agent that can only propose, and 610 committed sabotages proving every test can fail.">
+<meta name="description" content="Samen is an Elixir · Ash · Phoenix foundry for launching many B2B SaaS products from one substrate: PII masked by default, second-party reveal, crypto-shred erasure, an AI agent that can only propose, and 611 committed sabotages proving every test can fail.">
 <meta property="og:title" content="Samen — the hard 80% of a B2B SaaS, solved once and proven on every commit">
 <meta property="og:description" content="One command emits a running product. PII is masked by default. Every guarantee ships with a sabotage that proves its test can fail.">
 <meta name="theme-color" content="#0A0B11">
@@ -585,7 +585,7 @@ footer .credit{max-width:44em}
       </div>
     </div>
     <div class="stats rv">
-      <div class="stat"><div class="v"><em>610</em></div><div class="k">committed sabotages, each proving a named test <b>can fail</b></div><div class="s">ls scripts/sabotages/*.patch</div></div>
+      <div class="stat"><div class="v"><em>611</em></div><div class="k">committed sabotages, each proving a named test <b>can fail</b></div><div class="s">ls scripts/sabotages/*.patch</div></div>
       <div class="stat"><div class="v">26</div><div class="k">verifiers in the gate, from <code>no_plaintext_pii</code> to <code>no_pan_columns</code></div><div class="s">mix samen.verify.*</div></div>
       <div class="stat"><div class="v">18</div><div class="k">scope blueprints a product mounts as-is: CRM, billing, support, work, automation…</div><div class="s">samen_core/lib/samen/scopes</div></div>
       <div class="stat"><div class="v">0</div><div class="k">hand-edits for a generated app to pass its own 19-step gate</div><div class="s">gen_app_flagship_probe.exs</div></div>
@@ -1922,9 +1922,9 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
       <div class="eyebrow"><span class="n">13</span>Sabotage &amp; mutation</div>
       <h2>A test that can't fail <em>is a bug.</em></h2>
       <p class="punch">Each guarantee ships with a <b>sabotage</b>: a committed patch that breaks exactly that behaviour. The harness applies it, demands that the <b>named</b> tests fail (not just that something breaks), reverts, and checks the tree is restored byte for byte. Then a mutation gate asks the converse: what break did nobody think to sabotage?</p>
-      <div class="big"><span class="n" data-count="610">610</span><span class="l">committed sabotages, <b>replayed on every PR</b> where they touch the diff and in full every night. <span class="tag meas">counted from the tree</span></span></div>
+      <div class="big"><span class="n" data-count="611">611</span><span class="l">committed sabotages, <b>replayed on every PR</b> where they touch the diff and in full every night. <span class="tag meas">counted from the tree</span></span></div>
       <ul class="ticks">
-        <li><b>3,979 mutants</b> across 229 targets, enumerated from the AST, each run against only its owning tests</li>
+        <li><b>3,980 mutants</b> across 231 targets, enumerated from the AST, each run against only its owning tests</li>
         <li><b>A survivor fails the build</b> until a test kills it or a ledger row proves it can't matter</li>
         <li><b>26 verifiers</b> check structure the tests can't: no PII columns, catalog parity, fleet wire…</li>
       </ul>
@@ -1951,7 +1951,7 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
     </ol>
     <p>Agents add sabotages with <code>scripts/sabotage new</code>, which refuses one that can't flip, breaks the build instead of a test, or names its test with string interpolation the harness can't find.</p>
     <h4>The mutation gate</h4>
-    <p>Sabotages prove the guarantees someone thought to claim. The mutation gate enumerates four operator families (equality, relational, boolean operators, boolean literals) from the AST and splices each mutant at an exact line and column. A watch-list of 12 chokepoint modules (166 mutants) runs on PRs; the full corpus (3,979 mutants) runs as a soak. A compiler refusal isn't a kill; only a named test failure is.</p>
+    <p>Sabotages prove the guarantees someone thought to claim. The mutation gate enumerates four operator families (equality, relational, boolean operators, boolean literals) from the AST and splices each mutant at an exact line and column. A watch-list of 12 chokepoint modules (166 mutants) runs on PRs; the full corpus (3,980 mutants) runs as a soak. A compiler refusal isn't a kill; only a named test failure is.</p>
     <h4>The verifiers</h4>
     <p>26 <code>mix samen.verify.*</code> tasks check what tests can't express, for example: no plaintext PII in any tier, no PII or card-number columns, catalog and vault-declaration parity, same-org foreign keys, the API contract, the AI prompt masking and agent coverage, the fleet wire, the replay schema.</p>
     <div class="src">source · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-049-mutation-gate.md">ADR-049</a> mutation gate · <a href="https://github.com/ckluis/samen/blob/main/docs/ci.md">docs/ci.md</a> · scripts/sabotage.sh · scripts/mutate.sh</div>
@@ -2047,7 +2047,7 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
           <a href="https://github.com/ckluis/samen/blob/main/docs/claim-evidence.md">Claim → evidence map <span>claim-evidence.md ↗</span></a>
           <a href="https://github.com/ckluis/samen/blob/main/docs/compliance-story.md">The compliance story <span>for an auditor ↗</span></a>
           <a href="https://github.com/ckluis/samen/blob/main/docs/guides/getting-started.md">Zero to first feature <span>getting-started.md ↗</span></a>
-          <a href="https://github.com/ckluis/samen/tree/main/scripts/sabotages">How to prove a test can fail <span>610 patches ↗</span></a>
+          <a href="https://github.com/ckluis/samen/tree/main/scripts/sabotages">How to prove a test can fail <span>611 patches ↗</span></a>
           <a href="https://github.com/ckluis/samen/blob/main/docs/ci.md">CI an agent can afford <span>docs/ci.md ↗</span></a>
         </div>
       </div>
@@ -2064,7 +2064,7 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
     </div>
     <div class="credit">
       <p style="margin:0 0 10px"><b>On authorship.</b> Every commit in this repository was written by Claude under human direction and marked <code>Co-Authored-By</code>. A human operator set the direction, reviewed the work and gated it adversarially. The sabotages, verifiers and decision records exist largely because an AI-authored codebase has to be checkable by someone who didn't type it.</p>
-      <p style="margin:0">Session replay is inspired by <a href="https://github.com/elixir-vibe/phoenix_replay">phoenix_replay</a> by Danila Poyarkov (MIT). Counts on this page are generated from the tree at build time (c4870859).</p>
+      <p style="margin:0">Session replay is inspired by <a href="https://github.com/elixir-vibe/phoenix_replay">phoenix_replay</a> by Danila Poyarkov (MIT). Counts on this page are generated from the tree at build time (9b7d0c42).</p>
     </div>
   </div>
 </footer>
