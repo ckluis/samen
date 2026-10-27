@@ -34,6 +34,11 @@ end
 defmodule Samen.Meta.CiDriverGuardTest.C1Budget do
   use ExUnit.Case, async: true
 
+  # The two slowest cases: ~30 s (C1) and ~20 s (GENDEPS) standalone, and these modules run
+  # concurrently with the rest of the suite, so a loaded machine (load ~20) pushed GENDEPS past
+  # ExUnit's 60 s default. The case's assertions are unchanged; only the wall-clock allowance is.
+  @moduletag timeout: 180_000
+
   test "C1 budget/resume never reports PASS over a deferred, interrupted or unrun step" do
     Samen.Meta.CiDriverGuard.run_case!("C1")
   end
@@ -247,6 +252,11 @@ end
 
 defmodule Samen.Meta.CiDriverGuardTest.GenDepsCache do
   use ExUnit.Case, async: true
+
+  # The two slowest cases: ~30 s (C1) and ~20 s (GENDEPS) standalone, and these modules run
+  # concurrently with the rest of the suite, so a loaded machine (load ~20) pushed GENDEPS past
+  # ExUnit's 60 s default. The case's assertions are unchanged; only the wall-clock allowance is.
+  @moduletag timeout: 180_000
 
   test "GENDEPS the gen probes' compiled-dependency cache is keyed, hex-only, and fails closed on a corrupt entry" do
     Samen.Meta.CiDriverGuard.run_case!("GENDEPS")
