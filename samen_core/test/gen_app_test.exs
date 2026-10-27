@@ -374,7 +374,7 @@ defmodule Samen.Gen.AppTest do
       assert mix_exs =~ ~s({:phoenix, "~> 1.7"})
       assert mix_exs =~ ~s({:phoenix_live_view, "~> 1.0"})
       assert mix_exs =~ ~s({:phoenix_html, "~> 4.1"})
-      assert mix_exs =~ ~s({:bandit, "~> 1.0"})
+      assert mix_exs =~ ~s({:bandit, "~> 1.14"})
       assert mix_exs =~ ~s({:phoenix_pubsub, "~> 2.1"})
 
       config = rendered["config/config.exs"]

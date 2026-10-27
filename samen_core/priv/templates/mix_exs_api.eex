@@ -48,7 +48,7 @@ defmodule <%= module %>.MixProject do
       {:phoenix_live_view, "~> 1.0"},
       {:phoenix_html, "~> 4.1"},
       # Bandit: the HTTP adapter behind <%= module %>Web.Endpoint.
-      {:bandit, "~> 1.0"},
+      {:bandit, "~> 1.14"},
       {:phoenix_pubsub, "~> 2.1"},
       # The public JSON:API surface (OD-6 — AshJsonApi ONLY): the generated
       # `/api/v1` router + serializer over the SAME Ash resources the UI uses.
