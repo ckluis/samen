@@ -1,0 +1,21 @@
+# SABOTAGE: #96 D2 — signals_no_pii no longer fails closed on zero discovered resources, so a mis-keyed 
+#   :ash_domains reports a vacuous OK
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/signals/no_pii_test.exs
+# MUST_FAIL: RED: mix samen.verify.signals_no_pii exits 1 when it discovers zero resources
+diff --git a/samen_core/lib/mix/tasks/samen.verify.signals_no_pii.ex b/samen_core/lib/mix/tasks/samen.verify.signals_no_pii.ex
+index a7bc20d0..336aeb26 100644
+--- a/samen_core/lib/mix/tasks/samen.verify.signals_no_pii.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.signals_no_pii.ex
+@@ -38,7 +38,8 @@ defmodule Mix.Tasks.Samen.Verify.SignalsNoPii do
+       |> Enum.flat_map(&Ash.Domain.Info.resources/1)
+       |> Enum.uniq()
+ 
+-    halt_if_no_resources!(resources)
++    # SABOTAGE (#96 D2): an empty sweep passes as clean.
++    _ = resources
+ 
+     Samen.Verifier.halt_if_violations(@task_name, Samen.Signals.NoPii.violations(resources))
+   end

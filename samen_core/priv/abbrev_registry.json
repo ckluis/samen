@@ -376,6 +376,7 @@
       "asj": "SamenCore.Support.AutomationFixture.Subject",
       "arm": "SamenCore.Support.AutomationFixture.Reminder",
       "rpf": "Samen.Replay.Frame",
+      "sgt": "SamenCore.Support.SignalsFixture.Taxpayer",
       "sos": "SamenCore.Support.OutreachFixture.Sequence",
       "svs": "SamenCore.Support.Versioning.Snapshot",
       "scc": "SamenCore.Support.CrmScopeFixture.Company",

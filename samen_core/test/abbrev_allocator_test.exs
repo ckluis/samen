@@ -260,8 +260,9 @@ defmodule Samen.Abbrev.AllocatorTest do
       # `fbx`/`dpx`; `pbx`/`pmx`; `wbx`/`wpx`), growing the file to 21_034 bytes.
       # +2 ADR-052 P2 — samen_core host's replay capture pair `rps`/`rpf`
       # (Samen.Replay.{Session,Frame}), growing the file to 21_106 bytes.
-      assert byte_size(committed) == 21106
-      assert map_size(R.load()) == 452
+      # +1 issue #96 D2 — samen_core host's `sgt` (SignalsFixture.Taxpayer), 21_164 bytes.
+      assert byte_size(committed) == 21164
+      assert map_size(R.load()) == 453
     end
   end
 

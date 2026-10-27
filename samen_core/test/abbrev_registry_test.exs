@@ -416,7 +416,10 @@ defmodule Samen.AbbrevRegistryTest do
                  # ADR-052 P2: the replay capture storage (session + frames),
                  # allocator-reserved.
                  "rps" => "Samen.Replay.Session",
-                 "rpf" => "Samen.Replay.Frame"
+                 "rpf" => "Samen.Replay.Frame",
+                 # Issue #96 D2: the signals_no_pii rule-2 fixture (an emit copying a
+                 # pii_attribute), allocator-reserved.
+                 "sgt" => "SamenCore.Support.SignalsFixture.Taxpayer"
                },
                "samen_web" => %{
                  "wmv" => "Samen.WebTest.Marketing.ConsentEvent",
@@ -590,7 +593,8 @@ defmodule Samen.AbbrevRegistryTest do
       # (`bux` demo; `fbx`/`dpx` driftwood; `pbx`/`pmx` pawchart; `wbx`/`wpx` samen_web) = 450.
       # +2 ADR-052 P2: samen_core host's replay capture pair `rps`/`rpf`
       # (Samen.Replay.{Session,Frame}), allocator-reserved = 452.
-      assert map_size(Reg.load()) == 452
+      # +1 issue #96 D2: samen_core host's `sgt` (SignalsFixture.Taxpayer) = 453.
+      assert map_size(Reg.load()) == 453
     end
 
     test "load/1 (compat shim) reads a flat file byte-identically — hosts empty" do

@@ -1,0 +1,23 @@
+# SABOTAGE: #96 D2 rule 2 — signals_no_pii no longer refuses an emit that copies a declared pii_attribute 
+#   into a signal, so a PII value typed as a cleared scalar (an integer tax id) could ride a 
+#   well-typed argument
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/signals/no_pii_test.exs
+# MUST_FAIL: RED: an emit taking a signal field from a PII attribute is a violation
+# MUST_FAIL: RED: mix samen.verify.signals_no_pii exits 1 on a PII signal
+diff --git a/samen_core/lib/samen/signals/no_pii.ex b/samen_core/lib/samen/signals/no_pii.ex
+index 6870e584..1d9736f2 100644
+--- a/samen_core/lib/samen/signals/no_pii.ex
++++ b/samen_core/lib/samen/signals/no_pii.ex
+@@ -74,7 +74,8 @@ defmodule Samen.Signals.NoPii do
+         action.type != :action,
+         emit <- Map.get(action, :emits, []),
+         {field, attribute} <- attribute_sources(resource, emit),
+-        Samen.Pii.Info.vault_routed?(resource, attribute) do
++        # SABOTAGE (#96 D2 rule 2): an emit may copy a PII attribute into a signal.
++        Samen.Pii.Info.vault_routed?(resource, attribute) and false do
+       "#{inspect(resource)} action :#{action.name} emits #{inspect(emit.signal_module)} " <>
+         ":#{emit.signal} — signal field :#{field} is taken from the PII attribute " <>
+         ":#{attribute}; a PII value must never ride a signal"
