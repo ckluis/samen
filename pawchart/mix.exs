@@ -67,7 +67,7 @@ defmodule PawChart.MixProject do
       {:phoenix_live_view, "~> 1.2.9"},
       {:phoenix_html, "~> 4.1"},
       # Bandit: the HTTP adapter behind PawChartWeb.Endpoint.
-      {:bandit, "~> 1.12.1"},
+      {:bandit, "~> 1.14"},
       {:phoenix_pubsub, "~> 2.1"},
       {:jason, "~> 1.4"},
       {:stream_data, "== 1.3.0"},

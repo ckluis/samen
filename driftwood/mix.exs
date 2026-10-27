@@ -61,7 +61,7 @@ defmodule Driftwood.MixProject do
       # T5.3: Bandit is the HTTP server adapter behind the DriftwoodWeb.Endpoint that
       # serves the tenant + operator LiveView planes over localhost. phoenix_pubsub is
       # pulled transitively by phoenix; declared explicitly for the Endpoint's PubSub.
-      {:bandit, "~> 1.12.1"},
+      {:bandit, "~> 1.14"},
       {:phoenix_pubsub, "~> 2.1"},
       {:jason, "~> 1.4"},
       {:stream_data, "== 1.3.0"},
