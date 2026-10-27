@@ -77,8 +77,8 @@ defmodule SamenCore.MixProject do
     [
       # Issue #73: dialyzer runs in the default ./ci.sh (dev/test only, never shipped).
       {:dialyxir, "== 1.4.8", only: [:dev, :test], runtime: false},
-      {:ash, "== 3.34.4"},
-      {:ash_postgres, "== 2.14.2"},
+      {:ash, "== 3.37.2"},
+      {:ash_postgres, "== 2.15.2"},
       {:spark, "== 2.7.6"},
       {:ecto_sql, "== 3.14.0"},
       {:postgrex, "== 0.22.4"},
@@ -134,7 +134,8 @@ defmodule SamenCore.MixProject do
       # `use Samen.Resource, archivable: true` is the thin Samen sugar over it (mirrors
       # the ash_money §5.2 adoption pattern). Preparation variant per ADR-037 §5.3.
       {:ash_archival, "~> 2.0"},
-      # ash_oban (ADR-037 §5.9 ADOPT, v0.8.10 — consumed by T32/T39/T41/T42; dep-add
+      # ash_oban (ADR-037 §5.9 ADOPT, adopted at v0.8.10, now 0.10.x for the Ash.Signals
+      # Oban delivery — issue #96 D1; consumed by T32/T39/T41/T42; dep-add
       # owned by T39 per the same-ADR ash_money/ash_archival adoption pattern): the
       # WS-E automation engine's periodic scans (E1 schedule-due, E4 reminder-due,
       # E5 escalation-step-due) are AshOban triggers with EXPLICIT `scheduler_cron`
@@ -142,7 +143,7 @@ defmodule SamenCore.MixProject do
       # and the ID-only ActorPersister rule (job args carry bounded ids/enums only —
       # never actor structs, attribute values, or vt_* tokens; ADR-039 §2/§4.3). An
       # ash-project extension over Oban (already in the tree), not a vendor SDK.
-      {:ash_oban, "~> 0.8.10"},
+      {:ash_oban, "~> 0.10.2"},
       # ash_state_machine (ADR-037 §5.8 ADOPT, targeted, v0.2.13 — consumed by T34/T39/T42;
       # dep-add owned by T34 per the same-ADR ash_archival/ash_oban adoption pattern, i.e. the
       # dep lands WITH its first governed adopter): ADR-040 §4 E3's `Approval` is the designated
