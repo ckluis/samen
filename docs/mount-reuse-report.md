@@ -8,8 +8,8 @@
 
 ### New PawChart Scopes
 
-- `/Users/clank/Desktop/projects/samen/pawchart/lib/pawchart/crm.ex` — `PawChart.Crm` — `use Samen.Scopes.Crm` with fresh `vc*` abbrevs (vca/vcb/vcc/vcd/vce/vcf). Zero reshape.
-- `/Users/clank/Desktop/projects/samen/pawchart/lib/pawchart/support.ex` — `PawChart.Support` — `use Samen.Scopes.Support` with fresh `vs*` abbrevs (vsa/vsb/vsc/vsd/vse/vsf/vsg). Zero reshape.
+- https://github.com/ckluis/samen/blob/6fea9fe1ac3ace066ac5bb2c91c7f3e6fc125e1b/pawchart/lib/pawchart/crm.ex — `PawChart.Crm` — `use Samen.Scopes.Crm` with fresh `vc*` abbrevs (vca/vcb/vcc/vcd/vce/vcf). Zero reshape.
+- https://github.com/ckluis/samen/blob/6fea9fe1ac3ace066ac5bb2c91c7f3e6fc125e1b/pawchart/lib/pawchart/support.ex — `PawChart.Support` — `use Samen.Scopes.Support` with fresh `vs*` abbrevs (vsa/vsb/vsc/vsd/vse/vsf/vsg). Zero reshape.
 
 ### New PawChartWeb Layer
 

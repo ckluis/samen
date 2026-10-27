@@ -1,6 +1,6 @@
 defmodule SamenCore.TestRepo.Migrations.AiAgentRunHooks do
   @moduledoc """
-  UXD-08/UXD-09 (`/Users/clank/Desktop/projects/samen-oss-burndown/_orch/verify/T21-verdict.json`)
+  UXD-08/UXD-09 (the burn-down's T21 verifier verdict; unpublished run notes)
   — one additive column on the already-catalogued `ai_agent_run` table:
 
     * `ai_agent_run.arn_hooks` — the per-run `Samen.AI.Agent.Hook` module chain a caller

@@ -10,7 +10,7 @@ approaches (§3.6). Every load-bearing choice is called out as a DECISION; every
 gap the build must close is an OPEN RISK (§8).
 
 **Environment note (locked):** Driftwood is a **new top-level app** at
-`/Users/clank/Desktop/projects/samen/driftwood/`, matching the repo's convention
+https://github.com/ckluis/samen/tree/744147cb3f5c948957c108f6571d5afd3d51d0f1/driftwood, matching the repo's convention
 (`samen_core/`, `demo/`, `spikes/` are siblings — this repo is **not** an `apps/`
 umbrella; see plan OD-1). It mounts `samen_core` scopes exactly as `demo/` does
 (`use Samen.Scopes.Crm, otp_app: :driftwood, repo: Driftwood.Repo, namespace: …`)

@@ -1,6 +1,6 @@
 # Theme: ops-data — ops, observability, clustering, storage, data-pipeline substrate
 
-Orchestrator verdict pass over sections 00-01 (Health + AetherS3 cards), 05-06 (data/realtime/observability, minus Sequin's idempotency-key convention — delivery-egress owns it, verdict "already samen's practice"), 08-09 (GitBlixt backup envelope, OLI Torus libcluster, Wanderer dual-key line), 06-07 (Craftplan S3 adapter reference line), plus the KMS-rotation question ceded by delivery-egress. Every "samen lacks X" claim below was grep-verified against `~/Desktop/projects/samen` (branch `saas-readiness-phase-1`).
+Orchestrator verdict pass over sections 00-01 (Health + AetherS3 cards), 05-06 (data/realtime/observability, minus Sequin's idempotency-key convention — delivery-egress owns it, verdict "already samen's practice"), 08-09 (GitBlixt backup envelope, OLI Torus libcluster, Wanderer dual-key line), 06-07 (Craftplan S3 adapter reference line), plus the KMS-rotation question ceded by delivery-egress. Every "samen lacks X" claim below was grep-verified against https://github.com/ckluis/samen (branch `saas-readiness-phase-1`).
 
 **Corrections to the assembled report (systematic understatement, confirmed again in this theme):**
 

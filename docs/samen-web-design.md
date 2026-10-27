@@ -29,7 +29,7 @@ driftwood. That is the ADR-004 inheritance thesis broken on the UI plane. `samen
 
 ## 1 · The library
 
-New Mix project at `/Users/clank/Desktop/projects/samen/samen_web`, package `:samen_web`.
+New Mix project at https://github.com/ckluis/samen/tree/68034a4f6e1d4901339113c7fcce0b219d611cdf/samen_web, package `:samen_web`.
 
 ```elixir
 # samen_web/mix.exs (deps)

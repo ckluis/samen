@@ -94,7 +94,7 @@ tests are genuinely bound to the scan.
 
 The repo has NO `apps/` dir; top level is flat (`samen_core/`, `demo/`, `spikes/`). The new
 Driftwood app therefore belongs at top-level
-`/Users/clank/Desktop/projects/samen/driftwood/` (matching the `demo/` sibling convention),
+https://github.com/ckluis/samen/tree/72f37073ed15923503447332bb3579f7da6d8085/driftwood (matching the `demo/` sibling convention),
 with its own `ci.sh`, mounting `samen_core` scopes + `Samen.Context` exactly as `demo/`
 does. The Driftwood build itself is out of scope for PRE; this task delivered only the
 Gate-4 carry-over hardening in samen_core + docs.

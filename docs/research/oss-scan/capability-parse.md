@@ -1,10 +1,14 @@
 # samen OSS scan — capability parse
 
-Date: 2026-08-21. Inputs: `samen-digest.md`, `samen-oss-findings.html` (10 sections), `findings/*.md` (127 write-ups), the samen repo itself (`~/Desktop/projects/samen`, branch `saas-readiness-phase-1`), `spec/full-saas-readiness.md`, `_orch/plan/backlog.yaml` (T01–T160), `docs/adr/`.
+Date: 2026-08-21. Inputs: `samen-digest.md`, `samen-oss-findings.html` (10 sections), `findings/*.md` (127 write-ups), the samen repo itself (https://github.com/ckluis/samen, branch `saas-readiness-phase-1`), `spec/full-saas-readiness.md`, `_orch/plan/backlog.yaml` (T01–T160), `docs/adr/`.
+
+> Citations of the form `_orch/nodes/T##/work/<file>:<line>` and `_orch/verify/T##-verdict.json` point at the
+> scan's orchestration working files. They were never published; the line numbers record where the
+> evidence was read at the time.
 
 Method: seven theme orchestrators (agent-runtime, ai-governance, identity-trust, billing-metering, delivery-egress, ops-data, product-platform), each verifying every candidate against its findings file AND against the repo by grep before proposing anything. Full per-theme detail (evidence file paths, per-candidate greps, complete discard ledgers) lives in `parse-work/*.md`; this document is the deduplicated, ranked synthesis.
 
-Per operator override, this run ends in backlog conversion: the Part-4 shortlist has been appended to `~/Desktop/projects/samen/_orch/plan/backlog.yaml` as T161–T168 (uncommitted, for review).
+Per operator override, this run ends in backlog conversion: the Part-4 shortlist has been appended to `_orch/plan/backlog.yaml` as T161–T168 (uncommitted, for review).
 
 ---
 
@@ -151,18 +155,18 @@ Exact YAML in `_orch/plan/backlog.yaml` (working tree, uncommitted).
 ## Part 6 — second pass: promotions + concept mining
 
 > Assembled by T31 from four upstream artifacts, cited inline: `T14` (workstream-1 audit,
-> `/Users/clank/Desktop/projects/_orch/nodes/T14/work/w1-verdicts.md`), `T22`/`T23` (workstream-2
-> concept rulings and repo-evidence, `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md`
-> and `/Users/clank/Desktop/projects/_orch/nodes/T23/work/survivor-evidence.md`), `T30` (backlog
-> append, `/Users/clank/Desktop/projects/_orch/nodes/T30/work/appended.yaml`), and `T32` (ranked
-> next-tier list, `/Users/clank/Desktop/projects/_orch/nodes/T32/work/next-tier.md`). No verdict
+> `_orch/nodes/T14/work/w1-verdicts.md`), `T22`/`T23` (workstream-2
+> concept rulings and repo-evidence, `_orch/nodes/T22/work/concept-verdicts.md`
+> and `_orch/nodes/T23/work/survivor-evidence.md`), `T30` (backlog
+> append, `_orch/nodes/T30/work/appended.yaml`), and `T32` (ranked
+> next-tier list, `_orch/nodes/T32/work/next-tier.md`). No verdict
 > below is re-judged; every fact is cited to the node that ruled it.
 
 ### 6.1 Workstream 1 — per-candidate verdicts (the 12 held-back candidates, T169–T179 + #20)
 
 Audited by `T14` (rung 3). Nine of the eleven already-filed entries (T169–T179) stand as written;
 two stand with a noted correction; the twelfth candidate (#20) is **held, not promoted**. Source:
-`/Users/clank/Desktop/projects/_orch/nodes/T14/work/w1-verdicts.md`, summary table (lines 566–582).
+`_orch/nodes/T14/work/w1-verdicts.md`, summary table (lines 566–582).
 
 | id | capability | verdict |
 |---|---|---|
@@ -186,27 +190,27 @@ subsystem, Sanctum, is FSL-1.1, which directive §4.1 requires to be marked "pat
 clean-room" in the license slot. Sibling entry T175, filed in the same batch, marks CYFR that way;
 T169 does not. Nothing about the build changes — the concurrency rider was always a clean-room
 reimplementation over Oban partitioning — only the licensing-hygiene marking is missing. Source:
-`/Users/clank/Desktop/projects/_orch/nodes/T14/work/w1-verdicts.md`, Audit block 1.
+`_orch/nodes/T14/work/w1-verdicts.md`, Audit block 1.
 
 **Correction on T171 (recorded, no edit made to the filed entry).** T171's license slot calls
-Boruta "MIT"; Boruta is Apache-2.0 per `/Users/clank/Desktop/projects/samen-oss-scan/findings/100-boruta-server.md`
+Boruta "MIT"; Boruta is Apache-2.0 per https://github.com/ckluis/samen/blob/19630407710d3c98722ab51a7df721894fabab93/docs/research/oss-scan/findings/100-boruta-server.md
 ("Apache-2.0, by malach-it") and per sibling entry T177, filed in the same batch, which labels the
 same project correctly. Both licenses are MIT-compatible so the plan and clean-room boundary are
 unaffected, but the slot is factually wrong about a named source. Separately, the slot never states
 `wax_`'s own license even though the entry's mode is "import wax_"; the first-pass evidence records
 it as Apache-2.0 "re-verify at adoption," and directive §5's "Unclear license = incompatible until
 verified" makes that re-verification a precondition of the import, not a footnote. Source:
-`/Users/clank/Desktop/projects/_orch/nodes/T14/work/w1-verdicts.md`, Audit block 3.
+`_orch/nodes/T14/work/w1-verdicts.md`, Audit block 3.
 
 **Candidate #20 — `mix samen.orch.tick` — held, not promoted.** Dedup, license (clean — Symphony
 Apache-2.0, Shep MIT) and absence (T13 confirmed-absent) all clear, but the entry fails on two
 independent grounds: no WS letter, G-number or ADR section anchor exists or can be invented for it
 (directive §4.1's anchor requirement is "not optional"), and it fails the §5 foundry bar — a
 `samen.orch.tick` task reads/writes samen's own gitignored `_orch/` dev-process state
-(`/Users/clank/Desktop/projects/samen/.gitignore:30`), which no generated app inherits, so it is
+(https://github.com/ckluis/samen/blob/19630407710d3c98722ab51a7df721894fabab93/.gitignore#L30), which no generated app inherits, so it is
 "samen's private dev tooling wearing a foundry mix-task shape." Ruling (closing string): `hold`.
 Per the done-criterion's if-and-only-if condition, no draft backlog entry was ever carried for it.
-Source: `/Users/clank/Desktop/projects/_orch/nodes/T14/work/w1-verdicts.md`, Adjudication block
+Source: `_orch/nodes/T14/work/w1-verdicts.md`, Adjudication block
 (lines 462–519).
 
 ### 6.2 Workstream 2 — concept-mining results
@@ -215,7 +219,7 @@ Source: `/Users/clank/Desktop/projects/_orch/nodes/T14/work/w1-verdicts.md`, Adj
 for concepts only across three readers: `T20` (agent products / software factories, 117 concepts),
 `T21` (agent frameworks / sandboxed-execution trio / Sequin, 60 concepts), `T21b` (findings/000–048
 neighbours, 64 concepts) — 241 concepts total. Source:
-`/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md`, lines 6–21.
+`_orch/nodes/T22/work/concept-verdicts.md`, lines 6–21.
 
 **The dependency-level discard was not reopened.** All ~20 agent frameworks/products were rejected
 on the masking-chokepoint failure (raw-string provider paths, vendor/HTTP deps reaching toward
@@ -230,7 +234,7 @@ survivor items and withdrew three — S7, S8, S10 — each to `held — narrower
 evidenced remainder, never `dead`.
 
 **The 13 survivor items, source and license per concept** (source: `T22` roll-up,
-`/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md`, lines 502–523):
+`_orch/nodes/T22/work/concept-verdicts.md`, lines 502–523):
 
 | item | capability | sources · license | MIT-compat | mode | tier |
 |---|---|---|---|---|---|
@@ -256,10 +260,10 @@ title per directive §4.1; none of the 13 items is `import` — all are `adapt` 
 `## WITHDRAWN` rulings are **authoritative over T22's stale `SURVIVES` label** on these three
 concepts, per the binding gate ruling; `T22`'s `concept-verdicts.md` still labels them `SURVIVES`
 (documentation drift, accepted, not corrected in that file). Source for all three:
-`/Users/clank/Desktop/projects/_orch/nodes/T23/work/survivor-evidence.md`, `## WITHDRAWN` section.
+`_orch/nodes/T23/work/survivor-evidence.md`, `## WITHDRAWN` section.
 
 - **S7 — mid-run cancellation.** A durable, DB-persisted run-level cancel already ships
-  (`Samen.AI.Agent.cancel/2`, `/Users/clank/Desktop/projects/samen/samen_core/lib/samen/ai/agent/run.ex:63-66`
+  (`Samen.AI.Agent.cancel/2`, https://github.com/ckluis/samen/blob/19630407710d3c98722ab51a7df721894fabab93/samen_core/lib/samen/ai/agent/run.ex#L63-L66
   and `agent.ex:724-738` — the loop re-checks the cancel flag at every turn boundary and honors it).
   Narrowed remainder: a **sub-turn (per-tool-call) interruption** — an in-memory check consulted
   before each tool call within an in-progress turn, short-circuiting the remaining calls with
@@ -267,7 +271,7 @@ concepts, per the binding gate ruling; `T22`'s `concept-verdicts.md` still label
   anywhere in the repo.
 - **S8 — checkpoint-backed pause/resume.** The run-level `awaiting_approval`/`park`/`resume`/
   `expire_due` state machine and a crash-recoverable turn cursor already ship
-  (`/Users/clank/Desktop/projects/samen/samen_core/lib/samen/ai/agent/run.ex:60-136`), plus
+  (https://github.com/ckluis/samen/blob/19630407710d3c98722ab51a7df721894fabab93/samen_core/lib/samen/ai/agent/run.ex#L60-L136), plus
   turn-row replay-idempotency (`turn.ex:1-16`). Narrowed remainder: **keyed memoization of the
   provider LLM completion itself**, so a crash-replay of an in-progress turn does not re-call the
   LLM — the repo states in its own moduledoc that "the provider call between the two checkpoints can
@@ -276,14 +280,14 @@ concepts, per the binding gate ruling; `T22`'s `concept-verdicts.md` still label
   register as a derived artifact under C-001-7's withdrawal-propagation rule; without that condition
   it fails bar 4 outright.
 - **S10 — watermark-coordinated backfill discipline.** `Samen.Migration.ExpandContract.chunked_backfill/4`
-  (`/Users/clank/Desktop/projects/samen/samen_core/lib/samen/migration/expand_contract.ex:278`)
+  (https://github.com/ckluis/samen/blob/19630407710d3c98722ab51a7df721894fabab93/samen_core/lib/samen/migration/expand_contract.ex#L278)
   already ships a reusable, idempotent, chunked-scan UPDATE loop. Narrowed remainder: a **runtime**
   (non-migration) coordinated sweep for a **live** derived store — `chunked_backfill/4` hard-refuses
   outside a migration, its predicate can never re-process an already-populated row, it holds no
   watermark against concurrent writes, and it persists no cursor across a restart. **Per the binding
   gate ruling, this remainder does not rank ahead of S9** — it has no client until S9's re-embed
   sweep lands (T22's own text: "first client is the S9 re-embed sweep",
-  `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:338`).
+  `_orch/nodes/T22/work/concept-verdicts.md:338`).
 
 **UNVERIFIED note (does not block, stays in the record — CONTRACT §9).** `T20`'s verification probe
 sampled 8 concept quotes across sections 000, 003, 006, 009, 019, 021, 024, 026 and downgraded two
@@ -292,15 +296,15 @@ silently elide a parenthetical clause of real content words with no ellipsis mar
 as originally written do not appear verbatim in their source findings files. Neither concept's
 ruling changes — C-009-1 is `REJECTED — bar 3` (T22) and C-026-1 is `REJECTED — bar 4` (T22),
 both independent of the elided clause's wording. Source:
-`/Users/clank/Desktop/projects/_orch/verify/T20-verdict.json`, `unverified` array.
+`_orch/verify/T20-verdict.json`, `unverified` array.
 
 ### 6.3 Appended IDs
 
 `T30` (rung 1) appended **ten** entries, T180 through T189, to
-`/Users/clank/Desktop/projects/samen/_orch/plan/backlog.yaml`, sourced from `T23`'s ten `DRAFT
+`_orch/plan/backlog.yaml`, sourced from `T23`'s ten `DRAFT
 ENTRIES` (S1, S2, S3, S4, S5, S6, S9, S11, S12, S13 — S7/S8/S10 excluded, being withdrawn, not
 draft entries; candidate #20 excluded, being held, not promoted). Taken verbatim from
-`/Users/clank/Desktop/projects/_orch/nodes/T30/work/appended.yaml`, whose only content change from
+`_orch/nodes/T30/work/appended.yaml`, whose only content change from
 its source (per the prime's gate ruling 5) was fixing S6/T185's verify-task count from "21" to
 "22" — the correction `T23`'s own S6 evidence block already stated.
 
@@ -317,7 +321,7 @@ its source (per the prime's gate ruling 5) was fixing S6/T185's verify-task coun
 | T188 | S12 | behaviour contract-test case kit for adapter packages |
 | T189 | S13 | `mix samen.doctor` environment preflight, NARROWED |
 
-Verbatim appended YAML (source: `/Users/clank/Desktop/projects/_orch/nodes/T30/work/appended.yaml`,
+Verbatim appended YAML (source: `_orch/nodes/T30/work/appended.yaml`,
 all 10 lines, byte-identical to the live backlog's last 10 lines per T30's own diff check):
 
 ```yaml
@@ -333,15 +337,15 @@ all 10 lines, byte-identical to the live backlog's last 10 lines per T30's own d
 - {id: T189, phase: 7, title: "OSS-SCAN (source: Glorbo MIT-OR-Apache-2.0 + Agent Harness unlicensed patterns-only clean-room, mode: adapt): `mix samen.doctor` environment preflight, NARROWED — the adapter-configuration walk + a config-only, behaviour-dispatched keystore-adapter readiness check (never a live vendor network probe, INV-4) + a single readiness table; the pgvector pre-migration check is explicitly OUT, already owned by T140 (backlog.yaml:148); repo evidence: no `mix samen.doctor`-named task exists (find over lib/mix/tasks returns empty), zero hits for readiness-table/adapter-configuration-walk terms, and the only in-repo precedent for the config-only keystore check is the single function `Samen.Kms.assert_prod_adapter_ready!/1` (kms.ex:169), not a foundry-owned task; findings/003+027; WS-L", tier: sonnet, blocked_by: [], adversarial: standard}
 ```
 
-Source: `/Users/clank/Desktop/projects/_orch/nodes/T30/work/appended.yaml` and
-`/Users/clank/Desktop/projects/_orch/nodes/T30/work/append-log.md`.
+Source: `_orch/nodes/T30/work/appended.yaml` and
+`_orch/nodes/T30/work/append-log.md`.
 
 ### 6.4 Updated ranked next-tier list
 
 `T32` (rung 2) merged `T14`, `T22` and `T23` into one ranked list of everything that remains held —
 76 entries across six bands, nearest-to-promotable first — plus a `DEAD, NOT HELD` accounting of
 everything `T22` rejected on a bar rather than as `premature`. Embedded in full below. Source:
-`/Users/clank/Desktop/projects/_orch/nodes/T32/work/next-tier.md`.
+`_orch/nodes/T32/work/next-tier.md`.
 
 **Binding gate rulings T32 applied** (restated): S10's narrowed remainder does not rank ahead of
 S9 (S9 is a promoted survivor, not itself held, so it is not a line in this list); T23's
@@ -352,97 +356,97 @@ concepts, so this list keys off T23 throughout.
 
 **Band 1 — nearest to promotable: dependency is a promoted/filed item, not a chartering decision, or no dependency at all.**
 
-1. S7 remainder — sub-turn (per-tool-call) mid-run interruption. Held because the run-level cancel already ships; only the in-flight, before-each-tool-call check is missing, and nothing blocks building it. `/Users/clank/Desktop/projects/_orch/nodes/T23/work/survivor-evidence.md`.
-2. S8 remainder — keyed memoization of the provider LLM completion for crash-replay. Held because the run-level state machine already ships; the remainder is conditioned on S1 landing (C-001-7's derived-artifact rule). `/Users/clank/Desktop/projects/_orch/nodes/T23/work/survivor-evidence.md`.
-3. S10 remainder — watermark-coordinated backfill discipline for live derived stores. Held because `chunked_backfill/4` already ships the migration-time scan but has no watermark, cursor, or non-migration mode; per binding gate ruling, ranks behind S9 (its first client). `/Users/clank/Desktop/projects/_orch/nodes/T23/work/survivor-evidence.md`.
-4. C-030-2 (Svärm) — held, premature: ROI metrics rank behind T169's cost dimension, which is already filed. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:424`.
-5. C-009-3 (ZAQ) — held, premature: `ROLES=`-gated supervision trees belong with the WS-L deploy recipe (T91), not ahead of it. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:148`.
-6. C-018-5 (ControlKeel) — held, premature: a hook-time verifier subset needs S2's runtime seam first; S2 is a promoted survivor. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:170`.
+1. S7 remainder — sub-turn (per-tool-call) mid-run interruption. Held because the run-level cancel already ships; only the in-flight, before-each-tool-call check is missing, and nothing blocks building it. `_orch/nodes/T23/work/survivor-evidence.md`.
+2. S8 remainder — keyed memoization of the provider LLM completion for crash-replay. Held because the run-level state machine already ships; the remainder is conditioned on S1 landing (C-001-7's derived-artifact rule). `_orch/nodes/T23/work/survivor-evidence.md`.
+3. S10 remainder — watermark-coordinated backfill discipline for live derived stores. Held because `chunked_backfill/4` already ships the migration-time scan but has no watermark, cursor, or non-migration mode; per binding gate ruling, ranks behind S9 (its first client). `_orch/nodes/T23/work/survivor-evidence.md`.
+4. C-030-2 (Svärm) — held, premature: ROI metrics rank behind T169's cost dimension, which is already filed. `_orch/nodes/T22/work/concept-verdicts.md:424`.
+5. C-009-3 (ZAQ) — held, premature: `ROLES=`-gated supervision trees belong with the WS-L deploy recipe (T91), not ahead of it. `_orch/nodes/T22/work/concept-verdicts.md:148`.
+6. C-018-5 (ControlKeel) — held, premature: a hook-time verifier subset needs S2's runtime seam first; S2 is a promoted survivor. `_orch/nodes/T22/work/concept-verdicts.md:170`.
 
 **Band 2 — blocked on a specific, already-named increment (a promoted survivor not yet built, the v2 subagent/scheduling line T176 defers, or a not-yet-started ADR).**
 
-7. C-001-5 (Ankole) — ranks directly below T178's decision-graph ADR. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:87`.
-8. C-000-5 (AlexClaw) — presupposes nested tool/subagent invocation, T176 v2. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:77`.
-9. C-024-5 (Pixir) — durable subagent timeouts presuppose subagents, T176 v2. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:223`.
-10. C-047-7 (Sagents) — child-to-parent interrupt escalation presupposes subagents, T176 v2. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:333`.
-11. C-016-2 (Neoharness) — presupposes agent-scheduled runs, T176 v2; trace-retention half rides S1. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:399`.
-12. C-019-6 (Genesis) — mid-run message injection is the increment after S8's durable pause/resume. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:180`.
-13. C-021-10 (Loomkin) — a diff-review component is polish on the built E3 surface. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:203`.
-14. C-024-4 (Pixir) — a materialized virtual-diff is UX on top of the built E3 draft shape. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:222`.
-15. C-044-4 (Lemon) — steering/follow-up queues rank with C-019-6, after S8. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:314`.
-16. C-047-6 (Sagents) — an `:edit` approval decision is polish on approvals shipping after S8. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:332`.
-17. C-032-3 (Agens) — LM-decided routing needs an ADR before it could be a build. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:437`.
+7. C-001-5 (Ankole) — ranks directly below T178's decision-graph ADR. `_orch/nodes/T22/work/concept-verdicts.md:87`.
+8. C-000-5 (AlexClaw) — presupposes nested tool/subagent invocation, T176 v2. `_orch/nodes/T22/work/concept-verdicts.md:77`.
+9. C-024-5 (Pixir) — durable subagent timeouts presuppose subagents, T176 v2. `_orch/nodes/T22/work/concept-verdicts.md:223`.
+10. C-047-7 (Sagents) — child-to-parent interrupt escalation presupposes subagents, T176 v2. `_orch/nodes/T22/work/concept-verdicts.md:333`.
+11. C-016-2 (Neoharness) — presupposes agent-scheduled runs, T176 v2; trace-retention half rides S1. `_orch/nodes/T22/work/concept-verdicts.md:399`.
+12. C-019-6 (Genesis) — mid-run message injection is the increment after S8's durable pause/resume. `_orch/nodes/T22/work/concept-verdicts.md:180`.
+13. C-021-10 (Loomkin) — a diff-review component is polish on the built E3 surface. `_orch/nodes/T22/work/concept-verdicts.md:203`.
+14. C-024-4 (Pixir) — a materialized virtual-diff is UX on top of the built E3 draft shape. `_orch/nodes/T22/work/concept-verdicts.md:222`.
+15. C-044-4 (Lemon) — steering/follow-up queues rank with C-019-6, after S8. `_orch/nodes/T22/work/concept-verdicts.md:314`.
+16. C-047-6 (Sagents) — an `:edit` approval decision is polish on approvals shipping after S8. `_orch/nodes/T22/work/concept-verdicts.md:332`.
+17. C-032-3 (Agens) — LM-decided routing needs an ADR before it could be a build. `_orch/nodes/T22/work/concept-verdicts.md:437`.
 
 **Band 3 — blocked on infrastructure samen deliberately has not chartered yet: a code-execution/compute tool, a third-party MCP client consumer, live AI provider keys, or a multi-agent/unattended-run surface.**
 
-18. C-042-3 (Legion) — the pure-Elixir Lua VM compute step, first among the sandbox cluster. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:304`.
-19. C-003-4 (Glorbo) — bwrap/`--cap-drop`/pasta isolation, no code-execution tool. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:97`.
-20. C-019-3 (Genesis) — systemd-run → bwrap → sandbox-exec chain, no code-execution tool. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:177`.
-21. C-037-1 (Cantrip) — port-isolated Dune sandbox, mined but no code-execution tool. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:267`.
-22. C-038-1 (Condukt) — in-memory→microVM→per-session-pod isolation ladder, no code-execution tool. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:277`.
-23. C-020-3 (Hive) — sandbox half, reader marked "watch, not adopt." `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:189`.
-24. C-005-3 (OSA) — an Elixir MCP client, nothing consumes third-party MCP servers today. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:112`.
-25. C-021-9 (Loomkin) — consuming external MCP servers, no consumer, INV-4 forces an adapter package. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:202`.
-26. C-012-4 (CYFR) — MCP stdio→HTTP bridge, no third-party MCP consumer exists. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:373`.
-27. C-039-2 (ElGraph) — MCP client with sampling/elicitation, study-only. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:287`.
-28. C-005-4 (OSA) — deferred tool loading, no tool-count pressure exists yet. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:113`.
-29. C-018-6 (ControlKeel) — burn-rate breakers, AI plane keyless today (T152). `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:171`.
-30. C-011-5 (Codex Pooler) — provider health/quota routing, AI plane keyless (T152). `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:366`.
-31. C-016-7 (Neoharness) — fuse-style provider-egress breaker, T169's `:stop` is the first tripwire. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:404`.
-32. C-014-2 (JidoBuilder) — per-agent-template breaker granularity ranks with C-016-7/C-018-6. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:384`.
-33. C-005-6 (OSA) — durable goals with stall auto-pause, loop is request-scoped today. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:115`.
-34. C-006-3 (Pepe) — directed agent-to-agent ACLs need a multi-agent surface not built. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:121`.
-35. C-007-4 (Shem) — per-tool risk-tag manifests, "AI writes do not exist" today. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:133`.
-36. C-009-1 (ZAQ) — two-tier runtime reconciliation, no hot-patchable running runtime yet. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:146`.
+18. C-042-3 (Legion) — the pure-Elixir Lua VM compute step, first among the sandbox cluster. `_orch/nodes/T22/work/concept-verdicts.md:304`.
+19. C-003-4 (Glorbo) — bwrap/`--cap-drop`/pasta isolation, no code-execution tool. `_orch/nodes/T22/work/concept-verdicts.md:97`.
+20. C-019-3 (Genesis) — systemd-run → bwrap → sandbox-exec chain, no code-execution tool. `_orch/nodes/T22/work/concept-verdicts.md:177`.
+21. C-037-1 (Cantrip) — port-isolated Dune sandbox, mined but no code-execution tool. `_orch/nodes/T22/work/concept-verdicts.md:267`.
+22. C-038-1 (Condukt) — in-memory→microVM→per-session-pod isolation ladder, no code-execution tool. `_orch/nodes/T22/work/concept-verdicts.md:277`.
+23. C-020-3 (Hive) — sandbox half, reader marked "watch, not adopt." `_orch/nodes/T22/work/concept-verdicts.md:189`.
+24. C-005-3 (OSA) — an Elixir MCP client, nothing consumes third-party MCP servers today. `_orch/nodes/T22/work/concept-verdicts.md:112`.
+25. C-021-9 (Loomkin) — consuming external MCP servers, no consumer, INV-4 forces an adapter package. `_orch/nodes/T22/work/concept-verdicts.md:202`.
+26. C-012-4 (CYFR) — MCP stdio→HTTP bridge, no third-party MCP consumer exists. `_orch/nodes/T22/work/concept-verdicts.md:373`.
+27. C-039-2 (ElGraph) — MCP client with sampling/elicitation, study-only. `_orch/nodes/T22/work/concept-verdicts.md:287`.
+28. C-005-4 (OSA) — deferred tool loading, no tool-count pressure exists yet. `_orch/nodes/T22/work/concept-verdicts.md:113`.
+29. C-018-6 (ControlKeel) — burn-rate breakers, AI plane keyless today (T152). `_orch/nodes/T22/work/concept-verdicts.md:171`.
+30. C-011-5 (Codex Pooler) — provider health/quota routing, AI plane keyless (T152). `_orch/nodes/T22/work/concept-verdicts.md:366`.
+31. C-016-7 (Neoharness) — fuse-style provider-egress breaker, T169's `:stop` is the first tripwire. `_orch/nodes/T22/work/concept-verdicts.md:404`.
+32. C-014-2 (JidoBuilder) — per-agent-template breaker granularity ranks with C-016-7/C-018-6. `_orch/nodes/T22/work/concept-verdicts.md:384`.
+33. C-005-6 (OSA) — durable goals with stall auto-pause, loop is request-scoped today. `_orch/nodes/T22/work/concept-verdicts.md:115`.
+34. C-006-3 (Pepe) — directed agent-to-agent ACLs need a multi-agent surface not built. `_orch/nodes/T22/work/concept-verdicts.md:121`.
+35. C-007-4 (Shem) — per-tool risk-tag manifests, "AI writes do not exist" today. `_orch/nodes/T22/work/concept-verdicts.md:133`.
+36. C-009-1 (ZAQ) — two-tier runtime reconciliation, no hot-patchable running runtime yet. `_orch/nodes/T22/work/concept-verdicts.md:146`.
 
 **Band 4 — debugging/replay affordance on top of value T173 already buys from the token-only Turn log; real, but purely additive.**
 
-37. C-007-1 (Shem) — deterministic replay; T173 already buys the regression-pin value. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:130`.
-38. C-007-3 (Shem) — fork-at-turn debugging, same family as C-007-1. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:132`.
-39. C-036-3 (BeamWeaver) — checkpoint fork/time-travel eval primitive. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:261`.
-40. C-037-3 (Cantrip) — forkable loom replay, ranks with C-007-1. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:269`.
-41. C-039-1 (ElGraph) — thread forking from a past checkpoint. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:286`.
+37. C-007-1 (Shem) — deterministic replay; T173 already buys the regression-pin value. `_orch/nodes/T22/work/concept-verdicts.md:130`.
+38. C-007-3 (Shem) — fork-at-turn debugging, same family as C-007-1. `_orch/nodes/T22/work/concept-verdicts.md:132`.
+39. C-036-3 (BeamWeaver) — checkpoint fork/time-travel eval primitive. `_orch/nodes/T22/work/concept-verdicts.md:261`.
+40. C-037-3 (Cantrip) — forkable loom replay, ranks with C-007-1. `_orch/nodes/T22/work/concept-verdicts.md:269`.
+41. C-039-1 (ElGraph) — thread forking from a past checkpoint. `_orch/nodes/T22/work/concept-verdicts.md:286`.
 
 **Band 5 — no demonstrated need, a hypothetical harm, or explicitly "no gap names it"; lowest promotion-readiness of the premature set.**
 
-42. C-000-3 (AlexClaw) — parent/child semantic chunking, no truncation pressure evidenced. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:75`.
-43. C-000-7 (AlexClaw) — declarative `on_circuit_open` resilience policy, no gap. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:79`.
-44. C-001-8 (Ankole) — Oban Lifeline stale-lock rescue, no gap. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:90`.
-45. C-002-1 (Fermix) — compaction preserving memory/scheduled jobs presupposes T178 + T176 v2. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:348`.
-46. C-002-2 (Fermix) — memory/fact extraction ordering, no demonstrated failure. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:349`.
-47. C-002-3 (Fermix) — deterministic agent-loop benchmark tier, no gap. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:350`.
-48. C-002-5 (Fermix) — per-subsystem `/health/ready`, belongs with WS-L (T91); S13 covers the preflight half. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:352`.
-49. C-006-4 (Pepe) — one agent definition serving multiple channels, S4 answers this more safely. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:122`.
-50. C-007-2 (Shem) — offline-verifiable attestation bundles, anchors to no gap. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:131`.
-51. C-008-1 (Vibe) — multi-surface session attach, no second surface exists. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:138`.
-52. C-009-2 (ZAQ) — map/fan-out node types extend built E1/E2, no gap. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:147`.
-53. C-009-7 (ZAQ) — build-time DAG contract refusal, same family as C-038-6. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:152`.
-54. C-009-8 (ZAQ) — persist-before-deliver ordering, no demonstrated instance. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:153`.
-55. C-009-9 (ZAQ) — atom-safety guard, hypothetical harm. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:154`.
-56. C-010-3 (Buster Claw) — end-user "everything the agent changed" receipts feed. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:358`.
-57. C-015-3 (jido-conductor) — manifest-described run templates, T162 already pins run definitions. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:390`.
-58. C-017-3 (Camelot) — emitting `CLAUDE.md`/`.claude/skills` at generation time, no gap. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:160`.
-59. C-018-2 (ControlKeel) — trace-mining into eval candidates, no eval corpus yet. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:167`.
-60. C-019-7 (Genesis) — bounded grace turns refine S7's cancellation. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:181`.
-61. C-019-9 (Genesis) — disk-full-safe write boundary, SQLite-specific, samen is Postgres-only. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:183`.
-62. C-023-1 (Maestro) — `mix samen.gen.app --stack <preset>`, no gap names presets. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:213`.
-63. C-023-3 (Maestro) — fake-vs-live provider comparison runs, ranks with C-046-2. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:215`.
-64. C-025-3 (Shep) — "green means a named check reported," governs samen's own gate. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:229`.
-65. C-034-4 (Alloy) — `until_tool` termination, "draft is ready" already terminates through E3. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:254`.
-66. C-037-6 (Cantrip) — signed hot-load wards, matter only if ADR-044 payloads become executable. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:272`.
-67. C-037-7 (Cantrip) — wards as a declarative constraint list, ranks behind S2. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:273`.
-68. C-038-6 (Condukt) — compile-time JSON-Schema-typed tool operations, ranks with C-009-7. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:282`.
-69. C-040-3 (Jido Studio) — trending eval results, ranks behind an eval corpus that doesn't exist. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:454`.
-70. C-040-4 (Jido Studio) — arm-before-run two-step, no gap names it. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:455`.
-71. C-040-5 (Jido Studio) — presence-based viewer counts, low-value polish. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:456`.
-72. C-044-1 (Lemon) — stateless-Loop/stateful-Agent split, no demonstrated defect. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:311`.
-73. C-044-2 (Lemon) — deterministic multi-agent scenario arenas, inspiration-only. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:312`.
-74. C-046-2 (Nous) — declarative YAML eval suites, authoring ergonomics over T72's built tier. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:320`.
-75. C-047-5 (Sagents) — `until_tool` structured completion, ranks with C-034-4. `/Users/clank/Desktop/projects/_orch/nodes/T22/work/concept-verdicts.md:331`.
+42. C-000-3 (AlexClaw) — parent/child semantic chunking, no truncation pressure evidenced. `_orch/nodes/T22/work/concept-verdicts.md:75`.
+43. C-000-7 (AlexClaw) — declarative `on_circuit_open` resilience policy, no gap. `_orch/nodes/T22/work/concept-verdicts.md:79`.
+44. C-001-8 (Ankole) — Oban Lifeline stale-lock rescue, no gap. `_orch/nodes/T22/work/concept-verdicts.md:90`.
+45. C-002-1 (Fermix) — compaction preserving memory/scheduled jobs presupposes T178 + T176 v2. `_orch/nodes/T22/work/concept-verdicts.md:348`.
+46. C-002-2 (Fermix) — memory/fact extraction ordering, no demonstrated failure. `_orch/nodes/T22/work/concept-verdicts.md:349`.
+47. C-002-3 (Fermix) — deterministic agent-loop benchmark tier, no gap. `_orch/nodes/T22/work/concept-verdicts.md:350`.
+48. C-002-5 (Fermix) — per-subsystem `/health/ready`, belongs with WS-L (T91); S13 covers the preflight half. `_orch/nodes/T22/work/concept-verdicts.md:352`.
+49. C-006-4 (Pepe) — one agent definition serving multiple channels, S4 answers this more safely. `_orch/nodes/T22/work/concept-verdicts.md:122`.
+50. C-007-2 (Shem) — offline-verifiable attestation bundles, anchors to no gap. `_orch/nodes/T22/work/concept-verdicts.md:131`.
+51. C-008-1 (Vibe) — multi-surface session attach, no second surface exists. `_orch/nodes/T22/work/concept-verdicts.md:138`.
+52. C-009-2 (ZAQ) — map/fan-out node types extend built E1/E2, no gap. `_orch/nodes/T22/work/concept-verdicts.md:147`.
+53. C-009-7 (ZAQ) — build-time DAG contract refusal, same family as C-038-6. `_orch/nodes/T22/work/concept-verdicts.md:152`.
+54. C-009-8 (ZAQ) — persist-before-deliver ordering, no demonstrated instance. `_orch/nodes/T22/work/concept-verdicts.md:153`.
+55. C-009-9 (ZAQ) — atom-safety guard, hypothetical harm. `_orch/nodes/T22/work/concept-verdicts.md:154`.
+56. C-010-3 (Buster Claw) — end-user "everything the agent changed" receipts feed. `_orch/nodes/T22/work/concept-verdicts.md:358`.
+57. C-015-3 (jido-conductor) — manifest-described run templates, T162 already pins run definitions. `_orch/nodes/T22/work/concept-verdicts.md:390`.
+58. C-017-3 (Camelot) — emitting `CLAUDE.md`/`.claude/skills` at generation time, no gap. `_orch/nodes/T22/work/concept-verdicts.md:160`.
+59. C-018-2 (ControlKeel) — trace-mining into eval candidates, no eval corpus yet. `_orch/nodes/T22/work/concept-verdicts.md:167`.
+60. C-019-7 (Genesis) — bounded grace turns refine S7's cancellation. `_orch/nodes/T22/work/concept-verdicts.md:181`.
+61. C-019-9 (Genesis) — disk-full-safe write boundary, SQLite-specific, samen is Postgres-only. `_orch/nodes/T22/work/concept-verdicts.md:183`.
+62. C-023-1 (Maestro) — `mix samen.gen.app --stack <preset>`, no gap names presets. `_orch/nodes/T22/work/concept-verdicts.md:213`.
+63. C-023-3 (Maestro) — fake-vs-live provider comparison runs, ranks with C-046-2. `_orch/nodes/T22/work/concept-verdicts.md:215`.
+64. C-025-3 (Shep) — "green means a named check reported," governs samen's own gate. `_orch/nodes/T22/work/concept-verdicts.md:229`.
+65. C-034-4 (Alloy) — `until_tool` termination, "draft is ready" already terminates through E3. `_orch/nodes/T22/work/concept-verdicts.md:254`.
+66. C-037-6 (Cantrip) — signed hot-load wards, matter only if ADR-044 payloads become executable. `_orch/nodes/T22/work/concept-verdicts.md:272`.
+67. C-037-7 (Cantrip) — wards as a declarative constraint list, ranks behind S2. `_orch/nodes/T22/work/concept-verdicts.md:273`.
+68. C-038-6 (Condukt) — compile-time JSON-Schema-typed tool operations, ranks with C-009-7. `_orch/nodes/T22/work/concept-verdicts.md:282`.
+69. C-040-3 (Jido Studio) — trending eval results, ranks behind an eval corpus that doesn't exist. `_orch/nodes/T22/work/concept-verdicts.md:454`.
+70. C-040-4 (Jido Studio) — arm-before-run two-step, no gap names it. `_orch/nodes/T22/work/concept-verdicts.md:455`.
+71. C-040-5 (Jido Studio) — presence-based viewer counts, low-value polish. `_orch/nodes/T22/work/concept-verdicts.md:456`.
+72. C-044-1 (Lemon) — stateless-Loop/stateful-Agent split, no demonstrated defect. `_orch/nodes/T22/work/concept-verdicts.md:311`.
+73. C-044-2 (Lemon) — deterministic multi-agent scenario arenas, inspiration-only. `_orch/nodes/T22/work/concept-verdicts.md:312`.
+74. C-046-2 (Nous) — declarative YAML eval suites, authoring ergonomics over T72's built tier. `_orch/nodes/T22/work/concept-verdicts.md:320`.
+75. C-047-5 (Sagents) — `until_tool` structured completion, ranks with C-034-4. `_orch/nodes/T22/work/concept-verdicts.md:331`.
 
 **Band 6 — structurally excluded, not merely waiting: fails the §5 foundry bar itself, so no amount of waiting promotes it absent a scope change.**
 
-76. #20 — `mix samen.orch.tick` (claims-ledger bookkeeping over `backlog.yaml`). Held because it fails the §5 foundry bar (tools samen's own gitignored `_orch/` dev state, no generated app inherits it) and no WS/G/ADR anchor exists. Rank 20 (last) in Part 1's prior ordering, stays last here — nothing found in this second pass strengthens it. `/Users/clank/Desktop/projects/_orch/nodes/T14/work/w1-verdicts.md:462-519`.
+76. #20 — `mix samen.orch.tick` (claims-ledger bookkeeping over `backlog.yaml`). Held because it fails the §5 foundry bar (tools samen's own gitignored `_orch/` dev state, no generated app inherits it) and no WS/G/ADR anchor exists. Rank 20 (last) in Part 1's prior ordering, stays last here — nothing found in this second pass strengthens it. `_orch/nodes/T14/work/w1-verdicts.md:462-519`.
 
 #### DEAD, NOT HELD
 
@@ -452,7 +456,7 @@ concepts, so this list keys off T23 throughout.
 **T22 bar-rejected concepts (138 total: bar 1 × 33, bar 2 × 1, bar 3 × 94, bar 4 × 10).** These are
 not "premature" — T22 ruled them structurally excluded on a named bar, not merely not-yet-ready.
 Full itemized list (each with source, ruling location and one-line ground) is embedded verbatim in
-`/Users/clank/Desktop/projects/_orch/nodes/T32/work/next-tier.md` (`## DEAD, NOT HELD`, lines
+`_orch/nodes/T32/work/next-tier.md` (`## DEAD, NOT HELD`, lines
 158–320 of that file); the arithmetic is reproduced here as the section's own record:
 
 - **Bar 1 — fails the foundry-substrate bar (33 concepts).** Dominant pattern: samen's own
@@ -489,7 +493,7 @@ Full itemized list (each with source, ruling location and one-line ground) is em
   unattended burn-down (Symphony C-026-1, named by the directive); `full_auto` mode auto-approval
   (Agent Harness C-027-1); tracker-polling claim-and-retry (Conductor C-029-1).
 
-**Arithmetic (source: `/Users/clank/Desktop/projects/_orch/nodes/T32/work/next-tier.md`, lines
+**Arithmetic (source: `_orch/nodes/T32/work/next-tier.md`, lines
 321–331).** HELD: 76 (3 T23 narrowed remainders + 72 T22 `premature` + 1 held workstream-1
 candidate, #20). DEAD, NOT HELD: 138 (0 T23 `dead` + 138 T22 bar-rejected). 72 + 138 = 210 matches
 T22's declared `REJECTED` total exactly; the 31 `SURVIVES` concepts are accounted for separately —

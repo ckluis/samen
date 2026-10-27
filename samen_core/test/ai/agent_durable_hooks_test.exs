@@ -62,8 +62,8 @@ end
 
 defmodule Samen.AI.AgentDurableHooksTest do
   @moduledoc """
-  UXD-08/UXD-09 — binding verdict:
-  `/Users/clank/Desktop/projects/samen-oss-burndown/_orch/verify/T21-verdict.json`.
+  UXD-08/UXD-09 — binding verdict: the burn-down's T21 verifier verdict (unpublished run
+  notes).
 
   `Samen.AI.Agent.start/4` silently ignored the per-run `:hooks` opt: `resolve_hooks/1`
   ran inside `run/4`'s `with`-block and nowhere in `start/4`'s, so a caller handing

@@ -2,7 +2,7 @@
 
 > Sub-orchestrator deliverable. Lens: the experience of a **tenant's end-users actually using
 > a SaaS product built on Samen**. Benchmark: world-class B2B product UX (Linear, Notion,
-> Stripe-embedded, Intercom-embedded, modern LiveView apps). Repo: `~/Desktop/projects/samen`.
+> Stripe-embedded, Intercom-embedded, modern LiveView apps). Repo: https://github.com/ckluis/samen.
 > All file paths absolute. Read against the "make building AND running a SaaS a joy" north star.
 
 ## TL;DR
@@ -29,19 +29,19 @@ framework that proves masking" and "a SaaS foundry that makes *using* the produc
 
 ## Evidence base (what I actually read)
 
-- UI kit: `/Users/clank/Desktop/projects/samen/samen_web/lib/samen/ui.ex` (852 lines — the whole
+- UI kit: https://github.com/ckluis/samen/blob/85058d1ed50e4a200c2769ca2e05a2812d4020d2/samen_web/lib/samen/ui.ex (852 lines — the whole
   component vocabulary: shell, sidebar, nav, topbar, button, tabs, data_table, pill, object_card,
   progress, metric, mask_bar, token_blind_bar, timeline, lifecycle_pill, social_links).
-- Representative list page: `/Users/clank/Desktop/projects/samen/samen_web/lib/samen/web/crm/contacts_live.ex`.
-- Write path: `/Users/clank/Desktop/projects/samen/samen_web/lib/samen/web/crm/contact_live.ex`
+- Representative list page: https://github.com/ckluis/samen/blob/85058d1ed50e4a200c2769ca2e05a2812d4020d2/samen_web/lib/samen/web/crm/contacts_live.ex.
+- Write path: https://github.com/ckluis/samen/blob/85058d1ed50e4a200c2769ca2e05a2812d4020d2/samen_web/lib/samen/web/crm/contact_live.ex
   (`log_activity` form, lines 62–70, 310–326).
-- Router: `/Users/clank/Desktop/projects/samen/samen_web/lib/samen/web/router.ex`.
-- Cross-cutting primitives: `/Users/clank/Desktop/projects/samen/samen_core/lib/samen/scopes/primitives/blueprint.ex`
+- Router: https://github.com/ckluis/samen/blob/85058d1ed50e4a200c2769ca2e05a2812d4020d2/samen_web/lib/samen/web/router.ex.
+- Cross-cutting primitives: https://github.com/ckluis/samen/blob/85058d1ed50e4a200c2769ca2e05a2812d4020d2/samen_core/lib/samen/scopes/primitives/blueprint.ex
   (Notification, File, SearchIndex, Webhook, FeatureFlag resources), `.../primitives/audit.ex`,
   `.../primitives/search_index_guard.ex`.
-- Identity self-serve resources: `/Users/clank/Desktop/projects/samen/samen_core/lib/samen/scopes/identity/blueprint.ex`
+- Identity self-serve resources: https://github.com/ckluis/samen/blob/85058d1ed50e4a200c2769ca2e05a2812d4020d2/samen_core/lib/samen/scopes/identity/blueprint.ex
   (Membership, Invitation, ApiKey).
-- CSS: `/Users/clank/Desktop/projects/samen/samen_web/priv/static/assets/samen_ui.css` (500 lines,
+- CSS: https://github.com/ckluis/samen/blob/85058d1ed50e4a200c2769ca2e05a2812d4020d2/samen_web/priv/static/assets/samen_ui.css (500 lines,
   `@media` count = **0**, skeleton/loading/keyframes count = **0**).
 - Gate reports (`docs/gate-*.md`) + `docs/next-session-brief.md` for known residues.
 

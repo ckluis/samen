@@ -2,7 +2,7 @@
 
 Sections parsed: `06-07-business-collaboration-saas.txt` (whole, minus nyght-RBAC/Tymeslot-SSRF/Craftplan-S3 lines owned by other themes), `00-01-executive-summary.txt` (Plausible + Lightning cards), `07-08-communication-social-federation.txt` (vutuv DSAR/activity-log, Mobilizon geocoder/ICS, Bonfire Boundaries/Epics only), `08-09-quick-hits.txt` (Nivose i18n/vix/sitemap, OLI Torus gettext-at-scale, Semaphore audit-CSV/S3 only).
 
-Repo verification note (per the cross-theme warning): every "samen lacks X" below was grep-verified against `~/Desktop/projects/samen` on 2026-08-21. Two of this theme's headline candidates survived intact (G24 i18n, automation run pinning), one survived in narrowed form (G19 — the kernel primitive exists, the self-serve surface does not), and one headline report claim (Plausible visitor identity for the analytics scope) is **already built stronger in samen** and is demoted to validation.
+Repo verification note (per the cross-theme warning): every "samen lacks X" below was grep-verified against https://github.com/ckluis/samen on 2026-08-21. Two of this theme's headline candidates survived intact (G24 i18n, automation run pinning), one survived in narrowed form (G19 — the kernel primitive exists, the self-serve surface does not), and one headline report claim (Plausible visitor identity for the analytics scope) is **already built stronger in samen** and is demoted to validation.
 
 ---
 

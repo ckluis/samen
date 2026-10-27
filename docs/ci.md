@@ -327,6 +327,14 @@ at it; or a document resolves nothing at all. Not checked: flags of the other sc
 `mutate.sh`, …), paths outside those four directories, `ini` code fences. Unquoted prose naming the driver
 followed by a plain word reads as a subcommand: write `scripts/ci` in backticks. Fix the doc, not the check.
 
+### Local paths — `scripts/no_local_paths`
+
+The `no_local_paths` step (quick/pr/full, ~1 s) fails when any tracked text file names a path on someone's
+machine: a home directory (`/Users/<name>/`, `/home/<name>/`), a `~/Desktop`, `~/Downloads` or `~/Documents`
+path, a macOS temp dir (`/private/tmp`, `/private/var`) or an agent scratchpad. On GitHub, name a file in this
+repo by its GitHub URL (`https://github.com/ckluis/samen/blob/<sha>/<path>`, a commit permalink, or `blob/main/…`);
+name a file that never left a laptop by what it is, not where it was. Placeholders like `/Users/<name>` pass.
+
 ## 10. GitHub Actions
 
 - `.github/workflows/pr.yml` (on `pull_request` to main; `contents: read`; never `pull_request_target`;
@@ -444,6 +452,7 @@ test suites, then samen_core's tree-wide keys; a test-only edit no longer re-run
 | `apply_check` / `double_sweep` red on a patch | `scripts/sabotage reanchor <n>`; if refused, regenerate with `sabotage new`. |
 | `counts` red | `scripts/counts --write`, commit the CLAUDE.md change. |
 | `docs_check` red | the line names the file, line and missing command/step/path; fix the doc. |
+| `no_local_paths` red | the line names the file and the local path; replace it with the file's GitHub URL (or describe a file that was never published). |
 | lane leftovers | lane trees `.git/samen-lanes/<b|c|d>` are kept on purpose (warm `_build`). Drop them with `git worktree remove --force .git/samen-lanes/b` (then `git worktree prune`) and the `*_lane<k>` databases with `psql -d postgres -Atc "select datname from pg_database where datname ~ '_lane[0-9]+$'"` → `dropdb <name>` per row. Never while a replay is running. |
 | a chunk passed earlier is re-running | its inputs changed (any edit re-keys a `**` step), or `--no-cache` was given: a rising per-item rate alone no longer voids finished chunks (§3, `_ci/partition/`). |
 | patch N fails once under lanes, passes alone | the lanes print `scripts/sabotage.sh --range N-N` to re-check it alone; a flaky guard still fails the run — fix the timing dependence (patch 368 is a known compile-vs-run race). |

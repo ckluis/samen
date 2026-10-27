@@ -187,6 +187,14 @@ defmodule Samen.Meta.CiDriverGuardTest.DocDrift do
   end
 end
 
+defmodule Samen.Meta.CiDriverGuardTest.LocalPaths do
+  use ExUnit.Case, async: true
+
+  test "LOCALPATHS no tracked file names a path on someone's machine" do
+    Samen.Meta.CiDriverGuard.run_case!("LOCALPATHS")
+  end
+end
+
 # ── ADR-053 P5 — follow-ups ───────────────────────────────────────────────────────────────────────
 
 defmodule Samen.Meta.CiDriverGuardTest.GenProbeIsolation do

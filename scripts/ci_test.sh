@@ -1170,6 +1170,38 @@ STUB
   done
 }
 
+# LOCALPATHS: no tracked file names a path on someone's machine. The fixture is a tiny git repo; each defect is ONE
+# tracked file carrying one local-path shape (positive control first, so the check can go red AND green).
+case_LOCALPATHS() {
+  local F="$T/localpaths"
+  rm -rf "$F"; mkdir -p "$F/scripts" "$F/docs"
+  cp "$ROOT/scripts/no_local_paths" "$ROOT/scripts/no_local_paths.py" "$F/scripts/"
+  git -C "$F" init -q
+  printf 'see https://github.com/ckluis/samen/blob/main/docs/ci.md, ~/.cache/samen and /Users/<name>/x or /Users/.../y\n' > "$F/docs/ok.md"
+  git -C "$F" add -A
+  local C="env SAMEN_LOCAL_PATHS_REPO=$F bash $F/scripts/no_local_paths"
+  $C > "$T/lp0" 2>&1; eq "$?" 0 "LOCALPATHS: positive control — GitHub URLs, ~/.cache and <name>/... placeholders pass"
+  has "$T/lp0" '^NO_LOCAL_PATHS: OK' "LOCALPATHS: ... and says OK"
+  local i=0 shape
+  for shape in '/Users/someone/Desktop/projects/samen/docs/ci.md' '/home/someone/samen/x' '~/Desktop/projects/samen' \
+               '~/Downloads/plan.md' '/private/tmp/scratch/x' '/tmp/claude-501/scratchpad/x'; do
+    i=$((i+1)); printf 'path: %s\n' "$shape" > "$F/docs/bad$i.md"; git -C "$F" add "docs/bad$i.md"
+    $C > "$T/lp$i" 2>&1; eq "$?" 1 "LOCALPATHS: a tracked file naming $shape fails"
+    has "$T/lp$i" "^docs/bad$i.md:1: " "LOCALPATHS: ... naming the file and line"
+    git -C "$F" rm -q -f "docs/bad$i.md"
+  done
+  printf 'x\0/Users/someone/bin\n' > "$F/docs/blob.bin"; printf '/Users/someone/untracked\n' > "$F/docs/untracked.md"
+  git -C "$F" add docs/blob.bin
+  $C > "$T/lp8" 2>&1; eq "$?" 0 "LOCALPATHS: a binary file and an UNTRACKED file are not scanned"
+  # the REAL tree is clean, and the check runs in every mode
+  bash "$ROOT/scripts/no_local_paths" > "$T/lp9" 2>&1; eq "$?" 0 "LOCALPATHS: the real tree names no local machine path"
+  local m
+  for m in quick pr full; do
+    env -u SAMEN_CI_MANIFEST -u SAMEN_CI_REPO -u SAMEN_CI_HOME "$CI" list "$m" > "$T/lp10.$m" 2>&1
+    has "$T/lp10.$m" '^no_local_paths +' "LOCALPATHS: the local-path check is a $m step"
+  done
+}
+
 # GENPROBE (ADR-053 P5): the flagship/post/deploy gen probes run CONCURRENTLY. What made them serial was one shared
 # resource — the committed abbrev registry, which each probe mutated in place and restored from a snapshot (two
 # probes would restore each other's reservations away) — plus a scratch sweep that deleted every probe's working
@@ -1765,7 +1797,7 @@ PY
   eq "$n" 4 "GENDEPS: the four gen_* probe steps declare the helper as an input"
 }
 
-ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS GENPROBE NARROW RECHUNK COSTW TIMEOUT SELTMO GENDEPS)
+ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS LOCALPATHS GENPROBE NARROW RECHUNK COSTW TIMEOUT SELTMO GENDEPS)
 CASES=("$@")
 [[ ${#CASES[@]} -gt 0 ]] || CASES=("${ALL[@]}")
 for c in "${CASES[@]}"; do

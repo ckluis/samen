@@ -4,7 +4,7 @@
 the design contract. `mix compile --warnings-as-errors` clean; **43 samen_web tests pass**;
 **samen_core untouched + still 842 green** (verified `--seed 0 --warnings-as-errors`).
 
-The library is at `/Users/clank/Desktop/projects/samen/samen_web`.
+The library is at https://github.com/ckluis/samen/tree/6fea9fe1ac3ace066ac5bb2c91c7f3e6fc125e1b/samen_web.
 
 ---
 
