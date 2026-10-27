@@ -111,13 +111,15 @@ defmodule Samen.WideEventTest do
 
   describe "in-memory sink (bounded ring buffer)" do
     setup do
-      {:ok, pid} =
-        Sinks.InMemory.start_link(
-          name: :test_in_mem,
-          retention: %Retention{ttl_seconds: 3600, max_events: 3}
+      # Supervised by ExUnit, which stops it after the test. A start_link'd sink is linked to the
+      # test process and can die as that process exits, between an on_exit `Process.alive?` and
+      # its `GenServer.stop` (the teardown flake: `GenServer.stop … no process`).
+      pid =
+        start_supervised!(
+          {Sinks.InMemory,
+           name: :test_in_mem, retention: %Retention{ttl_seconds: 3600, max_events: 3}}
         )
 
-      on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
       %{pid: pid}
     end
 
