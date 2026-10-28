@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Demo CI gate — exactly the §runs 3 gate:
-#   mix compile --warnings-as-errors &&
+#   mix compile --force --warnings-as-errors &&
 #   schema.dict.json drift check (B3 / Gate-1 F5) &&
 #   samen.verify.catalog_parity &&
 #   samen.verify.prefixes &&
@@ -35,8 +35,8 @@ cd "$DEMO_DIR"
 echo "==> demo CI gate: starting (MIX_ENV=$MIX_ENV)"
 
 # 1. Compile
-echo "--- step 1/18: mix compile --warnings-as-errors"
-mix compile --warnings-as-errors
+echo "--- step 1/18: mix compile --force --warnings-as-errors"
+mix compile --force --warnings-as-errors
 echo "    PASSED"
 
 # 1a. Migrate (A4 gate P2: catalog_parity queries the live DB, so the gate must

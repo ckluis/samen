@@ -1,0 +1,20 @@
+# SABOTAGE: a strict compile without --force reuses a cached build and hides Spark verifier warnings (#108 
+#   broke main this way)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/strict_compile_force_test.exs
+# MUST_FAIL: every strict compile in CI forces a recompile of the app's own code
+diff --git a/driftwood/ci.sh b/driftwood/ci.sh
+index 5ee2f57a..2901d535 100755
+--- a/driftwood/ci.sh
++++ b/driftwood/ci.sh
+@@ -27,7 +27,7 @@ echo "==> driftwood CI gate: starting (MIX_ENV=$MIX_ENV)"
+ 
+ # 1. Compile (warnings are errors).
+ echo "--- step 1/20: mix compile --force --warnings-as-errors"
+-mix compile --force --warnings-as-errors
++mix compile --warnings-as-errors
+ echo "    PASSED"
+ 
+ # 1a. Bootstrap: recreate + migrate driftwood_test and register the reviewed

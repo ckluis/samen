@@ -57,7 +57,12 @@ defmodule Samen.Meta.ScriptedAsyncIsolationTest do
   # adapters) and `<dir>/<app>/test/**` covers the nested ones (spikes/*). A newly added app
   # is scanned BY DEFAULT — the fail-closed direction, and the same reason ci-fast.sh derives
   # its covered set from its own source instead of listing it.
-  @test_globs ~w(*/test/**/*_test.exs */*/test/**/*_test.exs)
+  #
+  # The globs name the `test/` ROOTS; `**` runs only inside roots that survive the exclusions
+  # below. `*/*/test` also matches `<app>/_build/test` (thousands of .beam files, rewritten
+  # while a concurrent `mix compile --force` runs), and walking those before filtering timed
+  # this test out under `scripts/ci pr` load.
+  @test_root_globs ~w(*/test */*/test)
 
   # Build dirs, vendored deps, and the orchestration scratch trees (`_orch/`, `_orch-runs/`,
   # which hold COPIES of real test files) are not the test tree.
@@ -150,15 +155,19 @@ defmodule Samen.Meta.ScriptedAsyncIsolationTest do
   # --- the scan --------------------------------------------------------------------------
 
   defp scan do
-    @test_globs
+    @test_root_globs
     |> Enum.flat_map(fn glob -> Path.wildcard(Path.join(@repo_root, glob)) end)
-    |> Enum.reject(fn path -> Enum.any?(@excluded_fragments, &String.contains?(path, &1)) end)
+    |> Enum.reject(&excluded?(&1 <> "/"))
+    |> Enum.flat_map(fn root -> Path.wildcard(Path.join(root, "**/*_test.exs")) end)
+    |> Enum.reject(&excluded?/1)
     |> Enum.uniq()
     |> Enum.sort()
     |> Enum.map(fn path ->
       analyze_source(Path.relative_to(path, @repo_root), File.read!(path))
     end)
   end
+
+  defp excluded?(path), do: Enum.any?(@excluded_fragments, &String.contains?(path, &1))
 
   # `%{path:, async?:, scripted_lines:}` for one test source. An unparseable test file is a
   # LOUD failure, never a silent skip: a file this guard cannot read is a file in which the

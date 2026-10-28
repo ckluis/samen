@@ -15,8 +15,8 @@ cd "$APP_DIR"
 
 echo "==> <%= otp_app %> CI gate: starting (MIX_ENV=$MIX_ENV)"
 
-echo "--- step 1/18: mix compile --warnings-as-errors"
-mix compile --warnings-as-errors
+echo "--- step 1/18: mix compile --force --warnings-as-errors"
+mix compile --force --warnings-as-errors
 echo "    PASSED"
 
 echo "--- step 1a/18: DB bootstrap (migrate)"

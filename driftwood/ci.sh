@@ -3,7 +3,7 @@
 # section), run against Driftwood's mounted CRM scope + the vertical Freight
 # resources (Driver / Settlement / DispatchEvent) + the Driftwood.Context reshape.
 #
-#   mix compile --warnings-as-errors
+#   mix compile --force --warnings-as-errors
 #   schema.dict.json drift check
 #   samen.verify.catalog_parity / prefixes / pii_reads / pii_classify / no_plaintext_pii
 #   samen.verify.migrations / sink_schema / metric_labels / vault_declared_parity
@@ -26,8 +26,8 @@ cd "$DW_DIR"
 echo "==> driftwood CI gate: starting (MIX_ENV=$MIX_ENV)"
 
 # 1. Compile (warnings are errors).
-echo "--- step 1/20: mix compile --warnings-as-errors"
-mix compile --warnings-as-errors
+echo "--- step 1/20: mix compile --force --warnings-as-errors"
+mix compile --force --warnings-as-errors
 echo "    PASSED"
 
 # 1a. Bootstrap: recreate + migrate driftwood_test and register the reviewed
