@@ -114,7 +114,7 @@ defmodule Samen.Scopes.Work.Blueprint do
   # (parent_id — the Subtask tree, cycle-refused). Org-scoped. No PII. Archivable,
   # cascading to its own subtree.
   # ---------------------------------------------------------------------------
-  defmacro define_task(module, otp_app, domain, repo, abbrev, project_mod) do
+  defmacro define_task(module, otp_app, domain, repo, abbrev, project_mod, signals_mod) do
     quote do
       defmodule unquote(module) do
         @moduledoc """
@@ -133,7 +133,10 @@ defmodule Samen.Scopes.Work.Blueprint do
         `project_id` links to an optional `Project`.
 
         Archivable (ADR-040 §5.9); archiving a Task cascades to its Subtask subtree
-        (`archive_related([:subtasks])`, ADR-041 §3.5).
+        (`archive_related([:subtasks])`, ADR-041 §3.5). Restoring one restores its
+        archived subtasks (`Samen.Scopes.Work.CascadeRestore`), a listener of the task's
+        own `:restored` signal (`<Task>.Archival`, issue #96 D3) — so each restored
+        subtask's own signal reaches the next level of the subtree.
 
         No PII: `title`/`body`/`custom` are freeform user content, unvaulted
         (Activity parity, default-deny-CDC-excluded, never plaintext-mirrored).
@@ -144,7 +147,8 @@ defmodule Samen.Scopes.Work.Blueprint do
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
           abbrev: unquote(abbrev),
-          archivable: true
+          archivable: true,
+          archival_signals: unquote(signals_mod)
 
         postgres do
           table("#{unquote(abbrev)}_task")
@@ -204,11 +208,15 @@ defmodule Samen.Scopes.Work.Blueprint do
         changes do
           change({Samen.Policy.SameOrgFk, relationships: [:parent, :project]})
           change(Samen.Scopes.Work.CycleGuard)
-          # Restore-side cascade counterpart to archive_related([:subtasks]) below —
-          # ash_archival ships no restore-cascade primitive (ADR-041 §3.5). Self-guards
-          # on the action NAME (see CascadeRestore moduledoc) — `:on` alone cannot
-          # discriminate :restore from the plain :update (both type :update).
-          change(Samen.Scopes.Work.CascadeRestore)
+        end
+
+        # Restore-side cascade counterpart to archive_related([:subtasks]) below —
+        # ash_archival ships no restore-cascade primitive (ADR-041 §3.5). A listener of
+        # this task's OWN `:restored` signal (issue #96 D3).
+        signals_in do
+          from unquote(signals_mod) do
+            on(:restored, :cascade_parent_restored)
+          end
         end
 
         archive do
@@ -222,9 +230,21 @@ defmodule Samen.Scopes.Work.Blueprint do
 
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
+
+          action :cascade_parent_restored do
+            argument(:signal, unquote(Module.concat(signals_mod, Restored)), allow_nil?: false)
+            run(Samen.Scopes.Work.CascadeRestore)
+          end
         end
 
         policies do
+          # The cascade listener runs as the actor who restored the parent task, whose
+          # restore was already authorized; it is reachable ONLY as a listener of that
+          # signal, never called directly.
+          bypass action(:cascade_parent_restored) do
+            authorize_if(signal_in(unquote(signals_mod), :restored))
+          end
+
           policy action_type(:read) do
             authorize_if(Samen.Policy.OrgScope)
           end

@@ -95,7 +95,8 @@ defmodule Samen.Scopes.Support.Blueprint do
              sla_mod,
              conversation_mod,
              csat_survey_token_mod,
-             csat_mod
+             csat_mod,
+             signals_mod
            ) do
     quote do
       defmodule unquote(module) do
@@ -134,7 +135,9 @@ defmodule Samen.Scopes.Support.Blueprint do
         so the cascade sweeps conversations by `ticket_id` and then messages by
         `conversation_id` under those same conversations); restoring a ticket
         restores exactly the same-instant-archived members
-        (`Samen.Scopes.Support.CascadeRestore`).
+        (`Samen.Scopes.Support.CascadeRestore`). The ticket only emits
+        `:archived`/`:restored` (`<Ticket>.Archival`, issue #96 D3); both cascades
+        are `Conversation`'s listeners.
 
         **POSTURE (T125, ADR-040 §5.4/§5.9 reconciled — INDEPENDENT-ARCHIVABLE
         CHILDREN EVERYWHERE):** `Conversation` and `Message` are ORDINARY
@@ -157,7 +160,8 @@ defmodule Samen.Scopes.Support.Blueprint do
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
           abbrev: unquote(abbrev),
-          archivable: true
+          archivable: true,
+          archival_signals: unquote(signals_mod)
 
         postgres do
           table("#{unquote(abbrev)}_ticket")
@@ -240,19 +244,6 @@ defmodule Samen.Scopes.Support.Blueprint do
         changes do
           change({Samen.Policy.SameOrgFk, relationships: [:sla]})
 
-          # Ticket ▸ {Conversation, Message} same-instant cascade (§5.4). See
-          # `Samen.Scopes.Support.CascadeArchive`/`CascadeRestore` moduledocs for why
-          # this scope does not use ash_archival's `archive_related` DSL option
-          # directly (timestamp exactness + audit completeness — mirrors
-          # `Samen.Scopes.Cms.CascadeArchive`/`Samen.Scopes.Chat.CascadeArchive`).
-          #
-          # `on:` defaults to `[:create, :update]` (Ash omits `:destroy` by default).
-          # `:archive` IS a `:destroy`-type action, so CascadeArchive needs
-          # `on: [:destroy]` explicitly or it silently never runs. CascadeRestore's
-          # `:restore` is `:update`-typed, already covered by the default.
-          change(Samen.Scopes.Support.CascadeArchive, on: [:destroy])
-          change(Samen.Scopes.Support.CascadeRestore)
-
           # I6 (spec §I6, T79) — CSAT loop trigger: a ticket transitioning INTO
           # `:resolved` sets `resolved_at` (part of THIS atomic write — closes a
           # pre-existing gap, `resolved_at` was never actually set by any
@@ -290,7 +281,16 @@ defmodule Samen.Scopes.Support.Blueprint do
   # Conversation — a thread attached to a ticket. Org-scoped. No PII.
   # A ticket may have multiple conversations (internal/external channels).
   # ---------------------------------------------------------------------------
-  defmacro define_conversation(module, otp_app, domain, repo, abbrev, ticket_mod, message_mod) do
+  defmacro define_conversation(
+             module,
+             otp_app,
+             domain,
+             repo,
+             abbrev,
+             ticket_mod,
+             message_mod,
+             ticket_signals
+           ) do
     quote do
       defmodule unquote(module) do
         @moduledoc """
@@ -302,8 +302,8 @@ defmodule Samen.Scopes.Support.Blueprint do
         ## INDEPENDENTLY-ARCHIVABLE (posture A)
 
         Archivable — carries `archived_at` + the `:archive`/`:restore`/`:archived`
-        actions so `Samen.Scopes.Support.CascadeArchive`/`CascadeRestore` (declared on
-        `Ticket`) have something to set/match/restore, and also the cascade PARENT one
+        actions so `Samen.Scopes.Support.CascadeArchive`/`CascadeRestore` (this
+        resource's listeners of the ticket's archival signals) have something to set/match/restore, and also the cascade PARENT one
         level down for `Message` (`conversation ▸cascade message`). Per T125's
         reconciliation of ADR-040 §5.4/§5.9 (posture A — independent-archivable
         children everywhere, matching CMS), a `Conversation` is ALSO an ORDINARY
@@ -365,8 +365,27 @@ defmodule Samen.Scopes.Support.Blueprint do
           end
         end
 
+        # The ticket ▸ {conversation, message} cascade (§5.4), both directions, as
+        # listeners of the ticket's archival signals (issue #96 D3).
+        signals_in do
+          from unquote(ticket_signals) do
+            on(:archived, :cascade_ticket_archived)
+            on(:restored, :cascade_ticket_restored)
+          end
+        end
+
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
+
+          action :cascade_ticket_archived do
+            argument(:signal, unquote(Module.concat(ticket_signals, Archived)), allow_nil?: false)
+            run(Samen.Scopes.Support.CascadeArchive)
+          end
+
+          action :cascade_ticket_restored do
+            argument(:signal, unquote(Module.concat(ticket_signals, Restored)), allow_nil?: false)
+            run(Samen.Scopes.Support.CascadeRestore)
+          end
         end
 
         # F3.2 same-org FK: a conversation may only reference a same-org ticket.
@@ -375,6 +394,17 @@ defmodule Samen.Scopes.Support.Blueprint do
         end
 
         policies do
+          # The cascade listeners run as the actor who archived/restored the ticket,
+          # whose ticket write was already authorized; they are reachable ONLY as
+          # listeners of that signal, never called directly.
+          bypass action(:cascade_ticket_archived) do
+            authorize_if(signal_in(unquote(ticket_signals), :archived))
+          end
+
+          bypass action(:cascade_ticket_restored) do
+            authorize_if(signal_in(unquote(ticket_signals), :restored))
+          end
+
           policy action_type(:read) do
             authorize_if(Samen.Policy.OrgScope)
           end

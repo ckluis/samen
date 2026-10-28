@@ -150,6 +150,8 @@ defmodule Samen.Scopes.Cms do
     page_version_mod = Module.concat(page_mod, Version)
     post_version_mod = Module.concat(post_mod, Version)
     block_version_mod = Module.concat(block_mod, Version)
+    # The page's archival signals (issue #96 D3), one module per mount.
+    page_signals = Module.concat(page_mod, Archival)
 
     quote do
       require Samen.Scopes.Cms.Blueprint
@@ -167,6 +169,11 @@ defmodule Samen.Scopes.Cms do
         resource(unquote(block_version_mod))
       end
 
+      defmodule unquote(page_signals) do
+        @moduledoc "The page's `:archived`/`:restored` signals — `Samen.Archival.Signals`."
+        use Samen.Archival.Signals
+      end
+
       # Materialize resource modules in the host namespace.
       Samen.Scopes.Cms.Blueprint.define_page(
         unquote(page_mod),
@@ -174,7 +181,8 @@ defmodule Samen.Scopes.Cms do
         unquote(domain),
         unquote(repo),
         unquote(abbrevs.page),
-        unquote(block_mod)
+        unquote(block_mod),
+        unquote(page_signals)
       )
 
       Samen.Scopes.Cms.Blueprint.define_post(
@@ -191,7 +199,8 @@ defmodule Samen.Scopes.Cms do
         unquote(domain),
         unquote(repo),
         unquote(abbrevs.block),
-        unquote(page_mod)
+        unquote(page_mod),
+        unquote(page_signals)
       )
 
       Samen.Scopes.Cms.Blueprint.define_media(

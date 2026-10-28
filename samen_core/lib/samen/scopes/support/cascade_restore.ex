@@ -8,12 +8,9 @@ defmodule Samen.Scopes.Support.CascadeRestore do
   `Samen.Scopes.Cms.CascadeRestore` (T37b) / `Samen.Scopes.Chat.CascadeRestore`
   (T37e), generalized one level deeper (see `CascadeArchive`'s moduledoc for why).
 
-  Self-guards on `changeset.action.name == :restore` (action TYPE alone,
-  `:update`, cannot discriminate `:restore` from the plain `:update`, since the
-  DSL's `on:` option only filters by type).
-
-  Reads the ticket's PRE-restore `archived_at` (`changeset.data.archived_at` —
-  the exact instant `Samen.Scopes.Support.CascadeArchive` stamped onto the ticket
+  A listener (issue #96 D3): `Conversation` runs this generic action when its ticket
+  emits `:restored` (`<Ticket>.Archival`). The signal carries the ticket's PRE-restore
+  `archived_at` — the exact instant `Samen.Scopes.Support.CascadeArchive` stamped onto the ticket
   and its cascaded conversations/messages) and restores exactly the archived
   Conversations under this ticket whose own `archived_at` equals that instant,
   THEN — scoped to exactly those matched conversation ids — the archived
@@ -43,53 +40,32 @@ defmodule Samen.Scopes.Support.CascadeRestore do
   scoping structurally can never touch regardless of any timestamp collision —
   both cases are covered by the scope's test suite.
 
-  Runs inside the parent `:restore` action's transaction. A `:restore_conflict` on
-  any matched member aborts the WHOLE transaction (the parent restore included) —
-  `Enum.reduce_while` halts on the first error and returns it, which the enclosing
-  `after_action` propagates as a transaction rollback, never a partial cascade.
+  Runs inline, inside the ticket's `:restore` transaction. A `:restore_conflict` on
+  any matched member is returned as the listener's error (`Samen.Archival.Cascade.
+  restore_each/1` halts on the first), which fails the ticket's restore and rolls the
+  WHOLE transaction back — never a partial cascade. A `nil` instant (the ticket was
+  already live) restores nothing.
   """
-  use Ash.Resource.Change
+  use Ash.Resource.Actions.Implementation
 
   require Ash.Query
 
   @impl true
-  def change(changeset, _opts, _context) do
-    Ash.Changeset.after_action(changeset, fn changeset, record ->
-      if changeset.action.name == :restore do
-        restore_matching_members(changeset, record)
-      else
-        {:ok, record}
-      end
-    end)
-  end
+  def run(input, _opts, _context) do
+    case input.arguments.signal do
+      %{record_id: ticket_id, archived_at: %DateTime{} = instant} ->
+        conversations = matching_archived_conversations(input.resource, ticket_id, instant)
 
-  defp restore_matching_members(changeset, record) do
-    case Ash.Changeset.get_data(changeset, :archived_at) do
-      %DateTime{} = instant ->
-        conversation_resource = conversation_resource(changeset.resource)
-        message_resource = message_resource(conversation_resource)
+        messages =
+          input.resource
+          |> message_resource()
+          |> matching_archived_messages(Enum.map(conversations, & &1.id), instant)
 
-        matching_conversations =
-          matching_archived_conversations(conversation_resource, record.id, instant)
-
-        conversation_ids = Enum.map(matching_conversations, & &1.id)
-
-        matching_messages =
-          matching_archived_messages(message_resource, conversation_ids, instant)
-
-        members = matching_conversations ++ matching_messages
-
-        Enum.reduce_while(members, {:ok, record}, fn member, {:ok, _acc} ->
-          case Samen.Archival.restore(member, authorize?: false) do
-            {:ok, _} -> {:cont, {:ok, record}}
-            {:error, reason} -> {:halt, {:error, reason}}
-          end
-        end)
+        Samen.Archival.Cascade.restore_each(conversations ++ messages)
 
       _ ->
-        # The ticket was already live (idempotent no-op restore) — nothing to
-        # cascade; also covers the defensive nil case.
-        {:ok, record}
+        # The ticket was already live (idempotent no-op restore) — nothing to cascade.
+        :ok
     end
   end
 
@@ -110,12 +86,6 @@ defmodule Samen.Scopes.Support.CascadeRestore do
     |> Ash.Query.filter(conversation_id in ^conversation_ids and archived_at == ^instant)
     # authz-scope: FK-pinned cascade read — bounded to exactly the conversation ids restored by THIS sweep
     |> Ash.read!(authorize?: false)
-  end
-
-  defp conversation_resource(ticket_resource) do
-    ticket_resource
-    |> Ash.Resource.Info.relationship(:conversations)
-    |> Map.fetch!(:destination)
   end
 
   defp message_resource(conversation_resource) do

@@ -4,15 +4,13 @@ defmodule Samen.Scopes.Chat.CascadeArchive do
   cascade (ADR-040 §5.4: "chat Thread → Message" is one of the three named cascade pairs;
   the roster's ¶ footnote extends the same same-instant cascade to `participant`
   — "archiving a thread also retires its cross-plane grants from default reads on both
-  planes"). Mirrors `Samen.Scopes.Cms.CascadeArchive` (T37b) — same self-guard, same
-  after_action/force_change_attribute shape — generalized to TWO cascaded resources
+  planes"). Mirrors `Samen.Scopes.Cms.CascadeArchive` (T37b), generalized to TWO cascaded resources
   instead of one.
 
-  Self-guards on `changeset.action.name == :archive`. The resource-level
-  `changes do change(...) end` block Thread declares this in applies to every action by
-  default (create/update/destroy alike); action TYPE (`:destroy`) alone cannot discriminate
-  the explicit `:archive` soft-destroy from the plain `:destroy`, so the guard is on the
-  action NAME.
+  A listener (issue #96 D3): `ChatParticipant` and `ChatMessage` EACH run this generic
+  action when their thread emits `:archived` (`<ChatThread>.Archival`,
+  `Samen.Archival.Signals`), each archiving its own rows of that thread, so the thread
+  names neither. The signal carries the thread id and the instant just stamped on it.
 
   ## Why NOT ash_archival's `archive_related` DSL option
 
@@ -33,83 +31,29 @@ defmodule Samen.Scopes.Chat.CascadeArchive do
   `:archive`/`:restore` actions are policy-locked to `forbid_if(always())` for any real actor
   (the cross-plane grant-carrier exception, §5.9 ¶); `ChatMessage` carries NO such lock as of
   T125 (ADR-040 §5.4/§5.9 reconciled, posture A) — an authorized actor may also archive a
-  message directly. Either way, this change routes each cascaded member through its own
+  message directly. Either way, this listener routes each cascaded member through its own
   `:archive` action with `authorize?: false` (bypassing policy entirely, same as every other
   cascade in this foundry) so the cascade path itself never depends on — and is never blocked
   by — either resource's actor-facing policy, keeping the audit trail complete regardless.
 
-  Runs inside the parent `:archive` action's transaction (nested `Ash`/`Ecto.Repo.transaction`
-  calls in the same process reuse the outer transaction), so a failure here rolls back the
-  thread's own archive too.
+  Runs inline, inside the thread's `:archive` transaction (`Ash.Signals.Delivery.Inline`),
+  so a failure here rolls back the thread's own archive too.
   """
-  use Ash.Resource.Change
+  use Ash.Resource.Actions.Implementation
 
   require Ash.Query
 
   @impl true
-  def change(changeset, _opts, _context) do
-    Ash.Changeset.after_action(changeset, fn changeset, record ->
-      if changeset.action.name == :archive do
-        cascade_archive_members(changeset, record)
-      else
-        {:ok, record}
-      end
-    end)
-  end
+  def run(input, _opts, _context) do
+    %{record_id: thread_id, archived_at: instant} = input.arguments.signal
 
-  # `on: [:destroy]` (declared where this change is attached on ChatThread) scopes by
-  # action TYPE, so it also reaches `:destroy` (plain) and `:destroy_permanently` —
-  # neither should run the cascade (self-guarded to `:archive` in `change/3` above) and
-  # both are otherwise atomic-eligible. `:archive` itself is forced non-atomic
-  # (`require_atomic?: false`, `Samen.Resource`'s archival_dsl), so it always goes through
-  # `change/3` above regardless of what this returns. `:ok` tells Ash's atomicity checker
-  # this change contributes nothing when running atomically — without it,
-  # `:destroy_permanently` would spuriously lose atomic eligibility just for being the
-  # same TYPE as `:archive`.
-  @impl true
-  def atomic(_changeset, _opts, _context) do
-    :ok
-  end
-
-  defp cascade_archive_members(changeset, record) do
-    case record.archived_at do
-      %DateTime{} = instant ->
-        archive_all(participant_resource(changeset.resource), record.id, instant)
-        archive_all(message_resource(changeset.resource), record.id, instant)
-        {:ok, record}
-
-      _ ->
-        # Defensive: the parent's own archive somehow left archived_at nil
-        # (should not happen post-commit) — nothing to propagate.
-        {:ok, record}
-    end
-  end
-
-  defp archive_all(resource, thread_id, instant) do
-    resource
+    input.resource
     |> Ash.Query.filter(thread_id == ^thread_id)
     # authz-scope: FK-pinned cascade read — bounded to the archived parent thread's own
     # members, inside that parent's org-authorized archive write
     |> Ash.read!(authorize?: false)
-    |> Enum.each(&archive_member_at(&1, instant))
-  end
+    |> Enum.each(&Samen.Archival.Cascade.archive_at!(&1, instant))
 
-  defp archive_member_at(member, instant) do
-    member
-    |> Ash.Changeset.for_destroy(:archive, %{}, authorize?: false)
-    |> Ash.Changeset.force_change_attribute(:archived_at, instant)
-    |> Ash.destroy!(authorize?: false)
-  end
-
-  defp participant_resource(thread_resource) do
-    thread_resource
-    |> Ash.Resource.Info.relationship(:participants)
-    |> Map.fetch!(:destination)
-  end
-
-  defp message_resource(thread_resource) do
-    thread_resource
-    |> Ash.Resource.Info.relationship(:messages)
-    |> Map.fetch!(:destination)
+    :ok
   end
 end

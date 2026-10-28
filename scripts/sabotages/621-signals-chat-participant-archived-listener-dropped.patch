@@ -1,0 +1,19 @@
+# SABOTAGE: archiving a thread retires its participants (the cross-plane grant carriers) only through 
+#   ChatParticipant's listener of the thread's :archived signal (#96 D3)
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/scopes/chat_scope_archival_leak_red_path_test.exs
+# MUST_FAIL: both members land on the EXACT same archived_at as the thread
+diff --git a/samen_web/lib/samen/scopes/chat/blueprint.ex b/samen_web/lib/samen/scopes/chat/blueprint.ex
+index 864b4be8..ead89001 100644
+--- a/samen_web/lib/samen/scopes/chat/blueprint.ex
++++ b/samen_web/lib/samen/scopes/chat/blueprint.ex
+@@ -288,7 +288,6 @@ defmodule Samen.Scopes.Chat.Blueprint do
+         # thread's archival signals (issue #96 D3).
+         signals_in do
+           from unquote(thread_signals) do
+-            on(:archived, :cascade_thread_archived)
+             on(:restored, :cascade_thread_restored)
+           end
+         end

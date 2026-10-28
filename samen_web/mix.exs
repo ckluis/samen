@@ -30,6 +30,9 @@ defmodule SamenWeb.MixProject do
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       consolidate_protocols: Mix.env() != :test,
+      # Issue #96 D3: consolidates Ash.Signals listeners once per build, like protocols, so an
+      # emit never searches the code path for them (`Mix.Tasks.Compile.AshSignals`).
+      compilers: [:ash_signals] ++ Mix.compilers(),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases(),

@@ -1,0 +1,19 @@
+# SABOTAGE: the ticket ▸ conversation ▸ message archive cascade is Conversation's listener of the ticket's 
+#   :archived signal (#96 D3); without it the ticket archives alone
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/support_scope_archival_leak_red_path_test.exs
+# MUST_FAIL: the SAME actor can independently archive one conversation AND still cascade-archive the ticket for the rest
+diff --git a/samen_core/lib/samen/scopes/support/blueprint.ex b/samen_core/lib/samen/scopes/support/blueprint.ex
+index c9fe5bd3..26f7c31a 100644
+--- a/samen_core/lib/samen/scopes/support/blueprint.ex
++++ b/samen_core/lib/samen/scopes/support/blueprint.ex
+@@ -369,7 +369,6 @@ defmodule Samen.Scopes.Support.Blueprint do
+         # listeners of the ticket's archival signals (issue #96 D3).
+         signals_in do
+           from unquote(ticket_signals) do
+-            on(:archived, :cascade_ticket_archived)
+             on(:restored, :cascade_ticket_restored)
+           end
+         end

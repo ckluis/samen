@@ -318,6 +318,14 @@ refs — so the sweep is small; the probe proves it either way).
 - **Restore of a cascade parent restores exactly the children whose `archived_at` equals
   the parent's** (the same-instant match) — a child independently archived earlier stays
   archived. Restore conflicts on any member abort the restore transaction honestly.
+- **Mechanism (issue #96 D3).** A cascade parent emits `:archived`/`:restored`
+  (`use Samen.Resource, archival_signals:`, a `Samen.Archival.Signals` module per mount),
+  and each composition child runs the cascade as an inline `Ash.Signals` listener inside
+  the parent's transaction, so the parent never names its children. Only Work's archive
+  side still uses `archive_related` (CMS, Support and Chat thread one instant through
+  `Samen.Archival.Cascade` instead, for the exactness and audit reasons in their modules).
+  A listener action is reachable only as a listener (`signal_in/2` bypass); it writes with
+  `authorize?: false`, as the cascades always have.
 
 ### 5.5 Reads, policies, masking
 

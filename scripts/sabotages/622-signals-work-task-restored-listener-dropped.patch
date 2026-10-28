@@ -1,0 +1,19 @@
+# SABOTAGE: a task's restore reaches its subtree only through Task's listener of its own :restored signal 
+#   (#96 D3)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/work_scope_test.exs
+# MUST_FAIL: restoring the parent Task cascades to restore its whole Subtask subtree at once
+diff --git a/samen_core/lib/samen/scopes/work/blueprint.ex b/samen_core/lib/samen/scopes/work/blueprint.ex
+index 6231bfb1..4a64d6e3 100644
+--- a/samen_core/lib/samen/scopes/work/blueprint.ex
++++ b/samen_core/lib/samen/scopes/work/blueprint.ex
+@@ -215,7 +215,6 @@ defmodule Samen.Scopes.Work.Blueprint do
+         # this task's OWN `:restored` signal (issue #96 D3).
+         signals_in do
+           from unquote(signals_mod) do
+-            on(:restored, :cascade_parent_restored)
+           end
+         end
+ 
