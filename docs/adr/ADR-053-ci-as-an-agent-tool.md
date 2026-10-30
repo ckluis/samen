@@ -761,6 +761,15 @@ driftwood 2, pawchart 1) and in the generator templates (`data_case`/`api_case`,
 allowlist rule, non-vacuity). Suites green after the migration: samen_core 156 s, samen_web 113 s, demo 92 s,
 driftwood 163 s, pawchart 76 s. Sabotages 587-593.
 
+*Follow-up (issue #103).* The opposite leak: `jobs_starvation_isolation_test.exs` switched the pool to `:auto` in
+`setup_all` and never switched it back. `:auto` has no owner whose exit ends it, so every later sync module ran on an
+unsandboxed pool until the next `shared!/1` owner stopped (which resets `:manual`), and its Oban jobs committed. A
+`TestSandboxTest` landing in that window failed all six setups: about 1 run in 40, depending on module order, which
+the seed does not fix (so replaying the seed did not reproduce it). The module now runs its real Oban per test inside
+a `shared!/1` owner (PG notifier: a sandbox never commits, so Postgres NOTIFY never fires). The one test that needs
+committed rows (`vault_pitr_test.exs`, for `pg_dump`) uses `Samen.TestSandbox.auto!/1`, which registers the switch
+back; the guard now also refuses a raw `Sandbox.mode(_, :auto)`. Sabotages 629-632.
+
 **Deferred.** (a) A shared compiled-dependency cache for the gen probes (≈ half of each probe is dependency compile;
 needs a soundness proof for compile-env differences between generated apps). (b) Cost-weighting of `modulo`
 (mutation) shards and of the Actions `sabotage_changed` job (it starts cold: unknown items are priced at the old

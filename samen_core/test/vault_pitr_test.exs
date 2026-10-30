@@ -38,6 +38,11 @@ defmodule Samen.VaultPitrTest do
   @secret "dave.restore@example.com"
 
   setup do
+    # The PITR test MUST write committed data (pg_dump sees only committed rows), so the pool runs in `:auto` for
+    # this test and is put back in `:manual` after it. Registered FIRST, so it runs LAST: the cleanup below still
+    # has a connection. Data written here is NOT rolled back — the cleanup deletes it.
+    Samen.TestSandbox.auto!(@repo)
+
     Samen.Kms.FileBacked.simulate_outage(false)
     Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
     on_exit(fn ->
@@ -51,27 +56,12 @@ defmodule Samen.VaultPitrTest do
       end
     end)
 
-    # The PITR test MUST write committed data (pg_dump sees only committed rows).
-    # We disable the SQL sandbox for this test module and use direct repo writes.
-    # This means data written here is NOT rolled back automatically — we clean up
-    # explicitly in on_exit.
-    Ecto.Adapters.SQL.Sandbox.mode(@repo, :auto)
-
     # Skip if pg_dump / psql are not available.
     case {System.find_executable("pg_dump"), System.find_executable("psql")} do
       {nil, _} -> :skip_no_pg_dump
       {_, nil} -> :skip_no_psql
       _ -> :ok
     end
-  end
-
-  # Restore sandbox mode after the test module finishes.
-  setup_all do
-    on_exit(fn ->
-      Ecto.Adapters.SQL.Sandbox.mode(@repo, :manual)
-    end)
-
-    :ok
   end
 
   @tag timeout: 120_000

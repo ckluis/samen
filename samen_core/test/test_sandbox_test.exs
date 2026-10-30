@@ -9,8 +9,8 @@ defmodule Samen.TestSandboxTest do
   alias Ecto.Adapters.SQL.Sandbox
   alias SamenCore.TestRepo
 
-  # One query from a process that never checked out. -> :ok | :no_connection (OwnershipError, pool is :manual) |
-  # :owner_exited (the shared owner is gone: the flake)
+  # One query from a process that never checked out. -> :ok (the pool is shared, or :auto) | :no_connection
+  # (OwnershipError, pool is :manual) | :owner_exited (the shared owner is gone: the flake)
   defp stranger do
     {pid, ref} =
       spawn_monitor(fn ->
@@ -30,6 +30,21 @@ defmodule Samen.TestSandboxTest do
     end
   end
 
+  # Runs `fun` with the pool in :auto (writes commit), then puts it back in :manual — `auto!/2`'s own callback, run
+  # here instead of at test exit.
+  defp with_auto(fun) do
+    Samen.TestSandbox.auto!(TestRepo, on_exit: &send(self(), {:restore, &1}))
+
+    receive do
+      {:restore, restore} ->
+        try do
+          fun.()
+        after
+          restore.()
+        end
+    end
+  end
+
   defp eventually(fun, tries \\ 50) do
     cond do
       fun.() -> true
@@ -38,10 +53,12 @@ defmodule Samen.TestSandboxTest do
     end
   end
 
-  # every test starts from a pool in :manual mode: a test (or the helper) that leaked an owner fails the NEXT test
+  # every test starts from a pool in :manual mode: an earlier test that left it otherwise fails the NEXT test. Sync
+  # modules run one at a time, so "earlier" can be any sync module since the last reset, not just the one before.
   setup do
     assert eventually(fn -> stranger() == :no_connection end),
-           "the pool is still shared when this test starts: the previous test leaked its sandbox owner"
+           "the pool is not in :manual mode when this test starts: an earlier sync test left it shared (an owner " <>
+             "still alive) or in :auto (a raw `Sandbox.mode(repo, :auto)` never switched back, issue #103)"
 
     :ok
   end
@@ -109,6 +126,35 @@ defmodule Samen.TestSandboxTest do
            "the pool is still shared after the owner was released"
 
     assert Samen.TestSandbox.release(owner) == :ok
+  end
+
+  test "auto!/2 lets any process reach the database, and its registered callback hands the pool back in :manual" do
+    recorder = fn callback -> send(self(), {:registered, callback}) end
+    assert Samen.TestSandbox.auto!(TestRepo, on_exit: recorder) == :ok
+
+    assert_received {:registered, callback}
+    assert is_function(callback, 0)
+    assert stranger() == :ok
+
+    callback.()
+    assert stranger() == :no_connection
+  end
+
+  test "auto!/1's writes commit: a row inserted under it is still there after the pool is back in :manual" do
+    with_auto(fn ->
+      TestRepo.query!("create table p5_auto_probe (n int)")
+      TestRepo.query!("insert into p5_auto_probe values (1)")
+    end)
+
+    try do
+      # a sandboxed owner (its own transaction, rolled back) sees the committed row
+      owner = Samen.TestSandbox.shared!(TestRepo)
+      rows = TestRepo.query!("select n from p5_auto_probe").rows
+      Samen.TestSandbox.release(owner)
+      assert rows == [[1]]
+    after
+      with_auto(fn -> TestRepo.query!("drop table if exists p5_auto_probe") end)
+    end
   end
 
   test "a released owner's data is rolled back" do

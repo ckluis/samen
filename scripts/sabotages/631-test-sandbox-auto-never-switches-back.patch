@@ -1,0 +1,20 @@
+# SABOTAGE: issue #103: auto!/1 leaves the pool in :auto when the test exits, the exact leak it exists to 
+#   prevent
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/test_sandbox_test.exs
+# MUST_FAIL: auto!/2 lets any process reach the database, and its registered callback hands the pool back in :manual
+diff --git a/samen_core/lib/samen/test_sandbox.ex b/samen_core/lib/samen/test_sandbox.ex
+index dce9ca38..6ed9979d 100644
+--- a/samen_core/lib/samen/test_sandbox.ex
++++ b/samen_core/lib/samen/test_sandbox.ex
+@@ -62,7 +62,7 @@ defmodule Samen.TestSandbox do
+     # `:on_exit` is a seam for the helper's own test (a recorder instead of ExUnit's registry)
+     register = Keyword.get(opts, :on_exit, &ExUnit.Callbacks.on_exit/1)
+     :ok = Sandbox.mode(repo, :auto)
+-    register.(fn -> Sandbox.mode(repo, :manual) end)
++    register.(fn -> :ok end)
+     :ok
+   end
+ 
