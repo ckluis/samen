@@ -74,6 +74,8 @@ defmodule Samen.Scopes.Chat do
     participant_mod = Module.concat(namespace, ChatParticipant)
     message_mod = Module.concat(namespace, ChatMessage)
     disclosure_mod = Module.concat(namespace, ChatDisclosureSetting)
+    # The thread's archival signals (issue #96 D3), one module per mount.
+    thread_signals = Module.concat(thread_mod, Archival)
 
     quote do
       require Samen.Scopes.Chat.Blueprint
@@ -85,6 +87,11 @@ defmodule Samen.Scopes.Chat do
         resource(unquote(disclosure_mod))
       end
 
+      defmodule unquote(thread_signals) do
+        @moduledoc "The thread's `:archived`/`:restored` signals — `Samen.Archival.Signals`."
+        use Samen.Archival.Signals
+      end
+
       Samen.Scopes.Chat.Blueprint.define_thread(
         unquote(thread_mod),
         unquote(otp_app),
@@ -92,7 +99,8 @@ defmodule Samen.Scopes.Chat do
         unquote(repo),
         unquote(abbrevs.thread),
         unquote(participant_mod),
-        unquote(message_mod)
+        unquote(message_mod),
+        unquote(thread_signals)
       )
 
       Samen.Scopes.Chat.Blueprint.define_participant(
@@ -101,7 +109,8 @@ defmodule Samen.Scopes.Chat do
         unquote(domain),
         unquote(repo),
         unquote(abbrevs.participant),
-        unquote(thread_mod)
+        unquote(thread_mod),
+        unquote(thread_signals)
       )
 
       Samen.Scopes.Chat.Blueprint.define_message(
@@ -111,7 +120,8 @@ defmodule Samen.Scopes.Chat do
         unquote(repo),
         unquote(abbrevs.message),
         unquote(thread_mod),
-        unquote(participant_mod)
+        unquote(participant_mod),
+        unquote(thread_signals)
       )
 
       Samen.Scopes.Chat.Blueprint.define_disclosure_setting(

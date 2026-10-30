@@ -166,7 +166,7 @@ defmodule Samen.Scopes.Cms.Blueprint do
   # Page — a published/draft page. Org-scoped. No PII.
   # Draft → publish workflow (status bounded enum). Admin-gated publish.
   # ---------------------------------------------------------------------------
-  defmacro define_page(module, otp_app, domain, repo, abbrev, block_mod) do
+  defmacro define_page(module, otp_app, domain, repo, abbrev, block_mod, signals_mod) do
     quote do
       defmodule unquote(module) do
         @moduledoc """
@@ -198,7 +198,8 @@ defmodule Samen.Scopes.Cms.Blueprint do
         instant (`Samen.Scopes.Cms.CascadeArchive`); restoring a Page restores
         exactly the same-instant-archived blocks
         (`Samen.Scopes.Cms.CascadeRestore`) — a block archived independently
-        stays archived (ADR-040 §5.4).
+        stays archived (ADR-040 §5.4). Page only emits `:archived`/`:restored`
+        (`<Page>.Archival`, issue #96 D3); the cascades are Block's listeners.
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
@@ -207,6 +208,7 @@ defmodule Samen.Scopes.Cms.Blueprint do
           authorizers: [Ash.Policy.Authorizer],
           abbrev: unquote(abbrev),
           archivable: true,
+          archival_signals: unquote(signals_mod),
           versioned: :snapshot
 
         postgres do
@@ -234,21 +236,6 @@ defmodule Samen.Scopes.Cms.Blueprint do
             public?(true)
             destination_attribute(:page_id)
           end
-        end
-
-        changes do
-          # Page ▸ Block same-instant cascade, both directions (§5.4). See
-          # each module's moduledoc for why this scope does not use
-          # ash_archival's `archive_related` DSL option directly.
-          #
-          # `on:` defaults to `[:create, :update]` (Ash omits `:destroy` by
-          # default — "most changes don't make sense for a destroy",
-          # `ash/lib/ash/resource/change/change.ex`). `:archive` IS a
-          # `:destroy`-type action, so CascadeArchive needs `on: [:destroy]`
-          # explicitly or it silently never runs. CascadeRestore's `:restore`
-          # is `:update`-typed, already covered by the default.
-          change(Samen.Scopes.Cms.CascadeArchive, on: [:destroy])
-          change(Samen.Scopes.Cms.CascadeRestore)
         end
 
         actions do
@@ -505,7 +492,7 @@ defmodule Samen.Scopes.Cms.Blueprint do
   # Block — a reusable content block / component. Org-scoped. No PII.
   # Belongs to a Page (nullable FK).
   # ---------------------------------------------------------------------------
-  defmacro define_block(module, otp_app, domain, repo, abbrev, page_mod) do
+  defmacro define_block(module, otp_app, domain, repo, abbrev, page_mod, page_signals) do
     quote do
       defmodule unquote(module) do
         @moduledoc """
@@ -519,7 +506,8 @@ defmodule Samen.Scopes.Cms.Blueprint do
 
         Archivable — and the CASCADE TARGET of `page ▸cascade block` (§5.4):
         archiving a Page cascades to archive its Blocks at the same instant
-        (`Samen.Scopes.Cms.CascadeArchive`, declared on Page); a Block can
+        (`Samen.Scopes.Cms.CascadeArchive`, a listener of the page's
+        `:archived` signal, issue #96 D3); a Block can
         also be archived independently of its page, in which case a later
         restore of the page does NOT restore it (the same-instant match,
         `Samen.Scopes.Cms.CascadeRestore`).
@@ -569,11 +557,41 @@ defmodule Samen.Scopes.Cms.Blueprint do
           change({Samen.Policy.SameOrgFk, relationships: [:page]})
         end
 
+        # The page ▸ block cascade (§5.4), both directions, as listeners of the
+        # page's archival signals (issue #96 D3).
+        signals_in do
+          from unquote(page_signals) do
+            on(:archived, :cascade_page_archived)
+            on(:restored, :cascade_page_restored)
+          end
+        end
+
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
+
+          action :cascade_page_archived do
+            argument(:signal, unquote(Module.concat(page_signals, Archived)), allow_nil?: false)
+            run(Samen.Scopes.Cms.CascadeArchive)
+          end
+
+          action :cascade_page_restored do
+            argument(:signal, unquote(Module.concat(page_signals, Restored)), allow_nil?: false)
+            run(Samen.Scopes.Cms.CascadeRestore)
+          end
         end
 
         policies do
+          # The cascade listeners run as the actor who archived/restored the page,
+          # whose page write was already authorized; they are reachable ONLY as
+          # listeners of that signal, never called directly.
+          bypass action(:cascade_page_archived) do
+            authorize_if(signal_in(unquote(page_signals), :archived))
+          end
+
+          bypass action(:cascade_page_restored) do
+            authorize_if(signal_in(unquote(page_signals), :restored))
+          end
+
           # Split read-only / write, matching the scope-authoring template idiom
           # (F3.4): reads are org-scoped; writes additionally require admin+.
           policy action_type(:read) do

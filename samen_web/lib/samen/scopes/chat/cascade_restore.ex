@@ -6,75 +6,39 @@ defmodule Samen.Scopes.Chat.CascadeRestore do
   the same-instant match; a child independently archived earlier stays archived"). Mirrors
   `Samen.Scopes.Cms.CascadeRestore` (T37b), generalized to TWO cascaded resources.
 
-  Self-guards on `changeset.action.name == :restore` (action TYPE alone, `:update`, cannot
-  discriminate `:restore` from the plain `:update`, since the DSL's `on:` option only
-  filters by type).
-
-  Reads the thread's PRE-restore `archived_at` (`changeset.data.archived_at` — the exact
-  instant `Samen.Scopes.Chat.CascadeArchive` stamped onto both the thread and its cascaded
+  A listener (issue #96 D3): `ChatParticipant` and `ChatMessage` EACH run this generic
+  action when their thread emits `:restored` (`<ChatThread>.Archival`). The signal carries
+  the thread's PRE-restore `archived_at` — the exact instant `Samen.Scopes.Chat.CascadeArchive` stamped onto both the thread and its cascaded
   participants/messages) and restores exactly the archived Participants/Messages whose own
   `archived_at` equals that instant. A member archived independently (a different instant,
   whether before or after the thread's cascade-archive, or a distinct wall-clock second, or
   the SAME wall-clock second but a different microsecond post-T124) is left alone — restore
   is scoped to the cascade set, not "every archived member under this thread".
 
-  Runs inside the parent `:restore` action's transaction. A `:restore_conflict` on any
-  matched member aborts the WHOLE transaction (the parent restore included) —
-  `Enum.reduce_while` halts on the first error and returns it, which the enclosing
-  `after_action` propagates as a transaction rollback, never a partial cascade.
+  Runs inline, inside the thread's `:restore` transaction. A `:restore_conflict` on any
+  matched member is returned as the listener's error, which fails the thread's restore and
+  rolls the WHOLE transaction back — never a partial cascade. A `nil` instant (the thread
+  was already live) restores nothing.
   """
-  use Ash.Resource.Change
+  use Ash.Resource.Actions.Implementation
 
   require Ash.Query
 
   @impl true
-  def change(changeset, _opts, _context) do
-    Ash.Changeset.after_action(changeset, fn changeset, record ->
-      if changeset.action.name == :restore do
-        restore_matching_members(changeset, record)
-      else
-        {:ok, record}
-      end
-    end)
-  end
-
-  defp restore_matching_members(changeset, record) do
-    case Ash.Changeset.get_data(changeset, :archived_at) do
-      %DateTime{} = instant ->
-        participant_resource =
-          changeset.resource
-          |> Ash.Resource.Info.relationship(:participants)
-          |> Map.fetch!(:destination)
-
-        message_resource =
-          changeset.resource
-          |> Ash.Resource.Info.relationship(:messages)
-          |> Map.fetch!(:destination)
-
-        members =
-          matching_archived(participant_resource, record.id, instant) ++
-            matching_archived(message_resource, record.id, instant)
-
-        Enum.reduce_while(members, {:ok, record}, fn member, {:ok, _acc} ->
-          case Samen.Archival.restore(member, authorize?: false) do
-            {:ok, _} -> {:cont, {:ok, record}}
-            {:error, reason} -> {:halt, {:error, reason}}
-          end
-        end)
+  def run(input, _opts, _context) do
+    case input.arguments.signal do
+      %{record_id: thread_id, archived_at: %DateTime{} = instant} ->
+        input.resource
+        |> Ash.Query.for_read(:archived)
+        |> Ash.Query.filter(thread_id == ^thread_id and archived_at == ^instant)
+        # authz-scope: FK-pinned cascade read — bounded to the restored parent thread's members
+        # archived at the SAME instant (org-authorized parent write)
+        |> Ash.read!(authorize?: false)
+        |> Samen.Archival.Cascade.restore_each()
 
       _ ->
-        # The thread was already live (idempotent no-op restore) — nothing to
-        # cascade; also covers the defensive nil case.
-        {:ok, record}
+        # The thread was already live (idempotent no-op restore) — nothing to cascade.
+        :ok
     end
-  end
-
-  defp matching_archived(resource, thread_id, instant) do
-    resource
-    |> Ash.Query.for_read(:archived)
-    |> Ash.Query.filter(thread_id == ^thread_id and archived_at == ^instant)
-    # authz-scope: FK-pinned cascade read — bounded to the restored parent thread's members
-    # archived at the SAME instant (org-authorized parent write)
-    |> Ash.read!(authorize?: false)
   end
 end

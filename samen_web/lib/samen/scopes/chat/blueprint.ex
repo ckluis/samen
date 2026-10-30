@@ -85,7 +85,16 @@ defmodule Samen.Scopes.Chat.Blueprint do
   # ---------------------------------------------------------------------------
   # ChatThread — a conversation that may span two planes. Org-scoped. No PII.
   # ---------------------------------------------------------------------------
-  defmacro define_thread(module, otp_app, domain, repo, abbrev, participant_mod, message_mod) do
+  defmacro define_thread(
+             module,
+             otp_app,
+             domain,
+             repo,
+             abbrev,
+             participant_mod,
+             message_mod,
+             signals_mod
+           ) do
     quote do
       defmodule unquote(module) do
         @moduledoc """
@@ -104,6 +113,8 @@ defmodule Samen.Scopes.Chat.Blueprint do
         `ChatMessage`s at the same instant (`Samen.Scopes.Chat.CascadeArchive`); restoring a
         thread restores exactly the same-instant-archived members
         (`Samen.Scopes.Chat.CascadeRestore`) — a member archived independently stays archived.
+        The thread only emits `:archived`/`:restored` (`<ChatThread>.Archival`, issue #96
+        D3); the cascades are the participant's and the message's listeners.
         No action-name collision: no hand-authored `:archive`/`:restore`/`:archived` action
         exists here. `:archive`/`:restore`/`:archived` are TYPE-matched by the existing
         `action_type([:create, :update, :destroy])`/`action_type(:read)` policy blocks below
@@ -116,7 +127,8 @@ defmodule Samen.Scopes.Chat.Blueprint do
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
           abbrev: unquote(abbrev),
-          archivable: true
+          archivable: true,
+          archival_signals: unquote(signals_mod)
 
         postgres do
           table("#{unquote(abbrev)}_thread")
@@ -165,20 +177,6 @@ defmodule Samen.Scopes.Chat.Blueprint do
           end
         end
 
-        changes do
-          # Thread ▸ {Participant, Message} same-instant cascade, both directions
-          # (§5.4). See each cascade module's moduledoc for why this scope does not
-          # use ash_archival's `archive_related` DSL option directly (timestamp
-          # exactness + audit completeness — mirrors `Samen.Scopes.Cms.CascadeArchive`).
-          #
-          # `on:` defaults to `[:create, :update]` (Ash omits `:destroy` by default).
-          # `:archive` IS a `:destroy`-type action, so CascadeArchive needs
-          # `on: [:destroy]` explicitly or it silently never runs. CascadeRestore's
-          # `:restore` is `:update`-typed, already covered by the default.
-          change(Samen.Scopes.Chat.CascadeArchive, on: [:destroy])
-          change(Samen.Scopes.Chat.CascadeRestore)
-        end
-
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
         end
@@ -201,7 +199,7 @@ defmodule Samen.Scopes.Chat.Blueprint do
   # ---------------------------------------------------------------------------
   # ChatParticipant — 🔒 PII: full_name (vault :pii_name). The cross-plane grant carrier.
   # ---------------------------------------------------------------------------
-  defmacro define_participant(module, otp_app, domain, repo, abbrev, thread_mod) do
+  defmacro define_participant(module, otp_app, domain, repo, abbrev, thread_mod, thread_signals) do
     quote do
       defmodule unquote(module) do
         @moduledoc """
@@ -286,8 +284,27 @@ defmodule Samen.Scopes.Chat.Blueprint do
           end
         end
 
+        # The thread ▸ participant cascade (§5.4), both directions, as listeners of the
+        # thread's archival signals (issue #96 D3).
+        signals_in do
+          from unquote(thread_signals) do
+            on(:archived, :cascade_thread_archived)
+            on(:restored, :cascade_thread_restored)
+          end
+        end
+
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
+
+          action :cascade_thread_archived do
+            argument(:signal, unquote(Module.concat(thread_signals, Archived)), allow_nil?: false)
+            run(Samen.Scopes.Chat.CascadeArchive)
+          end
+
+          action :cascade_thread_restored do
+            argument(:signal, unquote(Module.concat(thread_signals, Restored)), allow_nil?: false)
+            run(Samen.Scopes.Chat.CascadeRestore)
+          end
 
           action :reveal_participant, :map do
             argument(:actor_id, :string, allow_nil?: false)
@@ -317,13 +334,24 @@ defmodule Samen.Scopes.Chat.Blueprint do
         end
 
         policies do
+          # The cascade listeners run as the actor who archived/restored the thread,
+          # whose thread write was already authorized; they are reachable ONLY as
+          # listeners of that signal, never called directly.
+          bypass action(:cascade_thread_archived) do
+            authorize_if(signal_in(unquote(thread_signals), :archived))
+          end
+
+          bypass action(:cascade_thread_restored) do
+            authorize_if(signal_in(unquote(thread_signals), :restored))
+          end
+
           policy action_type([:read, :create, :update, :destroy]) do
             authorize_if(Samen.Policy.OrgScope)
           end
 
           # No independent archive (§5.4 ¶ footnote): reachable ONLY via the
           # thread's `authorize?: false` cascade calls (`Samen.Scopes.Chat.
-          # CascadeArchive`/`CascadeRestore`); any actor-based attempt is refused
+          # CascadeArchive`/`CascadeRestore`, the listeners above); any actor-based attempt is refused
           # — the same "pre-actor / system transition" posture
           # `Samen.Scopes.Identity.Blueprint`'s `:accept`/`:expire` use. Placed
           # AFTER the broad `action_type` policy above so BOTH policies match
@@ -346,7 +374,16 @@ defmodule Samen.Scopes.Chat.Blueprint do
   # ---------------------------------------------------------------------------
   # ChatMessage — 🔒 PII: body (vault :pii_body). The Support.Message shape, verbatim.
   # ---------------------------------------------------------------------------
-  defmacro define_message(module, otp_app, domain, repo, abbrev, thread_mod, participant_mod) do
+  defmacro define_message(
+             module,
+             otp_app,
+             domain,
+             repo,
+             abbrev,
+             thread_mod,
+             participant_mod,
+             thread_signals
+           ) do
     quote do
       defmodule unquote(module) do
         @moduledoc """
@@ -438,8 +475,27 @@ defmodule Samen.Scopes.Chat.Blueprint do
           end
         end
 
+        # The thread ▸ message cascade (§5.4), both directions, as listeners of the
+        # thread's archival signals (issue #96 D3).
+        signals_in do
+          from unquote(thread_signals) do
+            on(:archived, :cascade_thread_archived)
+            on(:restored, :cascade_thread_restored)
+          end
+        end
+
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
+
+          action :cascade_thread_archived do
+            argument(:signal, unquote(Module.concat(thread_signals, Archived)), allow_nil?: false)
+            run(Samen.Scopes.Chat.CascadeArchive)
+          end
+
+          action :cascade_thread_restored do
+            argument(:signal, unquote(Module.concat(thread_signals, Restored)), allow_nil?: false)
+            run(Samen.Scopes.Chat.CascadeRestore)
+          end
 
           action :reveal_message, :map do
             argument(:actor_id, :string, allow_nil?: false)
@@ -469,6 +525,17 @@ defmodule Samen.Scopes.Chat.Blueprint do
         end
 
         policies do
+          # The cascade listeners run as the actor who archived/restored the thread,
+          # whose thread write was already authorized; they are reachable ONLY as
+          # listeners of that signal, never called directly.
+          bypass action(:cascade_thread_archived) do
+            authorize_if(signal_in(unquote(thread_signals), :archived))
+          end
+
+          bypass action(:cascade_thread_restored) do
+            authorize_if(signal_in(unquote(thread_signals), :restored))
+          end
+
           # T125 (ADR-040 §5.4/§5.9 reconciled, posture A): NO
           # `forbid_if(always())` lock here — a ChatMessage is an ordinary,
           # independently-archivable composition child, matching CMS's

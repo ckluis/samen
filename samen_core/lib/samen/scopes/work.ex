@@ -98,6 +98,8 @@ defmodule Samen.Scopes.Work do
 
     project_mod = Module.concat(namespace, Project)
     task_mod = Module.concat(namespace, Task)
+    # The task's archival signals (issue #96 D3), one module per mount.
+    task_signals = Module.concat(task_mod, Archival)
 
     quote do
       require Samen.Scopes.Work.Blueprint
@@ -115,13 +117,19 @@ defmodule Samen.Scopes.Work do
         unquote(abbrevs.project)
       )
 
+      defmodule unquote(task_signals) do
+        @moduledoc "The task's `:archived`/`:restored` signals — `Samen.Archival.Signals`."
+        use Samen.Archival.Signals
+      end
+
       Samen.Scopes.Work.Blueprint.define_task(
         unquote(task_mod),
         unquote(otp_app),
         unquote(domain),
         unquote(repo),
         unquote(abbrevs.task),
-        unquote(project_mod)
+        unquote(project_mod),
+        unquote(task_signals)
       )
     end
   end

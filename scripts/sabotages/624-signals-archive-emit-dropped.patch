@@ -1,0 +1,20 @@
+# SABOTAGE: archival_signals: must make the generated :archive action emit :archived, or every archive 
+#   cascade listener silently never runs (#96 D3)
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/scopes/archival_signals_test.exs
+# MUST_FAIL: each parent emits its own mount's signals, and exactly its own children listen
+diff --git a/samen_core/lib/samen/resource.ex b/samen_core/lib/samen/resource.ex
+index 39dac56c..a2e389ef 100644
+--- a/samen_core/lib/samen/resource.ex
++++ b/samen_core/lib/samen/resource.ex
+@@ -327,7 +327,7 @@ defmodule Samen.Resource do
+           primary?(false)
+           require_atomic?(false)
+           change(Samen.Archival.Archive)
+-          unquote(archived_emit(signals))
++          unquote(archived_emit(nil))
+         end
+ 
+         # Restore: clear archived_at + audit the archived → live transition.

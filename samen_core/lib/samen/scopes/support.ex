@@ -122,6 +122,8 @@ defmodule Samen.Scopes.Support do
     macro_mod = Module.concat(namespace, Macro)
     csat_mod = Module.concat(namespace, Csat)
     csat_survey_token_mod = Module.concat(namespace, CsatSurveyToken)
+    # The ticket's archival signals (issue #96 D3), one module per mount.
+    ticket_signals = Module.concat(ticket_mod, Archival)
 
     quote do
       require Samen.Scopes.Support.Blueprint
@@ -150,6 +152,11 @@ defmodule Samen.Scopes.Support do
         unquote(abbrevs.sla)
       )
 
+      defmodule unquote(ticket_signals) do
+        @moduledoc "The ticket's `:archived`/`:restored` signals — `Samen.Archival.Signals`."
+        use Samen.Archival.Signals
+      end
+
       Samen.Scopes.Support.Blueprint.define_ticket(
         unquote(ticket_mod),
         unquote(otp_app),
@@ -159,7 +166,8 @@ defmodule Samen.Scopes.Support do
         unquote(sla_mod),
         unquote(conversation_mod),
         unquote(csat_survey_token_mod),
-        unquote(csat_mod)
+        unquote(csat_mod),
+        unquote(ticket_signals)
       )
 
       Samen.Scopes.Support.Blueprint.define_conversation(
@@ -169,7 +177,8 @@ defmodule Samen.Scopes.Support do
         unquote(repo),
         unquote(abbrevs.conversation),
         unquote(ticket_mod),
-        unquote(message_mod)
+        unquote(message_mod),
+        unquote(ticket_signals)
       )
 
       Samen.Scopes.Support.Blueprint.define_agent(

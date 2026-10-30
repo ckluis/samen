@@ -19,6 +19,9 @@ defmodule SamenCore.MixProject do
       # protocols stay consolidated. Pre-existing condition surfaced by T1.6's
       # --warnings-as-errors gate.
       consolidate_protocols: Mix.env() != :test,
+      # Issue #96 D3: consolidates Ash.Signals listeners once per build, like protocols, so an
+      # emit never searches the code path for them (`Mix.Tasks.Compile.AshSignals`).
+      compilers: [:ash_signals] ++ Mix.compilers(),
       # Issue #73: the PLT is cached under _build-adjacent priv/plts (gitignored), so only
       # the first run pays for building it; the baseline of pre-existing warnings lives in
       # .dialyzer_ignore.exs, so the gate fails on NEW warnings only.

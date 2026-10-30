@@ -69,6 +69,19 @@ defmodule Samen.Resource do
   defmacro __using__(opts) do
     {abbrev, opts} = Keyword.pop(opts, :abbrev)
     {archivable, opts} = Keyword.pop(opts, :archivable, false)
+    # Issue #96 D3: the module (`use Samen.Archival.Signals`) whose `:archived`/`:restored`
+    # signals the generated `:archive`/`:restore` actions emit, for composition cascades
+    # to listen to. Only meaningful on an archivable resource.
+    {archival_signals, opts} = Keyword.pop(opts, :archival_signals)
+
+    if archival_signals && archivable != true do
+      raise CompileError,
+        file: __CALLER__.file,
+        line: __CALLER__.line,
+        description:
+          "use Samen.Resource, archival_signals: needs archivable: true — only the " <>
+            "generated :archive/:restore actions emit them"
+    end
     {versioned_opt, opts} = Keyword.pop(opts, :versioned, false)
     # D3/T67 (ADR-043 §7.2): the DENY-BY-DEFAULT embeddable-field declaration. A list of
     # logical attribute names whose plain-text values may enter vector space. Refused at
@@ -108,7 +121,7 @@ defmodule Samen.Resource do
       end)
       |> maybe_put_fragments(base)
 
-    archival_dsl = archival_dsl(archivable)
+    archival_dsl = archival_dsl(archivable, archival_signals)
     # The generated version resource module name (ADR-040 §6.1/§6.2), matching
     # ash_paper_trail's default (`SourceResource.Version`). Its allocator-owned abbrev
     # is injected by Samen.Versioning.VersionMixin at the version module's compile.
@@ -302,9 +315,9 @@ defmodule Samen.Resource do
   # injects the archive/restore/archived/destroy_permanently actions plus the
   # ash_archival `archive` config that scopes the `is_nil(archived_at)` default
   # read filter. `archivable: false` (the default) injects nothing.
-  defp archival_dsl(false), do: nil
+  defp archival_dsl(false, _signals), do: nil
 
-  defp archival_dsl(true) do
+  defp archival_dsl(true, signals) do
     quote do
       actions do
         # Soft destroy: ash_archival's SetupArchival stamps archived_at; the
@@ -314,6 +327,7 @@ defmodule Samen.Resource do
           primary?(false)
           require_atomic?(false)
           change(Samen.Archival.Archive)
+          unquote(archived_emit(signals))
         end
 
         # Restore: clear archived_at + audit the archived → live transition.
@@ -321,6 +335,7 @@ defmodule Samen.Resource do
           primary?(false)
           require_atomic?(false)
           change(Samen.Archival.Restore)
+          unquote(restored_emit(signals))
         end
 
         # The trash read: shows ONLY archived rows (Samen.Archival.OnlyArchived).
@@ -341,6 +356,28 @@ defmodule Samen.Resource do
         exclude_read_actions([:archived])
         exclude_destroy_actions([:destroy_permanently])
       end
+    end
+  end
+
+  # The `emit`s for `archival_signals:` (issue #96 D3; `Samen.Archival.Signals`). Each runs
+  # after the archival change before it, so `archived_at` is the instant just stamped (or the
+  # preserved one on a re-archive); `:restored` carries the PRE-restore instant.
+  defp archived_emit(nil), do: nil
+
+  defp archived_emit(signals) do
+    quote do
+      emit(unquote(signals), :archived, fields: [record_id: :id])
+    end
+  end
+
+  defp restored_emit(nil), do: nil
+
+  defp restored_emit(signals) do
+    quote do
+      emit(unquote(signals), :restored,
+        fields: [record_id: :id],
+        values: [archived_at: previous(:archived_at)]
+      )
     end
   end
 

@@ -12,65 +12,38 @@ defmodule Samen.Scopes.Cms.CascadeRestore do
   archived on its own" is a real, distinguishable case Work's self-referential
   subtree doesn't have to consider).
 
-  Self-guards on `changeset.action.name == :restore` (mirrors
-  `Samen.Scopes.Work.CascadeRestore` — action TYPE alone, `:update`, cannot
-  discriminate `:restore` from the plain `:update`, since the DSL's `on:`
-  option only filters by type).
+  A listener (issue #96 D3): `Block` runs this generic action when its page emits
+  `:restored` (`<Page>.Archival`). The signal carries the page's PRE-restore
+  `archived_at` — the exact instant `Samen.Scopes.Cms.CascadeArchive` stamped onto both
+  the page and its cascaded blocks — and this restores exactly the archived Blocks
+  whose own `archived_at` equals that instant. A Block archived independently (a
+  different instant, whether before or after the page's cascade-archive) is left
+  alone — restore is scoped to the cascade set, not "every archived block under this
+  page". A `nil` instant (the page was already live) restores nothing.
 
-  Reads the page's PRE-restore `archived_at` (`changeset.data.archived_at` —
-  the exact instant `Samen.Scopes.Cms.CascadeArchive` stamped onto both the
-  page and its cascaded blocks) and restores exactly the archived Blocks whose
-  own `archived_at` equals that instant. A Block archived independently (a
-  different instant, whether before or after the page's cascade-archive) is
-  left alone — restore is scoped to the cascade set, not "every archived block
-  under this page".
-
-  Runs inside the parent `:restore` action's transaction. A `:restore_conflict`
-  on any matched Block aborts the WHOLE transaction (the parent restore
-  included) — `Enum.reduce_while` halts on the first error and returns it,
-  which the enclosing `after_action` propagates as a transaction rollback,
-  never a partial cascade (ADR-040 §5.3/§5.4).
+  Runs inline, inside the page's `:restore` transaction. A `:restore_conflict` on any
+  matched Block is returned as the listener's error, which fails the page's restore and
+  rolls the WHOLE transaction back — never a partial cascade (ADR-040 §5.3/§5.4).
   """
-  use Ash.Resource.Change
+  use Ash.Resource.Actions.Implementation
 
   require Ash.Query
 
   @impl true
-  def change(changeset, _opts, _context) do
-    Ash.Changeset.after_action(changeset, fn changeset, record ->
-      if changeset.action.name == :restore do
-        restore_matching_blocks(changeset, record)
-      else
-        {:ok, record}
-      end
-    end)
-  end
-
-  defp restore_matching_blocks(changeset, record) do
-    case Ash.Changeset.get_data(changeset, :archived_at) do
-      %DateTime{} = instant ->
-        block_resource =
-          changeset.resource
-          |> Ash.Resource.Info.relationship(:blocks)
-          |> Map.fetch!(:destination)
-
-        blocks =
-          block_resource
-          |> Ash.Query.for_read(:archived)
-          |> Ash.Query.filter(page_id == ^record.id and archived_at == ^instant)
-          |> Ash.read!(authorize?: false)
-
-        Enum.reduce_while(blocks, {:ok, record}, fn block, {:ok, _acc} ->
-          case Samen.Archival.restore(block, authorize?: false) do
-            {:ok, _} -> {:cont, {:ok, record}}
-            {:error, reason} -> {:halt, {:error, reason}}
-          end
-        end)
+  def run(input, _opts, _context) do
+    case input.arguments.signal do
+      %{record_id: page_id, archived_at: %DateTime{} = instant} ->
+        input.resource
+        |> Ash.Query.for_read(:archived)
+        |> Ash.Query.filter(page_id == ^page_id and archived_at == ^instant)
+        # authz-scope: FK-pinned cascade read — bounded to the restored parent page's blocks
+        # archived at the SAME instant (org-authorized parent write)
+        |> Ash.read!(authorize?: false)
+        |> Samen.Archival.Cascade.restore_each()
 
       _ ->
-        # The page was already live (idempotent no-op restore) — nothing to
-        # cascade; also covers the defensive nil case.
-        {:ok, record}
+        # The page was already live (idempotent no-op restore) — nothing to cascade.
+        :ok
     end
   end
 end

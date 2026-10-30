@@ -1,0 +1,19 @@
+# SABOTAGE: the page ▸ block archive cascade is Block's listener of the page's :archived signal (#96 D3); 
+#   without it the page archives alone
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/cms_scope_archival_leak_red_path_test.exs
+# MUST_FAIL: both blocks land on the EXACT same archived_at as the page
+diff --git a/samen_core/lib/samen/scopes/cms/blueprint.ex b/samen_core/lib/samen/scopes/cms/blueprint.ex
+index e5ae5f0f..e678a49e 100644
+--- a/samen_core/lib/samen/scopes/cms/blueprint.ex
++++ b/samen_core/lib/samen/scopes/cms/blueprint.ex
+@@ -561,7 +561,6 @@ defmodule Samen.Scopes.Cms.Blueprint do
+         # page's archival signals (issue #96 D3).
+         signals_in do
+           from unquote(page_signals) do
+-            on(:archived, :cascade_page_archived)
+             on(:restored, :cascade_page_restored)
+           end
+         end
