@@ -1,0 +1,20 @@
+# SABOTAGE: the fast job is enqueued on the saturated slow_queue itself; the old timed proof (800 ms slow 
+#   jobs, 3 s budget) passed this, the gated proof cannot
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/jobs_starvation_isolation_test.exs
+# MUST_FAIL: saturating slow_queue does not starve fast_queue
+diff --git a/samen_core/test/jobs_starvation_isolation_test.exs b/samen_core/test/jobs_starvation_isolation_test.exs
+index 65534860..66248d5b 100644
+--- a/samen_core/test/jobs_starvation_isolation_test.exs
++++ b/samen_core/test/jobs_starvation_isolation_test.exs
+@@ -86,7 +86,7 @@ defmodule Samen.Jobs.StarvationIsolationTest do
+ 
+   defmodule FastWorker do
+     @moduledoc "Fast worker for starvation isolation test."
+-    use Oban.Worker, queue: :fast_queue, max_attempts: 1
++    use Oban.Worker, queue: :slow_queue, max_attempts: 1
+ 
+     @impl Oban.Worker
+     def perform(%Oban.Job{args: %{"test_pid" => pid_str}}) do

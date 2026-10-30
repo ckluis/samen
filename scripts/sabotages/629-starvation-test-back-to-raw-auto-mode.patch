@@ -6,10 +6,10 @@
 # TEST_FILES: test/meta/sandbox_shared_guard_test.exs
 # MUST_FAIL: no test file or emitted template switches the sandbox to shared or :auto mode by hand
 diff --git a/samen_core/test/jobs_starvation_isolation_test.exs b/samen_core/test/jobs_starvation_isolation_test.exs
-index 29b0b19b..0d1ae93f 100644
+index 6553486..a00be53 100644
 --- a/samen_core/test/jobs_starvation_isolation_test.exs
 +++ b/samen_core/test/jobs_starvation_isolation_test.exs
-@@ -105,7 +105,8 @@ defmodule Samen.Jobs.StarvationIsolationTest do
+@@ -118,7 +118,8 @@ defmodule Samen.Jobs.StarvationIsolationTest do
      # test and the pool is back in `:manual` afterwards. (This module used to switch the pool to `:auto` and never
      # switch it back: its jobs committed, and every later sync module ran on an unsandboxed pool — issue #103.)
      repo = SamenCore.TestRepo
@@ -18,4 +18,4 @@ index 29b0b19b..0d1ae93f 100644
 +    Ecto.Adapters.SQL.Sandbox.mode(repo, :auto)
  
      :ets.insert(:starvation_counter, {:concurrent, 0})
-     :ets.insert(:starvation_counter, {:peak, 0})
+ 
