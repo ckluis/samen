@@ -1,26 +1,25 @@
 defmodule Samen.Scopes.Work.CascadeRestore do
   @moduledoc """
-  The restore-side counterpart to `archive_related([:subtasks])` (ADR-041 §3.5:
-  "archiving a parent task archives its subtree at the same instant, restore
-  matches the instant"). ash_archival ships `archive_related` for the archive
-  side only — it has no restore-cascade primitive — so the Work scope adds this
-  narrow listener.
+  Restore-side half of the Work `task ▸ subtask` cascade — the counterpart to
+  `Samen.Scopes.Work.CascadeArchive` (ADR-041 §3.5: "restore matches the instant";
+  ADR-040 §5.4: "restore of a cascade parent restores exactly the children whose
+  `archived_at` equals the parent's").
 
   A listener (issue #96 D3) of the task's OWN `:restored` signal (`<Task>.Archival`,
-  `Samen.Archival.Signals`): restoring a task restores every DIRECT archived subtask,
-  and each subtask's restore emits its own `:restored`, so the cascade reaches the
-  whole subtree recursively without a hand-rolled recursive query — symmetric with
-  how `archive_related`'s cascade reaches a subtree by re-invoking each child's own
-  (also-archivable) destroy action. `Samen.Scopes.Work.CycleGuard` refuses a parent
-  cycle, so the recursion ends at the leaves.
+  `Samen.Archival.Signals`). The signal carries the task's PRE-restore `archived_at` —
+  the instant `CascadeArchive` stamped onto its whole subtree — and this restores exactly
+  the archived DIRECT subtasks archived at that instant. Each of their restores emits its
+  own `:restored` with the same instant, so the cascade walks the subtree level by level.
+  A subtask archived on its own (a different instant) stays archived, and so does its
+  own subtree. A `nil` instant (the task was already live) restores nothing.
 
-  Kept exactly as the change it replaces behaved: every archived direct subtask is
-  restored (no same-instant match), also when the parent was already live, and a
-  subtask that fails to restore does not fail the parent.
+  A subtask that fails to restore (a `:restore_conflict`) is returned as the listener's
+  error, which fails the parent's restore and rolls the WHOLE transaction back — never a
+  partial cascade (ADR-040 §5.3/§5.4).
 
   Runs `authorize?: false` (a system-level structural cascade following an
-  already-authorized parent restore — mirrors ash_archival's own
-  `archive_related` internals, which run under the same posture by default).
+  already-authorized parent restore); the listener action itself is reachable only as a
+  listener (`signal_in/2` bypass).
   """
   use Ash.Resource.Actions.Implementation
 
@@ -28,16 +27,19 @@ defmodule Samen.Scopes.Work.CascadeRestore do
 
   @impl true
   def run(input, _opts, _context) do
-    %{record_id: task_id} = input.arguments.signal
+    case input.arguments.signal do
+      %{record_id: task_id, archived_at: %DateTime{} = instant} ->
+        input.resource
+        |> Ash.Query.for_read(:archived)
+        |> Ash.Query.filter(parent_id == ^task_id and archived_at == ^instant)
+        # authz-scope: FK-pinned cascade read — bounded to the restored parent task's direct
+        # subtasks archived at the SAME instant (org-authorized parent write)
+        |> Ash.read!(authorize?: false)
+        |> Samen.Archival.Cascade.restore_each()
 
-    input.resource
-    |> Ash.Query.for_read(:archived)
-    |> Ash.Query.filter(parent_id == ^task_id)
-    # authz-scope: FK-pinned cascade read — bounded to the restored parent task's direct
-    # subtasks (org-authorized parent write)
-    |> Ash.read!(authorize?: false)
-    |> Enum.each(&Samen.Archival.restore(&1, authorize?: false))
-
-    :ok
+      _ ->
+        # The task was already live (idempotent no-op restore) — nothing to cascade.
+        :ok
+    end
   end
 end

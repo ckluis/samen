@@ -26,7 +26,7 @@ defmodule Samen.Scopes.ArchivalSignalsTest do
     {Chat.ChatThread,
      archived: [Chat.ChatMessage, Chat.ChatParticipant],
      restored: [Chat.ChatMessage, Chat.ChatParticipant]},
-    {Work.Task, archived: [], restored: [Work.Task]}
+    {Work.Task, archived: [Work.Task], restored: [Work.Task]}
   ]
 
   describe "wiring" do

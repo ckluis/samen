@@ -1,0 +1,27 @@
+# SABOTAGE: a no-op restore of a live task cascades nothing: the signal's nil instant names no cascade to 
+#   undo
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/work_scope_test.exs
+# MUST_FAIL: restoring an already-live parent restores none of its archived subtasks
+diff --git a/samen_core/lib/samen/scopes/work/cascade_restore.ex b/samen_core/lib/samen/scopes/work/cascade_restore.ex
+index 57b2ca0f..02cf05c8 100644
+--- a/samen_core/lib/samen/scopes/work/cascade_restore.ex
++++ b/samen_core/lib/samen/scopes/work/cascade_restore.ex
+@@ -37,9 +37,13 @@ defmodule Samen.Scopes.Work.CascadeRestore do
+         |> Ash.read!(authorize?: false)
+         |> Samen.Archival.Cascade.restore_each()
+ 
+-      _ ->
++      %{record_id: task_id} ->
+         # The task was already live (idempotent no-op restore) — nothing to cascade.
+-        :ok
++        input.resource
++        |> Ash.Query.for_read(:archived)
++        |> Ash.Query.filter(parent_id == ^task_id)
++        |> Ash.read!(authorize?: false)
++        |> Samen.Archival.Cascade.restore_each()
+     end
+   end
+ end

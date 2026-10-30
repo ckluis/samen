@@ -1,0 +1,20 @@
+# SABOTAGE: a task's restore brings back only the subtasks archived at its own instant, never one archived 
+#   on its own
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/work_scope_test.exs
+# MUST_FAIL: a subtask archived on its own stays archived when its parent restores
+diff --git a/samen_core/lib/samen/scopes/work/cascade_restore.ex b/samen_core/lib/samen/scopes/work/cascade_restore.ex
+index 57b2ca0f..4724e8b0 100644
+--- a/samen_core/lib/samen/scopes/work/cascade_restore.ex
++++ b/samen_core/lib/samen/scopes/work/cascade_restore.ex
+@@ -31,7 +31,7 @@ defmodule Samen.Scopes.Work.CascadeRestore do
+       %{record_id: task_id, archived_at: %DateTime{} = instant} ->
+         input.resource
+         |> Ash.Query.for_read(:archived)
+-        |> Ash.Query.filter(parent_id == ^task_id and archived_at == ^instant)
++        |> Ash.Query.filter(parent_id == ^task_id)
+         # authz-scope: FK-pinned cascade read — bounded to the restored parent task's direct
+         # subtasks archived at the SAME instant (org-authorized parent write)
+         |> Ash.read!(authorize?: false)

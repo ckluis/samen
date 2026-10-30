@@ -13,8 +13,7 @@ defmodule Samen.Scopes.Cms.CascadeArchive do
 
   ## Why NOT ash_archival's `archive_related` DSL option
 
-  `archive_related([:blocks])` is the textbook mechanism (and the one
-  `Samen.Scopes.Work.Blueprint`'s Task→Subtask cascade uses), but it has two
+  `archive_related([:blocks])` is the textbook mechanism, but it has two
   gaps that matter for the CMS scope's binding same-instant contract:
 
     1. **Timestamp exactness.** `archive_related` cascades via a SEPARATE

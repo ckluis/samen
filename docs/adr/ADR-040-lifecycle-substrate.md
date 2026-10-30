@@ -321,9 +321,10 @@ refs — so the sweep is small; the probe proves it either way).
 - **Mechanism (issue #96 D3).** A cascade parent emits `:archived`/`:restored`
   (`use Samen.Resource, archival_signals:`, a `Samen.Archival.Signals` module per mount),
   and each composition child runs the cascade as an inline `Ash.Signals` listener inside
-  the parent's transaction, so the parent never names its children. Only Work's archive
-  side still uses `archive_related` (CMS, Support and Chat thread one instant through
-  `Samen.Archival.Cascade` instead, for the exactness and audit reasons in their modules).
+  the parent's transaction, so the parent never names its children. No cascade uses
+  `archive_related`: every one threads a single instant through `Samen.Archival.Cascade`,
+  for the exactness and audit reasons in `Samen.Scopes.Cms.CascadeArchive` (Work's
+  Task→Subtask cascade moved off it too, so its restore matches the instant).
   A listener action is reachable only as a listener (`signal_in/2` bypass); it writes with
   `authorize?: false`, as the cascades always have.
 
