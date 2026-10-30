@@ -349,10 +349,11 @@ defmodule Samen.AuditEventTest do
 
   describe "PartitionManager.detach_partition/3 — erasure window gate" do
     test "refuses to detach a partition within the erasure window (red path)" do
-      # July 2026 is within the default 90-day erasure window.
-      july = Date.new!(2026, 7, 1)
+      # The current month's partition ends next month, so it is inside the default 90-day
+      # erasure window on any day the suite runs. (A fixed month aged out of the window.)
+      current = Date.utc_today()
 
-      result = PartitionManager.detach_partition(Repo, july)
+      result = PartitionManager.detach_partition(Repo, current)
       assert {:error, :erasure_window_active, detail} = result
       assert is_binary(detail)
       assert detail =~ "erasure window"
