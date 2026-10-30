@@ -30,7 +30,7 @@ Use the driver; never hand-segment `ci.sh`, never background a run and poll it (
   new` — `git add` your fix FIRST, make ONLY the sabotage edit unstaged, then run it. `MUST_FAIL` is a literal test
   name, never interpolated. A patch that stopped applying: `scripts/sabotage reanchor <n>`; never delete it.
   Replay: `scripts/sabotage.sh` (filters) / `scripts/sabotage-lanes.sh` (N lanes). Unfiltered runs need `scripts/ci full`.
-- Counts are generated (`scripts/counts --write`, never by hand): <!--count:sabotages-->621<!--/count--> sabotages
+- Counts are generated (`scripts/counts --write`, never by hand): <!--count:sabotages-->625<!--/count--> sabotages
   (driver red paths `scripts/ci_test.sh` <!--count:driver_sabotages-->496–614<!--/count-->), watch-list <!--count:watchlist_modules-->12<!--/count-->
   modules / <!--count:watchlist_mutants-->166<!--/count--> mutants, corpus <!--count:corpus_targets-->237<!--/count--> targets /
   <!--count:corpus_mutants-->4,247<!--/count--> mutants.
@@ -38,7 +38,9 @@ Use the driver; never hand-segment `ci.sh`, never background a run and poll it (
   when upgrading. Prerequisite: Postgres WITH `pgvector` (`brew install pgvector`; ADR-043 §7.1/M3) — else the
   samen_core suite fails at setup with "pgvector not installed".
 - Tests needing a shared Ecto sandbox call `Samen.TestSandbox.shared!(Repo)`; a raw `Sandbox.mode(_, {:shared, _})` fails
-  `Samen.TestSandboxGuardTest` (it made the test process the owner: the `owner exited` flake). A step may drop
+  `Samen.TestSandboxGuardTest` (it made the test process the owner: the `owner exited` flake). A test whose writes must
+  COMMIT calls `Samen.TestSandbox.auto!(Repo)`; a raw `Sandbox.mode(_, :auto)` fails the same guard (nothing switched it
+  back, so later sync modules ran unsandboxed: #103). A step may drop
   `<app>/test/*_test.exs` from its key only if it never runs ExUnit on that app (`NARROW` proves it).
 - Dialyzer (`dialyzer_*` steps; `scripts/dialyzer_gate.sh [app…]`): a warning not in that project's
   `.dialyzer_ignore.exs` fails, and so does an UNUSED entry. Fix it or add it WITH its reason — never a bare

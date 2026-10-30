@@ -1,0 +1,20 @@
+# SABOTAGE: auto!/1 never switches the pool to :auto, so a test that needs committed rows (pg_dump) 
+#   silently gets none
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/test_sandbox_test.exs
+# MUST_FAIL: auto!/1's writes commit: a row inserted under it is still there after the pool is back in :manual
+diff --git a/samen_core/lib/samen/test_sandbox.ex b/samen_core/lib/samen/test_sandbox.ex
+index dce9ca38..47fa9803 100644
+--- a/samen_core/lib/samen/test_sandbox.ex
++++ b/samen_core/lib/samen/test_sandbox.ex
+@@ -61,7 +61,7 @@ defmodule Samen.TestSandbox do
+   def auto!(repo, opts \\ []) do
+     # `:on_exit` is a seam for the helper's own test (a recorder instead of ExUnit's registry)
+     register = Keyword.get(opts, :on_exit, &ExUnit.Callbacks.on_exit/1)
+-    :ok = Sandbox.mode(repo, :auto)
++    :ok = Sandbox.mode(repo, :manual)
+     register.(fn -> Sandbox.mode(repo, :manual) end)
+     :ok
+   end

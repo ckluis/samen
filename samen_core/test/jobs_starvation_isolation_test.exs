@@ -87,41 +87,41 @@ defmodule Samen.Jobs.StarvationIsolationTest do
   # Setup / teardown
   # -----------------------------------------------------------------------
 
+  # The workers' concurrency counter, owned by the module process so it outlives each test: a slow job can still be
+  # running when its test process exits (Oban, stopped after it, lets it finish).
   setup_all do
-    # We need a REAL Oban (not :manual) for this test. Start a dedicated Oban
-    # supervisor with two isolated queues.
-    repo = SamenCore.TestRepo
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(repo, ownership_timeout: 60_000)
-    Ecto.Adapters.SQL.Sandbox.mode(repo, :auto)
-
-    # Create ETS table for concurrency tracking. Use :ets.whereis/1 to guard
-    # against double-creation on re-run within the same BEAM session.
     case :ets.whereis(:starvation_counter) do
       :undefined -> :ets.new(:starvation_counter, [:named_table, :public, :set])
       _tid -> :ok
     end
 
+    on_exit(fn -> if :ets.whereis(:starvation_counter) != :undefined, do: :ets.delete(:starvation_counter) end)
+    :ok
+  end
+
+  setup do
+    # A REAL Oban (not `testing: :manual`) runs these jobs, in its own producer and executor processes. They reach
+    # the test's sandboxed connection through `Samen.TestSandbox.shared!/1`, so the jobs are rolled back with the
+    # test and the pool is back in `:manual` afterwards. (This module used to switch the pool to `:auto` and never
+    # switch it back: its jobs committed, and every later sync module ran on an unsandboxed pool — issue #103.)
+    repo = SamenCore.TestRepo
+    Samen.TestSandbox.shared!(repo)
+
     :ets.insert(:starvation_counter, {:concurrent, 0})
     :ets.insert(:starvation_counter, {:peak, 0})
 
-    oban_cfg = [
-      repo: repo,
-      queues: [slow_queue: 1, fast_queue: 2],
-      plugins: false,
-      name: StarvationTestOban
-    ]
-
-    {:ok, oban_pid} = Oban.start_link(oban_cfg)
-
-    on_exit(fn ->
-      if Process.alive?(oban_pid), do: Supervisor.stop(oban_pid)
-
-      if :ets.whereis(:starvation_counter) != :undefined do
-        :ets.delete(:starvation_counter)
-      end
-
-      Ecto.Adapters.SQL.Sandbox.checkin(repo)
-    end)
+    # Started after `shared!/1`, so ExUnit stops it before that owner is released. The PG notifier relays insert
+    # events in-process: the Postgres notifier's NOTIFY is delivered only on COMMIT, which a sandbox never does.
+    # No peer: with no plugins there is nothing to lead.
+    start_supervised!(
+      {Oban,
+       repo: repo,
+       queues: [slow_queue: 1, fast_queue: 2],
+       plugins: false,
+       notifier: Oban.Notifiers.PG,
+       peer: false,
+       name: StarvationTestOban}
+    )
 
     {:ok, oban_name: StarvationTestOban, repo: repo}
   end
