@@ -1,0 +1,20 @@
+# SABOTAGE: a task's archive reaches its subtree only through Task's listener of its own :archived signal, 
+#   which stamps one instant on the whole subtree
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/work_scope_test.exs
+# MUST_FAIL: archiving a parent Task cascades to archive its whole Subtask subtree at once
+# MUST_FAIL: the cascaded subtree is archived at the parent's EXACT instant
+diff --git a/samen_core/lib/samen/scopes/work/blueprint.ex b/samen_core/lib/samen/scopes/work/blueprint.ex
+index c0313453..8f8be80e 100644
+--- a/samen_core/lib/samen/scopes/work/blueprint.ex
++++ b/samen_core/lib/samen/scopes/work/blueprint.ex
+@@ -215,7 +215,6 @@ defmodule Samen.Scopes.Work.Blueprint do
+         # archival signals (issue #96 D3), one instant for the whole subtree.
+         signals_in do
+           from unquote(signals_mod) do
+-            on(:archived, :cascade_parent_archived)
+             on(:restored, :cascade_parent_restored)
+           end
+         end

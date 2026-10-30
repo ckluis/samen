@@ -39,10 +39,10 @@ defmodule Samen.Scopes.Work.Blueprint do
 
   Both resources are `archivable: true`. Project → Task is **not** a cascade (a task
   outlives its project's archival, ADR-040 §5.4 default). Task → Subtask **is** a
-  declared cascade (`archive_related([:subtasks])`) — archiving a parent task
-  archives its subtree at the same instant. Restore matches the instant too:
-  `Samen.Scopes.Work.CascadeRestore` (scoped to `:restore` only) is the restore-side
-  counterpart ash_archival does not ship.
+  declared cascade — archiving a parent task archives its subtree at the same instant
+  (`Samen.Scopes.Work.CascadeArchive`), and restoring it restores exactly the subtasks
+  archived at that instant (`Samen.Scopes.Work.CascadeRestore`); a subtask archived on
+  its own stays archived. Both are listeners of the task's own archival signals.
 
   ## Storage-name discipline
 
@@ -132,10 +132,11 @@ defmodule Samen.Scopes.Work.Blueprint do
         self-referential Subtask tree (cycle-refused, `Samen.Scopes.Work.CycleGuard`).
         `project_id` links to an optional `Project`.
 
-        Archivable (ADR-040 §5.9); archiving a Task cascades to its Subtask subtree
-        (`archive_related([:subtasks])`, ADR-041 §3.5). Restoring one restores its
-        archived subtasks (`Samen.Scopes.Work.CascadeRestore`), a listener of the task's
-        own `:restored` signal (`<Task>.Archival`, issue #96 D3) — so each restored
+        Archivable (ADR-040 §5.9); archiving a Task archives its Subtask subtree at the
+        same instant (`Samen.Scopes.Work.CascadeArchive`, ADR-041 §3.5), and restoring it
+        restores exactly the subtasks archived at that instant
+        (`Samen.Scopes.Work.CascadeRestore`). Both listen to the task's OWN
+        `:archived`/`:restored` signals (`<Task>.Archival`, issue #96 D3), so each
         subtask's own signal reaches the next level of the subtree.
 
         No PII: `title`/`body`/`custom` are freeform user content, unvaulted
@@ -210,26 +211,22 @@ defmodule Samen.Scopes.Work.Blueprint do
           change(Samen.Scopes.Work.CycleGuard)
         end
 
-        # Restore-side cascade counterpart to archive_related([:subtasks]) below —
-        # ash_archival ships no restore-cascade primitive (ADR-041 §3.5). A listener of
-        # this task's OWN `:restored` signal (issue #96 D3).
+        # The Task→Subtask cascade (ADR-041 §3.5): listeners of this task's OWN
+        # archival signals (issue #96 D3), one instant for the whole subtree.
         signals_in do
           from unquote(signals_mod) do
+            on(:archived, :cascade_parent_archived)
             on(:restored, :cascade_parent_restored)
           end
         end
 
-        archive do
-          archive_related([:subtasks])
-          # System-level structural cascade following an already-authorized parent
-          # archive — mirrors CascadeRestore's own `authorize?: false` posture (the
-          # actor scope does not automatically thread into ash_archival's internal
-          # cascade bulk_destroy; the parent action was already authorized).
-          archive_related_authorize?(false)
-        end
-
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
+
+          action :cascade_parent_archived do
+            argument(:signal, unquote(Module.concat(signals_mod, Archived)), allow_nil?: false)
+            run(Samen.Scopes.Work.CascadeArchive)
+          end
 
           action :cascade_parent_restored do
             argument(:signal, unquote(Module.concat(signals_mod, Restored)), allow_nil?: false)
@@ -238,9 +235,13 @@ defmodule Samen.Scopes.Work.Blueprint do
         end
 
         policies do
-          # The cascade listener runs as the actor who restored the parent task, whose
-          # restore was already authorized; it is reachable ONLY as a listener of that
-          # signal, never called directly.
+          # The cascade listeners run as the actor who archived/restored the parent task,
+          # whose write was already authorized; each is reachable ONLY as a listener of
+          # its signal, never called directly.
+          bypass action(:cascade_parent_archived) do
+            authorize_if(signal_in(unquote(signals_mod), :archived))
+          end
+
           bypass action(:cascade_parent_restored) do
             authorize_if(signal_in(unquote(signals_mod), :restored))
           end

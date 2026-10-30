@@ -5,12 +5,8 @@ defmodule Samen.Scopes.Cms.CascadeRestore do
   cascade parent restores exactly the children whose `archived_at` equals the
   parent's — the same-instant match; a child independently archived earlier
   stays archived"). ash_archival ships no restore-cascade primitive at all
-  (`Samen.Scopes.Work.CascadeRestore` is the direct precedent for this shape,
-  though Work's Task→Subtask cascade restores every archived descendant
-  unconditionally — CMS needs the stricter same-instant match because Page and
-  Block are DIFFERENT resources with independent archivability, so "a block
-  archived on its own" is a real, distinguishable case Work's self-referential
-  subtree doesn't have to consider).
+  (`Samen.Scopes.Work.CascadeRestore` has the same shape for the Task→Subtask
+  tree).
 
   A listener (issue #96 D3): `Block` runs this generic action when its page emits
   `:restored` (`<Page>.Archival`). The signal carries the page's PRE-restore

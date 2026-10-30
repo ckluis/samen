@@ -38,8 +38,9 @@ defmodule Samen.Scopes.Work do
   ## Soft-delete (ADR-040 §5.9)
 
   Both `Project` and `Task` are `archivable: true`. Project archival does NOT cascade
-  to its Tasks; Task archival DOES cascade to its Subtask subtree
-  (`archive_related([:subtasks])`, ADR-041 §3.5).
+  to its Tasks; Task archival DOES cascade to its Subtask subtree at one instant, and
+  restore brings back exactly that cascade (`Samen.Scopes.Work.CascadeArchive`/
+  `CascadeRestore`, ADR-041 §3.5).
 
   ## Subtask tree — cycle refusal (ADR-041 §3.4)
 

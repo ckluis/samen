@@ -20,8 +20,11 @@ defmodule Samen.WorkScopeTest do
       assert this file is required to carry);
     * c5 archive/restore (ADR-040 §5.9): Project and Task both hide-on-archive /
         show-via-:archived / return-on-restore; Task→Subtask cascades ARCHIVE
-        (`archive_related`) and RESTORE (`Samen.Scopes.Work.CascadeRestore`) to the
-        whole subtree at the same instant; Project→Task does NOT cascade;
+        (`Samen.Scopes.Work.CascadeArchive`) to the whole subtree at the parent's exact
+        instant, and RESTORE (`Samen.Scopes.Work.CascadeRestore`) brings back exactly
+        that cascade — an independently archived subtask stays archived, a live parent
+        restores nothing, and a subtask conflict rolls the whole restore back;
+        Project→Task does NOT cascade;
     * c6 INV-1 — the Work scope's catalog PII map is EMPTY (no vaulted column) —
       the either-way no-PII declaration proof;
     * c7 cross-org FK refusal on `parent_id`/`project_id` (`Samen.Policy.SameOrgFk`)
@@ -434,6 +437,81 @@ defmodule Samen.WorkScopeTest do
       assert archived_task_ids(scope) == MapSet.new()
     end
 
+    test "the cascaded subtree is archived at the parent's EXACT instant (the restore match key)",
+         %{org: org, scope: scope} do
+      root = new_task(scope, org, %{title: "root"})
+      child = new_task(scope, org, %{title: "child", parent_id: root.id})
+      grandchild = new_task(scope, org, %{title: "grandchild", parent_id: child.id})
+
+      {:ok, _} = Archival.archive(root, scope: scope)
+
+      instants = archived_tasks(scope) |> Map.new(&{&1.id, &1.archived_at})
+      assert %DateTime{} = instant = instants[root.id]
+      assert instants[child.id] == instant
+      assert instants[grandchild.id] == instant
+    end
+
+    test "a subtask archived on its own stays archived when its parent restores (RED); the cascaded sibling returns (CONTROL)",
+         %{org: org, scope: scope} do
+      root = new_task(scope, org, %{title: "root"})
+      cascaded = new_task(scope, org, %{title: "cascaded", parent_id: root.id})
+      independent = new_task(scope, org, %{title: "independent", parent_id: root.id})
+      below = new_task(scope, org, %{title: "below", parent_id: independent.id})
+
+      {:ok, _} = Archival.archive(independent, scope: scope)
+      {:ok, _} = Archival.archive(root, scope: scope)
+
+      restored_root = archived_tasks(scope) |> Enum.find(&(&1.id == root.id))
+      {:ok, _} = Archival.restore(restored_root, scope: scope)
+
+      live = task_ids(scope)
+      assert MapSet.member?(live, root.id)
+      assert MapSet.member?(live, cascaded.id)
+      # RED: archived before the parent (a different instant), so not part of its cascade —
+      # and neither is its own subtree, archived with it.
+      refute MapSet.member?(live, independent.id)
+      refute MapSet.member?(live, below.id)
+      assert archived_task_ids(scope) == MapSet.new([independent.id, below.id])
+    end
+
+    test "restoring an already-live parent restores none of its archived subtasks",
+         %{org: org, scope: scope} do
+      root = new_task(scope, org, %{title: "root"})
+      child = new_task(scope, org, %{title: "child", parent_id: root.id})
+      {:ok, _} = Archival.archive(child, scope: scope)
+
+      # A no-op restore of a live task: nothing was cascaded, so nothing comes back.
+      {:ok, _} = Archival.restore(root, scope: scope)
+
+      assert archived_task_ids(scope) == MapSet.new([child.id])
+    end
+
+    test "a subtask that cannot restore fails the parent's restore and rolls the whole cascade back",
+         %{org: org, scope: scope} do
+      # The fixture table has no unique index, so this test adds a partial one (rolled back
+      # with the sandbox) — the §5.3 shape that makes a restore conflict constructible.
+      @repo.query!(
+        "CREATE UNIQUE INDEX stw_task_live_title_test ON stw_task (stw_org_id, stw_title) " <>
+          "WHERE stw_archived_at IS NULL"
+      )
+
+      root = new_task(scope, org, %{title: "root"})
+      sibling = new_task(scope, org, %{title: "sibling", parent_id: root.id})
+      clashing = new_task(scope, org, %{title: "dup", parent_id: root.id})
+
+      {:ok, _} = Archival.archive(root, scope: scope)
+      # A live task claims the archived subtask's freed (org, title) slot.
+      occupant = new_task(scope, org, %{title: "dup"})
+
+      restored_root = archived_tasks(scope) |> Enum.find(&(&1.id == root.id))
+      assert {:error, :restore_conflict} = Archival.restore(restored_root, scope: scope)
+
+      # RED: never a partial cascade — the parent and BOTH subtasks are still archived.
+      assert archived_task_ids(scope) == MapSet.new([root.id, sibling.id, clashing.id])
+      # CONTROL: the occupant is untouched and live.
+      assert MapSet.member?(task_ids(scope), occupant.id)
+    end
+
     test "archiving a Project does NOT cascade to its Tasks (no-cascade, ADR-041 §3.5)",
          %{org: org, scope: scope} do
       p = new_project(scope, org)
@@ -443,6 +521,26 @@ defmodule Samen.WorkScopeTest do
 
       # CONTROL: the task outlives its project's archival — still in default reads.
       assert MapSet.member?(task_ids(scope), t.id)
+    end
+
+    test "RED: the cascade listener actions cannot be called directly with a forged signal",
+         %{org: org, scope: scope} do
+      root = new_task(scope, org, %{title: "root"})
+      child = new_task(scope, org, %{title: "child", parent_id: root.id})
+
+      # Well-formed signals, so the refusal is the policy's, not input validation's.
+      signal = %{signal_id: Ash.UUIDv7.generate(), record_id: root.id, archived_at: DateTime.utc_now()}
+
+      for action <- [:cascade_parent_archived, :cascade_parent_restored] do
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 Task
+                 |> Ash.ActionInput.for_action(action, %{signal: signal}, scope: scope)
+                 |> Ash.run_action(),
+               inspect(action)
+      end
+
+      # nothing cascaded: the live subtree is untouched
+      assert MapSet.subset?(MapSet.new([root.id, child.id]), task_ids(scope))
     end
   end
 
