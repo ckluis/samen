@@ -3,7 +3,7 @@ defmodule Samen.Fleet.PublicStatus do
   T166 / ADR-050 (G11) — the PUBLIC-plane projection of the fleet substrate.
 
   This module computes NOTHING about health. Every status it reports is
-  `Samen.Fleet.Registry.build_row/3`'s already-computed one — the same dead-man
+  `Samen.Fleet.Registry.build_row/4`'s already-computed one — the same dead-man
   staleness ADR-044 §4.6 ships, derived from `received_at` and the app's own
   `stale_after_s`, never from a producer-chosen `generated_at_us`. Re-implementing
   probing here would have given the public page a SECOND notion of "up", free to
@@ -36,7 +36,7 @@ defmodule Samen.Fleet.PublicStatus do
   The public vocabulary is SMALLER than the internal one, and the mapping is
   lossy on purpose — the public plane never reports an operator or security ACT:
 
-  | internal (`build_row/3`) | public          | why |
+  | internal (`build_row/4`) | public          | why |
   |--------------------------|-----------------|-----|
   | `:active`                | `:operational`  | reporting inside its window |
   | `:stale`                 | `:degraded`     | dead-man overdue |

@@ -665,21 +665,24 @@ defmodule Samen.Fleet.Registry do
   `generated_at_us`, §4.6), a revoked/deregistered app's last report EXCLUDED
   from `reporting` (never silently retained, never silently dropped from the
   row list — rule 6).
+
+  `opts[:now]` is the instant staleness is judged at (default `DateTime.utc_now/0`),
+  so a test can place a report in the past without waiting for the wall clock.
   """
   @spec read_rows(module(), keyword()) :: {:ok, map()} | {:error, term()}
   def read_rows(ns, opts) do
     actor = Keyword.get(opts, :actor, Samen.Aggregate.Actor.new())
+    now = Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
 
     with {:ok, apps} <- app_res(ns) |> Ash.read(actor: actor) do
-      rows = Enum.map(apps, &build_row(ns, &1, actor))
+      rows = Enum.map(apps, &build_row(ns, &1, actor, now))
       reporting = Enum.count(rows, &(&1.status in [:active]))
       {:ok, %{rows: rows, reporting: reporting, total: length(rows)}}
     end
   end
 
-  defp build_row(ns, app, actor) do
+  defp build_row(ns, app, actor, now) do
     latest = latest_report(ns, app.id, actor)
-    now = DateTime.utc_now()
 
     status =
       cond do

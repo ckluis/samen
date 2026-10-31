@@ -320,6 +320,34 @@ defmodule Samen.MultiNode.Harness do
   end
 
   @doc """
+  Block until no job is pending or running anywhere: every live peer's producers run
+  nothing, and then every `oban_jobs` row is terminal. Read in that order, a perform
+  cannot slip between the two reads: one that started after the producers looked idle
+  holds an `executing` row when the rows are read. Since a worker records its `mn_exec`
+  row inside `perform/1`, before its job is acked, every execution that will ever happen
+  is in `mn_exec` once this returns — the counts read after it are final, with no grace
+  sleep for a stray duplicate to land.
+  """
+  def await_quiescent(nodenames, timeout_ms \\ 30_000) do
+    wait_until(fn -> Enum.all?(nodenames, &producers_idle?/1) and no_pending_jobs?() end, timeout_ms)
+  end
+
+  defp producers_idle?(nodename) do
+    nodename
+    |> :erpc.call(Oban, :check_all_queues, [@oban_name])
+    |> Enum.all?(&(&1.running == []))
+  end
+
+  defp no_pending_jobs? do
+    %{rows: [[n]]} =
+      Samen.MultiNode.Repo.query!(
+        "SELECT count(*) FROM oban_jobs WHERE state NOT IN ('completed', 'discarded', 'cancelled')"
+      )
+
+    n == 0
+  end
+
+  @doc """
   Block until `pred.()` is true or `timeout_ms` elapses. Polls the DB on the
   PRIMARY node only (the peers do the async work); this is a join, not a
   background poller — it returns control to the test.

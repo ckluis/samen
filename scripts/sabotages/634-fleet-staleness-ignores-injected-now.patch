@@ -1,0 +1,20 @@
+# SABOTAGE: read_rows judges staleness at the wall clock instead of opts[:now]: the test no longer sleeps 
+#   2.2 s, so it must prove the injected instant is the one used
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/fleet_public_status_test.exs
+# MUST_FAIL: the dead-man staleness ADR-044 already ships is CONSUMED, not re-derived: overdue -> :degraded
+diff --git a/samen_core/lib/samen/fleet/registry.ex b/samen_core/lib/samen/fleet/registry.ex
+index ec7b8122..c2a5f62e 100644
+--- a/samen_core/lib/samen/fleet/registry.ex
++++ b/samen_core/lib/samen/fleet/registry.ex
+@@ -672,7 +672,7 @@ defmodule Samen.Fleet.Registry do
+   @spec read_rows(module(), keyword()) :: {:ok, map()} | {:error, term()}
+   def read_rows(ns, opts) do
+     actor = Keyword.get(opts, :actor, Samen.Aggregate.Actor.new())
+-    now = Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
++    now = DateTime.utc_now()
+ 
+     with {:ok, apps} <- app_res(ns) |> Ash.read(actor: actor) do
+       rows = Enum.map(apps, &build_row(ns, &1, actor, now))

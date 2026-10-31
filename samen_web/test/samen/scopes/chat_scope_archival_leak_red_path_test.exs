@@ -318,9 +318,8 @@ defmodule Samen.Scopes.ChatScopeArchivalLeakRedPathTest do
       # instant, while the thread is still live.
       {:ok, _} = Samen.Archival.archive(independently_archived_message, actor: actor)
 
-      # Force a distinct instant with a >1s sleep (belt-and-suspenders on top
-      # of T124's microsecond fix).
-      Process.sleep(1_100)
+      # No sleep: `archived_at` is microsecond-precise (T124), so the two archives land at
+      # different instants, and the `refute … ==` below asserts it rather than assuming it.
 
       # Now archive the thread — cascades ONLY the still-live cascaded_message;
       # the independently-archived one is already hidden from the default
@@ -391,10 +390,8 @@ defmodule Samen.Scopes.ChatScopeArchivalLeakRedPathTest do
       # Archive the second message INDEPENDENTLY first, at its own instant.
       {:ok, _} = Samen.Archival.archive(independently_archived_message, authorize?: false)
 
-      # Force a distinct instant with a >1s sleep — belt-and-suspenders on top of
-      # T124's microsecond fix (see the no-sleep same-second test below for the
-      # direct edge reproduction).
-      Process.sleep(1_100)
+      # No sleep: `archived_at` is microsecond-precise (T124), so the two archives land at
+      # different instants, and the `refute … ==` below asserts it rather than assuming it.
 
       {:ok, archived_thread} = Samen.Archival.archive(thread, authorize?: false)
 
