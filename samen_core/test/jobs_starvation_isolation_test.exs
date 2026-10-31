@@ -10,17 +10,27 @@ defmodule Samen.Jobs.StarvationIsolationTest do
   another queue's jobs from completing. It runs a real Oban instance (not
   `:manual` mode) with:
 
-    - `:slow_queue` (limit 1): filled with N slow jobs that block for `@slow_ms`
-    - `:fast_queue` (limit 2): one fast job enqueued AFTER the slow queue is full
+    - `:slow_queue` (limit 1): a slow job that HOLDS its slot until the test
+      releases it, and another slow job waiting behind it
+    - `:fast_queue` (limit 2): one fast job enqueued while that slot is held
 
-  Assertion: the fast job completes before the slow jobs do. This proves that
-  a saturated `:slow_queue` cannot starve `:fast_queue`.
+  Assertion: the fast job completes while the slow job still holds the slot.
+  The hold is a gate, not a duration: a slow job returns only when the test
+  sends it `:release` (or the test process exits), so a fast job that had to
+  wait for `:slow_queue` would never run before the assertion, whatever the
+  machine's speed. (An earlier version slept the slow jobs for 800 ms and gave
+  the fast job 3 s: a fast job on `:slow_queue` itself still finished in time,
+  so the proof could not fail.) The timeouts here only bound how long a broken
+  queue takes to fail the test.
 
   ## Red-path / anti-tautology probe
 
-  The test also includes a concurrency-limit red path: it saturates `:slow_queue`
-  with jobs that count their concurrent executions via an ETS counter and asserts
-  the peak never exceeds the queue's configured limit.
+  The test also includes a concurrency-limit red path: it fills `:slow_queue`
+  with held jobs and releases them one at a time, asserting at each start that
+  exactly one is running — by the workers' own ETS counter and by the jobs'
+  state in the database. Oban's fetch marks every job it takes `executing` in
+  one UPDATE before it starts any of them, so a limit above 1 would show more
+  than one `executing` row at the first start.
 
   ## Simulation seam
 
@@ -40,32 +50,36 @@ defmodule Samen.Jobs.StarvationIsolationTest do
   """
   use ExUnit.Case, async: false
 
-  # Milliseconds a slow job sleeps (long enough that fast jobs definitely finish
-  # first). Keep it reasonable to avoid flaky CI on slow machines.
-  @slow_ms 800
-  # How many slow jobs to enqueue (must fill the slow_queue to its limit + 1
-  # so at least one is queued waiting while the fast job runs).
-  @slow_job_count 3
-  # Fast job completes in this many ms (well under @slow_ms).
-  @fast_ms 50
-  # Max ms we wait for the fast job to complete.
-  @fast_timeout_ms 3_000
+  import Ecto.Query
+
+  # How long a broken queue may take to fail a test. Never what makes a correct one pass: every wait below is for an
+  # event the gate guarantees.
+  @timeout_ms 5_000
 
   # -----------------------------------------------------------------------
   # Fixture workers (defined here so we don't need a full support module)
   # -----------------------------------------------------------------------
 
   defmodule SlowWorker do
-    @moduledoc "Slow worker for starvation isolation test."
+    @moduledoc """
+    Slow worker for starvation isolation test: it holds its queue slot until the test sends it `:release`, or until
+    the test process exits (so a failed test never leaves Oban waiting on it).
+    """
     use Oban.Worker, queue: :slow_queue, max_attempts: 1
 
     @impl Oban.Worker
-    def perform(%Oban.Job{args: %{"test_pid" => pid_str, "slow_ms" => slow_ms}}) do
-      pid = :erlang.list_to_pid(:erlang.binary_to_list(pid_str))
-      :ets.update_counter(:starvation_counter, :concurrent, {2, 1})
-      Process.sleep(slow_ms)
+    def perform(%Oban.Job{args: %{"test_pid" => pid_str}}) do
+      test_pid = :erlang.list_to_pid(:erlang.binary_to_list(pid_str))
+      ref = Process.monitor(test_pid)
+      concurrent = :ets.update_counter(:starvation_counter, :concurrent, {2, 1})
+      send(test_pid, {:slow_started, self(), concurrent})
+
+      receive do
+        :release -> :ok
+        {:DOWN, ^ref, :process, _pid, _reason} -> :ok
+      end
+
       :ets.update_counter(:starvation_counter, :concurrent, {2, -1})
-      send(pid, {:slow_done, self()})
       :ok
     end
   end
@@ -75,9 +89,8 @@ defmodule Samen.Jobs.StarvationIsolationTest do
     use Oban.Worker, queue: :fast_queue, max_attempts: 1
 
     @impl Oban.Worker
-    def perform(%Oban.Job{args: %{"test_pid" => pid_str, "fast_ms" => fast_ms}}) do
+    def perform(%Oban.Job{args: %{"test_pid" => pid_str}}) do
       pid = :erlang.list_to_pid(:erlang.binary_to_list(pid_str))
-      Process.sleep(fast_ms)
       send(pid, {:fast_done, self()})
       :ok
     end
@@ -108,7 +121,6 @@ defmodule Samen.Jobs.StarvationIsolationTest do
     Samen.TestSandbox.shared!(repo)
 
     :ets.insert(:starvation_counter, {:concurrent, 0})
-    :ets.insert(:starvation_counter, {:peak, 0})
 
     # Started after `shared!/1`, so ExUnit stops it before that owner is released. The PG notifier relays insert
     # events in-process: the Postgres notifier's NOTIFY is delivered only on COMMIT, which a sandbox never does.
@@ -131,67 +143,64 @@ defmodule Samen.Jobs.StarvationIsolationTest do
   # -----------------------------------------------------------------------
 
   test "saturating slow_queue does not starve fast_queue", %{repo: repo} do
-    test_pid_str = :erlang.pid_to_list(self()) |> List.to_string()
+    test_pid = encode_pid(self())
 
-    # 1. Enqueue @slow_job_count slow jobs (fills slow_queue limit=1, others queued)
-    for _ <- 1..@slow_job_count do
-      cs = SlowWorker.new(%{test_pid: test_pid_str, slow_ms: @slow_ms})
-      {:ok, _} = Oban.insert(StarvationTestOban, cs)
-    end
+    # 1. Saturate slow_queue (limit 1): one job holds the slot, the other waits behind it.
+    Oban.insert_all(StarvationTestOban, for(_ <- 1..2, do: SlowWorker.new(%{test_pid: test_pid})))
+    assert_receive {:slow_started, holder, 1}, @timeout_ms
+    assert slow_queue_states(repo) == %{"executing" => 1, "available" => 1}
 
-    # Give Oban a moment to pick up and start executing slow jobs.
-    Process.sleep(150)
+    # 2. Enqueue the fast job while the slot is held.
+    {:ok, _} = Oban.insert(StarvationTestOban, FastWorker.new(%{test_pid: test_pid}))
 
-    # 2. Now enqueue the fast job.
-    cs = FastWorker.new(%{test_pid: test_pid_str, fast_ms: @fast_ms})
-    {:ok, _} = Oban.insert(StarvationTestOban, cs)
+    # 3. It completes, and slow_queue is still exactly as saturated as before: nothing there moved.
+    assert_receive {:fast_done, _pid}, @timeout_ms,
+                   "fast_queue job must complete while slow_queue's only slot is held"
 
-    # 3. Fast job must complete within the timeout, even though slow jobs are running.
-    assert_receive {:fast_done, _pid}, @fast_timeout_ms,
-                   "fast_queue job must complete within #{@fast_timeout_ms}ms even when slow_queue is saturated"
+    assert slow_queue_states(repo) == %{"executing" => 1, "available" => 1}
 
-    # 4. Slow jobs may still be running — that's fine. The key is fast job completed.
-    _ = repo
-    :ok
+    # 4. Let slow_queue drain.
+    send(holder, :release)
+    assert_receive {:slow_started, next, 1}, @timeout_ms
+    send(next, :release)
   end
 
   # -----------------------------------------------------------------------
-  # Concurrency limit red-path: peak concurrent executions ≤ queue limit
+  # Concurrency limit red-path: exactly one execution at a time at limit 1
   # -----------------------------------------------------------------------
 
-  test "slow_queue never runs more than its concurrency limit concurrently" do
-    test_pid_str = :erlang.pid_to_list(self()) |> List.to_string()
+  test "slow_queue never runs more than its concurrency limit concurrently", %{repo: repo} do
+    test_pid = encode_pid(self())
 
-    # Reset counter
-    :ets.insert(:starvation_counter, {:concurrent, 0})
-    :ets.insert(:starvation_counter, {:peak, 0})
+    # Enough held jobs to exceed the limit IF there were no cap. One INSERT: any fetch sees all four or none.
+    Oban.insert_all(StarvationTestOban, for(_ <- 1..4, do: SlowWorker.new(%{test_pid: test_pid})))
 
-    # Enqueue enough slow jobs to exceed the limit IF there were no cap.
-    for _ <- 1..4 do
-      cs = SlowWorker.new(%{test_pid: test_pid_str, slow_ms: @slow_ms})
-      {:ok, _} = Oban.insert(StarvationTestOban, cs)
+    for n <- 1..4 do
+      assert_receive {:slow_started, holder, concurrent}, @timeout_ms
+
+      assert concurrent == 1,
+             "slow_queue limit=1: start #{n} found #{concurrent} jobs running concurrently"
+
+      executing = Map.get(slow_queue_states(repo), "executing")
+
+      assert executing == 1,
+             "slow_queue limit=1: start #{n} found #{inspect(executing)} jobs fetched as executing"
+
+      send(holder, :release)
     end
-
-    # Wait for the jobs to start executing.
-    Process.sleep(300)
-
-    # Sample the peak concurrent count.
-    [{_, concurrent}] = :ets.lookup(:starvation_counter, :concurrent)
-
-    assert concurrent <= 1,
-           "slow_queue limit=1: expected ≤1 concurrent, got #{concurrent} at sample time"
-
-    # Drain — collect done messages with a timeout.
-    receive_n_dones(4, @slow_ms * 5)
   end
 
-  defp receive_n_dones(0, _timeout), do: :ok
+  defp encode_pid(pid), do: pid |> :erlang.pid_to_list() |> List.to_string()
 
-  defp receive_n_dones(n, timeout) do
-    receive do
-      {:slow_done, _} -> receive_n_dones(n - 1, timeout)
-    after
-      timeout -> :ok
-    end
+  # The slow_queue jobs' states as `%{state => count}`. Completed jobs are left out: a job is acked (marked
+  # `completed`) before its producer fetches the next one, so they never blur the `executing` count.
+  defp slow_queue_states(repo) do
+    from(j in Oban.Job,
+      where: j.queue == "slow_queue" and j.state != "completed",
+      group_by: j.state,
+      select: {j.state, count(j.id)}
+    )
+    |> repo.all()
+    |> Map.new()
   end
 end
