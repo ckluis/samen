@@ -86,7 +86,13 @@ defmodule Samen.TestSandboxTest do
     assert stranger() == :ok
   end
 
-  test "the raw pair this helper replaces: the SAME on_exit query dies with 'owner exited' (why the helper exists)" do
+  # Once the test process (the raw pair's owner) has exited, the query fails in one of three ways, depending on how far
+  # DBConnection has got in tearing the owner down — all three are the connection going away with its owner:
+  #   * the owner's proxy is alive but has the owner's DOWN: it answers `shutdown: "owner … exited"`;
+  #   * the proxy has already shut down: the checkout finds no process (`:noproc`);
+  #   * the ownership manager has already dropped the shared mode: the pool is `:manual` again (`OwnershipError`).
+  # Asserting one of them made this test as racy as the flake it demonstrates.
+  test "the raw pair this helper replaces: the SAME on_exit query fails once its owner is gone (why the helper exists)" do
     :ok = Sandbox.checkout(TestRepo)
     Sandbox.mode(TestRepo, {:shared, self()})
 
@@ -95,11 +101,15 @@ defmodule Samen.TestSandboxTest do
         try do
           TestRepo.query!("select 1")
           :reached
+        rescue
+          DBConnection.OwnershipError -> :owner_gone
         catch
-          :exit, {{:shutdown, "owner " <> _}, _} -> :owner_exited
+          :exit, {{:shutdown, "owner " <> _}, _} -> :owner_gone
+          :exit, {:noproc, {DBConnection.Holder, :checkout, _}} -> :owner_gone
         end
 
-      assert reached == :owner_exited
+      assert reached == :owner_gone,
+             "the on_exit query outlived the raw pair's owner, so Samen.TestSandbox.shared!/1 would not be needed"
     end)
   end
 
