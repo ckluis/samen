@@ -95,6 +95,15 @@ named error (never a silent half-secure boot):
     DATABASE_URL=… SECRET_KEY_BASE=… PHX_HOST=… SAMEN_KMS_REGION=… \
       /app/bin/<%= otp_app %> eval ":ok"
 
+## Audit-log partitions (nothing to do)
+
+`aud_event` is partitioned by month, and a row for a month with no partition is refused.
+The migration creates the month it runs in and the next two. From then on
+`Samen.AuditEvent.PartitionManager` keeps two months ahead: Oban runs it once at boot and
+daily at 01:00 UTC, both through `Samen.Jobs.install_defaults/1`. A host that declares its
+own `Oban.Plugins.Cron` replaces the daily run, so keep it in that crontab
+(`Samen.Jobs.default_crontab() ++ yours`).
+
 ## Tenant-auth gate — ARMED BY DEFAULT in prod (ADR-045 §2 V-F1)
 
 The multi-tenant plane's authentication gate is **armed by default in production** and

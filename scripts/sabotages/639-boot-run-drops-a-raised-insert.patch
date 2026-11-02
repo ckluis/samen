@@ -1,0 +1,21 @@
+# SABOTAGE: BootRun gives up on a worker whose insert raised, so an app that booted before its database was 
+#   reachable never gets its boot-time partition roll-forward
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/jobs_boot_run_test.exs
+# MUST_FAIL: an insert that raised is retried until it lands
+diff --git a/samen_core/lib/samen/jobs/boot_run.ex b/samen_core/lib/samen/jobs/boot_run.ex
+index 3e1a7a48..1d53ceb0 100644
+--- a/samen_core/lib/samen/jobs/boot_run.ex
++++ b/samen_core/lib/samen/jobs/boot_run.ex
+@@ -62,7 +62,8 @@ defmodule Samen.Jobs.BootRun do
+   # Enqueue what is still pending; keep what failed and try it again after `retry_ms`.
+   # The process stays up once done: Oban restarts a plugin that exits, even normally.
+   defp enqueue(%{pending: pending} = state) do
+-    failed = Enum.reject(pending, &settled?(state.conf, &1))
++    _ = Enum.reject(pending, &settled?(state.conf, &1))
++    failed = []
+     if failed != [], do: Process.send_after(self(), :enqueue, state.retry_ms)
+     %{state | pending: failed}
+   end

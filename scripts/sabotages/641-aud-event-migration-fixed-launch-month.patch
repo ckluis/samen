@@ -1,0 +1,39 @@
+# SABOTAGE: the generated aud_event migration seeds a fixed launch month again, so a fresh deploy in any 
+#   other month refuses audit writes until the daily roll-forward
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_test.exs
+# MUST_FAIL: the template partitions the month it is migrated in, never a fixed month
+diff --git a/samen_core/priv/templates/m_aud_event.eex b/samen_core/priv/templates/m_aud_event.eex
+index 87d4cb18..9df5a915 100644
+--- a/samen_core/priv/templates/m_aud_event.eex
++++ b/samen_core/priv/templates/m_aud_event.eex
+@@ -71,13 +71,12 @@ defmodule <%= module %>.Repo.Migrations.AudEvent do
+     """,
+     "DROP TABLE IF EXISTS aud_event"
+ 
+-    # The month this migration runs in and the next two — what the daily
+-    # `Samen.AuditEvent.PartitionManager` roll-forward keeps ahead from then on. A fixed
+-    # launch month here left a fresh deploy unable to write audit events (no partition for
+-    # the current month) until that job first ran. Dropping the table drops these with it.
+-    for sql <- Samen.AuditEvent.PartitionManager.upcoming_partition_sql(Date.utc_today(), 2) do
+-      execute sql
+-    end
++    execute """
++    CREATE TABLE IF NOT EXISTS aud_event_y2026m07
++    PARTITION OF aud_event
++    FOR VALUES FROM ('2026-07-01 00:00:00+00') TO ('2026-08-01 00:00:00+00')
++    """,
++    "DROP TABLE IF EXISTS aud_event_y2026m07"
+ 
+     execute """
+     CREATE INDEX aud_event_brin_occurred_at
+@@ -148,6 +147,7 @@ defmodule <%= module %>.Repo.Migrations.AudEvent do
+     execute "DROP TRIGGER IF EXISTS aud_event_append_only_tg ON aud_event"
+     execute "DROP FUNCTION IF EXISTS aud_event_enforce_append_only()"
+     execute "DROP INDEX IF EXISTS aud_event_brin_occurred_at"
++    execute "DROP TABLE IF EXISTS aud_event_y2026m07"
+     execute "DROP TABLE IF EXISTS aud_event"
+   end
+ end
