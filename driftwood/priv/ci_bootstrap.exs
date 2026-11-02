@@ -22,9 +22,10 @@ Ecto.Migrator.run(Repo, :up, all: true)
 # `Samen.AuditEvent.PartitionManager` Oban job that rolls partitions forward in production does
 # not run under this bootstrap, so on a wall clock past the launch month the current month's
 # partition is absent — and the gamedays/verifiers that write audit rows on the freshly-migrated
-# DB would hit "no partition of relation aud_event". Provision current + upcoming months up front
-# (forward-safe; the ensure is idempotent — exactly what the daily job does).
-Samen.AuditEvent.PartitionManager.ensure_upcoming_partitions(Repo, Date.utc_today(), 2)
+# DB would hit "no partition of relation aud_event". Provision every month from the launch month
+# through two months ahead, as a production database that has run since launch has them
+# (idempotent).
+Samen.AuditEvent.PartitionManager.ensure_contiguous_partitions(Repo, Date.utc_today(), 2)
 
 :ok = Driftwood.NonPiiSetup.register_all()
 

@@ -1,0 +1,25 @@
+# SABOTAGE: the daily roll-forward steps 31 days instead of a calendar month: run on a 29th-31st it skips 
+#   the next month, so a fresh deploy then has no partition for it until the 1st
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_test.exs
+# MUST_FAIL: ensure_upcoming_partitions counts calendar months: from January 31 it creates February
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index d13f6c4b..996d8f7e 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -208,8 +208,11 @@ defmodule Samen.AuditEvent.PartitionManager do
+           [{:ok, String.t()} | {:error, term()}]
+   def ensure_upcoming_partitions(repo, %Date{} = anchor, months_ahead)
+       when is_integer(months_ahead) and months_ahead >= 0 do
+-    first = first_of_month(anchor)
+-    ensure_partitions_between(repo, first, Date.shift(first, month: months_ahead))
++    0..months_ahead
++    |> Enum.map(fn offset ->
++      date = Date.add(anchor, offset * 31) |> first_of_month()
++      ensure_partition(repo, date)
++    end)
+   end
+ 
+   @doc """

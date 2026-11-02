@@ -18,10 +18,10 @@ Ecto.Migrator.run(Repo, :up, all: true)
 
 # The `aud_event` migration creates only the FIXED launch-month (July 2026) partition; the daily
 # `Samen.AuditEvent.PartitionManager` Oban job that rolls partitions forward in production never
-# runs under the test harness. Ensure the CURRENT + upcoming months' partitions so audit-writing
-# tests never hit "no partition of relation aud_event" once the wall clock rolls past the launch
-# month (forward-safe; the ensure is idempotent).
-Samen.AuditEvent.PartitionManager.ensure_upcoming_partitions(Repo, Date.utc_today(), 2)
+# runs under the test harness. Ensure a partition for EVERY month from the launch month through two
+# months ahead, as a production database has one for every month since launch: with only the
+# current months, a test row stamped a day in the past failed on the 1st of each month (idempotent).
+Samen.AuditEvent.PartitionManager.ensure_contiguous_partitions(Repo, Date.utc_today(), 2)
 
 {:ok, _} = Oban.start_link(Application.fetch_env!(:samen_core, Oban))
 

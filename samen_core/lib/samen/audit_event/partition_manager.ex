@@ -197,19 +197,68 @@ defmodule Samen.AuditEvent.PartitionManager do
   end
 
   @doc """
-  Ensure partitions exist for `date` through `date + months_ahead` months.
+  Ensure partitions exist for the month of `anchor` and each of the next `months_ahead`
+  calendar months (`months_ahead + 1` partitions).
   Returns a list of `{:ok, name}` or `{:error, reason}` tuples.
+
+  Months are counted on the calendar, never as 31-day steps: from a 29th–31st, a 31-day
+  step lands two months on and skips the month between (from Jan 31: Jan, Mar, Apr).
   """
   @spec ensure_upcoming_partitions(module(), Date.t(), non_neg_integer()) ::
           [{:ok, String.t()} | {:error, term()}]
   def ensure_upcoming_partitions(repo, %Date{} = anchor, months_ahead)
       when is_integer(months_ahead) and months_ahead >= 0 do
-    0..months_ahead
-    |> Enum.map(fn offset ->
-      date = Date.add(anchor, offset * 31) |> first_of_month()
-      ensure_partition(repo, date)
-    end)
+    first = first_of_month(anchor)
+    ensure_partitions_between(repo, first, Date.shift(first, month: months_ahead))
   end
+
+  @doc """
+  Ensure a partition exists for every month from the month of `from` through the month of
+  `to`, inclusive. Returns a list of `{:ok, name}` or `{:error, reason}` tuples (empty when
+  `to` is before `from`).
+  """
+  @spec ensure_partitions_between(module(), Date.t(), Date.t()) ::
+          [{:ok, String.t()} | {:error, term()}]
+  def ensure_partitions_between(repo, %Date{} = from, %Date{} = to) do
+    last = first_of_month(to)
+
+    from
+    |> first_of_month()
+    |> Stream.iterate(&Date.shift(&1, month: 1))
+    |> Enum.take_while(&(Date.compare(&1, last) != :gt))
+    |> Enum.map(&ensure_partition(repo, &1))
+  end
+
+  @doc """
+  Ensure a partition for every month from the EARLIEST attached partition through
+  `anchor + months_ahead` months: `ensure_upcoming_partitions/3` plus any gap behind it.
+
+  For a database that starts at a migration-seeded launch month and is first used later —
+  a test database, which is rebuilt on every run. A production database has a partition
+  for every month since launch, each made while it was current; a test database built
+  with only the current months lacks last month's, so a test writing a row a day in the
+  past failed on the 1st of every month. Not for the production roll-forward: a gap
+  behind the latest month there may be a detached partition, which must not be recreated.
+  """
+  @spec ensure_contiguous_partitions(module(), Date.t(), non_neg_integer()) ::
+          [{:ok, String.t()} | {:error, term()}]
+  def ensure_contiguous_partitions(repo, %Date{} = anchor, months_ahead)
+      when is_integer(months_ahead) and months_ahead >= 0 do
+    first = first_of_month(anchor)
+
+    earliest =
+      repo
+      |> list_partitions()
+      |> Enum.flat_map(fn {name, _, _} -> partition_month(name) end)
+      |> Enum.min(Date, fn -> first end)
+
+    ensure_partitions_between(repo, Enum.min([earliest, first], Date), Date.shift(first, month: months_ahead))
+  end
+
+  defp partition_month("aud_event_y" <> <<y::binary-size(4), "m", m::binary-size(2)>>),
+    do: [Date.new!(String.to_integer(y), String.to_integer(m), 1)]
+
+  defp partition_month(_other), do: []
 
   # ---------------------------------------------------------------------------
   # Detach-for-archival (with erasure-window gate)
