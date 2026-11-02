@@ -73,7 +73,7 @@ defmodule Samen.Sequences do
   @spec initial_state(struct()) :: map()
   def initial_state(%{steps: steps}) when is_list(steps) and steps != [] do
     delay = steps |> List.first() |> Map.get("delay_hours", 0)
-    ts = now()
+    ts = DateTime.utc_now()
 
     %{
       status: :active,
@@ -88,14 +88,14 @@ defmodule Samen.Sequences do
   end
 
   def initial_state(_no_steps) do
-    ts = now()
+    ts = DateTime.utc_now()
 
     %{
       status: :completed,
       current_step: 0,
       next_send_at: nil,
       enrolled_at: ts,
-      completed_at: ts,
+      completed_at: DateTime.truncate(ts, :second),
       reply_cutoff_at: ts
     }
   end
@@ -201,12 +201,17 @@ defmodule Samen.Sequences do
     #
     # T75 closing round DELTA-2: `reply_cutoff_at` is a nullable column (no
     # default) — a row that predates this column (or one hand-nulled) must
-    # not crash the due-scan (ReplyCheck.replied_since?/3 pattern-matches on
+    # not crash the due-scan (ReplyCheck.replied_since?/4 pattern-matches on
     # `%DateTime{}`). Fall back to `enrolled_at`, the cutoff's own original
     # value before MED-4 introduced the separate column.
     cutoff = enrollment.reply_cutoff_at || enrollment.enrolled_at
 
-    case ReplyCheck.replied_since?(enrollment.org_id, enrollment.person_id, cutoff) do
+    # #116: a reply counts once we LEARNED of it after the cutoff (ingestion, our clock)
+    # and it was SENT after the enrollment began (the provider's clock, a coarse floor
+    # that keeps a backfill of old mail from pausing a fresh enrollment).
+    floor = enrollment.enrolled_at || cutoff
+
+    case ReplyCheck.replied_since?(enrollment.org_id, enrollment.person_id, cutoff, floor) do
       {:ok, true} ->
         transition(enrollment, %{status: :paused, paused_reason: :replied, next_send_at: nil})
         :ok

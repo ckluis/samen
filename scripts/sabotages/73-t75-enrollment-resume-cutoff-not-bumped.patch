@@ -8,25 +8,14 @@
 # TEST_FILES: test/crm/sequence_send_test.exs
 # MUST_FAIL: resume does NOT re-pause on the OLD reply, but a NEW reply after resume DOES pause
 diff --git a/samen_core/lib/samen/scopes/outreach/blueprint.ex b/samen_core/lib/samen/scopes/outreach/blueprint.ex
-index c205cc5..ba83e6b 100644
+index a38a5bc2..fc2389ea 100644
 --- a/samen_core/lib/samen/scopes/outreach/blueprint.ex
 +++ b/samen_core/lib/samen/scopes/outreach/blueprint.ex
-@@ -269,17 +269,9 @@ defmodule Samen.Scopes.Outreach.Blueprint do
-             change(set_attribute(:status, :active))
-             change(set_attribute(:paused_reason, nil))
-
--            # T75 fix round MED-4: bump BOTH next_send_at (retry immediately)
--            # AND reply_cutoff_at (to "now") — without the latter, the SAME
--            # stale reply that (correctly) paused this enrollment would
--            # re-pause it on the very next scan, making :resume a permanent
--            # no-op for a reply-paused enrollment.
-             change(fn changeset, _ctx ->
-               now = DateTime.utc_now() |> DateTime.truncate(:second)
--
--              changeset
--              |> Ash.Changeset.force_change_attribute(:next_send_at, now)
+@@ -282,7 +282,6 @@ defmodule Samen.Scopes.Outreach.Blueprint do
+ 
+               changeset
+               |> Ash.Changeset.force_change_attribute(:next_send_at, DateTime.truncate(now, :second))
 -              |> Ash.Changeset.force_change_attribute(:reply_cutoff_at, now)
-+              Ash.Changeset.force_change_attribute(changeset, :next_send_at, now)
              end)
            end
-
+ 

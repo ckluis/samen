@@ -1,0 +1,20 @@
+# SABOTAGE: reply detection drops the sent-after-enrollment floor, so a mailbox's first sync of old mail 
+#   pauses every fresh enrollment of that contact
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/crm/sequence_send_test.exs
+# MUST_FAIL: a first sync backfilling mail sent before the enrollment began does not pause it
+diff --git a/samen_core/lib/samen/sequences/mailbox_reply_check.ex b/samen_core/lib/samen/sequences/mailbox_reply_check.ex
+index 9d5eeec8..be63892d 100644
+--- a/samen_core/lib/samen/sequences/mailbox_reply_check.ex
++++ b/samen_core/lib/samen/sequences/mailbox_reply_check.ex
+@@ -61,7 +61,7 @@ defmodule Samen.Sequences.MailboxReplyCheck do
+         |> Ash.Query.new()
+         |> Ash.Query.filter(
+           org_id == ^org_id and subject_key == "crm.person" and subject_id == ^person_id and
+-            direction == :inbound and ingested_at >= ^cutoff and occurred_at >= ^sent_floor
++            direction == :inbound and ingested_at >= ^cutoff and not is_nil(^sent_floor)
+         )
+         |> Ash.Query.limit(1)
+         |> Ash.read!(authorize?: false)

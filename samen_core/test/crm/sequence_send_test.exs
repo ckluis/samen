@@ -38,7 +38,7 @@ defmodule Samen.Crm.SequenceSendTest do
 
   alias Samen.Delivery.{Chokepoint, Deliverability, FakeProvider, ProviderEvent, Suppression, SuppressionCheck}
   alias Samen.Sequences
-  alias Samen.Sequences.ReceiptLookup
+  alias Samen.Sequences.{MailboxReplyCheck, ReceiptLookup}
   alias SamenCore.Support.MailboxFixture
   alias SamenCore.Support.OutreachFixture.{Enrollment, Sequence, StepSend}
   alias SamenCore.TestRepo
@@ -696,12 +696,8 @@ defmodule Samen.Crm.SequenceSendTest do
       assert paused.paused_reason == :replied
       assert paused.current_step == 1
 
-      # Tenant explicitly resumes. Sleep past the second boundary first — both
-      # `reply_cutoff_at` values are `utc_datetime` (second precision), so a
-      # same-second pause->resume in a fast test would otherwise compare :eq
-      # even though the fix genuinely re-wrote the column.
-      Process.sleep(1100)
-
+      # Tenant explicitly resumes — no sleep first: `reply_cutoff_at` is microsecond
+      # precise (#116), so a resume in the same second as the reply still lands after it.
       resumed =
         paused
         |> Ash.Changeset.for_update(:resume, %{}, scope: scope)
@@ -734,6 +730,149 @@ defmodule Samen.Crm.SequenceSendTest do
       assert final.current_step == 2
       # Step 3 was never queued.
       assert length(step_sends_for(enrollment.id)) == 2
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # #116: a reply counts when WE learned of it after the cutoff (ingested_at, our clock)
+  # and it was SENT after the enrollment began (occurred_at, the provider's clock).
+
+  # Moves the enrollment's start and reply cutoff `seconds` into the past (time-travel).
+  defp backdate_enrollment!(id, seconds) do
+    at = DateTime.add(DateTime.utc_now(), -seconds, :second)
+
+    reload_enrollment(id)
+    |> Ash.Changeset.for_update(:system_advance, %{}, authorize?: false)
+    |> Ash.Changeset.force_change_attribute(:enrolled_at, at)
+    |> Ash.Changeset.force_change_attribute(:reply_cutoff_at, at)
+    |> Ash.update!()
+  end
+
+  defp make_due!(enrollment_id) do
+    past = DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.truncate(:second)
+    assert {:ok, _} = Sequences.transition(reload_enrollment(enrollment_id), %{next_send_at: past})
+  end
+
+  describe "#116: reply detection compares our clock with our clock" do
+    test "delayed sync: a reply synced after a resume pauses, though it was sent before the resume" do
+      org = Ash.UUID.generate()
+      scope = tenant_scope(org)
+      seq = new_sequence(scope, org, @three_steps)
+      person = Ash.UUID.generate()
+      enrollment = enroll(scope, org, seq.id, person)
+
+      scan_and_drain()
+      assert reload_enrollment(enrollment.id).current_step == 1
+      backdate_enrollment!(enrollment.id, 2 * 3600)
+
+      # The contact replies an hour ago; the tenant, not having seen it, pauses and
+      # resumes now; the mailbox sync only then ingests the reply.
+      sent_at = DateTime.add(DateTime.utc_now(), -3600, :second)
+
+      resumed =
+        reload_enrollment(enrollment.id)
+        |> Ash.Changeset.for_update(:pause, %{}, scope: scope)
+        |> Ash.update!()
+        |> Ash.Changeset.for_update(:resume, %{}, scope: scope)
+        |> Ash.update!()
+
+      reply = inbound_reply!(org, person, sent_at)
+      assert DateTime.compare(reply.occurred_at, resumed.reply_cutoff_at) == :lt
+      assert DateTime.compare(reply.ingested_at, resumed.reply_cutoff_at) == :gt
+
+      make_due!(enrollment.id)
+      scan_and_drain()
+
+      final = reload_enrollment(enrollment.id)
+      assert final.status == :paused
+      assert final.paused_reason == :replied
+      assert length(step_sends_for(enrollment.id)) == 1
+    end
+
+    test "a provider clock ahead of ours does not re-pause a resumed enrollment" do
+      org = Ash.UUID.generate()
+      scope = tenant_scope(org)
+      seq = new_sequence(scope, org, @three_steps)
+      person = Ash.UUID.generate()
+      enrollment = enroll(scope, org, seq.id, person)
+
+      scan_and_drain()
+
+      # The reply is stamped an hour ahead of us, and pauses the enrollment.
+      inbound_reply!(org, person, DateTime.add(DateTime.utc_now(), 3600, :second))
+      make_due!(enrollment.id)
+      scan_and_drain()
+      assert reload_enrollment(enrollment.id).paused_reason == :replied
+
+      reload_enrollment(enrollment.id)
+      |> Ash.Changeset.for_update(:resume, %{}, scope: scope)
+      |> Ash.update!()
+
+      scan_and_drain()
+
+      after_resume = reload_enrollment(enrollment.id)
+      assert after_resume.status == :active
+      assert after_resume.current_step == 2
+    end
+
+    test "same second: a cutoff a microsecond after the reply's ingestion does not re-pause on it" do
+      org = Ash.UUID.generate()
+      scope = tenant_scope(org)
+      seq = new_sequence(scope, org, @three_steps)
+      person = Ash.UUID.generate()
+      enrollment = enroll(scope, org, seq.id, person)
+
+      scan_and_drain()
+      reply = inbound_reply!(org, person)
+
+      # A resume that lands one microsecond after the reply was ingested — in the same
+      # second, unless the reply was ingested at .999999. The stored cutoff keeps it.
+      cutoff = DateTime.add(reply.ingested_at, 1, :microsecond)
+
+      reload_enrollment(enrollment.id)
+      |> Ash.Changeset.for_update(:system_advance, %{}, authorize?: false)
+      |> Ash.Changeset.force_change_attribute(:reply_cutoff_at, cutoff)
+      |> Ash.update!()
+
+      assert reload_enrollment(enrollment.id).reply_cutoff_at == cutoff
+
+      make_due!(enrollment.id)
+      scan_and_drain()
+
+      final = reload_enrollment(enrollment.id)
+      assert final.status == :active
+      assert final.current_step == 2
+
+      # Positive control: at the reply's own ingestion instant, it counts.
+      floor = reload_enrollment(enrollment.id).enrolled_at
+      assert MailboxReplyCheck.replied_since?(org, person, reply.ingested_at, floor)
+      refute MailboxReplyCheck.replied_since?(org, person, cutoff, floor)
+    end
+
+    test "a first sync backfilling mail sent before the enrollment began does not pause it" do
+      org = Ash.UUID.generate()
+      scope = tenant_scope(org)
+      seq = new_sequence(scope, org, @three_steps)
+      person = Ash.UUID.generate()
+      enrollment = enroll(scope, org, seq.id, person)
+
+      # A mailbox connected after enrollment: its first sync ingests last month's mail.
+      inbound_reply!(org, person, DateTime.add(DateTime.utc_now(), -30 * 86_400, :second))
+      scan_and_drain()
+
+      after_backfill = reload_enrollment(enrollment.id)
+      assert after_backfill.status == :active
+      assert after_backfill.current_step == 1
+
+      # Positive control: a reply sent after the enrollment began does pause it.
+      inbound_reply!(org, person)
+      make_due!(enrollment.id)
+      scan_and_drain()
+
+      final = reload_enrollment(enrollment.id)
+      assert final.status == :paused
+      assert final.paused_reason == :replied
+      assert final.current_step == 1
     end
   end
 

@@ -189,7 +189,8 @@ defmodule Samen.Scopes.Outreach.Blueprint do
             constraints: [one_of: [:replied, :suppressed, :manual]]
           )
 
-          attribute(:enrolled_at, :utc_datetime, public?: true)
+          # Microseconds, like `reply_cutoff_at`: both bound the reply check.
+          attribute(:enrolled_at, :utc_datetime_usec, public?: true)
           attribute(:completed_at, :utc_datetime, public?: true)
 
           # T75 fix round MED-4: the reply-detection cutoff. Distinct from
@@ -197,8 +198,10 @@ defmodule Samen.Scopes.Outreach.Blueprint do
           # THIS to "now" so a reply that correctly paused the enrollment does
           # not immediately re-pause it on the very next scan after resume —
           # only a NEW reply (after the resume) does. `Samen.Sequences.handle_due/3`
-          # reads THIS field, never `enrolled_at`, for the reply check.
-          attribute(:reply_cutoff_at, :utc_datetime, public?: true)
+          # reads THIS field for "ingested after the cutoff" and `enrolled_at` only as
+          # the "sent after the enrollment began" floor. Microseconds, so a resume in the
+          # same second as the reply it follows does not re-pause on that reply.
+          attribute(:reply_cutoff_at, :utc_datetime_usec, public?: true)
         end
 
         relationships do
@@ -275,10 +278,10 @@ defmodule Samen.Scopes.Outreach.Blueprint do
             # re-pause it on the very next scan, making :resume a permanent
             # no-op for a reply-paused enrollment.
             change(fn changeset, _ctx ->
-              now = DateTime.utc_now() |> DateTime.truncate(:second)
+              now = DateTime.utc_now()
 
               changeset
-              |> Ash.Changeset.force_change_attribute(:next_send_at, now)
+              |> Ash.Changeset.force_change_attribute(:next_send_at, DateTime.truncate(now, :second))
               |> Ash.Changeset.force_change_attribute(:reply_cutoff_at, now)
             end)
           end
