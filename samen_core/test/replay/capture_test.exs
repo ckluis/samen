@@ -511,13 +511,9 @@ defmodule Samen.Replay.CaptureTest do
       start_capture!([ctx.org], max_persist_tasks: 1)
       attach_outcomes()
 
-      # Occupy the ONE persist slot.
+      # Occupy the ONE persist slot, until the test has the supervisor terminate it.
       {:ok, blocker} =
-        Task.Supervisor.start_child(Samen.Replay.TaskSupervisor, fn ->
-          receive do
-            :go -> :ok
-          end
-        end)
+        Task.Supervisor.start_child(Samen.Replay.TaskSupervisor, fn -> Process.sleep(:infinity) end)
 
       monitor = Process.whereis(Monitor)
       t0 = System.monotonic_time(:millisecond)
@@ -533,9 +529,10 @@ defmodule Samen.Replay.CaptureTest do
       assert :ets.lookup(Samen.Replay.Buffer.table(), :sessions) == [{:sessions, 0}]
       assert %{rows: [[0]]} = @repo.query!("SELECT count(*) FROM replay_session")
 
-      # Positive control: with the slot free again, the next session persists.
-      send(blocker, :go)
-      Process.sleep(20)
+      # Positive control: with the slot free again, the next session persists. The supervisor
+      # frees the slot itself and returns only once it has (no wait for the blocker's exit to
+      # reach it).
+      :ok = Task.Supervisor.terminate_child(Samen.Replay.TaskSupervisor, blocker)
       run_lv(ctx.org, fn -> lv_event("save", %{}) end)
       assert_receive {:replay_session, :persisted}
       assert %{rows: [[1]]} = @repo.query!("SELECT count(*) FROM replay_session")

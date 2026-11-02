@@ -305,20 +305,8 @@ defmodule Demo.CmsScopeArchivalLeakRedPathTest do
       # Archive the second block INDEPENDENTLY first, at its own instant.
       {:ok, _} = Samen.Archival.archive(independently_archived_block, authorize?: false)
 
-      # Force a distinct instant with a >1s sleep — a belt-and-suspenders gap
-      # that stays green regardless of substrate precision. HISTORICAL NOTE
-      # (T37b → T124): until T124, `Samen.Transformers.ArchivableAttribute`
-      # built the raw `archived_at` attribute with `constraints: []`, which
-      # silently fell through to `Ash.Type.Datetime`'s OWN default
-      # (`precision: :second`) and truncated every stamped instant to whole
-      # seconds REGARDLESS of the column's `:utc_datetime_usec` storage
-      # capacity — the exact defect `_orch/verify/T37b-verdict.json` finding
-      # `F1-same-second-mis-restore` reproduced live. T124 fixed the
-      # substrate (`constraints: [precision: :microsecond]`), restoring true
-      # microsecond granularity; see the same-second regression test below
-      # (`§5.4 — same wall-clock second`) for the direct, no-sleep
-      # reproduction of that exact edge, now closed.
-      Process.sleep(1_100)
+      # No sleep: `archived_at` is microsecond-precise (T124), so the two archives land at
+      # different instants, and the `refute … ==` below asserts it rather than assuming it.
 
       # Now archive the page — cascades ONLY the still-live `cascaded_block`
       # (the independently-archived one is already hidden from the default

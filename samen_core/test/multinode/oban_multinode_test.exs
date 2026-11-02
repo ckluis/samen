@@ -62,9 +62,8 @@ defmodule Samen.MultiNode.ObanMultiNodeTest do
     Harness.enqueue_on(na, half_a)
     Harness.enqueue_on(nb, half_b)
 
-    assert :ok = Harness.wait_until(fn -> Harness.total_execs() >= 120 end, 60_000)
-    # Give any stray double-grab a chance to also land before asserting no dupes.
-    Process.sleep(500)
+    # Every job done and acked on both nodes: a double-grab, had one happened, is already counted.
+    assert :ok = Harness.await_quiescent([na, nb], 60_000)
 
     assert Harness.distinct_key_count() == 120
     assert Harness.total_execs() == 120, "no job ran more than once (no double-grab)"
@@ -91,10 +90,8 @@ defmodule Samen.MultiNode.ObanMultiNodeTest do
     Harness.insert_each_on(na, ctrl)
     Harness.insert_each_on(nb, ctrl)
 
-    assert :ok =
-             Harness.wait_until(fn -> Harness.exec_count("control-key") >= 60 end, 60_000)
-
-    Process.sleep(500)
+    # Every job done and acked on both nodes: the counts below are final.
+    assert :ok = Harness.await_quiescent([na, nb], 60_000)
 
     assert Harness.exec_count("dedup-key") == 1,
            "the unique job must collapse to exactly ONE execution cluster-wide"
@@ -105,7 +102,7 @@ defmodule Samen.MultiNode.ObanMultiNodeTest do
 
   @tag :multinode
   test "reveal auto-revoke failover: node A dies, node B runs the scheduled revoke exactly once" do
-    {{pa, na}, {_pb, _nb}} = start_pair!(reveal: 5)
+    {{pa, na}, {_pb, nb}} = start_pair!(reveal: 5)
 
     # Grant expires ~4s out; enqueue the REAL AutoRevokeWorker scheduled at expiry
     # on node A, then kill A BEFORE it can run. Only B survives to reconcile.
@@ -117,8 +114,8 @@ defmodule Samen.MultiNode.ObanMultiNodeTest do
     Harness.stop_peer(pa)
 
     assert :ok = Harness.wait_until(fn -> Harness.grant_revoked?(grant_id) end, 60_000)
-    # Let any (buggy) second execution also land before asserting exactly-once.
-    Process.sleep(1_000)
+    # The survivor's jobs all done and acked: a (buggy) second execution is already counted.
+    assert :ok = Harness.await_quiescent([nb], 60_000)
 
     assert Harness.grant_revoked?(grant_id),
            "surviving node B must run the scheduled auto-revoke after A's death"

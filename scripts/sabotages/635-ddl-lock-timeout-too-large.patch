@@ -1,0 +1,22 @@
+# SABOTAGE: the expand/contract posture's lock_timeout grows past its statement_timeout: a blocked 
+#   migration DDL then dies by the 15 s statement timeout (or hangs), never by the lock timeout the 
+#   doc mandates
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/migration_expand_contract_test.exs
+# MUST_FAIL: a migration-style DDL under the shipped lock_timeout aborts on the lock instead of hanging
+# MUST_FAIL: the posture emits exactly lock 5s / statement 15s (doc §runs 2b)
+diff --git a/samen_core/lib/samen/migration/expand_contract.ex b/samen_core/lib/samen/migration/expand_contract.ex
+index 03fd7fe7..b5f3c550 100644
+--- a/samen_core/lib/samen/migration/expand_contract.ex
++++ b/samen_core/lib/samen/migration/expand_contract.ex
+@@ -62,7 +62,7 @@ defmodule Samen.Migration.ExpandContract do
+   Postgres would reject anyway), and the guard message documents the pattern.
+   """
+ 
+-  @lock_timeout "5s"
++  @lock_timeout "60s"
+   @statement_timeout "15s"
+ 
+   @doc """

@@ -16,7 +16,7 @@ defmodule Samen.FleetPublicStatusTest do
     * the durable twins are sabotage patches 360/361/362.
 
   Probing is NOT re-implemented here: staleness/dead-man semantics come from
-  `build_row/3` (ADR-044 §4.6), which this projection consumes verbatim.
+  `build_row/4` (ADR-044 §4.6), which this projection consumes verbatim.
   """
   use ExUnit.Case, async: false
 
@@ -91,15 +91,18 @@ defmodule Samen.FleetPublicStatusTest do
     end
 
     test "the dead-man staleness ADR-044 already ships is CONSUMED, not re-derived: overdue -> :degraded" do
-      # stale_after_s: 0 means the report received a moment ago is already overdue
-      # by build_row/3's own predicate — no second staleness notion here.
-      app = seed_app("gamma-api", publish_status: true, stale_after_s: 0, report: payload())
-      # A second report so received_at is strictly in the past by >0s.
-      Process.sleep(1100)
-      {:ok, _} = Registry.record_report(@ns, app.id, payload(), :pull)
-      Process.sleep(1100)
+      # stale_after_s: 0 means a report received more than 0 s before `now` is overdue
+      # by build_row/4's own predicate — no second staleness notion here.
+      seed_app("gamma-api", publish_status: true, stale_after_s: 0, report: payload())
+      {:ok, %{rows: [%{received_at: received_at}]}} = Registry.read_rows(@ns, [])
 
-      assert [%PublicStatus.Entry{slug: "gamma-api", status: :degraded}] = entries!()
+      # Judged at the instant of its receipt, the report is not overdue …
+      assert [%PublicStatus.Entry{slug: "gamma-api", status: :operational}] =
+               entries!(now: received_at)
+
+      # … and one second later it is. `now` is passed, not waited for.
+      assert [%PublicStatus.Entry{slug: "gamma-api", status: :degraded}] =
+               entries!(now: DateTime.add(received_at, 1, :second))
     end
   end
 

@@ -8,8 +8,8 @@ defmodule Samen.MigrationExpandContractTest do
       `null: false` is rejected as non-additive.
     * (b) the DDL timeout posture: `expand_setup`/`contract_setup` emit
       `SET LOCAL lock_timeout='5s'` / `statement_timeout='15s'`; a live blocking-lock
-      migration aborts fast at ~5s (RED PATH + anti-tautology: without the timeout it
-      would hang).
+      migration aborts on the lock_timeout instead of hanging (RED PATH + anti-tautology:
+      without the posture there is no lock timeout, and the same ALTER waits on the lock).
     * (c) the carve-outs: `concurrent_index`/`chunked_backfill` REQUIRE
       `@disable_ddl_transaction true` and refuse otherwise; catalog_sync refuses
       UNDER it — proving the paired-migration composition (T1.2).
@@ -98,11 +98,14 @@ defmodule Samen.MigrationExpandContractTest do
   end
 
   # ---------------------------------------------------------------------------
-  # (b) Live blocking-lock: aborts fast at ~5s (RED PATH + anti-tautology)
+  # (b) Live blocking-lock: aborts by lock_timeout instead of hanging (RED PATH + anti-tautology)
   # ---------------------------------------------------------------------------
 
+  # Both tests hold the lock with a GATED holder: it keeps ACCESS EXCLUSIVE until the test sends
+  # it `:release`, never for a fixed duration, so "the lock released early" is not a possible
+  # explanation for anything below and no assertion rests on wall-clock margins.
   describe "lock_timeout live abort" do
-    test "a migration-style DDL under lock_timeout=5s aborts at ~5s instead of hanging" do
+    test "a migration-style DDL under the shipped lock_timeout aborts on the lock instead of hanging" do
       # Two real (non-sandbox) Postgrex connections against a throwaway table so a
       # held lock is truly held (the sandbox wraps everything in one rolled-back tx,
       # which would deadlock a two-connection lock scenario).
@@ -112,14 +115,12 @@ defmodule Samen.MigrationExpandContractTest do
         Postgrex.query!(a, "DROP TABLE IF EXISTS lock_probe", [])
         Postgrex.query!(a, "CREATE TABLE lock_probe (id int)", [])
 
-        # Connection B holds an ACCESS EXCLUSIVE lock inside an open tx for 20s.
-        holder = spawn_lock_holder(b, "lock_probe", 20_000)
-        Process.sleep(300)
+        holder = spawn_lock_holder(b, "lock_probe")
 
         # Connection A tries the same DDL WITH THE REAL POSTURE — the exact SQL the
         # expand/contract helpers emit (ExpandContract.__timeout_sql__/0), not a
-        # hardcoded literal. This ties the test to the shipped 5s value so the
-        # anti-tautology probe (sabotage @lock_timeout) actually breaks this test.
+        # hardcoded literal. This ties the test to the shipped value so the
+        # anti-tautology probe (sabotage 635) actually breaks this test.
         {lock_sql, stmt_sql} = ExpandContract.__timeout_sql__()
 
         {elapsed_us, result} =
@@ -139,75 +140,67 @@ defmodule Samen.MigrationExpandContractTest do
             end
           end)
 
-        elapsed_s = elapsed_us / 1_000_000
-
         assert match?({:aborted, _}, result),
                "expected the ALTER to abort under lock_timeout, got #{inspect(result)}"
 
+        # The lock is held until released, so the ALTER can only end by a timeout, and
+        # Postgres names which one: the lock_timeout (5s) fired, not the statement_timeout
+        # (15s) and not the 30s client timeout. A disabled or larger lock_timeout fails here.
         {:aborted, err} = result
         assert Exception.message(err) =~ ~r/lock timeout/i
 
-        # ~5s: comfortably below the 20s hold. Proves fast-abort, not hang. If the
-        # lock_timeout were disabled/large, this would block ~20s and fail here.
-        assert elapsed_s < 12.0,
-               "aborted in #{Float.round(elapsed_s, 2)}s — expected ~5s (fast abort), not a hang"
+        # A timeout never fires early: under a 5s lock_timeout the abort takes at least that.
+        # (A posture shrunk to milliseconds fails here.)
+        elapsed_s = elapsed_us / 1_000_000
 
-        # Above 3s: proves the lock WAS genuinely held (else the ALTER would have
-        # succeeded instantly and the test would be vacuous).
-        assert elapsed_s > 3.0,
-               "aborted in #{Float.round(elapsed_s, 2)}s — suspiciously fast; the lock may not " <>
-                 "have been held (test would be vacuous)"
+        assert elapsed_s >= 5.0,
+               "aborted in #{Float.round(elapsed_s, 2)}s — the shipped lock_timeout is 5s"
 
-        Process.exit(holder, :kill)
+        release_lock_holder(holder)
       after
-        safe_query(a, "DROP TABLE IF EXISTS lock_probe")
-        stop_raw_conns({a, b})
+        drop_and_stop({a, b}, "lock_probe")
       end
     end
 
-    test "ANTI-TAUTOLOGY: WITHOUT lock_timeout the same DDL blocks past 5s" do
-      # The discriminating pair: hold the lock for 8s and set NO lock_timeout — the
-      # ALTER must NOT complete by the 5.5s mark (it waits for the lock). This proves
-      # the 5s abort above is caused by the timeout, not by the lock releasing early.
+    test "ANTI-TAUTOLOGY: WITHOUT the posture the same DDL waits on the held lock, and nothing else" do
+      # The discriminating pair: the abort above must come from the posture's SET LOCAL, not
+      # from the server (a server-wide lock_timeout would make it pass vacuously), and the lock
+      # must be what the ALTER waits on.
       {a, b} = start_raw_conns()
 
       try do
         Postgrex.query!(a, "DROP TABLE IF EXISTS lock_probe2", [])
         Postgrex.query!(a, "CREATE TABLE lock_probe2 (id int)", [])
 
-        holder = spawn_lock_holder(b, "lock_probe2", 8_000)
-        Process.sleep(300)
+        # 1. Without the posture there is no lock timeout at all.
+        assert %{rows: [["0"]]} = Postgrex.query!(a, "SHOW lock_timeout", []),
+               "the server sets a lock_timeout of its own, so the abort test above proves nothing about the posture"
+
+        %{rows: [[a_pid]]} = Postgrex.query!(a, "SELECT pg_backend_pid()", [])
+        %{rows: [[b_pid]]} = Postgrex.query!(b, "SELECT pg_backend_pid()", [])
+        holder = spawn_lock_holder(b, "lock_probe2")
 
         alter_task =
           Task.async(fn ->
-            :timer.tc(fn ->
-              try do
-                Postgrex.query!(a, "ALTER TABLE lock_probe2 ADD COLUMN c text", [], timeout: 30_000)
-                :ok
-              rescue
-                e -> {:error, e}
-              end
-            end)
+            try do
+              Postgrex.query!(a, "ALTER TABLE lock_probe2 ADD COLUMN c text", [], timeout: 30_000)
+              :ok
+            rescue
+              e -> {:error, e}
+            end
           end)
 
-        # At 5.5s the holder still holds (8s hold); the un-timed ALTER must NOT be done.
-        Process.sleep(5_500)
+        # 2. The ALTER is blocked by the holder's lock — Postgres says so — and has not finished.
+        assert :ok == await_blocked_by(a_pid, b_pid),
+               "the un-timed ALTER was never blocked by the lock holder, so the abort test above would be vacuous"
 
-        refute Task.yield(alter_task, 0),
-               "without lock_timeout the ALTER completed before 5.5s — the lock was not held, " <>
-                 "so the 5s-abort test above would be vacuous"
+        refute Task.yield(alter_task, 0)
 
-        # Let it finish once the holder releases at ~8s.
-        {elapsed_us, res} = Task.await(alter_task, 20_000)
-        assert res == :ok, "expected the ALTER to eventually succeed once the lock released"
-
-        assert elapsed_us / 1_000_000 > 5.0,
-               "the un-timed ALTER completed too fast; the lock was not genuinely held"
-
-        Process.exit(holder, :kill)
+        # 3. Released, the same ALTER completes: the lock was the only thing it waited on.
+        release_lock_holder(holder)
+        assert Task.await(alter_task, 20_000) == :ok
       after
-        safe_query(a, "DROP TABLE IF EXISTS lock_probe2")
-        stop_raw_conns({a, b})
+        drop_and_stop({a, b}, "lock_probe2")
       end
     end
   end
@@ -493,35 +486,76 @@ defmodule Samen.MigrationExpandContractTest do
     {a, b}
   end
 
-  defp stop_raw_conns({a, b}) do
-    GenServer.stop(a)
+  # B first: closing it ends a lock holder's transaction (a failed test never released it),
+  # so the DROP on A cannot queue behind the lock.
+  defp drop_and_stop({a, b}, table) do
     GenServer.stop(b)
+    safe_query(a, "DROP TABLE IF EXISTS #{table}")
+    GenServer.stop(a)
   end
 
-  defp spawn_lock_holder(conn, table, hold_ms) do
+  # Takes ACCESS EXCLUSIVE on `table` over `conn` and holds it until `release_lock_holder/1`
+  # (or the test process exits); returns once the lock is actually held.
+  defp spawn_lock_holder(conn, table) do
     parent = self()
 
     holder =
       spawn(fn ->
+        ref = Process.monitor(parent)
+
         Postgrex.transaction(
           conn,
           fn c ->
             Postgrex.query!(c, "LOCK TABLE #{table} IN ACCESS EXCLUSIVE MODE", [])
-            send(parent, :locked)
-            Process.sleep(hold_ms)
+            send(parent, {:locked, self()})
+
+            receive do
+              {:release, from} -> send(from, {:released, self()})
+              {:DOWN, ^ref, :process, _pid, _reason} -> :ok
+            end
           end,
-          timeout: hold_ms + 10_000
+          timeout: :infinity
         )
       end)
 
-    # Wait until the lock is actually acquired before returning.
     receive do
-      :locked -> :ok
+      {:locked, ^holder} -> holder
     after
       5_000 -> raise "lock holder failed to acquire lock in 5s"
     end
+  end
 
-    holder
+  defp release_lock_holder(holder) do
+    send(holder, {:release, self()})
+
+    receive do
+      {:released, ^holder} -> :ok
+    after
+      5_000 -> raise "lock holder did not release"
+    end
+  end
+
+  # Waits until Postgres reports backend `blocked` as blocked by backend `blocker`
+  # (`pg_blocking_pids/1`), polling a fresh connection; `:timeout` after 10s.
+  defp await_blocked_by(blocked, blocker) do
+    {:ok, c} = Postgrex.start_link(raw_conn_opts())
+
+    try do
+      deadline = System.monotonic_time(:millisecond) + 10_000
+      do_await_blocked_by(c, blocked, blocker, deadline)
+    after
+      GenServer.stop(c)
+    end
+  end
+
+  defp do_await_blocked_by(c, blocked, blocker, deadline) do
+    %{rows: [[blockers]]} = Postgrex.query!(c, "SELECT pg_blocking_pids($1)", [blocked])
+
+    cond do
+      blocker in blockers -> :ok
+      System.monotonic_time(:millisecond) >= deadline -> :timeout
+      true -> do_await_blocked_by(c, blocked, blocker, deadline)
+    end
   end
 
   defp safe_query(conn, sql) do
