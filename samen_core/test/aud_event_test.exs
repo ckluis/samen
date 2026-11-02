@@ -321,7 +321,8 @@ defmodule Samen.AuditEventTest do
       # Drop the +2-month partition, run the worker, and prove it was recreated — a stub
       # returning :ok without doing the work would leave it absent.
       months_ahead = 2
-      plus_two = Date.add(Date.utc_today(), months_ahead * 31)
+      # Two CALENDAR months on (`today + 62 days` is three months on from a 29th–31st).
+      plus_two = Date.utc_today() |> Date.beginning_of_month() |> Date.shift(month: months_ahead)
       target_name = PartitionManager.partition_name(plus_two)
 
       Repo.query("ALTER TABLE aud_event DETACH PARTITION #{target_name}")
@@ -340,6 +341,54 @@ defmodule Samen.AuditEventTest do
       assert :ok = PartitionManager.perform(%Oban.Job{args: %{"months_ahead" => months_ahead}})
       assert aud_partition_exists?(target_name),
              "worker perform/1 must call ensure_upcoming_partitions and create the partition"
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # (d.3) Calendar months, and a test database with no gap behind the current month
+  # ---------------------------------------------------------------------------
+
+  describe "PartitionManager month arithmetic and the test database's partitions" do
+    test "ensure_upcoming_partitions counts calendar months: from January 31 it creates February" do
+      names = Enum.map([~D[2099-01-01], ~D[2099-02-01], ~D[2099-03-01]], &PartitionManager.partition_name/1)
+      Enum.each(names, &Repo.query("DROP TABLE IF EXISTS #{&1}"))
+
+      # Jan 31 + 31 days is March 3: a 31-day step skipped February entirely.
+      results = PartitionManager.ensure_upcoming_partitions(Repo, ~D[2099-01-31], 2)
+
+      assert results == Enum.map(names, &{:ok, &1})
+      assert Enum.all?(names, &aud_partition_exists?/1)
+    end
+
+    test "ensure_partitions_between covers every month of the range, inclusive, and nothing for an empty one" do
+      assert [{:ok, "aud_event_y2099m11"}, {:ok, "aud_event_y2099m12"}, {:ok, "aud_event_y2100m01"}] =
+               PartitionManager.ensure_partitions_between(Repo, ~D[2099-11-30], ~D[2100-01-01])
+
+      assert PartitionManager.ensure_partitions_between(Repo, ~D[2099-12-01], ~D[2099-11-01]) == []
+    end
+
+    test "the test database has a partition for every month from the launch month through two months ahead" do
+      today = Date.utc_today()
+      last = today |> Date.beginning_of_month() |> Date.shift(month: 2)
+
+      expected =
+        ~D[2026-07-01]
+        |> Stream.iterate(&Date.shift(&1, month: 1))
+        |> Enum.take_while(&(Date.compare(&1, last) != :gt))
+        |> Enum.map(&PartitionManager.partition_name/1)
+
+      missing = Enum.reject(expected, &aud_partition_exists?/1)
+
+      assert missing == [],
+             "no partition for #{inspect(missing)}: a test row stamped in those months fails with " <>
+               "\"no partition of relation aud_event\" (test_helper must use ensure_contiguous_partitions/3)"
+
+      # The 2026-11-01 nightly failure, directly: a row stamped in the previous month inserts.
+      last_month = today |> Date.beginning_of_month() |> Date.shift(month: -1)
+      {:ok, at} = DateTime.new(last_month, ~T[12:00:00], "Etc/UTC")
+
+      assert {:ok, _} =
+               AuditEvent.insert(Repo, %{event_type: "system", subject_id: "previous-month", occurred_at: at})
     end
   end
 

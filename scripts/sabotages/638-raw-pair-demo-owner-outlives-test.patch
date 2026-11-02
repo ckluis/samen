@@ -1,0 +1,21 @@
+# SABOTAGE: the demonstration uses an owner that outlives the test (the helper itself): its on_exit query 
+#   then succeeds, which the demonstration must refuse, or it proves nothing about the raw pair
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/test_sandbox_test.exs
+# MUST_FAIL: the raw pair this helper replaces: the SAME on_exit query fails once its owner is gone (why the helper exists)
+diff --git a/samen_core/test/test_sandbox_test.exs b/samen_core/test/test_sandbox_test.exs
+index 6b2d6c94..115ed4e8 100644
+--- a/samen_core/test/test_sandbox_test.exs
++++ b/samen_core/test/test_sandbox_test.exs
+@@ -93,8 +93,7 @@ defmodule Samen.TestSandboxTest do
+   #   * the ownership manager has already dropped the shared mode: the pool is `:manual` again (`OwnershipError`).
+   # Asserting one of them made this test as racy as the flake it demonstrates.
+   test "the raw pair this helper replaces: the SAME on_exit query fails once its owner is gone (why the helper exists)" do
+-    :ok = Sandbox.checkout(TestRepo)
+-    Sandbox.mode(TestRepo, {:shared, self()})
++    Samen.TestSandbox.shared!(TestRepo)
+ 
+     on_exit(fn ->
+       reached =

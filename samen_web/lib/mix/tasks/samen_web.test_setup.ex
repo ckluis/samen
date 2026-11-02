@@ -38,10 +38,11 @@ defmodule Mix.Tasks.SamenWeb.TestSetup do
 
     # The `aud_event` migration creates only the FIXED launch-month (July 2026) partition; in
     # production the daily `Samen.AuditEvent.PartitionManager` Oban job rolls partitions forward,
-    # but that job never runs under the render-test harness. Ensure the CURRENT + upcoming months'
-    # partitions exist so audit-writing tests never hit "no partition of relation aud_event" once
-    # the wall clock rolls past the launch month (forward-safe; the ensure is idempotent).
-    Module.concat([Samen.AuditEvent, PartitionManager]).ensure_upcoming_partitions(
+    # but that job never runs under the render-test harness. Ensure a partition for EVERY month
+    # from the launch month through two months ahead, as a production database has one for every
+    # month since launch: with only the current months, a test row stamped a day in the past
+    # failed on the 1st of each month (`activity_masking_test`, 2026-11-01). Idempotent.
+    Module.concat([Samen.AuditEvent, PartitionManager]).ensure_contiguous_partitions(
       repo,
       Date.utc_today(),
       2
