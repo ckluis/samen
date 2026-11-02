@@ -159,4 +159,47 @@ defmodule Samen.Jobs.QueueTaxonomyTest do
 
     assert {"0 1 * * *", Samen.AuditEvent.PartitionManager} in Keyword.fetch!(cron_opts, :crontab)
   end
+
+  # -----------------------------------------------------------------------
+  # install_default_boot_run/1 — the partition roll-forward at boot, not first at 01:00
+  # -----------------------------------------------------------------------
+
+  test "install_defaults/1 gives a generated app the boot-time partition roll-forward" do
+    generated_config = [
+      repo: SamenCore.TestRepo,
+      plugins: [{Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60}]
+    ]
+
+    plugins = generated_config |> Jobs.install_defaults() |> Keyword.fetch!(:plugins)
+
+    assert {Samen.Jobs.BootRun, boot_opts} = Enum.find(plugins, &match?({Samen.Jobs.BootRun, _}, &1))
+    assert Samen.AuditEvent.PartitionManager in Keyword.fetch!(boot_opts, :workers)
+    assert Enum.any?(plugins, &match?({Oban.Plugins.Cron, _}, &1))
+    assert Enum.any?(plugins, &match?({Oban.Plugins.Pruner, _}, &1))
+  end
+
+  test "install_default_boot_run/1 is a no-op when plugins are disabled (test convention)" do
+    base = [repo: SamenCore.TestRepo, testing: :manual, plugins: false]
+    assert Jobs.install_default_boot_run(base) == base
+  end
+
+  test "install_default_boot_run/1 respects a host that already declared BootRun" do
+    base = [repo: SamenCore.TestRepo, plugins: [{Samen.Jobs.BootRun, workers: []}]]
+    assert Jobs.install_default_boot_run(base) == base
+  end
+
+  test "a host's own Cron plugin does not take away the boot-time roll-forward" do
+    host_cron = {Oban.Plugins.Cron, crontab: [{"*/30 * * * *", Samen.Jobs.RollupRefreshWorker}]}
+    plugins = [repo: SamenCore.TestRepo, plugins: [host_cron]] |> Jobs.install_defaults() |> Keyword.fetch!(:plugins)
+
+    assert host_cron in plugins
+    assert {Samen.Jobs.BootRun, workers: Jobs.default_boot_workers()} in plugins
+  end
+
+  test "install_defaults/1 is idempotent: a second pass adds no second BootRun" do
+    once = Jobs.install_defaults(repo: SamenCore.TestRepo)
+    # The same options (`Keyword.put/3` moves a key it rewrites to the front).
+    assert Enum.sort(Jobs.install_defaults(once)) == Enum.sort(once)
+    assert Enum.count(Keyword.fetch!(once, :plugins), &match?({Samen.Jobs.BootRun, _}, &1)) == 1
+  end
 end

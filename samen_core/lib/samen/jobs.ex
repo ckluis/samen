@@ -37,7 +37,8 @@ defmodule Samen.Jobs do
       {Oban, Samen.Jobs.install_defaults(Application.fetch_env!(:samen_core, Oban))}
 
   `install_defaults/1` = `install_default_queues/1` (this taxonomy) +
-  `install_default_cron/1` (`default_crontab/0`). A host config declares only its
+  `install_default_cron/1` (`default_crontab/0`) + `install_default_boot_run/1`
+  (`default_boot_workers/0`, enqueued once at boot). A host config declares only its
   `repo:` (plus any plugins and deliberate per-queue LIMIT overrides); every
   canonical queue is filled in for it. `Samen.Jobs.QueueParity` + `mix
   samen.verify.oban_queues` gate the invariant that every queue any shipped
@@ -253,6 +254,54 @@ defmodule Samen.Jobs do
   end
 
   @doc """
+  The workers `Samen.Jobs.BootRun` enqueues once when Oban starts, ahead of their cron.
+
+    - `Samen.AuditEvent.PartitionManager` — the daily 01:00 roll-forward, run at boot
+      too, so an app never waits until 01:00 for the current month's `aud_event`
+      partition: not an adopter whose migration seeded only a fixed launch month, and
+      not an app restarted after more than the two-month lookahead of downtime. Unique
+      for 23 hours, so it costs one job per day however many nodes boot.
+  """
+  @spec default_boot_workers() :: [module()]
+  def default_boot_workers, do: [Samen.AuditEvent.PartitionManager]
+
+  @doc """
+  Install `Samen.Jobs.BootRun` with `default_boot_workers/0` into an Oban child-spec
+  option list.
+
+  Rules (order-independent, idempotent):
+
+    * `plugins: false` (the test convention) — returned unchanged.
+    * a host that already declared `Samen.Jobs.BootRun` — returned unchanged.
+    * otherwise — prepend `{Samen.Jobs.BootRun, workers: default_boot_workers()}`. A
+      host's own `Oban.Plugins.Cron` does not stop it: replacing the crontab must not
+      also take away the boot-time partition roll-forward.
+  """
+  @spec install_default_boot_run(keyword()) :: keyword()
+  def install_default_boot_run(oban_opts) when is_list(oban_opts) do
+    case Keyword.fetch(oban_opts, :plugins) do
+      {:ok, false} ->
+        oban_opts
+
+      {:ok, plugins} when is_list(plugins) ->
+        if Enum.any?(plugins, &boot_run_plugin?/1) do
+          oban_opts
+        else
+          Keyword.put(oban_opts, :plugins, [default_boot_run_plugin() | plugins])
+        end
+
+      _ ->
+        Keyword.put(oban_opts, :plugins, [default_boot_run_plugin()])
+    end
+  end
+
+  defp default_boot_run_plugin, do: {Samen.Jobs.BootRun, workers: default_boot_workers()}
+
+  defp boot_run_plugin?(Samen.Jobs.BootRun), do: true
+  defp boot_run_plugin?({Samen.Jobs.BootRun, _opts}), do: true
+  defp boot_run_plugin?(_plugin), do: false
+
+  @doc """
   Install the canonical Samen queue taxonomy (`default_queue_config/0`) into an
   Oban child-spec option list.
 
@@ -313,9 +362,10 @@ defmodule Samen.Jobs do
   end
 
   @doc """
-  The single Oban adoption seam: canonical queues + canonical cron.
+  The single Oban adoption seam: canonical queues + canonical cron + the boot run.
 
-  Equivalent to `install_default_queues/1` followed by `install_default_cron/1`.
+  Equivalent to `install_default_queues/1`, then `install_default_cron/1`, then
+  `install_default_boot_run/1`.
   This is what every shipped host and every generated app passes to the `{Oban, _}`
   child spec, so ONE call makes a host inherit the whole taxonomy:
 
@@ -329,6 +379,7 @@ defmodule Samen.Jobs do
     oban_opts
     |> install_default_queues()
     |> install_default_cron()
+    |> install_default_boot_run()
   end
 
   @doc """

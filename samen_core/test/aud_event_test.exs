@@ -392,6 +392,63 @@ defmodule Samen.AuditEventTest do
     end
   end
 
+  describe "a fresh database's partitions: the generated aud_event migration" do
+    test "upcoming_partition_sql/2 creates the anchor month and the next two, by calendar month" do
+      names = Enum.map([~D[2099-01-01], ~D[2099-02-01], ~D[2099-03-01]], &PartitionManager.partition_name/1)
+      Enum.each(names, &Repo.query("DROP TABLE IF EXISTS #{&1}"))
+
+      statements = PartitionManager.upcoming_partition_sql(~D[2099-01-31], 2)
+      assert length(statements) == 3
+      Enum.each(statements, &({:ok, _} = Repo.query(&1)))
+
+      assert Enum.all?(names, &aud_partition_exists?/1)
+
+      # February's bounds, exactly: a row on its last instant lands in it.
+      assert {:ok, _} =
+               AuditEvent.insert(Repo, %{
+                 event_type: "system",
+                 subject_id: "feb-28",
+                 occurred_at: ~U[2099-02-28 23:59:59Z]
+               })
+
+      # A migration re-run (IF NOT EXISTS) is a no-op, not an error.
+      Enum.each(statements, &({:ok, _} = Repo.query(&1)))
+    end
+
+    test "the template partitions the month it is migrated in, never a fixed month" do
+      quoted =
+        [:code.priv_dir(:samen_core), "templates", "m_aud_event.eex"]
+        |> Path.join()
+        |> File.read!()
+        |> EEx.eval_string(module: "Acme", otp_app: "acme")
+        |> Code.string_to_quoted!()
+
+      {_, found} =
+        Macro.prewalk(quoted, %{roll_forward: 0, fixed_ddl: []}, fn
+          {{:., _, [{:__aliases__, _, [:Samen, :AuditEvent, :PartitionManager]}, :upcoming_partition_sql]}, _,
+           [{{:., _, [{:__aliases__, _, [:Date]}, :utc_today]}, _, []}, 2]} = node,
+          acc ->
+            {node, %{acc | roll_forward: acc.roll_forward + 1}}
+
+          sql, acc when is_binary(sql) ->
+            if sql =~ ~r/PARTITION OF aud_event/i,
+              do: {sql, %{acc | fixed_ddl: [sql | acc.fixed_ddl]}},
+              else: {sql, acc}
+
+          node, acc ->
+            {node, acc}
+        end)
+
+      assert found.roll_forward == 1,
+             "m_aud_event.eex must create its partitions with " <>
+               "PartitionManager.upcoming_partition_sql(Date.utc_today(), 2)"
+
+      assert found.fixed_ddl == [],
+             "m_aud_event.eex creates a fixed partition, so a fresh deploy in any other month " <>
+               "refuses audit writes until the daily roll-forward runs: #{inspect(found.fixed_ddl)}"
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # (e) Detach-for-archival refuses when erasure window is active — RED PATH
   # ---------------------------------------------------------------------------

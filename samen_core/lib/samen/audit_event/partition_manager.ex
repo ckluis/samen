@@ -138,7 +138,11 @@ defmodule Samen.AuditEvent.PartitionManager do
 
       {"0 1 * * *", Samen.AuditEvent.PartitionManager}
 
-  (daily at 01:00; the idempotent ensure_partition is cheap)
+  (daily at 01:00; the idempotent ensure_partition is cheap). `Samen.Jobs.install_defaults/1`
+  installs that entry, and also `Samen.Jobs.BootRun`, which enqueues this worker once when
+  Oban starts, so a node never waits until 01:00 for the current month's partition. A fresh
+  database has it from the start: the generated migration creates the month it runs in and
+  the next two (`upcoming_partition_sql/2`).
   """
 
   use Oban.Worker,
@@ -220,13 +224,41 @@ defmodule Samen.AuditEvent.PartitionManager do
   @spec ensure_partitions_between(module(), Date.t(), Date.t()) ::
           [{:ok, String.t()} | {:error, term()}]
   def ensure_partitions_between(repo, %Date{} = from, %Date{} = to) do
+    from
+    |> months_between(to)
+    |> Enum.map(&ensure_partition(repo, &1))
+  end
+
+  @doc """
+  The `CREATE TABLE IF NOT EXISTS … PARTITION OF aud_event` statements for the month of
+  `anchor` and each of the next `months_ahead` calendar months — the partitions
+  `ensure_upcoming_partitions/3` makes, as SQL for a migration to `execute`.
+
+  The generated `aud_event` migration runs these with `Date.utc_today()`, so a fresh
+  database can take audit writes as soon as it is migrated, not from the first daily
+  roll-forward on.
+  """
+  @spec upcoming_partition_sql(Date.t(), non_neg_integer()) :: [String.t()]
+  def upcoming_partition_sql(%Date{} = anchor, months_ahead)
+      when is_integer(months_ahead) and months_ahead >= 0 do
+    first = first_of_month(anchor)
+
+    first
+    |> months_between(Date.shift(first, month: months_ahead))
+    |> Enum.map(fn month ->
+      {name, from_ts, to_ts} = partition_spec(month)
+      create_partition_sql(name, from_ts, to_ts)
+    end)
+  end
+
+  # The first of each month from the month of `from` through the month of `to`, inclusive.
+  defp months_between(from, to) do
     last = first_of_month(to)
 
     from
     |> first_of_month()
     |> Stream.iterate(&Date.shift(&1, month: 1))
     |> Enum.take_while(&(Date.compare(&1, last) != :gt))
-    |> Enum.map(&ensure_partition(repo, &1))
   end
 
   @doc """
