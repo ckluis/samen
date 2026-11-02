@@ -1,0 +1,20 @@
+# SABOTAGE: the reply cutoff is stored to the second again, so a resume in the same second as the reply it 
+#   follows re-pauses on that reply
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/crm/sequence_send_test.exs
+# MUST_FAIL: same second: a cutoff a microsecond after the reply's ingestion does not re-pause on it
+diff --git a/samen_core/lib/samen/scopes/outreach/blueprint.ex b/samen_core/lib/samen/scopes/outreach/blueprint.ex
+index a38a5bc2..6d256e3f 100644
+--- a/samen_core/lib/samen/scopes/outreach/blueprint.ex
++++ b/samen_core/lib/samen/scopes/outreach/blueprint.ex
+@@ -201,7 +201,7 @@ defmodule Samen.Scopes.Outreach.Blueprint do
+           # reads THIS field for "ingested after the cutoff" and `enrolled_at` only as
+           # the "sent after the enrollment began" floor. Microseconds, so a resume in the
+           # same second as the reply it follows does not re-pause on that reply.
+-          attribute(:reply_cutoff_at, :utc_datetime_usec, public?: true)
++          attribute(:reply_cutoff_at, :utc_datetime, public?: true)
+         end
+ 
+         relationships do

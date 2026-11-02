@@ -195,7 +195,14 @@ defmodule Samen.Scopes.Mailbox.Blueprint do
           # so a Message-ID embedding an address cannot land in a plain column.
           attribute(:thread_key, :string, public?: true)
 
+          # The provider's timestamp: when the message was sent or received, on THEIR clock.
           attribute(:occurred_at, :utc_datetime, public?: true)
+
+          # When this row was written, on OUR clock, to the microsecond. Reply detection
+          # (`Samen.Sequences.MailboxReplyCheck`) compares this with the enrollment's
+          # cutoff, server clock against server clock: a reply synced late, or stamped by
+          # a provider clock ahead of ours, still lands on the right side of a resume.
+          create_timestamp(:ingested_at, type: :utc_datetime_usec, public?: true)
 
           # The generic CRM-agnostic object-ref anchor (ADR-041 §6.1 shape).
           attribute(:subject_key, :string, public?: true)

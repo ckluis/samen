@@ -25,20 +25,34 @@ defmodule Samen.Sequences.ReplyCheck do
   reply-check contract.
   """
 
-  @doc "The injectable contract: has `person_id` replied since `since`?"
-  @callback replied_since?(org_id :: String.t(), person_id :: String.t(), since :: DateTime.t()) ::
-              boolean() | {:error, term()}
+  @doc """
+  The injectable contract: has `person_id` sent a reply that we learned of at or after
+  `cutoff`, and that was sent at or after `floor`?
+
+  - `cutoff` is the enrollment's `reply_cutoff_at`, read on OUR clock: compare it with
+    when the reply was ingested, never with the provider's timestamp. A reply synced
+    after a resume then still counts, however long before the resume it was sent.
+  - `floor` is the enrollment's `enrolled_at`, compared with the provider's "sent at",
+    so a first sync that backfills older mail does not pause a fresh enrollment.
+  """
+  @callback replied_since?(
+              org_id :: String.t(),
+              person_id :: String.t(),
+              cutoff :: DateTime.t(),
+              floor :: DateTime.t()
+            ) :: boolean() | {:error, term()}
 
   @doc "Answer via the configured module (see moduledoc). Never raises."
-  @spec replied_since?(String.t(), String.t(), DateTime.t()) :: {:ok, boolean()} | {:error, term()}
-  def replied_since?(org_id, person_id, %DateTime{} = since) do
+  @spec replied_since?(String.t(), String.t(), DateTime.t(), DateTime.t()) ::
+          {:ok, boolean()} | {:error, term()}
+  def replied_since?(org_id, person_id, %DateTime{} = cutoff, %DateTime{} = floor) do
     case module() do
       nil ->
         {:ok, false}
 
       mod ->
         try do
-          case mod.replied_since?(org_id, person_id, since) do
+          case mod.replied_since?(org_id, person_id, cutoff, floor) do
             {:error, _} = err -> err
             bool when is_boolean(bool) -> {:ok, bool}
             other -> {:error, {:invalid_reply_check_result, other}}
