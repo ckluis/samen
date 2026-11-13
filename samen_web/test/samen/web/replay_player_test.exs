@@ -739,6 +739,31 @@ defmodule Samen.Web.ReplayPlayerTest do
     end
   end
 
+  describe "listing replays — a failed read (WP6)" do
+    test "is the error state with a retry, never the false-clean 'No recorded sessions.'", ctx do
+      admin = user!(ctx.org, :admin)
+      inject_read_faults([:replay_sessions])
+
+      {socket, _log} = ExUnit.CaptureLog.with_log(fn -> tenant_player(IndexLive, ctx.org, nil, admin.id) end)
+      assert socket.assigns.state == :open
+      assert socket.assigns.sessions == []
+      assert socket.assigns.load_error
+
+      html = page(socket, IndexLive)
+      assert html =~ "error-state"
+      assert html =~ "Nothing was lost"
+      refute html =~ "No recorded sessions."
+      refute html =~ "replay-row"
+      for s <- sentinels(), do: refute(html =~ s)
+
+      clear_read_faults()
+      {:noreply, socket} = IndexLive.handle_event("retry_load", %{}, socket)
+      html = page(socket, IndexLive)
+      refute html =~ "error-state"
+      assert html =~ "replay-row"
+    end
+  end
+
   # -- framework mount -----------------------------------------------------------------------
 
   describe "framework mount (≈0 authored LOC)" do

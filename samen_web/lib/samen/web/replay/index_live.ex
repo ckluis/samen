@@ -16,6 +16,7 @@ defmodule Samen.Web.Replay.IndexLive do
   import Samen.Web.Replay.Live
 
   alias Samen.Replay.Player
+  alias Samen.Web.Reads.Guard
   alias Samen.Web.Replay.Access
 
   @impl true
@@ -32,6 +33,8 @@ defmodule Samen.Web.Replay.IndexLive do
   def handle_params(_params, _uri, socket), do: {:noreply, socket}
 
   @impl true
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket)}
+
   def handle_event("open_session", %{"reason" => reason}, socket) do
     case open_session(socket, reason) do
       :ok -> {:noreply, load(socket)}
@@ -43,15 +46,23 @@ defmodule Samen.Web.Replay.IndexLive do
   def load(socket) do
     case Access.authorize(socket, socket.assigns[:org_id], socket.assigns[:user_id]) do
       {:ok, viewer} ->
-        sessions =
-          viewer.scope
-          |> Player.list()
-          |> Enum.map(&Map.put(&1, :drift, Player.drift(&1)))
+        # A FAILED list read is the error state (retry), never "No recorded sessions.".
+        case Guard.run(:replay_sessions, socket.assigns[:org_id], fn ->
+               case Player.list_result(viewer.scope) do
+                 {:ok, sessions} -> sessions
+                 {:error, :unavailable} -> raise "replay list unavailable"
+               end
+             end) do
+          {:ok, sessions} ->
+            sessions = Enum.map(sessions, &Map.put(&1, :drift, Player.drift(&1)))
+            assign(socket, state: :open, sessions: sessions, deny_reason: nil, load_error: nil)
 
-        assign(socket, state: :open, sessions: sessions, deny_reason: nil)
+          {:error, _} ->
+            assign(socket, state: :open, sessions: [], deny_reason: nil, load_error: Guard.message())
+        end
 
       {:error, reason} ->
-        assign(socket, state: :denied, sessions: [], deny_reason: reason)
+        assign(socket, state: :denied, sessions: [], deny_reason: reason, load_error: nil)
     end
   end
 
@@ -77,8 +88,10 @@ defmodule Samen.Web.Replay.IndexLive do
               field as it is NOW, on your plane — and is recorded in this org's audit log.
             </.token_blind_bar>
 
+            <.error_state :if={@load_error} class="replays-error" body={@load_error} retry_event="retry_load" />
+
             <.empty_state
-              :if={@sessions == []}
+              :if={@sessions == [] and is_nil(@load_error)}
               class="replays-empty"
               icon="▶"
               title="No recorded sessions."

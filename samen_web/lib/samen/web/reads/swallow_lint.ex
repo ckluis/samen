@@ -59,7 +59,19 @@ defmodule Samen.Web.Reads.SwallowLint do
     {"samen_web/lib/samen/web/settings/security_live.ex", :safe_csrf_token} =>
       "no CSRF token available (outside a request) renders the revoke forms without one, which the server then rejects — fail-closed, nothing to report",
     {"samen_web/lib/samen/web/settings/invitations_live.ex", :verified?} =>
-      "fail-CLOSED capability probe (ADR-035 §5 A2): an unresolvable principal is unverified on an armed host (the invite is refused), never an elevated default"
+      "fail-CLOSED capability probe (ADR-035 §5 A2): an unresolvable principal is unverified on an armed host (the invite is refused), never an elevated default",
+    {"samen_web/lib/samen/web/replay/recorder.ex", :on_mount} =>
+      "best-effort observer: session capture must never crash or block the LiveView it observes (documented 'Never crashes, never blocks'); a capture failure turns capture off, it does not change what the user sees",
+    {"samen_web/lib/samen/web/replay/recorder.ex", :attach} =>
+      "best-effort observer: same contract as on_mount/4 — attaching the recorder can never break the LiveView",
+    {"samen_web/lib/samen/web/replay/recorder.ex", :guarded} =>
+      "best-effort observer: a failing recorder hook turns capture :off for that LiveView and returns the socket untouched (documented)",
+    {"samen_web/lib/samen/web/replay/recorder.ex", :off} =>
+      "best-effort observer: detaching hooks after a recorder failure must itself be total",
+    {"samen_web/lib/samen/web/replay/renderer.ex", :render_body} =>
+      "returns the honest tagged value {:error, :render_failed}, which the player renders as a failed replay — not a swallow",
+    {"samen_web/lib/samen/web/replay/renderer.ex", :view_mount} =>
+      "optional-scope probe: a view with no resolvable router mount has no live mount; nil is the honest answer the caller handles"
   }
 
   # Swallows that still exist, per file, AFTER the reviewed ones are subtracted. Shrink-only: a
@@ -119,9 +131,7 @@ defmodule Samen.Web.Reads.SwallowLint do
     "samen_web/lib/samen/web/operator/revenue_live.ex" => 1,
     "samen_web/lib/samen/web/operator/webhook_dlq_live.ex" => 3,
     "samen_web/lib/samen/web/reads.ex" => 1,
-    "samen_web/lib/samen/web/replay/recorder.ex" => 5,
-    "samen_web/lib/samen/web/replay/renderer.ex" => 3,
-            "samen_web/lib/samen/web/support/kb_reads.ex" => 1,
+                    "samen_web/lib/samen/web/support/kb_reads.ex" => 1,
     "samen_web/lib/samen/web/tags.ex" => 2,
     "samen_web/lib/samen/web/tenant/analytics_reads.ex" => 1,
     "samen_web/lib/samen/web/tenant_gate.ex" => 1,
