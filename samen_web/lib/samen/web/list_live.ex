@@ -374,7 +374,17 @@ defmodule Samen.Web.ListLive do
     socket
     |> Phoenix.Component.assign(:list_state, state)
     |> Phoenix.Component.assign(:list_error, Guard.message())
-    |> Phoenix.Component.assign(:page, socket.assigns[:page] || %Samen.Web.Page{page_size: state.page_size})
+    |> Phoenix.Component.assign(:page, failed_page(socket, state))
+  end
+
+  # The page a failed read leaves behind: what the user was looking at, flagged `error:
+  # :unavailable` so `list_view` shows the error state even on a screen that was never wired to
+  # `:list_error` (a first read that fails is otherwise an empty page = an empty-state lie).
+  defp failed_page(socket, state) do
+    case socket.assigns[:page] do
+      %Samen.Web.Page{} = page -> %{page | error: :unavailable}
+      _ -> %Samen.Web.Page{page_size: state.page_size, error: :unavailable}
+    end
   end
 
   # An authorization denial is a denial, not an outage: the same empty page it always was.
