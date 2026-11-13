@@ -10,12 +10,12 @@
 # MUST_FAIL: the three refusals (quarantine / plane / scope) are each independent
 # MUST_FAIL: flagship files byte-serve: the operator plane is REFUSED 403
 diff --git a/samen_web/lib/samen/web/files/bytes_controller.ex b/samen_web/lib/samen/web/files/bytes_controller.ex
-index c64d400..814e5c7 100644
+index 74e006f3..d8b6d3fb 100644
 --- a/samen_web/lib/samen/web/files/bytes_controller.ex
 +++ b/samen_web/lib/samen/web/files/bytes_controller.ex
-@@ -117,8 +117,10 @@ defmodule Samen.Web.Files.BytesController do
-     end
-   end
+@@ -131,8 +131,10 @@ defmodule Samen.Web.Files.BytesController do
+   defp reason_kind(reason) when is_tuple(reason) and tuple_size(reason) > 0 and is_atom(elem(reason, 0)), do: Atom.to_string(elem(reason, 0))
+   defp reason_kind(_reason), do: "other"
  
 -  defp operator_plane?(%Mount{plane: %{kind: :operator}}), do: true
 -  defp operator_plane?(_), do: false
