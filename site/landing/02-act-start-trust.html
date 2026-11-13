@@ -64,7 +64,7 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
     <div class="copy rv">
       <div class="eyebrow"><span class="n">02</span>The vault</div>
       <h2><em>••••</em> isn't a redaction. It's the value.</h2>
-      <p class="punch">Declare <code>pii_attribute :email</code> and the value goes to a <b>per-subject-keyed vault</b>. The row keeps a <code>vt_…</code> token; plaintext is nowhere at rest. Every reader gets <code>%Masked{}</code> back: the UI, the API, the CSV writer, the log line. Forgetting to mask is not a mistake available to you.</p>
+      <p class="punch">Declare <code>pii_attribute :email</code> and the value goes to a <b>per-subject-keyed vault</b>. The row keeps a <code>vt_…</code> token; the declared field is never stored in plaintext. Every reader gets <code>%Masked{}</code> back: the UI, the API, the CSV writer, the log line. Forgetting to mask is not a mistake available to you.</p>
       <div class="big"><span class="n">1</span><span class="l">decrypt path in the whole system. <b>One function to gate, one to log, one for a reviewer to read.</b> <span class="tag built">built</span></span></div>
       <ul class="ticks">
         <li><b>Validated, then tokenized</b>: Money, Email, Phone, Address… each type's cast runs before encryption</li>
