@@ -6,18 +6,17 @@
 # TEST_FILES: test/samen/web/reads_honest_failure_p3_test.exs
 # MUST_FAIL: REAL FAULT: when the job cannot be enqueued the reset rolls back
 diff --git a/samen_core/lib/samen/webhook/event.ex b/samen_core/lib/samen/webhook/event.ex
-index 96e4cc97..129d22dc 100644
+index d6b08633..129d22dc 100644
 --- a/samen_core/lib/samen/webhook/event.ex
 +++ b/samen_core/lib/samen/webhook/event.ex
-@@ -188,14 +188,12 @@ defmodule Samen.Webhook.Event do
+@@ -188,13 +188,12 @@ defmodule Samen.Webhook.Event do
      if Oban.config(oban).repo == repo do
        changeset = Ecto.Changeset.change(row, status: "received", last_error: nil, processed_at: nil)
  
--      Ecto.Multi.new()
--      |> Ecto.Multi.update(:event, changeset)
--      |> then(&Oban.insert(oban, &1, :job, Samen.Webhook.IngestWorker.job(row, repo: repo)))
--      |> repo.transaction()
--      |> case do
+-      multi = Ecto.Multi.update(Ecto.Multi.new(), :event, changeset)
+-      multi = Oban.insert(oban, multi, :job, Samen.Webhook.IngestWorker.job(row, repo: repo))
+-
+-      case repo.transaction(multi) do
 -        {:ok, %{event: event}} -> {:ok, event}
 -        {:error, :event, changeset, _} -> {:error, changeset}
 -        {:error, :job, _reason, _} -> {:error, :enqueue_failed}
