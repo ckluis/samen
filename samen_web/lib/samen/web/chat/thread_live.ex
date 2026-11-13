@@ -191,21 +191,48 @@ defmodule Samen.Web.Chat.ThreadLive do
     with true <- delivery_authorized?(socket),
          {:ok, participant_id} <- self_participant_id(socket, party),
          {:ok, message} <-
-           Chat.post_message(mount, scope, %{
-             org_id: socket.assigns.org_id,
-             thread_id: socket.assigns.thread_id,
-             participant_id: participant_id,
-             sender_party: party,
-             body: body
-           }) do
+           Guard.write(:chat_post_message, scope, fn ->
+             Chat.post_message(mount, scope, %{
+               org_id: socket.assigns.org_id,
+               thread_id: socket.assigns.thread_id,
+               participant_id: participant_id,
+               sender_party: party,
+               body: body
+             })
+           end) do
       # Optimistically append for the sender (its own scope). Remote subscribers get the
       # broadcast → handle_info re-read.
       {:noreply, append_message(socket, mount, scope, message)}
     else
-      # A refused / failed post tells the sender (flash group) — never a silently dropped message.
-      false -> {:noreply, socket}
-      :error -> {:noreply, put_flash(socket, :error, "You can't post in this conversation right now.")}
-      _ -> {:noreply, put_flash(socket, :error, "Your message wasn't sent. Nothing was posted — try again.")}
+      # A refused / failed post tells the sender (flash group) — never a silently dropped message —
+      # and each cause gets its OWN true copy: a lapsed gate, a participants outage, a genuine
+      # non-participant, a write denial and a write outage are five different facts.
+      false ->
+        {:noreply, put_flash(socket, :error, "This conversation is no longer open to you, so your message wasn't sent. Reload to continue.")}
+
+      :error ->
+        {:noreply, put_flash(socket, :error, no_participant_copy(socket))}
+
+      {:error, :unavailable} ->
+        {:noreply, put_flash(socket, :error, "Your message wasn't sent. Nothing was posted — try again.")}
+
+      # A denial (e.g. the operator-plane vault WriteGuard refusing a chat post): retrying will not help.
+      {:error, denied} when denied == :forbidden or is_struct(denied, Ash.Error.Forbidden) ->
+        {:noreply, put_flash(socket, :error, "You're not allowed to post in this conversation, so your message wasn't sent.")}
+
+      # The operator plane can never write a chat body: `Samen.Pii.WriteGuard` (MC-1 / L1) refuses it at
+      # the vault write chokepoint as an `Invalid` changeset error. That is a structural fact about the
+      # plane, so any `Invalid` post on the operator plane is a denial — decided by plane, not by text.
+      {:error, %Ash.Error.Invalid{}} ->
+        copy =
+          if operator_plane?(socket.assigns.samen_mount),
+            do: "Operator sessions can't post chat messages (the conversation is masked to you), so your message wasn't sent.",
+            else: "Your message wasn't sent. Nothing was posted — check it and try again."
+
+        {:noreply, put_flash(socket, :error, copy)}
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "Your message wasn't sent. Nothing was posted — check it and try again.")}
     end
   end
 
@@ -226,6 +253,14 @@ defmodule Samen.Web.Chat.ThreadLive do
     else
       {:noreply, load(socket, org_id, socket.assigns[:thread_id])}
     end
+  end
+
+  # No self participant resolved: either the participants READ failed (an outage — we cannot say
+  # whether the viewer may post) or the viewer genuinely is not a participant.
+  defp no_participant_copy(socket) do
+    if :participants in Map.get(socket.assigns, :section_errors, []),
+      do: "We couldn't check who is in this conversation right now. Your message wasn't sent — try again.",
+      else: "You can't post in this conversation right now."
   end
 
   defp open_error_copy(:reason_required), do: "A reason for access is required."

@@ -510,4 +510,96 @@ defmodule Samen.Web.ReadsHonestFailureReviewTest do
       end
     end
   end
+
+  # ===========================================================================
+  # N3 — chat send: each failed-post cause gets its true copy
+  # ===========================================================================
+
+  describe "N3 — chat send" do
+    alias Samen.Web.Chat.ThreadLive
+
+    setup %{org_id: org_id} do
+      %{chat: Seeds.seed_chat(org_id, disclosure_mode: :tenant_wide)}
+    end
+
+    defp chat_socket(mount, org_id, thread_id) do
+      socket =
+        %Phoenix.LiveView.Socket{}
+        |> Phoenix.Component.assign(samen_mount: mount, samen_acting_as: false, org_id: org_id, thread_id: thread_id)
+        |> then(&ThreadLive.load(&1, org_id, thread_id))
+
+      # `:flash` is a reserved assign: a real mounted socket carries it, a bare test socket does not.
+      %{socket | assigns: Map.put(socket.assigns, :flash, %{})}
+    end
+
+    defp send_body(socket, body) do
+      {:noreply, socket} = ThreadLive.handle_event("send", %{"body" => body}, socket)
+      socket
+    end
+
+    defp message_count(thread_id) do
+      require Ash.Query
+
+      Samen.WebTest.Chat.ChatMessage
+      |> Ash.Query.filter(thread_id == ^thread_id)
+      |> Ash.count!(authorize?: false)
+    end
+
+    test "healthy tenant post persists and shows no error (positive control)", %{org_id: org_id, chat: chat} do
+      before = message_count(chat.thread.id)
+      socket = chat_socket(build_mount(:chat), org_id, chat.thread.id) |> send_body("n3 control")
+      assert message_count(chat.thread.id) == before + 1
+      assert socket.assigns.flash == %{}
+    end
+
+    test "a viewer who is genuinely NOT a participant is told they can't post", %{org_id: org_id, chat: chat} do
+      socket = chat_socket(build_mount(:chat), org_id, chat.thread.id)
+      socket = %{socket | assigns: Map.merge(socket.assigns, %{participants: [], section_errors: []})}
+
+      socket = send_body(socket, "hello")
+      assert socket.assigns.flash["error"] =~ "can't post in this conversation"
+      refute socket.assigns.flash["error"] =~ "couldn't check"
+    end
+
+    test "a LAPSED gate (operator, no session) is told the conversation is no longer open — not silently dropped",
+         %{org_id: org_id, chat: chat} do
+      operator = build_mount(:chat, plane: :operator, target_org_id: org_id)
+      socket = chat_socket(operator, org_id, chat.thread.id)
+
+      before = message_count(chat.thread.id)
+      socket = send_body(socket, "dropped?")
+
+      assert socket.assigns.flash["error"] =~ "no longer open to you"
+      assert message_count(chat.thread.id) == before
+    end
+
+    test "an operator WriteGuard denial is denial copy, not 'try again'", %{org_id: org_id, chat: chat} do
+      open_impersonation!("op-1", org_id)
+      operator = build_mount(:chat, plane: :operator, target_org_id: org_id)
+      socket = chat_socket(operator, org_id, chat.thread.id)
+
+      # The operator desk's own participant (so the failure is the WRITE, not a missing participant).
+      socket =
+        %{socket | assigns: Map.put(socket.assigns, :participants, [%{id: chat.operator_participant.id, party: :operator}])}
+
+      before = message_count(chat.thread.id)
+      {socket, _log} = with_log(fn -> send_body(socket, "operator says hi") end)
+
+      assert message_count(chat.thread.id) == before
+      refute is_nil(socket.assigns.flash["error"])
+      assert socket.assigns.flash["error"] =~ "Operator sessions can't post"
+      refute socket.assigns.flash["error"] =~ "try again"
+    end
+
+    test "a REAL write outage (the message table is gone) is 'try again', logged as a write failure", %{org_id: org_id, chat: chat} do
+      socket = chat_socket(build_mount(:chat), org_id, chat.thread.id)
+      break_table!(Samen.WebTest.Chat.ChatMessage)
+
+      {socket, log} = with_log(fn -> send_body(socket, "will not land") end)
+
+      assert socket.assigns.flash["error"] =~ "Nothing was posted — try again"
+      refute socket.assigns.flash["error"] =~ "can't post"
+      assert log =~ "write failed write=chat_post_message"
+    end
+  end
 end

@@ -727,14 +727,17 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
       assert rendered =~ "CHAT-BODY-SENTINEL"
     end
 
-    test "send: a refused post (no self participant) tells the sender instead of silently dropping it", %{org_id: org_id, chat: chat} do
+    test "send: a post while the participants read FAILED tells the sender it could not check (not 'you can\'t post')", %{org_id: org_id, chat: chat} do
       mount = build_mount(:chat)
       inject_read_faults([:chat_participants])
       socket = failing(fn -> socket_for(ThreadLive, mount, [org_id, chat.thread.id], org_id: org_id, thread_id: chat.thread.id) end)
       # `:flash` is a reserved assign: a real mounted socket carries it, a bare test socket does not.
       socket = %{socket | assigns: Map.put(socket.assigns, :flash, %{})}
       socket = failing(fn -> event(ThreadLive, socket, "send", %{"body" => "hello"}) end)
-      assert socket.assigns.flash["error"] =~ "can't post"
+      # A participants OUTAGE is not "you can't post": we could not check (N3 — see the review suite
+      # for the genuine non-participant, the lapsed gate and the write failures).
+      assert socket.assigns.flash["error"] =~ "couldn't check who is in this conversation"
+      refute socket.assigns.flash["error"] =~ "can't post"
       refute socket.assigns.flash["error"] =~ "Injected"
     end
   end
