@@ -247,7 +247,7 @@ defmodule Samen.Web.ReadsHonestFailureReviewTest do
       assert socket.assigns.invite_error =~ "Nothing was sent"
     end
 
-    test "S4: 'You're all set' is derived from the ONE org read — the load issues a single org query", ctx do
+    test "S4: 'You're all set' is derived from the ONE org read — the load issues a single org query", _ctx do
       mount = build_mount(:settings)
 
       {:ok, reg} =
@@ -297,6 +297,163 @@ defmodule Samen.Web.ReadsHonestFailureReviewTest do
         |> then(&WizardLive.load(&1, org_id, nil))
 
       assert done.assigns.complete? == true
+    end
+  end
+
+  # ===========================================================================
+  # S5 / S6 — AI support drafts: decided structurally, never from error text
+  # ===========================================================================
+
+  describe "S5/S6 — AI support drafts" do
+    alias Samen.Web.AI.{Server, SupportDraftLive}
+    alias Samen.Web.Reads.Adoption
+
+    @draft Samen.AI.SupportReplyDraft
+
+    defp ai_mount do
+      Mount.new(:ai, Samen.WebTest.Crm, Samen.WebTest.Repo, labels: %{ai_crm_resource: Samen.WebTest.Crm.Person})
+    end
+
+    # The draft resource's repo (`SamenCore.TestRepo`) is NOT started in samen_web: a REAL not-adopted
+    # host. Listing it in `:ecto_repos` models the other real condition — an ADOPTING host whose
+    # repo is configured but down. Same repo, same resource; the configuration alone flips the answer.
+    defp configure_repo!(repo) do
+      previous = Application.get_env(:samen_web, :ecto_repos)
+      Application.put_env(:samen_web, :ecto_repos, [Samen.WebTest.Repo, repo])
+      on_exit(fn -> Application.put_env(:samen_web, :ecto_repos, previous) end)
+    end
+
+    defp compose(org_id) do
+      socket =
+        %Phoenix.LiveView.Socket{}
+        |> Phoenix.Component.assign(samen_mount: ai_mount(), samen_acting_as: false)
+        |> then(&SupportDraftLive.load(&1, org_id))
+
+      {:noreply, socket} =
+        SupportDraftLive.handle_event("compose", %{"to_subscriber_id" => Ash.UUID.generate(), "instruction" => "hi"}, socket)
+
+      {socket, render_html(SupportDraftLive, socket.assigns)}
+    end
+
+    test "REAL not-adopted host: list is the documented honest empty and says so ONCE; compose says 'not adopted'", %{org_id: org_id} do
+      Adoption.forget_logged(@draft)
+      on_exit(fn -> Adoption.forget_logged(@draft) end)
+
+      assert Adoption.probe_resource(@draft) == :not_adopted
+
+      log =
+        capture_log(fn ->
+          assert {:ok, []} = Server.list_drafts_result(ai_mount(), org_id)
+          assert {:ok, []} = Server.list_drafts_result(ai_mount(), org_id)
+        end)
+
+      assert length(String.split(log, "feature not adopted on this host")) - 1 == 1
+      refute log =~ "read failed"
+
+      {_socket, html} = with_log(fn -> compose(org_id) end) |> elem(0)
+      assert html =~ "has not adopted the AI draft domain"
+      refute html =~ "Try again"
+    end
+
+    test "REAL failure on an ADOPTING host (repo configured, not running): the list is an error, compose says try again, never 'not adopted'",
+         %{org_id: org_id} do
+      configure_repo!(SamenCore.TestRepo)
+      assert Adoption.probe_resource(@draft) == :repo_down
+
+      {result, log} = with_log(fn -> Server.list_drafts_result(ai_mount(), org_id) end)
+      assert result == {:error, :unavailable}
+      assert log =~ "read failed read=ai_list_drafts"
+
+      {{socket, html}, _log} = with_log(fn -> compose(org_id) end)
+      assert socket.assigns.drafts_error
+      assert html =~ "Draft could not be saved — nothing was saved. Try again."
+      refute html =~ "has not adopted"
+      refute html =~ "No drafts yet"
+    end
+
+    test "a denial outcome renders denial copy, distinct from the outage and not-adopted copy", %{org_id: org_id} do
+      socket =
+        %Phoenix.LiveView.Socket{}
+        |> Phoenix.Component.assign(samen_mount: ai_mount(), samen_acting_as: false)
+        |> then(&SupportDraftLive.load(&1, org_id, outcome: {:denied, "You are not allowed to compose a support draft here — nothing was saved."}))
+
+      html = render_html(SupportDraftLive, socket.assigns)
+      assert html =~ ~s(data-state="denied")
+      assert html =~ "not allowed"
+      refute html =~ "Try again"
+      refute html =~ "has not adopted"
+    end
+
+    test "Adoption.probe decides from facts: ready / missing table / down repo / never configured" do
+      repo = Samen.WebTest.Repo
+      table = AshPostgres.DataLayer.Info.table(Samen.WebTest.Operator.Invitation)
+
+      # POSITIVE CONTROL: a started repo with the table is ready.
+      assert Adoption.probe(repo, table) == :ready
+
+      break_table!(Samen.WebTest.Operator.Invitation)
+      assert Adoption.probe(repo, table) == :table_missing
+
+      assert Adoption.probe(SamenCore.TestRepo, "anything") == :not_adopted
+      configure_repo!(SamenCore.TestRepo)
+      assert Adoption.probe(SamenCore.TestRepo, "anything") == :repo_down
+      assert Adoption.probe(nil, "anything") == :not_adopted
+    end
+  end
+
+  # ===========================================================================
+  # N4 — impersonation sessions: the genuinely-absent table is the honest empty
+  # ===========================================================================
+
+  describe "N4 — security settings, impersonation sessions" do
+    alias Samen.Web.Settings.SecurityLive
+    alias Samen.WebTest.Operator.{Membership, User}
+
+    defp security_render(org_id, user_id) do
+      socket =
+        %Phoenix.LiveView.Socket{}
+        |> Phoenix.Component.assign(samen_mount: build_mount(:settings), samen_acting_as: false, return_to: nil)
+        |> then(&SecurityLive.load(&1, org_id, user_id))
+
+      render_html(SecurityLive, socket.assigns)
+    end
+
+    setup do
+      org_id = Ash.UUID.generate()
+
+      user =
+        User
+        |> Ash.Changeset.for_create(:create, %{org_id: org_id, handle: "sec-admin", full_name: %Samen.Type.FullName{first: "Sec", last: "Admin"}})
+        |> Ash.create!(authorize?: false)
+
+      Membership
+      |> Ash.Changeset.for_create(:create, %{org_id: org_id, user_id: user.id, role: :admin})
+      |> Ash.create!(authorize?: false)
+
+      %{sec_org: org_id, sec_user: user.id}
+    end
+
+    test "a host WITHOUT the sessions table shows the documented honest empty; a present table with a broken query is still an error",
+         %{sec_org: org_id, sec_user: user_id} do
+      # POSITIVE CONTROL: the table is there and empty → "No impersonation sessions recorded."
+      healthy = security_render(org_id, user_id)
+      assert healthy =~ "No impersonation sessions recorded."
+      refute healthy =~ "security-sessions-unavailable"
+
+      table = Samen.Impersonation.Session.__schema__(:source)
+
+      # A REAL outage-shaped failure on a PRESENT table (the column the read selects is gone).
+      Ecto.Adapters.SQL.query!(Samen.WebTest.Repo, "ALTER TABLE #{table} RENAME COLUMN imp_org_id TO zz_org_id")
+      {broken, _log} = with_log(fn -> security_render(org_id, user_id) end)
+      assert broken =~ "security-sessions-unavailable"
+      refute broken =~ "No impersonation sessions recorded."
+      Ecto.Adapters.SQL.query!(Samen.WebTest.Repo, "ALTER TABLE #{table} RENAME COLUMN zz_org_id TO imp_org_id")
+
+      # The genuinely-absent table: structural check → honest empty, no error state.
+      Ecto.Adapters.SQL.query!(Samen.WebTest.Repo, "ALTER TABLE #{table} RENAME TO zz_gone_#{table}")
+      absent = security_render(org_id, user_id)
+      assert absent =~ "No impersonation sessions recorded."
+      refute absent =~ "security-sessions-unavailable"
     end
   end
 end

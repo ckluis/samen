@@ -28,6 +28,7 @@ defmodule Samen.Web.AI.Server do
   alias Samen.AI
   alias Samen.AI.Embeddings
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Adoption
   alias Samen.Web.Reads.Guard
 
   require Ash.Query
@@ -213,14 +214,27 @@ defmodule Samen.Web.AI.Server do
   def support_draft(mount, org_id, attrs, opts \\ []) when is_map(attrs) do
     attrs = Map.put(attrs, :org_id, org_id)
 
-    # A raise (e.g. the host has not adopted the AI draft domain: no table) is logged by name and
+    # A raise (or a RETURNED data-layer error, which `Guard.write/3` converts) is logged by name and
     # cause only and answered with a value-free reason — never `Exception.message/1`, which can
-    # interpolate the very values being drafted.
+    # interpolate the very values being drafted. WHY it failed is decided structurally, not from the
+    # error text: only a host that never adopted the draft domain is `{:persist_unavailable,
+    # :not_adopted}`; a real failure stays `{:error, :unavailable}` (try again) and a denial stays
+    # `{:error, :forbidden}`.
     case Guard.write(:ai_support_draft, org_id, fn ->
            Samen.AI.SupportOperator.draft_reply(scope(mount, org_id), attrs, opts)
          end) do
-      {:error, kind} when kind in [:unavailable, :forbidden] -> {:error, {:persist_unavailable, kind}}
-      other -> other
+      {:error, :unavailable} ->
+        case Adoption.probe_resource(Samen.AI.SupportReplyDraft) do
+          :not_adopted ->
+            Adoption.log_not_adopted_once(Samen.AI.SupportReplyDraft)
+            {:error, {:persist_unavailable, :not_adopted}}
+
+          _adopted_or_unknown ->
+            {:error, :unavailable}
+        end
+
+      other ->
+        other
     end
   end
 
@@ -228,16 +242,18 @@ defmodule Samen.Web.AI.Server do
   List this org's support-reply drafts (org-scoped read of `Samen.AI.SupportReplyDraft`).
   ORG-SCOPE PIN: the `org_id == ^org` filter is from the trusted scope; dropping it flips a
   named cross-org test (patch 142). Fail-safe `[]` when the host has not adopted the AI domain
-  (no table/repo) — an empty list, NEVER another org's drafts.
+  (no draft repo configured) — an empty list, NEVER another org's drafts.
   """
   @spec list_drafts(Mount.t(), String.t() | nil) :: [struct()]
   def list_drafts(mount, org_id), do: list_drafts_result(mount, org_id) |> Guard.value([])
 
   @doc """
   Tagged sibling of `list_drafts/2` (WP6): `{:ok, drafts}` — an empty list is the honest "no
-  drafts yet" — or `{:error, :unavailable | :forbidden}` when the read FAILED (an outage, or a
-  host without the AI draft table: either way the screen says it could not load the drafts
-  rather than "No drafts yet").
+  drafts yet" — or `{:error, :unavailable | :forbidden}` when the read FAILED (an outage, a repo
+  that is configured but down, or an adopting host whose draft table was never migrated: the
+  screen says it could not load the drafts rather than "No drafts yet"). The ONE honest-empty
+  failure is a host that never adopted `Samen.AI.Domain` (no draft repo configured or started —
+  decided by `Samen.Web.Reads.Adoption`, not by error text); it logs once per node.
   """
   @spec list_drafts_result(Mount.t(), String.t() | nil) :: Guard.result([struct()])
   def list_drafts_result(_mount, nil), do: {:ok, []}
@@ -254,27 +270,29 @@ defmodule Samen.Web.AI.Server do
           drafts
 
         {:error, error} ->
-          # A host that has not adopted `Samen.AI.Domain` has no draft repo/table: that is the
-          # documented honest empty (the composer then says so). Anything else is a FAILED read.
-          if domain_not_adopted?(error), do: [], else: raise(Ash.Error.to_error_class(error))
+          # A host that has not adopted `Samen.AI.Domain` has no draft repo: that is the documented
+          # honest empty (the composer then says so). Decided STRUCTURALLY (`Adoption`): a repo
+          # that is configured but down, a table the adopting host never migrated, or anything else
+          # is a FAILED read — never "No drafts yet".
+          case Adoption.probe_resource(Samen.AI.SupportReplyDraft) do
+            :not_adopted ->
+              Adoption.log_not_adopted_once(Samen.AI.SupportReplyDraft)
+              []
+
+            _failure ->
+              raise Ash.Error.to_error_class(error)
+          end
       end
     end)
   end
 
   # An unstarted repo surfaces as a RAISED `Ash.Error.Unknown`; catch exactly that class (typed, so a
-  # different failure still reaches `Guard.run/3`) and let `domain_not_adopted?/1` classify it.
+  # different failure still reaches `Guard.run/3`) and let `Adoption.probe_resource/1` classify it.
   defp read_drafts(query) do
     # authz-scope: the caller (`list_drafts_result/2`) pinned `org_id == ^org_id` on `query`, one clause up.
     Ash.read(query, authorize?: false)
   rescue
     e in Ash.Error.Unknown -> {:error, e}
-  end
-
-  # Matches the exception text only (never rendered or logged): no repo started for the resource,
-  # or the table absent.
-  defp domain_not_adopted?(error) do
-    msg = Exception.message(error)
-    String.contains?(msg, "could not lookup Ecto repo") or String.contains?(msg, "undefined_table")
   end
 
   # --- shared helpers ----------------------------------------------------------------------

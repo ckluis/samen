@@ -46,6 +46,7 @@ defmodule Samen.Web.Settings.SecurityLive do
 
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Adoption
   alias Samen.Web.Reads.Guard
   alias Samen.Web.Settings.Reads
 
@@ -141,6 +142,11 @@ defmodule Samen.Web.Settings.SecurityLive do
   # invents rows. Like the reveal ledger below this is a tenant TRUST surface: a FAILED read is
   # `{[], true}` (the render says "temporarily unavailable — a read error, not a clean record"),
   # never a false-clean "No impersonation sessions recorded." (O10).
+  #
+  # The ONE exception is a host that genuinely lacks the impersonation-sessions table (a minimal
+  # host that never adopted impersonation): its documented honest empty. That is decided
+  # STRUCTURALLY after the read failed (`Adoption.probe/3`: no such table on a running repo), never
+  # from the error text, and an outage (repo down, connection lost) is still the error state.
   defp sessions_for(_mount, nil), do: {[], false}
 
   defp sessions_for(mount, org_id) do
@@ -148,9 +154,13 @@ defmodule Samen.Web.Settings.SecurityLive do
            Samen.Impersonation.Sessions.list_for_org(org_id, repo: mount.repo)
          end) do
       {:ok, sessions} -> {sessions, false}
-      {:error, _} -> {[], true}
+      {:error, :forbidden} -> {[], true}
+      {:error, :unavailable} -> if sessions_table_absent?(mount), do: {[], false}, else: {[], true}
     end
   end
+
+  defp sessions_table_absent?(mount),
+    do: Adoption.probe(mount.repo, Samen.Impersonation.Session.__schema__(:source)) == :table_missing
 
   # PP-11 (T150) — the REVEAL-access ledger. An impersonation session records the MASKED
   # view; a reveal is the moment tenant PII actually becomes plaintext to an operator. Read

@@ -79,7 +79,18 @@ defmodule Samen.Web.AI.SupportDraftLive do
   # otherwise a fail-honest error term — surfaced truthfully (never "saved" on failure).
   defp classify_outcome({:ok, _}), do: {:saved, "Draft persisted; a pending approval was opened (no send)."}
   defp classify_outcome({:error, :not_configured}), do: {:not_configured, Server.configuration_hint()}
-  defp classify_outcome({:error, {:persist_unavailable, _}}), do: {:unavailable, "This host has not adopted the AI draft domain — nothing was persisted."}
+  # The ONE not-adopted case: this host never configured the AI draft domain (decided structurally).
+  defp classify_outcome({:error, {:persist_unavailable, :not_adopted}}),
+    do: {:unavailable, "This host has not adopted the AI draft domain — nothing was persisted."}
+
+  # A real failure (an outage): value-free, and it is safe to try again.
+  defp classify_outcome({:error, :unavailable}),
+    do: {:unavailable, "Draft could not be saved — nothing was saved. Try again."}
+
+  # A real denial: say so — it is not an outage and retrying will not help.
+  defp classify_outcome({:error, :forbidden}),
+    do: {:denied, "You are not allowed to compose a support draft here — nothing was saved."}
+
   defp classify_outcome({:error, _}), do: {:unavailable, "Draft could not be persisted — nothing was saved."}
 
   defp present(nil), do: nil
@@ -173,6 +184,17 @@ defmodule Samen.Web.AI.SupportDraftLive do
     ~H"""
     <div class="card" id="ai-support-outcome" data-state="unavailable" style="padding:12px">
       <.pill variant="warn">Not persisted</.pill>
+      <span style="margin-left:8px;color:var(--muted);font-size:13px">{@msg}</span>
+    </div>
+    """
+  end
+
+  defp compose_outcome(%{outcome: {:denied, msg}} = assigns) do
+    assigns = assign(assigns, :msg, msg)
+
+    ~H"""
+    <div class="card" id="ai-support-outcome" data-state="denied" style="padding:12px">
+      <.pill variant="bad">Not allowed</.pill>
       <span style="margin-left:8px;color:var(--muted);font-size:13px">{@msg}</span>
     </div>
     """
