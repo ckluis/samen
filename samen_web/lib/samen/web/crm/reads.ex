@@ -192,6 +192,28 @@ defmodule Samen.Web.CRM.Reads do
   end
 
   @doc """
+  Whether `id` is a (non-archived) contact of the scope's org. Org-scoped by the same Ash read
+  policy as every other CRM read; a malformed uuid is simply `false`. No PII is loaded.
+  """
+  def contact_exists?(mount, scope, id) when is_binary(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} ->
+        Mount.resource(mount, Person)
+        |> Ash.Query.filter(id == ^uuid)
+        |> Ash.Query.limit(1)
+        |> Ash.read!(scope: scope)
+        |> Kernel.!=([])
+
+      :error ->
+        false
+    end
+  rescue
+    _ -> false
+  end
+
+  def contact_exists?(_mount, _scope, _id), do: false
+
+  @doc """
   Read a single CRM person (contact) by id for `scope`, with PII plane-resolved
   (tenant clear / operator ••••). `{:ok, person}` or `:error`. **This is the new
   PII surface** (ADR-011 §5 — the masking-test target).
