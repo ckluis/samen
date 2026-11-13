@@ -79,7 +79,11 @@ defmodule Samen.Web.Operator.DeliverabilityReads do
   end
 
   defp with_recipient(row, mount, actor, opts) do
-    Map.put(row, :__recipient__, resolve_recipient(mount, actor, row.org_id, row.subscriber_id, opts))
+    case resolve_recipient_result(mount, actor, row.org_id, row.subscriber_id, opts) do
+      {:ok, recipient} -> row |> Map.put(:__recipient__, recipient) |> Map.put(:__recipient_failed__, false)
+      # A failed lookup is NOT an unknown recipient: the row says "couldn't load" (not "unknown").
+      {:error, :unavailable} -> row |> Map.put(:__recipient__, nil) |> Map.put(:__recipient_failed__, true)
+    end
   end
 
   @doc """
@@ -93,12 +97,26 @@ defmodule Samen.Web.Operator.DeliverabilityReads do
   `Samen.Reveal` grant checker decides); tests inject a grant stub.
   """
   @spec resolve_recipient(Mount.t(), map(), String.t(), String.t() | nil, keyword()) :: map() | nil
-  def resolve_recipient(_mount, _actor, _org_id, nil, _opts), do: nil
-
   def resolve_recipient(mount, actor, org_id, subscriber_id, opts) do
+    case resolve_recipient_result(mount, actor, org_id, subscriber_id, opts) do
+      {:ok, recipient} -> recipient
+      {:error, :unavailable} -> nil
+    end
+  end
+
+  @doc """
+  `resolve_recipient/5` with the failure kept apart from "unknown": `{:ok, nil}` is an honest unresolvable
+  recipient (no such user), `{:error, :unavailable}` is a lookup that FAILED (reported by name and
+  exception module). Fail-CLOSED either way: never plaintext, never a guessed identity.
+  """
+  @spec resolve_recipient_result(Mount.t(), map(), String.t(), String.t() | nil, keyword()) ::
+          {:ok, map() | nil} | {:error, :unavailable}
+  def resolve_recipient_result(_mount, _actor, _org_id, nil, _opts), do: {:ok, nil}
+
+  def resolve_recipient_result(mount, actor, org_id, subscriber_id, opts) do
     case find_user(mount, org_id, subscriber_id) do
       nil ->
-        nil
+        {:ok, nil}
 
       user ->
         [resolved] =
@@ -109,7 +127,7 @@ defmodule Samen.Web.Operator.DeliverabilityReads do
             Keyword.put_new(opts, :repo, mount.repo)
           )
 
-        %{name: resolved.full_name, email: resolved.emails}
+        {:ok, %{name: resolved.full_name, email: resolved.emails}}
     end
   rescue
     e ->
@@ -117,7 +135,7 @@ defmodule Samen.Web.Operator.DeliverabilityReads do
       # never as plaintext and never as a guessed identity. The failure is reported by name and
       # exception module (the row itself — the delivery fact — still renders).
       Guard.report(:operator_deliverability_recipient, org_id, e)
-      nil
+      {:error, :unavailable}
   end
 
   defp find_user(mount, org_id, subscriber_id) do

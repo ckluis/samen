@@ -611,6 +611,66 @@ defmodule Samen.Web.ReadsHonestFailureP3Test do
       refute rendered =~ "events-error"
     end
 
+    defp seed_event(org_id, subscriber_id, opts \\ []) do
+      {:ok, :inserted, _} =
+        Samen.Delivery.EmailEvent.record(Repo, %{
+          provider: "p3",
+          provider_event_id: "evt_p3_#{System.unique_integer([:positive])}",
+          kind: "bounce",
+          send_id: Ash.UUID.generate(),
+          org_id: org_id,
+          subscriber_id: subscriber_id,
+          occurred_at: DateTime.utc_now()
+        })
+
+      if Keyword.get(opts, :suppress, false) do
+        {:ok, _} = Samen.Delivery.Suppression.suppress(Repo, %{org_id: org_id, subscriber_id: subscriber_id, reason: "bounce"})
+      end
+
+      :ok
+    end
+
+    test "a failed suppressions read renders 'unknown' in the suppressed? cell of a REAL event row, never the pill or a dash", %{org_id: org_id} do
+      subscriber = Ash.UUID.generate()
+      seed_event(org_id, subscriber, suppress: true)
+
+      # POSITIVE CONTROL: with the read healthy, the SAME seeded row renders the real 'suppressed' pill.
+      healthy = html(DeliverabilityLive, deliverability(org_id))
+      assert healthy =~ "pill-bad"
+      refute healthy =~ "suppressed-unknown"
+
+      inject_read_faults([:operator_deliverability_suppressions])
+      rendered = html(DeliverabilityLive, failing(fn -> deliverability(org_id) end))
+
+      assert rendered =~ "event-row"
+      assert rendered =~ "suppressed-unknown"
+      refute rendered =~ "pill-bad"
+    end
+
+    test "a failed recipient lookup says 'couldn't load', an unknown recipient says 'unknown' — never the same cell", %{org_id: org_id} do
+      subscriber = Ash.UUID.generate()
+      seed_event(org_id, subscriber)
+
+      rendered = html(DeliverabilityLive, deliverability(org_id))
+      assert rendered =~ "· unknown"
+      refute rendered =~ "recipient-unavailable"
+
+      # REAL fault: the user table loses a selected column, so the per-row lookup raises.
+      user = Op.User
+      table = AshPostgres.DataLayer.Info.table(user)
+      attr = Ash.Resource.Info.attribute(user, :emails)
+      column = to_string(Map.get(attr, :source) || attr.name)
+      ddl!("ALTER TABLE #{table} RENAME COLUMN #{column} TO #{column}_renamed")
+
+      {socket, log} = with_log(fn -> deliverability(org_id) end)
+      rendered = html(DeliverabilityLive, socket)
+
+      assert log =~ "operator_deliverability_recipient"
+      assert rendered =~ "recipient-unavailable"
+      assert rendered =~ "couldn't load recipient"
+      refute rendered =~ "· unknown"
+    end
+
     test "POSITIVE CONTROL: nothing failed and nothing there renders the real empty states", %{org_id: org_id} do
       socket = deliverability(org_id)
       rendered = html(DeliverabilityLive, socket)

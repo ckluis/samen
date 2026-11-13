@@ -245,7 +245,12 @@ defmodule Samen.Web.Operator.DeliverabilityLive do
                         <div>{render_email(s.__recipient__.email)}</div>
                         <div style="font-size:11px;color:var(--muted)">{render_name(s.__recipient__.name)}</div>
                       <% else %>
-                        <span class="mono" style="color:var(--muted)">subscriber {short_id(s.subscriber_id)}</span>
+                        <span :if={Map.get(s, :__recipient_failed__, false)} class="recipient-unavailable" style="color:var(--muted)">
+                          couldn't load recipient
+                        </span>
+                        <span :if={!Map.get(s, :__recipient_failed__, false)} class="mono" style="color:var(--muted)">
+                          subscriber {short_id(s.subscriber_id)} · unknown
+                        </span>
                       <% end %>
                     </td>
                     <td class="s-reason"><.pill variant={reason_variant(s.reason)}>{s.reason}</.pill></td>
@@ -291,7 +296,12 @@ defmodule Samen.Web.Operator.DeliverabilityLive do
                         <div>{render_email(e.__recipient__.email)}</div>
                         <div style="font-size:11px;color:var(--muted)">{render_name(e.__recipient__.name)}</div>
                       <% else %>
-                        <span class="mono" style="color:var(--muted)">subscriber {short_id(e.subscriber_id)}</span>
+                        <span :if={Map.get(e, :__recipient_failed__, false)} class="recipient-unavailable" style="color:var(--muted)">
+                          couldn't load recipient
+                        </span>
+                        <span :if={!Map.get(e, :__recipient_failed__, false)} class="mono" style="color:var(--muted)">
+                          subscriber {short_id(e.subscriber_id)} · unknown
+                        </span>
                       <% end %>
                     </td>
                     <td class="e-provider" style="color:var(--muted)">{e.provider}</td>
