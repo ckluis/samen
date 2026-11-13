@@ -47,5 +47,9 @@
   #    positive); the transactions run in the erasure, impersonation and reveal suites.
   {"lib/samen/erasure.ex", :call_without_opaque},
   {"lib/samen/impersonation/sessions.ex", :call_without_opaque},
-  {"lib/samen/reveal/grants.ex", :call_without_opaque}
+  {"lib/samen/reveal/grants.ex", :call_without_opaque},
+  # `Event.replay/3` (webhook DLQ replay: reset + `Oban.insert(multi, …)` in one transaction) is the same
+  # `Ecto.Multi.update` on a `Multi.new/0` Multi; it runs in samen_web's `ReadsHonestFailureP3Test` (success
+  # control, real insert failure that rolls the reset back, repo-mismatch refusal).
+  {"lib/samen/webhook/event.ex", :call_without_opaque}
 ]

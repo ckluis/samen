@@ -188,11 +188,10 @@ defmodule Samen.Webhook.Event do
     if Oban.config(oban).repo == repo do
       changeset = Ecto.Changeset.change(row, status: "received", last_error: nil, processed_at: nil)
 
-      Ecto.Multi.new()
-      |> Ecto.Multi.update(:event, changeset)
-      |> then(&Oban.insert(oban, &1, :job, Samen.Webhook.IngestWorker.job(row, repo: repo)))
-      |> repo.transaction()
-      |> case do
+      multi = Ecto.Multi.update(Ecto.Multi.new(), :event, changeset)
+      multi = Oban.insert(oban, multi, :job, Samen.Webhook.IngestWorker.job(row, repo: repo))
+
+      case repo.transaction(multi) do
         {:ok, %{event: event}} -> {:ok, event}
         {:error, :event, changeset, _} -> {:error, changeset}
         {:error, :job, _reason, _} -> {:error, :enqueue_failed}
