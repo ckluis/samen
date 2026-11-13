@@ -498,7 +498,7 @@ authenticated (mode A secret, or the cockpit's Ed25519 public key in mode B). Re
 the same `FleetReport` envelope the heartbeat pushes — **one schema, one builder
 (`Samen.Fleet.Report.build/1`), three transports**, so there is no drift between what an
 app pushes and what it serves. Fail-honest: an app with no fleet credential configured
-returns `{:error, :not_configured}` → `503` with an empty body, never a `200` with an
+returns `{:error, :not_configured}` → `503` with a small JSON body naming the state (`fleet_not_configured`; amended 2026-11-13 from an empty body), never a `200` with an
 empty-looking-healthy report (§11).
 
 ---
@@ -1343,7 +1343,7 @@ fail-honest when unconfigured:
 | condition | result |
 |---|---|
 | no fleet config at all | `:embedded` mode — fully functional, one honest product, **zero** credentials |
-| `mode: :manual \| :heartbeat` with no credential configured | `Samen.Fleet.Credential.load/1` ⇒ `{:error, :not_configured}`; the app's `/fleet/health` returns `503` empty; the cockpit renders the named not-configured state |
+| `mode: :manual \| :heartbeat` with no credential configured | `Samen.Fleet.Credential.load/1` ⇒ `{:error, :not_configured}`; the app's `/fleet/health` returns `503` with the `fleet_not_configured` body; the cockpit renders the named not-configured state |
 | cockpit configured for pull, app unreachable | `{:error, :unreachable}`; the tile reads `unreachable · last seen …`; the app is excluded from roll-ups |
 | report received but schema-invalid | `422`, **not stored**, `attention` entry raised. A malformed report never becomes a rendered number |
 | any credential missing, revoked, retired, or unparseable | `401`/`403`, empty body, `aud_event` row |
@@ -1512,7 +1512,7 @@ Every red path pairs denial with a positive control (anti-tautology, `CLAUDE.md`
   branched" checkable rather than aspirational.
 - **RP-J-10 (fail-honest unconfigured, J1/J5).** `mode: :manual` with no credential ⇒
   `{:error, :not_configured}` and a named not-configured render; the app's
-  `/fleet/health` ⇒ `503` empty. **Sabotage twin:** return `{:ok, %Report{}}` from the
+  `/fleet/health` ⇒ `503` with the `fleet_not_configured` JSON body. **Sabotage twin:** return `{:ok, %Report{}}` from the
   unconfigured path and the named test must fail (the ADR-014 class, per
   `samen_core/test/files_storage_test.exs`).
 - **RP-J-11 (the tier-2 deep link does NOT bypass T150, J2/J3 — §5.3).** Follow a cockpit

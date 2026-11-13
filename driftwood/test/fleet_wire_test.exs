@@ -68,6 +68,6 @@ defmodule Driftwood.FleetWireTest do
   test "zero config: no fleet credential configured -> 503, never a fabricated 200" do
     conn = conn(:get, "/fleet/health") |> Ingress.health(otp_app: :driftwood)
     assert conn.status == 503
-    assert conn.resp_body == ""
+    assert Jason.decode!(conn.resp_body)["status"] == "fleet_not_configured"
   end
 end

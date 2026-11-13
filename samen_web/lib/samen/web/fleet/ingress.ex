@@ -8,8 +8,12 @@ defmodule Samen.Web.Fleet.Ingress do
   THIS app holds about itself. NEVER touches `Samen.Fleet.Registry` or any
   `flt_*` table (that is cockpit-side; see `Samen.Web.Fleet.CockpitIngress`).
 
-  Fail-honest (§4.7, RP-J-10): no local credential configured ⇒ `503`, empty
-  body — never a `200` with an empty-looking-healthy report.
+  Fail-honest (§4.7, RP-J-10): no local credential configured ⇒ `503` with a small JSON
+  body that SAYS so (`{"status":"fleet_not_configured", …}`) — never a `200` with an
+  empty-looking-healthy report, and never a silent empty body a human or monitor cannot
+  read. The status stays 503 (not 404): the route exists and is for a fleet cockpit's
+  signed probe; "unavailable until configured" is what a poller must see. The body is
+  static text — it discloses nothing the mounted route does not already imply.
   """
 
   import Plug.Conn
@@ -23,7 +27,7 @@ defmodule Samen.Web.Fleet.Ingress do
 
     case LocalCredential.fetch(host) do
       {:error, :not_configured} ->
-        respond(conn, 503, "")
+        not_configured(conn)
 
       {:ok, credential} ->
         raw_body = ""
@@ -57,7 +61,7 @@ defmodule Samen.Web.Fleet.Ingress do
 
     case LocalCredential.fetch(host) do
       {:error, :not_configured} ->
-        respond(conn, 503, "")
+        not_configured(conn)
 
       {:ok, credential} ->
         raw_body = Samen.Web.Webhook.RawBodyReader.raw_body(conn)
@@ -169,6 +173,19 @@ defmodule Samen.Web.Fleet.Ingress do
       {mod, fun, args} -> apply(mod, fun, args ++ [directive])
       nil -> 0
     end
+  end
+
+  defp not_configured(conn) do
+    body =
+      Jason.encode!(%{
+        status: "fleet_not_configured",
+        error: "This app has no fleet credential configured, so it cannot serve a signed fleet response."
+      })
+
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(503, body)
+    |> halt()
   end
 
   defp respond(conn, status, body), do: conn |> send_resp(status, body) |> halt()
