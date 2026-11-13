@@ -71,13 +71,39 @@ defmodule Samen.AgentCase do
     |> Enum.map(fn {_callback, %MaskedPayload{} = payload} -> payload.segments end)
   end
 
-  @doc "Every binary that reached the provider boundary, flattened (for canary controls)."
+  @doc """
+  Every binary that reached the provider boundary, flattened (for canary controls): the
+  segments AND, since the 2026-11-13 amendment (ADR-043 §5.1a), the sealed `:system`
+  instructions and every leaf of the role-structured `:turns` — an adapter that sends the
+  structure transmits those, so a canary control that read only the segments would miss them.
+  """
   @spec sent_texts() :: [String.t()]
   def sent_texts do
-    sent_segments()
-    |> List.flatten()
-    |> Enum.filter(&is_binary/1)
+    segment_texts = sent_segments() |> List.flatten() |> Enum.filter(&is_binary/1)
+    segment_texts ++ Enum.flat_map(sent_structures(), &structure_texts/1)
   end
+
+  @doc """
+  Every scripted `:complete` payload's `{system, turns}` (ADR-043 §5.1a), OLDEST call first.
+  """
+  @spec sent_structures() :: [{[String.t()], [map()]}]
+  def sent_structures do
+    Scripted.sent_payloads()
+    |> Enum.reverse()
+    |> Enum.filter(fn {callback, _} -> callback == :complete end)
+    # Field-less match + dot access (the single-mint probe convention).
+    |> Enum.map(fn {_callback, %MaskedPayload{} = payload} -> {payload.system, payload.turns} end)
+  end
+
+  defp structure_texts({system, turns}), do: system ++ leaf_texts(turns)
+
+  defp leaf_texts(value) when is_binary(value), do: [value]
+  defp leaf_texts(value) when is_list(value), do: Enum.flat_map(value, &leaf_texts/1)
+
+  defp leaf_texts(value) when is_map(value) and not is_struct(value),
+    do: Enum.flat_map(value, fn {k, v} -> leaf_texts(k) ++ leaf_texts(v) end)
+
+  defp leaf_texts(_value), do: []
 
   @doc """
   Every scripted `:complete` payload's EG2 `:tools` field (the sealed tool DEFS the

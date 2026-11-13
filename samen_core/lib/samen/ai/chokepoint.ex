@@ -141,6 +141,15 @@ defmodule Samen.AI.Chokepoint do
       `scrub_tools/1` (below): each def must pass the `safe_metadata?/1` allowlist (keys AND
       values, `vt_`-scanned) AND be byte-identical to an OPTED-IN registry action's
       compile-time `tool_schema/0` — a runtime-composed def REFUSES (the static-schema rule).
+    * `:system` — INSTRUCTION binaries kept apart from data (2026-11-13, ADR-043 §5.1a): a
+      list of binaries, each passing the SAME `safe_segment?/1` allowlist as `segments`. Any
+      non-binary refuses (an instruction is authored text, never a structure).
+    * `:turns` — the ROLE-STRUCTURED conversation (same amendment): a list in the closed shape
+      `Samen.AI.MaskedPayload` documents (`"role"` + `"content"` blocks of type `"text"`,
+      `"tool_call"`, `"tool_result"`). Refused fail-closed unless EVERY turn matches that shape
+      exactly AND passes the metadata allowlist whole (keys and leaves `vt_`-scanned, structs
+      and tuples refused). Turns never carry a grant span: the §3.2a re-check exists only for
+      `:history`, so a grant-resolved plaintext can never ride here as a structure.
     * `:grounding` (metadata map) and `:meta` (bounded dispatch metadata).
   """
   @spec seal(MaskedPayload.kind(), [term()] | term(), keyword()) ::
@@ -154,12 +163,16 @@ defmodule Samen.AI.Chokepoint do
          {:ok, history_segs} <- rescrub_history(kind, opts),
          {:ok, assembled} <- assemble_and_scrub(segments, binding_segs, history_segs),
          {:ok, tools} <- scrub_tools(Keyword.get(opts, :tools, [])),
+         {:ok, system} <- scrub_system(Keyword.get(opts, :system, [])),
+         {:ok, turns} <- scrub_turns(Keyword.get(opts, :turns, [])),
          :ok <- scrub_metadata(grounding),
          :ok <- scrub_metadata(meta) do
       {:ok,
        %MaskedPayload{
          kind: kind,
          segments: assembled,
+         system: system,
+         turns: turns,
          tools: tools,
          grounding: grounding,
          meta: meta
@@ -642,6 +655,66 @@ defmodule Samen.AI.Chokepoint do
   end
 
   defp scrub_tools(_other), do: @refusal
+
+  # --- instruction + role-structured conversation scrub (ADR-043 §5.1a, 2026-11-13) ------
+  #
+  # `:system` is INSTRUCTION text and `:turns` is the conversation the instructions apply to.
+  # Neither widens what may egress: system entries pass the very `safe_segment?/1` predicate
+  # `segments` do (and must be binaries), and every turn must be the closed shape below AND
+  # pass `safe_metadata?/1` whole — so a `vt_` token, a struct (`%Samen.Masked{}`, an
+  # un-rendered record) or a tuple anywhere in a turn refuses exactly as it would in a segment.
+  # `[]`/nil = "none" (the pre-amendment shape of every payload); any non-list refuses.
+  defp scrub_system(nil), do: {:ok, []}
+  defp scrub_system([]), do: {:ok, []}
+
+  defp scrub_system(system) when is_list(system) do
+    if Enum.all?(system, &(is_binary(&1) and safe_segment?(&1))),
+      do: {:ok, system},
+      else: @refusal
+  rescue
+    _ -> @refusal
+  end
+
+  defp scrub_system(_other), do: @refusal
+
+  defp scrub_turns(nil), do: {:ok, []}
+  defp scrub_turns([]), do: {:ok, []}
+
+  defp scrub_turns(turns) when is_list(turns) do
+    if Enum.all?(turns, &(turn_shape?(&1) and not unsafe_metadata?(&1))),
+      do: {:ok, turns},
+      else: @refusal
+  rescue
+    _ -> @refusal
+  end
+
+  defp scrub_turns(_other), do: @refusal
+
+  # The CLOSED turn shape: exactly the keys "role" + "content", a known role, and a non-empty
+  # list of known blocks. Anything else — an extra key, an unknown block type, a non-binary
+  # text — is not a turn this boundary knows how to vouch for, so it refuses.
+  defp turn_shape?(%{"role" => role, "content" => [_ | _] = blocks} = turn)
+       when role in ["user", "assistant"] and map_size(turn) == 2,
+       do: Enum.all?(blocks, &block_shape?/1)
+
+  defp turn_shape?(_turn), do: false
+
+  defp block_shape?(%{"type" => "text", "text" => text} = block)
+       when is_binary(text) and map_size(block) == 2,
+       do: true
+
+  defp block_shape?(%{"type" => "tool_call", "id" => id, "name" => name, "input" => input} = b)
+       when is_binary(id) and is_binary(name) and is_map(input) and not is_struct(input) and
+              map_size(b) == 4,
+       do: true
+
+  defp block_shape?(
+         %{"type" => "tool_result", "id" => id, "content" => content, "is_error" => err} = b
+       )
+       when is_binary(id) and is_binary(content) and is_boolean(err) and map_size(b) == 4,
+       do: true
+
+  defp block_shape?(_block), do: false
 
   defp safe_tool_def?(def) when is_map(def) and not is_struct(def) do
     not unsafe_metadata?(def) and static_tool_def?(def)

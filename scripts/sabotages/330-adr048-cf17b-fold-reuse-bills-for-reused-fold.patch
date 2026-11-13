@@ -28,11 +28,12 @@
 # TEST_FILES: test/ai/agent_fold_reuse_cost_test.exs
 # MUST_FAIL: CF-17(b) REUSE COST: a replay that REUSES the :proposed fold ledger row SPENDS NOTHING for it
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 8b55dbc9..102b7c8b 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -1562,13 +1562,28 @@ defmodule Samen.AI.Agent do
+@@ -1767,13 +1767,28 @@ defmodule Samen.AI.Agent do
              folds,
-             views.turn_lens,
+             {views.turn_lens, Map.get(views, :turn_shapes, [])},
              views.pending
 -          )
 +          ),

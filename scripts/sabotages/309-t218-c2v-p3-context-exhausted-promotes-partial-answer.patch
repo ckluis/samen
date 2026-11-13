@@ -10,9 +10,11 @@
 # APP: samen_core
 # TEST_FILES: test/ai/agent_compaction_test.exs
 # MUST_FAIL: the fail-honest floor survives context recovery
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 8b55dbc9..2627fdf8 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -980,9 +980,22 @@
+@@ -1120,9 +1120,22 @@ defmodule Samen.AI.Agent do
                meta: bounded_meta(Map.put(turn_row.meta || %{}, "replayed", replayed?))
              })
  
@@ -35,9 +37,9 @@
 -            {:error, :context_exhausted, run}
 +            {:ok, %{answer: answer, run: run, turns: run.current_turn}}
            else
-             if kind in [:provider_error, :not_configured],
+             if kind in @breaker_kinds,
                do: Breaker.note_provider_error(run.agent)
-@@ -1012,9 +1025,24 @@
+@@ -1152,9 +1165,24 @@ defmodule Samen.AI.Agent do
        # row and no bytes ever reach the provider: the turn that cannot fit is never taken,
        # exactly as the budget floor refuses the turn that would overrun.
        {:error, :context_exhausted} ->

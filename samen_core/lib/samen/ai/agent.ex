@@ -168,19 +168,39 @@ defmodule Samen.AI.Agent do
         use Samen.AI.Agent,
           name: "support_triage",
           goal_prompt: "Work the goal step by step. Reply FINAL: <answer> when done.",
-          budgets: [max_turns: 4]
+          budgets: [max_turns: 4],
+          # optional: the model this agent's turns ask for (else the adapter's default)
+          model: "claude-sonnet-5-5"
       end
 
       {:ok, %{answer: answer, run: run}} =
         Samen.AI.Agent.run(MyApp.TriageAgent, scope, "Why is shipment 4471 late?")
 
   The `use` macro validates the definition at compile time (name shape, `vt_`-free goal
-  prompt — the EG5 authored-artifact posture, budget shape) and defines `definition/0`.
+  prompt — the EG5 authored-artifact posture, budget shape, model identifier shape) and
+  defines `definition/0`.
+
+  ## Instructions apart from data (2026-11-13 — ADR-043 §5.1a, ADR-047 §5.2 amendment)
+
+  Every turn's call carries, besides the flat `[goal_prompt, goal]` segments and `:history`
+  it always carried, the sealed payload's `:system` and `:turns`
+  (`Samen.AI.Agent.Conversation`): the system prompt is the loop's fixed preamble — which
+  says that tool results and the goal are DATA, never instructions — plus the goal prompt; the
+  conversation is the goal as user content and each transcript turn in its role, a tool call
+  as a `tool_call` block and its rendered result as a `tool_result` block with the same id.
+  Which role a turn has is PERSISTED per turn (`turn_shapes`, beside `turn_lens`, inside the
+  DEK envelope) — never read off a line a model could have written. For a provider that
+  declares `native_tools?/0`, the tool definitions are offered natively; for one that does
+  not, the system prompt teaches the `TOOL:` envelope with the static tool catalog. A provider
+  that reports a truncated (`:truncated`), refused (`:refused`) or unknown-stop
+  (`:unexpected_stop`) response, or a rate limit / overload / timeout after its own retries,
+  ends the turn as a failure with that bounded kind — never as an answer.
   """
 
   alias Samen.AI.Agent.Approver
   alias Samen.AI.Agent.Breaker
   alias Samen.AI.Agent.Compaction
+  alias Samen.AI.Agent.Conversation
   alias Samen.AI.Agent.Hooks
   alias Samen.AI.Agent.Run
   alias Samen.AI.Agent.ToolResult
@@ -194,7 +214,8 @@ defmodule Samen.AI.Agent do
               required(:name) => String.t(),
               required(:goal_prompt) => String.t(),
               required(:tools) => [String.t()],
-              required(:budgets) => keyword()
+              required(:budgets) => keyword(),
+              optional(:model) => String.t() | nil
             }
 
   # ADR-047 §9#3 TAKEN (ratified 2026-08-14): the default budget posture. Values are
@@ -322,8 +343,29 @@ defmodule Samen.AI.Agent do
     # degrades to the useless `:unknown`, and a refusal that cannot be named on the turn
     # row is a refusal nobody can audit.
     :cross_run_write_refused,
+    # ADR-047 §5.2 / ADR-043 §5.1a (2026-11-13) — the PROVIDER outcome kinds a real model
+    # adapter reports. `:truncated` is a response cut off at its output limit (`max_tokens`):
+    # never a finished answer, so never promoted. `:refused` is the model declining (a
+    # `refusal` stop). `:unexpected_stop` is a stop reason the adapter does not know — an
+    # error, never a success. `:rate_limited` / `:overloaded` / `:provider_timeout` are the
+    # transport's bounded failures once its retries are spent. Members of this CLOSED list so
+    # the turn row names them instead of degrading to `:unknown`.
+    :truncated,
+    :refused,
+    :unexpected_stop,
+    :rate_limited,
+    :overloaded,
+    :provider_timeout,
     :unknown
   ]
+
+  # The provider-side failures that count toward the consecutive-error breaker (§6): an
+  # outage, an exhausted rate allowance, an overloaded vendor, a hung connection — NOT a
+  # truncation or a refusal, which say something about one request rather than the vendor.
+  @breaker_kinds [:provider_error, :not_configured, :rate_limited, :overloaded, :provider_timeout]
+
+  # An answering model's id, as recorded on the turn row's bounded meta (AX-15).
+  @model_pattern ~r/\A[A-Za-z0-9][A-Za-z0-9._:\-]{0,99}\z/
 
   # The in-flight watchdog horizon (ADR-047 §4.1): while a turn/batch executes, the
   # durable cursor stays selectable-by-due-scan at now + this many seconds — NEVER nil
@@ -551,12 +593,18 @@ defmodule Samen.AI.Agent do
   grant plaintext on the agent path (masked-only, categorically; operator decision §9#2
   TAKEN).
   """
-  @spec egress_opts(keyword(), [String.t()], [map()]) :: keyword()
-  def egress_opts(opts, history, tool_defs \\ []) do
+  @spec egress_opts(keyword(), [String.t()], [map()], keyword()) :: keyword()
+  def egress_opts(opts, history, tool_defs \\ [], structure \\ []) do
     opts
     |> Keyword.take([:provider, :grounding, :meta, :env_reader])
     |> Keyword.put(:history, history)
     |> Keyword.put(:tools, tool_defs)
+    # ADR-043 §5.1a (2026-11-13): the instructions and the role-structured conversation the
+    # LOOP built (`Samen.AI.Agent.Conversation`) — like `:history` and `:tools`, never taken
+    # from the caller's opts, and sealed through the same chokepoint scrub.
+    |> Keyword.put(:system, Keyword.get(structure, :system, []))
+    |> Keyword.put(:turns, Keyword.get(structure, :turns, []))
+    |> put_model(Keyword.get(structure, :model))
     # LAST, POSITIONALLY, and appended by `++` after a `delete` — not merely last-wins.
     # `Keyword.put/3` PREPENDS, so the pre-C3 pipeline left `grant_egress?` at the HEAD of
     # the list while its own docstring claimed the tail. Semantically equivalent for
@@ -567,6 +615,9 @@ defmodule Samen.AI.Agent do
     |> Keyword.delete(:grant_egress?)
     |> Kernel.++(grant_egress?: false)
   end
+
+  defp put_model(opts, model) when is_binary(model), do: Keyword.put(opts, :model, model)
+  defp put_model(opts, _model), do: opts
 
   # ADR-048 §5#2 — the summarizer instruction is a COMPILE-TIME LITERAL owned by the loop,
   # exactly as the A6 driftwood goal-prompt ruling has it, and NEVER a tenant-authored
@@ -657,11 +708,15 @@ defmodule Samen.AI.Agent do
   defp parse_native_call(%{"name" => kind, "args" => args}) when is_binary(kind) and is_map(args),
     do: {:tool, kind, args}
 
+  # Args PRESENT but not an object are a malformed call, never silently "no args" (an
+  # adapter that received a non-object tool input must not have it turned into `%{}`).
+  defp parse_native_call(%{"args" => _not_a_map}), do: {:tool_error, :invalid_tool_call}
   defp parse_native_call(%{"name" => kind}) when is_binary(kind), do: {:tool, kind, %{}}
 
   defp parse_native_call(%{name: kind, args: args}) when is_binary(kind) and is_map(args),
     do: {:tool, kind, args}
 
+  defp parse_native_call(%{args: _not_a_map}), do: {:tool_error, :invalid_tool_call}
   defp parse_native_call(%{name: kind}) when is_binary(kind), do: {:tool, kind, %{}}
   defp parse_native_call(_call), do: {:tool_error, :invalid_tool_call}
 
@@ -1069,7 +1124,7 @@ defmodule Samen.AI.Agent do
             log_terminal(run)
             {:error, :context_exhausted, run}
           else
-            if kind in [:provider_error, :not_configured],
+            if kind in @breaker_kinds,
               do: Breaker.note_provider_error(run.agent)
 
             finalize_turn!(turn_row, %{
@@ -1157,12 +1212,17 @@ defmodule Samen.AI.Agent do
        ) do
     started = System.monotonic_time(:millisecond)
 
+    defs = Tools.defs(tools)
+
     result =
       Samen.AI.complete(
         scope,
         [definition.goal_prompt, goal],
         %{},
-        [{:error_usage, true} | egress_opts(opts, lines, Tools.defs(tools))]
+        [
+          {:error_usage, true}
+          | egress_opts(opts, lines, defs, structure(definition, defs, goal, lines, views, opts))
+        ]
       )
 
     duration_ms = System.monotonic_time(:millisecond) - started
@@ -1252,6 +1312,26 @@ defmodule Samen.AI.Agent do
       true ->
         {run, lines, turn_row, result, duration_ms, retries}
     end
+  end
+
+  # ADR-047 §5.2 / ADR-043 §5.1a (2026-11-13): the instructions apart from the data. The
+  # system prompt is the loop's fixed preamble + the definition's goal prompt (+ the text
+  # envelope grammar for a provider without native tools); the conversation is the goal and
+  # every transcript turn in its role, from the per-turn shapes the loop persisted. The flat
+  # `[goal_prompt, goal]` segments and `:history` are unchanged, so an adapter that ignores
+  # roles sees exactly what it always saw.
+  defp structure(definition, defs, goal, lines, views, opts) do
+    native? = Samen.AI.native_tools?(Keyword.take(opts, [:provider, :env_reader]))
+
+    [
+      system: Conversation.instructions(definition, defs, native?),
+      turns:
+        Conversation.build(goal, segments(views, lines), Map.get(views, :turn_shapes, []),
+          native?: native?,
+          tool_names: Enum.map(defs, &Map.get(&1, :name))
+        ),
+      model: Map.get(definition, :model)
+    ]
   end
 
   # The write is DURABLE (`:advance`, the same action and the same in-memory-total-plus-
@@ -1363,6 +1443,17 @@ defmodule Samen.AI.Agent do
     segments
     |> Enum.drop(length(views.folds))
     |> Enum.drop(-(@protected_tail_turns - 1))
+  end
+
+  # The persisted per-turn shapes, aligned with `segments/2`'s whole turns — or every turn a
+  # kernel note when they do not reconcile (a blob from before shapes existed, or one whose
+  # boundaries degraded): never a role this build did not record.
+  defp shapes_for(views, segments) do
+    shapes = Map.get(views, :turn_shapes, [])
+
+    if is_list(shapes) and length(shapes) == length(segments),
+      do: shapes,
+      else: List.duplicate(Conversation.note_shape(), length(segments))
   end
 
   # `llm_view` chunked into whole turns. `turn_lens` is written by every transcript write
@@ -1674,7 +1765,7 @@ defmodule Samen.AI.Agent do
             views.llm_view,
             views.ui_view,
             folds,
-            views.turn_lens,
+            {views.turn_lens, Map.get(views, :turn_shapes, [])},
             views.pending
           )
       })
@@ -1721,7 +1812,12 @@ defmodule Samen.AI.Agent do
         new_lines: kept_markers ++ [marker] ++ Enum.concat(Enum.drop(segments, markers + turns)),
         new_lens:
           List.duplicate(1, markers + 1) ++
-            (segments |> Enum.drop(markers + turns) |> Enum.map(&length/1))
+            (segments |> Enum.drop(markers + turns) |> Enum.map(&length/1)),
+        # The per-turn shapes move with the turns (2026-11-13): every marker is a kernel note,
+        # and the turns after the folded span keep the shapes they were committed with.
+        new_shapes:
+          List.duplicate(Conversation.note_shape(), markers + 1) ++
+            Enum.drop(shapes_for(views, segments), markers + turns)
       }
     end
   end
@@ -1760,7 +1856,8 @@ defmodule Samen.AI.Agent do
       | llm_view: span.new_lines,
         ui_view: views.ui_view ++ [fold_note(span)],
         folds: views.folds ++ [entry],
-        turn_lens: span.new_lens
+        turn_lens: span.new_lens,
+        turn_shapes: span.new_shapes
     }
 
     run =
@@ -1772,7 +1869,7 @@ defmodule Samen.AI.Agent do
             folded_views.llm_view,
             folded_views.ui_view,
             folded_views.folds,
-            folded_views.turn_lens,
+            {folded_views.turn_lens, folded_views.turn_shapes},
             views.pending
           )
       })
@@ -1909,7 +2006,12 @@ defmodule Samen.AI.Agent do
           # MERGED, not replaced: ADR-048 §6 Level 2's `context_retries` counter is
           # stamped on the `:proposed` row before the retry and must survive the
           # finalize (the `commit_tool_turn!` idiom, applied here too).
-          meta: bounded_meta(Map.put(turn_row.meta || %{}, "replayed", replayed?))
+          meta:
+            bounded_meta(
+              (turn_row.meta || %{})
+              |> Map.put("replayed", replayed?)
+              |> put_answering_model(completion)
+            )
         })
 
         run =
@@ -1920,7 +2022,14 @@ defmodule Samen.AI.Agent do
               %{
                 current_turn: turn_index,
                 next_turn_at: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds),
-                transcript: encode_transcript_finalizing(run, goal, lines ++ [completion.text])
+                transcript:
+                  encode_transcript_finalizing(
+                    run,
+                    goal,
+                    lines ++ [completion.text],
+                    :none,
+                    Conversation.text_shape()
+                  )
               },
               spend_attrs(run, spend)
             )
@@ -2220,13 +2329,22 @@ defmodule Samen.AI.Agent do
           | ToolResult.render(outcome, actor: scope_actor(scope))
         ]
 
+        error_kind = outcome_error_kind(outcome)
+
         run =
           commit_tool_turn!(run, turn_row, completion, %{
             tool_kind: entry.kind,
             arg_keys: sorted_arg_keys(normalized),
-            error_kind: outcome_error_kind(outcome),
+            error_kind: error_kind,
             executed?: true,
             new_lines: new_lines,
+            shape:
+              Conversation.call_shape(
+                Conversation.call_id(completion, run.current_turn + 1),
+                entry.kind,
+                ToolResult.render_input(normalized),
+                error_kind && safe_error_kind(error_kind)
+              ),
             duration_ms: duration_ms,
             goal: goal,
             lines: lines,
@@ -2303,6 +2421,12 @@ defmodule Samen.AI.Agent do
         error_kind: refusal_kind,
         executed?: false,
         new_lines: [feedback],
+        shape:
+          Conversation.refused_shape(
+            Conversation.call_id(completion, run.current_turn + 1),
+            known_kind,
+            safe_error_kind(refusal_kind)
+          ),
         duration_ms: duration_ms,
         goal: goal,
         lines: lines,
@@ -2371,8 +2495,16 @@ defmodule Samen.AI.Agent do
           "args" => normalized
         }
 
-        _ = stamp_proposal!(turn_row, approval_id, replayed?)
-        run = park_run!(run, completion, {goal, lines ++ new_lines}, pending, approval)
+        _ = stamp_proposal!(turn_row, approval_id, replayed?, completion)
+
+        shape =
+          Conversation.proposed_shape(
+            Conversation.call_id(completion, run.current_turn + 1),
+            entry.kind,
+            ToolResult.render_input(normalized)
+          )
+
+        run = park_run!(run, completion, {goal, lines ++ new_lines}, pending, approval, shape)
         log_terminal(run)
         {:awaiting_approval, run}
 
@@ -2403,19 +2535,27 @@ defmodule Samen.AI.Agent do
   # args digest `decide_tool!/3` already committed. The row stays `:proposed` — it is the
   # idempotency key the approved execution finalizes, so a proposal can never be
   # double-executed and a park can never be mistaken for a completed turn.
-  defp stamp_proposal!(turn_row, approval_id, replayed?) do
+  defp stamp_proposal!(turn_row, approval_id, replayed?, completion) do
     meta =
       (turn_row.meta || %{})
       |> Map.put("approval_id", approval_id)
       |> Map.put("awaiting_approval", true)
       |> Map.put("replayed", replayed?)
+      |> put_answering_model(completion)
 
     turn_row
     |> Ash.Changeset.for_update(:decide, %{meta: bounded_meta(meta)})
     |> Ash.update!(authorize?: false)
   end
 
-  defp park_run!(%Run{} = run, %Completion{} = completion, {goal, lines}, pending, approval) do
+  defp park_run!(
+         %Run{} = run,
+         %Completion{} = completion,
+         {goal, lines},
+         pending,
+         approval,
+         shape
+       ) do
     run
     # The provider turn genuinely happened, so its tokens are billed. `tool_calls_used`
     # is NOT touched: nothing executed (A3's `executed?` rule, unchanged) — the approved
@@ -2425,7 +2565,7 @@ defmodule Samen.AI.Agent do
       Map.merge(
         %{
           next_turn_at: park_deadline(approval),
-          transcript: encode_transcript(run, goal, lines, pending)
+          transcript: encode_transcript(run, goal, lines, pending, shape)
         },
         spend_attrs(run, spent(completion.usage))
       )
@@ -2824,7 +2964,14 @@ defmodule Samen.AI.Agent do
       # The pending proposal is CLEARED (the 2-arity encoder): an executed proposal must
       # never be re-bindable by a second decision. This is also a cursor advance, so it
       # is a UXD-18 checkpoint 2 and finalizes any `:proposed` fold entry with it.
-      transcript: encode_transcript_finalizing(run, goal, lines ++ new_lines),
+      transcript:
+        encode_transcript_finalizing(
+          run,
+          goal,
+          lines ++ new_lines,
+          :none,
+          Conversation.approved_shape()
+        ),
       tool_calls_used: run.tool_calls_used + 1,
       input_tokens_used: run.input_tokens_used,
       cached_input_tokens_used: run.cached_input_tokens_used,
@@ -3165,6 +3312,7 @@ defmodule Samen.AI.Agent do
       (turn_row.meta || %{})
       |> Map.put("replayed", turn.replayed?)
       |> maybe_put_hook_reason(Map.get(turn, :hook_reason))
+      |> put_answering_model(completion)
 
     {:ok, run} =
       repo!().transaction(fn ->
@@ -3190,7 +3338,13 @@ defmodule Samen.AI.Agent do
               current_turn: turn_index,
               next_turn_at: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds),
               transcript:
-                encode_transcript_finalizing(run, turn.goal, turn.lines ++ turn.new_lines),
+                encode_transcript_finalizing(
+                  run,
+                  turn.goal,
+                  turn.lines ++ turn.new_lines,
+                  :none,
+                  Map.get(turn, :shape, Conversation.note_shape())
+                ),
               tool_calls_used: run.tool_calls_used + if(turn.executed?, do: 1, else: 0)
             },
             spend_attrs(run, spend)
@@ -3205,6 +3359,15 @@ defmodule Samen.AI.Agent do
   # T181: a hook's block/halt reason on the bounded turn row. Already normalized by
   # `Samen.AI.Agent.Hooks.bounded_reason/1` (atom-or-binary, <= 64 bytes, `vt_`-free)
   # before it ever reaches here, and `bounded_meta/1` is the second gate.
+  # AX-15: WHICH model answered this turn — the id the provider reported, on the turn row's
+  # bounded meta (token-only: a short identifier, never content). A missing or malformed id
+  # is simply not recorded.
+  defp put_answering_model(meta, %Completion{model: model}) when is_binary(model) do
+    if Regex.match?(@model_pattern, model), do: Map.put(meta, "model", model), else: meta
+  end
+
+  defp put_answering_model(meta, _completion), do: meta
+
   defp maybe_put_hook_reason(meta, nil), do: meta
   defp maybe_put_hook_reason(meta, reason), do: Map.put(meta, "hook_reason", reason)
 
@@ -3374,11 +3537,12 @@ defmodule Samen.AI.Agent do
   # the Level 1 fold diverges the two views, and a later turn's write must not silently
   # re-flatten them — that would delete what the tenant was shown, which is the
   # audit-integrity regression §4 exists to prevent.
-  defp encode_transcript(run, goal, lines), do: encode_transcript(run, goal, lines, :none)
-
-  defp encode_transcript(run, goal, lines, pending) do
-    {ui_view, turn_lens, folds} = carried_for_write(run, lines)
-    encode_views(goal, lines, ui_view, folds, turn_lens, pending)
+  # `shape` is the APPENDED turn's role shape (`Samen.AI.Agent.Conversation`, 2026-11-13) —
+  # persisted beside `turn_lens` so the next turn's conversation can say who wrote each turn
+  # without reading the lines. It is used only when the write appends a turn.
+  defp encode_transcript(run, goal, lines, pending \\ :none, shape \\ Conversation.note_shape()) do
+    {ui_view, boundaries, folds} = carried_for_write(run, lines, shape)
+    encode_views(goal, lines, ui_view, folds, boundaries, pending)
   end
 
   # ADR-048 §6 / ruling UXD-18 CHECKPOINT 2. Identical to `encode_transcript/3-4` except
@@ -3387,9 +3551,9 @@ defmodule Samen.AI.Agent do
   # ruling: the fold entry and the cursor move together or neither moves, so no crash
   # window can leave a finalized fold at an un-advanced cursor (the mirror of
   # `commit_turn!`'s single-transaction rule for turn ROWS).
-  defp encode_transcript_finalizing(run, goal, lines, pending \\ :none) do
-    {ui_view, turn_lens, folds} = carried_for_write(run, lines)
-    encode_views(goal, lines, ui_view, finalize_folds(folds), turn_lens, pending)
+  defp encode_transcript_finalizing(run, goal, lines, pending, shape) do
+    {ui_view, boundaries, folds} = carried_for_write(run, lines, shape)
+    encode_views(goal, lines, ui_view, finalize_folds(folds), boundaries, pending)
   end
 
   defp finalize_folds(folds) when is_list(folds) do
@@ -3401,36 +3565,40 @@ defmodule Samen.AI.Agent do
 
   defp finalize_folds(folds), do: folds
 
-  defp carried_for_write(run, lines) do
+  defp carried_for_write(run, lines, shape) do
     prior = carried_views(run)
 
-    {ui_view, turn_lens} =
+    {ui_view, turn_lens, turn_shapes} =
       cond do
         not List.starts_with?(lines, prior.llm_view) ->
           # Not a suffix append — only reachable if a caller threaded a `lines` that did
           # not come from this run's own current blob. Degrade to the pre-C2 shape rather
-          # than invent a UI history.
-          {lines, List.duplicate(1, length(lines))}
+          # than invent a UI history (and every turn a note: no role is claimed).
+          {lines, List.duplicate(1, length(lines)),
+           List.duplicate(Conversation.note_shape(), length(lines))}
 
         length(lines) == length(prior.llm_view) ->
-          {prior.ui_view, prior.turn_lens}
+          {prior.ui_view, prior.turn_lens, prior.turn_shapes}
 
         true ->
           appended = Enum.drop(lines, length(prior.llm_view))
-          {prior.ui_view ++ appended, prior.turn_lens ++ [length(appended)]}
+
+          {prior.ui_view ++ appended, prior.turn_lens ++ [length(appended)],
+           prior.turn_shapes ++ [shape]}
       end
 
-    {ui_view, turn_lens, prior.folds}
+    {ui_view, {turn_lens, turn_shapes}, prior.folds}
   end
 
-  defp encode_views(goal, lines, ui_view, folds, turn_lens, pending) do
+  defp encode_views(goal, lines, ui_view, folds, {turn_lens, turn_shapes}, pending) do
     base = %{
       "goal" => goal,
       "lines" => lines,
       "ui_view" => ui_view,
       "llm_view" => lines,
       "folds" => folds,
-      "turn_lens" => turn_lens
+      "turn_lens" => turn_lens,
+      "turn_shapes" => turn_shapes
     }
 
     Jason.encode!(if pending in [:none, nil], do: base, else: Map.put(base, "pending", pending))
@@ -3478,12 +3646,14 @@ defmodule Samen.AI.Agent do
       {:ok, %{"lines" => lines} = decoded} when is_list(lines) ->
         if Enum.all?(lines, &is_binary/1) do
           llm = Map.get(decoded, "llm_view", lines)
+          turn_lens = carried_turn_lens(Map.get(decoded, "turn_lens"), llm)
 
           %{
             llm_view: llm,
             ui_view: Map.get(decoded, "ui_view", lines),
             folds: Map.get(decoded, "folds", []),
-            turn_lens: carried_turn_lens(Map.get(decoded, "turn_lens"), llm),
+            turn_lens: turn_lens,
+            turn_shapes: carried_turn_shapes(Map.get(decoded, "turn_shapes"), turn_lens),
             pending: Map.get(decoded, "pending")
           }
         else
@@ -3496,7 +3666,7 @@ defmodule Samen.AI.Agent do
   end
 
   defp empty_views,
-    do: %{llm_view: [], ui_view: [], folds: [], turn_lens: [], pending: nil}
+    do: %{llm_view: [], ui_view: [], folds: [], turn_lens: [], turn_shapes: [], pending: nil}
 
   # A blob written before C2 records no turn boundaries. The honest reader-side default is
   # one line per turn: it never CLAIMS a boundary that was not recorded, and every turn
@@ -3508,6 +3678,18 @@ defmodule Samen.AI.Agent do
   end
 
   defp carried_turn_lens(_lens, llm), do: List.duplicate(1, length(llm))
+
+  # The per-turn role shapes (2026-11-13). A blob written before them, or one whose shapes do
+  # not line up with its turn boundaries, degrades to "every turn is a kernel note": the
+  # conversation then presents the history as user text — never a role nobody recorded.
+  defp carried_turn_shapes(shapes, lens) when is_list(shapes) do
+    if length(shapes) == length(lens) and Enum.all?(shapes, &is_map/1),
+      do: shapes,
+      else: List.duplicate(Conversation.note_shape(), length(lens))
+  end
+
+  defp carried_turn_shapes(_shapes, lens),
+    do: List.duplicate(Conversation.note_shape(), length(lens))
 
   # ------------------------------------------------------------------------------------
   # Durable-cursor writes (kernel-only, the Approvals trusted-API precedent)
@@ -3772,7 +3954,18 @@ defmodule Samen.AI.Agent do
       )
     end
 
-    %{name: name, goal_prompt: goal_prompt, tools: tools, budgets: budgets}
+    model = Keyword.get(opts, :model)
+
+    unless is_nil(model) or (is_binary(model) and Regex.match?(@model_pattern, model)) do
+      compile_error!(
+        caller,
+        "use Samen.AI.Agent: `model:` must be a model identifier string such as " <>
+          "\"claude-haiku-5-5\" (#{inspect(@model_pattern.source)}). Got: #{inspect(model)}"
+      )
+    end
+
+    definition = %{name: name, goal_prompt: goal_prompt, tools: tools, budgets: budgets}
+    if is_nil(model), do: definition, else: Map.put(definition, :model, model)
   end
 
   defp compile_error!(caller, description) do

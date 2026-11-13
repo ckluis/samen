@@ -24,6 +24,17 @@ defmodule Samen.AI.Provider do
   type-impossibility (the honest residual: runtime-computed metaprogramming is beyond static
   AST detection).
 
+  ## Instructions apart from data (ADR-043 §5.1a, 2026-11-13)
+
+  The sealed payload carries, besides the flat `:segments`, an INSTRUCTION channel
+  (`:system` — kernel/host-authored text) and a ROLE-STRUCTURED conversation (`:turns` —
+  user/assistant turns whose blocks are text, tool calls and tool results). An adapter whose
+  vendor has a system parameter and roles SHOULD send `:system` there and `:turns` as the
+  conversation, so tenant data and tool results reach the model as data and never merged into
+  instruction text. An adapter that ignores both still receives `:segments` exactly as before,
+  so the extension is backward compatible. Both fields are minted only by
+  `Samen.AI.Chokepoint.seal/3`, through the same allowlist scrub.
+
   ## The fail-honest contract (ADR-014/024/026 shape, binding — ADR-043 §4)
 
   An unconfigured adapter (no API key wired) NEVER returns `{:ok, _}` for work it did not
@@ -85,5 +96,18 @@ defmodule Samen.AI.Provider do
   """
   @callback simulated?() :: boolean()
 
-  @optional_callbacks simulated?: 0
+  @doc """
+  OPTIONAL: does this provider map `MaskedPayload.tools` onto its vendor's NATIVE tool-use
+  channel, and map the vendor's tool calls back into `%Samen.AI.Completion{tool_calls:}`?
+  (ADR-043 §5.1a / ADR-047 §5.2, the 2026-11-13 amendment.)
+
+  A provider that omits it is treated as NOT supporting native tools (`false`): the agent
+  loop then teaches the bounded `TOOL: {...}` text envelope in its instructions and parses
+  it out of `Completion.text`. Declaring `true` is a promise in both directions — the
+  definitions are sent as real tool definitions, and the calls come back as `tool_calls`,
+  each `%{"id" => id, "name" => name, "args" => map}`.
+  """
+  @callback native_tools?() :: boolean()
+
+  @optional_callbacks simulated?: 0, native_tools?: 0
 end

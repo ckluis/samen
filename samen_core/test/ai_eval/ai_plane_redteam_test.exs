@@ -130,8 +130,13 @@ defmodule Samen.AI.Eval.MaskLeakRedTeamTest do
   # All %MaskedPayload{} segments the Fake was sent this process, flattened to a scannable
   # string (the honest provider-side recording — a leak that reaches the provider is here).
   defp recorded_text do
+    # Segments AND (2026-11-13, ADR-043 §5.1a) the sealed instructions + role-structured turns
+    # an adapter transmits instead — a leak that rides only the structure is here too.
     Provider.Fake.sent_payloads()
-    |> Enum.flat_map(fn {_cb, p} -> Enum.map(p.segments, &to_string/1) end)
+    |> Enum.flat_map(fn {_cb, p} ->
+      Enum.map(p.segments, &to_string/1) ++
+        p.system ++ [inspect(p.turns, limit: :infinity, printable_limit: :infinity)]
+    end)
     |> Enum.join("\n")
   end
 

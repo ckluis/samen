@@ -10,9 +10,10 @@
 # MUST_FAIL: a RUNTIME-COMPOSED tool def is REFUSED fail-closed
 # MUST_FAIL: a canary/vt_-bearing tool definition is REFUSED fail-closed
 diff --git a/samen_core/lib/samen/ai/chokepoint.ex b/samen_core/lib/samen/ai/chokepoint.ex
+index aa0ffde2..ea34a197 100644
 --- a/samen_core/lib/samen/ai/chokepoint.ex
 +++ b/samen_core/lib/samen/ai/chokepoint.ex
-@@ -153,7 +153,10 @@
+@@ -162,7 +162,10 @@ defmodule Samen.AI.Chokepoint do
      with {:ok, binding_segs} <- resolve_bindings(kind, opts),
           {:ok, history_segs} <- rescrub_history(kind, opts),
           {:ok, assembled} <- assemble_and_scrub(segments, binding_segs, history_segs),
@@ -21,6 +22,6 @@ diff --git a/samen_core/lib/samen/ai/chokepoint.ex b/samen_core/lib/samen/ai/cho
 +         # copied into the sealed payload with NO scrub_tools/1, so a runtime-composed or
 +         # canary/vt_-bearing tool definition egresses to the provider intact.
 +         tools <- Keyword.get(opts, :tools, []),
+          {:ok, system} <- scrub_system(Keyword.get(opts, :system, [])),
+          {:ok, turns} <- scrub_turns(Keyword.get(opts, :turns, [])),
           :ok <- scrub_metadata(grounding),
-          :ok <- scrub_metadata(meta) do
-       {:ok,

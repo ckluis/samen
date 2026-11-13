@@ -104,10 +104,25 @@ defmodule Samen.AI.Agent.Compaction do
     |> Samen.AI.complete(
       [Samen.AI.Agent.summarizer_prompt()],
       %{},
-      [{:error_usage, true} | Samen.AI.Agent.egress_opts(opts, folded, [])]
+      [{:error_usage, true} | Samen.AI.Agent.egress_opts(opts, folded, [], structure(folded))]
     )
     |> summary_text()
     |> ingress()
+  end
+
+  # ADR-043 §5.1a (2026-11-13): the summarizer's instruction is the system prompt and the span
+  # it summarizes is DATA — one user turn holding exactly the folded lines `:history` carries.
+  # The span is attacker-reachable (it holds tool results), so it must never be merged into
+  # the instruction text.
+  defp structure(folded) do
+    span = Enum.join(folded, "\n")
+
+    turns =
+      if String.trim(span) == "",
+        do: [],
+        else: [%{"role" => "user", "content" => [%{"type" => "text", "text" => span}]}]
+
+    [system: [Samen.AI.Agent.summarizer_prompt()], turns: turns]
   end
 
   @typedoc "What one summarize call spent."
