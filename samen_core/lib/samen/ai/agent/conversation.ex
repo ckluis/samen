@@ -155,7 +155,7 @@ defmodule Samen.AI.Agent.Conversation do
         do: shapes,
         else: List.duplicate(note_shape(), length(chunks))
 
-    {turns, _used_ids} = render(Enum.zip(chunks, shapes), ctx, MapSet.new())
+    {turns, _used_ids} = render(Enum.zip(chunks, shapes), ctx, %{})
 
     [user([text(goal)]) | turns]
     |> Enum.reject(&(&1["content"] == []))
@@ -164,7 +164,7 @@ defmodule Samen.AI.Agent.Conversation do
 
   # --- rendering, one persisted turn at a time ---------------------------------------------
   #
-  # `used` is the set of tool-use ids already replayed natively in this conversation.
+  # `used` holds (as map keys) the tool-use ids already replayed natively in this conversation.
 
   defp render([], _ctx, used), do: {[], used}
 
@@ -190,7 +190,7 @@ defmodule Samen.AI.Agent.Conversation do
       {[
          assistant([tool_call(sh["id"], sh["name"], %{})]),
          user([tool_result(sh["id"], content, true)])
-       ], MapSet.put(used, sh["id"])}
+       ], Map.put(used, sh["id"], true)}
     else
       {[user(text_blocks(content))], used}
     end
@@ -218,7 +218,7 @@ defmodule Samen.AI.Agent.Conversation do
       {[
          assistant([tool_call(sh["id"], sh["name"], Map.get(sh, "input", %{}))]),
          user([tool_result(sh["id"], content, error?)])
-       ], MapSet.put(used, sh["id"])}
+       ], Map.put(used, sh["id"], true)}
     else
       {[assistant(text_blocks(echo)), user(text_blocks(content))], used}
     end
@@ -230,7 +230,7 @@ defmodule Samen.AI.Agent.Conversation do
     name = Map.get(sh, "name")
 
     ctx.native? and is_binary(name) and MapSet.member?(ctx.names, name) and is_binary(id) and
-      Regex.match?(@id_pattern, id) and not MapSet.member?(used, id) and
+      Regex.match?(@id_pattern, id) and not Map.has_key?(used, id) and
       is_map(Map.get(sh, "input", %{}))
   end
 
