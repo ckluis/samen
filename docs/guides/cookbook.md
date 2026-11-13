@@ -548,18 +548,31 @@ works and wins. A dashboard reads each tile through its own
 `Guard.run` and passes `error=` per tile, so one failed tile shows its own error and the rest render.
 
 **A write that fails must tell the user (phase 2).** A write returns its own tagged value (`:ok`, `{:ok, row}`, a changeset
-error, an honest `{:error, :not_configured}`); wrap it in `Guard.write/3` so only an *exception* becomes
-`{:error, :unavailable}` (logged exactly like a failed read), then say so on the screen. Never discard the result with
-`_ =`, and never print the error term, `inspect/1` output, `Exception.message/1` or a value — the copy is fixed and
+error, an honest `{:error, :not_configured}`); wrap it in `Guard.write/3` so an *exception*, an exit, or a **returned
+`{:error, %Ash.Error.Unknown{} | %Ash.Error.Framework{}}`** (a non-bang Ash write reports a data-layer outage as a return value,
+not a raise) becomes `{:error, :unavailable}` — logged as a failed *write* (`write failed write=<name>`, telemetry
+`[:samen, :web, :write, :error]`) — and a raised `Ash.Error.Forbidden` becomes `{:error, :forbidden}`. A returned `Invalid` or
+`Forbidden` is a real refusal and passes through untouched, so the screen can keep **denial copy for a denial and outage copy
+for an outage**: never print "refused (admin role required…)" for `:unavailable`. Then say so on the screen. Never discard the
+result with `_ =`, and never print the error term, `inspect/1` output, `Exception.message/1` or a value — the copy is fixed and
 value-free ("Couldn't save that preference. Nothing was changed — try again."). Use the flash group the layout renders
 (`put_flash(socket, :error, …)`) or the screen's inline notice, then re-read so the screen shows what is *really* stored.
 A best-effort side effect that must not fail its caller (a webhook enqueue, a mention notification) logs through
-`Guard.report/3` and says why in a comment. Test it by `inject_read_faults([:name])` on the write's name; assert the copy,
-that nothing was applied, and that the same call succeeds once the fault is cleared.
+`Guard.report/3` and says why in a comment. Look a role up with `current_membership_result/4`, not the legacy
+`current_membership/4` (which maps an outage to `:not_found`). Test it by `inject_read_faults([:name])` on the write's name **and**
+once with a real failure (rename the table inside the sandbox transaction: Postgres DDL is transactional), and assert the
+copy, that nothing was applied, and that the same call succeeds once the fault is cleared.
+
+**"Not adopted" is a structural fact, never error text.** A feature a host may not have (the AI draft domain, the
+impersonation-sessions table) reads as an honest empty only when `Samen.Web.Reads.Adoption` says so — resolve the repo, is it
+started, is it configured on this host (`:ecto_repos`), does the table exist (`to_regclass`) — and every other failure is
+`:unavailable`. Probe only *after* the read failed, never cache the answer (a repo that is down must not be remembered as "not
+adopted"), and log the not-adopted outcome once.
 
 **What is logged.** One `Logger.error` per failure — `read=<name> org=<id> cause=<exception module
 names>` — and one `[:samen, :web, :read, :error]` telemetry event (`read`, `cause`; no org id, which
-is a forbidden metric dimension). Never the exception message or struct, a query, row data or a
+is a forbidden metric dimension). A failed write logs `write failed write=<name> …` and emits `[:samen, :web, :write, :error]`
+(`write`, `cause`). Never the exception message or struct, a query, row data or a
 token: an Ash error interpolates the values being processed. Name the read with a stable atom.
 
 **Test it** with the fault seam, not by breaking the database: `inject_read_faults([:crm_contacts_page])`

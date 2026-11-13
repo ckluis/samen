@@ -73,12 +73,29 @@ directory and diff, or apply by hand:
   "You're all set") and the tenant activation funnel show the kit error state, a per-section error or an error tile instead
   of "No … yet", "… not found", `$0.00`, "No invitations yet." or "No impersonation sessions recorded."; a genuinely empty
   result and a genuinely missing record keep their copy.
-- **A failed write tells the user.** `Guard.write/3` passes a write's own tagged return through and turns only an exception
-  into `{:error, :unavailable}` (logged by name and cause). Marking a notification read, saving a notification preference,
-  revoking an API key or an invitation, minting a key, inviting, saving a profile or a flag change, cancelling an agent run
-  and posting a chat message used to discard the result or answer "refused"/"not found" for any failure; they now say what
-  happened with fixed, value-free copy. Copy that printed an exception or `inspect/1` output (flag/automation friendly
-  errors on a raised write, `support_draft`, the campaign send, the upload form) no longer does.
+- **A failed write tells the user.** `Guard.write/3` passes a write's own tagged return through and turns an exception, an
+  exit **or a returned `{:error, %Ash.Error.Unknown{} | %Ash.Error.Framework{}}`** (how a non-bang Ash write reports a
+  data-layer outage) into `{:error, :unavailable}`, logged by name and cause as a **write** failure
+  (`write failed write=<name>`, telemetry `[:samen, :web, :write, :error]` with `write` and `cause`; reads keep
+  `[:samen, :web, :read, :error]`). A returned `Invalid` / `Forbidden` is a real refusal and passes through. Marking a
+  notification read, saving a notification preference, revoking an API key or an invitation, minting a key, inviting,
+  saving a profile or a flag change, cancelling an agent run and posting a chat message used to discard the result or
+  answer "refused"/"not found" for any failure; they now say what happened with fixed, value-free copy, and an outage no
+  longer prints denial copy ("Revoke refused (admin role required…)"). Copy that printed an exception or `inspect/1` output
+  (flag/automation friendly errors on a raised write, `support_draft`, the campaign send pill, the file-bytes HTTP 500 body,
+  the upload form) no longer does.
+- **Review follow-ups.** The onboarding wizard's `verified?/2` fails **closed** on an armed host (it returned `true` for an
+  unresolvable principal, bypassing the invite capability gate; sabotage 669). The wizard invite step and billing settings
+  look the caller's role up through `current_membership_result`: an outage is an error state ("couldn't send — nothing was
+  sent", "couldn't check your role"), still fail-closed, never "No membership in context" / "Only an admin can…". "You're all
+  set" is derived from the one org read. Account health reports honest absence when a single MRR, active-subscription or
+  ticket figure failed (it printed a real-looking `$0` / `0`; sabotages 87 retargeted and 670). Whether the AI draft domain
+  or the impersonation-sessions table is **adopted** is decided structurally by the new `Samen.Web.Reads.Adoption`
+  (repo started? configured? table present?) instead of by matching exception text: a down repo or an unmigrated table on an
+  adopting host is an error, a host that never adopted the feature keeps the documented honest empty (logged once). A
+  malformed notification or object-ref id is "not found", not an error log; a flag write denial shows denial copy; a failed
+  chat post says why (lapsed gate, participants outage, non-participant, denial, write outage); board totals are an em dash
+  when a group count failed.
 - **samen_core (additive):** `Samen.Reveal.Grants.pending_for_org_result/2` and `Samen.Replay.Player.list_result/2`
   (the legacy functions are unchanged). **Host action:** none required. A host `live_session` that overrides the
   `list_view` of a `ListLive` view needs no change; a host that calls `Billing.Reads`/`Marketing.Reads`/… read helpers
