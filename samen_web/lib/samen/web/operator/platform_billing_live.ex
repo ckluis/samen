@@ -43,6 +43,7 @@ defmodule Samen.Web.Operator.PlatformBillingLive do
         case Reads.platform_billing_result(mount, scope) do
           {:ok, billing} -> assign(socket, no_org: false, billing: billing, load_error: false)
           # A failed read is NOT "$0 MRR, no subscriptions": the page says it could not load.
+          {:error, :forbidden} -> assign(socket, no_org: false, billing: empty_billing(), load_error: :forbidden)
           {:error, _} -> assign(socket, no_org: false, billing: empty_billing(), load_error: true)
         end
     end
@@ -71,7 +72,11 @@ defmodule Samen.Web.Operator.PlatformBillingLive do
         <% else %>
           <%= if @load_error do %>
             <div class="wrap" id="billing-load-error">
-              <.error_state body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
+              <.error_state
+                title={if @load_error == :forbidden, do: "Not permitted"}
+                body={Samen.Web.Reads.Guard.message(@load_error)}
+                retry_event={if @load_error != :forbidden, do: "retry_load"}
+              />
             </div>
           <% else %>
           <div class="metrics">

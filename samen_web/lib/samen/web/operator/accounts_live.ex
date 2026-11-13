@@ -73,6 +73,7 @@ defmodule Samen.Web.Operator.AccountsLive do
           case Reads.account_metrics_result(mount, scope, org_id) do
             {:ok, metrics} -> {metrics, false}
             # A failed read is NOT "0 accounts · $0 MRR": the four tiles say they could not load.
+            {:error, :forbidden} -> {nil, :forbidden}
             {:error, _} -> {nil, true}
           end
 
@@ -140,6 +141,10 @@ defmodule Samen.Web.Operator.AccountsLive do
 
   defp with_org(params, socket), do: Map.put(params, "org_id", socket.assigns.operator_org_id)
 
+  # `true` renders the generic outage copy; a denial carries its own (binary) copy.
+  defp metric_error(:forbidden), do: Samen.Web.Reads.Guard.message(:forbidden)
+  defp metric_error(other), do: other
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -172,34 +177,34 @@ defmodule Samen.Web.Operator.AccountsLive do
         <% else %>
           <div :if={@metrics_error} class="wrap" id="metrics-error" style="margin-bottom:0">
             <div class="card" style="padding:10px 14px;font-size:12px" role="alert">
-              {Samen.Web.Reads.Guard.message()}
-              <.button type="button" phx-click="retry_load" id="metrics-retry">Try again</.button>
+              {Samen.Web.Reads.Guard.message(@metrics_error)}
+              <.button :if={@metrics_error != :forbidden} type="button" phx-click="retry_load" id="metrics-retry">Try again</.button>
             </div>
           </div>
 
           <div class="metrics">
-            <.metric label="Accounts" value={@metrics && @metrics.accounts || 0} sub="tenant orgs" error={@metrics_error}>
+            <.metric label="Accounts" value={@metrics && @metrics.accounts || 0} sub="tenant orgs" error={metric_error(@metrics_error)}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Healthy" value={@metrics && @metrics.active || 0} sub="healthy band · dunning-coherent" error={@metrics_error}>
+            <.metric label="Healthy" value={@metrics && @metrics.active || 0} sub="healthy band · dunning-coherent" error={metric_error(@metrics_error)}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M20 6 9 17l-5-5" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="At risk" value={@metrics && @metrics.at_risk || 0} sub="at-risk + critical bands" error={@metrics_error}>
+            <.metric label="At risk" value={@metrics && @metrics.at_risk || 0} sub="at-risk + critical bands" error={metric_error(@metrics_error)}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Platform MRR" value={dollars((@metrics && @metrics.mrr_cents) || 0)} sub="across accounts" error={@metrics_error}>
+            <.metric label="Platform MRR" value={dollars((@metrics && @metrics.mrr_cents) || 0)} sub="across accounts" error={metric_error(@metrics_error)}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />

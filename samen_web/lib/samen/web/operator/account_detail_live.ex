@@ -59,6 +59,7 @@ defmodule Samen.Web.Operator.AccountDetailLive do
         case Reads.account_detail_result(mount, Operator.scope(mount), operator_org_id, account_id, opts) do
           {:ok, detail} -> {detail, false}
           # A failed read is NOT "Account not found": the page says it could not load, with a retry.
+          {:error, :forbidden} -> {nil, :forbidden}
           {:error, _} -> {nil, true}
         end
       else
@@ -141,7 +142,11 @@ defmodule Samen.Web.Operator.AccountDetailLive do
             </div>
           <% @load_error -> %>
             <div class="wrap" id="account-load-error">
-              <.error_state body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
+              <.error_state
+                title={if @load_error == :forbidden, do: "Not permitted"}
+                body={Samen.Web.Reads.Guard.message(@load_error)}
+                retry_event={if @load_error != :forbidden, do: "retry_load"}
+              />
             </div>
           <% is_nil(@detail) -> %>
             <div class="wrap">

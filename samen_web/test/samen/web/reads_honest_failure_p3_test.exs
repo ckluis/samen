@@ -139,6 +139,49 @@ defmodule Samen.Web.ReadsHonestFailureP3Test do
   end
 
   # ===========================================================================
+  # A denial is not an outage: {:error, :forbidden} gets denial copy and no retry
+  # ===========================================================================
+
+  describe "Denial copy (N1)" do
+    alias Samen.Web.Operator.{AccountDetailLive, AccountsLive, DeskDetailLive, PlatformBillingLive}
+
+    # `Guard.run` maps an `Ash.Error.Forbidden` raise to {:error, :forbidden}; the screens must carry that kind
+    # through instead of collapsing every `{:error, _}` into the outage pane.
+    defp forbidden_render(module, mount, load_args, key) do
+      socket = loaded(module, mount, load_args)
+      html(module, Phoenix.Component.assign(socket, key, :forbidden))
+    end
+
+    test "account detail, ticket detail, platform billing and the accounts tiles say 'may not view', with no retry", %{mount: mount} do
+      for {module, args, key, id} <-
+            [
+              {AccountDetailLive, [Ash.UUID.generate()], :load_error, "account-load-error"},
+              {DeskDetailLive, [Ash.UUID.generate()], :load_error, "ticket-load-error"},
+              {PlatformBillingLive, [], :load_error, "billing-load-error"}
+            ] do
+        rendered = forbidden_render(module, mount, args, key)
+
+        assert rendered =~ "may not view this", inspect(module)
+        refute rendered =~ "Nothing was lost", inspect(module)
+        refute rendered =~ ~s(phx-click="retry_load"), inspect(module)
+        assert rendered =~ id
+      end
+
+      rendered = forbidden_render(AccountsLive, mount, [], :metrics_error)
+      assert rendered =~ "may not view this"
+      refute rendered =~ "metrics-retry"
+    end
+
+    test "POSITIVE CONTROL: an outage on the same screens keeps the retry and the outage copy", %{mount: mount} do
+      rendered = html(PlatformBillingLive, Phoenix.Component.assign(loaded(PlatformBillingLive, mount), :load_error, true))
+
+      assert rendered =~ "Nothing was lost"
+      assert rendered =~ ~s(phx-click="retry_load")
+      refute rendered =~ "may not view this"
+    end
+  end
+
+  # ===========================================================================
   # Desk
   # ===========================================================================
 

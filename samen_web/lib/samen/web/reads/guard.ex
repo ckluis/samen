@@ -171,6 +171,15 @@ defmodule Samen.Web.Reads.Guard do
   @spec message() :: String.t()
   def message, do: "We couldn't load this right now. Nothing was lost — try again."
 
+  @doc """
+  The copy for a failed read of kind `kind` (`:unavailable` / `true` / anything else is the outage copy;
+  `:forbidden` is DENIAL copy — a denial is not an outage, retrying will not help, and the screen must not
+  say "Nothing was lost — try again").
+  """
+  @spec message(failure() | true) :: String.t()
+  def message(:forbidden), do: "Your operator role may not view this."
+  def message(_kind), do: message()
+
   # -- failure handling ----------------------------------------------------------
 
   defp failed(_name, _scope, %Ash.Error.Forbidden{}), do: {:error, :forbidden}

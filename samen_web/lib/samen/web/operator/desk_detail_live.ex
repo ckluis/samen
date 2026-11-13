@@ -74,6 +74,7 @@ defmodule Samen.Web.Operator.DeskDetailLive do
           case Reads.ticket_detail_result(mount, scope, ticket_id) do
             {:ok, ticket} -> {ticket, false}
             # A failed read is NOT "Ticket not found": the page says it could not load, with a retry.
+            {:error, :forbidden} -> {nil, :forbidden}
             {:error, _} -> {nil, true}
           end
 
@@ -200,7 +201,11 @@ defmodule Samen.Web.Operator.DeskDetailLive do
             </div>
           <% @load_error -> %>
             <div class="wrap" id="ticket-load-error">
-              <.error_state body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
+              <.error_state
+                title={if @load_error == :forbidden, do: "Not permitted"}
+                body={Samen.Web.Reads.Guard.message(@load_error)}
+                retry_event={if @load_error != :forbidden, do: "retry_load"}
+              />
             </div>
           <% is_nil(@ticket) -> %>
             <div class="wrap">
