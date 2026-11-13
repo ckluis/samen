@@ -264,6 +264,7 @@ defmodule Samen.Web.AI.Server do
   # An unstarted repo surfaces as a RAISED `Ash.Error.Unknown`; catch exactly that class (typed, so a
   # different failure still reaches `Guard.run/3`) and let `domain_not_adopted?/1` classify it.
   defp read_drafts(query) do
+    # authz-scope: the caller (`list_drafts_result/2`) pinned `org_id == ^org_id` on `query`, one clause up.
     Ash.read(query, authorize?: false)
   rescue
     e in Ash.Error.Unknown -> {:error, e}

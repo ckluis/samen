@@ -76,6 +76,8 @@ defmodule Samen.Web.Files.PreviewLive do
 
   @impl true
   def render(assigns) do
+    assigns = assign_new(assigns, :load_error, fn -> nil end)
+
     ~H"""
     <div id="files-preview">
       <.app_shell>

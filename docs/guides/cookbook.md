@@ -503,7 +503,7 @@ and keeps the real empty state for an honestly empty result.
 **Verified against:** `samen_web/lib/samen/web/reads/guard.ex` (the convention),
 `samen_web/lib/samen/web/crm/reads.ex` (`contacts_for_company_result/3`, `get_contact_result/3`,
 `companies_page/3`), `samen_web/lib/samen/web/list_live.ex` (`reread/2`) and the screen proofs in
-`samen_web/test/samen/web/reads_honest_failure_test.exs`.
+`samen_web/test/samen/web/reads_honest_failure_test.exs` and `reads_honest_failure_p2_test.exs` (writes: `Guard.write/3`).
 
 ```elixir
 # A detail/aggregate read: the tagged result is the real function; the legacy name is a shim.
@@ -538,12 +538,24 @@ failure.
 On the screen:
 
 ```heex
-<.list_view page={@page} state={@list_state} error={@list_error} retry_event="list_retry" ...>
+<.list_view page={@page} state={@list_state} ...>
 ```
 
-`ListLive` keeps the previous page, the filter text and the selection when a re-read fails and sets
-`@list_error`; `"list_retry"` re-runs the read. A dashboard reads each tile through its own
+`ListLive` keeps the previous page, the filter text and the selection when a re-read fails and flags the kept page
+`error: :unavailable`; `list_view` renders the kit error state from that flag BY DEFAULT (retry = `"list_retry"`), so a screen
+that was never wired shows an honest error at zero lines. Passing `error={@list_error} retry_event="list_retry"` still
+works and wins. A dashboard reads each tile through its own
 `Guard.run` and passes `error=` per tile, so one failed tile shows its own error and the rest render.
+
+**A write that fails must tell the user (phase 2).** A write returns its own tagged value (`:ok`, `{:ok, row}`, a changeset
+error, an honest `{:error, :not_configured}`); wrap it in `Guard.write/3` so only an *exception* becomes
+`{:error, :unavailable}` (logged exactly like a failed read), then say so on the screen. Never discard the result with
+`_ =`, and never print the error term, `inspect/1` output, `Exception.message/1` or a value — the copy is fixed and
+value-free ("Couldn't save that preference. Nothing was changed — try again."). Use the flash group the layout renders
+(`put_flash(socket, :error, …)`) or the screen's inline notice, then re-read so the screen shows what is *really* stored.
+A best-effort side effect that must not fail its caller (a webhook enqueue, a mention notification) logs through
+`Guard.report/3` and says why in a comment. Test it by `inject_read_faults([:name])` on the write's name; assert the copy,
+that nothing was applied, and that the same call succeeds once the fault is cleared.
 
 **What is logged.** One `Logger.error` per failure — `read=<name> org=<id> cause=<exception module
 names>` — and one `[:samen, :web, :read, :error]` telemetry event (`read`, `cause`; no org id, which

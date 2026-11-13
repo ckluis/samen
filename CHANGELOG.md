@@ -58,6 +58,33 @@ directory and diff, or apply by hand:
   `error={@list_error} retry_event="list_retry"` to its `list_view` (without it a failed re-read keeps the old page
   silently; the first read shows the empty state as before). Recipe: `docs/guides/cookbook.md` Recipe 11.
 
+### Reads that lie, phase 2 (WP6)
+
+- **`ListLive` shows a failed page's error by default.** A failed read flags the kept page `error: :unavailable` and
+  `list_view` renders the kit error state (retry = `"list_retry"`) from it, so an unwired screen (the Marketing leads lens
+  kept the old page and showed an empty state on a failed first read) is honest without any per-screen wiring. An explicit
+  `error=` still wins; happy-path markup is unchanged.
+- **The rest of the tenant plane reports a failed read.** Billing (overview, invoices, plans, usage, dunning, settings),
+  Marketing (campaigns, campaign detail, segments, leads), Work (tasks, task detail, projects, timeline, tree), Files,
+  Chat (inbox, room), Notifications (inbox, preferences), Settings (profile, API keys, invitations, security, reveal
+  approvals, replays), Flags, the Automation builder, the AI screens (agent runs and detail, CRM preview, support drafts),
+  the Support KB and the public help-center portal (which used to 500 on a failed read), Tags, ObjectRef cards (a new
+  `{:error, :unavailable}` reason and a "couldn't load this object" chip), Onboarding (a failed org read no longer paints
+  "You're all set") and the tenant activation funnel show the kit error state, a per-section error or an error tile instead
+  of "No … yet", "… not found", `$0.00`, "No invitations yet." or "No impersonation sessions recorded."; a genuinely empty
+  result and a genuinely missing record keep their copy.
+- **A failed write tells the user.** `Guard.write/3` passes a write's own tagged return through and turns only an exception
+  into `{:error, :unavailable}` (logged by name and cause). Marking a notification read, saving a notification preference,
+  revoking an API key or an invitation, minting a key, inviting, saving a profile or a flag change, cancelling an agent run
+  and posting a chat message used to discard the result or answer "refused"/"not found" for any failure; they now say what
+  happened with fixed, value-free copy. Copy that printed an exception or `inspect/1` output (flag/automation friendly
+  errors on a raised write, `support_draft`, the campaign send, the upload form) no longer does.
+- **samen_core (additive):** `Samen.Reveal.Grants.pending_for_org_result/2` and `Samen.Replay.Player.list_result/2`
+  (the legacy functions are unchanged). **Host action:** none required. A host `live_session` that overrides the
+  `list_view` of a `ListLive` view needs no change; a host that calls `Billing.Reads`/`Marketing.Reads`/… read helpers
+  keeps every legacy return shape (new `*_result` siblings are additive). The swallow ratchet baseline shrank from 226 to 107
+  clauses; the reviewed helpers carry their reason in `Samen.Web.Reads.SwallowLint`.
+
 ### Security and correctness fixes
 
 - The LiveView login oracle is closed; rate-limited users land on a real page. Sessions that are revoked disconnect their
