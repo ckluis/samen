@@ -1,0 +1,21 @@
+# SABOTAGE: A raising impersonation gate lookup is reported as :denied again, so every drill-in offers the 
+#   open-session form during an outage
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/reads_honest_failure_p3_test.exs test/samen/web/operator_impersonation_gate_test.exs
+# MUST_FAIL: REAL FAULT: a gate lookup that RAISES is :unavailable
+# MUST_FAIL: a gate lookup that RAISES renders a retryable error
+diff --git a/samen_web/lib/samen/web/operator/impersonation.ex b/samen_web/lib/samen/web/operator/impersonation.ex
+index 59f2d305..a89b747d 100644
+--- a/samen_web/lib/samen/web/operator/impersonation.ex
++++ b/samen_web/lib/samen/web/operator/impersonation.ex
+@@ -209,7 +209,7 @@ defmodule Samen.Web.Operator.Impersonation do
+       # otherwise open another tenant-visible session and audit row). Reported by name and exception
+       # module; `org_id` is already a cast UUID, so nothing from the URL reaches the log line.
+       Guard.report(:operator_impersonation_gate, org_id, e)
+-      :unavailable
++      :denied
+   end
+ 
+   # A canonical UUID string only (`Ecto.UUID.cast/1` would also accept a raw 16-byte binary).
