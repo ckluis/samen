@@ -486,6 +486,7 @@ defmodule Samen.Web.Marketing.Reads do
     Mount.resource(mount, Send)
     |> Ash.Query.ensure_selected([:subscriber_id, :campaign_id])
     |> Ash.Query.filter(campaign_id == ^campaign_id and subscriber_id in ^subscriber_ids)
+    |> Ash.Query.limit(length(subscriber_ids))
     |> Ash.read!(scope: scope)
     |> MapSet.new(& &1.subscriber_id)
   end
