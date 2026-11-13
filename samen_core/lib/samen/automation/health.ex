@@ -93,11 +93,17 @@ defmodule Samen.Automation.Health do
   Kill a workflow (`disabled_reason: :operator`) — idempotent, audited
   (`Samen.AuditEvent`, org-partitioned, actor-attributed). Refuses
   `{:error, :not_authorized}` for an actor that may not manage.
+
+  The workflow is looked up by `{org_id, workflow_id}`: a workflow that exists
+  but belongs to a DIFFERENT org is `{:error, :not_found}` — the caller's
+  impersonation/scope gate vouches for `org_id`, never for a client-supplied
+  workflow id on its own.
   """
-  @spec kill(Actor.t() | term(), String.t(), keyword()) :: {:ok, struct()} | {:error, term()}
-  def kill(operator, workflow_id, opts \\ []) do
+  @spec kill(Actor.t() | term(), String.t(), String.t(), keyword()) ::
+          {:ok, struct()} | {:error, term()}
+  def kill(operator, org_id, workflow_id, opts \\ []) do
     if may_manage?(operator) do
-      switch(:operator_kill, %{reason: :operator}, operator, workflow_id, opts)
+      switch(:operator_kill, %{reason: :operator}, operator, org_id, workflow_id, opts)
     else
       {:error, :not_authorized}
     end
@@ -107,10 +113,11 @@ defmodule Samen.Automation.Health do
   Re-arm a workflow (clears both kill columns) — idempotent, audited. Refuses
   `{:error, :not_authorized}` for an actor that may not manage.
   """
-  @spec rearm(Actor.t() | term(), String.t(), keyword()) :: {:ok, struct()} | {:error, term()}
-  def rearm(operator, workflow_id, opts \\ []) do
+  @spec rearm(Actor.t() | term(), String.t(), String.t(), keyword()) ::
+          {:ok, struct()} | {:error, term()}
+  def rearm(operator, org_id, workflow_id, opts \\ []) do
     if may_manage?(operator) do
-      switch(:operator_rearm, %{}, operator, workflow_id, opts)
+      switch(:operator_rearm, %{}, operator, org_id, workflow_id, opts)
     else
       {:error, :not_authorized}
     end
@@ -120,13 +127,13 @@ defmodule Samen.Automation.Health do
   # Internal
   # ---------------------------------------------------------------------------
 
-  defp switch(action, args, operator, workflow_id, opts) do
+  defp switch(action, args, operator, org_id, workflow_id, opts) do
     case Automation.workflow_module(opts) do
       nil ->
         {:error, :no_automation_module}
 
       wf_mod ->
-        with {:ok, wf} <- fetch_workflow(wf_mod, workflow_id),
+        with {:ok, wf} <- fetch_workflow(wf_mod, org_id, workflow_id),
              {:ok, updated} <-
                wf
                |> Ash.Changeset.for_update(action, args, authorize?: false)
@@ -146,9 +153,9 @@ defmodule Samen.Automation.Health do
   # resource's default read — ensure_selected it explicitly (the
   # `RunWorker.load_workflow/2` precedent) so the audit's `correlation_id`
   # (and the caller's `{:ok, updated}` return) always carry it.
-  defp fetch_workflow(wf_mod, workflow_id) do
+  defp fetch_workflow(wf_mod, org_id, workflow_id) do
     wf_mod
-    |> filter(id == ^workflow_id)
+    |> filter(id == ^workflow_id and org_id == ^org_id)
     |> Ash.Query.ensure_selected([:org_id])
     |> Ash.read!(authorize?: false)
     |> case do

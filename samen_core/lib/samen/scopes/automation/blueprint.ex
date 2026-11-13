@@ -267,7 +267,7 @@ defmodule Samen.Scopes.Automation.Blueprint do
           # `Samen.OperatorPlane` idiom (application-code gate + explicit-scope
           # bypass read/write) already used for the operator CRM. Both callers of
           # these actions run authorize?: false themselves (the LiveView action
-          # through `Health.kill/3`/`Health.rearm/3`; the rate breaker internally) —
+          # through `Health.kill/4`/`Health.rearm/4`; the rate breaker internally) —
           # this bypass documents that they are NEVER reachable through a public,
           # actor-checked Ash API.
           bypass action([:operator_kill, :operator_rearm]) do

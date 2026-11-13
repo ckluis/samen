@@ -1,0 +1,20 @@
+# SABOTAGE: Health.kill/rearm fetch the workflow by id alone again (org filter neutralised): an operator 
+#   vouched for org A can kill/rearm org B's workflow.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: Health.kill/rearm refuse a workflow that belongs to another org
+diff --git a/samen_core/lib/samen/automation/health.ex b/samen_core/lib/samen/automation/health.ex
+index 25a8196b..68a6ac6d 100644
+--- a/samen_core/lib/samen/automation/health.ex
++++ b/samen_core/lib/samen/automation/health.ex
+@@ -155,7 +155,7 @@ defmodule Samen.Automation.Health do
+   # (and the caller's `{:ok, updated}` return) always carry it.
+   defp fetch_workflow(wf_mod, org_id, workflow_id) do
+     wf_mod
+-    |> filter(id == ^workflow_id and org_id == ^org_id)
++    |> filter(id == ^workflow_id and ^org_id == ^org_id)
+     |> Ash.Query.ensure_selected([:org_id])
+     |> Ash.read!(authorize?: false)
+     |> case do
