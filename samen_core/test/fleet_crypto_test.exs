@@ -76,11 +76,24 @@ defmodule Samen.Fleet.CryptoTest do
   end
 
   describe "replay-bound timestamp (§4.4)" do
-    test "fresh timestamp passes, stale one fails (real clock, coarse — unaffected by the seam)" do
+    # The default-clock path reads System.os_time/1 INSIDE fresh_timestamp?/1, a second time after this test's own
+    # read. Asserting at `now ± 301` therefore flaked when a second boundary fell between the two reads (the
+    # function saw now+1, making `now + 301` exactly 300 away = fresh). So the real-clock test stays far from the
+    # boundary (a one-second skew cannot change any verdict), and the exact boundary is asserted with the pinned
+    # clock below.
+    test "fresh timestamp passes, stale one fails (real clock, far from the boundary — skew-proof)" do
       now = System.os_time(:second)
       assert Crypto.fresh_timestamp?(now)
-      refute Crypto.fresh_timestamp?(now - 301)
-      refute Crypto.fresh_timestamp?(now + 301)
+      refute Crypto.fresh_timestamp?(now - 3_600)
+      refute Crypto.fresh_timestamp?(now + 3_600)
+    end
+
+    test "the 300 s default tolerance is exact, against ONE captured instant (no second clock read)" do
+      now = System.os_time(:second)
+      assert Crypto.fresh_timestamp?(now - 300, 300, now: now)
+      refute Crypto.fresh_timestamp?(now - 301, 300, now: now)
+      assert Crypto.fresh_timestamp?(now + 300, 300, now: now)
+      refute Crypto.fresh_timestamp?(now + 301, 300, now: now)
     end
 
     # Issue #46: fresh_timestamp?/2 re-read System.os_time(:second) itself, so
