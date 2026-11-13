@@ -794,7 +794,7 @@ defmodule Samen.Web.Router do
           Keyword.fetch!(opts, :repo),
           domain: Keyword.get(opts, :domain, namespace),
           plane: Samen.Web.Router.__plane__(opts),
-          labels: Keyword.get(opts, :labels)
+          labels: Map.put(Keyword.get(opts, :labels) || %{}, :files_path, path)
         )
 
       # B-SEC / S1 — the TENANT authz gate. Every tenant `live_session` carries

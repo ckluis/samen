@@ -25,6 +25,21 @@ defmodule Samen.Web.Files.Live do
   def writable?(%Mount{plane: %{kind: :operator}}), do: false
   def writable?(_), do: true
 
+  @doc """
+  The files surface's mount path (the router records the `:path` it was mounted at as the
+  `:files_path` label; `/files` when absent).
+  """
+  def files_path(mount), do: Mount.label(mount, :files_path, "/files")
+
+  @doc "Link to one file's preview page, carrying the current org (`?org=`) like every tenant link."
+  def file_path(mount, file_id, org_id), do: "#{files_path(mount)}/#{file_id}#{org_query(org_id)}"
+
+  @doc "Link to one file's byte-serve route, carrying the current org (`?org=`)."
+  def file_bytes_path(mount, file_id, org_id), do: "#{files_path(mount)}/#{file_id}/bytes#{org_query(org_id)}"
+
+  defp org_query(org_id) when is_binary(org_id) and org_id != "", do: "?org=#{URI.encode_www_form(org_id)}"
+  defp org_query(_), do: ""
+
   attr :mount, Mount, required: true
   attr :org_id, :string, default: nil
   attr :active, :atom, default: :files

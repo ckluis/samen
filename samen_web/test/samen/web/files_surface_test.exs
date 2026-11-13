@@ -276,9 +276,9 @@ defmodule Samen.Web.FilesSurfaceTest do
       socket = upload_socket(org_id, plane: :operator, target_org_id: org_id)
       html = render_html(UploadLive, socket.assigns)
 
-      # An :active file gets a preview link.
+      # An :active file gets a preview link, carrying the current org.
       assert html =~ "Preview"
-      assert html =~ file.id
+      assert html =~ ~s(/files/#{file.id}?org=#{org_id})
     end
 
     test "operator plane: the upload form is NOT offered (write posture gate)" do
@@ -330,7 +330,36 @@ defmodule Samen.Web.FilesSurfaceTest do
       assert html =~ ~s(id="download-link")
       # The link points to the byte-serve route (BytesController at /files/:id/bytes),
       # NOT the PreviewLive HTML route at /files/:id.
-      assert html =~ ~s(href="/files/#{file.id}/bytes")
+      # …and carries the current org like every other tenant link (a multi-org user would
+      # otherwise fetch a DIFFERENT org's file bytes than the page shows).
+      assert html =~ ~s(href="/files/#{file.id}/bytes?org=#{org_id}")
+    end
+
+    test "the preview <iframe>/<img> source for an image also carries the org" do
+      org_id = Ash.UUID.generate()
+      root = storage_root()
+      file = seed_file(org_id, root, filename: "pic.png", content_type: "image/png")
+      _active = promote_file(file)
+
+      html = render_html(PreviewLive, preview_socket(org_id, file.id).assigns)
+
+      assert html =~ ~s(src="/files/#{file.id}/bytes?org=#{org_id}")
+      refute html =~ ~s(src="/files/#{file.id}/bytes")
+    end
+
+    test "links follow the configured mount path, not a hard-coded /files" do
+      org_id = Ash.UUID.generate()
+      root = storage_root()
+      file = seed_file(org_id, root, filename: "report.txt", content_type: "text/plain")
+      _active = promote_file(file)
+
+      mount =
+        Samen.Web.Mount.new(:files, Samen.WebTest.Files, Samen.WebTest.Repo, labels: %{files_path: "/attachments"})
+
+      assigns = Map.put(preview_socket(org_id, file.id).assigns, :samen_mount, mount)
+      html = render_html(PreviewLive, assigns)
+      assert html =~ ~s(href="/attachments/#{file.id}/bytes?org=#{org_id}")
+      refute html =~ ~s(href="/files/)
     end
 
     test "OPERATOR plane: byte download is refused for an :active file (RP-FI-4)" do
@@ -548,6 +577,25 @@ defmodule Samen.Web.FilesSurfaceTest do
       assert "/attachments" in paths
       assert "/attachments/:id" in paths
       assert "/attachments/:id/bytes" in paths
+    end
+
+    test "the router records the mounted path on the mount so the LiveViews can link to it" do
+      defmodule FilesLabelRouter do
+        use Phoenix.Router
+        import Phoenix.LiveView.Router
+        import Samen.Web.Router
+
+        scope "/" do
+          samen_files_routes(:files, Some.Host.Primitives, repo: Some.Host.Repo, path: "/attachments")
+        end
+      end
+
+      route = Enum.find(FilesLabelRouter.__routes__(), &(&1.path == "/attachments/:id"))
+      {_mod, _action, _opts, live_session} = route.metadata.phoenix_live_view
+      %{"samen_mount" => session_mount} = live_session.extra.session
+      mount = Samen.Web.Mount.from_session(session_mount)
+
+      assert Samen.Web.Mount.label(mount, :files_path, "/files") == "/attachments"
     end
 
     test "the mount scope_kind is :files and round-trips through session serialization" do

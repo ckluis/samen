@@ -223,7 +223,7 @@ defmodule Samen.Web.Mount do
   @label_keys ~w(
     crm_namespace crm_path crm_logo_style
     billing_logo_style support_path support_logo_style
-    marketing_path
+    marketing_path files_path
     crumb_root title glyph
     operator_org_id operator_title operator_workspace operator_glyph
     operator_initials operator_logo_style operator_role operator_user
