@@ -59,7 +59,7 @@ defmodule Samen.Web.Operator.AccountsLive do
     case operator_org_id do
       nil ->
         socket
-        |> assign(no_org: true, operator_org_id: nil, metrics: nil)
+        |> assign(no_org: true, operator_org_id: nil, metrics: nil, metrics_error: false)
         |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
         |> assign(show_new: false, new_form: nil)
         |> assign(scope_masking?: false, name_scope: :none)
@@ -69,11 +69,19 @@ defmodule Samen.Web.Operator.AccountsLive do
         otp_app = Operator.otp_app(mount)
         operator_id = acting_operator_id(socket, mount)
 
+        {metrics, metrics_error} =
+          case Reads.account_metrics_result(mount, scope, org_id) do
+            {:ok, metrics} -> {metrics, false}
+            # A failed read is NOT "0 accounts · $0 MRR": the four tiles say they could not load.
+            {:error, _} -> {nil, true}
+          end
+
         socket
         |> assign(
           no_org: false,
           operator_org_id: org_id,
-          metrics: Reads.account_metrics(mount, scope, org_id),
+          metrics: metrics,
+          metrics_error: metrics_error,
           # ADR-044 Amendment-1 account-level NAME scoping (§16.2/§16.4a, T159). The SAME
           # keyless `scope_of/2` seam the R-B impersonation drill-in gate uses
           # (`Samen.Web.Operator.Impersonation`): an operator sees an account's NAME only
@@ -93,6 +101,9 @@ defmodule Samen.Web.Operator.AccountsLive do
   # -- A3 CRUD events (list events belong to the ListLive hook) -----------------
 
   @impl true
+  # The tiles' "Try again": re-run the whole load (header read + the list).
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket)}
+
   def handle_event("new_account", _params, socket) do
     mount = socket.assigns.samen_mount
     {:noreply, assign(socket, show_new: true, new_form: new_account_form(mount, Operator.scope(mount)))}
@@ -159,29 +170,36 @@ defmodule Samen.Web.Operator.AccountsLive do
             </div>
           </div>
         <% else %>
+          <div :if={@metrics_error} class="wrap" id="metrics-error" style="margin-bottom:0">
+            <div class="card" style="padding:10px 14px;font-size:12px" role="alert">
+              {Samen.Web.Reads.Guard.message()}
+              <.button type="button" phx-click="retry_load" id="metrics-retry">Try again</.button>
+            </div>
+          </div>
+
           <div class="metrics">
-            <.metric label="Accounts" value={@metrics && @metrics.accounts || 0} sub="tenant orgs">
+            <.metric label="Accounts" value={@metrics && @metrics.accounts || 0} sub="tenant orgs" error={@metrics_error}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Healthy" value={@metrics && @metrics.active || 0} sub="healthy band · dunning-coherent">
+            <.metric label="Healthy" value={@metrics && @metrics.active || 0} sub="healthy band · dunning-coherent" error={@metrics_error}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M20 6 9 17l-5-5" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="At risk" value={@metrics && @metrics.at_risk || 0} sub="at-risk + critical bands">
+            <.metric label="At risk" value={@metrics && @metrics.at_risk || 0} sub="at-risk + critical bands" error={@metrics_error}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Platform MRR" value={dollars((@metrics && @metrics.mrr_cents) || 0)} sub="across accounts">
+            <.metric label="Platform MRR" value={dollars((@metrics && @metrics.mrr_cents) || 0)} sub="across accounts" error={@metrics_error}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />

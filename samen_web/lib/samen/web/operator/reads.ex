@@ -40,6 +40,7 @@ defmodule Samen.Web.Operator.Reads do
 
   alias Samen.Web.Mount
   alias Samen.Web.Operator.HealthScore
+  alias Samen.Web.Reads.Guard
 
   # A3 read-bounding (WS-A design §1.1 "read! elimination"): every join/lookup read on
   # the operator surfaces carries an explicit limit — the kit's hard page cap. These are
@@ -62,13 +63,22 @@ defmodule Samen.Web.Operator.Reads do
   `operator_org_id` is the operator org whose book this is; account rows are the OTHER Org
   rows in the operator namespace (`org_id == operator_org_id`, `id != operator_org_id`).
   """
-  def accounts(mount, scope, operator_org_id) do
-    joins = account_joins(mount, scope, operator_org_id)
+  def accounts(mount, scope, operator_org_id),
+    do: mount |> accounts_result(scope, operator_org_id) |> Guard.value([])
 
-    account_orgs(mount, operator_org_id)
-    |> Enum.map(&account_row(&1, joins))
-  rescue
-    _ -> []
+  @doc """
+  `accounts/3` that can say it failed: `{:ok, rows}` (an empty list is an honest empty book) or
+  `{:error, :unavailable}`. EVERY join read is part of the one guarded read, so a failed
+  billing/desk/activity join fails the whole assembly instead of scoring accounts on a missing
+  input (a missing past-due map reads as "nothing overdue", a missing activity map as "unknown").
+  """
+  def accounts_result(mount, scope, operator_org_id) do
+    Guard.run(:operator_accounts, scope, fn ->
+      joins = account_joins(mount, scope, operator_org_id)
+
+      account_orgs(mount, operator_org_id)
+      |> Enum.map(&account_row(&1, joins))
+    end)
   end
 
   @doc """
@@ -97,22 +107,22 @@ defmodule Samen.Web.Operator.Reads do
         empty_page(state)
 
       operator_org_id ->
-        joins = account_joins(mount, scope, operator_org_id)
+        Guard.page(:operator_accounts_page, scope, state, fn ->
+          joins = account_joins(mount, scope, operator_org_id)
 
-        page =
-          Mount.resource(mount, Org)
-          |> Ash.Query.ensure_selected([:name, :slug, :plan, :org_id])
-          |> Ash.Query.filter(id != ^operator_org_id)
-          |> Samen.Web.Reads.page_operator!(state,
-            scope: scope,
-            account_scope: operator_org_id,
-            filter_fields: [:name]
-          )
+          page =
+            Mount.resource(mount, Org)
+            |> Ash.Query.ensure_selected([:name, :slug, :plan, :org_id])
+            |> Ash.Query.filter(id != ^operator_org_id)
+            |> Samen.Web.Reads.page_operator!(state,
+              scope: scope,
+              account_scope: operator_org_id,
+              filter_fields: [:name]
+            )
 
-        %{page | items: Enum.map(page.items, &account_row(&1, joins))}
+          %{page | items: Enum.map(page.items, &account_row(&1, joins))}
+        end)
     end
-  rescue
-    _ -> empty_page(state)
   end
 
   # The per-account join maps (admins / subscription / customer / open desk tickets) —
@@ -179,28 +189,38 @@ defmodule Samen.Web.Operator.Reads do
   operator org. Returns `%{subscriptions:, invoices:, dunning:, mrr_cents:, past_due_cents:}`.
   """
   def platform_billing(mount, scope) do
-    subs = subscriptions(mount, scope)
-    invoices = invoices(mount, scope)
-    mrr_cents = Enum.reduce(subs, 0, fn s, acc -> if s.status == :active, do: acc + s.__mrr_cents__, else: acc end)
+    mount
+    |> platform_billing_result(scope)
+    |> Guard.value(%{subscriptions: [], invoices: [], dunning: [], mrr_cents: 0, past_due_cents: 0, active_subs: 0})
+  end
 
-    now = DateTime.utc_now()
+  @doc """
+  `platform_billing/2` that can say it failed: `{:ok, map}` or `{:error, :unavailable}`. The screen
+  renders the error state, never `$0` MRR over an empty subscription list.
+  """
+  def platform_billing_result(mount, scope) do
+    Guard.run(:operator_platform_billing, scope, fn ->
+      subs = subscriptions(mount, scope)
+      invoices = invoices(mount, scope)
+      mrr_cents = Enum.reduce(subs, 0, fn s, acc -> if s.status == :active, do: acc + s.__mrr_cents__, else: acc end)
 
-    dunning =
-      invoices
-      |> Enum.filter(fn inv -> past_due?(inv, now) end)
+      now = DateTime.utc_now()
 
-    past_due_cents = Enum.reduce(dunning, 0, fn inv, acc -> acc + (inv.amount_due_cents || 0) end)
+      dunning =
+        invoices
+        |> Enum.filter(fn inv -> past_due?(inv, now) end)
 
-    %{
-      subscriptions: subs,
-      invoices: invoices,
-      dunning: dunning,
-      mrr_cents: mrr_cents,
-      past_due_cents: past_due_cents,
-      active_subs: Enum.count(subs, &(&1.status == :active))
-    }
-  rescue
-    _ -> %{subscriptions: [], invoices: [], dunning: [], mrr_cents: 0, past_due_cents: 0, active_subs: 0}
+      past_due_cents = Enum.reduce(dunning, 0, fn inv, acc -> acc + (inv.amount_due_cents || 0) end)
+
+      %{
+        subscriptions: subs,
+        invoices: invoices,
+        dunning: dunning,
+        mrr_cents: mrr_cents,
+        past_due_cents: past_due_cents,
+        active_subs: Enum.count(subs, &(&1.status == :active))
+      }
+    end)
   end
 
   @doc """
@@ -209,17 +229,20 @@ defmodule Samen.Web.Operator.Reads do
   handling agent (a SaaS `Support.Agent`, PII CLEAR — both are the SaaS's own). SLA/priority
   ride the Ticket columns. Returns a list of ticket maps.
   """
-  def desk(mount, scope) do
-    joins = desk_joins(mount, scope)
+  def desk(mount, scope), do: mount |> desk_result(scope) |> Guard.value([])
 
-    Mount.resource(mount, Ticket)
-    |> Ash.Query.ensure_selected([:subject, :status, :priority, :sla_breach_at, :breached, :custom])
-    |> Ash.Query.sort(inserted_at: :asc)
-    |> Ash.Query.limit(@lookup_limit)
-    |> Ash.read!(scope: scope)
-    |> Enum.map(&desk_row(&1, joins))
-  rescue
-    _ -> []
+  @doc "`desk/2` that can say it failed: `{:ok, rows}` or `{:error, :unavailable}`."
+  def desk_result(mount, scope) do
+    Guard.run(:operator_desk, scope, fn ->
+      joins = desk_joins(mount, scope)
+
+      Mount.resource(mount, Ticket)
+      |> Ash.Query.ensure_selected([:subject, :status, :priority, :sla_breach_at, :breached, :custom])
+      |> Ash.Query.sort(inserted_at: :asc)
+      |> Ash.Query.limit(@lookup_limit)
+      |> Ash.read!(scope: scope)
+      |> Enum.map(&desk_row(&1, joins))
+    end)
   end
 
   @doc """
@@ -232,16 +255,16 @@ defmodule Samen.Web.Operator.Reads do
   any read error the page is EMPTY, never unbounded.
   """
   def desk_page(mount, scope, state) do
-    joins = desk_joins(mount, scope)
+    Guard.page(:operator_desk_page, scope, state, fn ->
+      joins = desk_joins(mount, scope)
 
-    page =
-      Mount.resource(mount, Ticket)
-      |> Ash.Query.ensure_selected([:subject, :status, :priority, :sla_breach_at, :breached, :custom])
-      |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:subject])
+      page =
+        Mount.resource(mount, Ticket)
+        |> Ash.Query.ensure_selected([:subject, :status, :priority, :sla_breach_at, :breached, :custom])
+        |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:subject])
 
-    %{page | items: Enum.map(page.items, &desk_row(&1, joins))}
-  rescue
-    _ -> empty_page(state)
+      %{page | items: Enum.map(page.items, &desk_row(&1, joins))}
+    end)
   end
 
   defp desk_joins(mount, scope) do
@@ -289,19 +312,39 @@ defmodule Samen.Web.Operator.Reads do
   `desk/2` list).
   """
   def desk_metrics(mount, scope) do
-    %{
-      open: count_tickets(mount, scope, &Ash.Query.filter(&1, status in [:open, :pending])),
-      breaching: count_tickets(mount, scope, &Ash.Query.filter(&1, breached == true)),
-      high: count_tickets(mount, scope, &Ash.Query.filter(&1, priority in [:urgent, :high]))
-    }
+    {stats, _failed} = desk_metrics_status(mount, scope)
+    stats
+  end
+
+  @doc """
+  `desk_metrics/2` plus the keys that could not be read: `{%{open:, breaching:, high:}, failed}`.
+  A failed count is `0` in the map (the legacy value) but is NAMED in `failed`, so its tile shows
+  "couldn't load" instead of a confident `0` (a quiet queue). Each count is its own guarded read.
+  """
+  def desk_metrics_status(mount, scope) do
+    parts = [
+      open:
+        Guard.run(:operator_desk_metric_open, scope, fn ->
+          count_tickets(mount, scope, &Ash.Query.filter(&1, status in [:open, :pending]))
+        end),
+      breaching:
+        Guard.run(:operator_desk_metric_breaching, scope, fn ->
+          count_tickets(mount, scope, &Ash.Query.filter(&1, breached == true))
+        end),
+      high:
+        Guard.run(:operator_desk_metric_high, scope, fn ->
+          count_tickets(mount, scope, &Ash.Query.filter(&1, priority in [:urgent, :high]))
+        end)
+    ]
+
+    {Map.new(parts, fn {key, result} -> {key, Guard.value(result, 0)} end),
+     for({key, result} <- parts, Guard.unavailable?(result), do: key)}
   end
 
   defp count_tickets(mount, scope, filter_fn) do
     Mount.resource(mount, Ticket)
     |> filter_fn.()
     |> Ash.count!(scope: scope)
-  rescue
-    _ -> 0
   end
 
   # -- A3 write side (sanctioned domain actions only) ----------------------------
@@ -325,18 +368,29 @@ defmodule Samen.Web.Operator.Reads do
   conversations/messages archive with it at the same instant. `:ok` or `{:error, reason}`.
   """
   def delete_ticket(mount, scope, id) do
-    record =
-      Mount.resource(mount, Ticket)
-      |> Ash.Query.filter(id == ^id)
-      |> Ash.Query.limit(1)
-      |> Ash.read_one!(scope: scope)
+    with {:ok, id} <- cast_id(id) do
+      Guard.write(:operator_delete_ticket, scope, fn ->
+        record =
+          Mount.resource(mount, Ticket)
+          |> Ash.Query.filter(id == ^id)
+          |> Ash.Query.limit(1)
+          |> Ash.read_one!(scope: scope)
 
-    case record do
-      nil -> {:error, :not_found}
-      record -> Ash.destroy(record, action: :archive, scope: scope)
+        case record do
+          nil -> {:error, :not_found}
+          record -> Ash.destroy(record, action: :archive, scope: scope)
+        end
+      end)
     end
-  rescue
-    e -> {:error, e}
+  end
+
+  # A client-supplied id is cast BEFORE it reaches a query: a malformed one is "not found" (no
+  # error log, no outage), never an exception that a read guard would report as a failure.
+  defp cast_id(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> {:ok, uuid}
+      :error -> {:error, :not_found}
+    end
   end
 
   @doc """
@@ -348,7 +402,24 @@ defmodule Samen.Web.Operator.Reads do
   `:__conversations__`) or `nil` (unknown ticket / read error) — the LiveView renders
   "not found", never a crash. Every read is OrgScope'd + explicitly bounded.
   """
-  def ticket_detail(mount, scope, ticket_id) do
+  def ticket_detail(mount, scope, ticket_id),
+    do: mount |> ticket_detail_result(scope, ticket_id) |> Guard.value(nil)
+
+  @doc """
+  `ticket_detail/3` that can say it failed: `{:ok, row}`, `{:ok, nil}` (an unknown — or malformed —
+  ticket id: a genuine "not found") or `{:error, :unavailable}` (the screen renders the error
+  state with a retry, never "Ticket not found"). The id is cast first, so a malformed one is
+  "not found" without a logged failure. The conversation threads are part of the same guarded
+  read: a failed thread read fails the detail rather than rendering a ticket with an empty thread.
+  """
+  def ticket_detail_result(mount, scope, ticket_id) do
+    case Ecto.UUID.cast(ticket_id) do
+      :error -> {:ok, nil}
+      {:ok, ticket_id} -> Guard.run(:operator_ticket_detail, scope, fn -> read_ticket_detail(mount, scope, ticket_id) end)
+    end
+  end
+
+  defp read_ticket_detail(mount, scope, ticket_id) do
     ticket =
       Mount.resource(mount, Ticket)
       |> Ash.Query.ensure_selected([:subject, :status, :priority, :sla_breach_at, :breached, :custom])
@@ -365,8 +436,6 @@ defmodule Samen.Web.Operator.Reads do
         |> desk_row(desk_joins(mount, scope))
         |> Map.put(:__conversations__, conversation_threads(mount, scope, ticket_id))
     end
-  rescue
-    _ -> nil
   end
 
   @doc """
@@ -379,12 +448,14 @@ defmodule Samen.Web.Operator.Reads do
   client input), threaded from the LiveView. Returns `:ok` or `{:error, reason}`.
   """
   def post_reply(mount, scope, org_id, ticket_id, body) when is_binary(body) do
-    with {:ok, conversation_id} <- ensure_conversation(mount, scope, org_id, ticket_id),
-         {:ok, _message} <- create_reply(mount, scope, org_id, conversation_id, body) do
-      :ok
+    with {:ok, ticket_id} <- cast_id(ticket_id) do
+      Guard.write(:operator_post_reply, scope, fn ->
+        with {:ok, conversation_id} <- ensure_conversation(mount, scope, org_id, ticket_id),
+             {:ok, _message} <- create_reply(mount, scope, org_id, conversation_id, body) do
+          :ok
+        end
+      end)
     end
-  rescue
-    e -> {:error, e}
   end
 
   # The ticket's conversation threads, each with its messages' bodies resolved per plane.
@@ -409,8 +480,6 @@ defmodule Samen.Web.Operator.Reads do
         earlier_hidden: truncated?
       }
     end)
-  rescue
-    _ -> []
   end
 
   # Messages on ONE conversation, oldest first, `body` resolved through PiiResolution on the
@@ -438,8 +507,6 @@ defmodule Samen.Web.Operator.Reads do
       end)
 
     {msgs, truncated?}
-  rescue
-    _ -> {[], false}
   end
 
   # Find the ticket's first conversation, or create one (a fresh ticket has none). Governed
@@ -491,14 +558,25 @@ defmodule Samen.Web.Operator.Reads do
 
   @doc "Non-PII operator summary metrics for the Accounts page header (bands per ADR-019)."
   def account_metrics(mount, scope, operator_org_id) do
-    accounts = accounts(mount, scope, operator_org_id)
+    mount
+    |> account_metrics_result(scope, operator_org_id)
+    |> Guard.value(%{accounts: 0, active: 0, at_risk: 0, mrr_cents: 0})
+  end
 
-    %{
-      accounts: length(accounts),
-      active: Enum.count(accounts, &(&1.__health__.band == :healthy)),
-      at_risk: Enum.count(accounts, &(&1.__health__.band in [:at_risk, :critical])),
-      mrr_cents: Enum.reduce(accounts, 0, fn a, acc -> acc + a.__mrr_cents__ end)
-    }
+  @doc """
+  `account_metrics/3` that can say it failed: `{:ok, metrics}` or `{:error, :unavailable}`. The
+  Accounts header renders "couldn't load" tiles for the error, never `0 accounts · $0 MRR`.
+  """
+  def account_metrics_result(mount, scope, operator_org_id) do
+    with {:ok, accounts} <- accounts_result(mount, scope, operator_org_id) do
+      {:ok,
+       %{
+         accounts: length(accounts),
+         active: Enum.count(accounts, &(&1.__health__.band == :healthy)),
+         at_risk: Enum.count(accounts, &(&1.__health__.band in [:at_risk, :critical])),
+         mrr_cents: Enum.reduce(accounts, 0, fn a, acc -> acc + a.__mrr_cents__ end)
+       }}
+    end
   end
 
   @doc """
@@ -522,7 +600,27 @@ defmodule Samen.Web.Operator.Reads do
   Returns `%{account:, movements:, tickets:, invoices:}` or `nil` (unknown account /
   read error) — the LiveView renders "not found", never a crash.
   """
-  def account_detail(mount, scope, operator_org_id, account_org_id, opts \\ []) do
+  def account_detail(mount, scope, operator_org_id, account_org_id, opts \\ []),
+    do: mount |> account_detail_result(scope, operator_org_id, account_org_id, opts) |> Guard.value(nil)
+
+  @doc """
+  `account_detail/5` that can say it failed: `{:ok, detail}`, `{:ok, nil}` (an unknown or malformed
+  account id — a genuine "not found") or `{:error, :unavailable}` (the screen renders the error
+  state with a retry, never "Account not found"). The id is cast before any query.
+  """
+  def account_detail_result(mount, scope, operator_org_id, account_org_id, opts \\ []) do
+    case Ecto.UUID.cast(account_org_id) do
+      :error ->
+        {:ok, nil}
+
+      {:ok, account_org_id} ->
+        Guard.run(:operator_account_detail, scope, fn ->
+          read_account_detail(mount, scope, operator_org_id, account_org_id, opts)
+        end)
+    end
+  end
+
+  defp read_account_detail(mount, scope, operator_org_id, account_org_id, opts) do
     case find_account_org(mount, operator_org_id, account_org_id) do
       nil ->
         nil
@@ -546,8 +644,6 @@ defmodule Samen.Web.Operator.Reads do
             |> Enum.map(&Map.put(&1, :__past_due__, past_due?(&1, now)))
         }
     end
-  rescue
-    _ -> nil
   end
 
   # The ONE account Org row — the same trusted non-PII grouping read as
@@ -559,8 +655,6 @@ defmodule Samen.Web.Operator.Reads do
     |> Ash.Query.limit(1)
     |> Ash.read!(authorize?: false)
     |> List.first()
-  rescue
-    _ -> nil
   end
 
   # The account's `mov` timeline (B1 ledger — token-blind ids/enums/cents/timestamps,
@@ -577,8 +671,6 @@ defmodule Samen.Web.Operator.Reads do
     |> Ash.Query.sort(occurred_at: :desc, id: :desc)
     |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
-  rescue
-    _ -> []
   end
 
   # -- private: Identity --------------------------------------------------------
@@ -594,8 +686,6 @@ defmodule Samen.Web.Operator.Reads do
     |> Ash.Query.sort(name: :asc)
     |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(authorize?: false)
-  rescue
-    _ -> []
   end
 
   # All tenant-admin Users (admin Membership), PII-resolved on the tenant plane (CLEAR),
@@ -629,8 +719,6 @@ defmodule Samen.Web.Operator.Reads do
     |> Ash.Query.ensure_selected([:role, :status, :user_id, :org_id])
     |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
-  rescue
-    _ -> []
   end
 
   defp users_by_id(mount, scope) do
@@ -640,8 +728,6 @@ defmodule Samen.Web.Operator.Reads do
     |> Ash.read!(scope: scope)
     |> resolve_pii(mount, User, scope)
     |> Map.new(&{&1.id, &1})
-  rescue
-    _ -> %{}
   end
 
   # -- private: Billing ---------------------------------------------------------
@@ -672,8 +758,6 @@ defmodule Samen.Web.Operator.Reads do
         __mrr_cents__: mrr
       }
     end)
-  rescue
-    _ -> []
   end
 
   defp subscriptions_by_customer(mount, scope) do
@@ -698,8 +782,6 @@ defmodule Samen.Web.Operator.Reads do
     |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
     |> resolve_pii(mount, Customer, scope)
-  rescue
-    _ -> []
   end
 
   defp invoices(mount, scope) do
@@ -715,8 +797,6 @@ defmodule Samen.Web.Operator.Reads do
       |> Map.take([:id, :status, :amount_due_cents, :amount_paid_cents, :currency, :due_date, :paid_at, :customer_id])
       |> Map.put(:__customer__, Map.get(customers_by_id, inv.customer_id))
     end)
-  rescue
-    _ -> []
   end
 
   defp plans_by_id(mount, scope) do
@@ -725,8 +805,6 @@ defmodule Samen.Web.Operator.Reads do
     |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
     |> Map.new(&{&1.id, &1})
-  rescue
-    _ -> %{}
   end
 
   # ADR-036 §4.5(3): unit_amount_cents was dropped by the H1 Money migration;
@@ -738,8 +816,6 @@ defmodule Samen.Web.Operator.Reads do
     |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
     |> Map.new(&{&1.plan_id, Samen.Type.Money.cents(&1.unit_amount)})
-  rescue
-    _ -> %{}
   end
 
   # -- private: Support ---------------------------------------------------------
@@ -762,8 +838,6 @@ defmodule Samen.Web.Operator.Reads do
           |> bump_count(tid, :breaching, t.breached == true)
       end
     end)
-  rescue
-    _ -> %{}
   end
 
   defp bump_count(acc, _tid, _key, false), do: acc
@@ -829,15 +903,14 @@ defmodule Samen.Web.Operator.Reads do
   # never touched). `authorize?: false` reads the operator's OWN book cross-account (the
   # same trusted non-PII grouping posture as `account_orgs/2` and the cross-tenant
   # `AnalyticsReads` rollup); the day count is computed HERE so the score stays
-  # clock-free (one `now` per assembly — B9 carry B4-P2-1). Any read failure degrades
-  # to `%{}` — it can never empty out the surrounding page.
+  # clock-free (one `now` per assembly — B9 carry B4-P2-1). A read FAILURE is not "no
+  # events yet": it raises into the caller's `Guard.run`, so the account list says it could not load
+  # rather than scoring every account's activity factor as `:unknown`.
   defp activity_by_account(now) do
     case Samen.Analytics.product_event_resource() do
       nil -> %{}
       resource -> latest_activity_days(resource, now)
     end
-  rescue
-    _ -> %{}
   end
 
   defp latest_activity_days(resource, now) do
@@ -860,8 +933,6 @@ defmodule Samen.Web.Operator.Reads do
         _ -> acc
       end
     end)
-  rescue
-    _ -> %{}
   end
 
   # Whole days between an event timestamp and `now` — non-negative (a future-stamped
@@ -878,8 +949,6 @@ defmodule Samen.Web.Operator.Reads do
     |> Ash.read!(scope: scope)
     |> resolve_pii(mount, Agent, scope)
     |> Map.new(&{&1.id, &1})
-  rescue
-    _ -> %{}
   end
 
   # ticket_id -> agent_id, via the first agent-authored message on the ticket's conversation.
@@ -904,8 +973,6 @@ defmodule Samen.Web.Operator.Reads do
         acc
       end
     end)
-  rescue
-    _ -> %{}
   end
 
   # -- private: shared ----------------------------------------------------------
@@ -918,7 +985,11 @@ defmodule Samen.Web.Operator.Reads do
       repo: mount.repo
     )
   rescue
-    _ -> records
+    e ->
+      # Fail-CLOSED (records stay masked/unresolved, never guessed) but not silent: the failure is
+      # reported by name + exception module like any other read failure.
+      Guard.report(:operator_resolve_pii, scope, e)
+      records
   end
 
   defp actor_of(%Samen.Scope{actor: actor}), do: actor

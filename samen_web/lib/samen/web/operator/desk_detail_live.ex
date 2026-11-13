@@ -62,19 +62,27 @@ defmodule Samen.Web.Operator.DeskDetailLive do
 
     case {operator_org_id, ticket_id} do
       {nil, _} ->
-        assign(socket, no_org: true, ticket_id: ticket_id, operator_org_id: nil, ticket: nil)
+        assign(socket, no_org: true, ticket_id: ticket_id, operator_org_id: nil, ticket: nil, load_error: false)
 
       {_org, nil} ->
-        assign(socket, no_org: false, ticket_id: nil, operator_org_id: operator_org_id, ticket: nil)
+        assign(socket, no_org: false, ticket_id: nil, operator_org_id: operator_org_id, ticket: nil, load_error: false)
 
       {org_id, ticket_id} ->
         scope = Operator.scope(mount)
+
+        {ticket, load_error} =
+          case Reads.ticket_detail_result(mount, scope, ticket_id) do
+            {:ok, ticket} -> {ticket, false}
+            # A failed read is NOT "Ticket not found": the page says it could not load, with a retry.
+            {:error, _} -> {nil, true}
+          end
 
         assign(socket,
           no_org: false,
           ticket_id: ticket_id,
           operator_org_id: org_id,
-          ticket: Reads.ticket_detail(mount, scope, ticket_id)
+          ticket: ticket,
+          load_error: load_error
         )
     end
   end
@@ -82,6 +90,8 @@ defmodule Samen.Web.Operator.DeskDetailLive do
   # -- reply (governed Support.Message create) ---------------------------------
 
   @impl true
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.ticket_id)}
+
   def handle_event("reply", %{"reply" => %{"body" => body}}, socket) do
     body = String.trim(body || "")
     mount = socket.assigns.samen_mount
@@ -100,6 +110,10 @@ defmodule Samen.Web.Operator.DeskDetailLive do
           :ok ->
             {:noreply, socket |> assign(reply_error: nil, ai_draft: nil, ai_error: nil) |> load(socket.assigns.ticket_id)}
 
+          # An outage is not a refusal: the reply was NOT posted, and it is safe to try again.
+          {:error, :unavailable} ->
+            {:noreply, assign(socket, reply_error: "We couldn't post the reply right now — nothing was posted. Try again.")}
+
           {:error, _reason} ->
             {:noreply, assign(socket, reply_error: "Could not post the reply.")}
         end
@@ -109,8 +123,6 @@ defmodule Samen.Web.Operator.DeskDetailLive do
   # -- AI draft (T149 B2a) — surface the EXISTING draft→approve loop, fail-honest -------
   def handle_event("draft_ai", _params, socket) do
     mount = socket.assigns.samen_mount
-    scope = Operator.scope(mount)
-
     attrs = %{
       to_subscriber_id: requester_subscriber_id(socket.assigns.ticket),
       instruction:
@@ -118,7 +130,7 @@ defmodule Samen.Web.Operator.DeskDetailLive do
           inspect(socket.assigns.ticket && socket.assigns.ticket.subject) <> "."
     }
 
-    case draft_reply(scope, attrs) do
+    case draft_reply(mount, socket.assigns.operator_org_id, attrs) do
       {:ok, %{draft_text: text} = result} ->
         {:noreply,
          assign(socket,
@@ -141,14 +153,13 @@ defmodule Samen.Web.Operator.DeskDetailLive do
   # normal governed reply — the human stays in the loop).
   def handle_event("use_draft", _params, socket), do: {:noreply, socket}
 
-  # `draft_reply/3` is fail-honest but persistence can RAISE on a host that has not adopted
-  # the AI plane (its `SupportReplyDraft` repo is absent) — normalize any raise to an honest
-  # `{:error, _}` so the button never crashes the LiveView and never fakes a draft.
-  defp draft_reply(scope, attrs) do
-    Samen.AI.SupportOperator.draft_reply(scope, attrs)
-  rescue
-    _ -> {:error, :not_configured}
-  end
+  # The draft goes through `Samen.Web.AI.Server.support_draft/4` (a `Guard.write`): a raise or a
+  # returned data-layer error is `{:error, :unavailable}` (logged by name only), and ONLY a host that
+  # never adopted the AI draft domain — decided structurally, not from error text — is
+  # `{:error, {:persist_unavailable, :not_adopted}}`. It never fakes a draft and never says "not
+  # configured" for an outage.
+  defp draft_reply(mount, operator_org_id, attrs),
+    do: Samen.Web.AI.Server.support_draft(mount, operator_org_id, attrs)
 
   defp requester_subscriber_id(%{__requester__: %{id: id}}) when is_binary(id), do: id
   defp requester_subscriber_id(_), do: "operator-desk"
@@ -156,8 +167,14 @@ defmodule Samen.Web.Operator.DeskDetailLive do
   defp honest_ai_error(:not_configured),
     do: "AI drafting is not configured for this host (no provider wired). No draft was produced."
 
-  defp honest_ai_error(reason),
-    do: "AI drafting is unavailable (#{inspect(reason)}). No draft was produced."
+  defp honest_ai_error({:persist_unavailable, :not_adopted}),
+    do: "This host has not adopted the AI draft domain. No draft was produced or saved."
+
+  defp honest_ai_error(:unavailable),
+    do: "AI drafting is unavailable right now. No draft was produced. Try again."
+
+  # Any other reason (a refusal, a denial): fixed copy only — the reason term is never printed.
+  defp honest_ai_error(_reason), do: "AI drafting did not produce a draft. No draft was produced."
 
   # -- render ------------------------------------------------------------------
 
@@ -180,6 +197,10 @@ defmodule Samen.Web.Operator.DeskDetailLive do
           <% @no_org -> %>
             <div class="wrap">
               <div class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">No operator org resolved.</div>
+            </div>
+          <% @load_error -> %>
+            <div class="wrap" id="ticket-load-error">
+              <.error_state body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
             </div>
           <% is_nil(@ticket) -> %>
             <div class="wrap">
