@@ -32,6 +32,8 @@ defmodule Samen.Web.Marketing.CampaignLive do
 
   alias Samen.Web.Marketing.Reads
 
+  @display_limit 200
+
   @impl true
   def mount(params, session, socket) do
     socket = assign_mount(socket, session)
@@ -62,29 +64,55 @@ defmodule Samen.Web.Marketing.CampaignLive do
     template_id = nz(params["template_id"])
     segment_id = nz(params["segment_id"])
 
-    results =
-      case segment_id && Reads.get_segment(mount, scope, segment_id) do
-        {:ok, segment} ->
-          Reads.send_campaign_to_segment(mount, scope, campaign, segment, template_id, org_id)
+    if is_nil(template_id) or is_nil(segment_id) or is_nil(campaign) do
+      {:noreply,
+       assign(socket,
+         send_results: nil,
+         notice: "Choose a template and a segment before sending."
+       )}
+    else
+      {results, notice} = run_send(mount, scope, campaign, segment_id, template_id, org_id)
 
-        _ ->
-          []
-      end
-
-    queued = Enum.count(results, &match?(%{result: {:ok, _}}, &1))
-    refused = length(results) - queued
-
-    notice =
-      "Enqueued #{queued} send(s); #{refused} refused (suppressed / unsubscribed / undeliverable)."
-
-    {:noreply,
-     assign(socket,
-       send_results: results,
-       notice: notice,
-       sends: Reads.sends_for_campaign(mount, scope, campaign && campaign.id),
-       event_counts: Reads.event_counts(mount, scope, campaign && campaign.id)
-     )}
+      {:noreply,
+       assign(socket,
+         # Display is bounded; the notice carries the full counts.
+         send_results: results && Enum.take(results, @display_limit),
+         notice: notice,
+         sends: Reads.sends_for_campaign(mount, scope, campaign.id),
+         event_counts: Reads.event_counts(mount, scope, campaign.id)
+       )}
+    end
   end
+
+  defp run_send(mount, scope, campaign, segment_id, template_id, org_id) do
+    with {:ok, segment} <- Reads.get_segment(mount, scope, segment_id),
+         {:ok, results} <-
+           Reads.send_campaign_to_segment(mount, scope, campaign, segment, template_id, org_id) do
+      queued = Enum.count(results, &match?(%{result: {:ok, _}}, &1))
+      already = Enum.count(results, &match?(%{result: {:error, :already_sent}}, &1))
+      refused = length(results) - queued - already
+
+      notice =
+        if results == [] do
+          "No eligible recipients in this segment."
+        else
+          "Enqueued #{queued} send(s); #{already} already sent; #{refused} refused (suppressed / unsubscribed / undeliverable)." <>
+            if(length(results) > @display_limit,
+              do: " Showing the first #{@display_limit}.",
+              else: ""
+            )
+        end
+
+      {results, notice}
+    else
+      :error -> {nil, "Send failed: the segment was not found."}
+      {:error, reason} -> {nil, "Send failed: #{describe_failure(reason)}"}
+    end
+  end
+
+  defp describe_failure(:template_required), do: "choose a template."
+  defp describe_failure(:campaign_required), do: "campaign not found."
+  defp describe_failure(e) when is_exception(e), do: Exception.message(e)
 
   @doc false
   def load(socket, nil, _campaign_id) do
@@ -202,7 +230,7 @@ defmodule Samen.Web.Marketing.CampaignLive do
                       </select>
                     </label>
                     <div>
-                      <.button variant="primary" type="submit">Send to segment</.button>
+                      <.button variant="primary" type="submit" phx-disable-with="Sending…">Send to segment</.button>
                     </div>
                   </form>
                 </div>
@@ -288,6 +316,7 @@ defmodule Samen.Web.Marketing.CampaignLive do
 
   # Per-recipient result → a pill. The refusal is VISIBLE (suppressed/unsubscribed shown red).
   defp result_pill({:ok, _}), do: pilled("ok", "queued")
+  defp result_pill({:error, :already_sent}), do: pilled("mut", "already sent — skipped")
   defp result_pill({:error, :suppressed}), do: pilled("bad", "suppressed — skipped")
   defp result_pill({:error, :unsubscribed}), do: pilled("bad", "unsubscribed — skipped")
   defp result_pill({:error, :bounced}), do: pilled("bad", "bounced — skipped")

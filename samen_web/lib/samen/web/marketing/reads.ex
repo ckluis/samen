@@ -392,35 +392,102 @@ defmodule Samen.Web.Marketing.Reads do
   end
 
   @doc """
-  Send a campaign to a whole segment's audience (ADR-011 §7.2). Returns a per-subscriber
-  result list `[%{subscriber_id, result}]` where `result` is `{:ok, _}` (queued) or
-  `{:error, reason}` (suppressed / undeliverable) — so the UI can render "queued" vs
-  "suppressed — skipped" per recipient (surfacing the refusal).
+  Send a campaign to a whole segment's audience (ADR-011 §7.2). Returns
+  `{:ok, [%{subscriber_id, result}]}` where `result` is `{:ok, _}` (queued) or
+  `{:error, reason}` (suppressed / undeliverable / `:already_sent`) — so the UI can render
+  "queued" vs "suppressed — skipped" per recipient (surfacing the refusal) — or
+  `{:error, reason}` when the send could not be run at all (`:campaign_required`,
+  `:template_required`, or the exception that stopped the audience read). A failure is NEVER
+  folded into an empty result list.
+
+  ## Audience = the segment's real membership
+
+  A `Segment` is a filter-criteria bag (the core models no subscriber-to-segment join), and the
+  only criterion it defines is `filter_criteria["status"]` (default `"active"`). The audience is
+  EVERY org subscriber matching it — walked with a keyset cursor on `id` in pages of
+  `:page_size` (default #{@detail_limit}; the page size bounds each read, NOT the audience), so
+  subscriber 201+ is sent just like subscriber 1.
+
+  ## Idempotent per (campaign, subscriber)
+
+  A subscriber that already has a `Send` row for this campaign is reported
+  `{:error, :already_sent}` and gets no second row or job, so a repeated submit is a no-op for
+  everyone already sent. (The core declares no unique identity on `Send`, so this is a
+  read-before-write guard, not a database constraint.)
   """
-  def send_campaign_to_segment(mount, scope, campaign, segment, template_id, org_id) do
-    audience_ids =
+  def send_campaign_to_segment(mount, scope, campaign, segment, template_id, org_id, opts \\ [])
+
+  def send_campaign_to_segment(_mount, _scope, nil, _segment, _template_id, _org_id, _opts),
+    do: {:error, :campaign_required}
+
+  def send_campaign_to_segment(_mount, _scope, _campaign, _segment, template_id, _org_id, _opts)
+      when template_id in [nil, ""],
+      do: {:error, :template_required}
+
+  def send_campaign_to_segment(mount, scope, campaign, segment, template_id, org_id, opts) do
+    page_size = Keyword.get(opts, :page_size, @detail_limit)
+
+    unless is_integer(page_size) and page_size > 0,
+      do: raise(ArgumentError, "page_size must be a positive integer, got: #{inspect(page_size)}")
+
+    status = audience_status(segment)
+
+    results =
+      Stream.unfold(:start, fn
+        :done ->
+          nil
+
+        cursor ->
+          ids = audience_page(mount, scope, status, cursor, page_size)
+          next = if length(ids) < page_size, do: :done, else: List.last(ids)
+          if ids == [], do: nil, else: {ids, next}
+      end)
+      |> Enum.flat_map(fn ids ->
+        sent = already_sent_ids(mount, scope, campaign.id, ids)
+
+        Enum.map(ids, fn sub_id ->
+          result =
+            if MapSet.member?(sent, sub_id) do
+              {:error, :already_sent}
+            else
+              enqueue_send(mount, scope, %{
+                subscriber_id: sub_id,
+                org_id: org_id,
+                campaign_id: campaign.id,
+                template_id: template_id
+              })
+            end
+
+          %{subscriber_id: sub_id, result: result}
+        end)
+      end)
+
+    {:ok, results}
+  rescue
+    e -> {:error, e}
+  end
+
+  defp audience_page(mount, scope, status, cursor, page_size) do
+    query =
       Mount.resource(mount, Subscriber)
       |> Ash.Query.ensure_selected([:id, :status])
-      |> Ash.Query.filter(status == ^audience_status(segment))
-      |> Ash.Query.limit(@detail_limit)
-      |> Ash.read!(scope: scope)
-      |> Enum.map(& &1.id)
+      |> Ash.Query.filter(status == ^status)
 
-    # Also attempt any suppressed/unsubscribed subscribers referenced by the segment so the
-    # refusal is VISIBLE — but for the plain "active" audience this list is the deliverables.
-    Enum.map(audience_ids, fn sub_id ->
-      result =
-        enqueue_send(mount, scope, %{
-          subscriber_id: sub_id,
-          org_id: org_id,
-          campaign_id: campaign && campaign.id,
-          template_id: template_id
-        })
+    query = if cursor == :start, do: query, else: Ash.Query.filter(query, id > ^cursor)
 
-      %{subscriber_id: sub_id, result: result}
-    end)
-  rescue
-    _ -> []
+    query
+    |> Ash.Query.sort(id: :asc)
+    |> Ash.Query.limit(page_size)
+    |> Ash.read!(scope: scope)
+    |> Enum.map(& &1.id)
+  end
+
+  defp already_sent_ids(mount, scope, campaign_id, subscriber_ids) do
+    Mount.resource(mount, Send)
+    |> Ash.Query.ensure_selected([:subscriber_id, :campaign_id])
+    |> Ash.Query.filter(campaign_id == ^campaign_id and subscriber_id in ^subscriber_ids)
+    |> Ash.read!(scope: scope)
+    |> MapSet.new(& &1.subscriber_id)
   end
 
   @doc """

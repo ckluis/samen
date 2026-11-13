@@ -1,0 +1,20 @@
+# SABOTAGE: campaign send stops after the first audience page, so subscriber page_size+1 onwards is never 
+#   sent
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/marketing_render_test.exs
+# MUST_FAIL: the audience is the segment's WHOLE membership, paged by keyset
+diff --git a/samen_web/lib/samen/web/marketing/reads.ex b/samen_web/lib/samen/web/marketing/reads.ex
+index 53b4900d..a8f4afe2 100644
+--- a/samen_web/lib/samen/web/marketing/reads.ex
++++ b/samen_web/lib/samen/web/marketing/reads.ex
+@@ -439,7 +439,7 @@ defmodule Samen.Web.Marketing.Reads do
+ 
+         cursor ->
+           ids = audience_page(mount, scope, status, cursor, page_size)
+-          next = if length(ids) < page_size, do: :done, else: List.last(ids)
++          next = if length(ids) < page_size or true, do: :done, else: List.last(ids)
+           if ids == [], do: nil, else: {ids, next}
+       end)
+       |> Enum.flat_map(fn ids ->
