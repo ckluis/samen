@@ -256,10 +256,10 @@ defmodule Samen.Web.Onboarding.WizardLive do
         end
 
       _ ->
-        true
+        not Samen.Web.CurrentOrg.tenant_gate_armed?(mount)
     end
   rescue
-    _ -> true
+    _ -> not Samen.Web.CurrentOrg.tenant_gate_armed?(mount)
   end
 
   # -- render ------------------------------------------------------------------

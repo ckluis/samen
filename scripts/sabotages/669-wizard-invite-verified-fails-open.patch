@@ -1,0 +1,24 @@
+# SABOTAGE: The onboarding wizard's verified?/2 fails OPEN (true) for an unresolvable principal on an armed 
+#   host, handing the invite scope verified?: true and bypassing the ADR-035 A2 capability gate.
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/onboarding_invite_failclosed_test.exs
+# MUST_FAIL: armed host + unresolvable principal: the invite is refused (fail CLOSED)
+diff --git a/samen_web/lib/samen/web/onboarding/wizard_live.ex b/samen_web/lib/samen/web/onboarding/wizard_live.ex
+index 7e555178..8b4ad672 100644
+--- a/samen_web/lib/samen/web/onboarding/wizard_live.ex
++++ b/samen_web/lib/samen/web/onboarding/wizard_live.ex
+@@ -256,10 +256,10 @@ defmodule Samen.Web.Onboarding.WizardLive do
+         end
+ 
+       _ ->
+-        not Samen.Web.CurrentOrg.tenant_gate_armed?(mount)
++        true
+     end
+   rescue
+-    _ -> not Samen.Web.CurrentOrg.tenant_gate_armed?(mount)
++    _ -> true
+   end
+ 
+   # -- render ------------------------------------------------------------------
