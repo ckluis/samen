@@ -228,14 +228,17 @@ defmodule Samen.Web.Chat do
   Re-read a broadcast message for THIS viewer's scope (the `handle_info` seam, §3.2). Resolves
   the body per the receiving viewer's plane (tenant clear / operator `••••`) AND resolves each
   stored ref into a per-viewer-masked unfurl card. Returns `{:ok, %{message:, cards:}}` or
-  `:error`. This is where masking survives the realtime path by construction.
+  `:error` (the message is not visible to this viewer), or `{:error, :unavailable}` when the
+  re-read FAILED (the caller says a message is missing instead of dropping it).
+  This is where masking survives the realtime path by construction.
   """
   @spec read_broadcast(Mount.t(), Samen.Scope.t(), map()) ::
-          {:ok, %{message: map(), cards: list()}} | :error
+          {:ok, %{message: map(), cards: list()}} | :error | {:error, :unavailable}
   def read_broadcast(%Mount{} = mount, scope, %{message_id: id}) do
-    case Reads.get_message(mount, scope, id) do
+    case Reads.get_message_result(mount, scope, id) do
       {:ok, message} -> {:ok, %{message: message, cards: resolve_cards(mount, scope, message.refs)}}
-      :error -> :error
+      {:error, :not_found} -> :error
+      {:error, :unavailable} = unavailable -> unavailable
     end
   end
 
@@ -256,6 +259,8 @@ defmodule Samen.Web.Chat do
 
   # Snapshot the org's disclosure setting into a thread's disclosure_mode at create.
   defp snapshot_disclosure_mode(mount, scope) do
+    # Fail-closed: an unreadable setting snapshots the MASKED floor (never discloses on a guess);
+    # the read is logged by `disclosure_setting_result/2`.
     case Reads.disclosure_setting(mount, scope) do
       %{expose_identity_to_support: true} -> :tenant_wide
       _ -> :masked
@@ -302,7 +307,12 @@ defmodule Samen.Web.Chat do
         :ok
     end
   rescue
-    _ -> :ok
+    e ->
+      # Best-effort BY DESIGN: the POSTED MESSAGE is the load-bearing write, so a mention
+      # notification that fails must not fail (or roll back) the post. Not silent: logged by
+      # name and cause only (no body, handle or value).
+      Samen.Web.Reads.Guard.report(:chat_notify_mentions, scope, e)
+      :ok
   end
 
   # Broadcast the id-only envelope unless the caller opted out (`broadcast: false`, e.g. a

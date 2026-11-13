@@ -31,6 +31,7 @@ defmodule Samen.Web.Chat.ThreadLive do
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
   alias Samen.Web.Operator.Impersonation
+  alias Samen.Web.Reads.Guard
 
   @impl true
   def mount(params, session, socket) do
@@ -87,14 +88,25 @@ defmodule Samen.Web.Chat.ThreadLive do
       {:ok, session_info} ->
         scope = Mount.scope(mount, org_id)
 
-        case Reads.get_thread(mount, scope, thread_id) do
+        # A FAILED thread read is the error state (retry), never "Conversation not available.";
+        # participants and messages each fail on their own (`section_errors`).
+        case Reads.get_thread_result(mount, scope, thread_id) do
           {:ok, thread} ->
-            participants = Reads.participants(mount, scope, thread_id)
+            participants_result = Reads.participants_result(mount, scope, thread_id)
+            messages_result = Reads.messages_window_result(mount, scope, thread_id)
+            participants = Guard.value(participants_result, [])
             resolved_participants = Identity.resolve_participants(mount, scope, thread, participants)
-            {messages, earlier_hidden} = Reads.messages_window(mount, scope, thread_id)
+            {messages, earlier_hidden} = Guard.value(messages_result, {[], false})
 
             assign(socket,
               no_thread: false,
+              load_error: nil,
+              section_errors:
+                for(
+                  {key, result} <- [participants: participants_result, messages: messages_result],
+                  Guard.unavailable?(result),
+                  do: key
+                ),
               org_id: org_id,
               thread_id: thread_id,
               thread: thread,
@@ -108,8 +120,11 @@ defmodule Samen.Web.Chat.ThreadLive do
               open_error: nil
             )
 
-          :error ->
+          {:error, :not_found} ->
             assign(assign_empty(socket), org_id: org_id, thread_id: thread_id)
+
+          {:error, :unavailable} ->
+            assign(assign_empty(socket), org_id: org_id, thread_id: thread_id, load_error: Guard.message())
         end
     end
   end
@@ -155,7 +170,11 @@ defmodule Samen.Web.Chat.ThreadLive do
   # ---------------------------------------------------------------------------
   # SEND — parse refs on plaintext → persist (vault) → broadcast id-only
   # ---------------------------------------------------------------------------
+  # The kit error state's "Try again" (a failed thread / messages / participants read).
   @impl true
+  def handle_event("retry_load", _params, socket),
+    do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.thread_id)}
+
   def handle_event("send", %{"body" => body}, socket) when is_binary(body) and body != "" do
     mount = socket.assigns.samen_mount
     scope = Mount.scope(mount, socket.assigns.org_id)
@@ -183,7 +202,10 @@ defmodule Samen.Web.Chat.ThreadLive do
       # broadcast → handle_info re-read.
       {:noreply, append_message(socket, mount, scope, message)}
     else
-      _ -> {:noreply, socket}
+      # A refused / failed post tells the sender (flash group) — never a silently dropped message.
+      false -> {:noreply, socket}
+      :error -> {:noreply, put_flash(socket, :error, "You can't post in this conversation right now.")}
+      _ -> {:noreply, put_flash(socket, :error, "Your message wasn't sent. Nothing was posted — try again.")}
     end
   end
 
@@ -229,6 +251,10 @@ defmodule Samen.Web.Chat.ThreadLive do
 
         :error ->
           {:noreply, socket}
+
+        # The broadcast arrived but its re-read failed: say a message is missing, don't drop it.
+        {:error, :unavailable} ->
+          {:noreply, put_flash(socket, :error, "A new message couldn't be loaded. Reload to see it.")}
       end
     else
       {:noreply, socket}
@@ -292,6 +318,11 @@ defmodule Samen.Web.Chat.ThreadLive do
                 </form>
               </div>
             </div>
+          <% @no_thread and @load_error != nil -> %>
+            <.topbar title="Chat" crumbs={[CurrentOrg.name(@samen_mount, @org_id), "Chat"]} />
+            <div class="wrap">
+              <.error_state class="thread-error" body={@load_error} retry_event="retry_load" />
+            </div>
           <% @no_thread -> %>
             <.topbar title="Chat" crumbs={[CurrentOrg.name(@samen_mount, @org_id), "Chat"]} />
             <div class="wrap">
@@ -321,6 +352,7 @@ defmodule Samen.Web.Chat.ThreadLive do
 
             <div class="wrap chat-layout">
             <div class="chat-main">
+              <.error_state :if={:messages in @section_errors} class="messages-error" body={Guard.message()} retry_event="retry_load" />
               <div id="chat-messages" class="chat-messages">
                 <div :if={@earlier_hidden} id="earlier-messages-hidden" class="chat-earlier" style="text-align:center;color:var(--muted);font-size:12px;padding:8px 0">
                   Earlier messages are not shown — this is the latest part of the conversation.
@@ -342,7 +374,8 @@ defmodule Samen.Web.Chat.ThreadLive do
 
             <aside class="chat-aside">
               <div class="gtitle"><h3>Participants</h3><span class="n">{length(@participants)}</span></div>
-              <.presence_roster participants={@participants} online_ids={online_ids(@participants)} />
+              <.error_state :if={:participants in @section_errors} class="participants-error" body={Guard.message()} retry_event="retry_load" />
+              <.presence_roster :if={:participants not in @section_errors} participants={@participants} online_ids={online_ids(@participants)} />
             </aside>
           </div>
         <% end %>
@@ -364,7 +397,9 @@ defmodule Samen.Web.Chat.ThreadLive do
       composer: "",
       impersonation: :none,
       session_info: nil,
-      open_error: nil
+      open_error: nil,
+      load_error: nil,
+      section_errors: []
     )
   end
 
@@ -390,9 +425,16 @@ defmodule Samen.Web.Chat.ThreadLive do
   end
 
   defp append_message(socket, mount, scope, message) do
-    {:ok, message} = Reads.get_message(mount, scope, message.id)
-    cards = Chat.resolve_cards(mount, scope, message.refs)
-    push_message(socket, %{message: message, cards: cards})
+    # The post SUCCEEDED; only the re-read for display failed. Say so (reload shows it) rather
+    # than crash the room on a MatchError.
+    case Reads.get_message_result(mount, scope, message.id) do
+      {:ok, message} ->
+        cards = Chat.resolve_cards(mount, scope, message.refs)
+        push_message(socket, %{message: message, cards: cards})
+
+      {:error, _} ->
+        put_flash(socket, :error, "Your message was sent, but it couldn't be shown just now. Reload to see it.")
+    end
   end
 
   # Append one message entry to the stream-ish assign (kept simple: prepend/append list).

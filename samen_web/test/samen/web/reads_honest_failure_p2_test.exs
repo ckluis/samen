@@ -652,4 +652,87 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
       end
     end
   end
+
+  # ===========================================================================
+  # Chat
+  # ===========================================================================
+
+  describe "Chat" do
+    alias Samen.Web.Chat.{ThreadLive, ThreadsLive}
+
+    setup %{org_id: org_id} do
+      %{chat: Seeds.seed_chat(org_id, disclosure_mode: :tenant_wide)}
+    end
+
+    test "inbox: a failed threads read and a failed disclosure read each say so; empty stays empty", %{org_id: org_id, chat: chat} do
+      mount = build_mount(:chat)
+      assert html(ThreadsLive, socket_for(ThreadsLive, mount, [Ash.UUID.generate()], flash_note: nil)) =~ "No conversations yet."
+
+      inject_read_faults([:chat_threads])
+      socket = failing(fn -> socket_for(ThreadsLive, mount, [org_id], flash_note: nil) end)
+      rendered = html(ThreadsLive, socket)
+      assert_error_state(rendered)
+      refute rendered =~ "No conversations yet."
+      refute rendered =~ chat.thread.subject
+
+      clear_read_faults()
+      inject_read_faults([:chat_disclosure_setting])
+      socket = failing(fn -> socket_for(ThreadsLive, mount, [org_id], flash_note: nil) end)
+      rendered = html(ThreadsLive, socket)
+      assert rendered =~ "disclosure-error"
+      refute rendered =~ "expose-identity-toggle"
+      assert rendered =~ chat.thread.subject
+
+      clear_read_faults()
+      rendered = html(ThreadsLive, event(ThreadsLive, socket, "retry_load"))
+      assert rendered =~ "expose-identity-toggle"
+    end
+
+    test "room: a FAILED thread read is the error state, not 'Conversation not available.'; 404 survives", %{org_id: org_id, chat: chat} do
+      mount = build_mount(:chat)
+      inject_read_faults([:chat_get_thread])
+      socket = failing(fn -> socket_for(ThreadLive, mount, [org_id, chat.thread.id], org_id: org_id, thread_id: chat.thread.id) end)
+      rendered = html(ThreadLive, socket)
+      assert_error_state(rendered)
+      refute rendered =~ "Conversation not available."
+      refute rendered =~ "CHAT-BODY-SENTINEL"
+
+      clear_read_faults()
+      rendered = html(ThreadLive, event(ThreadLive, socket, "retry_load"))
+      refute_error_state(rendered)
+      assert rendered =~ "CHAT-BODY-SENTINEL"
+
+      for id <- [Ash.UUID.generate(), "not-a-uuid"] do
+        rendered = html(ThreadLive, socket_for(ThreadLive, mount, [org_id, id], org_id: org_id, thread_id: id))
+        assert rendered =~ "Conversation not available."
+        refute_error_state(rendered)
+      end
+    end
+
+    test "room: messages and participants fail on their own; the operator-plane error prints no body or name", %{org_id: org_id, chat: chat} do
+      mount = build_mount(:chat)
+      inject_read_faults([:chat_messages_window])
+      rendered = html(ThreadLive, failing(fn -> socket_for(ThreadLive, mount, [org_id, chat.thread.id], org_id: org_id, thread_id: chat.thread.id) end))
+      assert rendered =~ "messages-error"
+      refute rendered =~ "CHAT-BODY-SENTINEL"
+      assert rendered =~ "chat-composer"
+
+      clear_read_faults()
+      inject_read_faults([:chat_participants])
+      rendered = html(ThreadLive, failing(fn -> socket_for(ThreadLive, mount, [org_id, chat.thread.id], org_id: org_id, thread_id: chat.thread.id) end))
+      assert rendered =~ "participants-error"
+      assert rendered =~ "CHAT-BODY-SENTINEL"
+    end
+
+    test "send: a refused post (no self participant) tells the sender instead of silently dropping it", %{org_id: org_id, chat: chat} do
+      mount = build_mount(:chat)
+      inject_read_faults([:chat_participants])
+      socket = failing(fn -> socket_for(ThreadLive, mount, [org_id, chat.thread.id], org_id: org_id, thread_id: chat.thread.id) end)
+      # `:flash` is a reserved assign: a real mounted socket carries it, a bare test socket does not.
+      socket = %{socket | assigns: Map.put(socket.assigns, :flash, %{})}
+      socket = failing(fn -> event(ThreadLive, socket, "send", %{"body" => "hello"}) end)
+      assert socket.assigns.flash["error"] =~ "can't post"
+      refute socket.assigns.flash["error"] =~ "Injected"
+    end
+  end
 end

@@ -18,6 +18,7 @@ defmodule Samen.Web.Chat.ThreadsLive do
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
   alias Samen.Web.Operator.Impersonation
+  alias Samen.Web.Reads.Guard
 
   @impl true
   def mount(params, session, socket) do
@@ -52,7 +53,7 @@ defmodule Samen.Web.Chat.ThreadsLive do
     socket
     |> ensure_flash()
     |> ensure_return_to()
-    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, threads: [], expose_identity: false)
+    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, threads: [], expose_identity: false, section_errors: [])
     # No tenant resolved → nothing to gate; render the no-org card, never the denied panel.
     |> assign(impersonation: :none, session_info: nil, open_error: nil)
   end
@@ -69,18 +70,24 @@ defmodule Samen.Web.Chat.ThreadsLive do
         socket
         |> ensure_flash()
         |> ensure_return_to()
-        |> assign(no_org: false, org_id: org_id, threads: [], expose_identity: false)
+        |> assign(no_org: false, org_id: org_id, threads: [], expose_identity: false, section_errors: [])
         |> assign(impersonation: :out_of_scope, session_info: nil, open_error: nil)
 
       :denied ->
         socket
         |> ensure_flash()
         |> ensure_return_to()
-        |> assign(no_org: false, org_id: org_id, threads: [], expose_identity: false)
+        |> assign(no_org: false, org_id: org_id, threads: [], expose_identity: false, section_errors: [])
         |> assign(impersonation: :denied, session_info: nil, open_error: nil)
 
       {:ok, session_info} ->
         scope = Mount.scope(mount, org_id)
+
+        # Each read fails on its own (`section_errors`): a failed inbox read is not "No
+        # conversations yet." (whose CTA invites duplicate starts), and a failed disclosure read
+        # is not "masked" — the setting card says it could not be loaded.
+        threads = Reads.threads_result(mount, scope)
+        setting = Reads.disclosure_setting_result(mount, scope)
 
         socket
         |> ensure_flash()
@@ -88,8 +95,10 @@ defmodule Samen.Web.Chat.ThreadsLive do
         |> assign(
           no_org: false,
           org_id: org_id,
-          threads: Reads.threads(mount, scope),
-          expose_identity: Chat.disclosure_setting?(mount, scope)
+          threads: Guard.value(threads, []),
+          expose_identity: match?({:ok, %{expose_identity_to_support: true}}, setting),
+          section_errors:
+            for({key, result} <- [threads: threads, disclosure: setting], Guard.unavailable?(result), do: key)
         )
         |> assign(impersonation: ok_state(mount), session_info: session_info, open_error: nil)
     end
@@ -132,7 +141,10 @@ defmodule Samen.Web.Chat.ThreadsLive do
   # ---------------------------------------------------------------------------
 
   # State 3 — the tenant-wide setting: admin toggles org-wide identity disclosure to support.
+  # The kit error state's "Try again" (a failed inbox / disclosure read).
   @impl true
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
+
   def handle_event("toggle_disclosure", params, socket) do
     if tenant_plane?(socket) do
       expose? = params["expose_identity"] in [true, "true", "on"]
@@ -146,8 +158,8 @@ defmodule Samen.Web.Chat.ThreadsLive do
            |> assign(expose_identity: expose?)
            |> assign(flash_note: disclosure_note(expose?))}
 
-        {:error, _} ->
-          {:noreply, assign(socket, flash_note: "Not permitted — admin only.")}
+        {:error, error} ->
+          {:noreply, assign(socket, flash_note: disclosure_error_note(error))}
       end
     else
       {:noreply, socket}
@@ -176,7 +188,7 @@ defmodule Samen.Web.Chat.ThreadsLive do
            |> assign(flash_note: new_conversation_note(share?))}
 
         {:error, _} ->
-          {:noreply, assign(socket, flash_note: "Could not start conversation.")}
+          {:noreply, assign(socket, flash_note: "Could not start conversation. Nothing was created — try again.")}
       end
     else
       {:noreply, socket}
@@ -204,6 +216,10 @@ defmodule Samen.Web.Chat.ThreadsLive do
       {:noreply, load(socket, org_id)}
     end
   end
+
+  # A denial is "admin only"; anything else is a failed write — say so, never claim a denial.
+  defp disclosure_error_note(%Ash.Error.Forbidden{}), do: "Not permitted — admin only."
+  defp disclosure_error_note(_), do: "Could not save that setting. Nothing was changed — try again."
 
   defp open_error_copy(:reason_required), do: "A reason for access is required."
   defp open_error_copy(:not_authorized), do: "Your operator role may not open an impersonation session."
@@ -291,16 +307,17 @@ defmodule Samen.Web.Chat.ThreadsLive do
               <div class="card chat-settings" id="chat-identity-setting" style="margin-bottom:16px">
                 <div class="gtitle" style="margin-top:0">
                   <h3>Identity disclosure to support</h3>
-                  <.pill variant={if @expose_identity, do: "info", else: "mut"}>
+                  <.pill :if={:disclosure not in @section_errors} variant={if @expose_identity, do: "info", else: "mut"}>
                     {if @expose_identity, do: "org-wide", else: "masked"}
                   </.pill>
                 </div>
+                <.error_state :if={:disclosure in @section_errors} class="disclosure-error" body={Guard.message()} retry_event="retry_load" />
                 <p style="color:var(--muted);margin:6px 0 12px">
                   When ON, SaaS support sees the REAL identity of your team's chat participants
                   (state 3, tenant-wide). When OFF, participants stay <code>••••</code> unless the
                   person who starts a conversation opts to share their own name (state 2).
                 </p>
-                <form phx-change="toggle_disclosure" id="disclosure-form">
+                <form :if={:disclosure not in @section_errors} phx-change="toggle_disclosure" id="disclosure-form">
                   <label class="chat-switch">
                     <input
                       type="checkbox"
@@ -332,8 +349,9 @@ defmodule Samen.Web.Chat.ThreadsLive do
                 <h3>Conversations</h3>
                 <span class="n">{length(@threads)}</span>
               </div>
+              <.error_state :if={:threads in @section_errors} class="threads-error" body={Guard.message()} retry_event="retry_load" />
               <.empty_state
-                :if={@threads == []}
+                :if={@threads == [] and :threads not in @section_errors}
                 class="threads-empty"
                 icon="❝"
                 title="No conversations yet."
