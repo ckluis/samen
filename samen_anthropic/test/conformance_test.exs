@@ -29,7 +29,7 @@ defmodule SamenAnthropic.ConformanceTest do
            "id" => "msg_fixture",
            "type" => "message",
            "role" => "assistant",
-           "model" => "claude-opus-5",
+           "model" => "claude-opus-5-5",
            "stop_reason" => "end_turn",
            "content" => [%{"type" => "text", "text" => "fixture completion"}],
            "usage" => %{"input_tokens" => 1, "output_tokens" => 1}

@@ -18,6 +18,18 @@ T64/D1). Implements `Samen.AI.Provider` for Anthropic's Messages API.
   truncated, so never handed back as a completion, and billed as a failed attempt. Usage
   keeps cached input in its own bucket: `input_tokens` = `input_tokens +
   cache_creation_input_tokens` (fresh), `cached_input_tokens` = `cache_read_input_tokens`.
+- **Instructions apart from data** (ADR-043 §5.1a, 2026-11-13): the sealed payload's `:system`
+  goes in the `system` parameter (cache breakpoint), its role-structured `:turns` become the
+  `messages` (`tool_call` → `tool_use`, `tool_result` → `tool_result` with the same id and
+  `is_error`), the agent's tools are sent natively with an `input_schema`
+  (`native_tools?/0` is `true`). A payload with no turns is sent as before: one user message.
+- **Stop reasons are honest**: only `end_turn` / `stop_sequence` / `tool_use` are completions;
+  `max_tokens` is `{:error, :truncated, usage}`, `refusal` `{:error, :refused, usage}`, anything
+  else `{:error, :unexpected_stop, usage}`. Default model `claude-opus-5-5` (a payload's
+  `meta.model` wins), default `max_tokens` 16 000.
+- **Transport**: explicit `connect_timeout` (10 s) / `receive_timeout` (300 s); bounded retry
+  (`SamenAnthropic.Retry`) on 429, 529, 5xx and connection failures, honouring `retry-after`;
+  never on another 4xx or a timeout. Then: `:rate_limited`, `:overloaded`, `:provider_timeout`.
 - **No live calls in CI**: the test suite injects a fixture transport (the
   `samen_postmark` cassette precedent); the real Messages-API call
   (`SamenAnthropic.Transport`, via `req`) is exercised only behind the host opt-in
