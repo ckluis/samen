@@ -107,23 +107,36 @@ defmodule Samen.Web.Reads.SwallowLintTest do
   end
 
   describe "the live sweep" do
-    test "non-vacuity: the scan sees the tree and finds the debt the baseline records" do
+    test "non-vacuity: the scanner sees the tree, and every @reviewed entry is still FOUND by it in its file" do
       files = SwallowLint.files()
       assert length(files) > 300
       assert Enum.any?(files, &String.ends_with?(&1, "crm/reads.ex"))
       assert Enum.any?(files, &String.ends_with?(&1, "driftwood/lib/driftwood/reads.ex"))
-      # The scanner sees the whole tree: the UNFILTERED swallow count (reviewed ones included) stays
-      # large however far the baseline is paid down, so a scanner that stopped matching could not
-      # hide behind a baseline that reached zero.
-      root = SwallowLint.repo_root()
 
+      # Debt-independent: this holds however far the baseline is paid down. The reviewed swallows are real
+      # code the scanner must keep matching — a scanner that stopped matching (or a refactor that renamed or
+      # deleted the helper, leaving a stale entry whose reason now describes nothing) fails here.
+      root = SwallowLint.repo_root()
+      reviewed = SwallowLint.reviewed()
+      assert map_size(reviewed) > 0
+
+      for {{file, fun}, reason} <- reviewed do
+        assert is_binary(reason) and reason != "", "#{file} #{fun}: a reviewed entry needs its reason"
+        assert file in files, "#{file} is reviewed but is not in the scanned tree (stale entry)"
+
+        found = root |> Path.join(file) |> File.read!() |> SwallowLint.scan_source(file)
+
+        assert Enum.any?(found, &(&1.fun == fun)),
+               "#{file}: no swallowing clause in #{fun}/? any more — delete the @reviewed entry (its reason is stale)"
+      end
+
+      # And the unfiltered count is never below the reviewed set (each reviewed entry is one found clause).
       unfiltered =
         files
         |> Enum.map(&length(SwallowLint.scan_source(File.read!(Path.join(root, &1)), &1)))
         |> Enum.sum()
 
-      assert unfiltered > 60
-      assert Enum.sum(Map.values(SwallowLint.scan())) > 0
+      assert unfiltered >= map_size(reviewed)
     end
 
     test "the converted read modules are swallow-free (WP6 phase 1)" do
