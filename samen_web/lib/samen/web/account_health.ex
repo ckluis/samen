@@ -66,14 +66,15 @@ defmodule Samen.Web.AccountHealth do
        no sibling `Billing`/`Support` domain) — the FRAMEWORK-level "not configured"
        case, detected with no exception at all (`sibling_mount/4` just returns `nil`);
     2. the scope IS mounted but the underlying read GENUINELY FAILED (a DB blip, a
-       policy/authorization error, …) — detected via a deliberately UNCAUGHT canary
-       read at the top of `billing_snapshot/2`/`support_snapshot/2` (see their docs).
-       `Billing.Reads`'s own helpers each carry their OWN `rescue -> 0` (correct for
-       THEIR callers — a dashboard tile that must never crash) — which means, once you
-       call THEM, a genuine failure is INDISTINGUISHABLE from "this org truly has zero
-       rows". The canary read runs the SAME query, uncaught, so a real failure raises
-       HERE first. `customer_billing_snapshot/3` (T160) needs no separate canary — its
-       own reads never swallow internally, so its own `rescue` IS the canary (see its doc).
+       policy/authorization error, …) — detected two ways: a deliberately UNCAUGHT canary
+       read at the top of `billing_snapshot/2`/`support_snapshot/2` (see their comments), and the
+       per-figure `Billing.Reads.metrics_status/2` / `Support.Reads.metrics_status/2`, which name
+       every figure that could not be read (each is its own `Guard.run`: a failed figure is `0` in
+       the legacy `metrics/2` map and so is INDISTINGUISHABLE there from "this org truly has zero
+       rows" — the status list is what tells them apart). Any failed figure the snapshot reports
+       makes the whole snapshot honest absence. `customer_billing_snapshot/3` (T160) needs no
+       separate canary — its own reads never swallow internally, so its own `rescue` IS the canary
+       (see its doc).
 
   For `snapshot_for_company/3` there is a THIRD honest-absence case, distinct from
   both of the above: the scope IS mounted and every read genuinely succeeds, but this
@@ -551,15 +552,19 @@ defmodule Samen.Web.AccountHealth do
   defp billing_snapshot(nil, _scope), do: nil
 
   defp billing_snapshot(billing_mount, scope) do
-    # Fix round 1, MED-3 — a CANARY read, deliberately UNCAUGHT, run before any of
-    # `Billing.Reads`'s own helpers (whose `rescue -> 0` swallow a genuine failure into
-    # a real-looking zero for THEIR callers — correct for a dashboard tile that must
-    # never crash, WRONG once this function treated that zero as fact). `Billing.Reads`
-    # itself is UNTOUCHED — its existing consumers keep their current, correct-for-them
-    # fail-safe-empty contract; only this call site gained the canary.
+    # Fix round 1, MED-3 — a CANARY read, deliberately UNCAUGHT: if the billing book cannot be
+    # read at all it raises HERE, into the rescue below, before anything is assembled.
+    #
+    # WP6: the per-figure reads are `Billing.Reads.metrics_status/2`, which names every figure it
+    # could not read (each is its own `Guard.run`, so a failed one is `0` in the legacy map but
+    # listed in `failed`). A failed figure THIS snapshot reports (MRR, active subscriptions) makes the
+    # whole snapshot the honest "billing unavailable" (the rescue below) — never a real-looking
+    # `$0` / `0`. (The outstanding / collected figures are not used here, so their failure does not
+    # blank the panel.)
     Ash.count!(Mount.resource(billing_mount, Customer), scope: scope)
 
-    metrics = Samen.Web.Billing.Reads.metrics(billing_mount, scope)
+    {metrics, failed} = Samen.Web.Billing.Reads.metrics_status(billing_mount, scope)
+    if Enum.any?(failed, &(&1 in [:mrr_cents, :active_subs])), do: raise("billing metrics unavailable")
 
     now = DateTime.utc_now()
     sub_query = Ash.Query.new(Mount.resource(billing_mount, Subscription))
@@ -594,8 +599,9 @@ defmodule Samen.Web.AccountHealth do
   # back to plain worst-of-N over this customer's OWN subscriptions, correct by
   # construction for a single account (see the moduledoc).
   #
-  # NO explicit canary here (unlike `billing_snapshot/2`, which needs one to outrace
-  # `Billing.Reads.metrics/2`'s own internal `rescue -> 0`): every read below
+  # NO explicit canary and no `metrics_status/2` here (unlike `billing_snapshot/2`, which reads the
+  # book-wide figures through `Billing.Reads`, whose guarded helpers report a failure as a listed
+  # figure rather than raising): every read below
   # (`customer_mrr_cents/3`, `worst_status_via_db/2`, `past_due_aggregate/3`) is a
   # DIRECT `Ash.count!`/`Ash.sum!`/`Ash.read_one!` call with NO internal swallowing —
   # this function's OWN `rescue` below is already the first thing that can catch a
@@ -759,13 +765,15 @@ defmodule Samen.Web.AccountHealth do
   defp support_snapshot(nil, _scope), do: nil
 
   defp support_snapshot(support_mount, scope) do
-    # Fix round 1, MED-3 — the SAME canary discipline as `billing_snapshot/2` (see its
-    # doc): `Support.Reads.metrics/2`'s helpers carry the identical `rescue -> 0`
-    # shape, so this uncaught canary is what lets a genuine failure surface as honest
-    # absence here instead of a fabricated "0 open tickets".
+    # Fix round 1, MED-3 — the SAME discipline as `billing_snapshot/2` (see its comment): an
+    # uncaught canary read, then `Support.Reads.metrics_status/2`, whose failed figures are named
+    # so a failed one makes the snapshot honest absence instead of a fabricated "0 open tickets".
     Ash.count!(Mount.resource(support_mount, Ticket), scope: scope)
 
-    metrics = Samen.Web.Support.Reads.metrics(support_mount, scope)
+    {metrics, failed} = Samen.Web.Support.Reads.metrics_status(support_mount, scope)
+
+    if Enum.any?(failed, &(&1 in [:open_tickets, :breaching_sla, :solved_this_week])),
+      do: raise("support metrics unavailable")
 
     %{
       open_tickets: metrics.open_tickets,

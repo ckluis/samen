@@ -21,24 +21,32 @@
 # TEST_FILES: test/samen/web/crm_account_health_test.exs
 # MUST_FAIL: snapshot/2 DEGRADED READ (fix round 1, MED-3): a genuinely FAILED read surfaces honest absence, never a fabricated $0/0
 diff --git a/samen_web/lib/samen/web/account_health.ex b/samen_web/lib/samen/web/account_health.ex
-index 39bd4944..3f9e8fb5 100644
+index e800161b..cd294f54 100644
 --- a/samen_web/lib/samen/web/account_health.ex
 +++ b/samen_web/lib/samen/web/account_health.ex
-@@ -557,8 +557,6 @@ defmodule Samen.Web.AccountHealth do
-     # never crash, WRONG once this function treated that zero as fact). `Billing.Reads`
-     # itself is UNTOUCHED — its existing consumers keep their current, correct-for-them
-     # fail-safe-empty contract; only this call site gained the canary.
+@@ -561,10 +561,7 @@ defmodule Samen.Web.AccountHealth do
+     # whole snapshot the honest "billing unavailable" (the rescue below) — never a real-looking
+     # `$0` / `0`. (The outstanding / collected figures are not used here, so their failure does not
+     # blank the panel.)
 -    Ash.count!(Mount.resource(billing_mount, Customer), scope: scope)
 -
-     metrics = Samen.Web.Billing.Reads.metrics(billing_mount, scope)
+-    {metrics, failed} = Samen.Web.Billing.Reads.metrics_status(billing_mount, scope)
+-    if Enum.any?(failed, &(&1 in [:mrr_cents, :active_subs])), do: raise("billing metrics unavailable")
++    metrics = Samen.Web.Billing.Reads.metrics(billing_mount, scope)
  
      now = DateTime.utc_now()
-@@ -763,8 +761,6 @@ defmodule Samen.Web.AccountHealth do
-     # doc): `Support.Reads.metrics/2`'s helpers carry the identical `rescue -> 0`
-     # shape, so this uncaught canary is what lets a genuine failure surface as honest
-     # absence here instead of a fabricated "0 open tickets".
+     sub_query = Ash.Query.new(Mount.resource(billing_mount, Subscription))
+@@ -768,12 +765,7 @@ defmodule Samen.Web.AccountHealth do
+     # Fix round 1, MED-3 — the SAME discipline as `billing_snapshot/2` (see its comment): an
+     # uncaught canary read, then `Support.Reads.metrics_status/2`, whose failed figures are named
+     # so a failed one makes the snapshot honest absence instead of a fabricated "0 open tickets".
 -    Ash.count!(Mount.resource(support_mount, Ticket), scope: scope)
 -
-     metrics = Samen.Web.Support.Reads.metrics(support_mount, scope)
+-    {metrics, failed} = Samen.Web.Support.Reads.metrics_status(support_mount, scope)
+-
+-    if Enum.any?(failed, &(&1 in [:open_tickets, :breaching_sla, :solved_this_week])),
+-      do: raise("support metrics unavailable")
++    metrics = Samen.Web.Support.Reads.metrics(support_mount, scope)
  
      %{
+       open_tickets: metrics.open_tickets,
