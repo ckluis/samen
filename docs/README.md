@@ -1,8 +1,12 @@
 # Docs index
 
-The front door to `docs/`. Start with **Guides** if you're building; **Concepts** if you want
-the mental model before the ADRs; **ADRs** for the load-bearing decisions; everything else is
-process record — useful for archaeology, not required reading.
+The front door to `docs/`. It has two halves. **Part 1 — using Samen** (guides, concepts, ADRs, runbooks, reference)
+is what you read to build and operate a product. **Part 2 — project history** (gate reports, build logs, workstream
+plans, research) is the record of how the foundry was built: useful for archaeology, never required reading, and not
+maintained as reference. If a doc you are about to follow lives in Part 2 or in `archive/`, treat it as a historical
+record, not as instructions.
+
+# Part 1 — Using Samen
 
 ## Start here
 
@@ -10,6 +14,8 @@ process record — useful for archaeology, not required reading.
   tour it, add a scope + resource, bend the API contract and watch the gate flip.
 - [Two-plane + masking concepts](concepts/two-plane-masking.md) — the tenant/operator plane
   model and the PII masking mechanism, explained before you read the ADRs that specify them.
+- [Glossary](concepts/glossary.md) — one line per bespoke term (plane, scope, mount, vault class, catalog, verifier,
+  sabotage, ledger, abbrev registry, …), each pointing at its ADR; read it when a word in the code is unfamiliar.
 - [ADR index](adr/README.md) — every accepted architecture decision, one line each.
 - [Cookbook](guides/cookbook.md) — task recipes (add a scope, bend billing, ramp a flag, mount
   the operator cockpit, add a vaulted field, expose an API field, scaffold CRUD, run a
@@ -25,6 +31,12 @@ process record — useful for archaeology, not required reading.
 | [scope-authoring.md](guides/scope-authoring.md) | The fan-out template for authoring a new universal scope (or a vertical scope) — the pattern Identity established and every other scope copies. |
 | [llm-grounding.md](guides/llm-grounding.md) | How an LLM agent (or a human driving one) authors a resource on Samen, grounded in the machine-readable catalog. |
 | [gate-failures.md](guides/gate-failures.md) | Error message → which verifier fired → what it means → the fix, for every `samen.verify.*` task plus the drift check. |
+| [ai-quickstart.md](guides/ai-quickstart.md) | The AI plane (ADR-043): from the keyless deterministic lane to one real model result in two steps. |
+| [vault-class-extension.md](guides/vault-class-extension.md) | Adding a new `pii_*` vault class (scalar or composite): the file-enumerated recipe, since there is no central registry. |
+| [enrichment-seam.md](guides/enrichment-seam.md) | The external data-provider adapter contract for CRM enrichment (mirrors the delivery-provider pattern). |
+| [mailbox-seam.md](guides/mailbox-seam.md) | Wiring a real two-way CRM email sync: what `samen_core` owns and what you bring (no IMAP/Gmail connector ships). |
+| [sso-saml-seam.md](guides/sso-saml-seam.md) | SSO: OIDC is built; SAML is a documented extension seam with a fixed boundary. |
+| [stripe-tax.md](guides/stripe-tax.md) | Enabling Stripe Tax and what Samen mirrors from the provider's invoice (Samen never computes tax). |
 | [byo-esp.md](guides/byo-esp.md) | Wiring real outbound email delivery through the fail-honest `Samen.Delivery.Adapter` boundary — Samen ships no first-party ESP integration. |
 
 ## Concepts (`docs/concepts/`)
@@ -33,9 +45,11 @@ process record — useful for archaeology, not required reading.
 |---|---|
 | [two-plane-masking.md](concepts/two-plane-masking.md) | Extracts and consolidates the two-plane (tenant/operator) model and the PII masking mechanism from ADR-009/ADR-010 into one reader-facing explainer, meant to be read before those ADRs. |
 
+| [glossary.md](concepts/glossary.md) | The bespoke vocabulary in one place, with each term's ADR and the terms that are used in more than one sense. |
+
 ## ADRs (`docs/adr/`)
 
-33 accepted architecture decisions, indexed in [adr/README.md](adr/README.md) — grouped by
+<!--count:adrs-->54<!--/count--> architecture decisions (each with its status), indexed in [adr/README.md](adr/README.md) — grouped by
 concern (vault/crypto-shred, scope packaging, the operator plane, then per-workstream:
 WS-A/B/D/E, launch). Read the ADR itself before touching anything it governs.
 
@@ -51,7 +65,23 @@ Operational procedures for a deployed Samen app.
 | [rollback.md](runbooks/rollback.md) | Reverting a bad release (code/config) via Fly — not a data-loss recovery path (that's `pitr-gameday.md`). |
 | [pitr-gameday.md](runbooks/pitr-gameday.md) | The quarterly PITR / reverse-migration game-day drill script, plus the local-simulation evidence actually run in this environment. |
 | [beam-introspection.md](runbooks/beam-introspection.md) | The wedged-process runbook: guarded remote console, `Process.info` + stacktrace, Oban/Ecto pool checkout handlers, the on-call decision tree. |
+| [backup-cadence.md](runbooks/backup-cadence.md) | Proving a backup is restorable, not merely taken: the operator cadence + game-day drill around `Samen.Backup.Verification`. |
+| [multinode-oban-proof.md](runbooks/multinode-oban-proof.md) | Showing the Oban substrate is safe on multiple nodes (no double execution, uniqueness, failover) on two local BEAM nodes. |
+| [session-replay.md](runbooks/session-replay.md) | Turning session replay on for one tenant org, watching a replay, what the viewer sees, and retention (ADR-052). |
 | [alerts.md](runbooks/alerts.md) | The alert catalog for a deployed app, with event-based fallbacks for the metrics-off default posture. |
+
+## Reference
+
+| Doc | What it is |
+|---|---|
+| [ci.md](ci.md) | CI for agents and humans: the `scripts/ci` driver (`quick`/`pr`/`full`), the step manifest, caching, budgets, troubleshooting. |
+| [compliance-story.md](compliance-story.md) | The GDPR / SOC 2 control posture: what the substrate gives you and what stays yours (not a certification). |
+| [launch-checklist.md](launch-checklist.md) | The bounded list of operator tasks between "boots on localhost" and "a paying tenant logs in tomorrow". |
+| [observability-guide.md](observability-guide.md) | Metrics / tracing / logging wiring and the documented operator TODO (a real OTLP exporter). |
+| [claim-evidence.md](claim-evidence.md) | Every load-bearing claim mapped to the test, verifier or probe that proves it. |
+| [claim-sweep.md](claim-sweep.md) | The same discipline applied to the outward face: landing page, README, SECURITY.md. |
+
+# Part 2 — Project history (not reference)
 
 ## Gap discovery (`docs/gap-discovery/`)
 
@@ -100,17 +130,13 @@ proven," not as ongoing reference:
 
 - [plan.md](plan.md) — the original v1 implementation plan (Phase 0–6), superseded in detail by everything shipped since but still the map of the phase structure.
 - [saas-gap-roadmap.md](saas-gap-roadmap.md) — the ranked roadmap of what a SaaS needs that Samen under-serves; source for the WS-A/B/D/E workstreams.
-- [claim-evidence.md](claim-evidence.md) — every load-bearing claim in the vision doc mapped to the test/verifier/probe that proves it (Gate 5's anti-invention audit).
 - [risk-register-final.md](risk-register-final.md) — the Gate 6 refresh of the original risk register (R1–R15) against everything built.
 - [pre-pr-dogfood-remediation.md](pre-pr-dogfood-remediation.md) — the SaaS-readiness pre-PR whole-product dogfood (8 personas, all tiers/roles): 17 findings, the 7 remediation batches + 3 post-PR cleanup items that closed them, each independently verified; the tracked pointer to the gitignored `_orch/` evidence.
 - [extraction-retro.md](extraction-retro.md) — the Rule-of-Three retro on what Driftwood forced into the framework (feeds ADR-005/006/007).
-- [launch-checklist.md](launch-checklist.md) — the bounded list of operator tasks between "the dogfood boots on localhost" and "a paying tenant logs in tomorrow."
-- [observability-guide.md](observability-guide.md) — metrics/tracing/logging wiring and the documented operator TODO (real OTLP exporter).
-- [next-session-brief.md](next-session-brief.md) — the paste-as-first-message brief for a fresh session continuing the build.
 
 ## Archive (`docs/archive/`)
 
-`samen-foundry.html` / `samen-foundry.txt` — the original canonical combined vision doc
+`next-session-brief.md` — a 2026-07-16 orchestration prompt for a fresh agent session. **Historical and superseded**: it tells agents to background `ci.sh`, which `CLAUDE.md` and `ci.md` forbid. `samen-foundry.html` / `samen-foundry.txt` — the original canonical combined vision doc
 (2026-06-23) that `plan.md` and the early ADRs cite as source of truth. Superseded as a build
 reference by the ADRs + shipped code, kept for provenance.
 
