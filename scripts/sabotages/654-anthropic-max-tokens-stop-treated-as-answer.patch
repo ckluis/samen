@@ -1,0 +1,32 @@
+# SABOTAGE: AX-10 (ADR-043 §5.1a): samen_anthropic treats a stop_reason max_tokens response — cut off at 
+#   its output limit — as a finished completion, so a truncated FINAL: becomes the run's answer and 
+#   its spend is never billed as a failed attempt
+#
+# Flips the named test(s).
+# APP: samen_anthropic
+# TEST_FILES: test/provider_test.exs
+# MUST_FAIL: max_tokens is NOT a finished answer: a usage-carrying :truncated, the text never handed back
+diff --git a/samen_anthropic/lib/samen_anthropic/provider.ex b/samen_anthropic/lib/samen_anthropic/provider.ex
+index e7a42310..4575b6cf 100644
+--- a/samen_anthropic/lib/samen_anthropic/provider.ex
++++ b/samen_anthropic/lib/samen_anthropic/provider.ex
+@@ -257,17 +257,14 @@ defmodule SamenAnthropic.Provider do
+     usage = normalize_usage(Map.get(body, "usage", %{}))
+ 
+     case Map.get(body, "stop_reason") do
+-      reason when reason in ["end_turn", "stop_sequence", "tool_use"] ->
++      # SABOTAGE: a response cut off at max_tokens is handed back as a finished answer.
++      reason when reason in ["end_turn", "stop_sequence", "tool_use", "max_tokens"] ->
+         completion(body, reason, usage, model)
+ 
+       # Generation filled the context window: truncated, and it spent tokens.
+       "model_context_window_exceeded" ->
+         {:error, :context_overflow, usage}
+ 
+-      # Cut off at the output limit: not an answer, and the tokens were spent.
+-      "max_tokens" ->
+-        {:error, :truncated, usage}
+-
+       "refusal" ->
+         {:error, :refused, usage}
+ 

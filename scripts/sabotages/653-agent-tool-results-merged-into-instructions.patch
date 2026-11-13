@@ -1,0 +1,23 @@
+# SABOTAGE: AX-12 (ADR-047 §5.2a): the agent loop merges its transcript — attacker-reachable tool results 
+#   included — into the sealed :system instruction channel, so a tool result reaches the model as 
+#   instruction text instead of a tool_result data block
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_conversation_test.exs
+# MUST_FAIL: a tool result carrying instruction-like text is a tool_result block, and is absent from the system instructions
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 8b55dbc9..da17eff7 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1324,7 +1324,9 @@ defmodule Samen.AI.Agent do
+     native? = Samen.AI.native_tools?(Keyword.take(opts, [:provider, :env_reader]))
+ 
+     [
+-      system: Conversation.instructions(definition, defs, native?),
++      # SABOTAGE (AX-12): the transcript — tool results included — is merged into the
++      # INSTRUCTION channel, the pre-amendment "one undifferentiated string" posture.
++      system: Conversation.instructions(definition, defs, native?) ++ lines,
+       turns:
+         Conversation.build(goal, segments(views, lines), Map.get(views, :turn_shapes, []),
+           native?: native?,
