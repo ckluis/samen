@@ -123,6 +123,8 @@ defmodule Samen.Gen.Templates do
   @page_controller_ex File.read!(Path.join(@templates_dir, "page_controller_ex.eex"))
   @external_resource Path.join(@templates_dir, "primitives_ex.eex")
   @primitives_ex File.read!(Path.join(@templates_dir, "primitives_ex.eex"))
+  @external_resource Path.join(@templates_dir, "agents_md.eex")
+  @agents_md File.read!(Path.join(@templates_dir, "agents_md.eex"))
   @external_resource Path.join(@templates_dir, "readme.eex")
   @readme File.read!(Path.join(@templates_dir, "readme.eex"))
   @external_resource Path.join(@templates_dir, "readme_api.eex")
@@ -218,7 +220,9 @@ defmodule Samen.Gen.Templates do
       {"test/record_vault_test.exs", record_vault_test()},
       {"ci.sh", ci_sh()},
       {".gitignore", gitignore()},
-      {"README.md", readme()}
+      {"README.md", readme()},
+      # AX-3: agent instructions for the generated app (the gate, failure index, hands-off rules).
+      {"AGENTS.md", agents_md()}
     ]
   end
 
@@ -505,6 +509,7 @@ defmodule Samen.Gen.Templates do
   end
 
   defp readme, do: @readme
+  defp agents_md, do: @agents_md
 
   # ==================================================================== WS-D D2: --web
   # The RUNNING-product templates (ADR-022). Parametrized ports of the SHIPPED references:

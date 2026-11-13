@@ -460,7 +460,7 @@ defmodule Samen.Gen.App do
         nil -> :ok
         ^owner -> :ok
         other ->
-          raise ArgumentError, collision_message(s, abbrev, other, registry, source)
+          raise ArgumentError, collision_message(s, abbrev, other, source)
       end
     end
 
@@ -470,7 +470,7 @@ defmodule Samen.Gen.App do
   # Names the abbrev, its owner, the host(s) holding it, the registry file that was ACTUALLY read (`source`), and
   # the cause: the operator/primitives abbrevs are `<first letter of --prefix>` + two letters, so every prefix
   # that starts with the same letter as an already-generated app collides with that app's abbrevs.
-  defp collision_message(s, abbrev, other, registry, source) do
+  defp collision_message(s, abbrev, other, source) do
     hosts =
       try do
         for {h, ns} <- AbbrevRegistry.load_namespaced(source).hosts, Map.get(ns, abbrev) == other, do: h

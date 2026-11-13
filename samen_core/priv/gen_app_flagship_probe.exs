@@ -214,6 +214,23 @@ try do
     halt.(1, "FAIL: the generated app is missing the seeds vault-routing red path (D4).")
   end
 
+  # AX-3: the generated app carries agent instructions (the gate, the hands-off rules). Present AND
+  # specific to this app — a generic or absent file gives an agent nothing to ground on.
+  agents_md = Path.join(app_dir, "AGENTS.md")
+
+  unless File.exists?(agents_md) do
+    halt.(1, "FAIL (AX-3): the generated app has no AGENTS.md.")
+  end
+
+  agents_text = File.read!(agents_md)
+
+  for needle <- ["MIX_ENV=test bash ci.sh", "#{otp_app} CI gate: ALL PASSED", "NEVER add or edit rows",
+                 "mix samen.abbrev.reserve --host #{otp_app}", "schema.dict.json"] do
+    unless String.contains?(agents_text, needle) do
+      halt.(1, "FAIL (AX-3): the generated AGENTS.md lacks #{inspect(needle)}.")
+    end
+  end
+
   IO.puts("FLAGSHIP: full ci.sh green — verifier gate (19 steps incl. api_contract + ai_prompt_masking) + gen'd")
   IO.puts("          test suite (record_vault, API bounded/clamp/allowlist, seeds vault) + probe.")
 
