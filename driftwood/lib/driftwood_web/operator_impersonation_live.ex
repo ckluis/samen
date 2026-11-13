@@ -36,7 +36,9 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
   whether it was unmasked by a click or by the passive grant-gated read. The per-second
   `:tick` recomputes the open windows and, the instant one expires, reloads the roster so
   the value re-masks mid-session (closing the P6-F5 "stale plaintext until reload" residual)
-  — a fresh mount already re-masked correctly; this closes it live too.
+  — a fresh mount already re-masked correctly; this closes it live too. The same tick also
+  re-consults the impersonation gate: when the session TTL elapses (or it is closed) the
+  console falls back to the access-denied state instead of leaving the roster on screen.
 
   ## Mount contract (H2/M1 — phase-6 SEC dogfood)
 
@@ -572,18 +574,32 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
   def handle_info(:tick, socket) do
     schedule_tick()
     %{operator_id: operator_id, org_id: org_id} = socket.assigns
-    now = DateTime.utc_now()
-    windows = reveal_windows(operator_id, now)
 
-    socket =
-      if length(windows) < length(socket.assigns.reveal_windows) do
-        # A window just expired — full reload re-masks the roster + drops stale reveals.
+    {:noreply, if(socket.assigns[:impersonating], do: tick(socket, operator_id, org_id), else: socket)}
+  end
+
+  # The impersonation session is a TIME-BOXED grant: the access decision is re-consulted on
+  # EVERY tick, not just at mount. When the session TTL elapses (or it is closed, or the
+  # operator is suspended / scoped out) the gate denies and `load/3` falls back to the
+  # access-denied state — roster, loads and reveals dropped from the socket. Previously the
+  # tick only reloaded when a reveal window shrank, so an expired session kept the whole
+  # tenant roster on screen until the next full mount.
+  defp tick(socket, operator_id, org_id) do
+    case OperatorGate.gate_socket(socket, operator_id, org_id) do
+      {:ok, _actor, _info} ->
+        now = DateTime.utc_now()
+        windows = reveal_windows(operator_id, now)
+
+        if length(windows) < length(socket.assigns.reveal_windows) do
+          # A window just expired — full reload re-masks the roster + drops stale reveals.
+          load(socket, operator_id, org_id)
+        else
+          assign(socket, now: now, reveal_windows: windows)
+        end
+
+      _denied ->
         load(socket, operator_id, org_id)
-      else
-        assign(socket, now: now, reveal_windows: windows)
-      end
-
-    {:noreply, socket}
+    end
   end
 
   # --- Reveal-window legibility helpers (R-P6) ------------------------------
