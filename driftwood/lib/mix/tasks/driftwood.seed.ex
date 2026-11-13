@@ -26,10 +26,11 @@ defmodule Mix.Tasks.Driftwood.Seed do
   """
   use Mix.Task
 
-  @requirements ["app.start"]
-
   @impl Mix.Task
   def run(_args) do
+    # No HTTP listener: dev config has `server: true`, which would collide with a running dev server (:eaddrinuse).
+    Samen.SeedBoot.start!(:driftwood, DriftwoodWeb.Endpoint)
+
     org_id = Driftwood.Seeds.dev_seed()
 
     Mix.shell().info("Seeded 5 brokerages + the operator book of business.\n")

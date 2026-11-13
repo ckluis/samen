@@ -11,10 +11,11 @@ defmodule Mix.Tasks.Acme.Seed do
   """
   use Mix.Task
 
-  @requirements ["app.start"]
-
   @impl Mix.Task
   def run(_args) do
+    # No HTTP listener: dev config has `server: true`, which would collide with a running dev server (:eaddrinuse).
+    Samen.SeedBoot.start!(:acme, AcmeWeb.Endpoint)
+
     org_id = Acme.Seeds.run()
     Mix.shell().info("Seeded Acme dev tenant org: #{org_id}")
     Mix.shell().info("Open: /billing?org=#{org_id}")
