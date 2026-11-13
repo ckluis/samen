@@ -802,6 +802,40 @@ defmodule Samen.Web.ReadsHonestFailureP3Test do
       refute_error_state(rendered)
     end
 
+    test "a host with no fleet_namespace label is the configuration copy, not an outage pane, and logs no failure" do
+      mount =
+        Samen.Web.Mount.new(:operator, Op, Samen.WebTest.Repo,
+          plane: Samen.Web.Plane.tenant(),
+          labels: %{otp_app: @otp_app, fleet_cockpit: true}
+        )
+
+      {socket, log} = with_log(fn -> fleet_socket(mount) end)
+      rendered = html(FleetLive, socket)
+
+      assert socket.assigns.fleet_failed == false
+      assert rendered =~ "Fleet not configured."
+      assert rendered =~ "no fleet namespace is wired on this mount"
+      refute rendered =~ "fleet-load-error"
+      refute_error_state(rendered)
+      refute log =~ "read failed"
+    end
+
+    test "a namespace that names a domain with no fleet resources is configuration, not an outage" do
+      mount =
+        Samen.Web.Mount.new(:operator, Op, Samen.WebTest.Repo,
+          plane: Samen.Web.Plane.tenant(),
+          labels: %{otp_app: @otp_app, fleet_namespace: Samen.WebTest.NoSuchFleet, fleet_cockpit: true}
+        )
+
+      {socket, log} = with_log(fn -> fleet_socket(mount) end)
+      rendered = html(FleetLive, socket)
+
+      assert rendered =~ "Fleet not configured."
+      assert rendered =~ "has no fleet resources"
+      refute_error_state(rendered)
+      refute log =~ "read failed"
+    end
+
     test "one malformed activity entry is skipped on its own; it does not blank every product's merged counts", %{fleet_mount: mount} do
       seed_fleet_app("p3-activity", %{
         "activity_counts" => [%{"event_kind" => "signup", "count" => 3}, "garbage", %{"event_kind" => "no-count"}]

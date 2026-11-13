@@ -109,18 +109,44 @@ defmodule Samen.Web.Operator.FleetLive do
 
   # `Samen.Fleet.read/2` returns `{:error, {:missing_namespace, _} | {:invalid_mode, _}}` for a
   # host that is not set up, and passes through the `{:error, %Ash.Error…}` of a failed registry
-  # read. Only the first two are configuration; anything else is raised into the guard.
+  # read. Only those are configuration; anything else is raised into the guard.
+  #
+  # The `:namespace` option is passed ONLY when one is wired: `namespace: nil` is a present key, so
+  # `Samen.Fleet.read/2` would never reach its `:missing_namespace` branch and the nil would be read
+  # as a registry outage. A namespace that names a module with no `Samen.Fleet.Scope` resources is
+  # likewise a configuration fact (decided structurally, before the read), not an outage.
   defp read_fleet(otp_app, namespace) do
     Guard.run(:operator_fleet_read, nil, fn ->
-      case Samen.Fleet.read(otp_app, namespace: namespace) do
-        {:ok, _} = ok -> ok
-        {:error, {:missing_namespace, _}} = config -> config
-        {:error, {:invalid_mode, _}} = config -> config
-        {:error, error} when is_exception(error) -> raise error
-        {:error, _other} -> raise RuntimeError, "fleet registry read failed"
+      with :ok <- check_namespace(otp_app, namespace) do
+        case Samen.Fleet.read(otp_app, namespace_opts(namespace)) do
+          {:ok, _} = ok -> ok
+          {:error, {:missing_namespace, _}} = config -> config
+          {:error, {:invalid_mode, _}} = config -> config
+          {:error, error} when is_exception(error) -> raise error
+          {:error, _other} -> raise RuntimeError, "fleet registry read failed"
+        end
       end
     end)
   end
+
+  defp namespace_opts(nil), do: []
+  defp namespace_opts(namespace), do: [namespace: namespace]
+
+  # Only the registry-backed modes read the namespace (`:embedded` never touches it).
+  defp check_namespace(_otp_app, nil), do: :ok
+
+  defp check_namespace(otp_app, namespace) do
+    if Samen.Fleet.mode(otp_app) in [:manual, :heartbeat] and not fleet_resources?(namespace),
+      do: {:error, {:invalid_namespace, :no_fleet_resources}},
+      else: :ok
+  end
+
+  defp fleet_resources?(namespace) when is_atom(namespace) do
+    app = Module.concat(namespace, App)
+    Code.ensure_loaded?(app) and Ash.Resource.Info.resource?(app)
+  end
+
+  defp fleet_resources?(_), do: false
 
   defp build_tile(row) do
     report = row.report || %{}
@@ -323,6 +349,7 @@ defmodule Samen.Web.Operator.FleetLive do
   # Fixed copy per configuration reason — the reason's payload (a config value) is never printed.
   defp not_configured_reason({:missing_namespace, _mode}), do: "no fleet namespace is wired on this mount"
   defp not_configured_reason({:invalid_mode, _mode}), do: "the configured fleet mode is not recognised"
+  defp not_configured_reason({:invalid_namespace, _}), do: "the configured fleet namespace has no fleet resources"
   defp not_configured_reason(_), do: "fleet is not configured"
 
   defp status_variant(:active), do: "ok"
