@@ -565,6 +565,50 @@ defmodule Samen.Web.Auth.TotpTest do
       assert socket.assigns.provisioning_uri =~ "otpauth://totp/"
     end
 
+    test "the secret is STABLE for an enrolment attempt: a remount/reconnect shows the SAME secret (F14)" do
+      mount = build_mount(:auth)
+      session = mount_session(mount)
+      cred = Ash.UUID.generate()
+
+      {:ok, first} = TotpEnrollLive.mount(%{"credential_id" => cred}, session, %Phoenix.LiveView.Socket{})
+      # The connected render / a socket reconnect mounts again.
+      {:ok, second} = TotpEnrollLive.mount(%{"credential_id" => cred}, session, %Phoenix.LiveView.Socket{})
+
+      assert first.assigns.raw_secret == second.assigns.raw_secret
+      assert first.assigns.provisioning_uri == second.assigns.provisioning_uri
+
+      # Anti-tautology: a DIFFERENT credential gets a different secret, and a dropped attempt
+      # starts fresh.
+      {:ok, other} =
+        TotpEnrollLive.mount(%{"credential_id" => Ash.UUID.generate()}, session, %Phoenix.LiveView.Socket{})
+
+      refute other.assigns.raw_secret == first.assigns.raw_secret
+
+      Samen.Web.Auth.TotpPending.drop(cred)
+      {:ok, fresh} = TotpEnrollLive.mount(%{"credential_id" => cred}, session, %Phoenix.LiveView.Socket{})
+      refute fresh.assigns.raw_secret == first.assigns.raw_secret
+    end
+
+    test "a scanned secret still verifies after a reconnect, and a confirmed enrolment retires the pending secret" do
+      result = register!()
+      mount = build_mount(:auth)
+      session = mount_session(mount)
+      params = %{"credential_id" => result.credential.id}
+
+      {:ok, scanned} = TotpEnrollLive.mount(params, session, %Phoenix.LiveView.Socket{})
+      # reconnect BEFORE the user types the code
+      {:ok, reconnected} = TotpEnrollLive.mount(params, session, %Phoenix.LiveView.Socket{})
+
+      code = NimbleTOTP.verification_code(scanned.assigns.raw_secret)
+      {:noreply, done} = TotpEnrollLive.handle_event("confirm", %{"totp_enroll" => %{"code" => code}}, reconnected)
+      assert done.assigns.enrolled?
+
+      # The pending secret is gone: the next attempt (after a disable) is a new secret.
+      {:noreply, _} = TotpEnrollLive.handle_event("disable", %{}, done)
+      {:ok, next} = TotpEnrollLive.mount(params, session, %Phoenix.LiveView.Socket{})
+      refute next.assigns.raw_secret == scanned.assigns.raw_secret
+    end
+
     test "T110: the confirm form renders method=post with the secret in the body (the TOTP code never a GET-URL leak)" do
       mount = build_mount(:auth)
       session = mount_session(mount)

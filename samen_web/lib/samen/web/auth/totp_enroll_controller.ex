@@ -51,6 +51,7 @@ defmodule Samen.Web.Auth.TotpEnrollController do
          {:ok, raw_secret} <- decode_secret(params["totp_secret"]),
          code <- extract_code(params),
          {:ok, _credential, recovery_codes} <- Totp.confirm_enrollment(mods(mount), credential_id, raw_secret, code) do
+      Samen.Web.Auth.TotpPending.drop(credential_id)
       fan_out(mount, credential_id, "totp_enrolled", "Two-factor authentication was enabled on your account.")
 
       conn
