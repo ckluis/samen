@@ -67,6 +67,16 @@ defmodule Samen.Web.Operator.Reads do
     do: mount |> accounts_result(scope, operator_org_id) |> Guard.value([])
 
   @doc """
+  `[{tenant_org_id, name}]` for every account org of `operator_org_id` — the Org rows ALONE, none of the
+  billing/desk/activity joins `accounts/3` assembles. For navigation chrome (the org switcher), which needs only
+  names: a failed billing/desk/activity join must not hide it. Raises on a failed Org read (the caller reports).
+  """
+  @spec account_names(Mount.t(), String.t()) :: [{String.t(), String.t()}]
+  def account_names(mount, operator_org_id) do
+    mount |> account_orgs(operator_org_id) |> Enum.map(&{&1.slug, &1.name})
+  end
+
+  @doc """
   `accounts/3` that can say it failed: `{:ok, rows}` (an empty list is an honest empty book) or
   `{:error, :unavailable}`. EVERY join read is part of the one guarded read, so a failed
   billing/desk/activity join fails the whole assembly instead of scoring accounts on a missing

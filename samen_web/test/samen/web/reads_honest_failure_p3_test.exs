@@ -126,6 +126,14 @@ defmodule Samen.Web.ReadsHonestFailureP3Test do
       assert rendered =~ "account-row"
     end
 
+    test "the org switcher reads the Org rows alone: a failed account-scoring join does not hide it", %{mount: mount} do
+      names = Samen.Web.CurrentOrg.list_orgs(mount)
+      assert length(names) == 2
+
+      inject_read_faults([:operator_accounts])
+      assert failing(fn -> Samen.Web.CurrentOrg.list_orgs(mount) end) == names
+    end
+
     test "POSITIVE CONTROL: an operator with no accounts still renders the real empty state and zero tiles" do
       socket = loaded(AccountsLive, empty_mount())
       rendered = html(AccountsLive, socket)

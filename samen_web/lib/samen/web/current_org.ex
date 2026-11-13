@@ -501,10 +501,10 @@ defmodule Samen.Web.CurrentOrg do
         []
 
       org_id ->
-        scope = Samen.Web.Operator.scope(mount)
-
-        Samen.Web.Operator.Reads.accounts(mount, scope, org_id)
-        |> Enum.map(fn a -> {a.tenant_org_id, a.name} end)
+        # The switcher needs only org NAMES: read the Org rows alone, so a failed billing/desk/activity
+        # join (which `accounts/3` assembles for scoring) cannot hide it.
+        org_id
+        |> then(&Samen.Web.Operator.Reads.account_names(mount, &1))
         |> normalize_directory()
     end
   rescue
