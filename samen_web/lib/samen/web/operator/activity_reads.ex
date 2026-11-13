@@ -118,6 +118,7 @@ defmodule Samen.Web.Operator.ActivityReads do
 
   alias Samen.AuditEvent
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   @default_window_hours 24
   @max_window_hours 24 * 30
@@ -148,11 +149,13 @@ defmodule Samen.Web.Operator.ActivityReads do
   rows (including T38's impersonation-write rows) merged with any T119
   `versioned` resource's Version-row diffs, bounded to `opts[:window_hours]`
   (default #{@default_window_hours}h, clamped to [1, #{@max_window_hours}]h),
-  newest first, capped at #{@feed_limit} rows. Any read error on either tier
-  degrades that tier to `[]` — fail-honest, never a crash, never a partial page
-  presented as complete for the other tier.
+  newest first, capped at #{@feed_limit} rows. Each sub-query is read — and fails — on its own:
+  a failed one contributes no rows and is NAMED in the additive `:failed` key (a subset of
+  `[:impersonation, :system, :approval, :history]`), so the screen says which part of the feed
+  could not be loaded and never prints "No changes in this window" over an outage, nor presents a
+  partial page as complete.
 
-  Returns `%{items:, window_hours:, cutoff:}`. Each item:
+  Returns `%{items:, window_hours:, cutoff:, failed:}`. Each item:
   `%{id:, tier: :governance | :history, occurred_at:, action:, actor_id:,
   object_ref:, impersonation?:, session_id:, detail:, changes:}` — `changes` is
   `nil` on governance-tier items (there is no diff to show; the object-ref IS
@@ -162,19 +165,24 @@ defmodule Samen.Web.Operator.ActivityReads do
   @spec activity(Mount.t(), String.t(), keyword()) :: map()
   def activity(mount, org_id, opts \\ [])
 
-  def activity(_mount, nil, _opts), do: %{items: [], window_hours: @default_window_hours, cutoff: nil}
+  def activity(_mount, nil, _opts), do: %{items: [], window_hours: @default_window_hours, cutoff: nil, failed: []}
 
   def activity(%Mount{} = mount, org_id, opts) do
     window_hours = clamp_window(Keyword.get(opts, :window_hours, @default_window_hours))
     now = Keyword.get(opts, :now, DateTime.utc_now())
     cutoff = DateTime.add(now, -window_hours * 3600, :second)
 
+    parts = governance_parts(mount.repo, org_id, cutoff) ++ [history: history_items(mount, org_id, cutoff)]
+
     items =
-      (governance_items(mount.repo, org_id, cutoff) ++ history_items(mount, org_id, cutoff))
+      parts
+      |> Enum.flat_map(fn {_tier, result} -> Guard.value(result, []) end)
       |> Enum.sort_by(& &1.occurred_at, {:desc, DateTime})
       |> Enum.take(@feed_limit)
 
-    %{items: items, window_hours: window_hours, cutoff: cutoff}
+    failed = for {tier, result} <- parts, Guard.unavailable?(result), do: tier
+
+    %{items: items, window_hours: window_hours, cutoff: cutoff, failed: failed}
   end
 
   defp clamp_window(hours) when is_integer(hours), do: hours |> max(1) |> min(@max_window_hours)
@@ -196,44 +204,46 @@ defmodule Samen.Web.Operator.ActivityReads do
   # one tier's error never blanks the others (fail-honest, partial-degrade).
   # ---------------------------------------------------------------------------
 
-  defp governance_items(repo, org_id, cutoff) when is_atom(repo) and not is_nil(repo) do
-    impersonation_rows(repo, org_id, cutoff) ++
-      system_bucket_rows(repo, org_id, cutoff) ++
-      approval_rows(repo, org_id, cutoff)
+  defp governance_parts(repo, org_id, cutoff) when is_atom(repo) and not is_nil(repo) do
+    [
+      impersonation: impersonation_rows(repo, org_id, cutoff),
+      system: system_bucket_rows(repo, org_id, cutoff),
+      approval: approval_rows(repo, org_id, cutoff)
+    ]
   end
 
-  defp governance_items(_repo, _org_id, _cutoff), do: []
+  defp governance_parts(_repo, _org_id, _cutoff), do: []
 
   # -- 1. Impersonation family: subject_id == org_id (T38 P7-F1) ---------------
 
   defp impersonation_rows(repo, org_id, cutoff) do
-    AuditEvent
-    |> where(
-      [e],
-      e.subject_id == ^org_id and e.event_type in ^@impersonation_event_types and e.occurred_at >= ^cutoff
-    )
-    |> order_by([e], desc: e.occurred_at)
-    |> limit(^@governance_limit)
-    |> repo.all()
-    |> Enum.map(&governance_item(&1, true))
-  rescue
-    _ -> []
+    Guard.run(:operator_activity_impersonation, org_id, fn ->
+      AuditEvent
+      |> where(
+        [e],
+        e.subject_id == ^org_id and e.event_type in ^@impersonation_event_types and e.occurred_at >= ^cutoff
+      )
+      |> order_by([e], desc: e.occurred_at)
+      |> limit(^@governance_limit)
+      |> repo.all()
+      |> Enum.map(&governance_item(&1, true))
+    end)
   end
 
   # -- 2. The "system" bucket: event_type == "system" AND correlation_id == org_id (DIRECT) --
 
   defp system_bucket_rows(repo, org_id, cutoff) do
-    AuditEvent
-    |> where(
-      [e],
-      e.event_type == ^@system_bucket_event_type and e.correlation_id == ^org_id and e.occurred_at >= ^cutoff
-    )
-    |> order_by([e], desc: e.occurred_at)
-    |> limit(^@governance_limit)
-    |> repo.all()
-    |> Enum.map(&governance_item(&1, false))
-  rescue
-    _ -> []
+    Guard.run(:operator_activity_system, org_id, fn ->
+      AuditEvent
+      |> where(
+        [e],
+        e.event_type == ^@system_bucket_event_type and e.correlation_id == ^org_id and e.occurred_at >= ^cutoff
+      )
+      |> order_by([e], desc: e.occurred_at)
+      |> limit(^@governance_limit)
+      |> repo.all()
+      |> Enum.map(&governance_item(&1, false))
+    end)
   end
 
   # -- 3. Approval family: correlation_id is an Approval id (INDIRECT) ---------
@@ -245,24 +255,24 @@ defmodule Samen.Web.Operator.ActivityReads do
   # cross-org fetch).
 
   defp approval_rows(repo, org_id, cutoff) do
-    case approval_ids_for_org(org_id) do
-      [] ->
-        []
+    Guard.run(:operator_activity_approval, org_id, fn ->
+      case approval_ids_for_org(org_id) do
+        [] ->
+          []
 
-      approval_ids ->
-        AuditEvent
-        |> where(
-          [e],
-          e.event_type in ^@approval_event_types and e.correlation_id in ^approval_ids and
-            e.occurred_at >= ^cutoff
-        )
-        |> order_by([e], desc: e.occurred_at)
-        |> limit(^@governance_limit)
-        |> repo.all()
-        |> Enum.map(&governance_item(&1, false))
-    end
-  rescue
-    _ -> []
+        approval_ids ->
+          AuditEvent
+          |> where(
+            [e],
+            e.event_type in ^@approval_event_types and e.correlation_id in ^approval_ids and
+              e.occurred_at >= ^cutoff
+          )
+          |> order_by([e], desc: e.occurred_at)
+          |> limit(^@governance_limit)
+          |> repo.all()
+          |> Enum.map(&governance_item(&1, false))
+      end
+    end)
   end
 
   # The SAME host-wiring seam `Samen.Approvals.wiring/1` reads
@@ -282,8 +292,6 @@ defmodule Samen.Web.Operator.ActivityReads do
         |> Ash.read!(authorize?: false)
         |> Enum.map(& &1.id)
     end
-  rescue
-    _ -> []
   end
 
   defp governance_item(%AuditEvent{} = e, impersonation?) do
@@ -373,15 +381,15 @@ defmodule Samen.Web.Operator.ActivityReads do
   # ---------------------------------------------------------------------------
 
   defp history_items(%Mount{domain: domain}, org_id, cutoff) when not is_nil(domain) do
-    domain
-    |> Samen.Catalog.resource_modules()
-    |> Enum.filter(&Samen.Info.versioned?/1)
-    |> Enum.flat_map(&version_rows_for(&1, org_id, cutoff))
-  rescue
-    _ -> []
+    Guard.run(:operator_activity_history, org_id, fn ->
+      domain
+      |> Samen.Catalog.resource_modules()
+      |> Enum.filter(&Samen.Info.versioned?/1)
+      |> Enum.flat_map(&version_rows_for(&1, org_id, cutoff))
+    end)
   end
 
-  defp history_items(_mount, _org_id, _cutoff), do: []
+  defp history_items(_mount, _org_id, _cutoff), do: {:ok, []}
 
   defp version_rows_for(resource, org_id, cutoff) do
     version_mod = Module.concat(resource, Version)
@@ -394,8 +402,6 @@ defmodule Samen.Web.Operator.ActivityReads do
     |> Ash.Query.limit(@version_limit_per_resource)
     |> Ash.read!(authorize?: false)
     |> Enum.map(&history_item(&1, abbrev, vault_names))
-  rescue
-    _ -> []
   end
 
   defp vault_field_names(resource) do

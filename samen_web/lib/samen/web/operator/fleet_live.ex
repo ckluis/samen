@@ -50,6 +50,7 @@ defmodule Samen.Web.Operator.FleetLive do
   import Samen.Web.Operator.Live, only: [assign_mount: 2, operator_sidebar: 1]
 
   alias Samen.Fleet.Attention
+  alias Samen.Web.Reads.Guard
   alias Samen.Web.Operator.Fleet, as: FleetHelpers
 
   @impl true
@@ -69,11 +70,12 @@ defmodule Samen.Web.Operator.FleetLive do
   def load(socket) do
     %{otp_app: otp_app, namespace: namespace} = socket.assigns.fleet_ctx
 
-    case Samen.Fleet.read(otp_app, namespace: namespace) do
-      {:ok, %{rows: rows, reporting: reporting, total: total}} ->
+    case read_fleet(otp_app, namespace) do
+      {:ok, {:ok, %{rows: rows, reporting: reporting, total: total}}} ->
         tiles = Enum.map(rows, &build_tile/1)
 
         assign(socket,
+          fleet_failed: false,
           not_configured: nil,
           tiles: tiles,
           reporting: reporting,
@@ -82,9 +84,42 @@ defmodule Samen.Web.Operator.FleetLive do
           t156: t156_surfaces(tiles)
         )
 
-      {:error, reason} ->
-        assign(socket, not_configured: reason, tiles: [], reporting: 0, total: 0, attention: [], t156: nil)
+      # A genuine CONFIGURATION fact (no namespace wired / an unknown mode) — the only reasons
+      # `Samen.Fleet.read/2` returns for a host that is not set up.
+      {:ok, {:error, reason}} ->
+        assign(socket,
+          fleet_failed: false,
+          not_configured: reason,
+          tiles: [],
+          reporting: 0,
+          total: 0,
+          attention: [],
+          t156: nil
+        )
+
+      # The registry read FAILED (an outage). Never "Fleet not configured", never "No products
+      # registered yet", never "Nothing needs attention".
+      {:error, _} ->
+        assign(socket, fleet_failed: true, not_configured: nil, tiles: [], reporting: 0, total: 0, attention: [], t156: nil)
     end
+  end
+
+  @impl true
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket)}
+
+  # `Samen.Fleet.read/2` returns `{:error, {:missing_namespace, _} | {:invalid_mode, _}}` for a
+  # host that is not set up, and passes through the `{:error, %Ash.Error…}` of a failed registry
+  # read. Only the first two are configuration; anything else is raised into the guard.
+  defp read_fleet(otp_app, namespace) do
+    Guard.run(:operator_fleet_read, nil, fn ->
+      case Samen.Fleet.read(otp_app, namespace: namespace) do
+        {:ok, _} = ok -> ok
+        {:error, {:missing_namespace, _}} = config -> config
+        {:error, {:invalid_mode, _}} = config -> config
+        {:error, error} when is_exception(error) -> raise error
+        {:error, _other} -> raise RuntimeError, "fleet registry read failed"
+      end
+    end)
   end
 
   defp build_tile(row) do
@@ -147,12 +182,13 @@ defmodule Samen.Web.Operator.FleetLive do
     tiles
     |> Enum.flat_map(fn tile -> Map.get(tile.report, "activity_counts") || [] end)
     |> Enum.filter(&is_map/1)
-    |> Enum.reduce(%{}, fn %{"event_kind" => kind, "count" => count}, acc when is_number(count) ->
-      Map.update(acc, kind, count, &(&1 + count))
+    |> Enum.reduce(%{}, fn
+      %{"event_kind" => kind, "count" => count}, acc when is_number(count) -> Map.update(acc, kind, count, &(&1 + count))
+      # A malformed entry in a product's self-reported list is skipped on its own; it must not
+      # blank the merged counts of every other product.
+      _malformed, acc -> acc
     end)
     |> Enum.sort_by(fn {_kind, count} -> -count end)
-  rescue
-    _ -> []
   end
 
   # Platform-wide attention feed: each tile's own reported `attention` list,
@@ -196,11 +232,15 @@ defmodule Samen.Web.Operator.FleetLive do
             class="fleet-not-configured"
             icon="⛴"
             title="Fleet not configured."
-            body={"This cockpit's fleet mode is not usable yet: #{inspect(@not_configured)}. Wire fleet_namespace: on the operator mount, or set config :your_app, :fleet, mode: :manual|:heartbeat."}
+            body={"This cockpit's fleet mode is not usable yet (#{not_configured_reason(@not_configured)}). Wire fleet_namespace: on the operator mount, or set config :your_app, :fleet, mode: :manual|:heartbeat."}
           />
         </div>
 
-        <div :if={!@not_configured} class="wrap">
+        <div :if={@fleet_failed} class="wrap" id="fleet-load-error">
+          <.error_state body={Guard.message()} retry_event="retry_load" />
+        </div>
+
+        <div :if={!@not_configured and !@fleet_failed} class="wrap">
           <div class="gtitle" id="fleet-header">
             <h3>{Samen.Web.Operator.Fleet.pluralize(length(@tiles), "product")}</h3>
             <span class="lane">· across {@reporting} of {@total} products reporting</span>
@@ -279,6 +319,11 @@ defmodule Samen.Web.Operator.FleetLive do
     </div>
     """
   end
+
+  # Fixed copy per configuration reason — the reason's payload (a config value) is never printed.
+  defp not_configured_reason({:missing_namespace, _mode}), do: "no fleet namespace is wired on this mount"
+  defp not_configured_reason({:invalid_mode, _mode}), do: "the configured fleet mode is not recognised"
+  defp not_configured_reason(_), do: "fleet is not configured"
 
   defp status_variant(:active), do: "ok"
   defp status_variant(:stale), do: "warn"

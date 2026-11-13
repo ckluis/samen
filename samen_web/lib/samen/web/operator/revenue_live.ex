@@ -32,6 +32,7 @@ defmodule Samen.Web.Operator.RevenueLive do
   alias Samen.Web.Mount
   alias Samen.Web.Operator
   alias Samen.Web.Operator.RevenueReads
+  alias Samen.Web.Reads.Guard
 
   @impl true
   def mount(_params, session, socket) do
@@ -48,18 +49,23 @@ defmodule Samen.Web.Operator.RevenueLive do
         assign(socket,
           no_org: true,
           revenue: RevenueReads.empty(),
+          revenue_failed: [],
           plan_cohorts: [],
+          plan_failed: false,
           plan_suppressed: 0
         )
 
       _org_id ->
         scope = Operator.scope(mount)
-        plan_cohorts = plan_cohorts(mount)
+        {plan_cohorts, plan_failed} = plan_cohorts(mount, scope)
+        {revenue, revenue_failed} = RevenueReads.revenue_status(mount, scope)
 
         assign(socket,
           no_org: false,
-          revenue: RevenueReads.revenue(mount, scope),
+          revenue: revenue,
+          revenue_failed: revenue_failed,
           plan_cohorts: plan_cohorts,
+          plan_failed: plan_failed,
           plan_suppressed: Enum.count(plan_cohorts, &suppressed_cohort?/1)
         )
     end
@@ -70,17 +76,18 @@ defmodule Samen.Web.Operator.RevenueLive do
   # `Samen.Aggregate.read_all/2` chokepoint, so the k-anon/l-div floors + query
   # budget have ALREADY run — a below-floor cohort arrives `%Suppressed{}` and is
   # passed through untouched. Absent a loader the section renders an empty state.
-  defp plan_cohorts(%Mount{} = mount) do
+  # Returns `{cohorts, failed?}`: a loader that RAISES is a failed pane ("couldn't load"), not an
+  # unwired one — only a mount with NO loader label is the "no projection wired" empty state.
+  defp plan_cohorts(%Mount{} = mount, scope) do
     case Mount.label(mount, :revenue_plan_loader, nil) do
       {mod, fun, args} ->
-        try do
-          apply(mod, fun, args) || []
-        rescue
-          _ -> []
+        case Guard.run(:operator_revenue_plan_cohorts, scope, fn -> apply(mod, fun, args) || [] end) do
+          {:ok, cohorts} -> {cohorts, false}
+          {:error, _} -> {[], true}
         end
 
       _ ->
-        []
+        {[], false}
     end
   end
 
@@ -88,6 +95,10 @@ defmodule Samen.Web.Operator.RevenueLive do
     Samen.Aggregate.Suppressed.suppressed?(Map.get(row, :mrr_cents)) or
       Samen.Aggregate.Suppressed.suppressed?(Map.get(row, :tenant_count))
   end
+
+  @impl true
+  # A failed pane's "Try again": re-read every pane (each still fails alone).
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket)}
 
   @impl true
   def render(assigns) do
@@ -108,28 +119,28 @@ defmodule Samen.Web.Operator.RevenueLive do
           </div>
         <% else %>
           <div class="metrics">
-            <.metric label="MRR" value={dollars(closing_cents(@revenue.latest))} sub="latest period closing">
+            <.metric label="MRR" value={dollars(closing_cents(@revenue.latest))} sub="latest period closing" error={:rollup in @revenue_failed}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="NRR" value={pct(@revenue.latest && @revenue.latest.nrr)} sub="net revenue retention">
+            <.metric label="NRR" value={pct(@revenue.latest && @revenue.latest.nrr)} sub="net revenue retention" error={:rollup in @revenue_failed}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M3 17l6-6 4 4 8-8" /><path d="M14 7h7v7" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Gross churn" value={pct(@revenue.latest && @revenue.latest.gross_churn)} sub="of opening MRR lost">
+            <.metric label="Gross churn" value={pct(@revenue.latest && @revenue.latest.gross_churn)} sub="of opening MRR lost" error={:rollup in @revenue_failed}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M3 7l6 6 4-4 8 8" /><path d="M14 17h7v-7" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Logo churn" value={pct(@revenue.latest && @revenue.latest.logo_churn)} sub="customers lost">
+            <.metric label="Logo churn" value={pct(@revenue.latest && @revenue.latest.logo_churn)} sub="customers lost" error={:rollup in @revenue_failed}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <circle cx="9" cy="8" r="4" /><path d="M2 21v-2a6 6 0 0 1 9-5" /><path d="m16 16 5 5m0-5-5 5" />
@@ -145,14 +156,15 @@ defmodule Samen.Web.Operator.RevenueLive do
                 <span class="n">{length(@revenue.periods)}</span>
                 <span class="lane">· opening + new + expansion − contraction − churn + reactivation = closing · reads the rollup, never a live scan</span>
               </div>
+              <.error_state :if={:rollup in @revenue_failed} class="revenue-error" body={Guard.message()} retry_event="retry_load" />
               <.empty_state
-                :if={@revenue.periods == []}
+                :if={@revenue.periods == [] and :rollup not in @revenue_failed}
                 class="revenue-empty"
                 icon="≋"
                 title="No revenue movements yet."
                 body="Subscription movements (new, expansion, contraction, churn, reactivation) roll up here per period once the ledger has rows."
               />
-              <.data_table :if={@revenue.periods != []}>
+              <.data_table :if={@revenue.periods != [] and :rollup not in @revenue_failed}>
                 <:head>
                   <th>Period</th>
                   <th>Opening</th>
@@ -184,14 +196,15 @@ defmodule Samen.Web.Operator.RevenueLive do
                 <span class="n">{length(@revenue.cohorts.cohorts)}</span>
                 <span class="lane">· customers by signup month · retained % from each customer's own movement timeline</span>
               </div>
+              <.error_state :if={:cohorts in @revenue_failed} class="cohorts-error" body={Guard.message()} retry_event="retry_load" />
               <.empty_state
-                :if={@revenue.cohorts.cohorts == []}
+                :if={@revenue.cohorts.cohorts == [] and :cohorts not in @revenue_failed}
                 class="cohorts-empty"
                 icon="▦"
                 title="No cohorts yet."
                 body="Each signup month becomes a cohort once customers have a :new movement on the ledger."
               />
-              <.data_table :if={@revenue.cohorts.cohorts != []}>
+              <.data_table :if={@revenue.cohorts.cohorts != [] and :cohorts not in @revenue_failed}>
                 <:head>
                   <th>Cohort</th>
                   <th>Size</th>
@@ -222,8 +235,9 @@ defmodule Samen.Web.Operator.RevenueLive do
                 un-suppresses.
               </.token_blind_bar>
 
+              <.error_state :if={@plan_failed} class="plan-mrr-error" body={Guard.message()} retry_event="retry_load" />
               <.empty_state
-                :if={@plan_cohorts == []}
+                :if={@plan_cohorts == [] and not @plan_failed}
                 class="plan-mrr-empty"
                 icon="⊘"
                 title="No cross-tenant plan projection wired."

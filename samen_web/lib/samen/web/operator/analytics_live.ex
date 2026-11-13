@@ -34,6 +34,7 @@ defmodule Samen.Web.Operator.AnalyticsLive do
   import Samen.Web.Operator.Live
 
   alias Samen.Web.Operator.AnalyticsReads
+  alias Samen.Web.Reads.{Adoption, Guard}
 
   @impl true
   def mount(_params, session, socket) do
@@ -64,13 +65,14 @@ defmodule Samen.Web.Operator.AnalyticsLive do
 
     case mount do
       nil ->
-        assign(socket, analytics: AnalyticsReads.empty(), funnel_suppressed: 0, retention_suppressed: 0)
+        assign(socket, analytics: AnalyticsReads.empty(), analytics_failed: [], funnel_suppressed: 0, retention_suppressed: 0)
 
       mount ->
-        analytics = AnalyticsReads.analytics(mount)
+        {analytics, failed} = AnalyticsReads.analytics_status(mount)
 
         assign(socket,
           analytics: analytics,
+          analytics_failed: failed,
           funnel_suppressed: AnalyticsReads.funnel_suppressed(analytics.funnel),
           retention_suppressed: AnalyticsReads.retention_suppressed(analytics.retention)
         )
@@ -88,6 +90,9 @@ defmodule Samen.Web.Operator.AnalyticsLive do
   # state, never a faked narration. NO Ash read on `load/1` (the `analytics_zero_ash_read`
   # invariant holds — the aggregate read fires only on the `ask` event).
   @impl true
+  # A failed pane's "Try again": re-read both panes (each still fails alone).
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket)}
+
   def handle_event("ask", %{"q" => question}, socket) do
     question = String.trim(question || "")
     mount = socket.assigns[:samen_mount]
@@ -108,9 +113,20 @@ defmodule Samen.Web.Operator.AnalyticsLive do
   # gate + carries grounding metadata to the narration. Any raise (unreachable aggregate table on
   # a host that has not built the projection) normalizes to the honest not-configured state.
   defp ask(resource, question, socket) do
-    Samen.AI.Analytics.ask(ask_scope(socket), resource, question)
-  rescue
-    _ -> {:error, :not_configured}
+    scope = ask_scope(socket)
+
+    case Guard.write(:operator_analytics_ask, scope, fn -> Samen.AI.Analytics.ask(scope, resource, question) end) do
+      {:error, :unavailable} ->
+        # Only a host whose aggregate projection was never built is "not configured" — decided
+        # STRUCTURALLY (repo/table facts), never from the error text. Anything else is an outage.
+        case Adoption.probe_resource(resource) do
+          state when state in [:not_adopted, :table_missing] -> {:error, :not_configured}
+          _ -> {:error, :unavailable}
+        end
+
+      other ->
+        other
+    end
   end
 
   @doc """
@@ -212,14 +228,15 @@ defmodule Samen.Web.Operator.AnalyticsLive do
               <span class="n">{length(@analytics.funnel)}</span>
               <span class="lane">· signup → first-run → first-record · reads the paf rollup, never a live event scan</span>
             </div>
+            <.error_state :if={:funnel in @analytics_failed} class="funnel-error" body={Guard.message()} retry_event="retry_load" />
             <.empty_state
-              :if={@analytics.funnel == []}
+              :if={@analytics.funnel == [] and :funnel not in @analytics_failed}
               class="funnel-empty"
               icon="≋"
               title="No product events yet."
               body="Framework choke points emit the seed events (session.signed_in, first_run.completed, record.created); they roll up here per stage once the ledger has rows."
             />
-            <.data_table :if={@analytics.funnel != []}>
+            <.data_table :if={@analytics.funnel != [] and :funnel not in @analytics_failed}>
               <:head>
                 <th style="width:40%">Stage</th>
                 <th style="width:30%">Orgs reached</th>
@@ -247,14 +264,15 @@ defmodule Samen.Web.Operator.AnalyticsLive do
               <span class="n">{length(@analytics.retention)}</span>
               <span class="lane">· weekly signup cohorts · retained % of each cohort's own actors · seed scope, W0–W4 only</span>
             </div>
+            <.error_state :if={:retention in @analytics_failed} class="retention-error" body={Guard.message()} retry_event="retry_load" />
             <.empty_state
-              :if={@analytics.retention == []}
+              :if={@analytics.retention == [] and :retention not in @analytics_failed}
               class="retention-empty"
               icon="▦"
               title="No cohorts yet."
               body="Each signup week becomes a cohort once actors have product events on the ledger; the rollup materializes offsets W0–W4."
             />
-            <.data_table :if={@analytics.retention != []}>
+            <.data_table :if={@analytics.retention != [] and :retention not in @analytics_failed}>
               <:head>
                 <th>Cohort week</th>
                 <th>Size</th>
@@ -315,7 +333,9 @@ defmodule Samen.Web.Operator.AnalyticsLive do
       {:error, :empty} -> "Enter a question above."
       {:error, :not_configured} -> "AI analytics is not configured (no provider / aggregate projection wired). No narration was produced."
       {:error, :unauthorized} -> "This caller is not authorized for the cross-tenant aggregate read."
-      {:error, reason} -> "AI analytics is unavailable (#{inspect(reason)}). No narration was produced."
+      {:error, :unavailable} -> "AI analytics is unavailable right now. No narration was produced. Try again."
+      {:error, :forbidden} -> "This caller is not authorized for the cross-tenant aggregate read."
+      {:error, _reason} -> "AI analytics did not produce a narration."
       _ -> "No result."
     end
   end

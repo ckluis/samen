@@ -75,6 +75,10 @@ defmodule Samen.Web.Operator.ActivityLive do
   end
 
   @impl true
+  # The error state's "Try again": re-run the (session-gated) feed read.
+  def handle_event("retry_load", _params, socket),
+    do: {:noreply, load(socket, socket.assigns[:org_id], socket.assigns[:window_hours_param])}
+
   def handle_event("open_session", %{"reason" => reason}, socket) do
     org_id = socket.assigns[:org_id]
 
@@ -244,8 +248,18 @@ defmodule Samen.Web.Operator.ActivityLive do
                   </span>
                 </div>
 
+                <%!-- A failed sub-query is named, not hidden: the feed below is PARTIAL, and an empty
+                      feed with a failure is never "No changes in this window". --%>
+                <.error_state
+                  :if={Map.get(@feed, :failed, []) != []}
+                  class="activity-error"
+                  title="Part of this feed couldn't be loaded"
+                  body={failed_copy(@feed.failed)}
+                  retry_event="retry_load"
+                />
+
                 <.empty_state
-                  :if={@feed.items == []}
+                  :if={@feed.items == [] and Map.get(@feed, :failed, []) == []}
                   class="activity-empty"
                   icon="🕘"
                   title="No changes in this window."
@@ -312,6 +326,20 @@ defmodule Samen.Web.Operator.ActivityLive do
   end
 
   # -- helpers (bounded enums/ids/masked-values only — never a resolved value) -
+
+  defp failed_copy(failed) do
+    names =
+      failed
+      |> Enum.map(&tier_name/1)
+      |> Enum.join(", ")
+
+    "We couldn't load: #{names}. Nothing was lost — try again."
+  end
+
+  defp tier_name(:impersonation), do: "impersonation events"
+  defp tier_name(:system), do: "system events"
+  defp tier_name(:approval), do: "approval events"
+  defp tier_name(:history), do: "versioned changes"
 
   defp short_id(nil), do: "—"
   defp short_id(id), do: "#{String.slice(to_string(id), 0, 8)}…"

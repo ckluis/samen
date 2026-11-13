@@ -78,6 +78,9 @@ defmodule Samen.Web.Operator.DeliverabilityLive do
     end
   end
 
+  # A failed pane's "Try again": re-run the gated load (the session gate decides again).
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns[:org_id])}
+
   defp open_error_copy(:reason_required), do: "A reason for access is required."
   defp open_error_copy(:not_authorized), do: "Your operator role may not open an impersonation session."
   defp open_error_copy({:pii_shaped_reason, _}), do: "The reason must name the ticket, not the person (no email/SSN/phone)."
@@ -208,8 +211,14 @@ defmodule Samen.Web.Operator.DeliverabilityLive do
                   <span class="lane">· dlv_suppression · refused BEFORE the provider ever sees the send</span>
                 </div>
 
+                <.error_state
+                  :if={:suppressions in @detail.failed}
+                  class="suppressions-error"
+                  body={Samen.Web.Reads.Guard.message()}
+                  retry_event="retry_load"
+                />
                 <.empty_state
-                  :if={@detail.suppressions == []}
+                  :if={@detail.suppressions == [] and :suppressions not in @detail.failed}
                   class="suppressions-empty"
                   icon="✓"
                   title="No suppressions."
@@ -246,8 +255,14 @@ defmodule Samen.Web.Operator.DeliverabilityLive do
                   <span class="lane">· dlv_email_event · delivered / bounce / complaint / open / click</span>
                 </div>
 
+                <.error_state
+                  :if={:events in @detail.failed}
+                  class="events-error"
+                  body={Samen.Web.Reads.Guard.message()}
+                  retry_event="retry_load"
+                />
                 <.empty_state
-                  :if={@detail.events == []}
+                  :if={@detail.events == [] and :events not in @detail.failed}
                   class="events-empty"
                   icon="✉"
                   title="No delivery events."
@@ -274,10 +289,13 @@ defmodule Samen.Web.Operator.DeliverabilityLive do
                     </td>
                     <td class="e-provider" style="color:var(--muted)">{e.provider}</td>
                     <td class="e-suppressed">
-                      <span :if={MapSet.member?(@detail.suppressed_subscriber_ids, e.subscriber_id)} class="pill pill-bad">
+                      <span :if={:suppressions in @detail.failed} class="suppressed-unknown" style="color:var(--muted)">
+                        unknown
+                      </span>
+                      <span :if={:suppressions not in @detail.failed and MapSet.member?(@detail.suppressed_subscriber_ids, e.subscriber_id)} class="pill pill-bad">
                         suppressed
                       </span>
-                      <span :if={!MapSet.member?(@detail.suppressed_subscriber_ids, e.subscriber_id)} style="color:var(--muted)">
+                      <span :if={:suppressions not in @detail.failed and !MapSet.member?(@detail.suppressed_subscriber_ids, e.subscriber_id)} style="color:var(--muted)">
                         —
                       </span>
                     </td>
