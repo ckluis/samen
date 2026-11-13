@@ -1154,4 +1154,103 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
       assert gone.assigns.run_error == "Workflow not found."
     end
   end
+
+  # ===========================================================================
+  # AI screens
+  # ===========================================================================
+
+  describe "AI" do
+    alias Samen.Web.AI.{AgentLive, CrmLive, SupportDraftLive}
+    alias Samen.WebTest.AgentFixture
+
+    defp ai_mount do
+      Samen.Web.Mount.new(:ai, Samen.WebTest.Crm, Samen.WebTest.Repo,
+        plane: Samen.Web.Plane.tenant(),
+        labels: %{ai_crm_resource: Samen.WebTest.Crm.Person}
+      )
+    end
+
+    test "agent runs: a failed list is the error state, not 'No agent runs yet'; retry recovers; empty stays empty" do
+      org_id = Ash.UUID.generate()
+      run = AgentFixture.run!(org_id, agent: "p2_triage", state: :running)
+      mount = ai_mount()
+      assert html(AgentLive, socket_for(AgentLive, mount, [Ash.UUID.generate()])) =~ "No agent runs yet"
+
+      inject_read_faults([:ai_agent_runs])
+      socket = failing(fn -> socket_for(AgentLive, mount, [org_id]) end)
+      rendered = html(AgentLive, socket)
+      assert_error_state(rendered)
+      refute rendered =~ "No agent runs yet"
+
+      clear_read_faults()
+      rendered = html(AgentLive, event(AgentLive, socket, "retry_load"))
+      refute_error_state(rendered)
+      assert rendered =~ "agent-run-#{run.id}"
+    end
+
+    test "agent run detail: a FAILED read is the error state, not a silently absent run; a failed turn log fails alone" do
+      org_id = Ash.UUID.generate()
+      run = AgentFixture.run!(org_id, agent: "p2_triage", state: :running)
+      mount = ai_mount()
+
+      inject_read_faults([:ai_agent_get_run])
+      socket = failing(fn -> socket_for(AgentLive, mount, [org_id, [run_id: run.id]]) end)
+      rendered = html(AgentLive, socket)
+      assert_error_state(rendered)
+      refute rendered =~ "agent-run-detail"
+
+      clear_read_faults()
+      inject_read_faults([:ai_agent_turns])
+      rendered = html(AgentLive, failing(fn -> socket_for(AgentLive, mount, [org_id, [run_id: run.id]]) end))
+      assert rendered =~ "agent-turns-error"
+      assert rendered =~ "agent-run-detail"
+      refute rendered =~ "No turns yet"
+    end
+
+    test "agent run cancel: a failed write tells the user the run is still running" do
+      org_id = Ash.UUID.generate()
+      run = AgentFixture.run!(org_id, agent: "p2_triage", state: :running)
+      socket = socket_for(AgentLive, ai_mount(), [org_id, [run_id: run.id]])
+
+      inject_read_faults([:ai_agent_cancel])
+      failed = failing(fn -> event(AgentLive, socket, "cancel", %{"id" => run.id}) end)
+      assert {:error, "That run could not be cancelled right now" <> _} = failed.assigns.outcome
+    end
+
+    test "CRM preview: a FAILED read is the error state, not 'Record not found in this org'; 404 survives" do
+      %{org_id: org_id, crm: %{person: %{id: person_id}}} = Seeds.seed_all()
+      mount = ai_mount()
+
+      inject_read_faults([:ai_crm_preview])
+      socket = failing(fn -> socket_for(CrmLive, mount, [org_id, [id: person_id]]) end)
+      rendered = html(CrmLive, socket)
+      assert_error_state(rendered)
+      refute rendered =~ "Record not found in this org"
+
+      clear_read_faults()
+      rendered = html(CrmLive, socket_for(CrmLive, mount, [org_id, [id: person_id]]))
+      refute_error_state(rendered)
+      assert rendered =~ ~s(data-state="ok")
+
+      for id <- [Ash.UUID.generate(), "not-a-uuid"] do
+        rendered = html(CrmLive, socket_for(CrmLive, mount, [org_id, [id: id]]))
+        assert rendered =~ "Record not found in this org"
+        refute_error_state(rendered)
+      end
+    end
+
+    test "support drafts: a failed list is the error state, not 'No drafts yet'; an un-adopted host stays the honest empty" do
+      org_id = Ash.UUID.generate()
+      mount = ai_mount()
+      # The test host has not adopted the AI draft domain: the documented honest empty.
+      healthy = html(SupportDraftLive, socket_for(SupportDraftLive, mount, [org_id]))
+      assert healthy =~ "No drafts yet"
+      refute_error_state(healthy)
+
+      inject_read_faults([:ai_list_drafts])
+      rendered = html(SupportDraftLive, failing(fn -> socket_for(SupportDraftLive, mount, [org_id]) end))
+      assert_error_state(rendered)
+      refute rendered =~ "No drafts yet"
+    end
+  end
 end

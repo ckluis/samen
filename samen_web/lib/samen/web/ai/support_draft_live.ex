@@ -32,18 +32,21 @@ defmodule Samen.Web.AI.SupportDraftLive do
   @doc "The framework page-load seam."
   def load(socket, org_id, opts \\ []) do
     mount = socket.assigns[:samen_mount]
-    drafts = if org_id, do: Server.list_drafts(mount, org_id), else: []
+    drafts_result = Server.list_drafts_result(mount, org_id)
 
     socket
     |> Phoenix.Component.assign(:org_id, org_id)
+    |> Phoenix.Component.assign(:drafts_error, Samen.Web.Reads.Guard.unavailable?(drafts_result))
     |> Phoenix.Component.assign(:to_subscriber_id, Keyword.get(opts, :to_subscriber_id, ""))
     |> Phoenix.Component.assign(:inbound_ref, Keyword.get(opts, :inbound_ref, ""))
     |> Phoenix.Component.assign(:instruction, Keyword.get(opts, :instruction, ""))
-    |> Phoenix.Component.assign(:drafts, drafts)
+    |> Phoenix.Component.assign(:drafts, Samen.Web.Reads.Guard.value(drafts_result, []))
     |> Phoenix.Component.assign(:outcome, Keyword.get(opts, :outcome, nil))
   end
 
   @impl true
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
+
   def handle_event("compose", params, socket) do
     org_id = socket.assigns.org_id
 
@@ -118,7 +121,8 @@ defmodule Samen.Web.AI.SupportDraftLive do
 
           <div class="card" id="ai-support-drafts" style="padding:16px">
             <h3 style="margin:0 0 8px;font-size:14px">Drafts in this org</h3>
-            <%= if @drafts == [] do %>
+            <.error_state :if={@drafts_error} class="ai-drafts-error" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
+            <%= if @drafts == [] and not @drafts_error do %>
               <.empty_state title="No drafts yet" body="Compose one above. Drafts are human-approved before any send." icon="✎" />
             <% else %>
               <ul style="list-style:none;margin:0;padding:0">

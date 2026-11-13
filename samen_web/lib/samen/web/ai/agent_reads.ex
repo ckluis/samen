@@ -33,6 +33,7 @@ defmodule Samen.Web.AI.AgentReads do
   alias Samen.AI.Agent.Turn
   alias Samen.AI.Agent.WriteProposal
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   @doc """
   This org's agent runs, newest first (token-only columns; the transcript is NOT
@@ -46,18 +47,27 @@ defmodule Samen.Web.AI.AgentReads do
 
   def list(_mount, nil, _opts), do: []
 
-  def list(_mount, org_id, opts) do
-    Run
-    |> Ash.Query.filter(org_id == ^org_id)
-    |> Ash.Query.sort(inserted_at: :desc)
-    |> Ash.Query.limit(Keyword.get(opts, :limit, 50))
-    |> Ash.read(authorize?: false)
-    |> case do
-      {:ok, runs} -> runs
-      _ -> []
-    end
-  rescue
-    _ -> []
+  def list(mount, org_id, opts), do: list_result(mount, org_id, opts) |> Guard.value([])
+
+  @doc """
+  Tagged sibling of `list/3` (WP6): `{:ok, runs}` — an empty list is the honest "no runs yet" —
+  or `{:error, :unavailable | :forbidden}` when the read FAILED (an outage is not "No agent runs
+  yet").
+  """
+  @spec list_result(Mount.t(), String.t() | nil, keyword()) :: Guard.result([map()])
+  def list_result(mount, org_id, opts \\ [])
+
+  def list_result(_mount, nil, _opts), do: {:ok, []}
+
+  def list_result(_mount, org_id, opts) do
+    Guard.run(:ai_agent_runs, org_id, fn ->
+      Run
+      |> Ash.Query.filter(org_id == ^org_id)
+      |> Ash.Query.sort(inserted_at: :desc)
+      |> Ash.Query.limit(Keyword.get(opts, :limit, 50))
+      |> Ash.read(authorize?: false)
+      |> unwrap!()
+    end)
   end
 
   @doc """
@@ -73,56 +83,89 @@ defmodule Samen.Web.AI.AgentReads do
   what it is handed and never decides.
   """
   @spec get(Mount.t(), String.t() | nil, String.t()) :: {:ok, map()} | {:error, :not_found}
-  def get(_mount, nil, _run_id), do: {:error, :not_found}
+  def get(mount, org_id, run_id) do
+    case get_result(mount, org_id, run_id) do
+      {:ok, detail} -> {:ok, detail}
+      {:error, _} -> {:error, :not_found}
+    end
+  end
 
-  def get(mount, org_id, run_id) when is_binary(run_id) do
-    Run
-    |> Ash.Query.filter(org_id == ^org_id and id == ^run_id)
-    |> Ash.Query.ensure_selected([:org_id, :transcript])
-    |> Ash.Query.limit(1)
-    |> Ash.read(authorize?: false)
-    |> case do
-      {:ok, [run]} ->
-        # THE resolution: the actor's plane decides, `Samen.Api.PiiResolution` performs.
-        [resolved] =
-          Samen.Api.PiiResolution.resolve([run], Run, actor_of(mount, org_id), repo: mount.repo)
+  @doc """
+  Tagged sibling of `get/3` (WP6): `{:ok, detail}`, `{:error, :not_found}` for a missing or
+  foreign run, and `{:error, :unavailable}` ONLY when the run read itself FAILED (a failed read
+  is not "run not found"). The turn log and the pending approval fail on their own: the detail
+  carries `turns_failed` / `approval_failed` flags (a failed approval lookup must not read as "no
+  proposal awaiting you").
+  """
+  @spec get_result(Mount.t(), String.t() | nil, String.t() | nil) :: {:ok, map()} | {:error, :not_found | :unavailable}
+  def get_result(_mount, nil, _run_id), do: {:error, :not_found}
 
-        {goal, lines} = decode_transcript(Map.get(resolved, :transcript))
-        approval = pending_approval(org_id, run)
+  def get_result(mount, org_id, run_id) when is_binary(run_id) do
+    case Guard.run(:ai_agent_get_run, org_id, fn ->
+           Run
+           |> Ash.Query.filter(org_id == ^org_id and id == ^run_id)
+           |> Ash.Query.ensure_selected([:org_id, :transcript])
+           |> Ash.Query.limit(1)
+           |> Ash.read(authorize?: false)
+           |> unwrap!()
+           |> case do
+             [run] ->
+               # THE resolution: the actor's plane decides, `Samen.Api.PiiResolution` performs.
+               [resolved] =
+                 Samen.Api.PiiResolution.resolve([run], Run, actor_of(mount, org_id), repo: mount.repo)
+
+               {run, Map.get(resolved, :transcript)}
+
+             _ ->
+               :not_found
+           end
+         end) do
+      {:ok, :not_found} ->
+        {:error, :not_found}
+
+      {:ok, {run, transcript}} ->
+        {goal, lines} = decode_transcript(transcript)
+        approval = pending_approval_result(org_id, run)
+        turns = turns_result(org_id, run.id)
+        approval_row = Guard.value(approval, nil)
 
         {:ok,
          %{
            run: run,
            goal: goal,
            lines: lines,
-           turns: turns(org_id, run.id),
-           approval: approval,
-           provenance: provenance(approval)
+           turns: Guard.value(turns, []),
+           turns_failed: Guard.unavailable?(turns),
+           approval: approval_row,
+           approval_failed: Guard.unavailable?(approval),
+           provenance: provenance(approval_row)
          }}
 
-      _ ->
+      {:error, :forbidden} ->
         {:error, :not_found}
+
+      {:error, :unavailable} = unavailable ->
+        unavailable
     end
-  rescue
-    _ -> {:error, :not_found}
   end
 
-  def get(_mount, _org_id, _run_id), do: {:error, :not_found}
+  def get_result(_mount, _org_id, _run_id), do: {:error, :not_found}
 
   @doc "The bounded per-turn log for one run (token-only, ADR-047 §6)."
   @spec turns(String.t(), String.t()) :: [map()]
-  def turns(org_id, run_id) do
-    Turn
-    |> Ash.Query.filter(org_id == ^org_id and run_id == ^run_id)
-    |> Ash.Query.sort(turn_index: :asc)
-    |> Ash.Query.limit(100)
-    |> Ash.read(authorize?: false)
-    |> case do
-      {:ok, turns} -> turns
-      _ -> []
-    end
-  rescue
-    _ -> []
+  def turns(org_id, run_id), do: turns_result(org_id, run_id) |> Guard.value([])
+
+  @doc "Tagged sibling of `turns/2` (WP6): `{:ok, turns}` or `{:error, :unavailable | :forbidden}`."
+  @spec turns_result(String.t(), String.t()) :: Guard.result([map()])
+  def turns_result(org_id, run_id) do
+    Guard.run(:ai_agent_turns, org_id, fn ->
+      Turn
+      |> Ash.Query.filter(org_id == ^org_id and run_id == ^run_id)
+      |> Ash.Query.sort(turn_index: :asc)
+      |> Ash.Query.limit(100)
+      |> Ash.read(authorize?: false)
+      |> unwrap!()
+    end)
   end
 
   @doc """
@@ -132,21 +175,30 @@ defmodule Samen.Web.AI.AgentReads do
   therefore can never be decided from it).
   """
   @spec pending_approval(String.t(), map()) :: struct() | nil
-  def pending_approval(org_id, %{state: :awaiting_approval} = run) do
-    refs =
-      org_id
-      |> proposed_turn_ids(run.id)
-      |> MapSet.new(&WriteProposal.subject_ref/1)
+  def pending_approval(org_id, run), do: pending_approval_result(org_id, run) |> Guard.value(nil)
 
-    case Samen.Approvals.list_pending(org_id, WriteProposal.kind()) do
-      {:ok, approvals} -> Enum.find(approvals, &MapSet.member?(refs, &1.subject_ref))
-      _ -> nil
-    end
-  rescue
-    _ -> nil
+  @doc """
+  Tagged sibling of `pending_approval/2` (WP6): `{:ok, approval | nil}` (`nil` = honestly no
+  proposal pending) or `{:error, :unavailable | :forbidden}` when the lookup FAILED.
+  """
+  @spec pending_approval_result(String.t(), map()) :: Guard.result(struct() | nil)
+  def pending_approval_result(org_id, %{state: :awaiting_approval} = run) do
+    Guard.run(:ai_agent_pending_approval, org_id, fn ->
+      refs =
+        org_id
+        |> proposed_turn_ids!(run.id)
+        |> MapSet.new(&WriteProposal.subject_ref/1)
+
+      case Samen.Approvals.list_pending(org_id, WriteProposal.kind()) do
+        {:ok, approvals} -> Enum.find(approvals, &MapSet.member?(refs, &1.subject_ref))
+        # An unwired host has no approvals engine: honestly no pending proposal.
+        {:error, :no_approvals_module} -> nil
+        {:error, _} -> raise "pending approval read failed"
+      end
+    end)
   end
 
-  def pending_approval(_org_id, _run), do: nil
+  def pending_approval_result(_org_id, _run), do: {:ok, nil}
 
   @doc "The token-only provenance a reviewer decides on (never an arg VALUE)."
   @spec provenance(struct() | nil) :: map() | nil
@@ -170,21 +222,24 @@ defmodule Samen.Web.AI.AgentReads do
   """
   @spec decide(:approve | :reject, String.t(), String.t()) :: {:ok, term()} | {:error, term()}
   def decide(:approve, approval_id, actor_id) when is_binary(approval_id) and is_binary(actor_id) do
-    case Samen.Approvals.approve(approval_id, actor_id) do
-      {:ok, decided, meta} -> {:ok, {decided, meta}}
-      {:error, reason} -> {:error, reason}
-    end
-  rescue
-    _ -> {:error, :decision_failed}
+    # `Guard.write/3`: the engine's own tagged return passes through; a raise is logged by name
+    # and cause and becomes `{:error, :unavailable}` (the screen: "could not be completed —
+    # nothing was executed"), never an exception term.
+    Guard.write(:ai_agent_decide, nil, fn ->
+      case Samen.Approvals.approve(approval_id, actor_id) do
+        {:ok, decided, meta} -> {:ok, {decided, meta}}
+        {:error, reason} -> {:error, reason}
+      end
+    end)
   end
 
   def decide(:reject, approval_id, actor_id) when is_binary(approval_id) and is_binary(actor_id) do
-    case Samen.Approvals.reject(approval_id, actor_id) do
-      {:ok, decided} -> {:ok, decided}
-      {:error, reason} -> {:error, reason}
-    end
-  rescue
-    _ -> {:error, :decision_failed}
+    Guard.write(:ai_agent_decide, nil, fn ->
+      case Samen.Approvals.reject(approval_id, actor_id) do
+        {:ok, decided} -> {:ok, decided}
+        {:error, reason} -> {:error, reason}
+      end
+    end)
   end
 
   def decide(_action, _approval_id, _actor_id), do: {:error, :not_authorized}
@@ -194,9 +249,7 @@ defmodule Samen.Web.AI.AgentReads do
   def cancel(_mount, nil, _run_id), do: {:error, :not_found}
 
   def cancel(mount, org_id, run_id) do
-    Agent.cancel(Mount.scope(mount, org_id), run_id)
-  rescue
-    _ -> {:error, :not_found}
+    Guard.write(:ai_agent_cancel, org_id, fn -> Agent.cancel(Mount.scope(mount, org_id), run_id) end)
   end
 
   # ---------------------------------------------------------------------------
@@ -208,17 +261,19 @@ defmodule Samen.Web.AI.AgentReads do
     end
   end
 
-  defp proposed_turn_ids(org_id, run_id) do
+  # Raising on purpose: only called inside `pending_approval_result/2`'s `Guard.run/3`.
+  defp proposed_turn_ids!(org_id, run_id) do
     Turn
     |> Ash.Query.filter(org_id == ^org_id and run_id == ^run_id and status == :proposed)
     |> Ash.read(authorize?: false)
-    |> case do
-      {:ok, turns} -> Enum.map(turns, & &1.id)
-      _ -> []
-    end
-  rescue
-    _ -> []
+    |> unwrap!()
+    |> Enum.map(& &1.id)
   end
+
+  # An Ash `{:error, _}` return is a FAILED read, not an empty one: raise so the surrounding
+  # `Guard.run/3` reports it (the exception is never rendered).
+  defp unwrap!({:ok, value}), do: value
+  defp unwrap!({:error, error}), do: raise(Ash.Error.to_error_class(error))
 
   # The transcript is JSON inside the envelope. On a plane that resolved it CLEAR we get
   # a binary and decode it; on a masked plane we get a `%Samen.Masked{}` and pass THAT

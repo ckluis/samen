@@ -59,6 +59,9 @@ defmodule Samen.Web.AI.CrmLive do
   end
 
   @impl true
+  def handle_event("retry_load", _params, socket),
+    do: {:noreply, load(socket, socket.assigns.org_id, id: socket.assigns.id, helper: socket.assigns.helper)}
+
   def handle_event("run", %{"helper" => helper} = params, socket) do
     {:noreply,
      load(socket, socket.assigns.org_id,
@@ -147,6 +150,13 @@ defmodule Samen.Web.AI.CrmLive do
 
   # The masked grounding preview — the field the AI grounds on, rendered on the caller's plane.
   attr :preview, :any, required: true
+
+  # A FAILED read is the error state (retry), never "Record not found in this org".
+  defp crm_preview_card(%{preview: {:error, :unavailable}} = assigns) do
+    ~H"""
+    <.error_state class="ai-crm-preview-error" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
+    """
+  end
 
   defp crm_preview_card(%{preview: {:error, _}} = assigns) do
     ~H"""

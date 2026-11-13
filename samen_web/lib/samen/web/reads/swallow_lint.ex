@@ -71,7 +71,9 @@ defmodule Samen.Web.Reads.SwallowLint do
     {"samen_web/lib/samen/web/replay/renderer.ex", :render_body} =>
       "returns the honest tagged value {:error, :render_failed}, which the player renders as a failed replay — not a swallow",
     {"samen_web/lib/samen/web/replay/renderer.ex", :view_mount} =>
-      "optional-scope probe: a view with no resolvable router mount has no live mount; nil is the honest answer the caller handles"
+      "optional-scope probe: a view with no resolvable router mount has no live mount; nil is the honest answer the caller handles",
+    {"samen_web/lib/samen/web/ai/server.ex", :public_field_names} =>
+      "pure introspection of a resource module (no read): a module with no resource info yields no extra fields, which only narrows what the grounding preview shows"
   }
 
   # Swallows that still exist, per file, AFTER the reviewed ones are subtracted. Shrink-only: a
@@ -97,16 +99,14 @@ defmodule Samen.Web.Reads.SwallowLint do
     "samen_web/lib/samen/ui/nav.ex" => 1,
     "samen_web/lib/samen/ui/overlay.ex" => 1,
     "samen_web/lib/samen/web/account_health.ex" => 2,
-    "samen_web/lib/samen/web/ai/agent_reads.ex" => 8,
-    "samen_web/lib/samen/web/ai/server.ex" => 3,
-    "samen_web/lib/samen/web/auth/totp_enroll_controller.ex" => 1,
+        "samen_web/lib/samen/web/auth/totp_enroll_controller.ex" => 1,
     "samen_web/lib/samen/web/auth/totp_pending.ex" => 2,
     "samen_web/lib/samen/web/auth_gate.ex" => 1,
-        "samen_web/lib/samen/web/csv.ex" => 1,
+    "samen_web/lib/samen/web/csv.ex" => 1,
     "samen_web/lib/samen/web/current_org.ex" => 6,
     "samen_web/lib/samen/web/first_run.ex" => 2,
     "samen_web/lib/samen/web/live.ex" => 1,
-        "samen_web/lib/samen/web/metrics_controller.ex" => 2,
+    "samen_web/lib/samen/web/metrics_controller.ex" => 2,
     "samen_web/lib/samen/web/object_ref.ex" => 3,
     "samen_web/lib/samen/web/object_ref/catalog.ex" => 1,
     "samen_web/lib/samen/web/object_ref/default_card.ex" => 1,
@@ -129,7 +129,7 @@ defmodule Samen.Web.Reads.SwallowLint do
     "samen_web/lib/samen/web/operator/revenue_live.ex" => 1,
     "samen_web/lib/samen/web/operator/webhook_dlq_live.ex" => 3,
     "samen_web/lib/samen/web/reads.ex" => 1,
-                    "samen_web/lib/samen/web/support/kb_reads.ex" => 1,
+    "samen_web/lib/samen/web/support/kb_reads.ex" => 1,
     "samen_web/lib/samen/web/tags.ex" => 2,
     "samen_web/lib/samen/web/tenant/analytics_reads.ex" => 1,
     "samen_web/lib/samen/web/tenant_gate.ex" => 1,

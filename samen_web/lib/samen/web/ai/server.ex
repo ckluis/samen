@@ -28,6 +28,7 @@ defmodule Samen.Web.AI.Server do
   alias Samen.AI
   alias Samen.AI.Embeddings
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   require Ash.Query
 
@@ -137,31 +138,45 @@ defmodule Samen.Web.AI.Server do
       do: {:error, :not_found}
 
   def crm_preview(mount, org_id, resource, id) do
-    query =
-      resource
-      |> Ash.Query.filter(org_id == ^org_id and id == ^id)
-      |> ensure_public_selected(resource)
+    # `{:error, :unavailable}` ONLY when the read FAILED (logged by name and cause; the reason term
+    # is never returned — it can carry query values); a missing / foreign / denied / malformed
+    # record is `:not_found`.
+    with {:ok, uuid} <- Ecto.UUID.cast(id),
+         {:ok, rows} <-
+           Guard.run(:ai_crm_preview, org_id, fn ->
+             query =
+               resource
+               |> Ash.Query.filter(org_id == ^org_id and id == ^uuid)
+               |> ensure_public_selected(resource)
 
-    case Ash.read(query, authorize?: false) do
-      {:ok, [record | _]} ->
-        [resolved] =
-          Samen.Api.PiiResolution.resolve(
-            [record],
-            resource,
-            actor_of(scope(mount, org_id)),
-            repo: mount.repo
-          )
+             case Ash.read(query, authorize?: false) do
+               {:ok, [record | _]} ->
+                 [resolved] =
+                   Samen.Api.PiiResolution.resolve(
+                     [record],
+                     resource,
+                     actor_of(scope(mount, org_id)),
+                     repo: mount.repo
+                   )
 
-        {:ok, preview_fields(resolved, resource)}
+                 {:found, preview_fields(resolved, resource)}
 
-      {:ok, []} ->
-        {:error, :not_found}
+               {:ok, []} ->
+                 :not_found
 
-      {:error, reason} ->
-        {:error, {:read_failed, reason}}
+               {:error, error} ->
+                 raise Ash.Error.to_error_class(error)
+             end
+           end) do
+      case rows do
+        {:found, fields} -> {:ok, fields}
+        :not_found -> {:error, :not_found}
+      end
+    else
+      :error -> {:error, :not_found}
+      {:error, :forbidden} -> {:error, :not_found}
+      {:error, :unavailable} = unavailable -> unavailable
     end
-  rescue
-    _ -> {:error, :not_found}
   end
 
   # --- Analytics surface (D7 token-blind ask box — operator/platform-gated by the kernel) --
@@ -197,9 +212,16 @@ defmodule Samen.Web.AI.Server do
           {:ok, term()} | {:error, term()}
   def support_draft(mount, org_id, attrs, opts \\ []) when is_map(attrs) do
     attrs = Map.put(attrs, :org_id, org_id)
-    Samen.AI.SupportOperator.draft_reply(scope(mount, org_id), attrs, opts)
-  rescue
-    e -> {:error, {:persist_unavailable, Exception.message(e)}}
+
+    # A raise (e.g. the host has not adopted the AI draft domain: no table) is logged by name and
+    # cause only and answered with a value-free reason — never `Exception.message/1`, which can
+    # interpolate the very values being drafted.
+    case Guard.write(:ai_support_draft, org_id, fn ->
+           Samen.AI.SupportOperator.draft_reply(scope(mount, org_id), attrs, opts)
+         end) do
+      {:error, kind} when kind in [:unavailable, :forbidden] -> {:error, {:persist_unavailable, kind}}
+      other -> other
+    end
   end
 
   @doc """
@@ -209,20 +231,49 @@ defmodule Samen.Web.AI.Server do
   (no table/repo) — an empty list, NEVER another org's drafts.
   """
   @spec list_drafts(Mount.t(), String.t() | nil) :: [struct()]
-  def list_drafts(_mount, nil), do: []
+  def list_drafts(mount, org_id), do: list_drafts_result(mount, org_id) |> Guard.value([])
 
-  def list_drafts(_mount, org_id) do
-    Samen.AI.SupportReplyDraft
-    |> Ash.Query.filter(org_id == ^org_id)
-    |> Ash.Query.sort(inserted_at: :desc)
-    |> Ash.Query.limit(50)
-    |> Ash.read(authorize?: false)
-    |> case do
-      {:ok, drafts} -> drafts
-      {:error, _} -> []
-    end
+  @doc """
+  Tagged sibling of `list_drafts/2` (WP6): `{:ok, drafts}` — an empty list is the honest "no
+  drafts yet" — or `{:error, :unavailable | :forbidden}` when the read FAILED (an outage, or a
+  host without the AI draft table: either way the screen says it could not load the drafts
+  rather than "No drafts yet").
+  """
+  @spec list_drafts_result(Mount.t(), String.t() | nil) :: Guard.result([struct()])
+  def list_drafts_result(_mount, nil), do: {:ok, []}
+
+  def list_drafts_result(_mount, org_id) do
+    Guard.run(:ai_list_drafts, org_id, fn ->
+      Samen.AI.SupportReplyDraft
+      |> Ash.Query.filter(org_id == ^org_id)
+      |> Ash.Query.sort(inserted_at: :desc)
+      |> Ash.Query.limit(50)
+      |> read_drafts()
+      |> case do
+        {:ok, drafts} ->
+          drafts
+
+        {:error, error} ->
+          # A host that has not adopted `Samen.AI.Domain` has no draft repo/table: that is the
+          # documented honest empty (the composer then says so). Anything else is a FAILED read.
+          if domain_not_adopted?(error), do: [], else: raise(Ash.Error.to_error_class(error))
+      end
+    end)
+  end
+
+  # An unstarted repo surfaces as a RAISED `Ash.Error.Unknown`; catch exactly that class (typed, so a
+  # different failure still reaches `Guard.run/3`) and let `domain_not_adopted?/1` classify it.
+  defp read_drafts(query) do
+    Ash.read(query, authorize?: false)
   rescue
-    _ -> []
+    e in Ash.Error.Unknown -> {:error, e}
+  end
+
+  # Matches the exception text only (never rendered or logged): no repo started for the resource,
+  # or the table absent.
+  defp domain_not_adopted?(error) do
+    msg = Exception.message(error)
+    String.contains?(msg, "could not lookup Ecto repo") or String.contains?(msg, "undefined_table")
   end
 
   # --- shared helpers ----------------------------------------------------------------------
