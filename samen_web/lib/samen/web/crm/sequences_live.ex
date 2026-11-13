@@ -49,6 +49,7 @@ defmodule Samen.Web.CRM.SequencesLive do
   alias Samen.Web.CRM.SequencesReads, as: Reads
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   @impl true
   def mount(params, session, socket) do
@@ -75,13 +76,20 @@ defmodule Samen.Web.CRM.SequencesLive do
       sends_configured: false,
       sequences: [],
       enrollments: [],
-      step_sends: %{}
+      step_sends: %{},
+      read_errors: []
     )
   end
 
   def load(socket, org_id) do
     mount = socket.assigns.samen_mount
     scope = Mount.scope(mount, org_id)
+
+    # Three independent reads; a FAILED one is named in `read_errors` and shown as the kit
+    # error state — never as "No sequences yet." / "No enrollments yet." (WP6).
+    {sequences, e1} = section(Reads.sequences_result(mount, scope), [], :sequences)
+    {enrollments, e2} = section(Reads.enrollments_result(mount, scope), [], :enrollments)
+    {step_sends, e3} = section(Reads.step_sends_by_enrollment_result(mount, scope), %{}, :step_sends)
 
     socket
     |> ensure_return_to()
@@ -92,11 +100,18 @@ defmodule Samen.Web.CRM.SequencesLive do
       scope_mounted: Reads.scope_mounted?(mount),
       # The fail-honest predicate — read from the delivery seam, never assumed.
       sends_configured: Reads.sends_configured?(org_id),
-      sequences: Reads.sequences(mount, scope),
-      enrollments: Reads.enrollments(mount, scope),
-      step_sends: Reads.step_sends_by_enrollment(mount, scope)
+      sequences: sequences,
+      enrollments: enrollments,
+      step_sends: step_sends,
+      read_errors: e1 ++ e2 ++ e3
     )
   end
+
+  # A tagged read result as `{value, errors}`: the value (or `default`) and `[section]` iff the
+  # read FAILED. A denial is not a failure (same empty value as ever).
+  defp section({:ok, value}, _default, _section), do: {value, []}
+  defp section({:error, :unavailable}, default, section), do: {default, [section]}
+  defp section({:error, _denied}, default, _section), do: {default, []}
 
   defp ensure_return_to(socket) do
     if Map.has_key?(socket.assigns, :return_to), do: socket, else: assign(socket, return_to: nil)
@@ -107,6 +122,10 @@ defmodule Samen.Web.CRM.SequencesLive do
   end
 
   @impl true
+  def handle_event("retry_load", _params, socket) do
+    {:noreply, load(socket, socket.assigns.org_id)}
+  end
+
   def handle_event("enroll", %{"sequence_id" => sequence_id, "person_id" => person_id}, socket) do
     mount = socket.assigns.samen_mount
     org_id = socket.assigns.org_id
@@ -115,28 +134,35 @@ defmodule Samen.Web.CRM.SequencesLive do
     person_id = normalize_person_id(person_id)
 
     socket =
-      cond do
-        is_nil(person_id) ->
-          assign(socket, enroll_notice: {:error, "Enter the contact id to enroll."})
+      if is_nil(person_id) do
+        assign(socket, enroll_notice: {:error, "Enter the contact id to enroll."})
+      else
+        # A FAILED existence check is not "not a contact" (WP6): say the check failed.
+        case Samen.Web.CRM.Reads.contact_exists_result(mount, scope, person_id) do
+          {:ok, true} ->
+            enroll(socket, mount, scope, org_id, sequence_id, person_id)
 
-        not Samen.Web.CRM.Reads.contact_exists?(mount, scope, person_id) ->
-          assign(socket, enroll_notice: {:error, "That is not a contact in this workspace."})
+          {:error, :unavailable} ->
+            assign(socket, enroll_notice: {:error, "Could not check that contact right now — try again."})
 
-        true ->
-          case Reads.enroll(mount, scope, sequence_id, person_id) do
-            {:ok, _enrollment} ->
-              socket
-              |> assign(enroll_notice: {:ok, "Contact enrolled — the sequence advances on its own schedule."})
-              |> load(org_id)
-
-            {:error, _reason} ->
-              assign(socket,
-                enroll_notice: {:error, "Enrollment refused — the sequence must belong to this org."}
-              )
-          end
+          _not_a_contact ->
+            assign(socket, enroll_notice: {:error, "That is not a contact in this workspace."})
+        end
       end
 
     {:noreply, socket}
+  end
+
+  defp enroll(socket, mount, scope, org_id, sequence_id, person_id) do
+    case Reads.enroll(mount, scope, sequence_id, person_id) do
+      {:ok, _enrollment} ->
+        socket
+        |> assign(enroll_notice: {:ok, "Contact enrolled — the sequence advances on its own schedule."})
+        |> load(org_id)
+
+      {:error, _reason} ->
+        assign(socket, enroll_notice: {:error, "Enrollment refused — the sequence must belong to this org."})
+    end
   end
 
   # A blank person id is an ERROR (nil) — never a minted stand-in contact.
@@ -207,11 +233,14 @@ defmodule Samen.Web.CRM.SequencesLive do
 
               <%!-- Enroll flow — tenant plane only (writable?). Uses the EXISTING :enroll action. --%>
               <div :if={writable?(@samen_mount)} id="sequences-enroll">
-                <%= if @sequences == [] do %>
+                <%= cond do %>
+                <% :sequences in @read_errors -> %>
+                  <%!-- the sequences list below shows the error; no "create one first" advice here --%>
+                <% @sequences == [] -> %>
                   <p style="font-size:13px;color:var(--muted)">
                     No sequences exist yet — create a sequence before enrolling contacts.
                   </p>
-                <% else %>
+                <% true -> %>
                   <form phx-submit="enroll" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
                     <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600">
                       Sequence
@@ -247,9 +276,12 @@ defmodule Samen.Web.CRM.SequencesLive do
               <%!-- Sequences list --%>
               <section id="sequences-list">
                 <h3 style="margin:0 0 8px;font-size:13px;font-weight:600">Sequences</h3>
-                <%= if @sequences == [] do %>
-                  <.empty_state class="sequences-empty" icon="✦" title="No sequences yet." />
-                <% else %>
+                <%= cond do %>
+                  <% :sequences in @read_errors -> %>
+                    <.error_state body={Guard.message()} retry_event="retry_load" />
+                  <% @sequences == [] -> %>
+                    <.empty_state class="sequences-empty" icon="✦" title="No sequences yet." />
+                  <% true -> %>
                   <.data_table>
                     <:head>
                       <th style="width:50%">Sequence</th>
@@ -268,9 +300,12 @@ defmodule Samen.Web.CRM.SequencesLive do
               <%!-- Enrollments list + per-enrollment step-send status --%>
               <section id="enrollments-list">
                 <h3 style="margin:0 0 8px;font-size:13px;font-weight:600">Enrollments</h3>
-                <%= if @enrollments == [] do %>
-                  <.empty_state class="enrollments-empty" icon="✦" title="No enrollments yet." />
-                <% else %>
+                <%= cond do %>
+                  <% :enrollments in @read_errors or :step_sends in @read_errors -> %>
+                    <.error_state body={Guard.message()} retry_event="retry_load" />
+                  <% @enrollments == [] -> %>
+                    <.empty_state class="enrollments-empty" icon="✦" title="No enrollments yet." />
+                  <% true -> %>
                   <.data_table>
                     <:head>
                       <th style="width:22%">Contact</th>

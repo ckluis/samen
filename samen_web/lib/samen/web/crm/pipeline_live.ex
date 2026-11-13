@@ -48,6 +48,7 @@ defmodule Samen.Web.CRM.PipelineLive do
 
   alias Samen.Web.Board
   alias Samen.Web.CRM.Reads
+  alias Samen.Web.Reads.Guard
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
 
@@ -74,7 +75,10 @@ defmodule Samen.Web.CRM.PipelineLive do
       board: %Board{groups: [], group_field: :pipeline_id},
       stage_meta: %{},
       total_opps: 0,
-      total_value_cents: 0
+      total_value_cents: 0,
+      board_error: nil,
+      value_error: false,
+      more_error: false
     )
   end
 
@@ -82,7 +86,21 @@ defmodule Samen.Web.CRM.PipelineLive do
     mount = socket.assigns.samen_mount
     scope = Mount.scope(mount, org_id)
 
-    %{board: board, stages: stages} = Reads.pipeline_board(mount, scope)
+    # A FAILED read is not "no stages" (WP6): the board and the value are independent reads, each
+    # showing its own error state with a retry, never an empty board or a confident $0.00.
+    {board, stages, board_error} =
+      case Reads.pipeline_board_result(mount, scope) do
+        {:ok, %{board: board, stages: stages}} -> {board, stages, nil}
+        {:error, :unavailable} -> {%Board{groups: [], group_field: :pipeline_id}, [], Guard.message()}
+        {:error, _denied} -> {%Board{groups: [], group_field: :pipeline_id}, [], nil}
+      end
+
+    {value_cents, value_error} =
+      case Reads.pipeline_value_cents_result(mount, scope) do
+        {:ok, cents} -> {cents, false}
+        {:error, :unavailable} -> {0, true}
+        {:error, _denied} -> {0, false}
+      end
 
     socket
     |> ensure_return_to()
@@ -92,7 +110,10 @@ defmodule Samen.Web.CRM.PipelineLive do
       board: board,
       stage_meta: Map.new(stages, fn s -> {s.id, s} end),
       total_opps: total_opps(board),
-      total_value_cents: Reads.pipeline_value_cents(mount, scope)
+      total_value_cents: value_cents,
+      board_error: board_error,
+      value_error: value_error,
+      more_error: false
     )
   end
 
@@ -102,17 +123,25 @@ defmodule Samen.Web.CRM.PipelineLive do
     mount = socket.assigns.samen_mount
     scope = Mount.scope(mount, socket.assigns.org_id)
 
-    board =
-      case group_for(socket.assigns.board, key) do
-        nil ->
-          socket.assigns.board
+    case group_for(socket.assigns.board, key) do
+      nil ->
+        {:noreply, socket}
 
-        group ->
-          page = Reads.pipeline_stage_page(mount, scope, key, group.next_cursor)
-          merge_group(socket.assigns.board, group, page)
-      end
+      group ->
+        case Reads.pipeline_stage_page(mount, scope, key, group.next_cursor) do
+          # A failed page leaves the column exactly as it was and says so; "Load more" retries.
+          %Samen.Web.Page{error: :unavailable} ->
+            {:noreply, assign(socket, more_error: true)}
 
-    {:noreply, assign(socket, board: board, total_opps: total_opps(board))}
+          page ->
+            board = merge_group(socket.assigns.board, group, page)
+            {:noreply, assign(socket, board: board, total_opps: total_opps(board), more_error: false)}
+        end
+    end
+  end
+
+  def handle_event("retry_load", _params, socket) do
+    {:noreply, load(socket, socket.assigns.org_id)}
   end
 
   defp ensure_return_to(socket) do
@@ -163,21 +192,21 @@ defmodule Samen.Web.CRM.PipelineLive do
           <span id="org-banner" style="display:none">CRM org: {@org_id}</span>
 
           <div class="metrics">
-            <.metric label="Pipeline stages" value={length(@board.groups)}>
+            <.metric label="Pipeline stages" value={length(@board.groups)} error={@board_error != nil}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M5 3v18M12 6v15M19 9v12" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Opportunities" value={@total_opps}>
+            <.metric label="Opportunities" value={@total_opps} error={@board_error != nil}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Pipeline value" value={dollars(@total_value_cents)} sub="all stages">
+            <.metric label="Pipeline value" value={dollars(@total_value_cents)} sub="all stages" error={@value_error}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
@@ -187,14 +216,17 @@ defmodule Samen.Web.CRM.PipelineLive do
           </div>
 
           <div class="wrap">
-            <%= if @board.groups == [] do %>
+            <.error_state :if={@board_error} body={@board_error} retry_event="retry_load" />
+            <.error_state :if={@more_error and @board_error == nil} title="Couldn't load more" body={Guard.message()} />
+            <%= if @board_error == nil and @board.groups == [] do %>
               <.empty_state
                 class="pipeline-empty"
                 icon="◇"
                 title="No pipeline stages yet."
                 body="Stages appear here once your pipeline has stages configured and opportunities in flight."
               />
-            <% else %>
+            <% end %>
+            <%= if @board_error == nil and @board.groups != [] do %>
               <.board id="pipeline" board={@board} load_more_event="board_load_more" empty_col_text="No opportunities">
                 <:col_header :let={group}>
                   <h3 class="bcol-t" id={"stage-#{stage_dom(group.key)}"}>{group.label}</h3>

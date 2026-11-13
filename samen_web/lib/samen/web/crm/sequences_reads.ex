@@ -49,6 +49,7 @@ defmodule Samen.Web.CRM.SequencesReads do
   """
 
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   # A3 read-bounding: every read on this surface carries an explicit hard cap.
   @limit 200
@@ -99,50 +100,60 @@ defmodule Samen.Web.CRM.SequencesReads do
   This org's outreach sequences (newest first), org-scoped + bounded. `[]` when the
   Outreach scope is not mounted — the honest absence, never a fabricated sequence.
   """
-  def sequences(mount, scope) do
-    case sequence_resource(mount) do
-      nil ->
-        []
+  def sequences(mount, scope), do: sequences_result(mount, scope) |> Guard.value([])
 
-      resource ->
-        resource
-        |> Ash.Query.new()
-        |> Ash.Query.ensure_selected([:name, :status, :steps])
-        |> Ash.Query.sort(inserted_at: :desc)
-        |> Ash.Query.limit(@limit)
-        |> Ash.read!(scope: scope)
-    end
-  rescue
-    _ -> []
+  @doc """
+  Tagged sibling of `sequences/2` (WP6): `{:ok, value}`, or `{:error, :unavailable}` when the read FAILED (an outage is not an empty result), or `{:error, :forbidden}` for a denial.
+  """
+  def sequences_result(mount, scope) do
+    Guard.run(:crm_sequences, scope, fn ->
+      case sequence_resource(mount) do
+        nil ->
+          []
+
+        resource ->
+          resource
+          |> Ash.Query.new()
+          |> Ash.Query.ensure_selected([:name, :status, :steps])
+          |> Ash.Query.sort(inserted_at: :desc)
+          |> Ash.Query.limit(@limit)
+          |> Ash.read!(scope: scope)
+      end
+    end)
   end
 
   @doc """
   This org's enrollments (newest first), org-scoped + bounded. `[]` when the Outreach
   scope is not mounted. NO PII: `person_id` is an opaque uuid (see the moduledoc).
   """
-  def enrollments(mount, scope) do
-    case enrollment_resource(mount) do
-      nil ->
-        []
+  def enrollments(mount, scope), do: enrollments_result(mount, scope) |> Guard.value([])
 
-      resource ->
-        resource
-        |> Ash.Query.new()
-        |> Ash.Query.ensure_selected([
-          :person_id,
-          :status,
-          :current_step,
-          :sequence_id,
-          :next_send_at,
-          :paused_reason,
-          :enrolled_at
-        ])
-        |> Ash.Query.sort(inserted_at: :desc)
-        |> Ash.Query.limit(@limit)
-        |> Ash.read!(scope: scope)
-    end
-  rescue
-    _ -> []
+  @doc """
+  Tagged sibling of `enrollments/2` (WP6): `{:ok, value}`, or `{:error, :unavailable}` when the read FAILED (an outage is not an empty result), or `{:error, :forbidden}` for a denial.
+  """
+  def enrollments_result(mount, scope) do
+    Guard.run(:crm_enrollments, scope, fn ->
+      case enrollment_resource(mount) do
+        nil ->
+          []
+
+        resource ->
+          resource
+          |> Ash.Query.new()
+          |> Ash.Query.ensure_selected([
+            :person_id,
+            :status,
+            :current_step,
+            :sequence_id,
+            :next_send_at,
+            :paused_reason,
+            :enrolled_at
+          ])
+          |> Ash.Query.sort(inserted_at: :desc)
+          |> Ash.Query.limit(@limit)
+          |> Ash.read!(scope: scope)
+      end
+    end)
   end
 
   @doc """
@@ -151,22 +162,27 @@ defmodule Samen.Web.CRM.SequencesReads do
   (`:queued | :delivered | :blocked | :suppressed | :failed | :skipped`) the surface
   renders verbatim — never re-derived into a fabricated "sent".
   """
-  def step_sends_by_enrollment(mount, scope) do
-    case step_send_resource(mount) do
-      nil ->
-        %{}
+  def step_sends_by_enrollment(mount, scope), do: step_sends_by_enrollment_result(mount, scope) |> Guard.value(%{})
 
-      resource ->
-        resource
-        |> Ash.Query.new()
-        |> Ash.Query.ensure_selected([:step_index, :status, :sent_at, :enrollment_id, :queued_at])
-        |> Ash.Query.sort(step_index: :asc)
-        |> Ash.Query.limit(@limit)
-        |> Ash.read!(scope: scope)
-        |> Enum.group_by(& &1.enrollment_id)
-    end
-  rescue
-    _ -> %{}
+  @doc """
+  Tagged sibling of `step_sends_by_enrollment/2` (WP6): `{:ok, value}`, or `{:error, :unavailable}` when the read FAILED (an outage is not an empty result), or `{:error, :forbidden}` for a denial.
+  """
+  def step_sends_by_enrollment_result(mount, scope) do
+    Guard.run(:crm_step_sends, scope, fn ->
+      case step_send_resource(mount) do
+        nil ->
+          %{}
+
+        resource ->
+          resource
+          |> Ash.Query.new()
+          |> Ash.Query.ensure_selected([:step_index, :status, :sent_at, :enrollment_id, :queued_at])
+          |> Ash.Query.sort(step_index: :asc)
+          |> Ash.Query.limit(@limit)
+          |> Ash.read!(scope: scope)
+          |> Enum.group_by(& &1.enrollment_id)
+      end
+    end)
   end
 
   @doc """

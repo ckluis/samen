@@ -42,6 +42,7 @@ defmodule Samen.Web.CRM.ContactsGalleryLive do
   alias Samen.Web.CRM.Reads
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
   alias Samen.Web.ObjectRef.FieldValue
   alias Samen.Web.Page
 
@@ -70,7 +71,8 @@ defmodule Samen.Web.CRM.ContactsGalleryLive do
       no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil),
       org_id: nil,
       after_id: nil,
-      page: %Page{items: [], page_size: 12}
+      page: %Page{items: [], page_size: 12},
+      page_error: nil
     )
     |> assign_nav(nil)
   end
@@ -80,12 +82,19 @@ defmodule Samen.Web.CRM.ContactsGalleryLive do
     scope = Mount.scope(mount, org_id)
     after_id = after_id || socket.assigns[:after_id]
 
+    # A FAILED read is not "No contacts yet." (WP6): the gallery shows the kit error state + retry.
     page = Reads.contacts_gallery(mount, scope, after_id)
+    page_error = if page.error, do: Guard.message()
 
     socket
     |> ensure_return_to()
-    |> assign(no_org: false, org_id: org_id, after_id: after_id, page: page)
+    |> assign(no_org: false, org_id: org_id, after_id: after_id, page: page, page_error: page_error)
     |> assign_nav(org_id)
+  end
+
+  @impl true
+  def handle_event("retry_load", _params, socket) do
+    {:noreply, load(socket, socket.assigns.org_id, socket.assigns.after_id)}
   end
 
   defp ensure_return_to(socket) do
@@ -141,6 +150,8 @@ defmodule Samen.Web.CRM.ContactsGalleryLive do
               page={@page}
               prev_href={@prev_href}
               next_href={@next_href}
+              error={@page_error}
+              retry_event="retry_load"
               empty_text="No contacts yet."
               empty_body="Contacts you add will appear here as cards."
             >

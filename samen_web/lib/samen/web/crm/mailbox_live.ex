@@ -37,6 +37,7 @@ defmodule Samen.Web.CRM.MailboxLive do
   alias Samen.Web.CRM.Reads
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   @impl true
   def mount(params, session, socket) do
@@ -59,6 +60,7 @@ defmodule Samen.Web.CRM.MailboxLive do
       no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil),
       org_id: nil,
       connections: [],
+      connections_error: false,
       provider_configured: Samen.Mailbox.provider_configured?(),
       scope_mounted: false,
       connect_notice: nil
@@ -69,12 +71,21 @@ defmodule Samen.Web.CRM.MailboxLive do
     mount = socket.assigns.samen_mount
     scope = Mount.scope(mount, org_id)
 
+    # A FAILED read is not "No mailbox connected yet" (WP6) — that state offers "Connect mailbox".
+    {connections, connections_error} =
+      case Reads.mailbox_connections_result(mount, scope) do
+        {:ok, rows} -> {rows, false}
+        {:error, :unavailable} -> {[], true}
+        {:error, _denied} -> {[], false}
+      end
+
     socket
     |> ensure_return_to()
     |> assign(
       no_org: false,
       org_id: org_id,
-      connections: Reads.mailbox_connections(mount, scope),
+      connections: connections,
+      connections_error: connections_error,
       # The fail-honest predicate — read from the adapter itself, never assumed.
       provider_configured: Samen.Mailbox.provider_configured?(),
       scope_mounted: not is_nil(Reads.mailbox_connection_resource(mount)),
@@ -114,6 +125,8 @@ defmodule Samen.Web.CRM.MailboxLive do
                   No provider is wired, so nothing has been synced and nothing can be. This is not an empty
                   inbox — see docs/guides/mailbox-seam.md for the adapter callbacks a real connector implements.
                 </div>
+              <% @connections_error -> %>
+                <.error_state body={Guard.message()} retry_event="retry_load" />
               <% @connections == [] -> %>
                 <.empty_state
                   class="mailbox-none-connected"
@@ -165,6 +178,10 @@ defmodule Samen.Web.CRM.MailboxLive do
   # not and must not hold. It says exactly that instead of faking a spinner — the same
   # honesty the unconfigured empty state uses.
   @impl true
+  def handle_event("retry_load", _params, socket) do
+    {:noreply, load(socket, socket.assigns.org_id)}
+  end
+
   def handle_event("connect", _params, socket) do
     {:noreply, assign(socket, connect_notice: connect_notice())}
   end

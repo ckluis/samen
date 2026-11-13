@@ -58,8 +58,8 @@ defmodule Samen.Web.Support.TicketsLive do
   def load(socket, nil) do
     socket
     |> ensure_return_to()
-    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, agents_by_id: %{}, metrics: nil)
-    |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
+    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, agents_by_id: %{}, metrics: nil, metric_errors: [])
+    |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{}, list_error: nil)
     |> assign(show_new: false, new_form: nil)
     |> assign_new(:delete_error, fn -> nil end)
   end
@@ -68,13 +68,25 @@ defmodule Samen.Web.Support.TicketsLive do
     mount = socket.assigns.samen_mount
     scope = Mount.scope(mount, org_id)
 
+    # A FAILED read is never shown as an empty value (WP6): the assignee column says
+    # "unavailable", each metric tile its own error; the list itself rides ListLive's error state.
+    agents_by_id =
+      case Reads.agents_by_id_result(mount, scope) do
+        {:ok, agents} -> agents
+        {:error, :unavailable} -> :unavailable
+        {:error, _denied} -> %{}
+      end
+
+    {metrics, metric_errors} = Reads.metrics_status(mount, scope)
+
     socket
     |> ensure_return_to()
     |> assign(
       no_org: false,
       org_id: org_id,
-      agents_by_id: Reads.agents_by_id(mount, scope),
-      metrics: Reads.metrics(mount, scope)
+      agents_by_id: agents_by_id,
+      metrics: metrics,
+      metric_errors: metric_errors
     )
     |> assign_new(:show_new, fn -> false end)
     |> assign_new(:delete_error, fn -> nil end)
@@ -180,28 +192,28 @@ defmodule Samen.Web.Support.TicketsLive do
           </div>
 
           <div class="metrics">
-            <.metric label="Open tickets" value={(@metrics && @metrics.open_tickets) || 0}>
+            <.metric label="Open tickets" value={(@metrics && @metrics.open_tickets) || 0} error={:open_tickets in @metric_errors}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Breaching SLA" value={(@metrics && @metrics.breaching_sla) || 0}>
+            <.metric label="Breaching SLA" value={(@metrics && @metrics.breaching_sla) || 0} error={:breaching_sla in @metric_errors}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 3" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Solved this week" value={(@metrics && @metrics.solved_this_week) || 0}>
+            <.metric label="Solved this week" value={(@metrics && @metrics.solved_this_week) || 0} error={:solved_this_week in @metric_errors}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M9 12l2 2 4-4" /><circle cx="12" cy="12" r="9" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="CSAT avg" value={csat_display(@metrics && @metrics.csat_avg)} sub="/ 5">
+            <.metric label="CSAT avg" value={csat_display(@metrics && @metrics.csat_avg)} sub="/ 5" error={:csat_avg in @metric_errors}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
@@ -221,6 +233,8 @@ defmodule Samen.Web.Support.TicketsLive do
                 id="tickets-list"
                 page={@page}
                 state={@list_state}
+                error={@list_error}
+                retry_event="list_retry"
                 row_class="ticket-row"
                 filter_placeholder="Filter tickets…"
                 empty_text="No tickets yet."
@@ -346,6 +360,7 @@ defmodule Samen.Web.Support.TicketsLive do
 
   defp sla_cell(_), do: "—"
 
+  defp render_assignee(_ticket, :unavailable), do: "unavailable"
   defp render_assignee(_ticket, agents_map) when map_size(agents_map) == 0, do: "—"
 
   defp render_assignee(_ticket, agents_map) do

@@ -85,6 +85,7 @@ defmodule Samen.Web.Support.TicketLive do
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
 
+  alias Samen.Web.Reads.Guard
   alias Samen.Web.Support.Reads
   alias Samen.Web.Support.KbReads
 
@@ -107,6 +108,10 @@ defmodule Samen.Web.Support.TicketLive do
   end
 
   @impl true
+  def handle_event("retry_load", _params, socket) do
+    {:noreply, load(socket, socket.assigns.org_id, socket.assigns.ticket_id)}
+  end
+
   def handle_event("switch_tab", %{"tab" => tab}, socket) do
     {:noreply, assign(socket, active_tab: tab)}
   end
@@ -246,7 +251,7 @@ defmodule Samen.Web.Support.TicketLive do
     socket
     |> ensure_return_to()
     |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, ticket: nil, ticket_tags: [], conversations: [], agents: [], active_tab: current_tab)
-    |> assign(reply_form: nil, kb_suggestion: nil, macros: [], csat: nil)
+    |> assign(reply_form: nil, kb_suggestion: nil, macros: [], csat: nil, load_error: nil, section_errors: [])
     |> assign_new(:status_error, fn -> nil end)
     |> assign_new(:conversation_error, fn -> nil end)
   end
@@ -255,20 +260,30 @@ defmodule Samen.Web.Support.TicketLive do
     mount = socket.assigns.samen_mount
     scope = Mount.scope(mount, org_id)
 
-    {ticket, ticket_tags, conversations, agents} =
+    # A FAILED read is not "not found" / "no thread yet" (WP6): `load_error` and `section_errors`
+    # name what failed and the page shows the kit error state with a retry — never the empty
+    # state with its "Start conversation" CTA (audit F08: that duplicated conversations).
+    {ticket, load_error} =
       if ticket_id do
-        t =
-          case Reads.get_ticket(mount, scope, ticket_id) do
-            {:ok, tk} -> tk
-            :error -> nil
-          end
-
-        tags = if t, do: Reads.ticket_tag_names(mount, scope, ticket_id), else: []
-        convs = if t, do: Reads.conversations_for_ticket(mount, scope, ticket_id), else: []
-        ags = Reads.agents(mount, scope)
-        {t, tags, convs, ags}
+        case Reads.get_ticket_result(mount, scope, ticket_id) do
+          {:ok, tk} -> {tk, nil}
+          {:error, :unavailable} -> {nil, Guard.message()}
+          {:error, _not_found} -> {nil, nil}
+        end
       else
-        {nil, [], [], []}
+        {nil, nil}
+      end
+
+    {ticket_tags, conversations, agents, macros, csat, section_errors} =
+      if ticket do
+        tags = Reads.ticket_tag_names(mount, scope, ticket_id)
+        {convs, e1} = section(Reads.conversations_for_ticket_result(mount, scope, ticket_id), [], :conversations)
+        {ags, e2} = section(Reads.agents_result(mount, scope), [], :agents)
+        {macros, e3} = section(Reads.macros_result(mount, scope), [], :macros)
+        {csat, e4} = section(Reads.csat_for_ticket_result(mount, scope, ticket_id), nil, :csat)
+        {tags, convs, ags, macros, csat, e1 ++ e2 ++ e3 ++ e4}
+      else
+        {[], [], [], [], nil, []}
       end
 
     current_tab = Map.get(socket.assigns, :active_tab, "conversation")
@@ -279,6 +294,8 @@ defmodule Samen.Web.Support.TicketLive do
       no_org: false,
       org_id: org_id,
       ticket: ticket,
+      load_error: load_error,
+      section_errors: section_errors,
       ticket_tags: ticket_tags,
       conversations: conversations,
       agents: agents,
@@ -286,11 +303,17 @@ defmodule Samen.Web.Support.TicketLive do
     )
     |> assign(reply_form: new_reply_form(mount, scope, conversations))
     |> assign(kb_suggestion: kb_suggestion(mount, scope, ticket))
-    |> assign(macros: (ticket && Reads.macros(mount, scope)) || [])
-    |> assign(csat: ticket && Reads.csat_for_ticket(mount, scope, ticket_id))
+    |> assign(macros: macros)
+    |> assign(csat: csat)
     |> assign_new(:status_error, fn -> nil end)
     |> assign_new(:conversation_error, fn -> nil end)
   end
+
+  # A tagged read result as `{value, errors}`: the value (or `default`) and `[section]` iff the
+  # read FAILED. A denial is not a failure (same empty value as ever).
+  defp section({:ok, value}, _default, _section), do: {value, []}
+  defp section({:error, :unavailable}, default, section), do: {default, [section]}
+  defp section({:error, _denied}, default, _section), do: {default, []}
 
   # T78 (spec §I5) — composer suggestion. Query on the ticket SUBJECT (non-PII); the
   # message body is vault-routed 🔒 and deliberately not fed to the AI plane here.
@@ -377,7 +400,11 @@ defmodule Samen.Web.Support.TicketLive do
 
           <%= if @ticket == nil do %>
             <div class="wrap">
-              <div class="card" style="padding:22px 20px;color:var(--muted)">Ticket not found.</div>
+              <%= if @load_error do %>
+                <.error_state body={@load_error} retry_event="retry_load" />
+              <% else %>
+                <div class="card" style="padding:22px 20px;color:var(--muted)">Ticket not found.</div>
+              <% end %>
             </div>
           <% else %>
             <div class="wrap" style="margin-bottom:0">
@@ -419,7 +446,10 @@ defmodule Samen.Web.Support.TicketLive do
 
             <%= if @active_tab == "conversation" do %>
               <div class="wrap" id="conversation-pane">
-                <%= if @conversations == [] do %>
+                <%= cond do %>
+                <% :conversations in @section_errors -> %>
+                  <.error_state body={Guard.message()} retry_event="retry_load" />
+                <% @conversations == [] -> %>
                   <.empty_state
                     class="conversation-empty"
                     icon="❝"
@@ -435,7 +465,7 @@ defmodule Samen.Web.Support.TicketLive do
                   <div :if={@conversation_error} class="card form-error" id="conversation-error" style="margin-top:8px;padding:10px 14px;color:var(--bad, #b91c1c);font-size:12px">
                     {@conversation_error}
                   </div>
-                <% else %>
+                <% true -> %>
                   <%= for conv <- @conversations do %>
                     <div class="card" id={"conv-#{conv.id}"} style="margin-bottom:12px">
                       <div style="padding:14px 18px 10px;border-bottom:1px solid var(--border);font-size:11px;color:var(--muted)">
@@ -475,6 +505,7 @@ defmodule Samen.Web.Support.TicketLive do
                   <% end %>
                 <% end %>
 
+                <.error_state :if={:macros in @section_errors} title="Macros couldn't be loaded" body={Guard.message()} retry_event="retry_load" />
                 {render_kb_suggestion(@kb_suggestion, writable?(@samen_mount) and @reply_form != nil)}
                 {render_macro_palette(@macros, writable?(@samen_mount) and @reply_form != nil)}
 
@@ -525,8 +556,10 @@ defmodule Samen.Web.Support.TicketLive do
                     </tr>
                   </table>
 
+                  <.error_state :if={:csat in @section_errors} title="CSAT couldn't be loaded" body={Guard.message()} retry_event="retry_load" />
                   {render_csat(@csat)}
 
+                  <.error_state :if={:agents in @section_errors} title="Agents couldn't be loaded" body={Guard.message()} retry_event="retry_load" />
                   <%= if @agents != [] do %>
                     <div class="gtitle" style="margin:20px 0 12px"><h3>Agents <small style="font-weight:400;color:var(--muted)">(PII resolved per plane)</small></h3></div>
                     <.data_table>

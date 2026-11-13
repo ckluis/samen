@@ -76,7 +76,7 @@ defmodule Samen.Web.CRM.ContactsLive do
     socket
     |> default_return_to()
     |> assign(no_org: no_org?(socket, nil), org_id: nil, company_names: %{})
-    |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
+    |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{}, list_error: nil)
     |> assign(show_new: false, new_form: nil, first_run: false)
     |> assign_new(:delete_error, fn -> nil end)
     |> assign_new(:sample_error, fn -> nil end)
@@ -268,6 +268,8 @@ defmodule Samen.Web.CRM.ContactsLive do
                 id="contacts"
                 page={@page}
                 state={@list_state}
+                error={@list_error}
+                retry_event="list_retry"
                 row_class="contact-row"
                 filter_placeholder="Filter contacts…"
                 empty_text="No contacts yet."

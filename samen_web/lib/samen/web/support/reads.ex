@@ -35,6 +35,7 @@ defmodule Samen.Web.Support.Reads do
   require Ash.Query
 
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   # Bounded detail/lookup reads (a ticket's conversations, a conversation's messages,
   # the agent join map). Single-parent fan-outs, not hot lists.
@@ -52,22 +53,27 @@ defmodule Samen.Web.Support.Reads do
   #{@detail_limit} rows (A3 read-bounding); the Ticket Inbox itself reads through the
   paginated `tickets_page/3`.
   """
-  def tickets(mount, scope) do
-    Mount.resource(mount, Ticket)
-    |> Ash.Query.ensure_selected([
-      :subject,
-      :status,
-      :priority,
-      :sla_breach_at,
-      :breached,
-      :resolved_at,
-      :sla_id
-    ])
-    |> Ash.Query.sort(inserted_at: :desc)
-    |> Ash.Query.limit(@detail_limit)
-    |> Ash.read!(scope: scope)
-  rescue
-    _ -> []
+  def tickets(mount, scope), do: tickets_result(mount, scope) |> Guard.value([])
+
+  @doc """
+  Tagged sibling of `tickets/2` (WP6): `{:ok, value}`, or `{:error, :unavailable}` when the read FAILED (an outage is not an empty result), or `{:error, :forbidden}` for a denial.
+  """
+  def tickets_result(mount, scope) do
+    Guard.run(:support_tickets, scope, fn ->
+      Mount.resource(mount, Ticket)
+      |> Ash.Query.ensure_selected([
+        :subject,
+        :status,
+        :priority,
+        :sla_breach_at,
+        :breached,
+        :resolved_at,
+        :sla_id
+      ])
+      |> Ash.Query.sort(inserted_at: :desc)
+      |> Ash.Query.limit(@detail_limit)
+      |> Ash.read!(scope: scope)
+    end)
   end
 
   @doc """
@@ -79,24 +85,7 @@ defmodule Samen.Web.Support.Reads do
   the A1 classifier). On any read error the page is EMPTY — never unbounded.
   """
   def tickets_page(mount, scope, state) do
-    Mount.resource(mount, Ticket)
-    |> Ash.Query.ensure_selected([
-      :subject,
-      :status,
-      :priority,
-      :sla_breach_at,
-      :breached,
-      :resolved_at,
-      :sla_id
-    ])
-    |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:subject])
-  rescue
-    _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(state.page_size)}
-  end
-
-  @doc "Read a single ticket by id for `scope`. `{:ok, ticket}` or `:error`."
-  def get_ticket(mount, scope, id) do
-    result =
+    Guard.page(:support_tickets_page, scope, state, fn ->
       Mount.resource(mount, Ticket)
       |> Ash.Query.ensure_selected([
         :subject,
@@ -107,16 +96,50 @@ defmodule Samen.Web.Support.Reads do
         :resolved_at,
         :sla_id
       ])
-      |> Ash.Query.filter(id == ^id)
-      |> Ash.Query.limit(1)
-      |> Ash.read!(scope: scope)
+      |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:subject])
+    end)
+  end
 
-    case result do
-      [ticket | _] -> {:ok, ticket}
-      [] -> :error
+  @doc "Read a single ticket by id for `scope`. `{:ok, ticket}` or `:error`."
+  def get_ticket(mount, scope, id) do
+    case get_ticket_result(mount, scope, id) do
+      {:ok, ticket} -> {:ok, ticket}
+      {:error, _kind} -> :error
     end
-  rescue
-    _ -> :error
+  end
+
+  @doc """
+  Tagged sibling of `get_ticket/3` (WP6): `{:ok, ticket}`, `{:error, :not_found}` for a missing
+  (or malformed / denied) id, and `{:error, :unavailable}` when the read FAILED — an outage is
+  not "Ticket not found".
+  """
+  def get_ticket_result(mount, scope, id) do
+    with {:ok, uuid} <- Ecto.UUID.cast(id),
+         {:ok, rows} <-
+           Guard.run(:support_get_ticket, scope, fn ->
+             Mount.resource(mount, Ticket)
+             |> Ash.Query.ensure_selected([
+               :subject,
+               :status,
+               :priority,
+               :sla_breach_at,
+               :breached,
+               :resolved_at,
+               :sla_id
+             ])
+             |> Ash.Query.filter(id == ^uuid)
+             |> Ash.Query.limit(1)
+             |> Ash.read!(scope: scope)
+           end) do
+      case rows do
+        [ticket | _] -> {:ok, ticket}
+        [] -> {:error, :not_found}
+      end
+    else
+      :error -> {:error, :not_found}
+      {:error, :forbidden} -> {:error, :not_found}
+      {:error, :unavailable} = unavailable -> unavailable
+    end
   end
 
   @doc """
@@ -134,26 +157,34 @@ defmodule Samen.Web.Support.Reads do
   end
 
   @doc "Read conversations (+ PII-resolved messages) for a ticket. BOUNDED."
-  def conversations_for_ticket(mount, scope, ticket_id) do
-    convs =
-      Mount.resource(mount, Conversation)
-      |> Ash.Query.ensure_selected([:channel, :status, :subject, :ticket_id])
-      |> Ash.Query.filter(ticket_id == ^ticket_id)
-      |> Ash.Query.sort(inserted_at: :asc)
-      |> Ash.Query.limit(@detail_limit)
-      |> Ash.read!(scope: scope)
+  def conversations_for_ticket(mount, scope, ticket_id),
+    do: conversations_for_ticket_result(mount, scope, ticket_id) |> Guard.value([])
 
-    agents_map = agents_by_id(mount, scope)
+  @doc """
+  Tagged sibling of `conversations_for_ticket/3` (WP6): `{:ok, conversations}` (an EMPTY list is
+  the honest "no thread yet") or `{:error, :unavailable}` — a failed read must never offer
+  "Start conversation" (audit F08: it created duplicate conversations on a transient error).
+  """
+  def conversations_for_ticket_result(mount, scope, ticket_id) do
+    Guard.run(:support_conversations_for_ticket, scope, fn ->
+      convs =
+        Mount.resource(mount, Conversation)
+        |> Ash.Query.ensure_selected([:channel, :status, :subject, :ticket_id])
+        |> Ash.Query.filter(ticket_id == ^ticket_id)
+        |> Ash.Query.sort(inserted_at: :asc)
+        |> Ash.Query.limit(@detail_limit)
+        |> Ash.read!(scope: scope)
 
-    Enum.map(convs, fn conv ->
-      {msgs, truncated?} = messages_window_for_conversation(mount, scope, conv.id, agents_map)
+      agents_map = Map.new(agents!(mount, scope), &{&1.id, &1})
 
-      conv
-      |> Map.put(:__messages__, msgs)
-      |> Map.put(:__earlier_hidden__, truncated?)
+      Enum.map(convs, fn conv ->
+        {msgs, truncated?} = messages_window!(mount, scope, conv.id, agents_map)
+
+        conv
+        |> Map.put(:__messages__, msgs)
+        |> Map.put(:__earlier_hidden__, truncated?)
+      end)
     end)
-  rescue
-    _ -> []
   end
 
   @doc """
@@ -165,6 +196,18 @@ defmodule Samen.Web.Support.Reads do
 
   @doc "Like `messages_for_conversation/4` but `{messages, earlier_hidden?}`."
   def messages_window_for_conversation(mount, scope, conversation_id, agents_map \\ nil) do
+    mount
+    |> messages_window_for_conversation_result(scope, conversation_id, agents_map)
+    |> Guard.value({[], false})
+  end
+
+  @doc "Tagged sibling of `messages_window_for_conversation/4` (WP6): `{:ok, {messages, earlier_hidden?}}` or `{:error, :unavailable}`."
+  def messages_window_for_conversation_result(mount, scope, conversation_id, agents_map \\ nil) do
+    Guard.run(:support_messages_window, scope, fn -> messages_window!(mount, scope, conversation_id, agents_map) end)
+  end
+
+  # The raising read, for callers already inside a `Guard.run/3`.
+  defp messages_window!(mount, scope, conversation_id, agents_map) do
     {rows, truncated?} =
       Mount.resource(mount, Message)
       |> Ash.Query.ensure_selected([
@@ -180,39 +223,49 @@ defmodule Samen.Web.Support.Reads do
       |> Samen.Web.Reads.newest_window(@detail_limit, scope: scope)
 
     msgs = resolve_pii(rows, mount, Message, scope)
-    agents_map = agents_map || agents_by_id(mount, scope)
+    agents_map = agents_map || Map.new(agents!(mount, scope), &{&1.id, &1})
 
     {Enum.map(msgs, fn msg -> Map.put(msg, :__agent__, agents_map[msg.agent_id]) end), truncated?}
-  rescue
-    _ -> {[], false}
   end
 
   @doc "Read support agents for `scope` with full_name/email PII-resolved. BOUNDED."
-  def agents(mount, scope) do
+  def agents(mount, scope), do: agents_result(mount, scope) |> Guard.value([])
+
+  @doc "Tagged sibling of `agents/2` (WP6): `{:ok, agents}` or `{:error, :unavailable}`."
+  def agents_result(mount, scope), do: Guard.run(:support_agents, scope, fn -> agents!(mount, scope) end)
+
+  # The raising read, for callers already inside a `Guard.run/3`.
+  defp agents!(mount, scope) do
     Mount.resource(mount, Agent)
     |> Ash.Query.ensure_selected([:handle, :status, :role, :full_name, :email, :timezone])
     |> Ash.Query.sort(inserted_at: :asc)
     |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
     |> resolve_pii(mount, Agent, scope)
-  rescue
-    _ -> []
   end
 
   @doc "agent_id → agent (PII-resolved) map for joining agent PII to messages/tickets."
-  def agents_by_id(mount, scope) do
-    agents(mount, scope) |> Map.new(&{&1.id, &1})
+  def agents_by_id(mount, scope), do: agents(mount, scope) |> Map.new(&{&1.id, &1})
+
+  @doc "Tagged sibling of `agents_by_id/2` (WP6)."
+  def agents_by_id_result(mount, scope) do
+    with {:ok, agents} <- agents_result(mount, scope), do: {:ok, Map.new(agents, &{&1.id, &1})}
   end
 
   @doc "Read CSAT responses for `scope`. Non-PII. BOUNDED to #{@detail_limit} rows."
-  def csats(mount, scope) do
-    Mount.resource(mount, Csat)
-    |> Ash.Query.ensure_selected([:score, :comments, :channel, :responded_at, :ticket_id, :agent_id])
-    |> Ash.Query.sort(responded_at: :desc)
-    |> Ash.Query.limit(@detail_limit)
-    |> Ash.read!(scope: scope)
-  rescue
-    _ -> []
+  def csats(mount, scope), do: csats_result(mount, scope) |> Guard.value([])
+
+  @doc """
+  Tagged sibling of `csats/2` (WP6): `{:ok, value}`, or `{:error, :unavailable}` when the read FAILED (an outage is not an empty result), or `{:error, :forbidden}` for a denial.
+  """
+  def csats_result(mount, scope) do
+    Guard.run(:support_csats, scope, fn ->
+      Mount.resource(mount, Csat)
+      |> Ash.Query.ensure_selected([:score, :comments, :channel, :responded_at, :ticket_id, :agent_id])
+      |> Ash.Query.sort(responded_at: :desc)
+      |> Ash.Query.limit(@detail_limit)
+      |> Ash.read!(scope: scope)
+    end)
   end
 
   @doc """
@@ -222,15 +275,20 @@ defmodule Samen.Web.Support.Reads do
   never a fabricated score). Org-scoped via `scope` — a cross-org `ticket_id`
   yields `nil`, never another org's response (no existence oracle).
   """
-  def csat_for_ticket(mount, scope, ticket_id) do
-    Mount.resource(mount, Csat)
-    |> Ash.Query.ensure_selected([:score, :comments, :channel, :responded_at, :ticket_id, :agent_id])
-    |> Ash.Query.filter(ticket_id == ^ticket_id)
-    |> Ash.Query.sort(responded_at: :desc)
-    |> Ash.Query.limit(1)
-    |> Ash.read_one!(scope: scope)
-  rescue
-    _ -> nil
+  def csat_for_ticket(mount, scope, ticket_id), do: csat_for_ticket_result(mount, scope, ticket_id) |> Guard.value(nil)
+
+  @doc """
+  Tagged sibling of `csat_for_ticket/3` (WP6): `{:ok, value}`, or `{:error, :unavailable}` when the read FAILED (an outage is not an empty result), or `{:error, :forbidden}` for a denial.
+  """
+  def csat_for_ticket_result(mount, scope, ticket_id) do
+    Guard.run(:support_csat_for_ticket, scope, fn ->
+      Mount.resource(mount, Csat)
+      |> Ash.Query.ensure_selected([:score, :comments, :channel, :responded_at, :ticket_id, :agent_id])
+      |> Ash.Query.filter(ticket_id == ^ticket_id)
+      |> Ash.Query.sort(responded_at: :desc)
+      |> Ash.Query.limit(1)
+      |> Ash.read_one!(scope: scope)
+    end)
   end
 
   @doc """
@@ -240,15 +298,20 @@ defmodule Samen.Web.Support.Reads do
   rows, sorted by name. Honest empty (`[]`) when the org has none — never
   fabricated.
   """
-  def macros(mount, scope) do
-    Mount.resource(mount, Macro)
-    |> Ash.Query.filter(enabled == true)
-    |> Ash.Query.ensure_selected([:name, :description, :body_template, :tags, :category])
-    |> Ash.Query.sort(name: :asc)
-    |> Ash.Query.limit(@detail_limit)
-    |> Ash.read!(scope: scope)
-  rescue
-    _ -> []
+  def macros(mount, scope), do: macros_result(mount, scope) |> Guard.value([])
+
+  @doc """
+  Tagged sibling of `macros/2` (WP6): `{:ok, value}`, or `{:error, :unavailable}` when the read FAILED (an outage is not an empty result), or `{:error, :forbidden}` for a denial.
+  """
+  def macros_result(mount, scope) do
+    Guard.run(:support_macros, scope, fn ->
+      Mount.resource(mount, Macro)
+      |> Ash.Query.filter(enabled == true)
+      |> Ash.Query.ensure_selected([:name, :description, :body_template, :tags, :category])
+      |> Ash.Query.sort(name: :asc)
+      |> Ash.Query.limit(@detail_limit)
+      |> Ash.read!(scope: scope)
+    end)
   end
 
   # The macro composer palette's ONE placeholder: `{{agent_name}}`. `agents`
@@ -294,12 +357,42 @@ defmodule Samen.Web.Support.Reads do
   read-bounding: this replaced an unbounded CSAT `read!`).
   """
   def metrics(mount, scope) do
-    %{
-      open_tickets: count_open_tickets(mount, scope),
-      breaching_sla: count_breaching(mount, scope),
-      solved_this_week: count_solved_this_week(mount, scope),
-      csat_avg: avg_csat(mount, scope)
-    }
+    {stats, _failed} = metrics_status(mount, scope)
+    stats
+  end
+
+  @doc """
+  `metrics/2` plus WHICH of its four numbers could not be read (WP6): `{stats, failed}`, `failed`
+  a subset of `[:open_tickets, :breaching_sla, :solved_this_week, :csat_avg]`. A failed number
+  keeps its legacy value (`0` / `nil`) in `stats` but is named in `failed`, so a tile shows an
+  error instead of a confident zero. Each number is its own guarded read.
+  """
+  def metrics_status(mount, scope) do
+    week_ago = DateTime.add(DateTime.utc_now(), -7 * 86_400, :second)
+    tickets = fn -> Mount.resource(mount, Ticket) end
+
+    parts = [
+      open_tickets:
+        {Guard.run(:support_metric_open_tickets, scope, fn ->
+           tickets.() |> Ash.Query.filter(status == :open) |> Ash.count!(scope: scope)
+         end), 0},
+      breaching_sla:
+        {Guard.run(:support_metric_breaching_sla, scope, fn ->
+           tickets.()
+           |> Ash.Query.filter(breached == true and status not in [:resolved, :closed])
+           |> Ash.count!(scope: scope)
+         end), 0},
+      solved_this_week:
+        {Guard.run(:support_metric_solved_this_week, scope, fn ->
+           tickets.()
+           |> Ash.Query.filter(status in [:resolved, :closed] and resolved_at >= ^week_ago)
+           |> Ash.count!(scope: scope)
+         end), 0},
+      csat_avg: {Guard.run(:support_metric_csat_avg, scope, fn -> avg_csat!(mount, scope) end), nil}
+    ]
+
+    {Map.new(parts, fn {key, {result, default}} -> {key, Guard.value(result, default)} end),
+     for({key, {result, _default}} <- parts, Guard.unavailable?(result), do: key)}
   end
 
   # -- A3 write side (sanctioned defaults only) ----------------------------------
@@ -414,39 +507,11 @@ defmodule Samen.Web.Support.Reads do
   defp actor_of(actor) when is_map(actor), do: actor
   defp actor_of(_), do: %{}
 
-  defp count_open_tickets(mount, scope) do
-    Mount.resource(mount, Ticket)
-    |> Ash.Query.filter(status == :open)
-    |> Ash.count!(scope: scope)
-  rescue
-    _ -> 0
-  end
-
-  defp count_breaching(mount, scope) do
-    Mount.resource(mount, Ticket)
-    |> Ash.Query.filter(breached == true and status not in [:resolved, :closed])
-    |> Ash.count!(scope: scope)
-  rescue
-    _ -> 0
-  end
-
-  defp count_solved_this_week(mount, scope) do
-    week_ago = DateTime.add(DateTime.utc_now(), -7 * 86_400, :second)
-
-    Mount.resource(mount, Ticket)
-    |> Ash.Query.filter(status in [:resolved, :closed] and resolved_at >= ^week_ago)
-    |> Ash.count!(scope: scope)
-  rescue
-    _ -> 0
-  end
-
-  defp avg_csat(mount, scope) do
+  defp avg_csat!(mount, scope) do
     case Ash.avg!(Mount.resource(mount, Csat), :score, scope: scope) do
       nil -> nil
       avg when is_float(avg) -> Float.round(avg, 1)
       avg -> avg |> Decimal.to_float() |> Float.round(1)
     end
-  rescue
-    _ -> nil
   end
 end
