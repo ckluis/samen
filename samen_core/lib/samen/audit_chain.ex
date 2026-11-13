@@ -17,14 +17,15 @@ defmodule Samen.AuditChain do
 
   `append/2` is the ONE write path. It:
 
-    1. locks the org's chain tip (`SELECT … FOR UPDATE` on the max-seq row — a
-       per-org advisory serialization so two concurrent appends can't both read the
-       same tip and produce a seq collision / fork);
+    1. takes a per-org advisory TRANSACTION lock (`pg_advisory_xact_lock`) inside a
+       transaction it opens itself (joining the caller's), so two concurrent appends
+       can't both read the same tip and produce a seq collision / fork — even with no
+       caller transaction and even on a fresh chain with no tip row to lock;
     2. computes `seq = prior.seq + 1` (or 0 for a new org chain), `prior_hash =
        prior.hash` (or genesis), and `hash` from the canonical payload;
     3. inserts the `aud_chain` row.
 
-  It is designed to run INSIDE the caller's transaction (e.g. the T1.6 grant multi,
+  It may run INSIDE the caller's transaction (e.g. the T1.6 grant multi,
   the T4.1 impersonation open, the erasure multi) so the chain entry and the
   underlying event commit atomically — an event without a chain entry, or a chain
   entry without its event, never exists.
@@ -162,8 +163,12 @@ defmodule Samen.AuditChain do
   # ==========================================================================
 
   @doc """
-  Append an entry to the org's chain. Runs inside the caller's transaction (pass
-  `:repo` bound to the transaction connection, or call from within `repo.transaction`).
+  Append an entry to the org's chain. The append is TRANSACTIONAL BY CONSTRUCTION: it opens its
+  own transaction (joining the caller's, if there is one) and takes a per-org advisory
+  TRANSACTION lock before reading the tip, so concurrent appends to one org serialise — whether
+  or not the caller wrapped the call in a transaction, and including the first entry of a fresh
+  chain (which has no tip row to lock). The lock is held until the enclosing transaction ends, so
+  the `seq` read and the insert are atomic with respect to every other appender of that org.
 
   `attrs` (all token-only):
     * `:org_id`         — the org chain (defaults to `"__global__"` for org-less events)
@@ -185,15 +190,34 @@ defmodule Samen.AuditChain do
     org_id = to_string(Map.get(attrs, :org_id) || Map.get(attrs, "org_id") || @global_org)
 
     with {:ok, ciphertext} <- encrypt_subject_payload(attrs) do
-      do_append(r, org_id, attrs, ciphertext)
+      # A {:error, _} from do_append is a DB-free validation failure: it is returned, not rolled
+      # back (rolling back here would abort a caller's enclosing transaction). A DB error raises
+      # and rolls the transaction back.
+      case r.transaction(fn ->
+             lock_org_chain(r, org_id)
+             do_append(r, org_id, attrs, ciphertext)
+           end) do
+        {:ok, result} -> result
+        {:error, reason} -> {:error, reason}
+      end
     end
+  end
+
+  # Serialise appenders per org. `FOR UPDATE` on the tip row cannot do this: it is released at
+  # statement end outside a transaction, and a fresh chain has no row at all. An advisory
+  # transaction lock keyed on the org needs neither, and is released automatically at commit or
+  # rollback. `hashtextextended` yields a bigint key; a collision between two orgs only costs a
+  # little needless serialisation, never correctness.
+  defp lock_org_chain(r, org_id) do
+    r.query!("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", ["samen:aud_chain:" <> org_id])
+    :ok
   end
 
   defp do_append(r, org_id, attrs, ciphertext) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
-    # Lock the tip for this org so concurrent appends serialize (no seq fork).
-    prior = tip_locked(r, org_id)
+    # The caller (`append/2`) holds the org's advisory lock, so this read-then-insert is atomic.
+    prior = tip(r, org_id)
     {seq, prior_hash} =
       case prior do
         nil -> {0, Canonical.genesis()}
@@ -248,14 +272,14 @@ defmodule Samen.AuditChain do
     r.insert(row)
   end
 
-  # The current tip (max seq) for the org, row-locked. nil for a fresh chain.
-  defp tip_locked(r, org_id) do
+  # The current tip (max seq) for the org. nil for a fresh chain. Only correct under the
+  # advisory lock taken in `append/2`.
+  defp tip(r, org_id) do
     r.one(
       from(e in Entry,
         where: e.org_id == ^org_id,
         order_by: [desc: e.seq],
-        limit: 1,
-        lock: "FOR UPDATE"
+        limit: 1
       )
     )
   end
