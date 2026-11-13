@@ -64,6 +64,8 @@ defmodule Samen.Web.MetricsController do
 
   # Resolve + call the reporter at runtime. Any failure (dep absent, reporter not
   # started, unexpected return) collapses to :error → a 404. Never a fake empty 200.
+  # A reporter that RAISES or exits is not "egress disabled" — the scraper still gets the 404, but the
+  # failure is reported by name and exception module so the operator can tell a broken reporter apart.
   defp safe_scrape(reporter, name) when is_atom(reporter) and not is_nil(name) do
     if Code.ensure_loaded?(reporter) and function_exported?(reporter, :scrape, 1) do
       case apply(reporter, :scrape, [name]) do
@@ -74,9 +76,13 @@ defmodule Samen.Web.MetricsController do
       :error
     end
   rescue
-    _ -> :error
+    e ->
+      Samen.Web.Reads.Guard.report(:metrics_scrape, nil, e)
+      :error
   catch
-    :exit, _ -> :error
+    :exit, _ ->
+      Samen.Web.Reads.Guard.report(:metrics_scrape, nil, :exit)
+      :error
   end
 
   defp safe_scrape(_reporter, _name), do: :error

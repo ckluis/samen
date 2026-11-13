@@ -355,7 +355,11 @@ defmodule Samen.UI.Nav do
         nil
     end
   rescue
-    _ -> nil
+    # A raising host resolver omits the extra group (navigation chrome must not take the sidebar down)
+    # but is reported by name and exception module, so a broken resolver is visible in the logs.
+    e ->
+      Samen.Web.Reads.Guard.report(:host_nav_extra, nil, e)
+      nil
   end
 
   # An item the sidebar can render: a map with a binary `:label` and `:href`. Anything else

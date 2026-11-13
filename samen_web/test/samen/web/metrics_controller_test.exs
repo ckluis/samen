@@ -54,4 +54,13 @@ defmodule Samen.Web.MetricsControllerTest do
     conn = call(%{samen_metrics: %{reporter: RaisingReporter, name: :x}})
     assert conn.status == 404
   end
+
+  test "a reporter that RAISES is reported by name (it is not 'egress disabled'); an absent one is not a failure" do
+    broken = ExUnit.CaptureLog.capture_log(fn -> call(%{samen_metrics: %{reporter: RaisingReporter, name: :x}}) end)
+    assert broken =~ "metrics_scrape"
+    assert broken =~ "RuntimeError"
+
+    absent = ExUnit.CaptureLog.capture_log(fn -> call(%{samen_metrics: %{reporter: Samen.Web.NoSuchReporter, name: :x}}) end)
+    refute absent =~ "metrics_scrape"
+  end
 end

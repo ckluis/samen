@@ -96,8 +96,6 @@ defmodule Samen.Web.Reads.SwallowLint do
       "guards rendering of a validation-message interpolation OPTION (a bound or count carried in the error tuple, not a database read): a value whose to_string raises falls back to its inspect text inside the message",
     {"samen_web/lib/samen/ui/gantt.ex", :frac} =>
       "guards rendering of one bar position: a point incomparable with the timeline range (mixed or malformed temporal types) is placed at the left edge (0.0) instead of crashing the render of every other bar — presentation of caller-supplied points, no read",
-    {"samen_web/lib/samen/ui/nav.ex", :host_nav_extra_data} =>
-      "guards a HOST-supplied nav-group resolver (navigation chrome, no data shown as empty): a raising resolver omits the host's extra nav group so it cannot take the inherited sidebar down",
     {"samen_web/lib/samen/ui/overlay.ex", :safe_call} =>
       "guards a host-supplied hit-path function: a raising one yields nil, which same_origin_path drops, so the hit renders without a link instead of crashing the overlay",
     {"samen_web/lib/samen/web/auth/totp_pending.ex", :fetch_or_create} =>
@@ -110,8 +108,6 @@ defmodule Samen.Web.Reads.SwallowLint do
       "best-effort telemetry (documented 'never fails an export'): observability must not break the export it observes; the export result is untouched",
     {"samen_web/lib/samen/web/live.ex", :peer_data} =>
       "get_connect_info raises outside the mount lifecycle and returns nil on a dead render: either way the caller uses the 'unknown' peer, which is a stricter global per-IP rate-limit bucket — fail-closed on the limiter, nothing shown as empty",
-    {"samen_web/lib/samen/web/metrics_controller.ex", :safe_scrape} =>
-      "a reporter that is absent, not started or raising is indistinguishable from egress being off BY CONSTRUCTION, and every such outcome answers a non-200 with a body ('metrics egress disabled') — a scraper sees failure, never a fabricated empty 200",
     {"samen_web/lib/samen/web/onboarding/wizard_controller.ex", :verified?} =>
       "fail-CLOSED capability probe (ADR-035 §5 A2): an unresolvable principal is unverified on an armed host, never an elevated default"
   }
