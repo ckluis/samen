@@ -8,10 +8,10 @@
 # MUST_FAIL: tenant import vault-routes PII
 # MUST_FAIL: operator import is refused ROW-BY-ROW
 diff --git a/samen_web/lib/samen/web/csv.ex b/samen_web/lib/samen/web/csv.ex
-index 95d8ab3..703a28c 100644
+index 5f5713aa..51e77b95 100644
 --- a/samen_web/lib/samen/web/csv.ex
 +++ b/samen_web/lib/samen/web/csv.ex
-@@ -351,12 +351,12 @@ defmodule Samen.Web.Csv do
+@@ -359,12 +359,12 @@ defmodule Samen.Web.Csv do
        |> Map.new(fn {col, value} -> {col, decode_cell(value)} end)
        |> Map.put(:org_id, scope_org_id(scope))
  
@@ -30,9 +30,9 @@ index 95d8ab3..703a28c 100644
      |> case do
        {:ok, _record} ->
          %Report{report | created: report.created + 1}
-@@ -374,6 +374,43 @@ defmodule Samen.Web.Csv do
-       %Report{report | errors: [%{row: n, error: "could not be imported"} | report.errors]}
-   end
+@@ -398,6 +398,43 @@ defmodule Samen.Web.Csv do
+   defp outage?(%Postgrex.Error{}), do: true
+   defp outage?(_), do: false
  
 +  # SABOTAGE helper (RP-CSV-2): a raw Ecto insert_all straight into the physical
 +  # table — no governed action, no WriteGuard, no Vault.Change.
