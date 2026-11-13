@@ -167,8 +167,12 @@ defmodule Samen.Web.Files.UploadLive do
           max_mb = div(max, 1_048_576)
           {:noreply, assign(socket, upload_error: "file exceeds the #{max_mb} MB size limit", upload_result: nil)}
 
-        [{:error, reason}] ->
-          {:noreply, assign(socket, upload_error: "upload failed: #{inspect(reason)}", upload_result: nil)}
+        [{:error, :not_configured}] ->
+          {:noreply, assign(socket, upload_error: "file storage is not configured on this deployment — nothing was saved", upload_result: nil)}
+
+        [{:error, _reason}] ->
+          # Never `inspect(reason)`: a reason term can carry storage keys and values.
+          {:noreply, assign(socket, upload_error: "upload failed — nothing was saved. Try again.", upload_result: nil)}
 
         _ ->
           {:noreply, assign(socket, upload_error: "no file selected", upload_result: nil)}

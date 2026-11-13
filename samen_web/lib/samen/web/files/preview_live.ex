@@ -47,7 +47,7 @@ defmodule Samen.Web.Files.PreviewLive do
     org_id = CurrentOrg.resolve(socket.assigns[:samen_mount], params, session)
     file_id = Map.get(params, "id")
 
-    {:ok, assign(socket, org_id: org_id, file_id: file_id, file: nil, not_found: false)}
+    {:ok, assign(socket, org_id: org_id, file_id: file_id, file: nil, not_found: false, load_error: nil)}
   end
 
   @impl true
@@ -89,6 +89,11 @@ defmodule Samen.Web.Files.PreviewLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
+        <%= if @load_error do %>
+          <div class="wrap">
+            <.error_state class="file-error" body={@load_error} retry_event="retry_load" />
+          </div>
+        <% else %>
         <%= if @not_found do %>
           <div id="file-not-found" class="empty-state">
             <p>File not found or not accessible.</p>
@@ -157,6 +162,7 @@ defmodule Samen.Web.Files.PreviewLive do
             </div>
           </div>
         <% end %>
+        <% end %>
       </.app_shell>
     </div>
     """
@@ -164,13 +170,21 @@ defmodule Samen.Web.Files.PreviewLive do
 
   # -- private -----------------------------------------------------------------
 
-  defp load_file(socket, _mount, _scope, nil), do: assign(socket, file: nil, not_found: true)
+  defp load_file(socket, _mount, _scope, nil), do: assign(socket, file: nil, not_found: true, load_error: nil)
 
   defp load_file(socket, mount, scope, file_id) do
-    case Reads.get_file(mount, scope, file_id) do
-      {:ok, file} -> assign(socket, file: file, not_found: false)
-      {:error, _} -> assign(socket, file: nil, not_found: true)
+    # A FAILED read is the error state (retry), never "File not found".
+    case Reads.get_file_result(mount, scope, file_id) do
+      {:ok, file} -> assign(socket, file: file, not_found: false, load_error: nil)
+      {:error, :not_found} -> assign(socket, file: nil, not_found: true, load_error: nil)
+      {:error, :unavailable} -> assign(socket, file: nil, not_found: false, load_error: Samen.Web.Reads.Guard.message())
     end
+  end
+
+  @impl true
+  def handle_event("retry_load", _params, socket) do
+    %{samen_mount: mount, org_id: org_id, file_id: file_id} = socket.assigns
+    {:noreply, load_file(socket, mount, Mount.scope(mount, org_id), file_id)}
   end
 
   defp crumbs(mount, org_id, nil),

@@ -556,4 +556,100 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
       refute_error_state(html(TaskTreeLive, event(TaskTreeLive, tr, "retry_load")))
     end
   end
+
+  # ===========================================================================
+  # Files
+  # ===========================================================================
+
+  describe "Files" do
+    alias Samen.Web.Files.{PreviewLive, UploadLive}
+
+    defp seed_file!(org_id) do
+      root = Path.join(System.tmp_dir!(), "p2_files_#{System.unique_integer([:positive])}")
+      on_exit(fn -> Elixir.File.rm_rf!(root) end)
+
+      {:ok, file} =
+        Samen.Files.upload(
+          %{org_id: org_id},
+          %{filename: "secret-plan.txt", content_type: "text/plain", binary: "hello"},
+          file_module: Samen.WebTest.Primitives.File,
+          repo: Samen.WebTest.Repo,
+          storage: Samen.Files.Storage.Local,
+          storage_config: %{root: root},
+          allowed_content_types: ~w(text/plain),
+          max_bytes: 1_048_576
+        )
+
+      file
+    end
+
+    defp upload_stub(socket), do: %{socket | assigns: Map.put(socket.assigns, :uploads, %{file_upload: %{entries: [], errors: [], ref: "file_upload"}})}
+
+    test "list: a failed page read is the error state, not 'No files yet.'; retry recovers" do
+      org_id = Ash.UUID.generate()
+      seed_file!(org_id)
+      # The operator plane hides the upload form (which needs a real LiveView upload config).
+      mount = build_mount(:files, plane: :operator, target_org_id: org_id)
+      base = fn ->
+        %Phoenix.LiveView.Socket{}
+        |> Phoenix.Component.assign(:samen_mount, mount)
+        |> Phoenix.Component.assign(:samen_acting_as, false)
+        |> Phoenix.Component.assign(:return_to, nil)
+        |> Phoenix.Component.assign(:org_id, org_id)
+        |> Phoenix.Component.assign(upload_ref: :file_upload, upload_result: nil, upload_error: nil)
+        |> upload_stub()
+        |> UploadLive.load(org_id)
+      end
+
+      inject_read_faults([:files_page])
+      socket = failing(base)
+      rendered = html(UploadLive, socket)
+      assert_error_state(rendered)
+      refute rendered =~ "No files yet."
+      # the error DOM prints no row value
+      refute rendered =~ "secret-plan"
+
+      clear_read_faults()
+      socket = list_event(socket, "list_retry")
+      rendered = html(UploadLive, socket)
+      refute_error_state(rendered)
+      assert rendered =~ "file-row"
+    end
+
+    test "preview: a FAILED read is the error state, not 'File not found'; 404 survives; retry recovers" do
+      org_id = Ash.UUID.generate()
+      file = seed_file!(org_id)
+      mount = build_mount(:files)
+
+      load = fn id ->
+        %Phoenix.LiveView.Socket{}
+        |> Phoenix.Component.assign(:samen_mount, mount)
+        |> Phoenix.Component.assign(:samen_acting_as, false)
+        |> Phoenix.Component.assign(:return_to, nil)
+        |> Phoenix.Component.assign(:org_id, org_id)
+        |> Phoenix.Component.assign(:file_id, id)
+        |> Phoenix.Component.assign(:file, nil)
+        |> Phoenix.Component.assign(:not_found, false)
+        |> PreviewLive.load(org_id, id)
+      end
+
+      inject_read_faults([:files_get_file])
+      socket = failing(fn -> load.(file.id) end)
+      rendered = html(PreviewLive, socket)
+      assert_error_state(rendered)
+      refute rendered =~ "File not found"
+      refute rendered =~ "file-preview-panel"
+
+      clear_read_faults()
+      rendered = html(PreviewLive, event(PreviewLive, socket, "retry_load"))
+      refute_error_state(rendered)
+      assert rendered =~ "file-metadata"
+
+      for id <- [Ash.UUID.generate(), "not-a-uuid"] do
+        rendered = html(PreviewLive, load.(id))
+        assert rendered =~ "File not found"
+        refute_error_state(rendered)
+      end
+    end
+  end
 end

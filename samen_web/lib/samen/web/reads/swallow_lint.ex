@@ -90,7 +90,6 @@ defmodule Samen.Web.Reads.SwallowLint do
     "samen_web/lib/samen/web/chat/reads.ex" => 8,
     "samen_web/lib/samen/web/csv.ex" => 1,
     "samen_web/lib/samen/web/current_org.ex" => 6,
-    "samen_web/lib/samen/web/files/reads.ex" => 3,
     "samen_web/lib/samen/web/first_run.ex" => 2,
     "samen_web/lib/samen/web/flags/reads.ex" => 3,
     "samen_web/lib/samen/web/live.ex" => 1,

@@ -73,9 +73,13 @@ defmodule Samen.Web.Files.BytesController do
     if operator_plane?(mount) do
       conn |> put_status(403) |> text("operator-refused")
     else
-      case Reads.get_file(mount, scope, file_id) do
+      case Reads.get_file_result(mount, scope, file_id) do
         {:error, :not_found} ->
           conn |> put_status(404) |> text("not found")
+
+        # A failed read is a 503 (retryable), never a 404.
+        {:error, :unavailable} ->
+          conn |> put_status(503) |> text("unavailable")
 
         {:ok, file} ->
           # Quarantine gate: refused unless :active (RP-FI-3).
