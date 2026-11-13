@@ -6,20 +6,24 @@ verifiers, generators) · `samen_web` (framework UI library: LiveViews, Mount/Pl
 `spikes/` (frozen mechanism spikes). Design records live in `docs/adr/` + per-workstream
 `docs/ws-*/{design,build-plan}.md` — consult the ADR before changing anything it governs.
 
-## Code exploration — codemunch FIRST (MANDATORY, not optional)
-Before you Read/Grep/Glob to orient yourself in this tree, use codemunch — this has been missed
-repeatedly (agents keep defaulting to raw Read/Grep sweeps). The rule, verbatim and enforced in
-`driftwood/CLAUDE.md`: your FIRST orientation action is `codemunch:explore`/`codemunch:search`/
-`codemunch:fetch`/`codemunch:refs`, NOT a multi-file Read or a large-tree Grep. WHEN it fires:
-reading >1 source file to understand something, or grepping/globbing any of `samen_core/`,
-`samen_web/`, `driftwood/`, `pawchart/`, `demo/`, `docs/` for a symbol/caller/structure → route it
-through codemunch first. A single grep for one exact string in one known file is fine; a *sweep* is
-not — that is what codemunch replaces. See `driftwood/CLAUDE.md` for the full rules + decision tree.
+## Code exploration — codemunch FIRST when it is available
+Before you Read/Grep/Glob to orient yourself in this tree, use codemunch (`codemunch:explore`/`search`/`fetch`/`refs`)
+— agents keep defaulting to raw multi-file Read/Grep sweeps, and that is what it replaces. It fires when you are about
+to read >1 source file to understand something, or to grep/glob `samen_core/`, `samen_web/`, `driftwood/`, `pawchart/`,
+`demo/` or `docs/` for a symbol/caller/structure. A single grep for one exact string in a known file is fine.
+Rules + decision tree: `driftwood/CLAUDE.md`.
+- **No codemunch** (plugin missing, other harness, subagent without plugins) **or a stale index**: fall back to targeted
+  `rg -n 'defmodule X'` / `rg -n 'def name'` and read only the file you need. Never stall for want of the plugin.
+- **Stale?** `.claude/codemunch/index.json` records the `commit` it was built at: if `git rev-list --count <commit>..HEAD`
+  is large or the file you need is newer, treat results as hints and verify with `rg`; `codemunch:index` rebuilds it.
+- **Blind spot:** it indexes `def`/`defmodule`/macros, NOT Spark/Ash DSL entities (`attribute`, `actions`, `policies`,
+  `pii do`, `postgres do`) — where most resource meaning lives. Find those with `rg -n 'attribute :x'` or by reading
+  the resource file.
 
 ## Suites / CI (local Postgres + pgvector required) — reference: `docs/ci.md`
 Use the driver; never hand-segment `ci.sh`, never background a run and poll it (run each call in the foreground).
 - `scripts/ci quick` during a round (diff-aware vs origin/main incl. untracked files; NEVER PR-ready) ·
-  `scripts/ci pr` before a PR: each call is budgeted to 540 s, on `INCOMPLETE n/m` run `scripts/ci resume`
+  `scripts/ci pr` before a PR: each call is budgeted to 540 s, so run it with a tool timeout of at least 600000 ms (the default 120 s kills it); on `INCOMPLETE n/m` run `scripts/ci resume`
   until the last line is `CI(pr): PASS n/n … — PR-READY` · `scripts/ci full` = nightly/opt-in (whole corpus +
   watch-list; Actions runs it nightly). `./ci.sh` / `./ci-fast.sh` are unbudgeted wrappers over the same steps.
 - A red step prints a digest + `_ci/logs/<step>.log`; `scripts/ci status` · `explain <step>` · `list pr`;
