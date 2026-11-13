@@ -168,8 +168,16 @@ defmodule PawChartWeb.ClinicReads do
         {:error, :not_found}
 
       owner ->
+        # The form edits only the FIRST email/phone; merge it into the stored lists so the
+        # others are kept (F06). `existing` is the plane-resolved record.
+        existing =
+          case get_owner(scope, id) do
+            {:ok, resolved} -> resolved
+            _ -> %{}
+          end
+
         owner
-        |> Ash.Changeset.for_update(:update, owner_attrs(params, org_id), scope: scope)
+        |> Ash.Changeset.for_update(:update, owner_attrs(params, org_id, existing), scope: scope)
         |> Ash.update(scope: scope)
     end
   rescue
@@ -241,15 +249,48 @@ defmodule PawChartWeb.ClinicReads do
     _ -> nil
   end
 
-  defp owner_attrs(params, org_id) do
-    %{
+  # `existing` is nil on create (the form value IS the list) and the plane-resolved patient on
+  # update (the form value replaces the first entry, the tail is kept). When the stored list is
+  # unreadable (masked / not decodable) the field is left OUT of the changeset, never clobbered.
+  defp owner_attrs(params, org_id, existing \\ nil) do
+    base = %{
       org_id: org_id,
       full_name: %{first: str(params["first"]), last: str(params["last"])},
-      emails: list_of(params["email"]),
-      phones: list_of(params["phone"]),
       marketing_opt_in: truthy(params["marketing_opt_in"])
     }
+
+    base
+    |> put_contact_list(:emails, params["email"], existing)
+    |> put_contact_list(:phones, params["phone"], existing)
   end
+
+  defp put_contact_list(attrs, key, value, nil), do: Map.put(attrs, key, list_of(value))
+
+  defp put_contact_list(attrs, key, value, existing) do
+    case stored_list(Map.get(existing, key)) do
+      {:ok, stored} -> Map.put(attrs, key, replace_first(stored, blank_to_nil(value)))
+      :unreadable -> attrs
+    end
+  end
+
+  defp stored_list(list) when is_list(list), do: {:ok, list}
+  defp stored_list(nil), do: {:ok, []}
+
+  defp stored_list(json) when is_binary(json) do
+    case Jason.decode(json) do
+      {:ok, list} when is_list(list) -> {:ok, list}
+      _ -> :unreadable
+    end
+  end
+
+  defp stored_list(_), do: :unreadable
+
+  defp replace_first([], nil), do: []
+  defp replace_first([], new), do: [new]
+  defp replace_first([_ | tail], nil), do: tail
+  defp replace_first([%{"address" => _} = h | tail], new), do: [%{h | "address" => new} | tail]
+  defp replace_first([%{"number" => _} = h | tail], new), do: [%{h | "number" => new} | tail]
+  defp replace_first([_ | tail], new), do: [new | tail]
 
   @temperaments ~w(docile anxious aggressive unknown)
 

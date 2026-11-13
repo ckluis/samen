@@ -152,6 +152,42 @@ defmodule PawChart.ClinicSurfaceTest do
     assert reloaded.marketing_opt_in == true
   end
 
+  test "EDITING a patient replaces only the first email/phone and keeps the rest (F06: no silent data loss)" do
+    {:ok, owner} =
+      PawChart.Clinic.Patient
+      |> Ash.Changeset.for_create(
+        :create,
+        %{
+          org_id: @org_a,
+          full_name: %{first: "Multi", last: "Contact"},
+          emails: ["first@example.test", "second@example.test", "third@example.test"],
+          phones: ["+15550000001", "+15550000002"]
+        },
+        scope: Reads.tenant_scope(@org_a)
+      )
+      |> Ash.create(scope: Reads.tenant_scope(@org_a))
+
+    assert {:ok, _} =
+             Reads.update_owner(@org_a, owner.id, %{
+               "first" => "Multi",
+               "last" => "Contact",
+               "email" => "renamed@example.test",
+               "phone" => "+15559999999"
+             })
+
+    {:ok, reloaded} = Reads.get_owner(Reads.tenant_scope(@org_a), owner.id)
+    assert Jason.decode!(reloaded.emails) == ["renamed@example.test", "second@example.test", "third@example.test"]
+    assert Jason.decode!(reloaded.phones) == ["+15559999999", "+15550000002"]
+
+    # Clearing the first field removes only that entry.
+    assert {:ok, _} =
+             Reads.update_owner(@org_a, owner.id, %{"first" => "Multi", "last" => "Contact", "email" => "", "phone" => ""})
+
+    {:ok, cleared} = Reads.get_owner(Reads.tenant_scope(@org_a), owner.id)
+    assert Jason.decode!(cleared.emails) == ["second@example.test", "third@example.test"]
+    assert Jason.decode!(cleared.phones) == ["+15550000002"]
+  end
+
   test "clinic staff can CREATE a pet linked to an in-org owner" do
     owner = create_owner!(@org_a, "Petra")
 
