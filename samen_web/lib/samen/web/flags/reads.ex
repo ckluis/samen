@@ -37,6 +37,7 @@ defmodule Samen.Web.Flags.Reads do
   # The operator debugging fan-out (per-tenant evaluated state) — a bounded cohort,
   # not a hot list.
   @write_failed_copy "We couldn't save this flag change right now. Nothing was changed — try again."
+  @denied_copy "You don't have permission to change this flag. Nothing was changed."
   @cohort_limit 50
 
   @doc """
@@ -175,9 +176,15 @@ defmodule Samen.Web.Flags.Reads do
   # NonPiiTargeting run) → write-through Cache.invalidate on success (design §3.3).
   defp update_flag(mount, scope, id, changes_fun) do
     case Guard.write(:flags_update, scope, fn -> do_update_flag(mount, scope, id, changes_fun) end) do
-      # The write itself blew up (not a validation refusal): value-free copy, never the exception
+      # The write itself blew up or the data layer failed (an outage — a raise, or a RETURNED
+      # Unknown/Framework error that `Guard.write/3` converts): value-free copy, never the exception
       # (its message can interpolate the very values being written). Logged by `Guard.write/3`.
-      {:error, kind} when kind in [:unavailable, :forbidden] -> {:error, @write_failed_copy}
+      {:error, :unavailable} -> {:error, @write_failed_copy}
+      # A real DENIAL stays a denial — it is not an outage and must not read like one.
+      {:error, :forbidden} -> {:error, @denied_copy}
+      {:error, %Ash.Error.Forbidden{}} -> {:error, @denied_copy}
+      # A validation refusal (e.g. NonPiiTargeting): the kernel's own framework copy.
+      {:error, %{__exception__: true} = error} -> {:error, friendly_error(error)}
       other -> other
     end
   end
@@ -188,7 +195,7 @@ defmodule Samen.Web.Flags.Reads do
         {:error, "Flag not found."}
 
       {:error, :unavailable} ->
-        {:error, @write_failed_copy}
+        {:error, :unavailable}
 
       {:ok, flag} ->
         flag
@@ -199,8 +206,9 @@ defmodule Samen.Web.Flags.Reads do
             :ok = Samen.FeatureFlags.Cache.invalidate(updated.name)
             {:ok, updated}
 
+          # Returned RAW: `update_flag/4` classifies it after `Guard.write/3` has had its say.
           {:error, error} ->
-            {:error, friendly_error(error)}
+            {:error, error}
         end
     end
   end
