@@ -1371,10 +1371,38 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
   describe "Onboarding" do
     alias Samen.Web.Onboarding.WizardLive
 
-    test "a FAILED org read is the error state, never 'You're all set'; retry recovers", %{org_id: org_id} do
+    test "a FAILED org read is the error state, never 'You're all set'; retry recovers" do
       mount = build_mount(:settings)
+
+      # A REAL, not-yet-onboarded org: the healthy control must POSITIVELY render the wizard's first
+      # step (not merely "no error"), so the error assertions below cannot pass on an empty page.
+      {:ok, reg} =
+        Samen.Identity.Register.register(
+          %{
+            org_name: "P2 Onboarding Co",
+            first_name: "Ada",
+            last_name: "Lovelace",
+            email: "p2-onboarding-#{System.unique_integer([:positive])}@example.test",
+            password: "correct horse battery staple"
+          },
+          %{
+            org: Samen.WebTest.Operator.Org,
+            credential: Samen.WebTest.Operator.Credential,
+            user: Samen.WebTest.Operator.User,
+            membership: Samen.WebTest.Operator.Membership,
+            auth_token: Samen.WebTest.Operator.AuthToken,
+            repo: Samen.WebTest.Repo
+          }
+        )
+
+      org_id = reg.org.id
+
       healthy = html(WizardLive, socket_for(WizardLive, mount, [org_id, nil]))
       refute_error_state(healthy)
+      assert healthy =~ ~s(id="onboarding-wizard")
+      assert healthy =~ ~s(id="onboarding-org-form")
+      assert healthy =~ "P2 Onboarding Co"
+      refute healthy =~ "onboarding-already-done"
 
       inject_read_faults([:onboarding_org])
       socket = failing(fn -> socket_for(WizardLive, mount, [org_id, nil]) end)
@@ -1382,9 +1410,12 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
       assert_error_state(rendered)
       refute rendered =~ "all set"
       refute rendered =~ "onboarding-already-done"
+      refute rendered =~ ~s(id="onboarding-org-form")
 
       clear_read_faults()
-      refute_error_state(html(WizardLive, event(WizardLive, socket, "retry_load")))
+      recovered = html(WizardLive, event(WizardLive, socket, "retry_load"))
+      refute_error_state(recovered)
+      assert recovered =~ ~s(id="onboarding-org-form")
     end
   end
 
@@ -1430,6 +1461,22 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
       refute rendered =~ "ticket-error"
 
       assert {:error, :unavailable} = with_log(fn -> Tags.names_for_result(mount, scope, "support.ticket", ticket_id) end) |> elem(0)
+
+      # The Tags scope genuinely UNMOUNTED (a host root with no Tags scope: `tags.tagging` is not in its
+      # catalog): the honest empty, logged nothing — and the fault injected above does not touch it,
+      # because no read is attempted at all.
+      unmounted = Samen.Web.Mount.new(:support, Samen.WebTestNoTags.Support, Samen.WebTest.Repo)
+      assert {:error, _} = Samen.Web.ObjectRef.Catalog.resource_for(unmounted, "tags.tagging")
+      unmounted_scope = Samen.Web.Mount.scope(unmounted, org_id)
+
+      log =
+        capture_log(fn ->
+          assert {:ok, []} = Tags.names_for_result(unmounted, unmounted_scope, "support.ticket", ticket_id)
+          assert {:ok, %{}} = Tags.names_by_subject_result(unmounted, unmounted_scope, "support.ticket", [ticket_id])
+          assert {:ok, %{}} = Tags.names_by_subject_key_result(unmounted, unmounted_scope, "support.ticket", 10)
+        end)
+
+      assert log == ""
 
       clear_read_faults()
       healthy = socket_for(TicketLive, mount, [org_id, ticket_id], active_tab: "details")
