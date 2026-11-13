@@ -21,9 +21,10 @@
 # TEST_FILES: test/samen/web/crm_account_health_test.exs
 # MUST_FAIL: snapshot/2 DEGRADED READ (fix round 1, MED-3): a genuinely FAILED read surfaces honest absence, never a fabricated $0/0
 diff --git a/samen_web/lib/samen/web/account_health.ex b/samen_web/lib/samen/web/account_health.ex
+index 39bd4944..3f9e8fb5 100644
 --- a/samen_web/lib/samen/web/account_health.ex
 +++ b/samen_web/lib/samen/web/account_health.ex
-@@ -556,8 +556,6 @@
+@@ -557,8 +557,6 @@ defmodule Samen.Web.AccountHealth do
      # never crash, WRONG once this function treated that zero as fact). `Billing.Reads`
      # itself is UNTOUCHED — its existing consumers keep their current, correct-for-them
      # fail-safe-empty contract; only this call site gained the canary.
@@ -32,7 +33,7 @@ diff --git a/samen_web/lib/samen/web/account_health.ex b/samen_web/lib/samen/web
      metrics = Samen.Web.Billing.Reads.metrics(billing_mount, scope)
  
      now = DateTime.utc_now()
-@@ -755,8 +753,6 @@
+@@ -763,8 +761,6 @@ defmodule Samen.Web.AccountHealth do
      # doc): `Support.Reads.metrics/2`'s helpers carry the identical `rescue -> 0`
      # shape, so this uncaught canary is what lets a genuine failure surface as honest
      # absence here instead of a fabricated "0 open tickets".

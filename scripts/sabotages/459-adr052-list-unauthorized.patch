@@ -5,10 +5,10 @@
 # TEST_FILES: test/samen/web/replay_player_test.exs
 # MUST_FAIL: authorized like an open
 diff --git a/samen_web/lib/samen/web/replay/index_live.ex b/samen_web/lib/samen/web/replay/index_live.ex
-index 7602ab6..3d06d8d 100644
+index cbb534d..0c95e15 100644
 --- a/samen_web/lib/samen/web/replay/index_live.ex
 +++ b/samen_web/lib/samen/web/replay/index_live.ex
-@@ -41,7 +41,8 @@ defmodule Samen.Web.Replay.IndexLive do
+@@ -44,7 +44,8 @@ defmodule Samen.Web.Replay.IndexLive do
  
    @doc false
    def load(socket) do
@@ -16,5 +16,5 @@ index 7602ab6..3d06d8d 100644
 +    # SABOTAGE (ADR-052 §2.3): list without asking.
 +    case {:ok, %{scope: %Samen.Scope{actor: %{org_id: socket.assigns[:org_id], plane: :tenant}}}} do
        {:ok, viewer} ->
-         sessions =
-           viewer.scope
+         # A FAILED list read is the error state (retry), never "No recorded sessions.".
+         case Guard.run(:replay_sessions, socket.assigns[:org_id], fn ->

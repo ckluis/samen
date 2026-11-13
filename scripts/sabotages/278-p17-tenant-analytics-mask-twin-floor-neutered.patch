@@ -8,17 +8,17 @@
 # APP: samen_web
 # TEST_FILES: test/samen/web/tenant_analytics_test.exs
 # MUST_FAIL: same lower-priv plane
+diff --git a/samen_web/lib/samen/web/tenant/analytics_reads.ex b/samen_web/lib/samen/web/tenant/analytics_reads.ex
+index 07e2fe0d..40c59d07 100644
 --- a/samen_web/lib/samen/web/tenant/analytics_reads.ex
 +++ b/samen_web/lib/samen/web/tenant/analytics_reads.ex
-@@ -147,8 +147,9 @@ defmodule Samen.Web.Tenant.AnalyticsReads do
+@@ -167,8 +167,7 @@ defmodule Samen.Web.Tenant.AnalyticsReads do
              Map.get(by_stage, stage, %{stage: stage, actor_count: 0})
            end)
  
 -        {:ok, floored} = Privacy.apply(stage_rows, @funnel_spec, Keyword.take(opts, [:k, :l]))
 -        floored
-+        # SABOTAGE: the floor is bypassed — a sub-floor / count-of-one own-org cohort emits
-+        # its re-identifying raw count instead of ⊘.
 +        stage_rows
  
+       # A failed query is a FAILURE (raised so the surrounding `Guard.run/3` reports it), not "[]".
        _ ->
-         []

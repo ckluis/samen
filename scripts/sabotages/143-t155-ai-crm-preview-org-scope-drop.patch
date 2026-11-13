@@ -3,15 +3,15 @@
 # TEST_FILES: test/samen/web/ai/ai_kit_test.exs
 # MUST_FAIL: crm_preview is org-scoped: another org's record is not found
 diff --git a/samen_web/lib/samen/web/ai/server.ex b/samen_web/lib/samen/web/ai/server.ex
-index 9899b00..fda2d4c 100644
+index 64de6009..65f35d48 100644
 --- a/samen_web/lib/samen/web/ai/server.ex
 +++ b/samen_web/lib/samen/web/ai/server.ex
-@@ -139,7 +139,7 @@ defmodule Samen.Web.AI.Server do
-   def crm_preview(mount, org_id, resource, id) do
-     query =
-       resource
--      |> Ash.Query.filter(org_id == ^org_id and id == ^id)
-+      |> Ash.Query.filter(id == ^id)
-       |> ensure_public_selected(resource)
+@@ -146,7 +146,7 @@ defmodule Samen.Web.AI.Server do
+            Guard.run(:ai_crm_preview, org_id, fn ->
+              query =
+                resource
+-               |> Ash.Query.filter(org_id == ^org_id and id == ^uuid)
++               |> Ash.Query.filter(id == ^uuid)
+                |> ensure_public_selected(resource)
  
-     case Ash.read(query, authorize?: false) do
+              case Ash.read(query, authorize?: false) do
