@@ -214,6 +214,28 @@ defmodule Samen.Web.OperatorImpersonationGateTest do
     refute render(redenied) =~ @recipient_email
   end
 
+  test "a gate lookup that RAISES renders a retryable error, never the open-session form (REAL fault: renamed session column)" do
+    org = seed_tenant()
+    operator_id = Ecto.UUID.generate()
+    {:ok, _} = Impersonation.open(%Samen.OperatorPlane.Actor{id: operator_id, operator_role: :operator_admin}, org.id, "ticket #9: outage")
+
+    # POSITIVE CONTROL: healthy, the same drill-in is active.
+    assert (drill_in_socket(operator_id) |> DeliverabilityLive.load(org.id)).assigns.impersonation == :active
+
+    Ecto.Adapters.SQL.query!(Repo, "ALTER TABLE imp_impersonation_session RENAME COLUMN imp_operator_id TO imp_operator_id_renamed", [])
+
+    socket = ExUnit.CaptureLog.with_log(fn -> drill_in_socket(operator_id) |> DeliverabilityLive.load(org.id) end) |> elem(0)
+
+    assert socket.assigns.impersonation == :unavailable
+    html = render(socket)
+    assert html =~ "gate-unavailable"
+    assert html =~ "error-state"
+    assert html =~ ~s(phx-click="retry_load")
+    refute html =~ "open-session-form"
+    refute html =~ "no active impersonation session"
+    refute html =~ @recipient_email
+  end
+
   test "an EXPIRED session denies mid-flight — the gate checks expiry per request, not per open" do
     org = seed_tenant()
     operator_id = Ecto.UUID.generate()

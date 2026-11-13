@@ -85,6 +85,11 @@ defmodule Samen.Web.Chat.ThreadLive do
         |> assign_empty()
         |> assign(org_id: org_id, thread_id: thread_id, impersonation: :denied, session_info: nil, open_error: nil)
 
+      :unavailable ->
+        socket
+        |> assign_empty()
+        |> assign(org_id: org_id, thread_id: thread_id, impersonation: :unavailable, session_info: nil, open_error: nil)
+
       {:ok, session_info} ->
         scope = Mount.scope(mount, org_id)
 
@@ -137,6 +142,7 @@ defmodule Samen.Web.Chat.ThreadLive do
         {:ok, _actor, info} -> {:ok, info}
         :out_of_scope -> :out_of_scope
         :denied -> :denied
+        :unavailable -> :unavailable
       end
     else
       {:ok, nil}
@@ -311,6 +317,11 @@ defmodule Samen.Web.Chat.ThreadLive do
         </:sidebar>
 
         <%= cond do %>
+          <% @impersonation == :unavailable -> %>
+            <.topbar title="Chat" crumbs={[CurrentOrg.name(@samen_mount, @org_id), "Chat"]} />
+            <div class="wrap" id="gate-unavailable">
+              <.error_state class="gate-unavailable" body={Guard.message()} retry_event="retry_load" />
+            </div>
           <% @impersonation == :out_of_scope -> %>
             <.topbar title="Chat" crumbs={[CurrentOrg.name(@samen_mount, @org_id), "Chat"]} />
             <div class="wrap">

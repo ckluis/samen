@@ -134,6 +134,19 @@ defmodule Samen.Web.Operator.AutomationHealthLive do
               open_error: nil
             )
 
+          :unavailable ->
+            assign(socket,
+              no_org: false,
+              impersonation: :unavailable,
+              target_org_id: target_org_id,
+              operator: operator,
+              summary: [],
+              runs: [],
+              action_error: nil,
+              session_info: nil,
+              open_error: nil
+            )
+
           :denied ->
             assign(socket,
               no_org: false,
@@ -160,6 +173,8 @@ defmodule Samen.Web.Operator.AutomationHealthLive do
     end
   end
 
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns[:target_org_id])}
+
   def handle_event("kill", %{"id" => workflow_id}, socket), do: switch(socket, :kill, workflow_id)
   def handle_event("rearm", %{"id" => workflow_id}, socket), do: switch(socket, :rearm, workflow_id)
 
@@ -182,7 +197,7 @@ defmodule Samen.Web.Operator.AutomationHealthLive do
     # (:out_of_scope) is refused the kill/rearm exactly like a session-less one (:denied) —
     # scope subtracts on writes as on reads.
     case Impersonation.gate_socket(socket, socket.assigns[:samen_operator_id], target_org_id) do
-      denied when denied in [:denied, :out_of_scope] ->
+      denied when denied in [:denied, :out_of_scope, :unavailable] ->
         {:noreply, load(socket, target_org_id)}
 
       {:ok, _actor, _info} ->
@@ -289,6 +304,10 @@ defmodule Samen.Web.Operator.AutomationHealthLive do
               <div class="card" id="no-target-org" style="padding:22px 20px;color:var(--muted)">
                 Open an account (Operator plane → Accounts) and follow "Automation health →"
                 to inspect a tenant's workflows.
+              </div>
+            <% @impersonation == :unavailable -> %>
+              <div id="gate-unavailable">
+                <.error_state class="gate-unavailable" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
               </div>
             <% @impersonation == :out_of_scope -> %>
               <div class="card" id="out-of-scope" style="padding:22px 20px">

@@ -1026,18 +1026,48 @@ defmodule Samen.Web.ReadsHonestFailureP3Test do
       assert Authz.resolve_role(authz_mount({__MODULE__, :admin_authority, []}), %{}) == :operator_admin
     end
 
-    test "the impersonation gate DENIES when its lookup raises, reporting by name; a live session still opens it", %{seed: seed} do
+    test "a MALFORMED org id is a plain denial: no lookup, no failure logged, never the outage value" do
       log =
         capture_log(fn ->
           assert Impersonation.gate(Ecto.UUID.generate(), "not-a-uuid", nil) == :denied
+          assert Impersonation.gate(Ecto.UUID.generate(), String.duplicate("x", 36), nil) == :denied
         end)
 
-      assert log =~ "operator_impersonation_gate"
+      refute log =~ "operator_impersonation_gate"
+      refute log =~ "not-a-uuid"
+    end
 
+    test "REAL FAULT: a gate lookup that RAISES is :unavailable (not :denied), reported by name with a cast org id only",
+         %{seed: seed} do
       org_id = hd(seed.accounts).tenant_org_id
       operator_id = Ecto.UUID.generate()
       open_impersonation!(operator_id, org_id)
+      # POSITIVE CONTROL first: the same call with a healthy table opens.
       assert {:ok, _actor, _info} = Impersonation.gate(operator_id, org_id, nil)
+
+      Ecto.Adapters.SQL.query!(
+        Samen.WebTest.Repo,
+        "ALTER TABLE imp_impersonation_session RENAME COLUMN imp_operator_id TO imp_operator_id_renamed",
+        []
+      )
+
+      log = capture_log(fn -> assert Impersonation.gate(operator_id, org_id, nil) == :unavailable end)
+
+      assert log =~ "operator_impersonation_gate"
+      assert log =~ "org=#{org_id}"
+    end
+
+    test "the URL org id never reaches the log line verbatim (no log-line injection), even when the lookup fails" do
+      forged = "x\n[error] cause=forged org=" <> String.duplicate("y", 30)
+
+      log =
+        capture_log(fn ->
+          Samen.Web.Reads.Guard.report(:operator_impersonation_gate, forged, RuntimeError.exception("boom"))
+          Samen.Web.Reads.Guard.report(:operator_impersonation_gate, %{org_id: forged}, RuntimeError.exception("boom"))
+        end)
+
+      refute log =~ "forged"
+      assert log =~ "org=invalid"
     end
   end
 

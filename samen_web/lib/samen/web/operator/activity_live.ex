@@ -128,6 +128,9 @@ defmodule Samen.Web.Operator.ActivityLive do
               :denied ->
                 assign(socket, org_id: org_id, window_hours_param: window_hours, feed: nil, impersonation: :denied, open_error: nil)
 
+              :unavailable ->
+                assign(socket, org_id: org_id, window_hours_param: window_hours, feed: nil, impersonation: :unavailable, open_error: nil)
+
               {:ok, _actor, _info} ->
                 feed = ActivityReads.activity(mount, org_id, Keyword.put(opts, :window_hours, window_hours))
                 assign(socket, org_id: org_id, window_hours_param: window_hours, feed: feed, impersonation: :active, open_error: nil)
@@ -152,6 +155,10 @@ defmodule Samen.Web.Operator.ActivityLive do
         </.topbar>
 
         <%= cond do %>
+          <% @impersonation == :unavailable -> %>
+            <div class="wrap" id="gate-unavailable">
+              <.error_state class="gate-unavailable" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
+            </div>
           <% @impersonation == :out_of_scope -> %>
             <div class="wrap">
               <div class="card" id="out-of-scope" style="padding:22px 20px">

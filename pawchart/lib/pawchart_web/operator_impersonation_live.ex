@@ -80,6 +80,7 @@ defmodule PawChartWeb.OperatorImpersonationLive do
         assign(socket,
           impersonating: true,
           session_inactive: false,
+          gate_unavailable: false,
           samen_operator_id: operator_id,
           operator_id: operator_id,
           org_id: org_id,
@@ -95,6 +96,11 @@ defmodule PawChartWeb.OperatorImpersonationLive do
       #                    a `:fleet_resolution` seam, so no lockout today)
       denial when denial in [:denied, :out_of_scope] ->
         denied(socket, operator_id, org_id)
+
+      # The gate's lookup raised: an outage, not a denial. No data and NO open-session form (a retry
+      # during an outage would open another tenant-visible session).
+      :unavailable ->
+        socket |> denied(operator_id, org_id) |> assign(gate_unavailable: true)
     end
   end
 
@@ -102,6 +108,7 @@ defmodule PawChartWeb.OperatorImpersonationLive do
     assign(socket,
       impersonating: false,
       session_inactive: true,
+      gate_unavailable: false,
       samen_operator_id: operator_id,
       operator_id: operator_id,
       org_id: org_id,
@@ -165,6 +172,9 @@ defmodule PawChartWeb.OperatorImpersonationLive do
   # conjunct before minting a row, so a crafted `phx-submit` cannot book an access under another
   # operator's name or acquire scope by opening a session.
   @impl true
+  def handle_event("retry_gate", _params, socket),
+    do: {:noreply, load(socket, socket.assigns[:samen_operator_id], socket.assigns[:org_id])}
+
   def handle_event("open_session", %{"reason" => reason}, socket) do
     org_id = socket.assigns[:org_id]
 
@@ -189,7 +199,14 @@ defmodule PawChartWeb.OperatorImpersonationLive do
     <div id="operator-impersonation">
       <h1>PawChart Ops · masked impersonation</h1>
 
-      <%= if @session_inactive do %>
+      <%= if @session_inactive and @gate_unavailable do %>
+        <div id="gate-unavailable" role="alert">
+          <div style="color:#B42318;font-weight:600">We couldn't check access right now.</div>
+          <p>Nothing was opened and nothing is shown. Nothing was lost — try again.</p>
+          <button type="button" phx-click="retry_gate">Try again</button>
+        </div>
+      <% end %>
+      <%= if @session_inactive and not @gate_unavailable do %>
         <div id="session-state">
           <div style="color:#B42318;font-weight:600">
             access denied — no active impersonation session (expired or never opened).
@@ -205,7 +222,8 @@ defmodule PawChartWeb.OperatorImpersonationLive do
             <button type="submit" id="start-session-btn">Start session (masked)</button>
           </form>
         </div>
-      <% else %>
+      <% end %>
+      <%= if not @session_inactive do %>
         <div id="banner">
           <b>Masked impersonation.</b>
           Impersonating clinic <b>{@org_name}</b> as operator {@operator_id}. Owner PII is masked (••••).

@@ -142,8 +142,13 @@ defmodule Samen.Web.Operator.Impersonation do
       open-session-with-reason form — opening a session must never be a way to *discover* you
       lack scope. The caller renders "this account is not in your scope", not the reason form.
     * `:denied` — in scope (or scope inert) but no active session (never opened / closed /
-      expired mid-flight / operator suspended), a nil operator/org, or an unreachable repo.
-      Fail closed. The caller renders the open-session-with-reason form.
+      expired mid-flight / operator suspended), a nil operator/org, or a MALFORMED org id (cast
+      first: not a UUID is a denial, not an outage). Fail closed. The caller renders the
+      open-session-with-reason form.
+    * `:unavailable` — the lookup RAISED (database down, a bug). Fail closed too, but this is NOT a
+      denial: the caller renders a retryable error state and must NOT offer the reason form (a retry
+      during an outage would otherwise open another tenant-visible session). A host with its own
+      caller of `gate/3` / `gate_socket/3` must handle this value.
 
   ## The R-B scope conjunct (ADR-044 §16.4a — the drill-in door)
 
@@ -167,12 +172,23 @@ defmodule Samen.Web.Operator.Impersonation do
   assignment — denies mid-flight; the kernel + the scope seam are both re-read per request.
   """
   @spec gate(String.t() | nil, String.t() | nil) ::
-          {:ok, map(), map() | nil} | :denied | :out_of_scope
+          {:ok, map(), map() | nil} | :denied | :out_of_scope | :unavailable
   def gate(operator_id, org_id), do: gate(operator_id, org_id, nil)
 
   @spec gate(String.t() | nil, String.t() | nil, atom() | nil) ::
-          {:ok, map(), map() | nil} | :denied | :out_of_scope
+          {:ok, map(), map() | nil} | :denied | :out_of_scope | :unavailable
   def gate(operator_id, org_id, otp_app) when is_binary(operator_id) and is_binary(org_id) do
+    # The org id comes from the URL: cast it BEFORE anything else. A malformed id is a plain denial
+    # (nothing to look up, nothing to report); it is not an outage, and it is never logged.
+    case cast_org_id(org_id) do
+      {:ok, org_id} -> guarded_gate(operator_id, org_id, otp_app)
+      :error -> :denied
+    end
+  end
+
+  def gate(_operator_id, _org_id, _otp_app), do: :denied
+
+  defp guarded_gate(operator_id, org_id, otp_app) do
     # R-B scope conjunct FIRST (§16.4a ordering: scope before the reason form). When no
     # product scope is configured the conjunct is inert (no-lockout) and this is `false`.
     if scope_denied?(otp_app, operator_id, org_id) do
@@ -188,14 +204,17 @@ defmodule Samen.Web.Operator.Impersonation do
     end
   rescue
     e ->
-      # Fail-CLOSED: a raising scope/session lookup is DENIED, never granted. Reported by name and
-      # exception module so an outage on the gate is visible rather than indistinguishable from a
-      # real denial in the logs.
+      # Fail-CLOSED, and NOT a denial: a raising scope/session lookup is an OUTAGE, so the caller shows a
+      # retryable error — never the open-session-with-reason form (each retry during an outage would
+      # otherwise open another tenant-visible session and audit row). Reported by name and exception
+      # module; `org_id` is already a cast UUID, so nothing from the URL reaches the log line.
       Guard.report(:operator_impersonation_gate, org_id, e)
-      :denied
+      :unavailable
   end
 
-  def gate(_operator_id, _org_id, _otp_app), do: :denied
+  # A canonical UUID string only (`Ecto.UUID.cast/1` would also accept a raw 16-byte binary).
+  defp cast_org_id(org_id) when byte_size(org_id) == 36, do: Ecto.UUID.cast(org_id)
+  defp cast_org_id(_), do: :error
 
   @doc """
   `gate/3` with `otp_app` derived from the drill-in socket's mount (`Samen.Web.Operator.otp_app/1`)
@@ -204,7 +223,7 @@ defmodule Samen.Web.Operator.Impersonation do
   that wires no `:fleet_resolution` seam.
   """
   @spec gate_socket(Phoenix.LiveView.Socket.t(), String.t() | nil, String.t() | nil) ::
-          {:ok, map(), map() | nil} | :denied | :out_of_scope
+          {:ok, map(), map() | nil} | :denied | :out_of_scope | :unavailable
   def gate_socket(socket, operator_id, org_id) do
     gate(operator_id, org_id, Operator.otp_app(socket.assigns[:samen_mount]))
   end

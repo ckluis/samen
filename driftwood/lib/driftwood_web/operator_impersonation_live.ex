@@ -122,6 +122,7 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
         assign(socket,
           impersonating: true,
           session_inactive: false,
+          gate_unavailable: false,
           samen_operator_id: operator_id,
           operator_id: operator_id,
           org_id: org_id,
@@ -142,6 +143,11 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
       #                   `:fleet_resolution` seam, so no lockout today)
       denial when denial in [:denied, :out_of_scope] ->
         denied(socket, operator_id, org_id)
+
+      # The gate's lookup raised: an outage, not a denial. Fail closed (no data) but do NOT offer the
+      # open-session form (a retry during an outage would open another tenant-visible session).
+      :unavailable ->
+        socket |> denied(operator_id, org_id) |> assign(gate_unavailable: true)
     end
   end
 
@@ -150,6 +156,7 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
     assign(socket,
       impersonating: false,
       session_inactive: true,
+      gate_unavailable: false,
       samen_operator_id: operator_id,
       operator_id: operator_id,
       org_id: org_id,
@@ -282,7 +289,18 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
           </:actions>
         </.topbar>
 
-        <%= if @session_inactive do %>
+        <%= if @session_inactive and @gate_unavailable do %>
+          <div class="wrap" id="gate-unavailable">
+            <div class="card error-state" role="alert" style="padding:22px 20px">
+              <div style="color:var(--red);font-weight:600">We couldn't check access right now.</div>
+              <p style="color:var(--muted);margin:10px 0 14px;font-size:13px">
+                Nothing was opened and nothing is shown. Nothing was lost — try again.
+              </p>
+              <button type="button" class="btn" phx-click="retry_gate">Try again</button>
+            </div>
+          </div>
+        <% end %>
+        <%= if @session_inactive and not @gate_unavailable do %>
           <div class="wrap">
             <div class="card" id="session-state" style="padding:22px 20px">
               <div style="color:var(--red);font-weight:600">
@@ -310,7 +328,8 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
               </form>
             </div>
           </div>
-        <% else %>
+        <% end %>
+        <%= if not @session_inactive do %>
           <.mask_bar chip={session_chip(@session_info)}>
             <b>Masked impersonation.</b>
             <span id="banner">
@@ -453,6 +472,9 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
   # conjunct before minting a row, so a crafted `phx-submit` cannot book an access under another
   # operator's name or acquire scope by opening a session.
   @impl true
+  def handle_event("retry_gate", _params, socket),
+    do: {:noreply, load(socket, socket.assigns[:samen_operator_id], socket.assigns[:org_id])}
+
   def handle_event("open_session", %{"reason" => reason}, socket) do
     org_id = socket.assigns[:org_id]
 

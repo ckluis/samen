@@ -120,6 +120,9 @@ defmodule Samen.Web.Operator.DeliverabilityLive do
 
           :denied ->
             assign(socket, org_id: org_id, detail: nil, impersonation: :denied, session_info: nil, open_error: nil)
+
+          :unavailable ->
+            assign(socket, org_id: org_id, detail: nil, impersonation: :unavailable, session_info: nil, open_error: nil)
         end
     end
   end
@@ -140,6 +143,10 @@ defmodule Samen.Web.Operator.DeliverabilityLive do
         </.topbar>
 
         <%= cond do %>
+          <% @impersonation == :unavailable -> %>
+            <div class="wrap" id="gate-unavailable">
+              <.error_state class="gate-unavailable" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
+            </div>
           <% @impersonation == :out_of_scope -> %>
             <div class="wrap">
               <div class="card" id="out-of-scope" style="padding:22px 20px">
