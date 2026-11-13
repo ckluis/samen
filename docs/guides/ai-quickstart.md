@@ -51,6 +51,53 @@ that makes an external, billable call — it is **never** exercised by `./ci.sh`
 deterministic lane is what CI runs). Without `SAMEN_AI_LIVE=1`, the task stays keyless even if
 a key is present, so you cannot accidentally spend money from CI.
 
+### Adapter options (all optional, same config map)
+
+    config :samen_core, Samen.AI,
+      provider:
+        {SamenAnthropic.Provider,
+         %{
+           api_key: System.get_env("ANTHROPIC_API_KEY"),
+           model: "claude-opus-5-5",      # the default; an agent's `model:` or a call's `model:` wins
+           max_tokens: 16_000,            # the default — thinking counts toward it
+           effort: "medium",              # output_config.effort; unset = the model's default
+           connect_timeout: 10_000,       # ms (default)
+           receive_timeout: 300_000,      # ms (default; below the agent watchdog's 600 s)
+           max_retries: 2                 # 429 / 529 / 5xx / connection failures only
+         }}
+
+What the adapter does with a sealed payload (ADR-043 §5.1a, 2026-11-13): the payload's
+`:system` instructions go in the `system` parameter (with a prompt-cache breakpoint), its
+role-structured `:turns` become the `messages` — a tool call is a `tool_use` block, its result a
+`tool_result` block with the same id, so tool output and tenant data reach the model as data,
+never merged into the instructions — and the agent's tool definitions are sent natively with an
+`input_schema`. A response cut off at `max_tokens` is `{:error, :truncated, usage}`, a refusal
+`{:error, :refused, usage}`, an unknown stop reason `{:error, :unexpected_stop, usage}`; after the
+bounded retries a 429 is `:rate_limited`, a 529 `:overloaded`, a timeout `:provider_timeout` (a
+timeout is never retried: the work may have been done). The agent loop ends the turn as a failure
+with that kind — never as an answer. Pick a model per agent with
+`use Samen.AI.Agent, …, model: "claude-haiku-5-5"`, or per verb call with `model:`; the model that
+actually answered is recorded on each agent turn row (`meta["model"]`).
+
+## 4 · The live agent trajectory eval (opt-in, never in CI)
+
+The keyless suites prove the request SHAPE (`samen_anthropic/test/request_shape_test.exs` asserts
+the exact body for every agent-loop case). Whether a real model actually drives the loop is a
+different question, answered only by a real call:
+
+    cd samen_core
+    SAMEN_AI_LIVE=1 ANTHROPIC_API_KEY=sk-ant-... \
+      mix test test/ai_eval/agent_live_trajectory_test.exs --only ai_live
+
+It runs two cases through the full governed loop against the real adapter: (1) one
+`fetch_record` call, then a final answer that uses the result; (2) a requested owner assignment,
+which must be PROPOSED and stop at the approval gate with nothing executed. Each case prints one
+`[ai_live]` line (turns, tools called, answering model, tokens). It is excluded unless
+`SAMEN_AI_LIVE=1`, skips without a key, and costs a few thousand tokens per case;
+`SAMEN_AI_LIVE_MODEL=claude-haiku-5-5` runs it on a cheaper model. `samen_core` stays vendor-free
+(INV-4): the test loads the adapter's source at run time and gives it an `:httpc` transport, so
+the request it sends and the response it parses are the adapter's own.
+
 ## Honesty recap
 
 | lane | provider | `simulated` | in CI? |
@@ -58,3 +105,4 @@ a key is present, so you cannot accidentally spend money from CI.
 | keyless (default) | `Samen.AI.Provider.Fake` (`:test`) | `true` | yes (deterministic) |
 | unwired, non-test | — | — (`{:error, :not_configured}`) | n/a |
 | live (`SAMEN_AI_LIVE=1` + key) | e.g. `SamenAnthropic.Provider` | `false` | **never** |
+| live agent eval (`SAMEN_AI_LIVE=1` + key, `--only ai_live`) | `SamenAnthropic.Provider` | `false` | **never** |
