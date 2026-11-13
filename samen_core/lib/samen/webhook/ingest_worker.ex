@@ -58,7 +58,17 @@ defmodule Samen.Webhook.IngestWorker do
   so the worker can resolve it in a multi-repo test/host). Returns the Oban insert result.
   """
   @spec enqueue(Event.t(), keyword()) :: {:ok, Oban.Job.t()} | {:error, term()}
-  def enqueue(%Event{id: id}, opts \\ []) do
+  def enqueue(%Event{} = event, opts \\ []) do
+    event |> job(opts) |> Oban.insert()
+  end
+
+  @doc """
+  The (not yet inserted) job changeset `enqueue/2` inserts — token-only args. Exposed so a caller that must
+  insert the job INSIDE its own transaction (`Samen.Webhook.Event.replay/3`: `Oban.insert(multi, …)`) builds the
+  exact same job.
+  """
+  @spec job(Event.t(), keyword()) :: Ecto.Changeset.t()
+  def job(%Event{id: id}, opts \\ []) do
     args = %{"event_id" => id}
 
     args =
@@ -67,9 +77,7 @@ defmodule Samen.Webhook.IngestWorker do
         repo -> Map.put(args, "repo", to_string(repo))
       end
 
-    args
-    |> new()
-    |> Oban.insert()
+    new(args)
   end
 
   # ---------------------------------------------------------------------------

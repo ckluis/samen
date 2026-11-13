@@ -898,7 +898,7 @@ defmodule Samen.Web.ReadsHonestFailureP3Test do
     end
 
     test "a failed replay says so (outage copy) and the envelope stays dead; the working replay is silent", %{dead: dead} do
-      inject_read_faults([:operator_dlq_reset])
+      inject_read_faults([:operator_dlq_replay])
       socket = dlq(:operator_admin)
 
       socket = failing(fn -> event(WebhookDlqLive, socket, "replay", %{"id" => dead.id}) end)
@@ -911,6 +911,64 @@ defmodule Samen.Web.ReadsHonestFailureP3Test do
       socket = event(WebhookDlqLive, socket, "replay", %{"id" => dead.id})
       assert socket.assigns.action_error == nil
       assert Event.get(Repo, dead.id).status == "received"
+    end
+
+    defp ingest_jobs(event_id) do
+      import Ecto.Query
+
+      Repo.all(
+        from(j in Oban.Job, where: j.worker == "Samen.Webhook.IngestWorker" and fragment("?->>'event_id' = ?", j.args, ^event_id))
+      )
+    end
+
+    test "REAL FAULT: when the job cannot be enqueued the reset rolls back — the envelope stays dead, replayable, and the copy is true",
+         %{dead: dead} do
+      socket = dlq(:operator_admin)
+      # A REAL insert failure inside the replay transaction (a CHECK no job row can satisfy; it rolls back with the
+      # sandbox). A DROP TABLE would disconnect the pooled connection on the type reload, not just fail the insert.
+      Ecto.Adapters.SQL.query!(Repo, "ALTER TABLE oban_jobs ADD CONSTRAINT zz_p3_no_jobs CHECK (false) NOT VALID", [])
+
+      socket = failing(fn -> event(WebhookDlqLive, socket, "replay", %{"id" => dead.id}) end)
+
+      row = Event.get(Repo, dead.id)
+      assert row.status == "dead"
+      assert row.last_error == dead.last_error
+      assert row.processed_at == dead.processed_at
+      assert socket.assigns.action_error =~ "nothing was changed"
+      assert socket.assigns.action_error =~ "still in the dead-letter set"
+      refute socket.assigns.action_error =~ "may not have been queued"
+      # Still actionable: the row is in the dead set, so the replay button renders for it again.
+      assert Enum.any?(socket.assigns.envelopes, &(&1.id == dead.id and &1.status == "dead"))
+    end
+
+    test "POSITIVE CONTROL: a working replay resets the envelope AND enqueues exactly one processing job", %{dead: dead} do
+      assert ingest_jobs(dead.id) == []
+
+      socket = event(WebhookDlqLive, dlq(:operator_admin), "replay", %{"id" => dead.id})
+
+      assert socket.assigns.action_error == nil
+      assert Event.get(Repo, dead.id).status == "received"
+      assert [%Oban.Job{state: "available"}] = ingest_jobs(dead.id)
+    end
+
+    test "Event.replay refuses (nothing changed) when Oban's jobs table is on another repo than the envelope's", %{dead: dead} do
+      repo_config = :samen_web |> Application.fetch_env!(Repo) |> Keyword.put(:pool, DBConnection.ConnectionPool)
+      start_supervised!({Samen.WebTest.OtherRepo, repo_config})
+
+      start_supervised!(
+        {Oban,
+         name: MismatchedOban,
+         repo: Samen.WebTest.OtherRepo,
+         testing: :manual,
+         queues: false,
+         plugins: false,
+         notifier: Oban.Notifiers.PG}
+      )
+
+      assert {:error, :queue_repo_mismatch} = Event.replay(Repo, dead, oban: MismatchedOban)
+      assert Event.get(Repo, dead.id).status == "dead"
+      assert ingest_jobs(dead.id) == []
+      assert {:ok, _} = Event.replay(Repo, dead)
     end
 
     test "a failed resolve says so and changes nothing", %{dead: dead} do
@@ -1039,4 +1097,11 @@ defmodule Samen.Web.ReadsHonestFailureP3Test do
       assert {:ok, %Samen.Web.Csv.Report{created: 1, errors: []}} = Csv.import(Person, scope, csv: csv)
     end
   end
+end
+
+# A second repo on the same database: Oban configured on it must not be mistaken for the envelope repo in
+# `Samen.Webhook.Event.replay/3`.
+defmodule Samen.WebTest.OtherRepo do
+  @moduledoc false
+  use Ecto.Repo, otp_app: :samen_web, adapter: Ecto.Adapters.Postgres
 end

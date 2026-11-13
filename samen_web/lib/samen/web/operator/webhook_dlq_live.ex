@@ -85,9 +85,9 @@ defmodule Samen.Web.Operator.WebhookDlqLive do
     error =
       with {:ok, repo} <- authorize_write(socket),
            {:ok, row} <- fetch_dead(repo, id),
-           {:ok, row} <- Guard.write(:operator_dlq_reset, nil, fn -> Event.reset_for_replay(repo, row) end),
-           # Re-enqueue the processing job — safe because processing is idempotent (§5.5).
-           :ok <- enqueue(row, repo) do
+           # Reset + re-enqueue the processing job in ONE transaction (safe to repeat: processing is
+           # idempotent, §5.5): a failed enqueue rolls the reset back, so the envelope stays dead and replayable.
+           {:ok, _row} <- Guard.write(:operator_dlq_replay, nil, fn -> Event.replay(repo, row) end) do
         nil
       else
         {:error, reason} -> action_copy(:replay, reason)
@@ -128,22 +128,16 @@ defmodule Samen.Web.Operator.WebhookDlqLive do
     end
   end
 
-  # Enqueue AFTER the reset committed: a failure leaves the envelope reset ("received") but not
-  # queued, which the operator must be told (it is no longer in the dead set to replay again).
-  defp enqueue(row, repo) do
-    case Guard.write(:operator_dlq_enqueue, nil, fn -> Samen.Webhook.IngestWorker.enqueue(row, repo: repo) end) do
-      {:error, _} = error -> error
-      _ -> :ok
-    end
-  end
-
   # Value-free copy: outage copy only for an outage, denial copy only for a real denial.
   defp action_copy(_action, :denied), do: "Your operator role may not change the webhook queue."
   defp action_copy(_action, :forbidden), do: "Your operator role may not change the webhook queue."
   defp action_copy(_action, :not_found), do: "That envelope is no longer in the dead-letter set — nothing was changed."
 
-  defp action_copy(:replay, :unavailable),
-    do: "We couldn't replay that envelope right now — it may not have been queued. Check the list and try again."
+  defp action_copy(:replay, reason) when reason in [:unavailable, :enqueue_failed],
+    do: "We couldn't replay that envelope right now — nothing was changed and it is still in the dead-letter set. Try again."
+
+  defp action_copy(:replay, :queue_repo_mismatch),
+    do: "Replay is unavailable: this host's job queue is not on the webhook database. Nothing was changed."
 
   defp action_copy(:resolve, :unavailable),
     do: "We couldn't mark that envelope handled right now — nothing was changed. Try again."

@@ -154,12 +154,52 @@ defmodule Samen.Webhook.Event do
     |> repo.update()
   end
 
-  @doc "Reset a `:dead` (or any) envelope back to `:received` for an operator replay."
+  @doc """
+  Reset a `:dead` (or any) envelope back to `:received`. Reset ONLY: an operator replay must use `replay/3`, which
+  enqueues the processing job in the same transaction (a reset with no job strands the envelope).
+  """
   @spec reset_for_replay(module(), t()) :: {:ok, t()} | {:error, Ecto.Changeset.t()}
   def reset_for_replay(repo, %__MODULE__{} = row) do
     row
     |> Ecto.Changeset.change(status: "received", last_error: nil, processed_at: nil)
     |> repo.update()
+  end
+
+  @doc """
+  Operator replay of a dead envelope as ONE transaction: reset it to `:received` AND insert its processing
+  job (`Samen.Webhook.IngestWorker`), so either both happen or neither does. Resetting first and enqueuing
+  second left an envelope "received" with no job when the enqueue failed — no longer "dead" (so no replay
+  button), and nothing would ever process it. Enqueuing first is worse (the worker can finish before the reset
+  commits and the reset then un-processes it).
+
+  The job insert joins the transaction only when Oban's `oban_jobs` lives on the SAME repo as the envelope
+  (`config :samen_core, Oban, repo: …`, which every in-tree host sets to its own repo). When it does not, the
+  two writes cannot be atomic and this refuses with `{:error, :queue_repo_mismatch}` having changed nothing.
+
+  Returns `{:ok, event}`, `{:error, :enqueue_failed}` (a RETURNED insert error; the reset is rolled back), or
+  `{:error, changeset}` for the reset. An exception (database down) propagates out of the rolled-back transaction.
+  Options: `:oban` (instance name, default `Oban`).
+  """
+  @spec replay(module(), t(), keyword()) ::
+          {:ok, t()} | {:error, :enqueue_failed | :queue_repo_mismatch | Ecto.Changeset.t()}
+  def replay(repo, %__MODULE__{} = row, opts \\ []) when is_atom(repo) do
+    oban = Keyword.get(opts, :oban, Oban)
+
+    if Oban.config(oban).repo == repo do
+      changeset = Ecto.Changeset.change(row, status: "received", last_error: nil, processed_at: nil)
+
+      Ecto.Multi.new()
+      |> Ecto.Multi.update(:event, changeset)
+      |> then(&Oban.insert(oban, &1, :job, Samen.Webhook.IngestWorker.job(row, repo: repo)))
+      |> repo.transaction()
+      |> case do
+        {:ok, %{event: event}} -> {:ok, event}
+        {:error, :event, changeset, _} -> {:error, changeset}
+        {:error, :job, _reason, _} -> {:error, :enqueue_failed}
+      end
+    else
+      {:error, :queue_repo_mismatch}
+    end
   end
 
   # ---------------------------------------------------------------------------
