@@ -307,4 +307,42 @@ defmodule Samen.Web.OperatorImpersonationGateTest do
       end
     end
   end
+
+  # ==========================================================================
+  # An UNRESOLVABLE otp_app must never disarm anything (fail closed)
+  # ==========================================================================
+  describe "an unresolvable otp_app is ARMED, never disarmed" do
+    alias Samen.Web.{CurrentOrg, Mount}
+    alias Samen.Web.Operator.Impersonation, as: Imp
+
+    defmodule BrokenConfigRepo do
+      @moduledoc false
+      def config, do: raise("repo config unavailable")
+    end
+
+    defp no_host_socket(mount \\ nil), do: Phoenix.Component.assign(%Phoenix.LiveView.Socket{}, :samen_mount, mount)
+
+    test "no mount / no otp_app: the ?operator_id and ?org= param legs are OFF (armed), not trusted" do
+      refute Imp.auth_disarmed?(no_host_socket())
+      refute CurrentOrg.param_trust_disarmed?(nil)
+
+      forged = "op-forged-no-host"
+      refute Imp.resolve_operator_id(no_host_socket(), %{}, %{"operator_id" => forged}) == forged
+    end
+
+    test "a repo whose config RAISES crashes the otp_app lookup (fail closed) instead of reading as 'no host' (disarmed)" do
+      mount = Mount.new(:operator, Op, BrokenConfigRepo, plane: Samen.Web.Plane.tenant(), labels: %{})
+
+      assert_raise RuntimeError, ~r/repo config unavailable/, fn -> Samen.Web.Operator.otp_app(mount) end
+      assert_raise RuntimeError, fn -> CurrentOrg.param_trust_disarmed?(mount) end
+      assert_raise RuntimeError, fn -> Imp.auth_disarmed?(no_host_socket(mount)) end
+    end
+
+    test "POSITIVE CONTROL: a resolvable, unarmed otp_app is still the dev posture (disarmed)" do
+      on_exit(fn -> Application.delete_env(@probe_host, :auth_required?) end)
+      Application.put_env(@probe_host, :auth_required?, false)
+      assert Imp.auth_disarmed?(probe_socket())
+      assert CurrentOrg.param_trust_disarmed?(build_operator_mount(@seat_org_id, labels: %{otp_app: @probe_host}))
+    end
+  end
 end

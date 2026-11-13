@@ -119,12 +119,15 @@ defmodule Samen.Web.Operator do
     end
   end
 
-  defp repo_otp_app(%Mount{repo: repo}) when is_atom(repo) do
-    if function_exported?(repo, :config, 0) do
+  # No rescue, on purpose: a repo whose config RAISES has no resolvable otp_app, and `nil` here would mean
+  # "no host", which `CurrentOrg.param_trust_disarmed?/1` and `Impersonation.auth_disarmed?/1` once read as
+  # DISARMED (trust `?org=` / `?operator_id=`) and which makes the fleet-scope leg of the impersonation gate
+  # inert. A broken repo config crashes the request instead: fail closed. Both predicates now also treat a
+  # nil otp_app as ARMED.
+  defp repo_otp_app(%Mount{repo: repo}) when is_atom(repo) and not is_nil(repo) do
+    if Code.ensure_loaded?(repo) and function_exported?(repo, :config, 0) do
       repo.config()[:otp_app]
     end
-  rescue
-    _ -> nil
   end
 
   defp repo_otp_app(_), do: nil

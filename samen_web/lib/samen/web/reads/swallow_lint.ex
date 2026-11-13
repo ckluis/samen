@@ -112,8 +112,6 @@ defmodule Samen.Web.Reads.SwallowLint do
       "get_connect_info raises outside the mount lifecycle and returns nil on a dead render: either way the caller uses the 'unknown' peer, which is a stricter global per-IP rate-limit bucket — fail-closed on the limiter, nothing shown as empty",
     {"samen_web/lib/samen/web/metrics_controller.ex", :safe_scrape} =>
       "a reporter that is absent, not started or raising is indistinguishable from egress being off BY CONSTRUCTION, and every such outcome answers a non-200 with a body ('metrics egress disabled') — a scraper sees failure, never a fabricated empty 200",
-    {"samen_web/lib/samen/web/operator.ex", :repo_otp_app} =>
-      "pure introspection of the repo module's config (no read): a repo that exposes no otp_app yields nil, which only means no per-app config is consulted",
     {"samen_web/lib/samen/web/onboarding/wizard_controller.ex", :verified?} =>
       "fail-CLOSED capability probe (ADR-035 §5 A2): an unresolvable principal is unverified on an armed host, never an elevated default"
   }

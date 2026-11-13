@@ -75,8 +75,8 @@ defmodule Samen.Web.Operator.Impersonation do
   uses: it applies only while `auth_required?` is false for the drill-in mount's otp_app, and
   is inert the instant the app is armed for prod (`config otp_app, auth_required?: true`).
   A mount with no resolvable otp_app (an isolated component/unit test socket with no
-  `:samen_mount`) is treated as disarmed, exactly as before — the framework routes always
-  populate the mount, so every real armed deploy has the leg switched off.
+  `:samen_mount`) is treated as ARMED — the leg is off (fail closed); a repo whose config
+  raises is not "no otp_app" at all, it crashes (`Samen.Web.Operator.otp_app/1`).
 
   This is defence in depth, not the control: the control remains the `:require_operator`
   on_mount plus `assign_identity/3`'s principal-first order.
@@ -96,12 +96,12 @@ defmodule Samen.Web.Operator.Impersonation do
   @doc """
   Is the drill-in socket's product UNARMED (dev/test posture, `auth_required?` false or
   unset)? The gate on the dev-only `?operator_id` leg of `resolve_operator_id/3`. A socket
-  with no resolvable otp_app counts as unarmed (unit-test sockets carry no mount).
+  with no resolvable otp_app counts as ARMED (fail closed: a unit-test socket sets the `:otp_app` label).
   """
   @spec auth_disarmed?(Phoenix.LiveView.Socket.t()) :: boolean()
   def auth_disarmed?(socket) do
     case Operator.otp_app(socket.assigns[:samen_mount]) do
-      nil -> true
+      nil -> false
       otp_app -> not Samen.Web.TenantGate.armed?(otp_app)
     end
   end

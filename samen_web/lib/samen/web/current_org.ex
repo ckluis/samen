@@ -288,9 +288,10 @@ defmodule Samen.Web.CurrentOrg do
   # An ARMED host (`config otp_app, auth_required?: true`, or prod-by-default) fails closed here EVEN
   # WHEN the mount carries no `:authn` label — so a vertical that never adopted the tenant-auth
   # seam (pawchart) can no longer serve a caller-supplied `?org=` as identity once deployed for
-  # prod. A mount with NO resolvable otp_app (a synthetic/unit-test mount that carries no repo
-  # config) counts as disarmed, exactly as the impersonation param-leg treats a mountless socket —
-  # every framework route populates a real otp_app, so every armed deploy is covered.
+  # prod. A mount with NO resolvable otp_app (no mount, or a repo that exposes none) counts as ARMED —
+  # fail closed, exactly as `Impersonation.auth_disarmed?/1` treats a mountless socket: every framework
+  # route populates a real otp_app, so only a synthetic mount is affected, and it must set the label.
+  # (A repo whose config RAISES crashes `Operator.otp_app/1` rather than reading as "no host".)
   @doc """
   Whether this mount's host is in the DISARMED (dev/dogfood) posture — the ONLY posture in which
   a client-supplied `?org=`/`?user=` is trusted as identity. Public since B-SEC so the sibling
@@ -300,7 +301,7 @@ defmodule Samen.Web.CurrentOrg do
   @spec param_trust_disarmed?(Mount.t() | nil) :: boolean()
   def param_trust_disarmed?(mount) do
     case Samen.Web.Operator.otp_app(mount) do
-      nil -> true
+      nil -> false
       otp_app -> not Samen.Web.TenantGate.armed?(otp_app)
     end
   end
