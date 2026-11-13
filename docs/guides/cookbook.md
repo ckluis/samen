@@ -414,7 +414,7 @@ patch IS the change now; the tree should go back to green). Prove it flips befor
 it — `scripts/sabotage.sh` does all five steps for every committed patch: SHA-256 the touched
 files, apply, run `TEST_FILES` and assert the `MUST_FAIL` names are among the failures, revert,
 and re-SHA to confirm a byte-exact restore. Run it locally against your new patch, then run the
-whole committed suite (<!--count:sabotages-->663<!--/count--> patches today; the number is generated) — both are opt-in (they deliberately
+whole committed suite (<!--count:sabotages-->666<!--/count--> patches today; the number is generated) — both are opt-in (they deliberately
 break the tree and re-run DB-backed suites), so they're run explicitly, not by the default
 `bash ci.sh`:
 
@@ -503,7 +503,8 @@ and keeps the real empty state for an honestly empty result.
 **Verified against:** `samen_web/lib/samen/web/reads/guard.ex` (the convention),
 `samen_web/lib/samen/web/crm/reads.ex` (`contacts_for_company_result/3`, `get_contact_result/3`,
 `companies_page/3`), `samen_web/lib/samen/web/list_live.ex` (`reread/2`) and the screen proofs in
-`samen_web/test/samen/web/reads_honest_failure_test.exs` and `reads_honest_failure_p2_test.exs` (writes: `Guard.write/3`).
+`samen_web/test/samen/web/reads_honest_failure_test.exs`, `reads_honest_failure_p2_test.exs` (writes: `Guard.write/3`) and
+`reads_honest_failure_p3_test.exs` (the operator plane).
 
 ```elixir
 # A detail/aggregate read: the tagged result is the real function; the legacy name is a shim.
@@ -562,6 +563,22 @@ A best-effort side effect that must not fail its caller (a webhook enqueue, a me
 `current_membership/4` (which maps an outage to `:not_found`). Test it by `inject_read_faults([:name])` on the write's name **and**
 once with a real failure (rename the table inside the sandbox transaction: Postgres DDL is transactional), and assert the
 copy, that nothing was applied, and that the same call succeeds once the fault is cleared.
+
+**An aggregate fails one tile at a time (phase 3).** An operator header, a revenue/analytics/deliverability/activity pane or
+a fleet tile reads each number through its own `Guard.run` and returns the keys that failed next to the value
+(`desk_metrics_status/2 -> {stats, failed}`, `revenue_status/2`, `analytics_status/2`, the additive `:failed` key on
+`deliverability/4` and `activity/3`). A failed number is `0`/`[]` in the legacy value but is *named* in `failed`, and the
+template passes `error={:key in @failed}` to `<.metric>` / renders `<.error_state>` for that pane only — never a `0`, `$0.00`,
+"No … yet" or "healthy" for a read that did not happen. A number that *depends on* another read (a per-event "suppressed?"
+flag over the suppressions list) becomes "unknown" when its input failed. A host-supplied loader (`aggregate_loader`,
+`revenue_plan_loader`) is run through `Guard.run`: a raise is a failed pane, only an absent label is the "not wired" state.
+Cast a client-supplied id (`Ecto.UUID.cast/1`) before it reaches a query: a malformed id is "not found" with no error log.
+
+**A gate fails closed and says so.** An authorization/capability lookup that raises denies (never grants), and reports the
+failure by name and exception module with `Guard.report/3` instead of vanishing into `rescue _ -> nil`; if the screen's copy for
+the denied state would read as a denial for an outage, say so in the `@reviewed` reason or fix the copy. A `@reviewed` reason must be
+literally true of the code ("fail-SECURE: an unresolvable environment is :prod, which arms the gate"); a kit rescue says precisely
+what it guards ("a host-supplied hit-path function that raises yields nil").
 
 **"Not adopted" is a structural fact, never error text.** A feature a host may not have (the AI draft domain, the
 impersonation-sessions table) reads as an honest empty only when `Samen.Web.Reads.Adoption` says so — resolve the repo, is it
