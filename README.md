@@ -22,8 +22,9 @@ several vertical apps that exist to prove the substrate rather than to be shippe
 Unpacked:
 
 - **Masked by default, on both planes.** Every 🔒 field writes a `vt_*` token through one
-  vault chokepoint; plaintext is nowhere at rest. Every surface renders `••••` unless a
-  scoped reveal grant is present — *including* operator support and impersonation sessions.
+  vault chokepoint; no declared PII field is stored in plaintext. Every surface renders
+  `••••` unless a scoped reveal grant is present — *including* operator support and
+  impersonation sessions.
 - **Reveal is second-party.** An operator can request a reveal, but a *distinct* party must
   approve it — enforced both in policy and by a DB `CHECK (granted_by <> requestor_id)`.
   Self-approval is refused. Grants carry `expires_at` and cannot be renewed in place; an
@@ -39,6 +40,12 @@ Unpacked:
 This is deliberately *not* the stronger-sounding "run support without ever seeing PII" — that
 claim was retired as false-by-construction. Support **can** see PII, but only through a
 grant that a second party approved and the tenant can audit.
+
+**Known residue: free text.** The guarantee covers fields *declared* as PII (🔒). Free text
+is stored as written: ticket and chat message bodies, notes, reason fields and audit detail.
+A name or phone number someone types into a ticket body is plaintext at rest, is not masked
+on the operator plane, and is not destroyed by crypto-shred. Put personal data in declared
+fields; vaulting free-text bodies is an open decision, not a shipped guarantee.
 
 ## The claim set (each backed by a test, verifier, or probe in CI)
 
