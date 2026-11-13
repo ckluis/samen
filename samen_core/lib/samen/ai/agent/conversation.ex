@@ -91,8 +91,9 @@ defmodule Samen.AI.Agent.Conversation do
   what lets a provider cache it.
   """
   @spec instructions(map(), [map()], boolean()) :: [String.t()]
-  def instructions(%{goal_prompt: goal_prompt}, tool_defs, native?) when is_list(tool_defs) do
-    [@preamble, tool_note(tool_defs, native?), goal_prompt]
+  def instructions(definition, tool_defs, native?)
+      when is_map(definition) and is_list(tool_defs) do
+    [@preamble, tool_note(tool_defs, native?), Map.fetch!(definition, :goal_prompt)]
     |> Enum.reject(&(&1 == ""))
   end
 
