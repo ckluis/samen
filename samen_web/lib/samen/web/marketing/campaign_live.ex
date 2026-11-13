@@ -31,6 +31,7 @@ defmodule Samen.Web.Marketing.CampaignLive do
   alias Samen.Web.Mount
 
   alias Samen.Web.Marketing.Reads
+  alias Samen.Web.Reads.Guard
 
   @display_limit 200
 
@@ -58,6 +59,9 @@ defmodule Samen.Web.Marketing.CampaignLive do
   # Send-to-segment (tenant plane only — the composer is hidden on the operator plane, so this
   # handler only runs there). Consent/suppression enforced by Reads.enqueue_send.
   @impl true
+  def handle_event("retry_load", _params, socket),
+    do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.campaign_id)}
+
   def handle_event("send_campaign", %{"send" => params}, socket) do
     %{samen_mount: mount, org_id: org_id, campaign: campaign} = socket.assigns
     scope = Mount.scope(mount, org_id)
@@ -80,12 +84,13 @@ defmodule Samen.Web.Marketing.CampaignLive do
          notice: notice,
          sends: Reads.sends_for_campaign(mount, scope, campaign.id),
          event_counts: Reads.event_counts(mount, scope, campaign.id)
-       )}
+       )
+       |> assign_delivery_errors(mount, scope, campaign.id)}
     end
   end
 
   defp run_send(mount, scope, campaign, segment_id, template_id, org_id) do
-    with {:ok, segment} <- Reads.get_segment(mount, scope, segment_id),
+    with {:ok, segment} <- Reads.get_segment_result(mount, scope, segment_id),
          {:ok, results} <-
            Reads.send_campaign_to_segment(mount, scope, campaign, segment, template_id, org_id) do
       queued = Enum.count(results, &match?(%{result: {:ok, _}}, &1))
@@ -105,14 +110,19 @@ defmodule Samen.Web.Marketing.CampaignLive do
 
       {results, notice}
     else
-      :error -> {nil, "Send failed: the segment was not found."}
+      {:error, :not_found} -> {nil, "Send failed: the segment was not found."}
+      {:error, :unavailable} -> {nil, "Send failed: the segment could not be read. Nothing was sent — try again."}
       {:error, reason} -> {nil, "Send failed: #{describe_failure(reason)}"}
     end
   end
 
   defp describe_failure(:template_required), do: "choose a template."
   defp describe_failure(:campaign_required), do: "campaign not found."
-  defp describe_failure(e) when is_exception(e), do: Exception.message(e)
+  # Never the exception (its message can interpolate ids and query values): a value-free reason.
+  defp describe_failure(:audience_unavailable),
+    do:
+      "the audience could not be read, so the send may not have finished. Recipients already queued are skipped when you try again."
+
 
   @doc false
   def load(socket, nil, _campaign_id) do
@@ -123,6 +133,8 @@ defmodule Samen.Web.Marketing.CampaignLive do
       org_id: nil,
       campaign_id: nil,
       campaign: nil,
+      load_error: nil,
+      section_errors: [],
       templates: [],
       segments: [],
       audience: [],
@@ -137,20 +149,27 @@ defmodule Samen.Web.Marketing.CampaignLive do
     mount = socket.assigns.samen_mount
     scope = Mount.scope(mount, org_id)
 
-    campaign =
+    # A FAILED campaign read is the error state (retry), never "Campaign not found."; each
+    # secondary read fails on its own (`section_errors`) and blanks only its own pane.
+    {campaign, load_error} =
       if campaign_id do
-        case Reads.get_campaign(mount, scope, campaign_id) do
-          {:ok, c} -> c
-          :error -> nil
+        case Reads.get_campaign_result(mount, scope, campaign_id) do
+          {:ok, c} -> {c, nil}
+          {:error, :not_found} -> {nil, nil}
+          {:error, :unavailable} -> {nil, Guard.message()}
         end
+      else
+        {nil, nil}
       end
 
-    segments = Reads.segments(mount, scope)
+    segments_result = Reads.segments_result(mount, scope)
+    templates_result = Reads.templates_result(mount, scope)
+    segments = Guard.value(segments_result, [])
 
-    audience =
+    audience_result =
       case segments do
-        [first | _] -> Reads.segment_audience(mount, scope, first)
-        [] -> []
+        [first | _] -> Reads.segment_audience_result(mount, scope, first)
+        [] -> {:ok, []}
       end
 
     socket
@@ -160,13 +179,43 @@ defmodule Samen.Web.Marketing.CampaignLive do
       org_id: org_id,
       campaign_id: campaign_id,
       campaign: campaign,
-      templates: Reads.templates(mount, scope),
+      load_error: load_error,
+      templates: Guard.value(templates_result, []),
       segments: segments,
-      audience: audience,
-      sends: if(campaign, do: Reads.sends_for_campaign(mount, scope, campaign.id), else: []),
-      event_counts: if(campaign, do: Reads.event_counts(mount, scope, campaign.id), else: %{}),
+      audience: Guard.value(audience_result, []),
+      sends: [],
+      event_counts: %{},
       send_results: Map.get(socket.assigns, :send_results),
       notice: Map.get(socket.assigns, :notice)
+    )
+    |> assign(
+      section_errors:
+        for(
+          {key, result} <- [templates: templates_result, segments: segments_result, audience: audience_result],
+          Guard.unavailable?(result),
+          do: key
+        )
+    )
+    |> then(fn socket ->
+      if campaign, do: assign_delivery_errors(socket, mount, scope, campaign.id), else: socket
+    end)
+  end
+
+  # The delivery pane (sends + events) reads on its own; a failure is its own error, not
+  # "No sends yet." Keeps any template/segment/audience errors already recorded.
+  defp assign_delivery_errors(socket, mount, scope, campaign_id) do
+    sends = Reads.sends_for_campaign_result(mount, scope, campaign_id)
+    counts = Reads.event_counts_result(mount, scope, campaign_id)
+
+    failed =
+      if Guard.unavailable?(sends) or Guard.unavailable?(counts), do: [:delivery], else: []
+
+    kept = Enum.reject(socket.assigns[:section_errors] || [], &(&1 == :delivery))
+
+    assign(socket,
+      sends: Guard.value(sends, []),
+      event_counts: Guard.value(counts, %{}),
+      section_errors: kept ++ failed
     )
   end
 
@@ -197,7 +246,10 @@ defmodule Samen.Web.Marketing.CampaignLive do
           <span id="org-banner" style="display:none">Marketing org: {@org_id}</span>
 
           <%= if @campaign == nil do %>
-            <div class="wrap">
+            <div :if={@load_error} class="wrap">
+              <.error_state class="campaign-error" body={@load_error} retry_event="retry_load" />
+            </div>
+            <div :if={is_nil(@load_error)} class="wrap">
               <div class="card" style="padding:22px 20px;color:var(--muted)">Campaign not found.</div>
             </div>
           <% else %>
@@ -214,6 +266,7 @@ defmodule Samen.Web.Marketing.CampaignLive do
 
             <%= if composer?(@samen_mount) do %>
               <div class="wrap" id="compose-pane" style="margin-bottom:0;padding-top:8px">
+                <.error_state :if={:templates in @section_errors or :segments in @section_errors} class="compose-error" body={Guard.message()} retry_event="retry_load" />
                 <div class="card" style="padding:18px 20px">
                   <div class="gtitle" style="margin-bottom:12px"><h3>Compose &amp; send</h3></div>
                   <form id="send-campaign-form" phx-submit="send_campaign" style="display:flex;flex-direction:column;gap:10px">
@@ -261,6 +314,9 @@ defmodule Samen.Web.Marketing.CampaignLive do
               <div class="gtitle"><h3>Recipients (first segment)</h3><span class="n">{length(@audience)}</span>
                 <span class="lane">· email via PiiResolution · {marketing_plane_note(@samen_mount)}</span>
               </div>
+              <%= if :audience in @section_errors or :segments in @section_errors do %>
+                <.error_state class="audience-error" body={Guard.message()} retry_event="retry_load" />
+              <% else %>
               <%= if @audience == [] do %>
                 <.empty_state
                   class="recipients-empty"
@@ -282,11 +338,13 @@ defmodule Samen.Web.Marketing.CampaignLive do
                   </tr>
                 </.data_table>
               <% end %>
+              <% end %>
             </div>
 
             <div class="wrap" id="events-pane" style="padding-top:8px">
               <div class="gtitle"><h3>Delivery events</h3></div>
-              <div class="card" style="padding:14px 16px;display:flex;gap:8px;flex-wrap:wrap">
+              <.error_state :if={:delivery in @section_errors} class="delivery-error" body={Guard.message()} retry_event="retry_load" />
+              <div :if={:delivery not in @section_errors} class="card" style="padding:14px 16px;display:flex;gap:8px;flex-wrap:wrap">
                 <%= if @event_counts == %{} and @sends == [] do %>
                   <span style="color:var(--muted);font-size:13px">No sends yet.</span>
                 <% else %>

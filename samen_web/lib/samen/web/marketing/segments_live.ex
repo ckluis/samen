@@ -81,7 +81,7 @@ defmodule Samen.Web.Marketing.SegmentsLive do
     |> ensure_return_to()
     |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil)
     |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
-    |> assign(sub_page: %Samen.Web.Page{}, suppressed_ids: MapSet.new())
+    |> assign(sub_page: %Samen.Web.Page{}, suppressed_ids: MapSet.new(), subscribers_failed: false, suppressions_failed: false)
     |> assign(show_new: false, new_form: nil)
     |> assign_new(:delete_error, fn -> nil end)
   end
@@ -93,12 +93,18 @@ defmodule Samen.Web.Marketing.SegmentsLive do
     # The BOUNDED subscribers panel: first keyset page (default page size), PII
     # plane-resolved; the suppression flag read is bounded to the page's own ids.
     sub_page = Reads.subscribers_page(mount, scope, %Samen.Web.ListState{})
-    suppressed_ids = Reads.suppressed_ids(mount, scope, Enum.map(sub_page.items, & &1.id))
+    suppressed = Reads.suppressed_ids_result(mount, scope, Enum.map(sub_page.items, & &1.id))
+    suppressed_ids = Samen.Web.Reads.Guard.value(suppressed, MapSet.new())
 
     socket
     |> ensure_return_to()
     |> assign(no_org: false, org_id: org_id)
-    |> assign(sub_page: sub_page, suppressed_ids: suppressed_ids)
+    |> assign(
+      sub_page: sub_page,
+      suppressed_ids: suppressed_ids,
+      subscribers_failed: Samen.Web.Reads.Guard.unavailable?(sub_page),
+      suppressions_failed: Samen.Web.Reads.Guard.unavailable?(suppressed)
+    )
     |> assign_new(:show_new, fn -> false end)
     |> assign_new(:delete_error, fn -> nil end)
     |> assign(new_form: new_segment_form(mount, org_id))
@@ -107,7 +113,10 @@ defmodule Samen.Web.Marketing.SegmentsLive do
 
   # -- A3 CRUD events (list events belong to the ListLive hook) -----------------
 
+  # The kit error state's "Try again" (a failed subscribers / suppression read).
   @impl true
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
+
   def handle_event("new_segment", _params, socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
     {:noreply, assign(socket, show_new: true, new_form: new_segment_form(mount, org_id))}
@@ -247,6 +256,10 @@ defmodule Samen.Web.Marketing.SegmentsLive do
                 <span class="n">{length(@sub_page.items)}</span>
                 <span class="lane">· email via PiiResolution · {marketing_plane_note(@samen_mount)}</span>
               </div>
+              <%= if @subscribers_failed do %>
+                <.error_state class="subscribers-error" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
+              <% else %>
+              <.error_state :if={@suppressions_failed} class="suppressions-error" title="Suppression flags unavailable" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
               <%= if @sub_page.items == [] do %>
                 <.empty_state
                   class="subscribers-empty"
@@ -268,13 +281,15 @@ defmodule Samen.Web.Marketing.SegmentsLive do
                     <td style="font-size:12px;color:var(--muted)">{if s.consent_at, do: "opted-in", else: "—"}</td>
                     <td>
                       <span :if={MapSet.member?(@suppressed_ids, s.id)} class="suppressed-flag"><.pill variant="bad">suppressed</.pill></span>
-                      <span :if={!MapSet.member?(@suppressed_ids, s.id)} style="color:var(--muted);font-size:12px">—</span>
+                      <span :if={!MapSet.member?(@suppressed_ids, s.id) and not @suppressions_failed} style="color:var(--muted);font-size:12px">—</span>
+                      <span :if={@suppressions_failed} class="suppressed-unknown" style="color:var(--muted);font-size:12px">unknown</span>
                     </td>
                   </tr>
                 </.data_table>
                 <div :if={@sub_page.has_more} class="subscribers-bounded-note" style="color:var(--muted);font-size:12px;margin-top:8px">
                   Showing the first {@sub_page.page_size} subscribers — the audience is larger.
                 </div>
+              <% end %>
               <% end %>
             </div>
           </div>

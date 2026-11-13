@@ -51,7 +51,9 @@ defmodule Samen.Web.Reads.SwallowLint do
     {"samen_web/lib/samen/web/crm/sequences_reads.ex", :sends_configured?} =>
       "fail-honest predicate: 'no sender configured' is the safe, truthful default",
     {"samen_web/lib/samen/web/billing/settings_live.ex", :billing_actor} =>
-      "fail-closed authorization lookup: no resolvable membership means no billing actor, which hides the admin affordances and refuses the write (never an elevated default)"
+      "fail-closed authorization lookup: no resolvable membership means no billing actor, which hides the admin affordances and refuses the write (never an elevated default)",
+    {"samen_web/lib/samen/web/marketing/leads_live.ex", :crm_mount} =>
+      "optional-scope probe: no (or an unresolvable) :crm_namespace label means the Leads lens is not wired on this host, which the lens renders as inert — a host-configuration fact, not a read"
   }
 
   # Swallows that still exist, per file, AFTER the reviewed ones are subtracted. Shrink-only: a
@@ -92,9 +94,7 @@ defmodule Samen.Web.Reads.SwallowLint do
     "samen_web/lib/samen/web/first_run.ex" => 2,
     "samen_web/lib/samen/web/flags/reads.ex" => 3,
     "samen_web/lib/samen/web/live.ex" => 1,
-    "samen_web/lib/samen/web/marketing/leads_live.ex" => 1,
-    "samen_web/lib/samen/web/marketing/reads.ex" => 18,
-    "samen_web/lib/samen/web/metrics_controller.ex" => 2,
+        "samen_web/lib/samen/web/metrics_controller.ex" => 2,
     "samen_web/lib/samen/web/notifications/reads.ex" => 5,
     "samen_web/lib/samen/web/object_ref.ex" => 3,
     "samen_web/lib/samen/web/object_ref/catalog.ex" => 1,

@@ -58,7 +58,13 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
 
   setup do
     seeded = Seeds.seed_all()
-    %{org_id: seeded.org_id}
+
+    %{
+      org_id: seeded.org_id,
+      campaign_id: seeded.marketing.campaign.id,
+      segment_id: seeded.marketing.segment.id,
+      template_id: seeded.marketing.template.id
+    }
   end
 
   # ===========================================================================
@@ -273,6 +279,167 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
       clear_read_faults()
       socket = event(SettingsLive, socket, "retry_load")
       assert socket.assigns.section_errors == []
+    end
+  end
+
+  # ===========================================================================
+  # Marketing
+  # ===========================================================================
+
+  describe "Marketing campaigns / segments / leads (ListLive)" do
+    alias Samen.Web.Marketing.{CampaignsLive, LeadsLive, SegmentsLive}
+
+    test "campaigns: failed page → error state, not 'No campaigns yet.'; retry recovers; empty stays empty", %{org_id: org_id} do
+      mount = build_mount(:marketing)
+      assert html(CampaignsLive, socket_for(CampaignsLive, mount, [Ash.UUID.generate()])) =~ "No campaigns yet."
+
+      inject_read_faults([:marketing_campaigns_page])
+      socket = failing(fn -> socket_for(CampaignsLive, mount, [org_id]) end)
+      rendered = html(CampaignsLive, socket)
+
+      assert_error_state(rendered)
+      refute rendered =~ "No campaigns yet."
+      refute rendered =~ "empty-new-campaign"
+
+      clear_read_faults()
+      rendered = html(CampaignsLive, list_event(socket, "list_retry"))
+      refute_error_state(rendered)
+      assert rendered =~ Seeds.campaign_name()
+    end
+
+    test "segments: a failed page, a failed subscribers panel and failed suppression flags each say so", %{org_id: org_id} do
+      mount = build_mount(:marketing)
+      inject_read_faults([:marketing_segments_page])
+      socket = failing(fn -> socket_for(SegmentsLive, mount, [org_id]) end)
+      rendered = html(SegmentsLive, socket)
+      assert_error_state(rendered)
+      refute rendered =~ "No segments yet."
+      assert rendered =~ "subscriber-row"
+
+      clear_read_faults()
+      inject_read_faults([:marketing_subscribers_page])
+      socket = failing(fn -> socket_for(SegmentsLive, mount, [org_id]) end)
+      rendered = html(SegmentsLive, socket)
+      assert rendered =~ "subscribers-error"
+      refute rendered =~ "No subscribers yet."
+      refute rendered =~ "subscriber-row"
+
+      # A failed suppression read must not paint every subscriber "not suppressed".
+      clear_read_faults()
+      inject_read_faults([:marketing_suppressed_ids])
+      socket = failing(fn -> socket_for(SegmentsLive, mount, [org_id]) end)
+      rendered = html(SegmentsLive, socket)
+      assert rendered =~ "suppressions-error"
+      assert rendered =~ "suppressed-unknown"
+      assert rendered =~ "subscriber-row"
+
+      clear_read_faults()
+      rendered = html(SegmentsLive, event(SegmentsLive, socket, "retry_load"))
+      refute rendered =~ "suppressions-error"
+    end
+
+    test "segments POSITIVE CONTROL: empty org → real empty states" do
+      rendered = html(SegmentsLive, socket_for(SegmentsLive, build_mount(:marketing), [Ash.UUID.generate()]))
+      assert rendered =~ "No segments yet."
+      assert rendered =~ "No subscribers yet."
+      refute_error_state(rendered)
+    end
+
+    test "masking: the operator-plane subscribers error DOM prints no email and no token", %{org_id: org_id} do
+      mount = build_mount(:marketing, plane: :operator, target_org_id: org_id)
+      inject_read_faults([:marketing_subscribers_page, :marketing_segments_page])
+      rendered = html(SegmentsLive, failing(fn -> socket_for(SegmentsLive, mount, [org_id]) end))
+      assert_error_state(rendered)
+      refute rendered =~ "pii_"
+      clear_read_faults()
+      assert html(SegmentsLive, socket_for(SegmentsLive, mount, [org_id])) =~ "••••"
+    end
+
+    test "leads (never wired to :list_error): a failed first read shows the error, not the empty lens", %{org_id: org_id} do
+      mount = build_mount(:marketing)
+      inject_read_faults([:crm_leads_page])
+      socket = failing(fn -> socket_for(LeadsLive, mount, [org_id]) end)
+      rendered = html(LeadsLive, socket)
+
+      assert_error_state(rendered)
+      refute rendered =~ "No leads in the early funnel yet."
+
+      clear_read_faults()
+      refute_error_state(html(LeadsLive, list_event(socket, "list_retry")))
+    end
+  end
+
+  describe "Marketing campaign detail" do
+    alias Samen.Web.Marketing.CampaignLive
+
+    test "a FAILED campaign read is the error state — not 'Campaign not found.'; 404 survives", %{org_id: org_id, campaign_id: campaign_id} do
+      mount = build_mount(:marketing)
+      inject_read_faults([:marketing_get_campaign])
+      socket = failing(fn -> socket_for(CampaignLive, mount, [org_id, campaign_id]) end)
+      rendered = html(CampaignLive, socket)
+
+      assert_error_state(rendered)
+      refute rendered =~ "Campaign not found."
+      refute rendered =~ "campaign-header"
+
+      clear_read_faults()
+      rendered = html(CampaignLive, event(CampaignLive, socket, "retry_load"))
+      refute_error_state(rendered)
+      assert rendered =~ "campaign-header"
+
+      for id <- [Ash.UUID.generate(), "not-a-uuid"] do
+        rendered = html(CampaignLive, socket_for(CampaignLive, mount, [org_id, id]))
+        assert rendered =~ "Campaign not found."
+        refute_error_state(rendered)
+      end
+    end
+
+    test "each pane fails on its own: compose selects, recipients, delivery", %{org_id: org_id, campaign_id: campaign_id} do
+      mount = build_mount(:marketing)
+
+      inject_read_faults([:marketing_templates])
+      rendered = html(CampaignLive, failing(fn -> socket_for(CampaignLive, mount, [org_id, campaign_id]) end))
+      assert rendered =~ "compose-error"
+      assert rendered =~ "campaign-header"
+
+      clear_read_faults()
+      inject_read_faults([:marketing_segment_audience])
+      rendered = html(CampaignLive, failing(fn -> socket_for(CampaignLive, mount, [org_id, campaign_id]) end))
+      assert rendered =~ "audience-error"
+      refute rendered =~ "No subscribers in the first segment yet."
+      refute rendered =~ "recipient-row"
+
+      clear_read_faults()
+      inject_read_faults([:marketing_sends_for_campaign])
+      rendered = html(CampaignLive, failing(fn -> socket_for(CampaignLive, mount, [org_id, campaign_id]) end))
+      assert rendered =~ "delivery-error"
+      refute rendered =~ "No sends yet."
+    end
+
+    test "masking: the operator-plane audience error DOM prints no email", %{org_id: org_id, campaign_id: campaign_id} do
+      mount = build_mount(:marketing, plane: :operator, target_org_id: org_id)
+      inject_read_faults([:marketing_segment_audience])
+      rendered = html(CampaignLive, failing(fn -> socket_for(CampaignLive, mount, [org_id, campaign_id]) end))
+      assert rendered =~ "audience-error"
+      refute rendered =~ "pii_"
+    end
+
+    test "a send whose audience read fails tells the user, without printing an exception or a value",
+         %{org_id: org_id, campaign_id: campaign_id, segment_id: segment_id, template_id: template_id} do
+      mount = build_mount(:marketing)
+      socket = socket_for(CampaignLive, mount, [org_id, campaign_id], org_id: org_id, send_results: nil, notice: nil)
+      inject_read_faults([:marketing_get_segment])
+
+      socket =
+        failing(fn ->
+          event(CampaignLive, socket, "send_campaign", %{"send" => %{"template_id" => template_id, "segment_id" => segment_id}})
+        end)
+
+      assert socket.assigns.notice =~ "Send failed: the segment could not be read"
+      refute socket.assigns.notice =~ "not found"
+      refute socket.assigns.notice =~ "InjectedFault"
+      refute socket.assigns.notice =~ "injected read fault"
+      assert socket.assigns.send_results == nil
     end
   end
 end
