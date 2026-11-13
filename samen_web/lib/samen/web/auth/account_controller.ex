@@ -148,7 +148,7 @@ defmodule Samen.Web.Auth.AccountController do
     mount = conn.private.samen_mount
     base = "#{reset_path(conn)}/#{token}"
 
-    case Reset.consume(token, password, reset_mods(mount)) do
+    case Reset.consume(token, password, reset_mods(mount, conn)) do
       {:ok, _credential} ->
         redirect(conn, to: "#{base}?reset=1")
 
@@ -223,6 +223,12 @@ defmodule Samen.Web.Auth.AccountController do
       user: Mount.resource(mount, User),
       repo: mount.repo
     }
+  end
+
+  # `consume/3` revokes EVERY session of the credential; `on_sessions_revoked` also tears down
+  # the LiveView sockets those sessions hold open (ARCH-13).
+  defp reset_mods(%Mount{} = mount, conn) do
+    Map.put(reset_mods(mount), :on_sessions_revoked, &Samen.Web.Auth.SessionSockets.disconnect(conn, &1))
   end
 
   defp invite_mods(%Mount{} = mount) do

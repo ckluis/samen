@@ -109,6 +109,7 @@ defmodule Samen.Web.Auth.SessionController do
   alias Samen.Scopes.Identity.Audit
   alias Samen.Scopes.Identity.Notify
   alias Samen.Web.Auth
+  alias Samen.Web.Auth.SessionSockets
   alias Samen.Web.Auth.Totp
   alias Samen.Web.Auth.TotpStepUp
   alias Samen.Web.Mount
@@ -224,7 +225,10 @@ defmodule Samen.Web.Auth.SessionController do
          {:ok, _consumed} <-
            TokenConsume.consume_once(Mount.resource(mount, AuthToken), digest, :totp_pending) do
       if method == :recovery do
-        SessionRevoke.revoke_all(Mount.resource(mount, Session), credential_id)
+        session_mod = Mount.resource(mount, Session)
+        digests = SessionRevoke.live_token_digests(session_mod, credential_id)
+        SessionRevoke.revoke_all(session_mod, credential_id)
+        SessionSockets.disconnect(conn, digests)
 
         # ADR-035 §5 A10 (T09) — audit + notify, co-located exactly as
         # `Samen.Web.Auth.TotpEnrollLive.fan_out/4` does for the sibling
@@ -291,6 +295,8 @@ defmodule Samen.Web.Auth.SessionController do
     case Auth.resolve_principal(get_session(conn), %{session: session_mod}) do
       {:ok, %{credential_id: credential_id, session_id: session_id}} ->
         _ = SessionRevoke.revoke_one(session_mod, session_id, credential_id)
+        # ARCH-13 — the signed-out browser's own sockets go with the session.
+        SessionSockets.disconnect_token(conn, get_session(conn, Auth.session_token_key()))
 
         # ADR-035 §5 A10 (T101) — self-initiated logout: audit always, no
         # notify (this is the credential's OWN current session ending
@@ -338,8 +344,13 @@ defmodule Samen.Web.Auth.SessionController do
 
     case Auth.resolve_principal(get_session(conn), %{session: session_mod}) do
       {:ok, %{credential_id: credential_id}} ->
+        # Read the target's digest BEFORE the revoke (scoped to the caller's own credential).
+        digests = SessionRevoke.live_token_digests(session_mod, credential_id, only: session_id)
+
         case SessionRevoke.revoke_one(session_mod, session_id, credential_id) do
           {:ok, :revoked} ->
+            SessionSockets.disconnect(conn, digests)
+
             # ADR-035 §5 A10 (T101) — this control is, by construction, the
             # caller's CURRENT session revoking a (typically different)
             # session in the list: the ADR's "revoke-by-another-session"
@@ -383,7 +394,9 @@ defmodule Samen.Web.Auth.SessionController do
 
     case Auth.resolve_principal(get_session(conn), %{session: session_mod}) do
       {:ok, %{credential_id: credential_id, session_id: session_id}} ->
+        digests = SessionRevoke.live_token_digests(session_mod, credential_id, except: session_id)
         :ok = SessionRevoke.revoke_others(session_mod, credential_id, session_id)
+        SessionSockets.disconnect(conn, digests)
 
         # ADR-035 §5 A10 (T101) — the caller's CURRENT session revoking every
         # OTHER session: also "revoke-by-another-session". Audit always;

@@ -1,0 +1,20 @@
+# SABOTAGE: Revoke-all-others stops broadcasting the LiveView socket disconnect: revoked sessions keep 
+#   their connected sockets (ARCH-13).
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/auth/session_sockets_test.exs
+# MUST_FAIL: revoke_others disconnects every OTHER session's sockets
+diff --git a/samen_web/lib/samen/web/auth/session_controller.ex b/samen_web/lib/samen/web/auth/session_controller.ex
+index 70d5fe7c..977ce119 100644
+--- a/samen_web/lib/samen/web/auth/session_controller.ex
++++ b/samen_web/lib/samen/web/auth/session_controller.ex
+@@ -396,7 +396,7 @@ defmodule Samen.Web.Auth.SessionController do
+       {:ok, %{credential_id: credential_id, session_id: session_id}} ->
+         digests = SessionRevoke.live_token_digests(session_mod, credential_id, except: session_id)
+         :ok = SessionRevoke.revoke_others(session_mod, credential_id, session_id)
+-        SessionSockets.disconnect(conn, digests)
++        _ = digests
+ 
+         # ADR-035 §5 A10 (T101) — the caller's CURRENT session revoking every
+         # OTHER session: also "revoke-by-another-session". Audit always;
