@@ -7,7 +7,7 @@ every `samen_core/lib/mix/tasks/samen.verify.*.ex` task has an entry here and (b
 quoted load-bearing string still exists in the cited source — the index cannot drift from
 what the gate actually prints.
 
-**The shared failure shape.** Sixteen of the seventeen verifiers report through
+**The shared failure shape.** Every verifier except `metric_labels`, `erasure_completeness` and `oban_queues` (each prints its own shape; see its entry) reports through
 `Samen.Verifier.halt_if_violations/2` (`samen_core/lib/samen/verifier.ex`) and exit
 non-zero via `:erlang.halt(1)`:
 
@@ -17,8 +17,9 @@ FAIL: <task name> found N violation(s):
 ```
 
 On success each prints `<task name>: OK — no violations found.` Step numbers below are the
-generated app's 18-step `ci.sh` (emitted by `mix samen.gen.app`); Driftwood's 20-step and
-PawChart's 17-step gates run the same tiers in the same order.
+generated app's <!--count:gate_steps_app-->18<!--/count-->-step `ci.sh` (emitted by `mix samen.gen.app`; the `--api` variant has <!--count:gate_steps_app_api-->19<!--/count-->); Driftwood's
+<!--count:gate_steps_driftwood-->20<!--/count-->-step and PawChart's <!--count:gate_steps_pawchart-->17<!--/count-->-step gates run the same tiers in the same order. There are <!--count:verifiers-->26<!--/count--> `samen.verify.*` tasks in
+total; each has an entry below (`doc_recipes_test.exs` enforces it).
 
 ---
 
@@ -507,7 +508,7 @@ still green under sabotage, a verifier regressed: fix the verifier, not the prob
 
 ## Off-gate verifiers
 
-This `samen.verify.*` task is not a step of the generated 18-step gate but is part of
+This `samen.verify.*` task is not a step of the generated <!--count:gate_steps_app-->18<!--/count-->-step gate but is part of
 the verifier suite (AC-G10-4 covers every task in `samen_core/lib/mix/tasks/`):
 
 > The uncatalogued-column ("hallucinated field") bug class is owned by

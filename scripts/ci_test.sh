@@ -1026,6 +1026,37 @@ DOC
   # the real document: the two counts that need no Elixir are current
   bash "$ROOT/scripts/counts" --check --only sabotages,driver_sabotages > "$T/c10k" 2>&1
   eq "$?" 0 "C10: the real CLAUDE.md's sabotage counts are current"
+  # --docs (DX-12): the front-door numbers in README/docs are derived too — ADRs, verifiers, gate steps, sabotages
+  mkdir -p "$F/docs/adr" "$F/docs/guides" "$F/samen_core/lib/mix/tasks" "$F/samen_core/priv/templates" "$F/driftwood" "$F/pawchart"
+  : > "$F/docs/adr/ADR-001-a.md"; : > "$F/docs/adr/ADR-002-b.md"
+  : > "$F/samen_core/lib/mix/tasks/samen.verify.one.ex"; : > "$F/samen_core/lib/mix/tasks/samen.verify.two.ex"
+  printf 'echo "--- step 1/3: a"\necho "--- step 2/3: b"\necho "--- step 2b/3: c"\n' > "$F/samen_core/priv/templates/ci_sh.eex"
+  printf 'echo "--- step 1/4: a"\n' > "$F/samen_core/priv/templates/ci_sh_api.eex"
+  printf 'echo "--- step 1/5: a"\n' > "$F/driftwood/ci.sh"; printf 'echo "--- step 1/6: a"\n' > "$F/pawchart/ci.sh"
+  local ad='<!--count:adrs-->99<!--/count-->' ve='<!--count:verifiers-->99<!--/count-->' ga='<!--count:gate_steps_app-->99<!--/count-->'
+  local gi='<!--count:gate_steps_app_api-->99<!--/count-->' gd='<!--count:gate_steps_driftwood-->99<!--/count-->' gp='<!--count:gate_steps_pawchart-->99<!--/count-->' sa='<!--count:sabotages-->99<!--/count-->'
+  printf '%s %s %s\n' "$ad" "$gi" "$sa" > "$F/README.md"
+  printf '%s\n' "$ad" > "$F/docs/README.md"; printf '%s\n' "$ad" > "$F/docs/adr/README.md"
+  printf '%s %s %s %s\n' "$ve" "$ga" "$gd" "$gp" > "$F/docs/guides/gate-failures.md"
+  printf '%s\n' "$ga" > "$F/docs/guides/getting-started.md"; printf '%s %s\n' "$ga" "$sa" > "$F/docs/guides/cookbook.md"
+  printf '%s\n' "$ga" > "$F/docs/guides/generators.md"
+  $C --check --docs > "$T/c10m" 2>&1; eq "$?" 1 "C10: stale front-door numbers fail --check --docs"
+  has "$T/c10m" 'count adrs says 99, the sources say 2' "C10: ... ADRs are counted from docs/adr/ADR-*.md"
+  has "$T/c10m" 'count verifiers says 99, the sources say 2' "C10: ... verifiers from the samen.verify.* tasks"
+  has "$T/c10m" 'count gate_steps_app says 99, the sources say 3' "C10: ... gate steps from the step banners' N (2b is not a step)"
+  has "$T/c10m" 'count gate_steps_pawchart says 99, the sources say 6' "C10: ... per gate script"
+  $C --write --docs > "$T/c10n" 2>&1; eq "$?" 0 "C10: --write --docs rewrites them"
+  $C --check --docs > "$T/c10o" 2>&1; eq "$?" 0 "C10: positive control — written docs pass --check --docs"
+  sed 's/<!--count:adrs-->[0-9]*<!--\/count-->/2/' "$F/docs/README.md" > "$F/docs/README.md.x" && mv "$F/docs/README.md.x" "$F/docs/README.md"
+  $C --check --docs > "$T/c10p" 2>&1; eq "$?" 1 "C10: a front-door number that lost its marker fails"
+  has "$T/c10p" 'docs/README.md: no <!--count:adrs-->' "C10: ... naming the file and the count"
+  printf 'echo "--- step 1/5: a"\necho "--- step 2/7: b"\n' > "$F/driftwood/ci.sh"
+  $C --list --docs > "$T/c10q" 2>&1; eq "$?" 1 "C10: a gate script announcing two different step totals is refused"
+  has "$T/c10q" 'expected exactly one' "C10: ... it would lie about itself"
+  # the real repo's front-door numbers are current (none of them needs Elixir)
+  bash "$ROOT/scripts/counts" --check --docs > "$T/c10r" 2>&1
+  eq "$?" 0 "C10: the real README/docs front-door numbers are current"
+
   # and the check is a manifest step of quick, pr and full — drift FAILS quick (the real manifest)
   local m
   for m in quick pr full; do

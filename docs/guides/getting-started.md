@@ -11,8 +11,31 @@ thing to watch the gate flip, and finish green.
 > generated app on every root `ci.sh` run. A command added here that CI does not
 > execute fails the build.
 
-**Prerequisites:** Elixir 1.20 / OTP 29 (pinned in `spikes/s00_smoke/VERSIONS.md`),
-local PostgreSQL trusting `$USER` on localhost. All commands start from the repo root.
+**Prerequisites** (every command starts from the repo root; the app is generated *inside* this checkout — fork the
+repo, your product lives in the fork):
+
+- **Elixir 1.20.4 / Erlang-OTP 29.1.1 or newer** — the floor pinned in `.tool-versions` (`asdf install` /
+  `mise install` read it). Every `mix.exs` declares `elixir: ">= 1.20.4"`, and `scripts/toolchain_check.sh` fails on an
+  older toolchain.
+- **PostgreSQL on `localhost`, reachable as your OS user with an empty password.** The generated configs hardcode
+  `username: System.get_env("USER") || "postgres"`, `password: ""`, `hostname: "localhost"` and create
+  `<app>_dev` / `<app>_test` (`config/dev.exs`, `config/test.exs`); there is no `DATABASE_URL` in dev/test (only the
+  deploy runtime reads it). To use other credentials, edit those two files in the generated app. The role must exist
+  (`psql -d postgres -c '\du'`) and be allowed to create databases.
+- **The `pgvector` extension** (`brew install pgvector`, or the `pgvector/pgvector:0.8.0-pg16` image CI uses). The
+  framework's own suites (`samen_core`, the repo gate) fail at setup with "pgvector not installed" without it; a
+  generated app's migrations do not create the extension.
+
+```bash operator-todo
+asdf install
+brew install pgvector
+cd samen_core && mix deps.get
+```
+
+`mix deps.get` in `samen_core` is a one-time step before the generator (it fetches the ~60 hex deps the generator
+compiles the new app against). `mix samen.doctor` prints one readiness table of the adapter seams (KMS, anchor,
+password hasher, delivery provider) from configuration alone, with no network calls; it does **not** check your
+toolchain or Postgres, so use `scripts/toolchain_check.sh` for the first and `psql -d postgres -c 'select 1'` for the second.
 
 ---
 
@@ -48,7 +71,7 @@ cd ../harbor
 MIX_ENV=test bash ci.sh
 ```
 
-All 18 steps pass on first run — that is the load-bearing claim of the generator
+All <!--count:gate_steps_app-->18<!--/count--> steps pass on first run — that is the load-bearing claim of the generator
 (*correct-by-construction*), and it is exactly what the flagship CI probe proves on
 every root `ci.sh`: compile → DB bootstrap → `schema.dict.json` drift check → the
 `samen.verify.*` tiers (catalog parity, prefixes, PII reads/classify, no-plaintext-PII,
