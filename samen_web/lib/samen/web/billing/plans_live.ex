@@ -31,6 +31,7 @@ defmodule Samen.Web.Billing.PlansLive do
   alias Samen.Web.Mount
 
   alias Samen.Web.Billing.Reads
+  alias Samen.Web.Reads.Guard
 
   use Samen.Web.ListLive,
     resource: Plan,
@@ -60,7 +61,7 @@ defmodule Samen.Web.Billing.PlansLive do
   def load(socket, nil) do
     socket
     |> ensure_return_to()
-    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, prices_by_plan: %{})
+    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, prices_by_plan: %{}, section_errors: [])
     |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
     |> assign(show_new: false, new_form: nil)
     |> assign(show_edit: false, edit_form: nil, edit_plan_id: nil)
@@ -72,10 +73,21 @@ defmodule Samen.Web.Billing.PlansLive do
     mount = socket.assigns.samen_mount
     scope = Mount.scope(mount, org_id)
 
+    # Each secondary read fails on its own (`section_errors`): none of them blanks the plan list.
+    results = [
+      prices: Reads.prices_by_plan_result(mount, scope),
+      subscriptions: Reads.subscriptions_result(mount, scope),
+      entitlements: Reads.entitlements_result(mount, scope)
+    ]
+
     socket
     |> ensure_return_to()
-    |> assign(no_org: false, org_id: org_id, prices_by_plan: Reads.prices_by_plan(mount, scope))
-    |> assign(subscriptions: Reads.subscriptions(mount, scope), entitlements: Reads.entitlements(mount, scope))
+    |> assign(no_org: false, org_id: org_id, prices_by_plan: Guard.value(results[:prices], %{}))
+    |> assign(
+      subscriptions: Guard.value(results[:subscriptions], []),
+      entitlements: Guard.value(results[:entitlements], []),
+      section_errors: for({key, result} <- results, Guard.unavailable?(result), do: key)
+    )
     |> assign_new(:show_new, fn -> false end)
     |> assign_new(:show_edit, fn -> false end)
     |> assign_new(:edit_plan_id, fn -> nil end)
@@ -88,7 +100,10 @@ defmodule Samen.Web.Billing.PlansLive do
 
   # -- A3 CRUD events (list events belong to the ListLive hook) -----------------
 
+  # The kit error state's "Try again" (a failed prices / subscriptions / entitlements read).
   @impl true
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
+
   def handle_event("new_plan", _params, socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
     {:noreply, assign(socket, show_new: true, new_form: new_plan_form(mount, org_id))}
@@ -301,6 +316,7 @@ defmodule Samen.Web.Billing.PlansLive do
                 <span class="n">{length(@page.items)}</span>
                 <span class="lane">· Tier-0 config rows · admin-gated writes · no PII</span>
               </div>
+              <.error_state :if={:prices in @section_errors} class="prices-error" body={Guard.message()} retry_event="retry_load" />
               <.list_view
                 id="plans-list"
                 page={@page}
@@ -431,6 +447,9 @@ defmodule Samen.Web.Billing.PlansLive do
           </.modal>
 
           <.modal :if={@show_ents and writable?(@samen_mount)} id="entitlements-modal" title="Subscription entitlements" on_cancel="cancel_ents">
+            <%= if :subscriptions in @section_errors or :entitlements in @section_errors do %>
+              <.error_state class="entitlements-error" body={Guard.message()} retry_event="retry_load" />
+            <% else %>
             <%= if @subscriptions == [] do %>
               <p style="font-size:12px;color:var(--muted)">No subscriptions to entitle yet.</p>
             <% else %>
@@ -463,6 +482,7 @@ defmodule Samen.Web.Billing.PlansLive do
                   <.button phx-click="revoke_ent" phx-value-subscription_id={ent.subscription_id} phx-value-feature={to_string(ent.feature)} class="revoke-ent">Revoke</.button>
                 </div>
               </div>
+            <% end %>
             <% end %>
           </.modal>
         <% end %>

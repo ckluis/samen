@@ -57,7 +57,8 @@ defmodule Samen.Web.Billing.DunningLive do
       no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil),
       org_id: nil,
       metrics: empty_metrics(),
-      rows: []
+      rows: [],
+      load_error: nil
     )
   end
 
@@ -67,15 +68,26 @@ defmodule Samen.Web.Billing.DunningLive do
     # ONE clock reading threaded to both the rows and the header (they cannot desync).
     now = DateTime.utc_now()
 
+    {rows, load_error} =
+      case Dunning.rows_result(mount, scope, now) do
+        {:ok, rows} -> {rows, nil}
+        {:error, :unavailable} -> {[], Samen.Web.Reads.Guard.message()}
+        {:error, _denied} -> {[], nil}
+      end
+
     socket
     |> ensure_return_to()
     |> assign(
       no_org: false,
       org_id: org_id,
-      metrics: Dunning.metrics(mount, scope, now),
-      rows: Dunning.rows(mount, scope, now)
+      metrics: Dunning.metrics_from_rows(rows),
+      rows: rows,
+      load_error: load_error
     )
   end
+
+  @impl true
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
 
   defp ensure_return_to(socket) do
     if Map.has_key?(socket.assigns, :return_to), do: socket, else: assign(socket, return_to: nil)
@@ -100,28 +112,28 @@ defmodule Samen.Web.Billing.DunningLive do
           <span id="org-banner" style="display:none">Billing dunning org: {@org_id}</span>
 
           <div class="metrics">
-            <.metric label="Accounts in dunning" value={@metrics.accounts} sub="behind on payment">
+            <.metric label="Accounts in dunning" value={@metrics.accounts} sub="behind on payment" error={!!@load_error}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M12 8v4M12 16h.01" /><circle cx="12" cy="12" r="9" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Total overdue" value={dollars(@metrics.overdue_cents)} sub="past-due amount">
+            <.metric label="Total overdue" value={dollars(@metrics.overdue_cents)} sub="past-due amount" error={!!@load_error}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Past-due invoices" value={@metrics.invoices}>
+            <.metric label="Past-due invoices" value={@metrics.invoices} error={!!@load_error}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M6 2h9l5 5v15H6z" /><path d="M9 12h7M9 16h7" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Oldest overdue" value={"#{@metrics.max_days_overdue}d"} sub="days past due">
+            <.metric label="Oldest overdue" value={"#{@metrics.max_days_overdue}d"} sub="days past due" error={!!@load_error}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
@@ -138,8 +150,10 @@ defmodule Samen.Web.Billing.DunningLive do
                 <span class="lane">· billing_name via PiiResolution · {plane_note(@samen_mount)}</span>
               </div>
 
+              <.error_state :if={@load_error} class="dunning-error" body={@load_error} retry_event="retry_load" />
+
               <.empty_state
-                :if={@rows == []}
+                :if={@rows == [] and is_nil(@load_error)}
                 class="dunning-empty"
                 icon="✓"
                 title="Nobody is behind on payment."

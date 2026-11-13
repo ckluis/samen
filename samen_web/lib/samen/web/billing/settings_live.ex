@@ -48,6 +48,7 @@ defmodule Samen.Web.Billing.SettingsLive do
   alias Samen.Web.CurrentOrg
   alias Samen.Web.ListState
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
   alias Samen.Web.Page
 
   alias Samen.Web.Billing.Reads
@@ -96,7 +97,7 @@ defmodule Samen.Web.Billing.SettingsLive do
     |> ensure_return_to()
     |> ensure_current_uri()
     |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, configured: false)
-    |> assign(plans_with_prices: [], customer: nil, recent_invoices: %Page{})
+    |> assign(plans_with_prices: [], customer: nil, recent_invoices: %Page{}, section_errors: [])
     |> assign(checkout_error: nil, portal_error: nil)
     |> assign(billing_actor: nil, billing_admin?: false)
   end
@@ -121,21 +122,32 @@ defmodule Samen.Web.Billing.SettingsLive do
   end
 
   defp load_billing(socket, _mount, _scope, false) do
-    assign(socket, plans_with_prices: [], customer: nil, recent_invoices: %Page{})
+    assign(socket, plans_with_prices: [], customer: nil, recent_invoices: %Page{}, section_errors: [])
   end
 
   defp load_billing(socket, mount, scope, true) do
+    # Each section fails on its own (`section_errors`): a failed plans read is not "No plans yet",
+    # a failed customer read is not "Available after your first subscription", and a failed
+    # invoices read is not "No invoices yet".
+    plans = Reads.plans_with_prices_result(mount, scope)
+    customers = Reads.customers_result(mount, scope)
+    invoices = Reads.invoices_page(mount, scope, %ListState{page_size: 5, sort: {:due_date, :desc}})
+
     assign(socket,
-      plans_with_prices: Reads.plans_with_prices(mount, scope),
-      customer: Reads.customers(mount, scope) |> List.first(),
-      recent_invoices:
-        Reads.invoices_page(mount, scope, %ListState{page_size: 5, sort: {:due_date, :desc}})
+      plans_with_prices: Guard.value(plans, []),
+      customer: customers |> Guard.value([]) |> List.first(),
+      recent_invoices: invoices,
+      section_errors:
+        for({key, failed?} <- [plans: Guard.unavailable?(plans), customer: Guard.unavailable?(customers), invoices: Guard.unavailable?(invoices)], failed?, do: key)
     )
   end
 
   # -- events --------------------------------------------------------------------
 
+  # The kit error state's "Try again" (a failed plans / customer / invoices read).
   @impl true
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
+
   def handle_event("checkout", %{"plan_id" => plan_id}, socket) do
     cond do
       # PP-5: subscribing is a billing WRITE — admin+ only, by ROLE (not plane). The UI
@@ -415,8 +427,10 @@ defmodule Samen.Web.Billing.SettingsLive do
                   <span class="lane">· hosted checkout — samen never handles card data</span>
                 </div>
 
+                <.error_state :if={:plans in @section_errors} class="plan-picker-error" body={Guard.message()} retry_event="retry_load" />
+
                 <.empty_state
-                  :if={@plans_with_prices == []}
+                  :if={@plans_with_prices == [] and :plans not in @section_errors}
                   class="plan-picker-empty"
                   icon="◫"
                   title="No plans yet"
@@ -471,8 +485,11 @@ defmodule Samen.Web.Billing.SettingsLive do
                 >
                   Manage payment method
                 </.button>
-                <span :if={writable?(@samen_mount) and @billing_admin? and not payment_method_available?(@customer)} style="font-size:12px;color:var(--muted)">
+                <span :if={writable?(@samen_mount) and @billing_admin? and not payment_method_available?(@customer) and :customer not in @section_errors} style="font-size:12px;color:var(--muted)">
                   Available after your first subscription.
+                </span>
+                <span :if={:customer in @section_errors} class="payment-method-unavailable" style="font-size:12px;color:var(--muted)">
+                  {Guard.message()}
                 </span>
                 <span :if={writable?(@samen_mount) and not @billing_admin?} class="billing-admin-only" style="font-size:12px;color:var(--muted)">
                   Only an admin can manage the payment method.
@@ -486,8 +503,10 @@ defmodule Samen.Web.Billing.SettingsLive do
                   <a href={"#{billing_path(@return_to)}/invoices?org=#{@org_id}"} class="lane" id="view-all-invoices">View all invoices →</a>
                 </div>
 
+                <.error_state :if={:invoices in @section_errors} class="settings-invoice-error" body={Guard.message()} retry_event="retry_load" />
+
                 <.empty_state
-                  :if={@recent_invoices.items == []}
+                  :if={@recent_invoices.items == [] and :invoices not in @section_errors}
                   class="settings-invoice-empty"
                   icon="☰"
                   title="No invoices yet"

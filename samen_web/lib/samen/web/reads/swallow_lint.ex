@@ -49,7 +49,9 @@ defmodule Samen.Web.Reads.SwallowLint do
     {"samen_web/lib/samen/web/crm/sequences_reads.ex", :live_resource?} =>
       "optional-scope probe: an unmounted Outreach scope IS 'absent' — the honest answer",
     {"samen_web/lib/samen/web/crm/sequences_reads.ex", :sends_configured?} =>
-      "fail-honest predicate: 'no sender configured' is the safe, truthful default"
+      "fail-honest predicate: 'no sender configured' is the safe, truthful default",
+    {"samen_web/lib/samen/web/billing/settings_live.ex", :billing_actor} =>
+      "fail-closed authorization lookup: no resolvable membership means no billing actor, which hides the admin affordances and refuses the write (never an elevated default)"
   }
 
   # Swallows that still exist, per file, AFTER the reviewed ones are subtracted. Shrink-only: a
@@ -81,10 +83,7 @@ defmodule Samen.Web.Reads.SwallowLint do
     "samen_web/lib/samen/web/auth/totp_pending.ex" => 2,
     "samen_web/lib/samen/web/auth_gate.ex" => 1,
     "samen_web/lib/samen/web/automation/reads.ex" => 2,
-    "samen_web/lib/samen/web/billing/dunning.ex" => 1,
-    "samen_web/lib/samen/web/billing/reads.ex" => 15,
-    "samen_web/lib/samen/web/billing/settings_live.ex" => 1,
-    "samen_web/lib/samen/web/chat.ex" => 1,
+        "samen_web/lib/samen/web/chat.ex" => 1,
     "samen_web/lib/samen/web/chat/identity.ex" => 1,
     "samen_web/lib/samen/web/chat/reads.ex" => 8,
     "samen_web/lib/samen/web/csv.ex" => 1,

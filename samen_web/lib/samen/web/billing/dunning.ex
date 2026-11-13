@@ -36,6 +36,7 @@ defmodule Samen.Web.Billing.Dunning do
   """
 
   alias Samen.Web.Billing.Reads
+  alias Samen.Web.Reads.Guard
 
   @doc """
   Per-customer dunning rows for `scope`, worst first (oldest overdue, then largest amount).
@@ -43,10 +44,21 @@ defmodule Samen.Web.Billing.Dunning do
   max_days_overdue, sub_status}`. BOUNDED BY CONSTRUCTION (folds the bounded `Reads`
   outputs). `now` defaults to one reading and is threaded to every day-count.
   """
-  def rows(mount, scope, now \\ DateTime.utc_now()) do
-    invoices = Reads.invoices(mount, scope)
-    subs = Reads.subscriptions(mount, scope)
+  def rows(mount, scope, now \\ DateTime.utc_now()),
+    do: rows_result(mount, scope, now) |> Guard.value([])
 
+  @doc """
+  Tagged sibling of `rows/3` (WP6): `{:ok, rows}`, or `{:error, :unavailable}` when either bounded
+  input read FAILED (an outage is not "nobody is behind on payment"), or `{:error, :forbidden}`.
+  """
+  def rows_result(mount, scope, now \\ DateTime.utc_now()) do
+    with {:ok, invoices} <- Reads.invoices_result(mount, scope),
+         {:ok, subs} <- Reads.subscriptions_result(mount, scope) do
+      {:ok, fold_rows(invoices, subs, now)}
+    end
+  end
+
+  defp fold_rows(invoices, subs, now) do
     sub_status_by_customer =
       Enum.reduce(subs, %{}, fn s, acc ->
         Map.update(acc, s.customer_id, s.status, &worse_status(&1, s.status))
@@ -75,8 +87,6 @@ defmodule Samen.Web.Billing.Dunning do
       }
     end)
     |> Enum.sort_by(&{-&1.max_days_overdue, -&1.amount_cents})
-  rescue
-    _ -> []
   end
 
   @doc """
@@ -85,9 +95,11 @@ defmodule Samen.Web.Billing.Dunning do
   disagree with the table, and every past-due determination shares the SAME `now`.
   Bounded by construction (over the bounded rows). All bounded counts/cent amounts — no PII.
   """
-  def metrics(mount, scope, now \\ DateTime.utc_now()) do
-    rows = rows(mount, scope, now)
+  def metrics(mount, scope, now \\ DateTime.utc_now()),
+    do: mount |> rows(scope, now) |> metrics_from_rows()
 
+  @doc "The header metrics folded from already-read `rows` (so a screen reads once and the two cannot disagree)."
+  def metrics_from_rows(rows) do
     %{
       accounts: length(rows),
       overdue_cents: Enum.reduce(rows, 0, fn r, acc -> acc + r.amount_cents end),

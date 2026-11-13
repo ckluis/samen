@@ -59,7 +59,7 @@ defmodule Samen.Web.Billing.InvoicesLive do
   def load(socket, nil) do
     socket
     |> ensure_return_to()
-    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, metrics: nil, customer_options: [])
+    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, metrics: nil, metric_errors: [], customer_options: [], customers_failed: false)
     |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
     |> assign(show_new: false, new_form: nil)
     |> assign_new(:delete_error, fn -> nil end)
@@ -69,13 +69,18 @@ defmodule Samen.Web.Billing.InvoicesLive do
     mount = socket.assigns.samen_mount
     scope = Mount.scope(mount, org_id)
 
+    {metrics, metric_errors} = Reads.invoice_metrics_status(mount, scope)
+    {customer_options, customers_failed} = customer_options(mount, scope)
+
     socket
     |> ensure_return_to()
     |> assign(
       no_org: false,
       org_id: org_id,
-      metrics: Reads.invoice_metrics(mount, scope),
-      customer_options: customer_options(mount, scope)
+      metrics: metrics,
+      metric_errors: metric_errors,
+      customer_options: customer_options,
+      customers_failed: customers_failed
     )
     |> assign_new(:show_new, fn -> false end)
     |> assign_new(:delete_error, fn -> nil end)
@@ -85,7 +90,10 @@ defmodule Samen.Web.Billing.InvoicesLive do
 
   # -- A3 CRUD events (list events belong to the ListLive hook) -----------------
 
+  # The kit error state's "Try again" (a failed metric / customer read): re-run the whole load.
   @impl true
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
+
   def handle_event("new_invoice", _params, socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
     {:noreply, assign(socket, show_new: true, new_form: new_invoice_form(mount, org_id))}
@@ -136,9 +144,12 @@ defmodule Samen.Web.Billing.InvoicesLive do
   # Option labels are ALREADY-RESOLVED billing names (tenant plane: clear). A
   # %Masked{} customer (operator plane — where this select is never offered) falls
   # back to the opaque id-derived label rather than stringifying the mask.
+  # `{options, failed?}`: a failed customer read is NOT an empty select (the form says so).
   defp customer_options(mount, scope) do
-    Reads.customers(mount, scope)
-    |> Enum.map(fn c -> {customer_label(c), c.id} end)
+    case Reads.customers_result(mount, scope) do
+      {:ok, customers} -> {Enum.map(customers, fn c -> {customer_label(c), c.id} end), false}
+      {:error, _} -> {[], true}
+    end
   end
 
   defp customer_label(%{billing_name: name}) when is_binary(name), do: name
@@ -186,28 +197,28 @@ defmodule Samen.Web.Billing.InvoicesLive do
           </div>
 
           <div class="metrics">
-            <.metric label="Total outstanding" value={dollars((@metrics && @metrics.outstanding_cents) || 0)} sub="open invoices">
+            <.metric label="Total outstanding" value={dollars((@metrics && @metrics.outstanding_cents) || 0)} sub="open invoices" error={:outstanding_cents in @metric_errors}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M9 14l2 2 4-4" /><rect x="3" y="3" width="18" height="18" rx="2" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Invoices" value={(@metrics && @metrics.count) || 0}>
+            <.metric label="Invoices" value={(@metrics && @metrics.count) || 0} error={:count in @metric_errors}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M9 12h6M9 16h6M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Paid" value={(@metrics && @metrics.paid) || 0}>
+            <.metric label="Paid" value={(@metrics && @metrics.paid) || 0} error={:paid in @metric_errors}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <circle cx="12" cy="12" r="9" /><path d="M9 12l2 2 4-4" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Overdue" value={(@metrics && @metrics.overdue) || 0}>
+            <.metric label="Overdue" value={(@metrics && @metrics.overdue) || 0} error={:overdue in @metric_errors}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M12 8v4M12 16h.01" /><circle cx="12" cy="12" r="9" />
@@ -301,6 +312,7 @@ defmodule Samen.Web.Billing.InvoicesLive do
 
           <.modal :if={@show_new and @new_form != nil and writable?(@samen_mount)} id="new-invoice-modal" title="New invoice" on_cancel="cancel_new">
             <.simple_form :let={f} for={@new_form} id="new-invoice-form" phx-change="validate_new" phx-submit="save_new">
+              <.error_state :if={@customers_failed} body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
               <.form_field field={f[:customer_id]} label="Customer" type="select" prompt="Choose a customer" options={@customer_options} />
               <.form_field field={f[:amount_due_cents]} label="Amount due (cents)" type="number" />
               <.form_field field={f[:status]} label="Status" type="select" options={[{"draft", "draft"}, {"open", "open"}]} />
