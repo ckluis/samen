@@ -156,6 +156,7 @@ defmodule DriftwoodWeb.Router do
     # org through `Samen.Web.CurrentOrg` like every framework tenant LiveView, rather than
     # fabricating a `plane: :tenant` actor from `?org=` and discarding the session.
     live_session :driftwood_broker,
+      layout: {Samen.Web.Layouts, :app},
       on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
       session: %{"samen_mount" => @broker_mount} do
       live("/broker", BrokerLive)
@@ -420,6 +421,7 @@ defmodule DriftwoodWeb.Router do
     pipe_through([:browser, :require_authenticated_operator])
 
     live_session :driftwood_operator_aggregate,
+      layout: {Samen.Web.Layouts, :app},
       on_mount: [{Samen.Web.Operator.Authz, :require_operator}],
       session: %{"samen_mount" => @aggregate_mount} do
       live("/operator/aggregate", Samen.Web.Operator.AggregateLive)
@@ -481,6 +483,7 @@ defmodule DriftwoodWeb.Router do
     # `on_mount` + the `@impersonate_mount`'s `:operator_authority` label close that live-nav
     # vector; a tenant is refused on the socket mount exactly as on HTTP.
     live_session :driftwood_operator_impersonate,
+      layout: {Samen.Web.Layouts, :app},
       on_mount: [{Samen.Web.Operator.Authz, :require_operator}],
       session: %{"samen_mount" => @impersonate_mount} do
       live("/operator/impersonate", OperatorImpersonationLive)

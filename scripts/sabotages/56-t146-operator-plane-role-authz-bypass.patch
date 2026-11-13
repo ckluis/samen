@@ -46,10 +46,11 @@ diff --git a/samen_web/lib/samen/web/auth_gate.ex b/samen_web/lib/samen/web/auth
 diff --git a/driftwood/lib/driftwood_web/router.ex b/driftwood/lib/driftwood_web/router.ex
 --- a/driftwood/lib/driftwood_web/router.ex
 +++ b/driftwood/lib/driftwood_web/router.ex
-@@ -349,7 +349,6 @@ defmodule DriftwoodWeb.Router do
+@@ -349,8 +349,7 @@ defmodule DriftwoodWeb.Router do
      # `on_mount` + the `@impersonate_mount`'s `:operator_authority` label close that live-nav
      # vector; a tenant is refused on the socket mount exactly as on HTTP.
      live_session :driftwood_operator_impersonate,
+       layout: {Samen.Web.Layouts, :app},
 -      on_mount: [{Samen.Web.Operator.Authz, :require_operator}],
        session: %{"samen_mount" => @impersonate_mount} do
        live("/operator/impersonate", OperatorImpersonationLive)

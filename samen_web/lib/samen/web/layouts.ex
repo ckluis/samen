@@ -57,6 +57,24 @@ defmodule Samen.Web.Layouts do
     end
   end
 
+  @doc false
+  # True for a plain controller render. A LiveView dead render stamps the conn with
+  # `:phoenix_live_view` in `conn.private`; its flash is rendered by `app/1`.
+  def controller_page?(assigns) do
+    case assigns[:conn] do
+      %Plug.Conn{private: private} -> not Map.has_key?(private, :phoenix_live_view)
+      _ -> false
+    end
+  end
+
+  @doc false
+  def conn_flash(assigns) do
+    case assigns[:flash] do
+      %{} = flash -> flash
+      _ -> %{}
+    end
+  end
+
   @doc """
   Derives the default page title from a host layouts module:
   the top namespace segment with a trailing `Web` stripped
@@ -67,6 +85,24 @@ defmodule Samen.Web.Layouts do
     |> Module.split()
     |> List.first()
     |> String.replace_suffix("Web", "")
+  end
+
+  @doc """
+  The LiveView layout (`layout: {Samen.Web.Layouts, :app}` on every framework `live_session`).
+
+  It wraps each LiveView's own render with the two unhappy-path notices the kit lacked (audit
+  F07): the `flash_group/1` (every `put_flash` in the product was invisible — no component
+  rendered `@flash`) and the `connection_banner/1` ("Connection lost — reconnecting…", driven
+  by LiveView's `phx-disconnected` / `phx-connected`). Rendered ONCE here, so a screen inherits
+  both without calling anything, and no screen renders a flash a second time. (A screen's own
+  `@flash_ok` / `@flash_note` assigns are unrelated and untouched.)
+  """
+  def app(assigns) do
+    ~H"""
+    <Samen.UI.State.connection_banner />
+    <Samen.UI.State.flash_group flash={@flash} />
+    {@inner_content}
+    """
   end
 
   @doc """
@@ -98,6 +134,11 @@ defmodule Samen.Web.Layouts do
         <script defer nonce={assigns[:csp_nonce]} src="/assets/app.js"></script>
       </head>
       <body>
+        <%!--
+          Controller (non-LiveView) pages: the conn flash. A LiveView page renders its flash from
+          `app/1` instead, so this is skipped for it (no double render, F07).
+        --%>
+        <Samen.UI.State.flash_group :if={controller_page?(assigns)} flash={conn_flash(assigns)} />
         {@inner_content}
       </body>
     </html>

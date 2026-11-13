@@ -13,10 +13,11 @@
 diff --git a/samen_web/lib/samen/web/router.ex b/samen_web/lib/samen/web/router.ex
 --- a/samen_web/lib/samen/web/router.ex
 +++ b/samen_web/lib/samen/web/router.ex
-@@ -71,7 +71,6 @@
+@@ -71,8 +71,7 @@
        # authority so a client `?org=` can only SELECT among the authenticated
        # principal's authorized orgs (`Samen.Web.CurrentOrg.reresolve/2`).
        live_session session_name,
+         layout: {Samen.Web.Layouts, :app},
 -        on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
          session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
          for {sub_path, module} <- Samen.Web.Router.__routes__(kind, path) do

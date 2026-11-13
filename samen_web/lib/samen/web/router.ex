@@ -71,6 +71,7 @@ defmodule Samen.Web.Router do
       # authority so a client `?org=` can only SELECT among the authenticated
       # principal's authorized orgs (`Samen.Web.CurrentOrg.reresolve/2`).
       live_session session_name,
+        layout: {Samen.Web.Layouts, :app},
         on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
         session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         for {sub_path, module} <- Samen.Web.Router.__routes__(kind, path) do
@@ -199,6 +200,7 @@ defmodule Samen.Web.Router do
       # for any principal that is not an operator. A plain tenant-user session cannot reach ANY
       # `/operator/*` surface. See `Samen.Web.Operator.Authz`.
       live_session session_name,
+        layout: {Samen.Web.Layouts, :app},
         on_mount: [{Samen.Web.Operator.Authz, :require_operator}],
         session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         live("#{path}/accounts", Samen.Web.Operator.AccountsLive)
@@ -536,6 +538,7 @@ defmodule Samen.Web.Router do
       # `:require_tenant` is inert (T146/T150 own that plane); on a tenant mount it is the
       # dead-render halt + org-authority pin every other tenant `live_session` carries.
       live_session session_name,
+        layout: {Samen.Web.Layouts, :app},
         on_mount: Keyword.get(opts, :on_mount, []) ++ [{Samen.Web.TenantAuthz, :require_tenant}],
         session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         for {sub_path, module} <- Samen.Web.Router.__routes__(:chat, path) do
@@ -608,6 +611,7 @@ defmodule Samen.Web.Router do
       # authority so a client `?org=` can only SELECT among the authenticated
       # principal's authorized orgs (`Samen.Web.CurrentOrg.reresolve/2`).
       live_session session_name,
+        layout: {Samen.Web.Layouts, :app},
         on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
         session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         for {sub_path, module} <- Samen.Web.Router.__routes__(:notifications, path) do
@@ -676,6 +680,7 @@ defmodule Samen.Web.Router do
       # authority so a client `?org=` can only SELECT among the authenticated
       # principal's authorized orgs (`Samen.Web.CurrentOrg.reresolve/2`).
       live_session session_name,
+        layout: {Samen.Web.Layouts, :app},
         on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
         session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         for {sub_path, module} <- Samen.Web.Router.__routes__(:flags, path) do
@@ -728,6 +733,7 @@ defmodule Samen.Web.Router do
         )
 
       live_session session_name,
+        layout: {Samen.Web.Layouts, :app},
         on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
         session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         live(path, Samen.Web.Tenant.AnalyticsLive)
@@ -804,6 +810,7 @@ defmodule Samen.Web.Router do
       # authority so a client `?org=` can only SELECT among the authenticated
       # principal's authorized orgs (`Samen.Web.CurrentOrg.reresolve/2`).
       live_session session_name,
+        layout: {Samen.Web.Layouts, :app},
         on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
         session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         for {sub_path, module} <- Samen.Web.Router.__routes__(:files, path) do
@@ -880,6 +887,7 @@ defmodule Samen.Web.Router do
       # authority so a client `?org=` can only SELECT among the authenticated
       # principal's authorized orgs (`Samen.Web.CurrentOrg.reresolve/2`).
       live_session session_name,
+        layout: {Samen.Web.Layouts, :app},
         on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
         session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         for {sub_path, module} <- Samen.Web.Router.__routes__(:csv, path) do
@@ -1002,6 +1010,7 @@ defmodule Samen.Web.Router do
       # authority so a client `?org=` can only SELECT among the authenticated
       # principal's authorized orgs (`Samen.Web.CurrentOrg.reresolve/2`).
       live_session session_name,
+        layout: {Samen.Web.Layouts, :app},
         on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
         session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         for {sub_path, module} <- Samen.Web.Router.__routes__(:search, path) do
@@ -1087,6 +1096,7 @@ defmodule Samen.Web.Router do
       # authority so a client `?org=` can only SELECT among the authenticated
       # principal's authorized orgs (`Samen.Web.CurrentOrg.reresolve/2`).
       live_session session_name,
+        layout: {Samen.Web.Layouts, :app},
         on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
         session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         for {sub_path, module} <- Samen.Web.Router.__routes__(:ai, path) do
@@ -1167,6 +1177,7 @@ defmodule Samen.Web.Router do
       # authority so a client `?org=` can only SELECT among the authenticated
       # principal's authorized orgs (`Samen.Web.CurrentOrg.reresolve/2`).
       live_session session_name,
+        layout: {Samen.Web.Layouts, :app},
         on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
         session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         for {sub_path, module} <- Samen.Web.Router.__routes__(:automation, path) do
@@ -1277,6 +1288,7 @@ defmodule Samen.Web.Router do
       # authority so a client `?org=` can only SELECT among the authenticated
       # principal's authorized orgs (`Samen.Web.CurrentOrg.reresolve/2`).
       live_session session_name,
+        layout: {Samen.Web.Layouts, :app},
         on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
         session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         for {sub_path, module} <- Samen.Web.Router.__routes__(:settings, path) do
@@ -1303,6 +1315,7 @@ defmodule Samen.Web.Router do
       # correct posture for a step across an authentication boundary.
       if spine_totp do
         live_session :"#{session_name}_totp",
+          layout: {Samen.Web.Layouts, :app},
           on_mount: [{Samen.Web.Auth, :ensure_authenticated}],
           session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
           live("#{path}/security/2fa", Samen.Web.Auth.TotpEnrollLive)
@@ -1485,7 +1498,9 @@ defmodule Samen.Web.Router do
             })
         )
 
-      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+      live_session session_name,
+        layout: {Samen.Web.Layouts, :app},
+        session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         live(signup_path, Samen.Web.Auth.RegistrationLive)
         live("#{verify_path}/:token", Samen.Web.Auth.ConfirmLive)
         live(reset_path, Samen.Web.Auth.ResetRequestLive)
@@ -1633,6 +1648,7 @@ defmodule Samen.Web.Router do
       # authority so a client `?org=` can only SELECT among the authenticated
       # principal's authorized orgs (`Samen.Web.CurrentOrg.reresolve/2`).
       live_session session_name,
+        layout: {Samen.Web.Layouts, :app},
         on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
         session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         live(path, Samen.Web.Onboarding.WizardLive)

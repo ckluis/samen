@@ -339,6 +339,7 @@ defmodule PawChartWeb.Router do
     # pins the org authority so a client `?org=` can only select among the principal's
     # authorized orgs (`Samen.Web.CurrentOrg.reresolve/2` in `ClinicLive.handle_params/3`).
     live_session :pawchart_clinic,
+      layout: {Samen.Web.Layouts, :app},
       on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
       session: %{"samen_mount" => @clinic_mount} do
       live("/clinic", ClinicLive)
@@ -403,6 +404,7 @@ defmodule PawChartWeb.Router do
     pipe_through([:browser, :require_authenticated_operator])
 
     live_session :pawchart_operator_impersonate,
+      layout: {Samen.Web.Layouts, :app},
       on_mount: [{Samen.Web.Operator.Authz, :require_operator}],
       session: %{"samen_mount" => @impersonate_mount} do
       live("/operator/impersonate", OperatorImpersonationLive)

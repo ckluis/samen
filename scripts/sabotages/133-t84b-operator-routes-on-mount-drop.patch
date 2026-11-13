@@ -13,10 +13,11 @@ diff --git a/samen_web/lib/samen/web/router.ex b/samen_web/lib/samen/web/router.
 index 483607e..d117a38 100644
 --- a/samen_web/lib/samen/web/router.ex
 +++ b/samen_web/lib/samen/web/router.ex
-@@ -191,7 +191,6 @@ defmodule Samen.Web.Router do
+@@ -191,8 +191,7 @@ defmodule Samen.Web.Router do
        # for any principal that is not an operator. A plain tenant-user session cannot reach ANY
        # `/operator/*` surface. See `Samen.Web.Operator.Authz`.
        live_session session_name,
+         layout: {Samen.Web.Layouts, :app},
 -        on_mount: [{Samen.Web.Operator.Authz, :require_operator}],
          session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
          live("#{path}/accounts", Samen.Web.Operator.AccountsLive)
