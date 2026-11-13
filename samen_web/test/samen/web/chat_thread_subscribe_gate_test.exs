@@ -90,7 +90,7 @@ defmodule Samen.Web.ChatThreadSubscribeGateTest do
     socket = build_socket(ThreadLive, mount, [org_id, chat.thread.id])
 
     before = length(socket.assigns.messages)
-    envelope = Samen.Web.Chat.envelope(chat.message)
+    envelope = Samen.Web.Chat.envelope(Seeds.append_chat_message(chat, org_id, "live one"))
     {:noreply, socket} = ThreadLive.handle_info({:chat_message, envelope}, socket)
 
     assert length(socket.assigns.messages) == before + 1,
@@ -107,7 +107,7 @@ defmodule Samen.Web.ChatThreadSubscribeGateTest do
 
     # deliver
     before = length(socket.assigns.messages)
-    envelope = Samen.Web.Chat.envelope(chat.message)
+    envelope = Samen.Web.Chat.envelope(Seeds.append_chat_message(chat, org_id, "live two"))
     {:noreply, socket} = ThreadLive.handle_info({:chat_message, envelope}, socket)
     assert length(socket.assigns.messages) == before + 1
 

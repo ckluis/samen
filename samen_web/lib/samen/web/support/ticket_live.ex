@@ -445,6 +445,9 @@ defmodule Samen.Web.Support.TicketLive do
                         <div style="padding:18px 20px;color:var(--muted)">No messages yet.</div>
                       <% else %>
                         <div style="padding:0 20px">
+                          <div :if={Map.get(conv, :__earlier_hidden__)} class="earlier-messages-hidden" style="padding:10px 0;color:var(--muted);font-size:12px;border-bottom:1px solid var(--border)">
+                            Earlier messages are not shown — this is the latest part of the conversation.
+                          </div>
                           <%= for msg <- conv.__messages__ do %>
                             <div class="msg-row" id={"msg-#{msg.id}"} style={"padding:14px 0;border-bottom:1px solid var(--border);#{msg == List.last(conv.__messages__) && "border-bottom:none" || ""}"}>
                               <div style="display:flex;align-items:flex-start;gap:10px">

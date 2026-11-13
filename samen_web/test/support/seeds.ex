@@ -216,6 +216,42 @@ defmodule Samen.WebTest.Seeds do
     }
   end
 
+  @doc "Persist one more tenant message on a seeded chat thread (no broadcast) and return it."
+  def append_chat_message(chat, org_id, body, inserted_at \\ nil) do
+    Samen.WebTest.Chat.ChatMessage
+    |> Ash.Changeset.for_create(
+      :create,
+      %{
+        org_id: org_id,
+        thread_id: chat.thread.id,
+        participant_id: chat.tenant_participant.id,
+        sender_party: :tenant,
+        kind: :message,
+        body: body,
+        refs: []
+      },
+      authorize?: false
+    )
+    |> Ash.create!()
+    |> then(fn msg ->
+      # `inserted_at` is non-writable and second-resolution; a test that needs a definite
+      # order sets the physical column directly.
+      if inserted_at, do: set_inserted_at!(Samen.WebTest.Chat.ChatMessage, msg.id, inserted_at)
+      msg
+    end)
+  end
+
+  defp set_inserted_at!(resource, id, at) do
+    table = AshPostgres.DataLayer.Info.table(resource)
+    col = Ash.Resource.Info.attribute(resource, :inserted_at).source
+    idcol = Ash.Resource.Info.attribute(resource, :id).source
+
+    Samen.WebTest.Repo.query!(
+      "UPDATE #{table} SET #{col} = $1 WHERE #{idcol} = $2",
+      [at, Ecto.UUID.dump!(id)]
+    )
+  end
+
   @doc "Set the org's ChatDisclosureSetting (§5 state 3). `expose` toggles tenant-wide consent."
   def seed_disclosure_setting(org_id, expose) do
     Samen.WebTest.Chat.ChatDisclosureSetting
