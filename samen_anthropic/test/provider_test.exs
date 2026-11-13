@@ -530,7 +530,7 @@ defmodule SamenAnthropic.ProviderTest do
 
     # The worst an HONEST transport can do: use every millisecond its timeouts allow (or a
     # given share of them), then answer `response`.
-    defp slow_transport(responses, share \\ fn -> 1.0 end) do
+    defp slow_transport(responses, share) do
       me = self()
       {:ok, agent} = Agent.start_link(fn -> responses end)
 

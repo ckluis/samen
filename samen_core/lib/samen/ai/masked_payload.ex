@@ -84,11 +84,14 @@ defmodule Samen.AI.MaskedPayload do
     * `:turns` — the ROLE-STRUCTURED conversation (same amendment): a list of
       `%{"role" => "user" | "assistant", "content" => [block]}` where a block is exactly one of
       `%{"type" => "text", "text" => binary}`,
-      `%{"type" => "tool_call", "id" => id, "name" => name, "input" => map}` or
+      `%{"type" => "tool_call", "id" => id, "name" => name, "input" => map}` (JSON values
+      only: binary keys; binaries, numbers, booleans, nil, lists and plain maps) or
       `%{"type" => "tool_result", "id" => id, "content" => binary, "is_error" => boolean}`.
       A CLOSED shape: `Samen.AI.Chokepoint.seal/3` refuses anything else, and scans every key
       and leaf with the metadata allowlist (`vt_`-free, no structs, no tuples). Tool results and
       tenant data ride here as DATA (user content / tool results), never as instruction text.
+      A payload with turns is masked-only: `seal/3` refuses one whose call has grant egress on
+      or a grant span in `:history` (an adapter sending turns does not send the segments).
       `[]` means "no structure — use `:segments`".
     * `:tools` — the EG2 tool DEFINITIONS the provider may offer the model (ADR-047 §4.2,
       batch A3): a list of bounded, STATIC schema maps (`%{name:, description:, params:}`),
