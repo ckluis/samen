@@ -169,6 +169,48 @@ defmodule Samen.Web.ReadsGuardTest do
     end
   end
 
+  describe "write/3 (phase 2)" do
+    test "the write's own tagged return passes through untouched, logging nothing", %{org_id: org_id} do
+      log =
+        capture_log(fn ->
+          assert :ok = Guard.write(:t_w_ok, org_id, fn -> :ok end)
+          assert {:ok, :row} = Guard.write(:t_w_row, org_id, fn -> {:ok, :row} end)
+          assert {:error, :not_configured} = Guard.write(:t_w_nc, org_id, fn -> {:error, :not_configured} end)
+          assert {:error, :not_found} = Guard.write(:t_w_nf, org_id, fn -> {:error, :not_found} end)
+        end)
+
+      assert log == ""
+    end
+
+    test "a raise / exit becomes {:error, :unavailable}, logged by name and cause only", %{org_id: org_id} do
+      canary = "write-canary-#{System.unique_integer([:positive])}"
+
+      log =
+        capture_log(fn ->
+          assert {:error, :unavailable} = Guard.write(:t_w_boom, org_id, fn -> raise ArgumentError, canary end)
+          assert {:error, :unavailable} = Guard.write(:t_w_exit, org_id, fn -> exit(:db_gone) end)
+        end)
+
+      assert log =~ "read=t_w_boom"
+      assert log =~ "cause=ArgumentError"
+      refute log =~ canary
+    end
+
+    test "a denial stays a denial; the seam fails a named write", %{org_id: org_id} do
+      assert {:error, :forbidden} =
+               Guard.write(:t_w_denied, org_id, fn -> raise Ash.Error.Forbidden, errors: [] end)
+
+      inject_read_faults([:t_w_named])
+
+      capture_log(fn ->
+        assert {:error, :unavailable} = Guard.write(:t_w_named, org_id, fn -> :ok end)
+      end)
+
+      clear_read_faults()
+      assert :ok = Guard.write(:t_w_named, org_id, fn -> :ok end)
+    end
+  end
+
   defp render_name(name) when is_binary(name) do
     case Jason.decode(name) do
       {:ok, %{"first" => f, "last" => l}} -> "#{f} #{l}"

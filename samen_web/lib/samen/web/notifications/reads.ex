@@ -22,6 +22,7 @@ defmodule Samen.Web.Notifications.Reads do
   require Ash.Query
 
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   @select [
     :recipient_id,
@@ -46,14 +47,14 @@ defmodule Samen.Web.Notifications.Reads do
   unbounded, never a plaintext downgrade.
   """
   def notifications_page(mount, scope, state) do
-    page =
-      Mount.resource(mount, Notification)
-      |> Ash.Query.ensure_selected(@select)
-      |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:event_type])
+    Guard.page(:notifications_page, scope, state, fn ->
+      page =
+        Mount.resource(mount, Notification)
+        |> Ash.Query.ensure_selected(@select)
+        |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:event_type])
 
-    %{page | items: resolve_pii(page.items, mount, scope)}
-  rescue
-    _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(state.page_size)}
+      %{page | items: resolve_pii(page.items, mount, scope)}
+    end)
   end
 
   @doc """
@@ -64,32 +65,53 @@ defmodule Samen.Web.Notifications.Reads do
   OrgScope → `:error` (no existence oracle).
   """
   def get_notification(mount, scope, id) do
-    Mount.resource(mount, Notification)
-    |> Ash.Query.ensure_selected(@select)
-    |> Ash.Query.filter(id == ^id)
-    |> Ash.Query.limit(1)
-    |> Ash.read!(scope: scope)
-    |> resolve_pii(mount, scope)
-    |> case do
-      [notification | _] -> {:ok, notification}
-      [] -> :error
+    case get_notification_result(mount, scope, id) do
+      {:ok, notification} -> {:ok, notification}
+      {:error, _} -> :error
     end
-  rescue
-    _ -> :error
+  end
+
+  @doc """
+  Tagged sibling of `get_notification/3` (WP6): `{:ok, notification}`, `{:error, :not_found}` for a
+  missing, malformed-id or denied record, and `{:error, :unavailable}` ONLY when the read FAILED.
+  """
+  def get_notification_result(mount, scope, id) do
+    with {:ok, uuid} <- Ecto.UUID.cast(id),
+         {:ok, rows} <-
+           Guard.run(:notifications_get_notification, scope, fn ->
+             Mount.resource(mount, Notification)
+             |> Ash.Query.ensure_selected(@select)
+             |> Ash.Query.filter(id == ^uuid)
+             |> Ash.Query.limit(1)
+             |> Ash.read!(scope: scope)
+             |> resolve_pii(mount, scope)
+           end) do
+      case rows do
+        [notification | _] -> {:ok, notification}
+        [] -> {:error, :not_found}
+      end
+    else
+      :error -> {:error, :not_found}
+      {:error, :forbidden} -> {:error, :not_found}
+      {:error, :unavailable} = unavailable -> unavailable
+    end
   end
 
   @doc """
   The org's UNREAD notification count for `scope` — feeds the `nav_item` `count`
   badge (AC-G2-7: the badge affordance, finally lit). A DB aggregate — no row set is
   transferred, bounded by construction. `0` on any error (an unlit badge, never a
-  crash).
+  crash). `unread_count_result/2` tells a failed count from a real zero.
   """
-  def unread_count(mount, scope) do
-    Mount.resource(mount, Notification)
-    |> Ash.Query.filter(is_nil(read_at))
-    |> Ash.count!(scope: scope)
-  rescue
-    _ -> 0
+  def unread_count(mount, scope), do: unread_count_result(mount, scope) |> Guard.value(0)
+
+  @doc "Tagged sibling of `unread_count/2` (WP6): `{:ok, count}` or `{:error, :unavailable | :forbidden}`."
+  def unread_count_result(mount, scope) do
+    Guard.run(:notifications_unread_count, scope, fn ->
+      Mount.resource(mount, Notification)
+      |> Ash.Query.filter(is_nil(read_at))
+      |> Ash.count!(scope: scope)
+    end)
   end
 
   @doc """
@@ -99,6 +121,10 @@ defmodule Samen.Web.Notifications.Reads do
   `{:error, reason}`.
   """
   def mark_read(mount, scope, id) do
+    Guard.write(:notifications_mark_read, scope, fn -> do_mark_read(mount, scope, id) end)
+  end
+
+  defp do_mark_read(mount, scope, id) do
     record =
       Mount.resource(mount, Notification)
       |> Ash.Query.filter(id == ^id)
@@ -120,8 +146,6 @@ defmodule Samen.Web.Notifications.Reads do
           {:error, reason} -> {:error, reason}
         end
     end
-  rescue
-    e -> {:error, e}
   end
 
   @doc """
@@ -130,6 +154,10 @@ defmodule Samen.Web.Notifications.Reads do
   oldest #{@sweep_limit} and the badge re-counts honestly). `:ok`.
   """
   def mark_all_read(mount, scope) do
+    Guard.write(:notifications_mark_all_read, scope, fn -> do_mark_all_read(mount, scope) end)
+  end
+
+  defp do_mark_all_read(mount, scope) do
     now = DateTime.utc_now()
 
     Mount.resource(mount, Notification)
@@ -144,8 +172,6 @@ defmodule Samen.Web.Notifications.Reads do
     end)
 
     :ok
-  rescue
-    e -> {:error, e}
   end
 
   # -- preferences (WS-A design §2.4 "/notifications/settings"; ADR-016 §4) -------
@@ -161,14 +187,22 @@ defmodule Samen.Web.Notifications.Reads do
   on any read error (an empty grid falls back to the engine defaults — default-on
   in-app, opt-in email — never a crash).
   """
-  def preferences(mount, scope, recipient_id) do
-    Mount.resource(mount, NotificationPreference)
-    |> Ash.Query.filter(recipient_id == ^recipient_id)
-    |> Ash.Query.sort(event_type: :asc)
-    |> Ash.Query.limit(@preferences_limit)
-    |> Ash.read!(scope: scope)
-  rescue
-    _ -> []
+  def preferences(mount, scope, recipient_id),
+    do: preferences_result(mount, scope, recipient_id) |> Guard.value([])
+
+  @doc """
+  Tagged sibling of `preferences/3` (WP6): `{:ok, rows}` or `{:error, :unavailable | :forbidden}`.
+  An empty `{:ok, []}` is the honest "no explicit preferences yet"; a failed read must NOT fall
+  back to showing the engine defaults as if they were the recipient's settings.
+  """
+  def preferences_result(mount, scope, recipient_id) do
+    Guard.run(:notifications_preferences, scope, fn ->
+      Mount.resource(mount, NotificationPreference)
+      |> Ash.Query.filter(recipient_id == ^recipient_id)
+      |> Ash.Query.sort(event_type: :asc)
+      |> Ash.Query.limit(@preferences_limit)
+      |> Ash.read!(scope: scope)
+    end)
   end
 
   @doc """
@@ -179,12 +213,16 @@ defmodule Samen.Web.Notifications.Reads do
   (in-app ON, email OFF) merged under the toggle. Touches no vaulted attribute
   (the resource has none). `{:ok, preference}` or `{:error, reason}`.
   """
-  def set_preference(mount, scope, %{
-        org_id: org_id,
-        recipient_id: recipient_id,
-        event_type: event_type,
-        changes: changes
-      }) do
+  def set_preference(mount, scope, %{org_id: _, recipient_id: _, event_type: _, changes: _} = attrs) do
+    Guard.write(:notifications_set_preference, scope, fn -> do_set_preference(mount, scope, attrs) end)
+  end
+
+  defp do_set_preference(mount, scope, %{
+         org_id: org_id,
+         recipient_id: recipient_id,
+         event_type: event_type,
+         changes: changes
+       }) do
     existing =
       Mount.resource(mount, NotificationPreference)
       |> Ash.Query.filter(recipient_id == ^recipient_id)
@@ -216,8 +254,6 @@ defmodule Samen.Web.Notifications.Reads do
         |> Ash.Changeset.for_update(:update, changes, scope: scope)
         |> Ash.update(scope: scope)
     end
-  rescue
-    e -> {:error, e}
   end
 
   # -- private -----------------------------------------------------------------
@@ -233,7 +269,10 @@ defmodule Samen.Web.Notifications.Reads do
       repo: mount.repo
     )
   rescue
-    _ -> records
+    e ->
+      # Fail-closed (no plaintext downgrade), but not silent: a resolver outage is logged.
+      Guard.report(:notifications_resolve_pii, scope, e)
+      records
   end
 
   defp actor_of(%Samen.Scope{actor: actor}), do: actor

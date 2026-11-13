@@ -89,36 +89,45 @@ defmodule Samen.Web.Notifications.PreferencesLive do
   def load(socket, nil, _recipient_id) do
     socket
     |> default_return_to()
-    |> assign(no_org: no_org?(socket), org_id: nil, recipient_id: nil, rows: [], form: blank_form())
+    |> assign(no_org: no_org?(socket), org_id: nil, recipient_id: nil, rows: [], form: blank_form(), load_error: nil)
   end
 
   def load(socket, org_id, nil) do
     socket
     |> default_return_to()
-    |> assign(no_org: false, org_id: org_id, recipient_id: nil, rows: [], form: blank_form())
+    |> assign(no_org: false, org_id: org_id, recipient_id: nil, rows: [], form: blank_form(), load_error: nil)
   end
 
   def load(socket, org_id, recipient_id) do
     mount = socket.assigns.samen_mount
     scope = Mount.scope(mount, org_id)
-    prefs = Reads.preferences(mount, scope, recipient_id)
-    rows = grid_rows(prefs)
+    # A FAILED read must not render the engine defaults as if they were this recipient's saved
+    # settings (a toggle on that grid would then write over the real row): it is the error state.
+    {rows, load_error} =
+      case Reads.preferences_result(mount, scope, recipient_id) do
+        {:ok, prefs} -> {grid_rows(prefs), nil}
+        {:error, :unavailable} -> {[], Samen.Web.Reads.Guard.message()}
+        {:error, :forbidden} -> {grid_rows([]), nil}
+      end
 
     socket
     |> default_return_to()
-    |> assign(no_org: false, org_id: org_id, recipient_id: recipient_id)
+    |> assign(no_org: false, org_id: org_id, recipient_id: recipient_id, load_error: load_error)
     |> assign(rows: rows, form: to_form(form_params(rows), as: :prefs))
   end
 
   # -- events ----------------------------------------------------------------
 
   @impl true
+  def handle_event("retry_load", _params, socket),
+    do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.recipient_id)}
+
   def handle_event("save", %{"_target" => ["prefs", field]} = params, socket) do
     %{samen_mount: mount, org_id: org_id, recipient_id: recipient_id} = socket.assigns
 
     with true <- writable?(mount) and org_id != nil and recipient_id != nil,
          {:ok, event_type, changes} <- toggle_changes(field, get_in(params, ["prefs", field])) do
-      _ =
+      saved =
         Reads.set_preference(mount, Mount.scope(mount, org_id), %{
           org_id: org_id,
           recipient_id: recipient_id,
@@ -126,7 +135,17 @@ defmodule Samen.Web.Notifications.PreferencesLive do
           changes: changes
         })
 
-      {:noreply, load(socket, org_id, recipient_id)}
+      # Reload either way: the grid then shows what is REALLY stored. A failed save tells the
+      # user (flash group, value-free copy) instead of leaving a toggle that looks saved.
+      socket = load(socket, org_id, recipient_id)
+
+      case saved do
+        {:ok, _preference} ->
+          {:noreply, socket}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Couldn't save that preference. Nothing was changed — try again.")}
+      end
     else
       _ -> {:noreply, socket}
     end
@@ -240,6 +259,9 @@ defmodule Samen.Web.Notifications.PreferencesLive do
                 <span class="lane">per event type · in-app default on · email opt-in · {plane_note(@samen_mount)}</span>
               </div>
 
+              <%= if @load_error do %>
+                <.error_state class="preferences-error" body={@load_error} retry_event="retry_load" />
+              <% else %>
               <%= if @recipient_id == nil do %>
                 <div id="no-recipient" style="padding:14px 0;color:var(--muted)">
                   No recipient is wired on this mount. Pass a <code>:recipient_id</code>
@@ -289,6 +311,7 @@ defmodule Samen.Web.Notifications.PreferencesLive do
                   Toggles save immediately. An event switched off writes no notification
                   record at all (suppressed at dispatch, not hidden in the inbox).
                 </p>
+              <% end %>
               <% end %>
             </div>
           </div>

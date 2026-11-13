@@ -735,4 +735,139 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
       refute socket.assigns.flash["error"] =~ "Injected"
     end
   end
+
+  # ===========================================================================
+  # Notifications (PII-bearing: rendered_body is vault-routed)
+  # ===========================================================================
+
+  describe "Notifications" do
+    alias Samen.Notifications.Engine
+    alias Samen.Web.Notifications.{InboxLive, PreferencesLive}
+
+    @body "P2-BODY-SENTINEL please review the attached contact record."
+
+    setup %{org_id: org_id} do
+      {:ok, notification} =
+        Engine.notify(
+          %{
+            org_id: org_id,
+            recipient_id: Ash.UUID.generate(),
+            event_type: "crm.person.flagged",
+            channel: :in_app,
+            rendered_body: @body
+          },
+          notification_module: Samen.WebTest.Primitives.Notification,
+          preference_module: Samen.WebTest.Primitives.NotificationPreference,
+          repo: Samen.WebTest.Repo
+        )
+
+      %{notification: notification}
+    end
+
+    defp flashed(socket), do: %{socket | assigns: Map.put(socket.assigns, :flash, %{})}
+
+    test "inbox: a failed page read is the error state, not 'No notifications yet.'; retry recovers; empty stays empty", %{org_id: org_id} do
+      mount = build_mount(:notifications)
+      assert html(InboxLive, socket_for(InboxLive, mount, [Ash.UUID.generate()])) =~ "No notifications yet."
+
+      inject_read_faults([:notifications_page])
+      socket = failing(fn -> socket_for(InboxLive, mount, [org_id]) end)
+      rendered = html(InboxLive, socket)
+      assert_error_state(rendered)
+      refute rendered =~ "No notifications yet."
+      refute rendered =~ "P2-BODY-SENTINEL"
+
+      clear_read_faults()
+      rendered = html(InboxLive, list_event(socket, "list_retry"))
+      refute_error_state(rendered)
+      assert rendered =~ "P2-BODY-SENTINEL"
+    end
+
+    test "inbox: a failed unread count is 'unavailable', never '0 unread'", %{org_id: org_id} do
+      mount = build_mount(:notifications)
+      inject_read_faults([:notifications_unread_count])
+      socket = failing(fn -> socket_for(InboxLive, mount, [org_id]) end)
+      rendered = html(InboxLive, socket)
+      assert socket.assigns.unread_failed
+      assert rendered =~ "notifications-unread-unavailable"
+      assert rendered =~ "unread count unavailable"
+      refute rendered =~ ~s(id="notifications-unread")
+    end
+
+    test "masking: the operator-plane error DOM prints no body, no person value and no token", %{org_id: org_id} do
+      mount = build_mount(:notifications, plane: :operator, target_org_id: org_id)
+      inject_read_faults([:notifications_page, :notifications_unread_count])
+      rendered = html(InboxLive, failing(fn -> socket_for(InboxLive, mount, [org_id]) end))
+
+      assert_error_state(rendered)
+      refute rendered =~ "P2-BODY-SENTINEL"
+      refute rendered =~ Seeds.contact_full_name()
+      refute rendered =~ Seeds.contact_email()
+      refute rendered =~ "pii_"
+      # Non-vacuous: the same page, healthy, renders the masked row.
+      clear_read_faults()
+      healthy = html(InboxLive, socket_for(InboxLive, mount, [org_id]))
+      assert healthy =~ "••••"
+      refute healthy =~ "P2-BODY-SENTINEL"
+    end
+
+    test "mark_read / mark_all_read: a failed write tells the user, prints no error term, and applies nothing", %{org_id: org_id, notification: n} do
+      mount = build_mount(:notifications)
+      socket = socket_for(InboxLive, mount, [org_id]) |> flashed()
+      assert socket.assigns.unread_count == 1
+
+      inject_read_faults([:notifications_mark_read, :notifications_mark_all_read])
+      failed = failing(fn -> event(InboxLive, socket, "mark_read", %{"id" => n.id}) end)
+      assert failed.assigns.flash["error"] =~ "Couldn't mark that notification read."
+      assert failed.assigns.flash["error"] =~ "Nothing was changed"
+      refute failed.assigns.flash["error"] =~ "Injected"
+      # nothing half-applied: the list re-read still shows it unread
+      assert failed.assigns.unread_count == 1
+
+      failed = failing(fn -> event(InboxLive, socket, "mark_all_read") end)
+      assert failed.assigns.flash["error"] =~ "Couldn't mark all notifications read."
+      assert failed.assigns.unread_count == 1
+
+      clear_read_faults()
+      ok = event(InboxLive, socket, "mark_read", %{"id" => n.id})
+      assert ok.assigns.flash == %{}
+      assert ok.assigns.unread_count == 0
+    end
+
+    test "preferences: a failed read is the error state, not the engine defaults; retry recovers", %{org_id: org_id} do
+      mount = build_mount(:notifications)
+      recipient = Ash.UUID.generate()
+      healthy = html(PreferencesLive, socket_for(PreferencesLive, mount, [org_id, recipient]))
+      assert healthy =~ "preferences-grid"
+
+      inject_read_faults([:notifications_preferences])
+      socket = failing(fn -> socket_for(PreferencesLive, mount, [org_id, recipient], org_id: org_id) end)
+      rendered = html(PreferencesLive, socket)
+      assert_error_state(rendered)
+      refute rendered =~ "preferences-grid"
+
+      clear_read_faults()
+      rendered = html(PreferencesLive, event(PreferencesLive, socket, "retry_load"))
+      refute_error_state(rendered)
+      assert rendered =~ "preferences-grid"
+    end
+
+    test "preferences: a failed save tells the user and the grid shows what is really stored", %{org_id: org_id} do
+      mount = build_mount(:notifications)
+      recipient = Ash.UUID.generate()
+      socket = socket_for(PreferencesLive, mount, [org_id, recipient], org_id: org_id, recipient_id: recipient) |> flashed()
+
+      inject_read_faults([:notifications_set_preference])
+
+      failed =
+        failing(fn ->
+          event(PreferencesLive, socket, "save", %{"_target" => ["prefs", "chat_mention__email"], "prefs" => %{"chat_mention__email" => "on"}})
+        end)
+
+      assert failed.assigns.flash["error"] =~ "Couldn't save that preference."
+      row = Enum.find(failed.assigns.rows, &(&1.event_type == "chat_mention"))
+      refute row.email
+      refute row.explicit
+    end
+  end
 end

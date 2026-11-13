@@ -25,6 +25,9 @@ defmodule Samen.Web.Reads.Guard do
   ordinary return values of the function inside `run/3` and pass through untouched as
   `{:ok, _}`. Only an exception or exit becomes `:unavailable`.
 
+  A WRITE uses `write/3` (below): its own tagged return passes through, an exception becomes
+  `{:error, :unavailable}` (logged by name), and the screen tells the user — see cookbook Recipe 11.
+
   ## Adopting it with a small diff
 
   A read keeps its name and its legacy return shape (so existing callers are unchanged) and
@@ -87,6 +90,29 @@ defmodule Samen.Web.Reads.Guard do
     :exit, _reason -> failed(name, scope, :exit)
     :throw, _value -> failed(name, scope, :throw)
   end
+
+  @doc """
+  Run a WRITE (or any action that returns its own `{:ok, _} | {:error, _}` / `:ok`) as the action
+  called `name` (WP6 phase 2). The function's own return value passes through UNTOUCHED — an
+  honest `{:error, :not_configured}`, a changeset error, `:ok` — and only an exception or exit
+  becomes `{:error, :unavailable}` (an `Ash.Error.Forbidden` raise becomes `{:error, :forbidden}`).
+  The failure is reported exactly like a failed read (one `Logger.error` + telemetry event, by
+  name and exception module only), so the caller can tell the user with value-free copy and no
+  exception term ever reaches a template. The same test seam (`inject_faults/1`) fails a named
+  write through this path.
+  """
+  @spec write(atom(), term(), (-> t)) :: t | {:error, failure()} when t: term()
+  def write(name, scope, fun) when is_atom(name) and is_function(fun, 0) do
+    maybe_inject(name)
+    fun.()
+  rescue
+    e -> write_failed(name, scope, e)
+  catch
+    :exit, _reason -> write_failed(name, scope, :exit)
+    :throw, _value -> write_failed(name, scope, :throw)
+  end
+
+  defp write_failed(name, scope, reason), do: failed(name, scope, reason)
 
   @doc """
   Run a page read. `fun` returns a `%Samen.Web.Page{}`; on failure the result is an EMPTY page

@@ -88,7 +88,7 @@ defmodule Samen.Web.Notifications.InboxLive do
   def load(socket, nil) do
     socket
     |> default_return_to()
-    |> assign(no_org: no_org?(socket), org_id: nil, unread_count: 0)
+    |> assign(no_org: no_org?(socket), org_id: nil, unread_count: 0, unread_failed: false)
     |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
   end
 
@@ -99,7 +99,7 @@ defmodule Samen.Web.Notifications.InboxLive do
     socket
     |> default_return_to()
     |> assign(no_org: false, org_id: org_id)
-    |> assign(unread_count: Reads.unread_count(mount, scope))
+    |> assign_unread(Reads.unread_count_result(mount, scope))
     |> init_list(mount, scope)
   end
 
@@ -108,15 +108,27 @@ defmodule Samen.Web.Notifications.InboxLive do
   @impl true
   def handle_event("mark_read", %{"id" => id}, socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
-    _ = Reads.mark_read(mount, Mount.scope(mount, org_id), id)
-    {:noreply, refresh(socket)}
+
+    case Reads.mark_read(mount, Mount.scope(mount, org_id), id) do
+      :ok -> {:noreply, refresh(socket)}
+      # A missing / cross-org id is a no-op (OrgScope; no existence oracle) — not a failure.
+      {:error, :not_found} -> {:noreply, refresh(socket)}
+      {:error, _} -> {:noreply, socket |> write_failed("Couldn't mark that notification read.") |> refresh()}
+    end
   end
 
   def handle_event("mark_all_read", _params, socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
-    _ = Reads.mark_all_read(mount, Mount.scope(mount, org_id))
-    {:noreply, refresh(socket)}
+
+    case Reads.mark_all_read(mount, Mount.scope(mount, org_id)) do
+      :ok -> {:noreply, refresh(socket)}
+      {:error, _} -> {:noreply, socket |> write_failed("Couldn't mark all notifications read.") |> refresh()}
+    end
   end
+
+  # A failed write is told to the user (flash group) with value-free copy — never the error
+  # term — and the list is re-read so it shows what is REALLY stored (nothing half-applied).
+  defp write_failed(socket, copy), do: put_flash(socket, :error, copy <> " Nothing was changed — try again.")
 
   # -- realtime ------------------------------------------------------------------
 
@@ -127,8 +139,11 @@ defmodule Samen.Web.Notifications.InboxLive do
   def handle_info({:notification_created, %{id: id}}, socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
 
-    case org_id && Reads.get_notification(mount, Mount.scope(mount, org_id), id) do
+    case org_id && Reads.get_notification_result(mount, Mount.scope(mount, org_id), id) do
       {:ok, _notification} -> {:noreply, refresh(socket)}
+      # The broadcast arrived but its re-read FAILED: re-run the list read, which then shows its
+      # own error state if the outage persists (never silently stays stale).
+      {:error, :unavailable} -> {:noreply, refresh(socket)}
       _ -> {:noreply, socket}
     end
   end
@@ -143,11 +158,15 @@ defmodule Samen.Web.Notifications.InboxLive do
     state = socket.assigns.list_state
     page = Reads.notifications_page(mount, scope, state)
 
-    assign(socket,
-      page: %{page | prev_cursor: List.first(state.cursor_stack)},
-      unread_count: Reads.unread_count(mount, scope)
-    )
+    socket
+    |> assign(page: %{page | prev_cursor: List.first(state.cursor_stack)})
+    |> assign_unread(Reads.unread_count_result(mount, scope))
   end
+
+  # A failed count is NOT "0 unread": the badge goes unlit and the header says it is unavailable.
+  defp assign_unread(socket, {:ok, count}), do: assign(socket, unread_count: count, unread_failed: false)
+  defp assign_unread(socket, {:error, :forbidden}), do: assign(socket, unread_count: 0, unread_failed: false)
+  defp assign_unread(socket, {:error, :unavailable}), do: assign(socket, unread_count: 0, unread_failed: true)
 
   defp no_org?(socket), do: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil)
 
@@ -196,8 +215,9 @@ defmodule Samen.Web.Notifications.InboxLive do
             <div id="notifications-panel">
               <div class="gtitle">
                 <h3>Inbox</h3>
-                <span class="n" id="notifications-unread">{@unread_count}</span>
-                <span class="lane">unread · body via PiiResolution · {plane_note(@samen_mount)}</span>
+                <span :if={not @unread_failed} class="n" id="notifications-unread">{@unread_count}</span>
+                <span :if={@unread_failed} class="n" id="notifications-unread-unavailable">—</span>
+                <span class="lane">{if @unread_failed, do: "unread count unavailable", else: "unread"} · body via PiiResolution · {plane_note(@samen_mount)}</span>
               </div>
               <.list_view
                 id="notifications"
