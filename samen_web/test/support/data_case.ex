@@ -26,6 +26,23 @@ defmodule Samen.WebTest.DataCase do
   end
 
   @doc """
+  Make the named reads fail through the REAL failure path (`Samen.Web.Reads.Guard`'s test
+  seam — compiled into samen_web's own test env only). `names` is a list of read names (the
+  atoms passed to `Guard.run/3`, or a `ListLive` view module) or `:all`. The faults are
+  process-global application env, so the calling module must be `async: false`; they are
+  cleared when the test exits, and `clear_read_faults/0` ends them early (the "recover on
+  retry" half of a test).
+  """
+  def inject_read_faults(names) do
+    :ok = Samen.Web.Reads.Guard.inject_faults(names)
+    ExUnit.Callbacks.on_exit(&Samen.Web.Reads.Guard.clear_faults/0)
+    :ok
+  end
+
+  @doc "End every injected read fault now (the database \"came back\")."
+  def clear_read_faults, do: Samen.Web.Reads.Guard.clear_faults()
+
+  @doc """
   Build a `Samen.Web.Mount` for the test host's given scope on a plane.
 
   `scope_kind` is `:crm | :billing | :support`; `plane` is `:tenant` (default) or
