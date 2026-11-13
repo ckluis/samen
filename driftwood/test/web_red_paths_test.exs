@@ -32,6 +32,12 @@ defmodule Driftwood.WebRedPathsTest do
 
   defp empty_socket, do: %Phoenix.LiveView.Socket{}
 
+  defp broker_mount do
+    Samen.Web.Mount.new(:settings, Driftwood.Operator, Driftwood.Repo,
+      labels: %{org_directory: {Driftwood.Directory, :orgs, []}}
+    )
+  end
+
   setup do
     scenario = DogfoodScenario.build(lane: "IL->TX", tier: "starter", mrr_cents: 120_000)
     {:ok, scenario: scenario}
@@ -179,6 +185,7 @@ defmodule Driftwood.WebRedPathsTest do
     # The rendered roster disables the blocked driver's Dispatch button.
     html =
       render(DriftwoodWeb.BrokerLive, %{
+        samen_mount: broker_mount(),
         no_org: false,
         org_id: s.org_id,
         panel: "roster",
@@ -188,9 +195,9 @@ defmodule Driftwood.WebRedPathsTest do
         settlements: []
       })
 
-    assert html =~ "Dispatch (blocked)"
+    assert html =~ "Not eligible (FMCSA)"
     # And an enabled button exists for the compliant driver (control).
-    assert html =~ ">Dispatch<"
+    assert html =~ ">Check eligibility<"
 
     # The UI ACTION decision refuses the blocked driver (defence in depth over the
     # disabled button — even a forged phx-click is rejected server-side).
