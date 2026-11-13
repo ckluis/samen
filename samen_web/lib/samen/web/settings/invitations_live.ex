@@ -51,17 +51,26 @@ defmodule Samen.Web.Settings.InvitationsLive do
   @doc false
   def load(socket, org_id, user_id) do
     mount = socket.assigns.samen_mount
-    socket = assign(socket, org_id: org_id, user_id: user_id, invitations: [])
+    socket = assign(socket, org_id: org_id, user_id: user_id, invitations: [], invitations_failed: false)
 
     if is_nil(org_id) do
       socket
     else
       scope = Mount.scope(mount, org_id)
-      assign(socket, invitations: Invitations.list(mount, scope))
+
+      # A FAILED list read is the error state (retry), never "No invitations yet.".
+      case Invitations.list_result(mount, scope) do
+        {:ok, invitations} -> assign(socket, invitations: invitations)
+        {:error, :forbidden} -> socket
+        {:error, :unavailable} -> assign(socket, invitations_failed: true)
+      end
     end
   end
 
   @impl true
+  def handle_event("retry_load", _params, socket),
+    do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.user_id)}
+
   def handle_event("invite", %{"invitation" => params}, socket) do
     %{samen_mount: mount, org_id: org_id, user_id: user_id, samen_session: session} = socket.assigns
 
@@ -79,8 +88,16 @@ defmodule Samen.Web.Settings.InvitationsLive do
       {:noreply, socket}
     else
       scope = member_scope(mount, org_id, user_id)
-      _ = Invitations.revoke(mount, scope, invitation_id)
-      {:noreply, load(assign(socket, invited_raw_token: nil), org_id, user_id)}
+
+      # A revoke must never fail silently: say so, and re-read so the list shows the REAL state.
+      error =
+        case Invitations.revoke(mount, scope, invitation_id) do
+          {:ok, _invitation} -> nil
+          {:error, :unavailable} -> "Couldn't revoke that invitation — it is still pending. Try again."
+          {:error, _reason} -> "Revoke refused (admin role required, or the invitation is no longer pending)."
+        end
+
+      {:noreply, load(assign(socket, invited_raw_token: nil, invite_error: error), org_id, user_id)}
     end
   end
 
@@ -178,8 +195,13 @@ defmodule Samen.Web.Settings.InvitationsLive do
                       </button>
                     </td>
                   </tr>
-                  <tr :if={@invitations == []}>
+                  <tr :if={@invitations == [] and not @invitations_failed}>
                     <td colspan="5" style="color:var(--muted)">No invitations yet.</td>
+                  </tr>
+                  <tr :if={@invitations_failed} id="invitations-unavailable">
+                    <td colspan="5">
+                      <.error_state class="invitations-error" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -206,6 +228,10 @@ defmodule Samen.Web.Settings.InvitationsLive do
       {:error, :not_found} ->
         {:noreply, assign(socket, invite_error: "No membership in context — cannot invite.")}
 
+      # The lookup / write itself failed (not a refusal): say so, value-free — nothing was sent.
+      {:error, :unavailable} ->
+        {:noreply, assign(socket, invite_error: "Couldn't send that invitation right now. Nothing was sent — try again.")}
+
       {:error, _reason} ->
         {:noreply,
          assign(socket,
@@ -216,7 +242,7 @@ defmodule Samen.Web.Settings.InvitationsLive do
 
   defp membership(mount, org_id, user_id) when is_binary(org_id) and is_binary(user_id) do
     scope = Mount.scope(mount, org_id)
-    Reads.current_membership(mount, scope, user_id, org_id)
+    Reads.current_membership_result(mount, scope, user_id, org_id)
   end
 
   defp membership(_mount, _org_id, _user_id), do: {:error, :not_found}

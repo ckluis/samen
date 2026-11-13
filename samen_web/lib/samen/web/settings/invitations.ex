@@ -17,6 +17,7 @@ defmodule Samen.Web.Settings.Invitations do
 
   alias Samen.Identity.Invite
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   @type mods :: Invite.mods()
 
@@ -39,9 +40,9 @@ defmodule Samen.Web.Settings.Invitations do
   @spec create(Mount.t(), Samen.Scope.t() | map(), String.t(), atom() | String.t()) ::
           {:ok, term(), String.t()} | {:error, term()}
   def create(%Mount{} = mount, scope, email, role) when is_binary(email) do
-    Invite.create(mods(mount), scope, %{email: email, role: normalize_role(role)})
-  rescue
-    e -> {:error, e}
+    Guard.write(:settings_invitation_create, scope, fn ->
+      Invite.create(mods(mount), scope, %{email: email, role: normalize_role(role)})
+    end)
   end
 
   @doc """
@@ -50,7 +51,13 @@ defmodule Samen.Web.Settings.Invitations do
   operator-without-grant plane; never a `vt_*` token.
   """
   @spec list(Mount.t(), Samen.Scope.t() | map()) :: [map()]
-  def list(%Mount{} = mount, scope) do
+  def list(%Mount{} = mount, scope), do: list_result(mount, scope) |> Guard.value([])
+
+  @doc "Tagged sibling of `list/2` (WP6): `{:ok, rows}` or `{:error, :unavailable | :forbidden}`; an outage is not 'No invitations yet.'"
+  @spec list_result(Mount.t(), Samen.Scope.t() | map()) :: Guard.result([map()])
+  def list_result(%Mount{} = mount, scope), do: Guard.run(:settings_invitations, scope, fn -> fetch_list(mount, scope) end)
+
+  defp fetch_list(mount, scope) do
     Mount.resource(mount, Invitation)
     |> Ash.Query.ensure_selected([
       :id,
@@ -66,20 +73,21 @@ defmodule Samen.Web.Settings.Invitations do
     |> Ash.Query.sort(inserted_at: :desc)
     |> Ash.read!(scope: scope)
     |> resolve_pii(mount, scope)
-  rescue
-    _ -> []
   end
 
   @doc "Revoke a pending invitation — admin-gated. `{:ok, invitation}` or `{:error, reason}`."
   @spec revoke(Mount.t(), Samen.Scope.t() | map(), String.t()) :: {:ok, term()} | {:error, term()}
   def revoke(%Mount{} = mount, scope, invitation_id) when is_binary(invitation_id) do
-    Invite.revoke(mods(mount), scope, invitation_id)
+    Guard.write(:settings_invitation_revoke, scope, fn -> Invite.revoke(mods(mount), scope, invitation_id) end)
   end
 
   defp resolve_pii(records, mount, scope) do
     Samen.Api.PiiResolution.resolve(records, Mount.resource(mount, Invitation), actor_of(scope), repo: mount.repo)
   rescue
-    _ -> records
+    e ->
+      # Fail-closed (no plaintext downgrade), but not silent: a resolver outage is logged.
+      Guard.report(:settings_invitations_resolve_pii, scope, e)
+      records
   end
 
   defp actor_of(%Samen.Scope{actor: actor}), do: actor

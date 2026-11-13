@@ -46,6 +46,7 @@ defmodule Samen.Web.Settings.SecurityLive do
 
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
   alias Samen.Web.Settings.Reads
 
   # The host-managed auth items the framework is HONEST it does NOT own, absent the
@@ -100,10 +101,15 @@ defmodule Samen.Web.Settings.SecurityLive do
     # (`credential_id_for/3` below). No resolved org → no scope → the seam fails closed.
     scope = if is_binary(org_id), do: Mount.scope(mount, org_id)
 
+    {sessions, sessions_unavailable?} = sessions_for(mount, org_id)
+    {login_sessions, login_sessions_unavailable?} = login_sessions_for(mount, scope, spine?, user_id)
+
     assign(socket,
       org_id: org_id,
       user_id: user_id,
-      sessions: sessions_for(mount, org_id),
+      sessions: sessions,
+      sessions_unavailable?: sessions_unavailable?,
+      login_sessions_unavailable?: login_sessions_unavailable?,
       reveal_events: reveal_events,
       reveal_ledger_unavailable?: reveal_unavailable?,
       host_managed: if(spine?, do: @host_managed_spine, else: @host_managed_default),
@@ -111,7 +117,7 @@ defmodule Samen.Web.Settings.SecurityLive do
       spine_totp?: totp?,
       settings_path: Mount.label(mount, :settings_path, "/settings"),
       totp_enroll_path: totp_enroll_path(mount, scope, totp?, user_id),
-      login_sessions: login_sessions_for(mount, scope, spine?, user_id),
+      login_sessions: login_sessions,
       csrf_token: safe_csrf_token()
     )
   end
@@ -132,14 +138,18 @@ defmodule Samen.Web.Settings.SecurityLive do
   end
 
   # Read the REAL impersonation sessions from the kernel accountability source. Never
-  # invents rows; on any read error (e.g. the table is absent in a minimal host) the
-  # list is simply empty — honest, never a fake.
-  defp sessions_for(_mount, nil), do: []
+  # invents rows. Like the reveal ledger below this is a tenant TRUST surface: a FAILED read is
+  # `{[], true}` (the render says "temporarily unavailable — a read error, not a clean record"),
+  # never a false-clean "No impersonation sessions recorded." (O10).
+  defp sessions_for(_mount, nil), do: {[], false}
 
   defp sessions_for(mount, org_id) do
-    Samen.Impersonation.Sessions.list_for_org(org_id, repo: mount.repo)
-  rescue
-    _ -> []
+    case Guard.run(:settings_security_sessions, org_id, fn ->
+           Samen.Impersonation.Sessions.list_for_org(org_id, repo: mount.repo)
+         end) do
+      {:ok, sessions} -> {sessions, false}
+      {:error, _} -> {[], true}
+    end
   end
 
   # PP-11 (T150) — the REVEAL-access ledger. An impersonation session records the MASKED
@@ -170,7 +180,10 @@ defmodule Samen.Web.Settings.SecurityLive do
         {[], true}
     end
   rescue
-    _ -> {[], true}
+    e ->
+      # Honest "unavailable" (the render says so), and no longer silent: logged by name and cause.
+      Guard.report(:settings_reveal_events, org_id, e)
+      {[], true}
   end
 
   # Turn the token-only `detail` ("event=requested <reason>") into a tenant-legible
@@ -193,16 +206,25 @@ defmodule Samen.Web.Settings.SecurityLive do
   # credential, spine-opt-in ONLY. Never invents rows; any read error (host hasn't
   # actually mounted Credential/Session under this namespace) degrades to an empty
   # list — honest, matching the impersonation-sessions precedent above.
-  defp login_sessions_for(_mount, _scope, false, _user_id), do: []
-  defp login_sessions_for(_mount, _scope, true, nil), do: []
+  defp login_sessions_for(_mount, _scope, false, _user_id), do: {[], false}
+  defp login_sessions_for(_mount, _scope, true, nil), do: {[], false}
 
   defp login_sessions_for(mount, scope, true, user_id) do
-    case credential_id_for(mount, scope, user_id) do
-      nil -> []
-      credential_id -> Samen.Auth.SessionList.list_live(Mount.resource(mount, Session), credential_id)
+    with {:ok, credential_id} <- credential_id_result(mount, scope, user_id),
+         {:ok, sessions} <- list_login_sessions(mount, scope, credential_id) do
+      {sessions, false}
+    else
+      {:error, :unavailable} -> {[], true}
+      _ -> {[], false}
     end
-  rescue
-    _ -> []
+  end
+
+  defp list_login_sessions(_mount, _scope, nil), do: {:ok, []}
+
+  defp list_login_sessions(mount, scope, credential_id) do
+    Guard.run(:settings_login_sessions, scope, fn ->
+      Samen.Auth.SessionList.list_live(Mount.resource(mount, Session), credential_id)
+    end)
   end
 
   # Nil guard: without it, a nil `user_id` (unresolved/unauthenticated) still hits
@@ -211,11 +233,14 @@ defmodule Samen.Web.Settings.SecurityLive do
   # since SQL's `= NULL` is never true — the query was always doomed to return
   # zero rows. Short-circuiting here keeps the same nil result, skips the wasted
   # round-trip, and silences the warning (no behaviour change).
-  defp credential_id_for(_mount, _scope, nil), do: nil
+  defp credential_id_for(mount, scope, user_id),
+    do: mount |> credential_id_result(scope, user_id) |> Guard.value(nil)
+
+  defp credential_id_result(_mount, _scope, nil), do: {:ok, nil}
 
   # S6 — no org-resolved scope (org_id was nil) → fail closed: never fall back to an
   # ungoverned read.
-  defp credential_id_for(_mount, nil, _user_id), do: nil
+  defp credential_id_result(_mount, nil, _user_id), do: {:ok, nil}
 
   # S6 (luminary panel-2) — this read was `Ash.read!(authorize?: false)` with no org
   # scope: a global `user_id → credential_id` oracle (the pivot in the S3 chain). It is
@@ -224,20 +249,20 @@ defmodule Samen.Web.Settings.SecurityLive do
   # Identity `User` makes a cross-org `user_id` read ZERO rows — the seam answers `nil`,
   # the 2FA link degrades to the bare path, the session list stays empty. Same-org
   # resolution is unchanged (never widened).
-  defp credential_id_for(mount, scope, user_id) do
+  defp credential_id_result(mount, scope, user_id) do
     require Ash.Query
 
-    Mount.resource(mount, User)
-    |> Ash.Query.filter(id == ^user_id)
-    |> Ash.Query.select([:credential_id])
-    |> Ash.Query.limit(1)
-    |> Ash.read!(scope: scope)
-    |> case do
-      [%{credential_id: credential_id}] -> credential_id
-      _ -> nil
-    end
-  rescue
-    _ -> nil
+    Guard.run(:settings_credential_id, scope, fn ->
+      Mount.resource(mount, User)
+      |> Ash.Query.filter(id == ^user_id)
+      |> Ash.Query.select([:credential_id])
+      |> Ash.Query.limit(1)
+      |> Ash.read!(scope: scope)
+      |> case do
+        [%{credential_id: credential_id}] -> credential_id
+        _ -> nil
+      end
+    end)
   end
 
   defp safe_csrf_token do
@@ -295,7 +320,12 @@ defmodule Samen.Web.Settings.SecurityLive do
                       </span>
                     </td>
                   </tr>
-                  <tr :if={@sessions == []}>
+                  <tr :if={@sessions_unavailable?} id="security-sessions-unavailable">
+                    <td colspan="5" style="color:var(--muted)">
+                      Impersonation sessions temporarily unavailable — this is a read error, not a clean record. Retry shortly.
+                    </td>
+                  </tr>
+                  <tr :if={@sessions == [] and not @sessions_unavailable?}>
                     <td colspan="5" style="color:var(--muted)">No impersonation sessions recorded.</td>
                   </tr>
                 </tbody>
@@ -366,7 +396,12 @@ defmodule Samen.Web.Settings.SecurityLive do
                         </form>
                       </td>
                     </tr>
-                    <tr :if={@login_sessions == []}>
+                    <tr :if={@login_sessions_unavailable?} id="login-sessions-unavailable">
+                      <td colspan="4" style="color:var(--muted)">
+                        Login sessions temporarily unavailable — this is a read error, not a clean record. Retry shortly.
+                      </td>
+                    </tr>
+                    <tr :if={@login_sessions == [] and not @login_sessions_unavailable?}>
                       <td colspan="4" style="color:var(--muted)">No active sessions.</td>
                     </tr>
                   </tbody>

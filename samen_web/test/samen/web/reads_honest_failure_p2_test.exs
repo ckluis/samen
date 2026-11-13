@@ -870,4 +870,168 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
       refute row.explicit
     end
   end
+
+  # ===========================================================================
+  # Settings (profile, API keys, invitations, security, reveal approvals)
+  # ===========================================================================
+
+  describe "Settings" do
+    alias Samen.Web.Settings.{ApiKeys, ApiKeysLive, InvitationsLive, ProfileLive, RevealApprovalsLive, SecurityLive}
+    alias Samen.WebTest.Operator.{Membership, User}
+
+    defp seed_member!(org_id, role) do
+      user =
+        User
+        |> Ash.Changeset.for_create(:create, %{org_id: org_id, handle: "p2-#{role}", full_name: %Samen.Type.FullName{first: "P2Secret", last: "Person"}})
+        |> Ash.create!(authorize?: false)
+
+      Membership
+      |> Ash.Changeset.for_create(:create, %{org_id: org_id, user_id: user.id, role: role})
+      |> Ash.create!(authorize?: false)
+
+      user
+    end
+
+    test "api keys: a failed list is the error state, not 'No API keys yet.'; retry recovers; empty stays empty" do
+      org_id = Ash.UUID.generate()
+      user = seed_member!(org_id, :admin)
+      mount = build_mount(:settings)
+      assert html(ApiKeysLive, socket_for(ApiKeysLive, mount, [org_id, user.id])) =~ "No API keys yet."
+
+      inject_read_faults([:settings_api_keys])
+      socket = failing(fn -> socket_for(ApiKeysLive, mount, [org_id, user.id]) end)
+      rendered = html(ApiKeysLive, socket)
+      assert_error_state(rendered)
+      refute rendered =~ "No API keys yet."
+
+      clear_read_faults()
+      rendered = html(ApiKeysLive, event(ApiKeysLive, socket, "retry_load"))
+      refute_error_state(rendered)
+      assert rendered =~ "No API keys yet."
+    end
+
+    test "api keys: a failed REVOKE tells the user, the key stays active, nothing is half-applied" do
+      org_id = Ash.UUID.generate()
+      user = seed_member!(org_id, :admin)
+      mount = build_mount(:settings)
+      scope = %Samen.Scope{actor: %{id: user.id, org_id: org_id, role: :admin, kind: :tenant, plane: :tenant}}
+      {:ok, membership} = Samen.Web.Settings.Reads.current_membership(mount, scope, user.id, org_id)
+
+      {:ok, _raw, row} =
+        ApiKeys.mint(mount, scope, membership_id: membership.id, minter_role: :admin, plane: :tenant, scopes: %{all: [:read]})
+
+      socket = socket_for(ApiKeysLive, mount, [org_id, user.id]) |> Map.update!(:assigns, &Map.merge(&1, %{minted_key: nil}))
+
+      inject_read_faults([:settings_api_key_revoke])
+      failed = failing(fn -> event(ApiKeysLive, socket, "revoke", %{"id" => row.id}) end)
+      rendered = html(ApiKeysLive, failed)
+      assert rendered =~ "Couldn&#39;t revoke that key"
+      assert rendered =~ "still active"
+      refute rendered =~ "Injected"
+      assert [%{revoked?: false}] = Enum.filter(failed.assigns.keys, &(&1.id == row.id))
+
+      clear_read_faults()
+      ok = event(ApiKeysLive, socket, "revoke", %{"id" => row.id})
+      assert [%{revoked?: true}] = Enum.filter(ok.assigns.keys, &(&1.id == row.id))
+      refute html(ApiKeysLive, ok) =~ "Couldn&#39;t revoke"
+    end
+
+    test "api keys: a failed MINT says nothing was created and never prints a key or an error term" do
+      org_id = Ash.UUID.generate()
+      user = seed_member!(org_id, :admin)
+      mount = build_mount(:settings)
+      socket = socket_for(ApiKeysLive, mount, [org_id, user.id])
+
+      inject_read_faults([:settings_api_key_mint])
+      failed = failing(fn -> event(ApiKeysLive, socket, "mint", %{"key" => %{}}) end)
+      rendered = html(ApiKeysLive, failed)
+      assert rendered =~ "Couldn&#39;t mint a key right now. Nothing was created"
+      assert failed.assigns[:minted_key] == nil
+      assert failed.assigns.keys == []
+    end
+
+    test "invitations: failed list is the error state; a failed revoke tells the user" do
+      org_id = Ash.UUID.generate()
+      user = seed_member!(org_id, :admin)
+      mount = build_mount(:settings)
+      base = fn -> socket_for(InvitationsLive, mount, [org_id, user.id]) |> Map.update!(:assigns, &Map.merge(&1, %{invite_error: nil, invited_raw_token: nil, samen_session: %{}})) end
+      assert html(InvitationsLive, base.()) =~ "No invitations yet."
+
+      inject_read_faults([:settings_invitations])
+      socket = failing(base)
+      rendered = html(InvitationsLive, socket)
+      assert_error_state(rendered)
+      refute rendered =~ "No invitations yet."
+
+      clear_read_faults()
+      inject_read_faults([:settings_invitation_revoke])
+      failed = failing(fn -> event(InvitationsLive, base.(), "revoke", %{"id" => Ash.UUID.generate()}) end)
+      assert html(InvitationsLive, failed) =~ "Couldn&#39;t revoke that invitation"
+    end
+
+    test "profile: a FAILED user read is the error state, not 'No user in context'; a failed save says so" do
+      org_id = Ash.UUID.generate()
+      user = seed_member!(org_id, :admin)
+      mount = build_mount(:settings)
+
+      inject_read_faults([:settings_get_user])
+      socket = failing(fn -> socket_for(ProfileLive, mount, [org_id, user.id]) end)
+      rendered = html(ProfileLive, socket)
+      assert_error_state(rendered)
+      refute rendered =~ "No user in context"
+      refute rendered =~ "P2Secret"
+
+      clear_read_faults()
+      socket = event(ProfileLive, socket, "retry_load")
+      rendered = html(ProfileLive, socket)
+      refute_error_state(rendered)
+      assert rendered =~ "settings-profile-form"
+
+      socket = %{socket | assigns: Map.merge(socket.assigns, %{flash_ok: nil})}
+      inject_read_faults([:settings_profile_update])
+      failed = failing(fn -> event(ProfileLive, socket, "save", %{"profile" => %{"handle" => "renamed"}}) end)
+      assert html(ProfileLive, failed) =~ "Couldn&#39;t save your profile. Nothing was changed"
+    end
+
+    test "security: failed impersonation-session and login-session reads are 'unavailable', never a clean record" do
+      org_id = Ash.UUID.generate()
+      user = seed_member!(org_id, :admin)
+      mount = build_mount(:settings)
+
+      inject_read_faults([:settings_security_sessions])
+      rendered = html(SecurityLive, failing(fn -> socket_for(SecurityLive, mount, [org_id, user.id]) end))
+      assert rendered =~ "security-sessions-unavailable"
+      refute rendered =~ "No impersonation sessions recorded."
+      refute rendered =~ "vt_"
+
+      clear_read_faults()
+      rendered = html(SecurityLive, socket_for(SecurityLive, mount, [org_id, user.id]))
+      refute rendered =~ "security-sessions-unavailable"
+      assert rendered =~ "No impersonation sessions recorded."
+    end
+
+    test "reveal approvals: a failed pending read / role lookup is the error state, not 'No pending reveal requests'" do
+      org_id = Ash.UUID.generate()
+      user = seed_member!(org_id, :admin)
+      mount = build_mount(:settings)
+      healthy = html(RevealApprovalsLive, socket_for(RevealApprovalsLive, mount, [org_id, user.id]))
+      assert healthy =~ "No pending reveal requests for this org."
+
+      inject_read_faults([:settings_reveal_pending])
+      socket = failing(fn -> socket_for(RevealApprovalsLive, mount, [org_id, user.id]) end)
+      rendered = html(RevealApprovalsLive, socket)
+      assert_error_state(rendered)
+      refute rendered =~ "No pending reveal requests"
+
+      clear_read_faults()
+      inject_read_faults([:settings_current_membership])
+      rendered = html(RevealApprovalsLive, failing(fn -> socket_for(RevealApprovalsLive, mount, [org_id, user.id]) end))
+      assert rendered =~ "role-error"
+      refute rendered =~ "requires an admin role"
+
+      clear_read_faults()
+      rendered = html(RevealApprovalsLive, event(RevealApprovalsLive, socket, "retry_load"))
+      refute_error_state(rendered)
+    end
+  end
 end

@@ -42,6 +42,8 @@ defmodule Samen.Web.Reads.SwallowLint do
   @reviewed %{
     {"samen_web/lib/samen/web/reads/guard.ex", :run} =>
       "the exit/throw clauses funnel into failed/3, which Guard.report/3s — the lint cannot see through the call",
+    {"samen_web/lib/samen/web/reads/guard.ex", :write} =>
+      "the rescue/exit/throw clauses funnel into write_failed/3 -> failed/3, which Guard.report/3s — the lint cannot see through the call",
     {"samen_web/lib/samen/web/reads/guard.ex", :emit} =>
       "best-effort telemetry: observability must never break the read it observes",
     {"samen_web/lib/samen/web/crm/reads.ex", :work_resource?} =>
@@ -53,7 +55,11 @@ defmodule Samen.Web.Reads.SwallowLint do
     {"samen_web/lib/samen/web/billing/settings_live.ex", :billing_actor} =>
       "fail-closed authorization lookup: no resolvable membership means no billing actor, which hides the admin affordances and refuses the write (never an elevated default)",
     {"samen_web/lib/samen/web/marketing/leads_live.ex", :crm_mount} =>
-      "optional-scope probe: no (or an unresolvable) :crm_namespace label means the Leads lens is not wired on this host, which the lens renders as inert — a host-configuration fact, not a read"
+      "optional-scope probe: no (or an unresolvable) :crm_namespace label means the Leads lens is not wired on this host, which the lens renders as inert — a host-configuration fact, not a read",
+    {"samen_web/lib/samen/web/settings/security_live.ex", :safe_csrf_token} =>
+      "no CSRF token available (outside a request) renders the revoke forms without one, which the server then rejects — fail-closed, nothing to report",
+    {"samen_web/lib/samen/web/settings/invitations_live.ex", :verified?} =>
+      "fail-CLOSED capability probe (ADR-035 §5 A2): an unresolvable principal is unverified on an armed host (the invite is refused), never an elevated default"
   }
 
   # Swallows that still exist, per file, AFTER the reviewed ones are subtracted. Shrink-only: a
@@ -115,13 +121,7 @@ defmodule Samen.Web.Reads.SwallowLint do
     "samen_web/lib/samen/web/reads.ex" => 1,
     "samen_web/lib/samen/web/replay/recorder.ex" => 5,
     "samen_web/lib/samen/web/replay/renderer.ex" => 3,
-    "samen_web/lib/samen/web/settings/api_keys.ex" => 1,
-    "samen_web/lib/samen/web/settings/invitations.ex" => 2,
-    "samen_web/lib/samen/web/settings/invitations_live.ex" => 1,
-    "samen_web/lib/samen/web/settings/reads.ex" => 3,
-    "samen_web/lib/samen/web/settings/reveal_approvals_live.ex" => 1,
-    "samen_web/lib/samen/web/settings/security_live.ex" => 5,
-    "samen_web/lib/samen/web/support/kb_reads.ex" => 1,
+            "samen_web/lib/samen/web/support/kb_reads.ex" => 1,
     "samen_web/lib/samen/web/tags.ex" => 2,
     "samen_web/lib/samen/web/tenant/analytics_reads.ex" => 1,
     "samen_web/lib/samen/web/tenant_gate.ex" => 1,
