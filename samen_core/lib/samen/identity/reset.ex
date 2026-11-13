@@ -52,7 +52,8 @@ defmodule Samen.Identity.Reset do
           required(:auth_token) => module(),
           required(:session) => module(),
           required(:repo) => module(),
-          optional(:user) => module()
+          optional(:user) => module(),
+          optional(:on_sessions_revoked) => ([String.t()] -> any())
         }
 
   @doc """
