@@ -14,18 +14,38 @@
   var meta = document.querySelector("meta[name='csrf-token']");
   var csrfToken = meta && meta.getAttribute("content");
 
+  // (a2) In-flight affordance for `simple_form` (kit F06). The form carries
+  //      `data-busy-text` (default "Saving…"); LiveView reads a submit button's
+  //      `phx-disable-with` when the submit starts, so give any submit button that sets none
+  //      the form's text first. A capture listener on `document` runs before LiveView's own
+  //      `window` submit listener. Reads no field value; touches only a button attribute.
+  document.addEventListener("submit", function (e) {
+    var form = e.target;
+    if (!form || !form.getAttribute || !form.hasAttribute("data-busy-text")) return;
+    var text = form.getAttribute("data-busy-text");
+    if (!text) return;
+    var buttons = form.querySelectorAll("button[type=submit], button:not([type])");
+    for (var i = 0; i < buttons.length; i++) {
+      if (!buttons[i].hasAttribute("phx-disable-with")) buttons[i].setAttribute("phx-disable-with", text);
+    }
+  }, true);
+
   // (b) Construct the LiveSocket against the "/live" websocket every host endpoint
-  //     declares, authenticating with the same CSRF token via connect params (C7).
-  var liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
-    hooks: window.SamenHooks,
-    params: { _csrf_token: csrfToken }
-  });
+  //     declares, authenticating with the same CSRF token via connect params (C7). If a
+  //     vendored client script failed to load (blocked / network), leave the server-rendered
+  //     page intact (links and forms still work) instead of throwing a ReferenceError.
+  if (window.LiveView && window.Phoenix) {
+    var liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
+      hooks: window.SamenHooks,
+      params: { _csrf_token: csrfToken }
+    });
 
-  // (c) Connect. Websocket transport only (matches the endpoints' declaration).
-  liveSocket.connect();
+    // (c) Connect. Websocket transport only (matches the endpoints' declaration).
+    liveSocket.connect();
 
-  // (d) Expose for reconnect/debug from the console.
-  window.liveSocket = liveSocket;
+    // (d) Expose for reconnect/debug from the console.
+    window.liveSocket = liveSocket;
+  }
 
   // (e) The GLOBAL ⌘K (Ctrl+K) focus shortcut, relocated verbatim from the inline
   //     root-layout <script> (WS-E E6 / ADR-027). Focuses the ⌘K palette input when

@@ -32,8 +32,14 @@ defmodule Samen.UI.Shell do
   def app_shell(assigns) do
     ~H"""
     <div class="app">
-      <input type="checkbox" id="samen-nav-toggle" class="nav-toggle-cb" aria-hidden="true" tabindex="-1" />
-      <label for="samen-nav-toggle" class="nav-hamburger" aria-label="Toggle navigation menu">
+      <input
+        type="checkbox"
+        id="samen-nav-toggle"
+        class="nav-toggle-cb"
+        aria-label="Toggle navigation menu"
+        aria-controls="samen-nav"
+      />
+      <label for="samen-nav-toggle" class="nav-hamburger" aria-hidden="true">
         <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path d="M4 6h16M4 12h16M4 18h16" />
         </svg>
@@ -55,15 +61,30 @@ defmodule Samen.UI.Shell do
   A `.btn`. `variant="primary"` renders the dark filled button. Provide an optional
   `:icon` slot; the label is the default inner block. Extra attrs (`phx-click`,
   `type`, `disabled`, `class`, …) pass through via `:rest`.
+
+  Unhappy-path affordances (both default off, so existing output is unchanged):
+
+    * `busy_text` — maps to `phx-disable-with`: while the click/submit is in flight the button
+      is disabled and shows this text (and carries `phx-click-loading`, styled in the CSS), so
+      a slow action cannot be double-fired.
+    * `confirm` — maps to `data-confirm`: the browser must confirm before the event is sent
+      (destructive actions). Keep it static copy — never interpolate a field value.
   """
   attr :variant, :string, default: "default", values: ~w(default primary)
+  attr :busy_text, :string, default: nil, doc: "phx-disable-with text while the action is in flight"
+  attr :confirm, :string, default: nil, doc: "data-confirm prompt shown before the event fires"
   attr :rest, :global, include: ~w(type disabled name value form phx-click phx-value-id)
   slot :icon
   slot :inner_block, required: true
 
   def button(assigns) do
     ~H"""
-    <button class={if @variant == "primary", do: "btn primary", else: "btn"} {@rest}>
+    <button
+      class={if @variant == "primary", do: "btn primary", else: "btn"}
+      phx-disable-with={@busy_text}
+      data-confirm={@confirm}
+      {@rest}
+    >
       <span :if={@icon != []} class="i">{render_slot(@icon)}</span>
       {render_slot(@inner_block)}
     </button>

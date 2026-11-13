@@ -42,6 +42,10 @@ defmodule Samen.UI.Board do
   """
   use Phoenix.Component
 
+  import Samen.UI.Feedback, only: [empty_state: 1]
+
+  alias Samen.UI.State
+
   @doc """
   Render a `%Samen.Web.Board{}` as grouped columns.
 
@@ -60,13 +64,38 @@ defmodule Samen.UI.Board do
   attr :board, :any, required: true, doc: "a %Samen.Web.Board{}"
   attr :load_more_event, :string, default: nil
   attr :empty_col_text, :string, default: "—"
+  attr :loading, :boolean, default: false, doc: "render the skeleton instead of the columns (F04)"
+  attr :error, :any, default: nil, doc: "an error message (binary) or `true`: render the error state"
+  attr :retry_event, :string, default: nil, doc: "LiveView event the error state's retry button fires"
+  attr :empty_text, :string, default: "Nothing here yet.", doc: "shown when the board has no columns"
   slot :card, required: true, doc: "renders one card from a row (:let={row})"
   slot :col_header, doc: "optional custom column header (:let={group})"
 
   def board(assigns) do
+    if State.gated?(assigns) do
+      State.state_view(assigns, "card")
+    else
+      assigns = assign(assigns, :groups, board_groups(assigns.board))
+      board_body(assigns)
+    end
+  end
+
+  # A nil / unloaded board is zero columns, not a crash.
+  defp board_groups(%{groups: groups}) when is_list(groups), do: groups
+  defp board_groups(_), do: []
+
+  defp board_body(%{groups: []} = assigns) do
+    ~H"""
+    <div id={@id} class="board board-empty">
+      <.empty_state class="board-empty-state" title={@empty_text} />
+    </div>
+    """
+  end
+
+  defp board_body(assigns) do
     ~H"""
     <div id={@id} class="board" role="list">
-      <%= for group <- @board.groups do %>
+      <%= for group <- @groups do %>
         <section class="bcol" id={"#{@id}-col-#{col_slug(group.key)}"} role="listitem">
           <header class="bcol-h">
             <%= if @col_header != [] do %>
@@ -91,6 +120,7 @@ defmodule Samen.UI.Board do
               type="button"
               class="btn bcol-more-btn"
               phx-click={@load_more_event}
+              phx-disable-with="Loading…"
               phx-value-key={col_key(group.key)}
             >
               Load more

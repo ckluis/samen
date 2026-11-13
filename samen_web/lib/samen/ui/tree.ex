@@ -30,6 +30,8 @@ defmodule Samen.UI.Tree do
   """
   use Phoenix.Component
 
+  alias Samen.UI.State
+
   @doc """
   Render a `%Samen.Web.Tree{}` as nested expandable nodes.
 
@@ -52,20 +54,36 @@ defmodule Samen.UI.Tree do
   attr :expand_param, :string, default: "focus"
   attr :expand_prefix, :string, default: ""
   attr :expand_event, :string, default: nil
+  attr :loading, :boolean, default: false, doc: "render the skeleton instead of the tree (F04)"
+  attr :error, :any, default: nil, doc: "an error message (binary) or `true`: render the error state"
+  attr :retry_event, :string, default: nil, doc: "LiveView event the error state's retry button fires"
   slot :node, required: true, doc: "renders one node's body from node.record (:let={node})"
 
   def tree(assigns) do
+    if State.gated?(assigns) do
+      State.state_view(assigns, "rows")
+    else
+      assigns = assign(assigns, :roots, tree_roots(assigns.tree))
+      tree_body(assigns)
+    end
+  end
+
+  # A nil / unloaded tree has zero roots, not a crash.
+  defp tree_roots(%{roots: roots}) when is_list(roots), do: roots
+  defp tree_roots(_), do: []
+
+  defp tree_body(assigns) do
     ~H"""
     <div id={@id} class="tree" role="tree" aria-label={@label}>
       <.branch
-        nodes={@tree.roots}
+        nodes={@roots}
         node_slot={@node}
         id={@id}
         expand_param={@expand_param}
         expand_prefix={@expand_prefix}
         expand_event={@expand_event}
       />
-      <p :if={@tree.roots == []} class="tree-empty">{@empty_text}</p>
+      <p :if={@roots == []} class="tree-empty">{@empty_text}</p>
     </div>
     """
   end

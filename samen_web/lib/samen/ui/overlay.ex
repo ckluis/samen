@@ -75,12 +75,18 @@ defmodule Samen.UI.Overlay do
     * `results`     — a list of `%Samen.Search.Result{}`.
     * `event`       — the LiveView event the debounced input fires (default `"search"`).
     * `placeholder` — input copy.
+    * `href`        — optional 1-arity function `%Result{} -> path | nil` that supplies a hit's
+      destination (the kit cannot know the host's routes). A hit also links when the result
+      itself carries a `:href` / `:path`. Only same-origin paths (`/…`, not `//…`) become links;
+      any other value (a `javascript:` URL, an absolute URL, nil) is ignored and the hit renders
+      as plain text exactly as before (F02).
   """
   attr :id, :string, default: "cmdk"
   attr :q, :string, default: ""
   attr :results, :list, default: []
   attr :event, :string, default: "search"
   attr :placeholder, :string, default: "Search everything…"
+  attr :href, :any, default: nil, doc: "1-arity fun %Result{} -> same-origin path | nil"
 
   def command_palette(assigns) do
     ~H"""
@@ -102,14 +108,47 @@ defmodule Samen.UI.Overlay do
 
       <ul class="cmdk-results" role="listbox">
         <li :for={r <- @results} class="cmdk-hit" role="option">
-          <span class="cmdk-kind">{Samen.UI.humanize_resource(r.resource_name)}</span>
-          <span class="cmdk-label">{Samen.UI.palette_label(r.display)}</span>
+          <%= case hit_path(r, @href) do %>
+            <% nil -> %>
+              <span class="cmdk-kind">{Samen.UI.humanize_resource(r.resource_name)}</span>
+              <span class="cmdk-label">{Samen.UI.palette_label(r.display)}</span>
+            <% path -> %>
+              <a href={path} class="cmdk-link">
+                <span class="cmdk-kind">{Samen.UI.humanize_resource(r.resource_name)}</span>
+                <span class="cmdk-label">{Samen.UI.palette_label(r.display)}</span>
+              </a>
+          <% end %>
         </li>
         <li :if={@q not in [nil, ""] and @results == []} class="cmdk-empty">No matches.</li>
       </ul>
     </div>
     """
   end
+
+  # The destination of one palette hit: the host's `href` function, else a `:href`/`:path` on the
+  # result. Same-origin paths only (`/x`, never `//host` or a scheme), so a hostile or buggy
+  # value can't become a `javascript:` / off-site link.
+  defp hit_path(result, fun) do
+    candidate =
+      cond do
+        is_function(fun, 1) -> safe_call(fun, result)
+        true -> Map.get(result, :href) || Map.get(result, :path)
+      end
+
+    same_origin_path(candidate)
+  end
+
+  defp safe_call(fun, result) do
+    fun.(result)
+  rescue
+    _ -> nil
+  end
+
+  defp same_origin_path("/" <> rest = path) when is_binary(rest) do
+    if String.starts_with?(rest, ["/", "\\"]), do: nil, else: path
+  end
+
+  defp same_origin_path(_), do: nil
 
   # ---------------------------------------------------------------------------
   # Modal (ADR-016 §2 — role=dialog, focus trap, escape/click-away close)
@@ -150,7 +189,7 @@ defmodule Samen.UI.Overlay do
         aria-modal="true"
         aria-labelledby={@title && "#{@id}-title"}
         phx-click-away={@on_cancel}
-        style="background:#fff;min-width:340px;max-width:560px;width:100%;max-height:calc(100vh - 40px);overflow:auto;padding:18px 20px"
+        style="background:#fff;min-width:min(340px,100%);max-width:560px;width:100%;max-height:calc(100vh - 40px);overflow:auto;padding:18px 20px"
       >
         <div class="modal-head" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px">
           <h2 :if={@title} id={"#{@id}-title"} class="modal-title" style="margin:0;font-size:15px;font-weight:650">{@title}</h2>
@@ -186,6 +225,7 @@ defmodule Samen.UI.Overlay do
   """
   attr :message, :string, default: "Delete this record? This cannot be undone."
   attr :label, :string, default: "Delete"
+  attr :busy_text, :string, default: "Deleting…", doc: "phx-disable-with text while the delete is in flight"
   attr :rest, :global, include: ~w(disabled form name value)
 
   slot :inner_block
@@ -196,6 +236,7 @@ defmodule Samen.UI.Overlay do
       type="button"
       class="btn danger"
       data-confirm={@message}
+      phx-disable-with={@busy_text}
       style="color:var(--bad, #b91c1c);border-color:var(--bad, #b91c1c)"
       {@rest}
     >

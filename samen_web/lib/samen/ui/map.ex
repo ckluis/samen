@@ -44,6 +44,7 @@ defmodule Samen.UI.Map do
   """
   use Phoenix.Component
 
+  alias Samen.UI.State
   alias Samen.Web.Geo.NaturalEarth
   alias Samen.Web.GeoSet
 
@@ -63,12 +64,23 @@ defmodule Samen.UI.Map do
   attr :title, :string, default: nil
   attr :tile_source, :any, default: nil
   attr :show_table, :boolean, default: false
+  attr :loading, :boolean, default: false, doc: "render the skeleton instead of the map (F04)"
+  attr :error, :any, default: nil, doc: "an error message (binary) or `true`: render the error state"
+  attr :retry_event, :string, default: nil, doc: "LiveView event the error state's retry button fires"
   slot :marker
 
   def map(assigns) do
+    if State.gated?(assigns) do
+      State.state_view(assigns, "card")
+    else
+      map_body(assigns)
+    end
+  end
+
+  defp map_body(assigns) do
     assigns =
       assigns
-      |> assign_new(:geo_set, fn -> %GeoSet{} end)
+      |> assign(:geo_set, assigns[:geo_set] || %GeoSet{})
       |> then(fn a -> assign(a, :vb, projection(a).view_box()) end)
       |> then(fn a -> assign(a, :land, land_paths(projection(a))) end)
       |> then(fn a -> assign(a, :pins, plottable(a.geo_set)) end)

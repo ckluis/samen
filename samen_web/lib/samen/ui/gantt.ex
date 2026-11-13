@@ -41,6 +41,8 @@ defmodule Samen.UI.Gantt do
   """
   use Phoenix.Component
 
+  alias Samen.UI.State
+
   @month_abbr ~w(Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec)
 
   @doc """
@@ -66,9 +68,9 @@ defmodule Samen.UI.Gantt do
   """
   attr :id, :string, default: "gantt"
   attr :board, :any, required: true, doc: "a %Samen.Web.Board{} whose groups are lanes"
-  attr :range_start, :any, required: true
-  attr :range_end, :any, required: true
-  attr :start_field, :atom, required: true
+  attr :range_start, :any, default: nil, doc: "required unless `loading`/`error`"
+  attr :range_end, :any, default: nil, doc: "required unless `loading`/`error`"
+  attr :start_field, :atom, default: nil, doc: "required unless `loading`/`error`"
   attr :end_field, :atom, default: nil
   attr :window_label, :string, default: nil
   attr :today, :any, default: nil
@@ -76,10 +78,25 @@ defmodule Samen.UI.Gantt do
   attr :next_href, :string, default: nil
   attr :tick_count, :integer, default: 7
   attr :empty_text, :string, default: "—"
+  attr :stack, :boolean,
+    default: false,
+    doc: "opt-in: stack concurrent bars of a lane on separate rows instead of overlapping (F09)"
+
+  attr :loading, :boolean, default: false, doc: "render the skeleton instead of the lanes (F04)"
+  attr :error, :any, default: nil, doc: "an error message (binary) or `true`: render the error state"
+  attr :retry_event, :string, default: nil, doc: "LiveView event the error state's retry button fires"
   slot :bar, required: true, doc: "renders one bar's content from a lane's row (:let={row})"
   slot :lane_header, doc: "renders a lane header (:let={group}); default is label + count"
 
   def gantt(assigns) do
+    if State.gated?(assigns) do
+      State.state_view(assigns, "rows")
+    else
+      gantt_body(assigns)
+    end
+  end
+
+  defp gantt_body(assigns) do
     assigns =
       assigns
       |> assign(:lanes, lanes(assigns.board))
@@ -119,14 +136,14 @@ defmodule Samen.UI.Gantt do
             <% end %>
           </div>
 
-          <div class="gantt-lane-track">
+          <div class="gantt-lane-track" style={@stack && "min-height:#{stack_height(lane)}px"}>
             <span :if={@now_pos} class="gantt-now" style={"left:#{@now_pos}%"} aria-hidden="true"></span>
 
-            <%= for row <- lane.rows do %>
+            <%= for {row, idx} <- Enum.with_index(lane.rows) do %>
               <% geo = bar_geometry(row, @start_field, @end_field, @range_start, @range_end) %>
               <article
                 class={["gantt-bar", geo.point? && "gantt-bar-point"]}
-                style={"left:#{geo.left}%;width:#{geo.width}%"}
+                style={"left:#{geo.left}%;width:#{geo.width}%" <> if(@stack, do: ";top:#{6 + idx * 26}px", else: "")}
                 data-row-id={Map.get(row, :id)}
               >
                 <div class="gantt-bar-in">{render_slot(@bar, row)}</div>
@@ -255,6 +272,10 @@ defmodule Samen.UI.Gantt do
 
   defp lanes(%{groups: groups}) when is_list(groups), do: groups
   defp lanes(_), do: []
+
+  # One 26px row per bar (plus the track padding) so stacked bars never clip.
+  defp stack_height(%{rows: rows}) when is_list(rows), do: max(46, 12 + length(rows) * 26)
+  defp stack_height(_), do: 46
 
   defp lane_label(%{label: label}) when not is_nil(label), do: to_string(label)
   defp lane_label(%{key: nil}), do: "All"

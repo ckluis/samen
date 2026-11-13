@@ -18,11 +18,10 @@
 diff --git a/samen_web/lib/samen/web/layouts.ex b/samen_web/lib/samen/web/layouts.ex
 --- a/samen_web/lib/samen/web/layouts.ex
 +++ b/samen_web/lib/samen/web/layouts.ex
-@@ -95,7 +95,6 @@ defmodule Samen.Web.Layouts do
+@@ -95,6 +95,5 @@ defmodule Samen.Web.Layouts do
          --%>
          <script defer nonce={assigns[:csp_nonce]} src="/assets/phoenix.min.js"></script>
          <script defer nonce={assigns[:csp_nonce]} src="/assets/phoenix_live_view.min.js"></script>
 -        <script defer nonce={assigns[:csp_nonce]} src="/assets/app.js"></script>
        </head>
        <body>
-         {@inner_content}

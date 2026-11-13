@@ -27,6 +27,11 @@ defmodule Samen.UI.Form do
   attr :for, :any, required: true, doc: "an AshPhoenix.Form / %Phoenix.HTML.Form{} / FormData source"
   attr :id, :string, default: nil
   attr :as, :any, default: nil
+
+  attr :busy_text, :string,
+    default: "Saving…",
+    doc: "default in-flight label for the form's submit button(s) — applied as `phx-disable-with` by app.js to a submit button that sets none (F06)"
+
   attr :rest, :global,
     include: ~w(action method autocomplete novalidate phx-submit phx-change phx-target phx-auto-recover)
 
@@ -43,7 +48,7 @@ defmodule Samen.UI.Form do
       end
 
     ~H"""
-    <.form :let={f} for={@for} id={@id} class="simple-form" {@rest}>
+    <.form :let={f} for={@for} id={@id} class="simple-form" data-busy-text={@busy_text} {@rest}>
       {render_slot(@inner_block, f)}
       <div :if={@actions != []} class="form-actions" style="display:flex;align-items:center;gap:8px;margin-top:14px">
         {render_slot(@actions, f)}
@@ -155,11 +160,29 @@ defmodule Samen.UI.Form do
 
   # Interpolate `{msg, opts}` error tuples (the Phoenix/Ash error shape). This touches
   # ERROR MESSAGES only — framework copy + bounded vars — never a field value.
-  defp translate_form_error({msg, opts}) when is_binary(msg) do
-    Enum.reduce(opts, msg, fn {key, value}, acc ->
-      String.replace(acc, "%{#{key}}", fn _ -> to_string(value) end)
+  #
+  # TOTAL (F05): this runs while rendering the validation errors, so a raise here crashes the
+  # page exactly on the error path. Every shape yields a string: `{msg, opts}` with a
+  # non-enumerable `opts` keeps `msg`; an opt value with no `String.Chars` is `inspect`ed; an
+  # Ash/Exception-style struct with a binary `:message` shows it; a bare atom shows its name;
+  # anything else is the generic "is invalid" (never `inspect`ed — an arbitrary term may carry
+  # a field value).
+  defp translate_form_error({msg, opts}) when is_binary(msg) and (is_list(opts) or is_map(opts)) do
+    Enum.reduce(opts, msg, fn
+      {key, value}, acc -> String.replace(acc, "%{#{key}}", fn _ -> opt_to_string(value) end)
+      _other, acc -> acc
     end)
   end
 
+  defp translate_form_error({msg, _opts}) when is_binary(msg), do: msg
   defp translate_form_error(msg) when is_binary(msg), do: msg
+  defp translate_form_error(%{message: msg}) when is_binary(msg), do: msg
+  defp translate_form_error(atom) when is_atom(atom) and not is_nil(atom), do: Atom.to_string(atom)
+  defp translate_form_error(_other), do: "is invalid"
+
+  defp opt_to_string(value) do
+    if String.Chars.impl_for(value), do: to_string(value), else: inspect(value)
+  rescue
+    _ -> inspect(value)
+  end
 end

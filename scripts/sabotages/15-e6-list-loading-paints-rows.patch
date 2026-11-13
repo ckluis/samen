@@ -17,7 +17,7 @@
 diff --git a/samen_web/lib/samen/ui/table.ex b/samen_web/lib/samen/ui/table.ex
 --- a/samen_web/lib/samen/ui/table.ex
 +++ b/samen_web/lib/samen/ui/table.ex
-@@ -161,6 +161,9 @@
+@@ -167,6 +167,9 @@
          <% @loading -> %>
            <div class="card list-loading" style="padding:14px 16px">
              <.skeleton rows={5} avatar />
@@ -25,5 +25,5 @@ diff --git a/samen_web/lib/samen/ui/table.ex b/samen_web/lib/samen/ui/table.ex
 +              <tr :for={item <- @page.items}>{render_slot(@row, item)}</tr>
 +            </tbody></table>
            </div>
-         <% @page.items == [] and @empty != [] -> %>
-           {render_slot(@empty)}
+         <% @items == [] and String.trim(@filter) != "" -> %>
+           <.empty_state

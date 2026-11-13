@@ -1,0 +1,19 @@
+# SABOTAGE: a framework live_session loses layout: Samen.Web.Layouts.app/1, so its put_flash is invisible 
+#   again (audit-kit F07)
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/flash_layout_test.exs
+# MUST_FAIL: EVERY live route of the security router
+diff --git a/samen_web/lib/samen/web/router.ex b/samen_web/lib/samen/web/router.ex
+index 354013e3..04cf9c77 100644
+--- a/samen_web/lib/samen/web/router.ex
++++ b/samen_web/lib/samen/web/router.ex
+@@ -71,7 +71,6 @@ defmodule Samen.Web.Router do
+       # authority so a client `?org=` can only SELECT among the authenticated
+       # principal's authorized orgs (`Samen.Web.CurrentOrg.reresolve/2`).
+       live_session session_name,
+-        layout: {Samen.Web.Layouts, :app},
+         on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
+         session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+         for {sub_path, module} <- Samen.Web.Router.__routes__(kind, path) do

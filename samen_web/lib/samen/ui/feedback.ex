@@ -74,16 +74,27 @@ defmodule Samen.UI.Feedback do
   attr :avatar, :boolean, default: false
   attr :class, :any, default: nil
 
+  attr :shape, :string,
+    default: "rows",
+    values: ~w(rows card chart),
+    doc: "the silhouette: shimmer `rows` (default), a `card` block or a `chart` block (F41)"
+
   def skeleton(assigns) do
     assigns =
       assigns
       |> assign(:count, max(assigns.rows, 1))
-      |> assign(:class_attr, Enum.join(["skeleton" | List.wrap(assigns.class)], " "))
+      |> assign(
+        :class_attr,
+        Enum.join(["skeleton" | List.wrap(assigns.class)] ++ shape_class(assigns.shape), " ")
+      )
 
     ~H"""
     <div class={@class_attr} role="status" aria-busy="true" aria-live="polite">
       <span class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Loading…</span>
-      <div :for={_ <- 1..@count} class="skeleton-row" aria-hidden="true">
+      <div :if={@shape in ["card", "chart"]} class="skeleton-block" aria-hidden="true">
+        <div class="skeleton-line"></div>
+      </div>
+      <div :for={_ <- 1..@count} :if={@shape == "rows"} class="skeleton-row" aria-hidden="true">
         <div :if={@avatar} class="skeleton-line avatar"></div>
         <div class="skeleton-line narrow"></div>
         <div class="skeleton-line"></div>
@@ -91,6 +102,10 @@ defmodule Samen.UI.Feedback do
     </div>
     """
   end
+
+  defp shape_class("card"), do: ["skeleton-card"]
+  defp shape_class("chart"), do: ["skeleton-chart"]
+  defp shape_class(_), do: []
 
   # ---------------------------------------------------------------------------
   # Pill (status badge)
@@ -124,7 +139,7 @@ defmodule Samen.UI.Feedback do
   (default the brand green). Renders `label` verbatim — a `%Masked{}` label shows
   `••••`.
   """
-  attr :value, :integer, default: 0
+  attr :value, :any, default: 0
   attr :label, :any, default: nil
   attr :color, :string, default: "var(--green)"
 
@@ -142,6 +157,7 @@ defmodule Samen.UI.Feedback do
   end
 
   defp clamp(v) when is_integer(v), do: v |> max(0) |> min(100)
+  defp clamp(v) when is_float(v), do: v |> round() |> clamp()
   defp clamp(_), do: 0
 
   # ---------------------------------------------------------------------------
@@ -155,32 +171,53 @@ defmodule Samen.UI.Feedback do
   sparkline (the last bar is highlighted). An optional `:icon` slot leads the label.
   """
   attr :label, :string, required: true
-  attr :value, :any, required: true
+  attr :value, :any, default: nil, doc: "nil renders an em dash (no value yet)"
   attr :delta, :string, default: nil
   attr :delta_dir, :string, default: "up", values: ~w(up down)
   attr :sub, :string, default: nil
   attr :spark, :list, default: []
+  attr :loading, :boolean, default: false, doc: "show a skeleton instead of the value"
+  attr :error, :any, default: nil, doc: "an error message (binary) or `true`: show it instead of the value"
   slot :icon
 
   def metric(assigns) do
+    assigns = assign(assigns, :mstate, metric_state(assigns.loading, assigns.error))
+
     ~H"""
     <div class="metric">
       <div class="k">
         <span :if={@icon != []} class="i">{render_slot(@icon)}</span>
         {@label}
       </div>
-      <div class="v">
-        <span class="num">{@value}</span>
+      <div :if={@mstate == :error} class="v" role="alert">
+        <span class="num">—</span>
+      </div>
+      <div :if={@mstate == :error} class="sub metric-error">
+        {Samen.UI.State.error_body(@error) || "Unavailable"}
+      </div>
+      <div :if={@mstate == :loading} class="v">
+        <.skeleton rows={1} shape="card" />
+      </div>
+      <div :if={@mstate == :ok} class="v">
+        <span class="num">{if @value == nil, do: "—", else: @value}</span>
         <span :if={@delta} class={["delta", @delta_dir]}>{@delta}</span>
       </div>
-      <div :if={@sub} class="sub">{@sub}</div>
-      <div :if={@spark != []} class="spark">
+      <div :if={@sub && @mstate == :ok} class="sub">{@sub}</div>
+      <div :if={@spark != [] && @mstate == :ok} class="spark">
         <%= for {h, idx} <- Enum.with_index(@spark) do %>
           <i class={idx == length(@spark) - 1 && "hi"} style={"height:#{clamp(h)}%"}></i>
         <% end %>
       </div>
     </div>
     """
+  end
+
+  defp metric_state(loading, error) do
+    cond do
+      Samen.UI.State.error?(error) -> :error
+      loading -> :loading
+      true -> :ok
+    end
   end
 
   # ---------------------------------------------------------------------------

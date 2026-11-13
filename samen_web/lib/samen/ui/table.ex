@@ -11,6 +11,9 @@ defmodule Samen.UI.Table do
 
   import Samen.UI.Shell, only: [button: 1]
   import Samen.UI.Feedback, only: [empty_state: 1, skeleton: 1]
+  import Samen.UI.State, only: [error_state: 1]
+
+  alias Samen.UI.State
 
   # ---------------------------------------------------------------------------
   # Data table
@@ -30,24 +33,45 @@ defmodule Samen.UI.Table do
   or reflows a cell VALUE (which would be the only way to disturb masking), so a
   `%Samen.Masked{}` cell renders `••••` identically at every width (AC-G20-2).
   """
+  attr :loading, :boolean, default: false, doc: "render the skeleton instead of the table (F04)"
+  attr :error, :any, default: nil, doc: "an error message (binary) or `true`: render the error state"
+  attr :retry_event, :string, default: nil, doc: "LiveView event the error state's retry button fires"
+  attr :empty_text, :string, default: "Nothing to show.", doc: "copy shown when the body has no rows"
+
   slot :head, required: true
   slot :inner_block, required: true
+  slot :empty, doc: "replaces the neutral no-rows message (shown only when the body has no `<tr>`)"
 
   def data_table(assigns) do
-    ~H"""
-    <div class="card">
-      <div class="table-scroll">
-        <table>
-          <thead>
-            <tr>{render_slot(@head)}</tr>
-          </thead>
-          <tbody>
-            {render_slot(@inner_block)}
-          </tbody>
-        </table>
+    if State.gated?(assigns) do
+      State.state_view(assigns, "rows")
+    else
+      # The no-rows message is always in the DOM but `display:none` unless the `<tbody>` has no
+      # `<tr>` (CSS `:has`, see `.table-empty`). Deciding it in CSS keeps the row `:for` as a live
+      # LiveView diff — rendering the slot to a string to test for emptiness would resend the
+      # whole body on every patch.
+      ~H"""
+      <div class="card">
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>{render_slot(@head)}</tr>
+            </thead>
+            <tbody>
+              {render_slot(@inner_block)}
+            </tbody>
+          </table>
+          <p class="table-empty">
+            <%= if @empty != [] do %>
+              {render_slot(@empty)}
+            <% else %>
+              {@empty_text}
+            <% end %>
+          </p>
+        </div>
       </div>
-    </div>
-    """
+      """
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -101,6 +125,8 @@ defmodule Samen.UI.Table do
     default: false,
     doc: "render the skeleton/1 placeholder instead of rows/empty (WS-E E6.2)"
 
+  attr :error, :any, default: nil, doc: "an error message (binary) or `true`: render the error state (F04)"
+  attr :retry_event, :string, default: nil, doc: "LiveView event the error state's retry button fires"
   attr :filter, :string, default: nil
   attr :selected, :any, default: nil, doc: "MapSet of selected row ids"
   attr :selectable, :boolean, default: false
@@ -110,6 +136,7 @@ defmodule Samen.UI.Table do
   attr :empty_text, :string, default: "Nothing here yet."
   attr :empty_icon, :string, default: nil
   attr :empty_body, :string, default: nil
+  attr :no_match_text, :string, default: "No matches", doc: "title when a non-blank filter matched nothing (F21)"
   slot :head, required: true
   slot :row, required: true
   slot :bulk_bar
@@ -122,6 +149,7 @@ defmodule Samen.UI.Table do
       assigns
       |> assign(:filter, assigns.filter || list_state_get(assigns.state, :filter, ""))
       |> assign(:selected, assigns.selected || list_state_get(assigns.state, :selected, MapSet.new()))
+      |> assign(:items, page_items(assigns.page))
       |> assign(:prev?, list_prev?(assigns.state, assigns.page))
       |> assign(:row_class_attr, Enum.join(["list-row"] ++ List.wrap(assigns.row_class), " "))
 
@@ -150,7 +178,12 @@ defmodule Samen.UI.Table do
           <%= if @bulk_bar != [] do %>
             {render_slot(@bulk_bar, @selected)}
           <% else %>
-            <.button :for={action <- @bulk_actions} phx-click="bulk" phx-value-action={bulk_action_name(action)}>
+            <.button
+              :for={action <- @bulk_actions}
+              phx-click="bulk"
+              phx-value-action={bulk_action_name(action)}
+              busy_text="Working…"
+            >
               {bulk_action_label(action)}
             </.button>
           <% end %>
@@ -158,13 +191,31 @@ defmodule Samen.UI.Table do
       </div>
 
       <%= cond do %>
+        <% Samen.UI.State.error?(@error) -> %>
+          <.error_state
+            class="list-error"
+            body={Samen.UI.State.error_body(@error)}
+            retry_event={@retry_event}
+          />
         <% @loading -> %>
           <div class="card list-loading" style="padding:14px 16px">
             <.skeleton rows={5} avatar />
           </div>
-        <% @page.items == [] and @empty != [] -> %>
+        <% @items == [] and String.trim(@filter) != "" -> %>
+          <.empty_state
+            class="list-empty list-no-match"
+            title={@no_match_text}
+            body={"Nothing matches “#{@filter}”."}
+          >
+            <:actions>
+              <.button phx-click="filter" phx-value-filter="">
+                Clear filter
+              </.button>
+            </:actions>
+          </.empty_state>
+        <% @items == [] and @empty != [] -> %>
           {render_slot(@empty)}
-        <% @page.items == [] -> %>
+        <% @items == [] -> %>
           <.empty_state class="list-empty" title={@empty_text} body={@empty_body} icon={@empty_icon}>
             <:actions :if={@empty_actions != []}>{render_slot(@empty_actions)}</:actions>
             <:sample :if={@empty_sample != []}>{render_slot(@empty_sample)}</:sample>
@@ -176,13 +227,13 @@ defmodule Samen.UI.Table do
               <input
                 type="checkbox"
                 phx-click="select_all"
-                checked={list_all_selected?(@page.items, @selected)}
+                checked={list_all_selected?(@items, @selected)}
                 aria-label="Select all rows on this page"
               />
             </th>
             {render_slot(@head)}
           </:head>
-          <tr :for={item <- @page.items} class={@row_class_attr} id={"#{@id}-row-#{item.id}"}>
+          <tr :for={item <- @items} class={@row_class_attr} id={"#{@id}-row-#{item.id}"}>
             <td :if={@selectable} class="list-select-cell">
               <input
                 type="checkbox"
@@ -197,10 +248,22 @@ defmodule Samen.UI.Table do
         </.data_table>
 
         <div class="list-footer" style="display:flex;align-items:center;gap:10px;margin-top:10px">
-          <.button phx-click="paginate" phx-value-dir="prev" disabled={not @prev?} aria-label="Previous page">
+          <.button
+            phx-click="paginate"
+            phx-value-dir="prev"
+            disabled={not @prev?}
+            aria-label="Previous page"
+            busy_text="…"
+          >
             ‹ Prev
           </.button>
-          <.button phx-click="paginate" phx-value-dir="next" disabled={not @page.has_more} aria-label="Next page">
+          <.button
+            phx-click="paginate"
+            phx-value-dir="next"
+            disabled={not @page.has_more}
+            aria-label="Next page"
+            busy_text="…"
+          >
             Next ›
           </.button>
           <span class="list-page-size" style="color:var(--muted);font-size:12px">
@@ -258,6 +321,10 @@ defmodule Samen.UI.Table do
   defp sort_aria(_, _), do: nil
 
   # list_view helpers — STATE plumbing only; these never touch a field value.
+
+  # A nil / unloaded page (assign_async pending, failed load) is an empty page, not a crash.
+  defp page_items(%{items: items}) when is_list(items), do: items
+  defp page_items(_), do: []
 
   defp list_state_get(nil, _key, default), do: default
   defp list_state_get(state, key, default), do: Map.get(state, key) || default

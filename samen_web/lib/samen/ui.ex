@@ -186,6 +186,11 @@ defmodule Samen.UI do
   defdelegate lifecycle_pill(assigns), to: Samen.UI.Feedback
   defdelegate lifecycle_stages(), to: Samen.UI.Feedback
 
+  # State (loading / error / notices — audit F04, F07)
+  defdelegate error_state(assigns), to: Samen.UI.State
+  defdelegate flash_group(assigns), to: Samen.UI.State
+  defdelegate connection_banner(assigns), to: Samen.UI.State
+
   # Object
   defdelegate object_card(assigns), to: Samen.UI.Object
   defdelegate timeline(assigns), to: Samen.UI.Object

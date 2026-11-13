@@ -12,10 +12,11 @@
 diff --git a/samen_web/lib/samen/web/router.ex b/samen_web/lib/samen/web/router.ex
 --- a/samen_web/lib/samen/web/router.ex
 +++ b/samen_web/lib/samen/web/router.ex
-@@ -1180,7 +1180,6 @@
+@@ -1180,8 +1180,7 @@
        # correct posture for a step across an authentication boundary.
        if spine_totp do
          live_session :"#{session_name}_totp",
+           layout: {Samen.Web.Layouts, :app},
 -          on_mount: [{Samen.Web.Auth, :ensure_authenticated}],
            session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
            live("#{path}/security/2fa", Samen.Web.Auth.TotpEnrollLive)
