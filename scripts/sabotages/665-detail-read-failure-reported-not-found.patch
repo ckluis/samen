@@ -1,0 +1,22 @@
+# SABOTAGE: A failed single-record read (contact / company detail) is reported as not-found instead of 
+#   unavailable, so an outage renders as 'Contact not found.' (404 semantics are for a genuinely 
+#   missing record only).
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/reads_honest_failure_test.exs
+# MUST_FAIL: a FAILED read is the error state — not 'Contact not found.'; retry recovers
+# MUST_FAIL: a FAILED read is the error state — not 'Company not found.'; retry recovers
+diff --git a/samen_web/lib/samen/web/crm/reads.ex b/samen_web/lib/samen/web/crm/reads.ex
+index f1d9c360..ae050f98 100644
+--- a/samen_web/lib/samen/web/crm/reads.ex
++++ b/samen_web/lib/samen/web/crm/reads.ex
+@@ -295,7 +295,7 @@ defmodule Samen.Web.CRM.Reads do
+     else
+       :error -> {:error, :not_found}
+       {:error, :forbidden} -> {:error, :not_found}
+-      {:error, :unavailable} = unavailable -> unavailable
++      {:error, :unavailable} -> {:error, :not_found}
+     end
+   end
+ 
