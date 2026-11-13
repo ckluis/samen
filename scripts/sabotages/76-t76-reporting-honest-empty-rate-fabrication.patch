@@ -15,14 +15,15 @@
 # MUST_FAIL: HONEST EMPTY: an org with NO opportunities gets nil for both rates (never a fabricated 0%)
 # MUST_FAIL: HONEST EMPTY (partial): an org with OPEN deals but ZERO closed deals gets nil win_rate but a real (zero) conversion_rate
 diff --git a/samen_web/lib/samen/web/crm/reads.ex b/samen_web/lib/samen/web/crm/reads.ex
+index f1d9c360..9c9fa133 100644
 --- a/samen_web/lib/samen/web/crm/reads.ex
 +++ b/samen_web/lib/samen/web/crm/reads.ex
-@@ -745,7 +745,7 @@
-     _ -> %{win_rate: nil, conversion_rate: nil, won: 0, lost: 0, open: 0, on_hold: 0}
+@@ -954,7 +954,7 @@ defmodule Samen.Web.CRM.Reads do
+     }
    end
-
+ 
 -  defp rate(_won, 0), do: nil
 +  defp rate(_won, 0), do: 0.0
    defp rate(won, total), do: won / total
-
+ 
    defp round_count(n) when is_integer(n), do: n

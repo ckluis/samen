@@ -11,11 +11,13 @@
 # TEST_FILES: test/samen/web/support_csat_test.exs
 # MUST_FAIL: no CSAT responses yet -> csat_avg is nil, never a fabricated number
 # APPLY: patch -p1 --no-backup-if-mismatch < scripts/sabotages/110-t79-csat-avg-honest-empty-violated.patch
+diff --git a/samen_web/lib/samen/web/support/reads.ex b/samen_web/lib/samen/web/support/reads.ex
+index 1d6bff63..054e72e5 100644
 --- a/samen_web/lib/samen/web/support/reads.ex
 +++ b/samen_web/lib/samen/web/support/reads.ex
-@@ -420,7 +420,7 @@
+@@ -509,7 +509,7 @@ defmodule Samen.Web.Support.Reads do
  
-   defp avg_csat(mount, scope) do
+   defp avg_csat!(mount, scope) do
      case Ash.avg!(Mount.resource(mount, Csat), :score, scope: scope) do
 -      nil -> nil
 +      nil -> 0.0

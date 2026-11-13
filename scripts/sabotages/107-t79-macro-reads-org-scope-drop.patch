@@ -10,22 +10,15 @@
 # MUST_FAIL: a two-org pin: org B never sees org A's macros
 # APPLY: patch -p1 --no-backup-if-mismatch < scripts/sabotages/107-t79-macro-reads-org-scope-drop.patch
 diff --git a/samen_web/lib/samen/web/support/reads.ex b/samen_web/lib/samen/web/support/reads.ex
-index 904b1fd..fc4c001 100644
+index 1d6bff63..ad3e0ed0 100644
 --- a/samen_web/lib/samen/web/support/reads.ex
 +++ b/samen_web/lib/samen/web/support/reads.ex
-@@ -235,13 +235,13 @@
-   rows, sorted by name. Honest empty (`[]`) when the org has none — never
-   fabricated.
-   """
--  def macros(mount, scope) do
-+  def macros(mount, _scope) do
-     Mount.resource(mount, Macro)
-     |> Ash.Query.filter(enabled == true)
-     |> Ash.Query.ensure_selected([:name, :description, :body_template, :tags, :category])
-     |> Ash.Query.sort(name: :asc)
-     |> Ash.Query.limit(@detail_limit)
--    |> Ash.read!(scope: scope)
-+    |> Ash.read!(authorize?: false)
-   rescue
-     _ -> []
+@@ -310,7 +310,7 @@ defmodule Samen.Web.Support.Reads do
+       |> Ash.Query.ensure_selected([:name, :description, :body_template, :tags, :category])
+       |> Ash.Query.sort(name: :asc)
+       |> Ash.Query.limit(@detail_limit)
+-      |> Ash.read!(scope: scope)
++      |> Ash.read!(authorize?: false)
+     end)
    end
+ 

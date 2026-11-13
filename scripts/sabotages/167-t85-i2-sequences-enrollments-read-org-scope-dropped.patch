@@ -10,14 +10,15 @@
 # TEST_FILES: test/samen/web/crm_sequences_test.exs
 # MUST_FAIL: CROSS-ORG: another org's sequences/enrollments NEVER appear in this org's reads
 diff --git a/samen_web/lib/samen/web/crm/sequences_reads.ex b/samen_web/lib/samen/web/crm/sequences_reads.ex
+index 608cc823..85a304bf 100644
 --- a/samen_web/lib/samen/web/crm/sequences_reads.ex
 +++ b/samen_web/lib/samen/web/crm/sequences_reads.ex
-@@ -139,7 +139,7 @@ defmodule Samen.Web.CRM.SequencesReads do
-         ])
-         |> Ash.Query.sort(inserted_at: :desc)
-         |> Ash.Query.limit(@limit)
--        |> Ash.read!(scope: scope)
-+        |> Ash.read!(authorize?: false)
-     end
-   rescue
-     _ -> []
+@@ -151,7 +151,7 @@ defmodule Samen.Web.CRM.SequencesReads do
+           ])
+           |> Ash.Query.sort(inserted_at: :desc)
+           |> Ash.Query.limit(@limit)
+-          |> Ash.read!(scope: scope)
++          |> Ash.read!(authorize?: false)
+       end
+     end)
+   end
