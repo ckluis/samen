@@ -42,7 +42,7 @@ defmodule Samen.Web.Operator.RevenueReads do
 
   alias Samen.Revenue.Metrics
   alias Samen.Web.Mount
-  alias Samen.Web.Reads.Guard
+  alias Samen.Web.Reads.{Adoption, Guard}
 
   # The raw rollup table (ADR-018; identical name in every host DB — the rol precedent).
   @rollup_table "mrr_revenue_rollup"
@@ -128,10 +128,18 @@ defmodule Samen.Web.Operator.RevenueReads do
         %{period_month: month, kind: kind, delta_cents: delta, count: count}
       end)
     else
-      {:error, error} when is_exception(error) -> raise error
-      _ -> raise ArgumentError, "revenue rollup query failed"
+      {:error, error} ->
+        # The rollup table is a host migration nothing in `mix samen.gen.app` creates: a host that never
+        # adopted it is the honest empty (logged once), decided structurally. Anything else is a failure.
+        if Adoption.absent_after_failure?(repo, @rollup_table), do: [], else: raise_query_error(error)
+
+      _ ->
+        raise ArgumentError, "revenue rollup query failed"
     end
   end
+
+  defp raise_query_error(error) when is_exception(error), do: raise(error)
+  defp raise_query_error(_error), do: raise(RuntimeError, "revenue rollup query failed")
 
   # -- period chaining (kernel-documented caller threading) -----------------------
 

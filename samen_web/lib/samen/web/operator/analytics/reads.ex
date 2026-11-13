@@ -50,7 +50,7 @@ defmodule Samen.Web.Operator.AnalyticsReads do
 
   alias Samen.Aggregate.{CohortSpec, Privacy}
   alias Samen.Web.Mount
-  alias Samen.Web.Reads.Guard
+  alias Samen.Web.Reads.{Adoption, Guard}
 
   # The raw rollup table (ADR-021; identical name in every host DB — the mrr precedent).
   @rollup_table "paf_product_event_rollup"
@@ -158,7 +158,7 @@ defmodule Samen.Web.Operator.AnalyticsReads do
         floored
 
       {:error, error} ->
-        raise_query_error(error)
+        if Adoption.absent_after_failure?(repo, @rollup_table), do: [], else: raise_query_error(error)
     end
   end
 
@@ -190,14 +190,15 @@ defmodule Samen.Web.Operator.AnalyticsReads do
         floored
 
       {:error, error} ->
-        raise_query_error(error)
+        if Adoption.absent_after_failure?(repo, @rollup_table), do: [], else: raise_query_error(error)
     end
   end
 
   defp retention(_, _opts), do: []
 
   # A query error is a FAILED read (raised into `Guard.run`, logged by exception module only),
-  # never an empty rollup.
+  # never an empty rollup — except on a host that never adopted the rollup table (`Adoption`, decided
+  # structurally above), which is the honest empty.
   defp raise_query_error(error) when is_exception(error), do: raise(error)
   defp raise_query_error(_error), do: raise(RuntimeError, "rollup query failed")
 

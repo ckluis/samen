@@ -490,6 +490,87 @@ defmodule Samen.Web.ReadsHonestFailureP3Test do
   end
 
   # ===========================================================================
+  # Rollup tables — a host that never migrated them is the honest empty, not a permanent outage
+  # ===========================================================================
+  #
+  # `mrr_revenue_rollup` / `paf_product_event_rollup` are host migrations; nothing `mix samen.gen.app`
+  # produces creates them, yet every generated app mounts /operator/revenue and /operator/analytics.
+  # REAL faults, not the seam (the seam fires before the body): DDL inside the sandbox transaction rolls back.
+
+  describe "Rollup tables on a host that never adopted them" do
+    alias Samen.Web.Operator.{AnalyticsLive, RevenueLive}
+    alias Samen.Web.Reads.Adoption
+
+    setup do
+      Adoption.forget_logged(:mrr_revenue_rollup)
+      Adoption.forget_logged(:paf_product_event_rollup)
+      :ok
+    end
+
+    defp ddl!(sql), do: Ecto.Adapters.SQL.query!(Samen.WebTest.Repo, sql, [])
+
+    test "revenue: a missing mrr_revenue_rollup is the honest empty, logged once as not-adopted, never an error", %{
+      mount: mount
+    } do
+      ddl!("DROP TABLE mrr_revenue_rollup")
+
+      {rendered, log} = with_log(fn -> html(RevenueLive, loaded(RevenueLive, mount)) end)
+
+      assert rendered =~ "No revenue movements yet."
+      refute rendered =~ "revenue-error"
+      refute rendered =~ "metric-error"
+      refute log =~ "read failed"
+      assert log =~ "feature not adopted"
+
+      # ONCE per node, not once per page load.
+      {_, second} = with_log(fn -> loaded(RevenueLive, mount) end)
+      refute second =~ "feature not adopted"
+      refute second =~ "read failed"
+    end
+
+    test "revenue: a renamed column on an EXISTING table is still the error pane (and logged)", %{mount: mount} do
+      ddl!("ALTER TABLE mrr_revenue_rollup RENAME COLUMN mrr_kind TO mrr_kind_renamed")
+
+      {socket, log} = with_log(fn -> loaded(RevenueLive, mount) end)
+      rendered = html(RevenueLive, socket)
+
+      assert socket.assigns.revenue_failed == [:rollup]
+      assert rendered =~ "revenue-error"
+      refute rendered =~ "No revenue movements yet."
+      assert log =~ "read failed"
+      refute log =~ "feature not adopted"
+    end
+
+    test "analytics: a missing paf_product_event_rollup is the honest empty for BOTH panes, no error log", %{
+      mount: mount
+    } do
+      ddl!("DROP TABLE paf_product_event_rollup")
+
+      {socket, log} = with_log(fn -> loaded(AnalyticsLive, mount) end)
+      rendered = html(AnalyticsLive, socket)
+
+      assert socket.assigns.analytics_failed == []
+      refute rendered =~ "funnel-error"
+      refute rendered =~ "retention-error"
+      assert rendered =~ "No product events yet."
+      refute log =~ "read failed"
+      assert log =~ "feature not adopted"
+    end
+
+    test "analytics: a renamed column is the error pane for the pane that reads it", %{mount: mount} do
+      ddl!("ALTER TABLE paf_product_event_rollup RENAME COLUMN paf_stage TO paf_stage_renamed")
+
+      {socket, log} = with_log(fn -> loaded(AnalyticsLive, mount) end)
+      rendered = html(AnalyticsLive, socket)
+
+      assert :funnel in socket.assigns.analytics_failed
+      assert rendered =~ "funnel-error"
+      refute rendered =~ "No product events yet."
+      assert log =~ "read failed"
+    end
+  end
+
+  # ===========================================================================
   # Deliverability — events and suppressions fail ALONE; recipients are 🔒 fields
   # ===========================================================================
 
