@@ -803,7 +803,7 @@ td.right { text-align: right; }
 .cmdk-empty { padding: 22px 16px; color: var(--faint); font-size: 13px; text-align: center; }
 
 /* --- per-list search box (E4.3 / carry b): the .search slot as a real form --- */
-.search form, form.search { display: contents; }
+.search form { display: contents; }
 .search .search-input {
   flex: 1 1 auto; min-width: 0; border: 0; outline: none;
   background: transparent; font: inherit; font-size: 13px;
