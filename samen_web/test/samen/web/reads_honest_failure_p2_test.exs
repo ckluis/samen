@@ -1034,4 +1034,68 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
       refute_error_state(rendered)
     end
   end
+
+  # ===========================================================================
+  # Flags settings
+  # ===========================================================================
+
+  describe "Flags settings" do
+    alias Samen.Web.Flags.SettingsLive
+    alias Samen.WebTest.Primitives.FeatureFlag
+
+    defp seed_flag!(org_id) do
+      FeatureFlag
+      |> Ash.Changeset.for_create(:create, %{org_id: org_id, name: "p2.checkout", enabled: true, rollout_pct: 100}, authorize?: false)
+      |> Ash.create!()
+    end
+
+    test "a failed page read is the error state, not 'No feature flags yet.'; retry recovers; empty stays empty" do
+      org_id = Ash.UUID.generate()
+      seed_flag!(org_id)
+      mount = build_mount(:flags)
+      assert html(SettingsLive, socket_for(SettingsLive, mount, [Ash.UUID.generate()])) =~ "No feature flags yet."
+
+      inject_read_faults([:flags_page])
+      socket = failing(fn -> socket_for(SettingsLive, mount, [org_id]) end)
+      rendered = html(SettingsLive, socket)
+      assert_error_state(rendered)
+      refute rendered =~ "No feature flags yet."
+
+      clear_read_faults()
+      rendered = html(SettingsLive, list_event(socket, "list_retry"))
+      refute_error_state(rendered)
+      assert rendered =~ "p2.checkout"
+    end
+
+    test "a failed WRITE (toggle) tells the user with value-free copy and changes nothing" do
+      org_id = Ash.UUID.generate()
+      flag = seed_flag!(org_id)
+      mount = build_mount(:flags)
+      socket = socket_for(SettingsLive, mount, [org_id])
+
+      inject_read_faults([:flags_update])
+      failed = failing(fn -> event(SettingsLive, socket, "toggle_flag", %{"id" => flag.id}) end)
+      rendered = html(SettingsLive, failed)
+      assert rendered =~ "couldn&#39;t save this flag change right now"
+      refute rendered =~ "InjectedFault"
+      refute rendered =~ "injected read fault"
+      assert Ash.get!(FeatureFlag, flag.id, authorize?: false).enabled
+
+      clear_read_faults()
+      _ = event(SettingsLive, socket, "toggle_flag", %{"id" => flag.id})
+      refute Ash.get!(FeatureFlag, flag.id, authorize?: false).enabled
+    end
+
+    test "a failed single-flag read while opening the editor is an error, not a silently absent modal" do
+      org_id = Ash.UUID.generate()
+      flag = seed_flag!(org_id)
+      mount = build_mount(:flags)
+      socket = socket_for(SettingsLive, mount, [org_id])
+
+      inject_read_faults([:flags_get_flag])
+      failed = failing(fn -> event(SettingsLive, socket, "edit_flag", %{"id" => flag.id}) end)
+      assert failed.assigns.edit_flag == nil
+      assert html(SettingsLive, failed) =~ "Nothing was lost"
+    end
+  end
 end
