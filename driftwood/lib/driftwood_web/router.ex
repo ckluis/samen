@@ -90,6 +90,8 @@ defmodule DriftwoodWeb.Router do
   pipeline :browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
+    # ARCH-11 — secure browser headers + a conservative CSP (`frame-ancestors 'self'`), inherited from the framework.
+    plug(Samen.Web.SecureHeaders)
     plug(:put_root_layout, html: {DriftwoodWeb.Layouts, :root})
     plug(:protect_from_forgery)
     # F2 (ADR-031) — the prod auth gate. NO-OP in dev/test (`:auth_required?` false: the

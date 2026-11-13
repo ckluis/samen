@@ -9,6 +9,10 @@ import Config
 # Quieter prod logging.
 config :logger, level: :info
 
+# ARCH-11 — the session cookie carries the `Secure` attribute in prod (read at compile time by the
+# endpoint's `@session_options`); dev/test run over plain http and keep it off.
+config :pawchart, secure_session_cookie: true
+
 # --- tenant-auth gate: ARMED IN PROD (ADR-045 §2, V-F1 Option A) ----------------------------
 # Already set (and load-bearing) in `config/config.exs` via `auth_required?: config_env() ==
 # :prod`, evaluated BEFORE this import — the gate is ARMED by the time this file loads. Re-stated

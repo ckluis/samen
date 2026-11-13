@@ -1,0 +1,20 @@
+# SABOTAGE: The framework CSP stops restricting frame-ancestors (any origin may frame reveal-approval / 
+#   impersonation pages: clickjacking).
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/secure_headers_test.exs
+# MUST_FAIL: a browser response forbids framing by any other origin
+diff --git a/samen_web/lib/samen/web/secure_headers.ex b/samen_web/lib/samen/web/secure_headers.ex
+index dbef0463..4a99912f 100644
+--- a/samen_web/lib/samen/web/secure_headers.ex
++++ b/samen_web/lib/samen/web/secure_headers.ex
+@@ -61,7 +61,7 @@ defmodule Samen.Web.SecureHeaders do
+     "connect-src" => ["'self'"],
+     "object-src" => ["'none'"],
+     "base-uri" => ["'self'"],
+-    "frame-ancestors" => ["'self'"]
++    "frame-ancestors" => ["*"]
+   }
+ 
+   @order ~w(default-src script-src style-src img-src font-src connect-src object-src base-uri frame-ancestors)

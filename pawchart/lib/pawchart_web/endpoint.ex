@@ -15,7 +15,9 @@ defmodule PawChartWeb.Endpoint do
     store: :cookie,
     key: "_pawchart_key",
     signing_salt: "pawchart_sess_salt",
-    same_site: "Lax"
+    same_site: "Lax",
+    # ARCH-11 — `secure` in prod only (set by config/prod.exs; dev/test are plain http).
+    secure: Application.compile_env(:pawchart, :secure_session_cookie, false)
   ]
 
   socket("/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]])

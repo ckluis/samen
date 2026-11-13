@@ -110,6 +110,8 @@ defmodule PawChartWeb.Router do
   pipeline :browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
+    # ARCH-11 — secure browser headers + a conservative CSP (`frame-ancestors 'self'`), inherited from the framework.
+    plug(Samen.Web.SecureHeaders)
     plug(:put_root_layout, html: {PawChartWeb.Layouts, :root})
     plug(:protect_from_forgery)
     # PP-1/PP-2 (Batch 5a) — the prod auth gate. NO-OP in dev/test (`:auth_required?` false: the
