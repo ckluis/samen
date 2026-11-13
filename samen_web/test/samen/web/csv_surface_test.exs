@@ -165,6 +165,21 @@ defmodule Samen.Web.CsvSurfaceTest do
       assert html =~ "invalid"
     end
 
+    test "an import that STOPPED on an outage says where, how many were imported, and what was not attempted" do
+      report = %Report{total: 5, created: 2, errors: [], stopped: %{reason: :unavailable, at_row: 3}}
+
+      html = render_html(ImportLive, import_socket(Ash.UUID.generate(), [], report: report).assigns)
+
+      assert html =~ ~s(id="csv-import-stopped")
+      assert html =~ "stopped at row 3"
+      assert html =~ "2 of 5"
+      assert html =~ "not attempted"
+
+      # POSITIVE CONTROL: a finished import has no stop notice.
+      done = render_html(ImportLive, import_socket(Ash.UUID.generate(), [], report: %Report{total: 1, created: 1}).assigns)
+      refute done =~ "csv-import-stopped"
+    end
+
     test "a whole-file mapping rejection renders as the import error" do
       html =
         render_html(

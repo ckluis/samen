@@ -1077,27 +1077,79 @@ defmodule Samen.Web.ReadsHonestFailureP3Test do
 
   describe "CSV import report" do
     alias Samen.Web.Csv
-    alias Samen.WebTest.Crm.Person
+    alias Samen.WebTest.Crm.{Opportunity, Person}
 
-    test "a refused row's message names the kind of failure, never the cell value that was refused" do
+    # The real leak: `Ash.Error.Changes.InvalidAttribute.message/1` appends "Value: <inspect(value)>". A
+    # cast failure (an INTEGER column given text) produces exactly that error; the old
+    # `Exception.message/1` report echoed the cell.
+    test "a cast failure names the field and the kind of failure, never the cell value (and never logs it)" do
       org_id = Ash.UUID.generate()
-      scope = Samen.Web.Plane.scope(Samen.Web.Plane.operator("op-1", org_id, "p3-csv"), org_id)
+      scope = Samen.Web.Plane.scope(Samen.Web.Plane.tenant(), org_id)
       sentinel = "Sentinel#{System.unique_integer([:positive])}"
 
-      csv =
-        Csv.serialize([
-          ["display_name", "full_name"],
-          ["Row", ~s({"first":"#{sentinel}","last":"Refused"})]
-        ])
+      csv = Csv.serialize([["name", "probability"], ["Deal", sentinel]])
 
-      log = capture_log(fn -> send(self(), {:report, Csv.import(Person, scope, csv: csv)}) end)
-      assert_received {:report, {:ok, %Samen.Web.Csv.Report{errors: [%{row: 1, error: message}]}}}
+      log = capture_log(fn -> send(self(), {:report, Csv.import(Opportunity, scope, csv: csv)}) end)
+      assert_received {:report, {:ok, %Csv.Report{created: 0, stopped: nil, errors: [%{row: 1, error: message}]}}}
 
-      assert is_binary(message) and message != ""
+      # Non-vacuity: the framework's own message DOES carry the value, so this assertion can fail.
+      {:error, ash_error} =
+        Opportunity |> Ash.Changeset.for_create(:create, %{name: "Deal", probability: sentinel, org_id: org_id}, scope: scope) |> Ash.create()
+
+      assert Exception.message(ash_error) =~ sentinel
+
+      assert message =~ "probability"
       refute message =~ sentinel
-      refute message =~ "Refused"
       refute log =~ sentinel
     end
+
+    # The rescue path: a change that RAISES with the cell value in its message. The report carries fixed copy.
+    test "a change that raises with the cell value in its message never reaches the report or the log" do
+      scope = Samen.Web.Plane.scope(Samen.Web.Plane.tenant(), Ash.UUID.generate())
+      sentinel = "Sentinel#{System.unique_integer([:positive])}"
+      csv = Csv.serialize([["label"], [sentinel]])
+
+      log = capture_log(fn -> send(self(), {:report, Csv.import(Samen.WebTest.CsvBoom, scope, csv: csv)}) end)
+      assert_received {:report, {:ok, %Csv.Report{} = report}}
+
+      text = inspect(report)
+      refute text =~ sentinel
+      refute log =~ sentinel
+      # Non-vacuity: the change really did raise with the value (the failure is not silently absent).
+      assert report.created == 0
+      assert report.errors != [] or report.stopped != nil
+    end
+
+    test "an outage STOPS the import: rows before it are imported, the report says where it stopped, nothing after is attempted" do
+      org_id = Ash.UUID.generate()
+      scope = Samen.Web.Plane.scope(Samen.Web.Plane.tenant(), org_id)
+      table = AshPostgres.DataLayer.Info.table(Person)
+
+      column = display_name_column(Person)
+
+      Ecto.Adapters.SQL.query!(
+        Samen.WebTest.Repo,
+        "ALTER TABLE #{table} ADD CONSTRAINT zz_csv_outage CHECK (position('Boom' in #{column}) = 0) NOT VALID",
+        []
+      )
+
+      csv = Csv.serialize([["display_name"], ["First"], ["Second"], ["Boom row"], ["Fourth"], ["Fifth"]])
+
+      {result, log} = with_log(fn -> Csv.import(Person, scope, csv: csv) end)
+      assert {:ok, %Csv.Report{created: 2, total: 5, stopped: %{reason: :unavailable, at_row: 3}, errors: []}} = result
+      refute log =~ "Boom row"
+
+      # Rows 4 and 5 were never attempted.
+      refute Enum.any?(person_names(scope), &(&1 in ["Fourth", "Fifth"]))
+      assert Enum.sort(person_names(scope)) == ["First", "Second"]
+    end
+
+    defp display_name_column(resource) do
+      attr = Ash.Resource.Info.attribute(resource, :display_name)
+      to_string(Map.get(attr, :source) || attr.name)
+    end
+
+    defp person_names(scope), do: Person |> Ash.read!(scope: scope) |> Enum.map(& &1.display_name)
 
     test "a cross-org reference is refused without echoing the foreign id back in the report" do
       org_a = Ash.UUID.generate()
@@ -1125,6 +1177,41 @@ defmodule Samen.Web.ReadsHonestFailureP3Test do
       csv = Csv.serialize([["display_name"], ["Fine Row"]])
 
       assert {:ok, %Samen.Web.Csv.Report{created: 1, errors: []}} = Csv.import(Person, scope, csv: csv)
+    end
+  end
+end
+
+# A resource whose create change raises with the cell value in its message (the CSV rescue-path twin).
+defmodule Samen.WebTest.CsvBoom.Domain do
+  @moduledoc false
+  use Ash.Domain, validate_config_inclusion?: false
+
+  resources do
+    resource Samen.WebTest.CsvBoom
+  end
+end
+
+defmodule Samen.WebTest.CsvBoom do
+  @moduledoc false
+  use Ash.Resource, domain: Samen.WebTest.CsvBoom.Domain, data_layer: Ash.DataLayer.Ets
+
+  ets do
+    private? true
+  end
+
+  attributes do
+    uuid_primary_key :id
+    attribute :org_id, :uuid, public?: true
+    attribute :label, :string, public?: true
+  end
+
+  actions do
+    create :create do
+      accept [:org_id, :label]
+
+      change fn changeset, _ctx ->
+        raise "boom #{Ash.Changeset.get_attribute(changeset, :label)}"
+      end
     end
   end
 end
