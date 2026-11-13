@@ -14,12 +14,23 @@
 # asdf/mise read the same file. SAMEN_TOOLCHAIN_ELIXIR / SAMEN_TOOLCHAIN_OTP override the
 # detected versions (the self-test drives every case through them).
 #
-# Usage: scripts/toolchain_check.sh [--file <tool-versions>]     Exit: 0 ok · 1 too old · 2 env
+# AGREEMENT. Every committed mix.exs (and the generator's mix.exs templates) must declare
+# `elixir: ">= <pin>"`, so the requirement a host reads, the pin and this check never drift apart
+# (they once said "~> 1.18" while the pin and this check required 1.20.4). `--root <dir>` points the scan
+# at another tree (the self-test).
+#
+# Usage: scripts/toolchain_check.sh [--file <tool-versions>] [--root <dir>]     Exit: 0 ok · 1 too old/disagree · 2 env
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FILE="$REPO_ROOT/.tool-versions"
-[[ "${1:-}" == "--file" && -n "${2:-}" ]] && FILE="$2"
+FILE="$REPO_ROOT/.tool-versions"; SCAN_ROOT="$REPO_ROOT"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --file) FILE="${2:-}"; shift 2 ;;
+    --root) SCAN_ROOT="${2:-}"; shift 2 ;;
+    *) echo "TOOLCHAIN CHECK: unknown argument $1" >&2; exit 2 ;;
+  esac
+done
 [[ -f "$FILE" ]] || { echo "TOOLCHAIN CHECK: no .tool-versions at $FILE" >&2; exit 2; }
 
 pin_erlang="$(awk '$1=="erlang"{print $2}' "$FILE")"
@@ -43,5 +54,18 @@ for tool in Elixir OTP; do
     echo "TOOLCHAIN CHECK: note — $tool $run is newer than the pin $pin (fine; raise the pin when adopted)."
   fi
 done
+
+# Requirement agreement: every `elixir: "..."` in a mix.exs / mix.exs template must be exactly ">= <pin>".
+want=">= $pin_elixir"
+while IFS= read -r f; do
+  [[ -n "$f" ]] || continue
+  got="$(sed -n 's/^[[:space:]]*elixir: "\([^"]*\)".*/\1/p' "$f" | head -1)"
+  if [[ -n "$got" && "$got" != "$want" ]]; then
+    echo "TOOLCHAIN CHECK: ${f#"$SCAN_ROOT"/} declares elixir: \"$got\" but the pin requires \"$want\" — make them agree."
+    bad=1
+  fi
+done < <(find "$SCAN_ROOT" \( -name _build -o -name deps -o -name node_modules -o -name .git -o -name fixtures \) -prune -o \
+           \( -name mix.exs -o -name 'mix_exs*.eex' \) -type f -print 2>/dev/null)
+
 [[ $bad -eq 0 ]] || { echo "TOOLCHAIN CHECK: FAILED"; exit 1; }
 echo "TOOLCHAIN CHECK: OK (Elixir $run_elixir >= $pin_elixir, OTP $run_otp >= $pin_erlang)"

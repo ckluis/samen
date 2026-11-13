@@ -27,7 +27,7 @@ defmodule SamenWeb.MixProject do
       ],
       app: :samen_web,
       version: "0.1.0",
-      elixir: "~> 1.18",
+      elixir: ">= 1.20.4",
       elixirc_paths: elixirc_paths(Mix.env()),
       consolidate_protocols: Mix.env() != :test,
       # Issue #96 D3: consolidates Ash.Signals listeners once per build, like protocols, so an

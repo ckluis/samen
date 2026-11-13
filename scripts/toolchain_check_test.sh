@@ -20,5 +20,15 @@ check 0 "TOOLCHAIN CHECK: OK"          "29.1.10 >= 29.1.1 (numeric, not lexical)
 printf 'erlang 29.1.1\n' > "$T/half"
 check 2 "must pin both"                "a pin file missing elixir is an env error"    1.20.4 29.1.1 "$T/half"
 check 2 "no .tool-versions"            "a missing pin file is an env error"           1.20.4 29.1.1 "$T/absent"
+# requirement agreement: a mix.exs that disagrees with the pin fails and is named; agreeing ones pass
+mkdir -p "$T/ok/app" "$T/bad/app"
+printf '  elixir: ">= 1.20.4",\n' > "$T/ok/app/mix.exs"
+printf '  elixir: "~> 1.18",\n' > "$T/bad/app/mix.exs"
+check_root() { # check_root <want-rc> <grep> <what> <root>
+  out="$(SAMEN_TOOLCHAIN_ELIXIR=1.20.4 SAMEN_TOOLCHAIN_OTP=29.1.1 bash "$CHK" --file "$T/tv" --root "$4" 2>&1)"; rc=$?
+  if [[ $rc -eq $1 ]] && grep -qF -- "$2" <<<"$out"; then echo "PASS: $3"; pass=$((pass+1)); else echo "$out"; echo "FAIL: $3 (rc=$rc)"; fail=$((fail+1)); fi
+}
+check_root 0 "TOOLCHAIN CHECK: OK"   "a mix.exs agreeing with the pin passes"                "$T/ok"
+check_root 1 'app/mix.exs declares elixir: "~> 1.18"' "a mix.exs disagreeing with the pin fails and is named" "$T/bad"
 echo "TOOLCHAIN CHECK SELF-TEST: $pass passed, $fail failed"
 [[ $fail -eq 0 ]] && echo "TOOLCHAIN CHECK SELF-TEST: ALL PASSED" || { echo "TOOLCHAIN CHECK SELF-TEST: FAILED"; exit 1; }

@@ -5,7 +5,7 @@ defmodule S06Verify.MixProject do
     [
       app: :s06_verify,
       version: "0.1.0",
-      elixir: "~> 1.18",
+      elixir: ">= 1.20.4",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps()
