@@ -488,4 +488,26 @@ defmodule Samen.Web.ReadsHonestFailureReviewTest do
       refute html =~ "enqueue_failed"
     end
   end
+
+  # ===========================================================================
+  # N5 — a board total whose group count failed is unknown, not the loaded row count
+  # ===========================================================================
+
+  describe "N5 — board totals" do
+    alias Samen.Web.Board
+
+    test "a nil group count (the aggregate failed) makes the total nil (an em dash), on every board screen" do
+      rows = [%{id: 1}, %{id: 2}]
+
+      known = %Board{groups: [%Board.Group{key: :a, rows: rows, count: 40}, %Board.Group{key: :b, rows: rows, count: 2}], group_field: :status}
+      unknown = %Board{groups: [%Board.Group{key: :a, rows: rows, count: 40}, %Board.Group{key: :b, rows: rows, count: nil}], group_field: :status}
+
+      for {mod, fun} <- [{Samen.Web.Work.TimelineLive, :total_tasks}, {Samen.Web.CRM.PipelineLive, :total_opps}, {Samen.Web.CRM.CalendarLive, :total_opps}] do
+        # POSITIVE CONTROL: exact counts sum to the exact total (not the 4 loaded rows).
+        assert apply(mod, fun, [known]) == 42
+        assert apply(mod, fun, [unknown]) == nil
+        assert apply(mod, fun, [%Board{groups: [], group_field: :status}]) == 0
+      end
+    end
+  end
 end

@@ -150,8 +150,13 @@ defmodule Samen.Web.CRM.PipelineLive do
 
   # -- board helpers -----------------------------------------------------------
 
-  defp total_opps(%Board{groups: groups}),
-    do: Enum.reduce(groups, 0, fn g, acc -> acc + (g.count || length(g.rows)) end)
+  # The sum of the groups' EXACT counts. A group whose count aggregate failed has `count: nil`
+  # ("total unknown", see `Samen.Web.Reads` `safe_count/2`): the total is then unknown too (`nil`
+  # renders an em dash), never the number of rows that happened to be loaded.
+  @doc false
+  def total_opps(%Board{groups: groups}) do
+    if Enum.any?(groups, &is_nil(&1.count)), do: nil, else: Enum.sum(Enum.map(groups, & &1.count))
+  end
 
   # Match the column whose key stringifies to the event's phx-value-key ("" = nil key).
   defp group_for(%Board{groups: groups}, key),

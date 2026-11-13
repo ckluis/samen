@@ -43,7 +43,7 @@ defmodule Samen.Web.Reads.SwallowLint do
     {"samen_web/lib/samen/web/reads/guard.ex", :run} =>
       "the exit/throw clauses funnel into failed/3, which Guard.report/3s — the lint cannot see through the call",
     {"samen_web/lib/samen/web/reads/guard.ex", :write} =>
-      "the rescue/exit/throw clauses funnel into write_failed/3 -> failed/3, which Guard.report/3s — the lint cannot see through the call",
+      "the exit/throw clauses (and the rescue) funnel into write_failed/3 -> log_failure/4, which Logger.errors and emits the write-error event — the lint cannot see through the call",
     {"samen_web/lib/samen/web/reads/guard.ex", :emit} =>
       "best-effort telemetry: observability must never break the read it observes",
     {"samen_web/lib/samen/web/crm/reads.ex", :work_resource?} =>
@@ -52,8 +52,6 @@ defmodule Samen.Web.Reads.SwallowLint do
       "optional-scope probe: an unmounted Outreach scope IS 'absent' — the honest answer",
     {"samen_web/lib/samen/web/crm/sequences_reads.ex", :sends_configured?} =>
       "fail-honest predicate: 'no sender configured' is the safe, truthful default",
-    {"samen_web/lib/samen/web/billing/settings_live.ex", :billing_actor} =>
-      "fail-closed authorization lookup: no resolvable membership means no billing actor, which hides the admin affordances and refuses the write (never an elevated default)",
     {"samen_web/lib/samen/web/marketing/leads_live.ex", :crm_mount} =>
       "optional-scope probe: no (or an unresolvable) :crm_namespace label means the Leads lens is not wired on this host, which the lens renders as inert — a host-configuration fact, not a read",
     {"samen_web/lib/samen/web/settings/security_live.ex", :safe_csrf_token} =>
@@ -91,7 +89,7 @@ defmodule Samen.Web.Reads.SwallowLint do
     {"samen_web/lib/samen/web/first_run.ex", :any_rows?} =>
       "fail-safe probe: a failed existence check answers 'has records' so the first-run sample-data offer is NOT shown (never offers sample data into a possibly populated org)",
     {"samen_web/lib/samen/web/reads.ex", :safe_count} =>
-      "an exact-total aggregate that fails is nil = 'total unknown', which the caller renders as unknown rather than a number — never a fabricated count",
+      "an exact-total aggregate that fails is nil = 'total unknown'; the CRM pipeline column header prints no number for it, and the three board totals that sum group counts (Work timeline, CRM pipeline, CRM calendar) become nil — an em dash — when any group count is nil, never a fabricated count or the loaded row count",
     {"samen_web/lib/samen/web/onboarding/wizard_controller.ex", :verified?} =>
       "fail-CLOSED capability probe (ADR-035 §5 A2): an unresolvable principal is unverified on an armed host, never an elevated default"
   }
@@ -118,14 +116,14 @@ defmodule Samen.Web.Reads.SwallowLint do
     "samen_web/lib/samen/ui/gantt.ex" => 1,
     "samen_web/lib/samen/ui/nav.ex" => 1,
     "samen_web/lib/samen/ui/overlay.ex" => 1,
-        "samen_web/lib/samen/web/auth/totp_enroll_controller.ex" => 1,
+    "samen_web/lib/samen/web/auth/totp_enroll_controller.ex" => 1,
     "samen_web/lib/samen/web/auth/totp_pending.ex" => 2,
     "samen_web/lib/samen/web/auth_gate.ex" => 1,
     "samen_web/lib/samen/web/csv.ex" => 1,
     "samen_web/lib/samen/web/current_org.ex" => 6,
     "samen_web/lib/samen/web/live.ex" => 1,
     "samen_web/lib/samen/web/metrics_controller.ex" => 2,
-                            "samen_web/lib/samen/web/operator.ex" => 2,
+    "samen_web/lib/samen/web/operator.ex" => 2,
     "samen_web/lib/samen/web/operator/activity_reads.ex" => 7,
     "samen_web/lib/samen/web/operator/aggregate_live.ex" => 1,
     "samen_web/lib/samen/web/operator/analytics/reads.ex" => 3,
@@ -139,7 +137,7 @@ defmodule Samen.Web.Reads.SwallowLint do
     "samen_web/lib/samen/web/operator/revenue/reads.ex" => 3,
     "samen_web/lib/samen/web/operator/revenue_live.ex" => 1,
     "samen_web/lib/samen/web/operator/webhook_dlq_live.ex" => 3,
-        "samen_web/lib/samen/web/tenant_gate.ex" => 1
+    "samen_web/lib/samen/web/tenant_gate.ex" => 1
   }
 
   def roots, do: @roots
