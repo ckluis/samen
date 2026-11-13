@@ -243,27 +243,62 @@ defmodule Samen.Web.CRMSequencesTest do
     refute html =~ "Enroll contact"
   end
 
-  test "the enroll handle_event creates an enrollment and reports success", %{org_id: org_id} do
-    seq = create_sequence(org_id, "Drip")
-    mount = build_mount(:crm, plane: :tenant)
+  defp enroll_socket(org_id) do
+    %Phoenix.LiveView.Socket{}
+    |> Phoenix.Component.assign(:samen_mount, build_mount(:crm, plane: :tenant))
+    |> Phoenix.Component.assign(:samen_acting_as, false)
+    |> SequencesLive.load(org_id)
+  end
 
-    socket =
-      %Phoenix.LiveView.Socket{}
-      |> Phoenix.Component.assign(:samen_mount, mount)
-      |> Phoenix.Component.assign(:samen_acting_as, false)
-      |> SequencesLive.load(org_id)
+  defp create_contact(org_id) do
+    Samen.WebTest.Crm.Person
+    |> Ash.Changeset.for_create(:create, %{org_id: org_id, display_name: "Enrollable Person"}, authorize?: false)
+    |> Ash.create!()
+  end
+
+  test "the enroll handle_event enrolls a REAL contact and reports success", %{org_id: org_id} do
+    seq = create_sequence(org_id, "Drip")
+    contact = create_contact(org_id)
 
     {:noreply, after_click} =
       SequencesLive.handle_event(
         "enroll",
-        %{"sequence_id" => seq.id, "person_id" => Ash.UUID.generate()},
-        socket
+        %{"sequence_id" => seq.id, "person_id" => contact.id},
+        enroll_socket(org_id)
       )
 
     assert length(after_click.assigns.enrollments) == 1
     html = render_html(SequencesLive, after_click.assigns)
     assert html =~ "sequences-enroll-notice"
     assert html =~ "Contact enrolled"
+  end
+
+  test "a BLANK contact id is an error — nothing is enrolled, nothing is minted", %{org_id: org_id} do
+    seq = create_sequence(org_id, "Drip")
+
+    for blank <- ["", "   "] do
+      {:noreply, after_click} =
+        SequencesLive.handle_event("enroll", %{"sequence_id" => seq.id, "person_id" => blank}, enroll_socket(org_id))
+
+      assert {:error, msg} = after_click.assigns.enroll_notice
+      assert msg =~ "Enter the contact id"
+      assert after_click.assigns.enrollments == []
+    end
+  end
+
+  test "an id that is not a contact of THIS org is an error (random uuid, malformed, other org's contact)",
+       %{org_id: org_id} do
+    seq = create_sequence(org_id, "Drip")
+    other_org_contact = create_contact(Ash.UUID.generate())
+
+    for bad <- [Ash.UUID.generate(), "not-a-uuid", other_org_contact.id] do
+      {:noreply, after_click} =
+        SequencesLive.handle_event("enroll", %{"sequence_id" => seq.id, "person_id" => bad}, enroll_socket(org_id))
+
+      assert {:error, msg} = after_click.assigns.enroll_notice
+      assert msg =~ "not a contact in this workspace"
+      assert after_click.assigns.enrollments == []
+    end
   end
 
   # ==========================================================================

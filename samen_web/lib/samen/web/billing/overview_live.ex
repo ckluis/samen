@@ -261,7 +261,7 @@ defmodule Samen.Web.Billing.OverviewLive do
                     <.pill variant={plan_variant(plan_name(sub.__plan__))}>{plan_label(sub.__plan__)}</.pill>
                   </td>
                   <td class="sub-mrr" style="font-weight:500;color:#3a3b45">
-                    {plan_mrr(sub.__plan__)}
+                    {plan_mrr(sub)}
                   </td>
                   <td class="sub-status">
                     <.pill variant={sub_status_variant(sub.status)}>{sub.status}</.pill>
@@ -339,17 +339,9 @@ defmodule Samen.Web.Billing.OverviewLive do
   defp plan_label(%{name: name}) when is_binary(name), do: String.capitalize(name)
   defp plan_label(_), do: "—"
 
-  defp plan_mrr(nil), do: "—"
-
-  defp plan_mrr(%{name: name}) do
-    case name do
-      "starter" -> "$99/mo"
-      "growth" -> "$299/mo"
-      "scale" -> "$799/mo"
-      _ -> "—"
-    end
-  end
-
+  # The subscription's plan price per month, from the plan's real active price (joined by
+  # `Reads.subscriptions_page/3`); "—" when the plan has no recurring price to show.
+  defp plan_mrr(%{__mrr_cents__: cents}) when is_integer(cents), do: dollars(cents) <> "/mo"
   defp plan_mrr(_), do: "—"
 
   defp plan_variant("starter"), do: "mut"

@@ -398,12 +398,15 @@ defmodule Samen.Web.Operator.Reads do
     |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
     |> Enum.map(fn conv ->
+      {msgs, truncated?} = messages_for_conversation(mount, scope, conv.id, agents)
+
       %{
         id: conv.id,
         channel: conv.channel,
         status: conv.status,
         subject: conv.subject,
-        messages: messages_for_conversation(mount, scope, conv.id, agents)
+        messages: msgs,
+        earlier_hidden: truncated?
       }
     end)
   rescue
@@ -414,25 +417,29 @@ defmodule Samen.Web.Operator.Reads do
   # scope's plane — CLEAR on the operator's own tenant plane, `%Masked{}` (→ ••••) on an
   # operator-plane mount. NEVER unwraps.
   defp messages_for_conversation(mount, scope, conversation_id, agents) do
-    Mount.resource(mount, Message)
-    |> Ash.Query.ensure_selected([:sender_type, :message_type, :agent_id, :conversation_id, :body, :created_via])
-    |> Ash.Query.filter(conversation_id == ^conversation_id)
-    |> Ash.Query.sort(inserted_at: :asc)
-    |> Ash.Query.limit(@lookup_limit)
-    |> Ash.read!(scope: scope)
-    |> resolve_pii(mount, Message, scope)
-    |> Enum.map(fn m ->
-      %{
-        id: m.id,
-        sender_type: m.sender_type,
-        message_type: m.message_type,
-        body: m.body,
-        created_via: m.created_via,
-        __agent__: m.agent_id && Map.get(agents, m.agent_id)
-      }
-    end)
+    {rows, truncated?} =
+      Mount.resource(mount, Message)
+      |> Ash.Query.ensure_selected([:sender_type, :message_type, :agent_id, :conversation_id, :body, :created_via])
+      |> Ash.Query.filter(conversation_id == ^conversation_id)
+      |> Samen.Web.Reads.newest_window(@lookup_limit, scope: scope)
+
+    msgs =
+      rows
+      |> resolve_pii(mount, Message, scope)
+      |> Enum.map(fn m ->
+        %{
+          id: m.id,
+          sender_type: m.sender_type,
+          message_type: m.message_type,
+          body: m.body,
+          created_via: m.created_via,
+          __agent__: m.agent_id && Map.get(agents, m.agent_id)
+        }
+      end)
+
+    {msgs, truncated?}
   rescue
-    _ -> []
+    _ -> {[], false}
   end
 
   # Find the ticket's first conversation, or create one (a fresh ticket has none). Governed

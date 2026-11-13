@@ -64,19 +64,22 @@ defmodule Samen.Web.Chat.Reads do
   Read a thread's messages for `scope`, oldest-first, with `body` PII plane-resolved
   (tenant clear / operator `••••`). The vaulted body is resolved through the shared
   chokepoint — this is the re-read the `handle_info` broadcast path calls per subscriber.
-  BOUNDED to `#{@detail_limit}` rows (A3 read-bounding); realtime appends arrive via the
-  per-id `get_message/3` re-read, so the cap bounds only the initial history transfer.
+  BOUNDED to the NEWEST `#{@detail_limit}` rows (A3 read-bounding), shown in display order;
+  `messages_window/3` also reports whether older messages were left out.
   """
-  def messages(mount, scope, thread_id) do
-    Mount.resource(mount, ChatMessage)
-    |> Ash.Query.ensure_selected([:body, :sender_party, :kind, :refs, :participant_id, :thread_id])
-    |> Ash.Query.filter(thread_id == ^thread_id)
-    |> Ash.Query.sort(inserted_at: :asc)
-    |> Ash.Query.limit(@detail_limit)
-    |> Ash.read!(scope: scope)
-    |> resolve_pii(mount, ChatMessage, scope)
+  def messages(mount, scope, thread_id), do: elem(messages_window(mount, scope, thread_id), 0)
+
+  @doc "Like `messages/3` but `{messages, earlier_hidden?}` — `true` when older messages were cut."
+  def messages_window(mount, scope, thread_id) do
+    {rows, truncated?} =
+      Mount.resource(mount, ChatMessage)
+      |> Ash.Query.ensure_selected([:body, :sender_party, :kind, :refs, :participant_id, :thread_id])
+      |> Ash.Query.filter(thread_id == ^thread_id)
+      |> Samen.Web.Reads.newest_window(@detail_limit, scope: scope)
+
+    {resolve_pii(rows, mount, ChatMessage, scope), truncated?}
   rescue
-    _ -> []
+    _ -> {[], false}
   end
 
   @doc """

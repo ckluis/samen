@@ -2,7 +2,7 @@ defmodule Samen.Web.Application do
   @moduledoc """
   `samen_web`'s OTP application — supervises the framework's process-owned singletons.
 
-  Currently just `Samen.Web.RateLimit.Backend` (the Hammer fixed-window ETS counter store
+  Currently `Samen.Web.Auth.TotpPending` (the in-progress TOTP enrolment secret store) and `Samen.Web.RateLimit.Backend` (the Hammer fixed-window ETS counter store
   behind `Samen.Web.RateLimit`, ADR-038 §6.1). A rate limiter needs a STABLE owner for its
   ETS table: counters keyed per-account/per-IP must survive across requests, so the table
   cannot be owned by a transient request process. Supervising the backend here gives it a
@@ -19,7 +19,8 @@ defmodule Samen.Web.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      {Samen.Web.RateLimit.Backend, clean_period: :timer.minutes(1)}
+      {Samen.Web.RateLimit.Backend, clean_period: :timer.minutes(1)},
+      Samen.Web.Auth.TotpPending
     ]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Samen.Web.Supervisor)

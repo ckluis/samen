@@ -203,6 +203,23 @@ defmodule Samen.Web.Reads do
     Ash.Type.NaiveDatetime
   ]
 
+  @doc """
+  Read the NEWEST `limit` rows of `query` and return them in DISPLAY (oldest-first) order, with a
+  flag saying whether older rows were left out: `{rows, truncated?}`. A thread/conversation view
+  must show its latest messages — sorting ascending and then limiting shows the oldest `limit` and
+  hides the newest. Reads `limit + 1` rows (newest first, `id` as the tie-break) to detect
+  truncation, then drops the extra row. `opts` — `:scope` (required, the org boundary stays ON).
+  """
+  def newest_window(query, limit, opts) when is_integer(limit) and limit > 0 do
+    rows =
+      query
+      |> Ash.Query.sort(inserted_at: :desc, id: :desc)
+      |> Ash.Query.limit(limit + 1)
+      |> Ash.read!(scope: Keyword.fetch!(opts, :scope))
+
+    {rows |> Enum.take(limit) |> Enum.reverse(), length(rows) > limit}
+  end
+
   @doc "The default list page size (ADR-016 §3)."
   def default_page_size, do: @default_page_size
 

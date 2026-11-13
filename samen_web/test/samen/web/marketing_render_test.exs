@@ -142,10 +142,146 @@ defmodule Samen.Web.MarketingRenderTest do
     scope = Mount.scope(mount, org_id)
     {:ok, campaign} = Reads.get_campaign(mount, scope, campaign_id)
 
-    results = Reads.send_campaign_to_segment(mount, scope, campaign, segment, template_id, org_id)
+    {:ok, results} = Reads.send_campaign_to_segment(mount, scope, campaign, segment, template_id, org_id)
 
     # The segment audience is the ACTIVE subscriber → queued.
     assert Enum.any?(results, &match?(%{result: {:ok, _}}, &1))
+  end
+
+  describe "send to segment (eval 2026-11-13 tenant-a F01-F03)" do
+    defp add_active_subscribers(mount, scope, org_id, n) do
+      for i <- 1..n do
+        {:ok, sub} =
+          Reads.add_subscriber(mount, scope, %{email: "bulk#{i}-#{System.unique_integer([:positive])}@example.test", org_id: org_id})
+
+        sub.id
+      end
+    end
+
+    test "the audience is the segment's WHOLE membership, paged by keyset (not capped at one page)", %{
+      org_id: org_id,
+      campaign_id: campaign_id,
+      segment: segment,
+      template_id: template_id,
+      active_subscriber_id: seeded_id
+    } do
+      mount = build_mount(:marketing)
+      scope = Mount.scope(mount, org_id)
+      {:ok, campaign} = Reads.get_campaign(mount, scope, campaign_id)
+      bulk = add_active_subscribers(mount, scope, org_id, 5)
+
+      {:ok, results} =
+        Reads.send_campaign_to_segment(mount, scope, campaign, segment, template_id, org_id, page_size: 2)
+
+      sent = for %{subscriber_id: id, result: {:ok, _}} <- results, do: id
+      # 6 active subscribers across three pages of 2: every one is sent, none twice.
+      assert Enum.sort(sent) == Enum.sort([seeded_id | bulk])
+      assert length(Enum.uniq(sent)) == length(sent)
+      assert length(Reads.sends_for_campaign(mount, scope, campaign_id)) == 6
+    end
+
+    test "a second send of the same campaign is a no-op per (campaign, subscriber)", %{
+      org_id: org_id,
+      campaign_id: campaign_id,
+      segment: segment,
+      template_id: template_id
+    } do
+      mount = build_mount(:marketing)
+      scope = Mount.scope(mount, org_id)
+      {:ok, campaign} = Reads.get_campaign(mount, scope, campaign_id)
+      add_active_subscribers(mount, scope, org_id, 2)
+
+      {:ok, first} = Reads.send_campaign_to_segment(mount, scope, campaign, segment, template_id, org_id)
+      before_count = length(Reads.sends_for_campaign(mount, scope, campaign_id))
+      queued = for %{subscriber_id: id, result: {:ok, _}} <- first, do: id
+      assert length(queued) == 3
+
+      {:ok, second} = Reads.send_campaign_to_segment(mount, scope, campaign, segment, template_id, org_id)
+
+      assert Enum.sort(for %{subscriber_id: id, result: {:error, :already_sent}} <- second, do: id) ==
+               Enum.sort(queued)
+      assert length(Reads.sends_for_campaign(mount, scope, campaign_id)) == before_count
+    end
+
+    test "a missing template or campaign is refused, never an empty success", %{
+      org_id: org_id,
+      campaign_id: campaign_id,
+      segment: segment,
+      template_id: template_id
+    } do
+      mount = build_mount(:marketing)
+      scope = Mount.scope(mount, org_id)
+      {:ok, campaign} = Reads.get_campaign(mount, scope, campaign_id)
+
+      assert {:error, :template_required} =
+               Reads.send_campaign_to_segment(mount, scope, campaign, segment, nil, org_id)
+
+      assert {:error, :campaign_required} =
+               Reads.send_campaign_to_segment(mount, scope, nil, segment, template_id, org_id)
+
+      assert Reads.sends_for_campaign(mount, scope, campaign_id) == []
+    end
+
+    test "an audience read that raises is a FAILURE, not 'Enqueued 0'", %{
+      org_id: org_id,
+      campaign_id: campaign_id,
+      segment: segment,
+      template_id: template_id
+    } do
+      mount = build_mount(:marketing)
+      scope = Mount.scope(mount, org_id)
+      {:ok, campaign} = Reads.get_campaign(mount, scope, campaign_id)
+
+      # A non-positive page size makes the audience read raise; it must surface as {:error, _}.
+      assert {:error, _} =
+               Reads.send_campaign_to_segment(mount, scope, campaign, segment, template_id, org_id, page_size: -1)
+    end
+
+    defp compose_socket(mount, org_id, campaign_id) do
+      %Phoenix.LiveView.Socket{}
+      |> Phoenix.Component.assign(:samen_mount, mount)
+      |> Phoenix.Component.assign(:samen_acting_as, false)
+      |> Phoenix.Component.assign(:org_id, org_id)
+      |> Phoenix.Component.assign(:send_results, nil)
+      |> Phoenix.Component.assign(:notice, nil)
+      |> Samen.Web.Marketing.CampaignLive.load(org_id, campaign_id)
+    end
+
+    test "the form refuses an empty segment/template selection and reports it", %{org_id: org_id, campaign_id: campaign_id} do
+      mount = build_mount(:marketing)
+      scope = Mount.scope(mount, org_id)
+      socket = compose_socket(mount, org_id, campaign_id)
+
+      {:noreply, socket} =
+        Samen.Web.Marketing.CampaignLive.handle_event(
+          "send_campaign",
+          %{"send" => %{"template_id" => "", "segment_id" => ""}},
+          socket
+        )
+
+      assert socket.assigns.notice =~ "Choose a template and a segment"
+      assert Reads.sends_for_campaign(mount, scope, campaign_id) == []
+    end
+
+    test "submitting the form twice sends once; the second submit changes nothing", %{
+      org_id: org_id,
+      campaign_id: campaign_id,
+      segment: segment,
+      template_id: template_id
+    } do
+      mount = build_mount(:marketing)
+      scope = Mount.scope(mount, org_id)
+      socket = compose_socket(mount, org_id, campaign_id)
+      params = %{"send" => %{"template_id" => template_id, "segment_id" => segment.id}}
+
+      {:noreply, s1} = Samen.Web.Marketing.CampaignLive.handle_event("send_campaign", params, socket)
+      assert s1.assigns.notice =~ "Enqueued 1 send(s)"
+      n = length(Reads.sends_for_campaign(mount, scope, campaign_id))
+
+      {:noreply, s2} = Samen.Web.Marketing.CampaignLive.handle_event("send_campaign", params, s1)
+      assert s2.assigns.notice =~ "Enqueued 0 send(s); 1 already sent"
+      assert length(Reads.sends_for_campaign(mount, scope, campaign_id)) == n
+    end
   end
 
   test "send_to_subscribers surfaces per-recipient refusal for a mixed batch (active queued, suppressed refused)", %{

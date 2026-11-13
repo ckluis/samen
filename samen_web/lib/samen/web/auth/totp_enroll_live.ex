@@ -55,6 +55,7 @@ defmodule Samen.Web.Auth.TotpEnrollLive do
   alias Samen.Scopes.Identity.Audit
   alias Samen.Scopes.Identity.Notify
   alias Samen.Web.Auth.Totp
+  alias Samen.Web.Auth.TotpPending
   alias Samen.Web.Mount
 
   @impl true
@@ -91,7 +92,9 @@ defmodule Samen.Web.Auth.TotpEnrollLive do
   end
 
   defp setup(socket, credential_id, mount, error) do
-    raw_secret = Totp.generate_secret()
+    # Stable for this enrolment attempt: the dead render, the connected render and every
+    # reconnect must show the SAME secret the user may already have scanned.
+    raw_secret = TotpPending.fetch_or_create(credential_id)
 
     assign(socket,
       credential_id: credential_id,
@@ -134,6 +137,7 @@ defmodule Samen.Web.Auth.TotpEnrollLive do
 
     case Totp.confirm_enrollment(mods(mount), socket.assigns.credential_id, socket.assigns.raw_secret, code) do
       {:ok, _credential, recovery_codes} ->
+        TotpPending.drop(socket.assigns.credential_id)
         fan_out(mount, socket.assigns.credential_id, "totp_enrolled", "Two-factor authentication was enabled on your account.")
         {:noreply, assign(socket, enrolled?: true, recovery_codes: recovery_codes, error: nil)}
 
@@ -168,6 +172,7 @@ defmodule Samen.Web.Auth.TotpEnrollLive do
 
     case Totp.disable(mods(mount), socket.assigns.credential_id) do
       {:ok, _credential} ->
+        TotpPending.drop(socket.assigns.credential_id)
         fan_out(mount, socket.assigns.credential_id, "totp_disabled", "Two-factor authentication was disabled on your account.")
 
       _ ->

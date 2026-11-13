@@ -171,7 +171,24 @@ defmodule DriftwoodWeb.BrokerLive do
     }
   end
 
-  defp panel(params), do: param(params, "panel") || "dashboard"
+  # The brokerage name and signed-in user come from the mount the framework screens read
+  # (`CurrentOrg.name/2` over the org directory; `:user_*` labels with the framework defaults),
+  # never from literals. A render without a mount (unit tests) degrades to the same defaults.
+  defp org_title(nil, _org_id), do: "Workspace"
+  defp org_title(mount, org_id), do: Samen.Web.CurrentOrg.name(mount, org_id)
+
+  defp mount_label(nil, _key, default), do: default
+  defp mount_label(mount, key, default), do: Samen.Web.Mount.label(mount, key, default)
+
+  @panels ~w(dashboard loads roster settlements)
+
+  # An unknown `?panel=` falls back to the default panel (it used to render a blank page).
+  defp panel(params) do
+    case param(params, "panel") do
+      p when p in @panels -> p
+      _ -> "dashboard"
+    end
+  end
   defp param(params, key), do: Map.get(params, key)
 
   # ADR-036 §4.5(4): l.value is now the Money composite (dollars(l.value)).
@@ -232,6 +249,7 @@ defmodule DriftwoodWeb.BrokerLive do
     # no-op there).
     assigns =
       assigns
+      |> Map.put_new(:samen_mount, nil)
       |> Map.put_new(:show_new, false)
       |> Map.put_new(:new_load_form, nil)
       |> Map.put_new(:load_error, nil)
@@ -259,7 +277,7 @@ defmodule DriftwoodWeb.BrokerLive do
       <.app_shell>
         <:sidebar>
           <.sidebar
-            title="Blue Ridge Logistics"
+            title={org_title(@samen_mount, @org_id)}
             subtitle="Freight brokerage"
             logo="B"
             logo_style="background:linear-gradient(150deg,#0E7C5A,#17A06E)"
@@ -308,14 +326,16 @@ defmodule DriftwoodWeb.BrokerLive do
 
             <:footer>
               <div class="foot">
-                <div class="av" style="background:#D6E9DF;color:#1E7A45">RM</div>
-                <div class="m"><b>Rosa Medina</b><span>dispatcher</span></div>
+                <div class="av" style="background:#D6E9DF;color:#1E7A45">{mount_label(@samen_mount, :user_initials, "S")}</div>
+                <div class="m">
+                  <b>{mount_label(@samen_mount, :user_name, "Signed in")}</b><span>{mount_label(@samen_mount, :user_role, "member")}</span>
+                </div>
               </div>
             </:footer>
           </.sidebar>
         </:sidebar>
 
-        <.topbar title={panel_title(@panel)} crumbs={["Blue Ridge Logistics", "Operations", panel_title(@panel)]}>
+        <.topbar title={panel_title(@panel)} crumbs={[org_title(@samen_mount, @org_id), "Operations", panel_title(@panel)]}>
           <:actions>
             <%!-- T148: "New load" is wired to the real create flow (`create_load/2`).
                   T158: the create action is now CONTEXTUAL to the active panel — "New load" on
@@ -539,9 +559,9 @@ defmodule DriftwoodWeb.BrokerLive do
                     </td>
                     <td class="d-dispatch">
                       <%= if Reads.dispatchable?(d) do %>
-                        <button class="dispatch-btn btn" phx-click="dispatch" phx-value-driver={d.id}>Dispatch</button>
+                        <button class="dispatch-btn btn" phx-click="dispatch" phx-value-driver={d.id} title="Checks the driver's FMCSA eligibility. A dispatch itself needs a load.">Check eligibility</button>
                       <% else %>
-                        <button class="dispatch-btn btn" disabled>Dispatch (blocked)</button>
+                        <button class="dispatch-btn btn" disabled>Not eligible (FMCSA)</button>
                       <% end %>
                     </td>
                     <td class="d-actions">
@@ -789,7 +809,16 @@ defmodule DriftwoodWeb.BrokerLive do
     case dispatch_decision(socket.assigns.org_id, driver_id) do
       {:error, :not_found} -> {:noreply, put_flash(socket, :error, "driver not found")}
       {:error, :fmcsa_blocked} -> {:noreply, put_flash(socket, :error, "dispatch refused — driver is FMCSA-blocked")}
-      {:ok, _} -> {:noreply, put_flash(socket, :info, "driver #{driver_id} is dispatchable")}
+      {:ok, driver} ->
+        name =
+          case driver_name(driver.full_name) do
+            n when is_binary(n) and n != "" -> n
+            _ -> "This driver"
+          end
+
+        # A dispatch (`DispatchEvent.:dispatch`) joins a driver to a LOAD (load_id is required),
+        # and this roster button carries no load — so it only reports eligibility, honestly.
+        {:noreply, put_flash(socket, :info, "#{name} is eligible for dispatch (FMCSA clear). Assign them to a load to dispatch.")}
     end
   end
 

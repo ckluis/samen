@@ -43,7 +43,7 @@ defmodule Samen.Web.Files.UploadLive do
   use Phoenix.LiveView
 
   import Samen.UI
-  import Samen.Web.Files.Live, only: [assign_mount: 2, files_sidebar: 1, writable?: 1]
+  import Samen.Web.Files.Live, only: [assign_mount: 2, files_sidebar: 1, writable?: 1, file_path: 3]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
@@ -263,7 +263,7 @@ defmodule Samen.Web.Files.UploadLive do
                   <td class="f-size" style="font-size:12px;color:var(--muted)">{format_bytes(f.size_bytes)}</td>
                   <td class="f-uploaded" style="font-size:12px;color:var(--muted)">{uploaded_at(f)}</td>
                   <td class="f-actions">
-                    <.link :if={f.status == :active} navigate={"/files/#{f.id}"} id={"preview-#{f.id}"}>
+                    <.link :if={f.status == :active} navigate={file_path(@samen_mount, f.id, @org_id)} id={"preview-#{f.id}"}>
                       Preview
                     </.link>
                   </td>

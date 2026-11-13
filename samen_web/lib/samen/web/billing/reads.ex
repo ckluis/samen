@@ -606,11 +606,28 @@ defmodule Samen.Web.Billing.Reads do
   defp join_subscriptions(subs, mount, scope) do
     custs_by_id = customers(mount, scope) |> Map.new(&{&1.id, &1})
     plans_by_id = plans(mount, scope) |> Map.new(&{&1.id, &1})
+    prices = prices_by_plan(mount, scope)
 
     Enum.map(subs, fn sub ->
       sub
       |> Map.put(:__customer__, Map.get(custs_by_id, sub.customer_id))
       |> Map.put(:__plan__, Map.get(plans_by_id, sub.plan_id))
+      |> Map.put(:__mrr_cents__, plan_mrr_cents(Map.get(prices, sub.plan_id, [])))
+    end)
+  end
+
+  # The plan's REAL monthly recurring amount in cents, from its active price: a monthly price is
+  # itself, an annual one is a twelfth (rounded). `nil` when the plan has no active recurring
+  # price we can normalise (none, one-time, weekly/daily) — the UI shows "—", never a guess.
+  defp plan_mrr_cents(prices) do
+    Enum.find_value(prices, fn price ->
+      cents = Samen.Type.Money.cents(price.unit_amount)
+
+      case {price.active, price.interval} do
+        {true, :monthly} -> cents
+        {true, :annual} -> div(cents + 6, 12)
+        _ -> nil
+      end
     end)
   end
 

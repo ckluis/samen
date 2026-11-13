@@ -44,10 +44,19 @@ defmodule Samen.Web.FleetIngressTest do
   # ---------------------------------------------------------------------------
 
   describe "GET /fleet/health — mode A" do
-    test "RP-J-10: no local credential configured -> 503, empty body" do
+    test "RP-J-10: no local credential configured -> 503 with an honest JSON body" do
       conn = conn(:get, "/fleet/health") |> Ingress.health(otp_app: @host)
       assert conn.status == 503
-      assert conn.resp_body == ""
+      assert ["application/json" <> _] = Plug.Conn.get_resp_header(conn, "content-type")
+      body = Jason.decode!(conn.resp_body)
+      assert body["status"] == "fleet_not_configured"
+      assert body["error"] =~ "no fleet credential configured"
+      # never report-shaped: no healthy-looking fields
+      refute Map.has_key?(body, "app_id")
+
+      directive = conn(:post, "/fleet/directive") |> Ingress.directive(otp_app: @host)
+      assert directive.status == 503
+      assert Jason.decode!(directive.resp_body)["status"] == "fleet_not_configured"
     end
 
     test "GREEN (control): correctly signed request -> 200 + schema-valid report" do

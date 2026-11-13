@@ -133,7 +133,8 @@ defmodule Samen.Web.ChatLiveRenderTest do
     mount = chat_mount(plane: :operator, target_org_id: org_id)
     socket = build_socket(ThreadLive, mount, [org_id, chat.thread.id])
 
-    envelope = Samen.Web.Chat.envelope(chat.message)
+    # A message posted AFTER the socket loaded (the loaded one is already in the list).
+    envelope = Samen.Web.Chat.envelope(Seeds.append_chat_message(chat, org_id, "arrives live"))
     before = length(socket.assigns.messages)
 
     {:noreply, socket} = ThreadLive.handle_info({:chat_message, envelope}, socket)
@@ -142,6 +143,56 @@ defmodule Samen.Web.ChatLiveRenderTest do
     appended = List.last(socket.assigns.messages)
     # The re-read resolved the body for the OPERATOR plane → masked.
     assert match?(%Samen.Masked{}, appended.message.body)
+  end
+
+  test "the sender does not see its own message twice (optimistic append + own broadcast, de-duplicated by id)",
+       %{org_id: org_id, chat: chat} do
+    mount = chat_mount(plane: :tenant)
+    socket = build_socket(ThreadLive, mount, [org_id, chat.thread.id])
+    before = length(socket.assigns.messages)
+
+    {:noreply, socket} = ThreadLive.handle_event("send", %{"body" => "said once"}, socket)
+    sent = List.last(socket.assigns.messages)
+    assert length(socket.assigns.messages) == before + 1
+
+    # The sender's own broadcast arrives back.
+    {:noreply, socket} =
+      ThreadLive.handle_info({:chat_message, Samen.Web.Chat.envelope(sent.message)}, socket)
+
+    assert length(socket.assigns.messages) == before + 1
+    assert Enum.count(socket.assigns.messages, &(&1.message.id == sent.message.id)) == 1
+  end
+
+  test "a long thread shows the NEWEST messages, oldest hidden, with an 'earlier messages' row",
+       %{org_id: org_id, chat: chat} do
+    mount = chat_mount(plane: :tenant)
+    scope = Mount.scope(mount, org_id)
+    # Timestamps are second-resolution, so give each row a distinct instant after the seeded one.
+    base = DateTime.add(DateTime.utc_now(), 60, :second) |> DateTime.truncate(:second)
+
+    for i <- 1..205 do
+      Seeds.append_chat_message(chat, org_id, "bulk #{String.pad_leading("#{i}", 3, "0")}", DateTime.add(base, i, :second))
+    end
+
+    {window, hidden?} = Samen.Web.Chat.Reads.messages_window(mount, scope, chat.thread.id)
+    assert hidden?
+    assert length(window) == 200
+    bodies = Enum.map(window, & &1.body)
+    # newest last, display order ascending; the seeded + earliest bulk rows are the ones cut.
+    assert List.last(bodies) == "bulk 205"
+    assert "bulk 205" in bodies and "bulk 006" in bodies
+    refute "bulk 001" in bodies
+
+    socket = build_socket(ThreadLive, mount, [org_id, chat.thread.id])
+    html = render_html(ThreadLive, socket.assigns)
+    assert html =~ "earlier-messages-hidden"
+    assert html =~ "bulk 205"
+  end
+
+  test "a short thread shows no 'earlier messages' row", %{org_id: org_id, chat: chat} do
+    mount = chat_mount(plane: :tenant)
+    socket = build_socket(ThreadLive, mount, [org_id, chat.thread.id])
+    refute render_html(ThreadLive, socket.assigns) =~ "earlier-messages-hidden"
   end
 
   test "handle_info ignores a broadcast for a DIFFERENT thread", %{org_id: org_id, chat: chat} do

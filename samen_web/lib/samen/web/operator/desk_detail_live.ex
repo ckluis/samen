@@ -209,6 +209,9 @@ defmodule Samen.Web.Operator.DeskDetailLive do
                 </div>
 
                 <div :for={conv <- @ticket.__conversations__} class="conv-thread" id={"conv-#{conv.id}"}>
+                  <div :if={Map.get(conv, :earlier_hidden)} class="earlier-messages-hidden" style="padding:8px 0;color:var(--muted);font-size:12px">
+                    Earlier messages are not shown — this is the latest part of the conversation.
+                  </div>
                   <div :for={m <- conv.messages} class={"msg msg-#{m.sender_type}"} id={"msg-#{m.id}"} style="padding:12px 16px;border:1px solid var(--line,#E5E7EB);border-radius:10px;margin-bottom:10px">
                     <div class="msg-meta" style="font-size:12px;color:var(--muted);margin-bottom:4px">
                       <span class="msg-sender">{sender_label(m)}</span> · <span class="msg-kind">{m.message_type}</span>

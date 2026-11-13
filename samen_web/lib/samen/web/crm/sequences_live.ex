@@ -112,34 +112,42 @@ defmodule Samen.Web.CRM.SequencesLive do
     org_id = socket.assigns.org_id
     scope = Mount.scope(mount, org_id)
 
-    socket =
-      case Reads.enroll(mount, scope, sequence_id, normalize_person_id(person_id)) do
-        {:ok, _enrollment} ->
-          socket
-          |> assign(enroll_notice: {:ok, "Contact enrolled — the sequence advances on its own schedule."})
-          |> load(org_id)
+    person_id = normalize_person_id(person_id)
 
-        {:error, _reason} ->
-          assign(socket,
-            enroll_notice:
-              {:error,
-               "Enrollment refused — the sequence must belong to this org and the contact id must be a valid uuid."}
-          )
+    socket =
+      cond do
+        is_nil(person_id) ->
+          assign(socket, enroll_notice: {:error, "Enter the contact id to enroll."})
+
+        not Samen.Web.CRM.Reads.contact_exists?(mount, scope, person_id) ->
+          assign(socket, enroll_notice: {:error, "That is not a contact in this workspace."})
+
+        true ->
+          case Reads.enroll(mount, scope, sequence_id, person_id) do
+            {:ok, _enrollment} ->
+              socket
+              |> assign(enroll_notice: {:ok, "Contact enrolled — the sequence advances on its own schedule."})
+              |> load(org_id)
+
+            {:error, _reason} ->
+              assign(socket,
+                enroll_notice: {:error, "Enrollment refused — the sequence must belong to this org."}
+              )
+          end
       end
 
     {:noreply, socket}
   end
 
-  # An empty person id → mint one (a tenant enrolling an ad-hoc contact ref). person_id is
-  # an OPAQUE uuid with no FK, so any uuid is a legitimate reference (the blueprint posture).
+  # A blank person id is an ERROR (nil) — never a minted stand-in contact.
   defp normalize_person_id(id) when is_binary(id) do
     case String.trim(id) do
-      "" -> Ash.UUID.generate()
+      "" -> nil
       trimmed -> trimmed
     end
   end
 
-  defp normalize_person_id(_), do: Ash.UUID.generate()
+  defp normalize_person_id(_), do: nil
 
   @impl true
   def render(assigns) do

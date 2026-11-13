@@ -34,7 +34,7 @@ defmodule Samen.Web.Files.PreviewLive do
   use Phoenix.LiveView
 
   import Samen.UI
-  import Samen.Web.Files.Live, only: [assign_mount: 2, files_sidebar: 1]
+  import Samen.Web.Files.Live, only: [assign_mount: 2, files_sidebar: 1, file_bytes_path: 3]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
@@ -133,7 +133,7 @@ defmodule Samen.Web.Files.PreviewLive do
                     <div id="preview-byte-view" style="margin-top:16px">
                       <%= if previewable_image?(@file) do %>
                         <img
-                          src={"/files/#{@file.id}/bytes"}
+                          src={file_bytes_path(@samen_mount, @file.id, @org_id)}
                           id="preview-image"
                           alt={@file.filename}
                           style="max-width:100%;border-radius:4px"
@@ -141,13 +141,13 @@ defmodule Samen.Web.Files.PreviewLive do
                       <% end %>
                       <%= if previewable_text?(@file) do %>
                         <pre id="preview-text-link" style="font-size:12px">
-                          <a href={"/files/#{@file.id}/bytes"} target="_blank" id="download-link">
+                          <a href={file_bytes_path(@samen_mount, @file.id, @org_id)} target="_blank" id="download-link">
                             Download / view raw text
                           </a>
                         </pre>
                       <% end %>
                       <%= if not previewable_image?(@file) and not previewable_text?(@file) do %>
-                        <a href={"/files/#{@file.id}/bytes"} target="_blank" id="download-link">
+                        <a href={file_bytes_path(@samen_mount, @file.id, @org_id)} target="_blank" id="download-link">
                           Download file
                         </a>
                       <% end %>

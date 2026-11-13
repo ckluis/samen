@@ -91,7 +91,7 @@ defmodule Samen.Web.Chat.ThreadLive do
           {:ok, thread} ->
             participants = Reads.participants(mount, scope, thread_id)
             resolved_participants = Identity.resolve_participants(mount, scope, thread, participants)
-            messages = Reads.messages(mount, scope, thread_id)
+            {messages, earlier_hidden} = Reads.messages_window(mount, scope, thread_id)
 
             assign(socket,
               no_thread: false,
@@ -101,6 +101,7 @@ defmodule Samen.Web.Chat.ThreadLive do
               participants: resolved_participants,
               handles: handle_map(participants),
               messages: attach_cards(mount, scope, messages),
+              earlier_hidden: earlier_hidden,
               composer: "",
               impersonation: ok_state(mount),
               session_info: session_info,
@@ -321,6 +322,9 @@ defmodule Samen.Web.Chat.ThreadLive do
             <div class="wrap chat-layout">
             <div class="chat-main">
               <div id="chat-messages" class="chat-messages">
+                <div :if={@earlier_hidden} id="earlier-messages-hidden" class="chat-earlier" style="text-align:center;color:var(--muted);font-size:12px;padding:8px 0">
+                  Earlier messages are not shown — this is the latest part of the conversation.
+                </div>
                 <.chat_message
                   :for={%{message: m, cards: cards} <- @messages}
                   message={m}
@@ -356,6 +360,7 @@ defmodule Samen.Web.Chat.ThreadLive do
       participants: [],
       handles: %{},
       messages: [],
+      earlier_hidden: false,
       composer: "",
       impersonation: :none,
       session_info: nil,
@@ -391,8 +396,14 @@ defmodule Samen.Web.Chat.ThreadLive do
   end
 
   # Append one message entry to the stream-ish assign (kept simple: prepend/append list).
+  # De-duplicated by message id: the sender appends its own post optimistically AND receives its
+  # own broadcast, so the same id can arrive twice.
   defp push_message(socket, entry) do
-    assign(socket, messages: socket.assigns.messages ++ [entry])
+    if Enum.any?(socket.assigns.messages, &(&1.message.id == entry.message.id)) do
+      socket
+    else
+      assign(socket, messages: socket.assigns.messages ++ [entry])
+    end
   end
 
   defp handle_map(participants), do: Map.new(participants, fn p -> {p.id, p.handle} end)

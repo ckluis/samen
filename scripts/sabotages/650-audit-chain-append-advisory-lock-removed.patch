@@ -1,0 +1,20 @@
+# SABOTAGE: AuditChain.append no longer takes the per-org advisory transaction lock, so concurrent appends 
+#   fork the seq and hit the unique index
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/audit_chain_concurrency_test.exs
+# MUST_FAIL: concurrent bare AuditChain.append on a FRESH chain: every append lands, seq dense
+diff --git a/samen_core/lib/samen/audit_chain.ex b/samen_core/lib/samen/audit_chain.ex
+index 03c7ebe3..ce4ea932 100644
+--- a/samen_core/lib/samen/audit_chain.ex
++++ b/samen_core/lib/samen/audit_chain.ex
+@@ -194,7 +194,7 @@ defmodule Samen.AuditChain do
+       # back (rolling back here would abort a caller's enclosing transaction). A DB error raises
+       # and rolls the transaction back.
+       case r.transaction(fn ->
+-             lock_org_chain(r, org_id)
++             :ok
+              do_append(r, org_id, attrs, ciphertext)
+            end) do
+         {:ok, result} -> result

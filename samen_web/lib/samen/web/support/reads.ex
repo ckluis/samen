@@ -146,16 +146,26 @@ defmodule Samen.Web.Support.Reads do
     agents_map = agents_by_id(mount, scope)
 
     Enum.map(convs, fn conv ->
-      msgs = messages_for_conversation(mount, scope, conv.id, agents_map)
-      Map.put(conv, :__messages__, msgs)
+      {msgs, truncated?} = messages_window_for_conversation(mount, scope, conv.id, agents_map)
+
+      conv
+      |> Map.put(:__messages__, msgs)
+      |> Map.put(:__earlier_hidden__, truncated?)
     end)
   rescue
     _ -> []
   end
 
-  @doc "Read messages for a conversation with body PII-resolved and agent joined. BOUNDED."
-  def messages_for_conversation(mount, scope, conversation_id, agents_map \\ nil) do
-    msgs =
+  @doc """
+  Read messages for a conversation with body PII-resolved and agent joined. BOUNDED to the
+  NEWEST `#{@detail_limit}` messages, returned oldest-first.
+  """
+  def messages_for_conversation(mount, scope, conversation_id, agents_map \\ nil),
+    do: elem(messages_window_for_conversation(mount, scope, conversation_id, agents_map), 0)
+
+  @doc "Like `messages_for_conversation/4` but `{messages, earlier_hidden?}`."
+  def messages_window_for_conversation(mount, scope, conversation_id, agents_map \\ nil) do
+    {rows, truncated?} =
       Mount.resource(mount, Message)
       |> Ash.Query.ensure_selected([
         :sender_type,
@@ -167,19 +177,14 @@ defmodule Samen.Web.Support.Reads do
         :body
       ])
       |> Ash.Query.filter(conversation_id == ^conversation_id)
-      |> Ash.Query.sort(inserted_at: :asc)
-      |> Ash.Query.limit(@detail_limit)
-      |> Ash.read!(scope: scope)
-      |> resolve_pii(mount, Message, scope)
+      |> Samen.Web.Reads.newest_window(@detail_limit, scope: scope)
 
+    msgs = resolve_pii(rows, mount, Message, scope)
     agents_map = agents_map || agents_by_id(mount, scope)
 
-    Enum.map(msgs, fn msg ->
-      agent = agents_map[msg.agent_id]
-      Map.put(msg, :__agent__, agent)
-    end)
+    {Enum.map(msgs, fn msg -> Map.put(msg, :__agent__, agents_map[msg.agent_id]) end), truncated?}
   rescue
-    _ -> []
+    _ -> {[], false}
   end
 
   @doc "Read support agents for `scope` with full_name/email PII-resolved. BOUNDED."
