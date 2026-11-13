@@ -48,6 +48,9 @@ defmodule Samen.Web.Operator.AggregateLive do
 
     assign(socket,
       load_error: load_error,
+      # WIRED = the host mounted an `aggregate_loader`. A wired loader that returns no groups is an honest
+      # empty projection, not an unwired one.
+      wired: wired?(socket.assigns[:samen_mount]),
       title: title(socket.assigns[:samen_mount]),
       metrics: Map.get(data, :metrics, []),
       groups: Map.get(data, :groups, []),
@@ -66,6 +69,9 @@ defmodule Samen.Web.Operator.AggregateLive do
   end
 
   defp load_aggregate(_), do: {:ok, %{}}
+
+  defp wired?(%Mount{} = mount), do: match?({_, _, _}, Mount.label(mount, :aggregate_loader, nil))
+  defp wired?(_), do: false
 
   @impl true
   def handle_event("retry_load", _params, socket), do: {:noreply, load(socket)}
@@ -147,7 +153,14 @@ defmodule Samen.Web.Operator.AggregateLive do
           <.error_state :if={@load_error} class="aggregate-error" body={Guard.message()} retry_event="retry_load" />
 
           <.empty_state
-            :if={@groups == [] and not @load_error}
+            :if={@groups == [] and not @load_error and @wired}
+            class="aggregate-empty-wired"
+            icon="⊘"
+            title="No aggregate groups yet."
+            body="The host's aggregate projection is wired and returned no groups."
+          />
+          <.empty_state
+            :if={@groups == [] and not @load_error and not @wired}
             class="aggregate-empty"
             icon="⊘"
             title="No aggregate projection wired."

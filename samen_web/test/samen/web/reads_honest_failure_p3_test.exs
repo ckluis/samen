@@ -829,6 +829,13 @@ defmodule Samen.Web.ReadsHonestFailureP3Test do
       assert rendered =~ "Tenants"
       refute_error_state(rendered)
     end
+
+    test "a WIRED loader that returns no groups is 'No aggregate groups yet.', never 'No aggregate projection wired.'" do
+      rendered = html(AggregateLive, AggregateLive.load(socket_for(aggregate_mount({__MODULE__, :ok_loader, []}))))
+
+      assert rendered =~ "No aggregate groups yet."
+      refute rendered =~ "No aggregate projection wired."
+    end
   end
 
   # ===========================================================================
