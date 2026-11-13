@@ -113,7 +113,11 @@ defmodule Samen.Web.Auth.TotpEnrollController do
       _ -> :error
     end
   rescue
-    _ -> :error
+    e ->
+      # Fail-CLOSED: no resolvable credential ⇒ the request is refused (`?error=1`), never run
+      # against another credential. Reported by name and exception module.
+      Samen.Web.Reads.Guard.report(:totp_session_credential, nil, e)
+      :error
   end
 
   defp decode_secret(b32) when is_binary(b32) do

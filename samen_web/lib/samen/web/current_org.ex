@@ -45,6 +45,7 @@ defmodule Samen.Web.CurrentOrg do
   use Phoenix.Component
 
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   @session_key "samen_current_org"
 
@@ -343,7 +344,11 @@ defmodule Samen.Web.CurrentOrg do
         []
     end
   rescue
-    _ -> []
+    e ->
+      # Fail-CLOSED (no authorized orgs ⇒ deny), reported by name and exception module so a
+      # raising membership seam is visible instead of reading as "this user has no orgs".
+      Guard.report(:current_org_authorized_orgs, nil, e)
+      []
   end
 
   # ADR-045 §4.4 — the sibling mount carrying the Identity spine (`Session`/`User`/`Membership`).
@@ -369,7 +374,10 @@ defmodule Samen.Web.CurrentOrg do
       _ -> :error
     end
   rescue
-    _ -> :error
+    e ->
+      # Fail-CLOSED (no credential ⇒ no acting org), reported by name and exception module.
+      Guard.report(:current_org_spine_credential, nil, e)
+      :error
   end
 
   defp spine_credential_id(_mount, _session), do: :error
@@ -379,7 +387,10 @@ defmodule Samen.Web.CurrentOrg do
     mods = %{user: Mount.resource(mount, User), membership: Mount.resource(mount, Membership)}
     Samen.Auth.OrgActor.authorized_org_ids(mods, credential_id)
   rescue
-    _ -> []
+    e ->
+      # Fail-CLOSED (no authorized orgs ⇒ deny), reported by name and exception module.
+      Guard.report(:current_org_spine_authorized_orgs, nil, e)
+      []
   end
 
   @doc """
@@ -405,7 +416,10 @@ defmodule Samen.Web.CurrentOrg do
         nil
     end
   rescue
-    _ -> nil
+    e ->
+      # Fail-CLOSED (no actor ⇒ no access to the org), reported by name and exception module.
+      Guard.report(:current_org_resolve_actor, org_id, e)
+      nil
   end
 
   def resolve_actor(_mount, _credential_id, _org_id), do: nil
@@ -470,7 +484,11 @@ defmodule Samen.Web.CurrentOrg do
   defp invoke_directory(mod, fun, args) do
     apply(mod, fun, args) |> normalize_directory()
   rescue
-    _ -> []
+    e ->
+      # The org switcher is navigation chrome: a raising host directory hides it (documented
+      # "never raises"), but the failure is reported by name and exception module.
+      Guard.report(:current_org_directory, nil, e)
+      []
   end
 
   # An operator/aggregate mount can read its own accounts (each an org row) directly.
@@ -489,7 +507,9 @@ defmodule Samen.Web.CurrentOrg do
         |> normalize_directory()
     end
   rescue
-    _ -> []
+    e ->
+      Guard.report(:current_org_operator_directory, nil, e)
+      []
   end
 
   defp normalize_directory(list) when is_list(list) do

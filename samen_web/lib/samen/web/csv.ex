@@ -365,8 +365,13 @@ defmodule Samen.Web.Csv do
         %Report{report | errors: [%{row: n, error: error_message(error)} | report.errors]}
     end
   rescue
-    # A cast/validation raise is that ROW's failure, not the import's.
-    e -> %Report{report | errors: [%{row: n, error: Exception.message(e)} | report.errors]}
+    # A cast/validation raise is that ROW's failure, not the import's. The report is rendered to
+    # the user, so it carries FIXED copy only (`Exception.message/1` of an Ash/Ecto error can
+    # interpolate the very cell values being imported); the exception is logged by name and
+    # exception module.
+    e ->
+      Samen.Web.Reads.Guard.report(:csv_import_row, scope, e)
+      %Report{report | errors: [%{row: n, error: "could not be imported"} | report.errors]}
   end
 
   # A cell that parses as a JSON object/array is a composite value (the export
@@ -381,12 +386,22 @@ defmodule Samen.Web.Csv do
 
   defp decode_cell(value), do: value
 
-  defp error_message(%{errors: errors}) when is_list(errors) do
-    Enum.map_join(errors, "; ", &error_message/1)
+  # The row error shown in the import report is VALUE-FREE: the failing field (a column name the
+  # uploader already supplied) and the KIND of failure — never `Exception.message/1` or `inspect/1`
+  # of the error, which interpolate the cell value that was rejected.
+  defp error_message(%Ash.Error.Forbidden{}), do: "forbidden"
+
+  # A data-layer outage is not the row's fault: say so, so the uploader retries instead of "fixing" a good row.
+  defp error_message(%Ash.Error.Unknown{}), do: "could not be saved right now — try again"
+  defp error_message(%Ash.Error.Framework{}), do: "could not be saved right now — try again"
+
+  defp error_message(%{errors: errors}) when is_list(errors) and errors != [] do
+    errors |> Enum.map(&error_message/1) |> Enum.uniq() |> Enum.join("; ")
   end
 
-  defp error_message(error) when is_exception(error), do: Exception.message(error)
-  defp error_message(error), do: inspect(error)
+  defp error_message(%Ash.Error.Changes.Required{field: field}) when is_atom(field), do: "#{field} is required"
+  defp error_message(%{field: field} = error) when is_atom(field) and not is_nil(field) and is_exception(error), do: "#{field} is invalid"
+  defp error_message(_error), do: "could not be imported"
 
   # -- RFC 4180 (ship note: hand-rolled, no dependency) ------------------------
 

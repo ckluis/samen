@@ -43,6 +43,7 @@ defmodule Samen.Web.Operator.Impersonation do
 
   alias Samen.OperatorPlane.Actor
   alias Samen.Web.{Auth, Mount, Operator}
+  alias Samen.Web.Reads.Guard
 
   @roles Actor.roles()
 
@@ -186,7 +187,12 @@ defmodule Samen.Web.Operator.Impersonation do
       end
     end
   rescue
-    _ -> :denied
+    e ->
+      # Fail-CLOSED: a raising scope/session lookup is DENIED, never granted. Reported by name and
+      # exception module so an outage on the gate is visible rather than indistinguishable from a
+      # real denial in the logs.
+      Guard.report(:operator_impersonation_gate, org_id, e)
+      :denied
   end
 
   def gate(_operator_id, _org_id, _otp_app), do: :denied
@@ -312,7 +318,11 @@ defmodule Samen.Web.Operator.Impersonation do
     |> ledger()
     |> Enum.find(fn e -> e.operator_id == operator_id and e.active? end)
   rescue
-    _ -> nil
+    e ->
+      # Display-only accountability banner: nil omits the banner (the gate already approved the
+      # session), but a failed ledger read is reported by name and exception module.
+      Guard.report(:operator_impersonation_active_entry, org_id, e)
+      nil
   end
 
   defp present(v) when is_binary(v) do

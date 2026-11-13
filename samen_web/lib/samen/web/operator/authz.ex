@@ -50,6 +50,7 @@ defmodule Samen.Web.Operator.Authz do
 
   alias Samen.OperatorPlane.Actor
   alias Samen.Web.{Auth, Mount}
+  alias Samen.Web.Reads.Guard
 
   @roles Actor.roles()
   @default_login_path "/login"
@@ -101,7 +102,12 @@ defmodule Samen.Web.Operator.Authz do
         nil
     end
   rescue
-    _ -> nil
+    e ->
+      # Fail-CLOSED (the principal is NOT an operator, the console renders nothing): but a raising
+      # authority seam is an OUTAGE the host operator must be able to see, so it is reported by
+      # name and exception module — never swallowed silently into "just not an operator".
+      Guard.report(:operator_authz_resolve_role, nil, e)
+      nil
   end
 
   def resolve_role(_mount, _session), do: nil

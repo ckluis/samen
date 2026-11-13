@@ -98,6 +98,10 @@ defmodule Samen.Web.AuthGate do
         nil
     end
   rescue
-    _ -> nil
+    e ->
+      # Fail-CLOSED (not an operator ⇒ the caller denies); a raising authority seam is reported by
+      # name and exception module rather than reading as a plain "not an operator".
+      Samen.Web.Reads.Guard.report(:auth_gate_operator_role, nil, e)
+      nil
   end
 end

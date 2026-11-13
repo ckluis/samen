@@ -131,9 +131,24 @@ defmodule Samen.Web.Operator do
 
   # The operator org is the well-known anchor; the seed guarantees exactly one Org row in the
   # operator namespace. Read it org-lessly (the Org anchor create/read is bootstrap-friendly)
-  # and take the single row's id. Fail-safe: any error → nil (the LiveView shows "no org").
+  # and take the single row's id. Fail-safe: any error → nil (every operator read is then scoped to
+  # no org — fail CLOSED — and the failure is reported by name and exception module, so an outage
+  # on the discovery read is visible in the logs rather than only as the "no org" screen).
   defp from_single_org_row(%Mount{} = mount) do
-    Mount.resource(mount, Org)
+    org = Mount.resource(mount, Org)
+
+    # A mount whose namespace carries no Identity `Org` resource has no operator org to discover —
+    # decided from the module (a structural fact), not from an exception: nothing to report. Any
+    # failure of the READ below is reported.
+    if Ash.Resource.Info.resource?(org), do: read_single_org(org), else: nil
+  rescue
+    e ->
+      Samen.Web.Reads.Guard.report(:operator_org_discovery, nil, e)
+      nil
+  end
+
+  defp read_single_org(org) do
+    org
     |> Ash.Query.sort(inserted_at: :asc)
     |> Ash.Query.limit(1)
     # authz-scope: operator-namespace anchor bootstrap — this read DISCOVERS the
@@ -145,7 +160,5 @@ defmodule Samen.Web.Operator do
       [%{id: id} | _] -> id
       _ -> nil
     end
-  rescue
-    _ -> nil
   end
 end
