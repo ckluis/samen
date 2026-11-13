@@ -306,9 +306,9 @@ message** (`"invalid_args: <bounded reason>"`), never a raise and never a silent
 arg referencing a subject attribute must reference a **condition-eligible** one (ADR-039 §5.2's
 oracle gate), which structurally excludes vault fields from arg space.
 
-### 4.3a · Untrusted-content sanitization at tool-result INGRESS — **ADDENDUM, STATUS: PROPOSED** (T182)
+### 4.3a · Untrusted-content sanitization at tool-result INGRESS — **ADDENDUM, STATUS: BUILT** (T182)
 
-> **Status of this subsection: PROPOSED (2026-08-24, T182).** The rest of this ADR is unchanged
+> **Status of this subsection: BUILT (filed PROPOSED 2026-08-24, T182; shipped in `samen_core/lib/samen/ai/agent/ingress.ex`).** The rest of this ADR is unchanged
 > and remains **ACCEPTED**. This addendum **extends** §4.3; it amends nothing and it moves no §9
 > ratified decision — propose-then-approve (§9#1), masked-only runs (§9#2), the budgets (§9#3),
 > the 90-day retention (§9#4), the streaming deferral (§9#5) and the verifier placement (§9#6)
@@ -406,9 +406,9 @@ ingress reds in `samen_core/test/ai/agent_ingress_test.exs`, one per payload cla
 positive control. Shipped sabotage **255** is regenerated against the new clause with the same
 defect and the same two `MUST_FAIL` targets.
 
-### 4.3b · Secrets-redaction lane, distinct from `pii_*` — **ADDENDUM, STATUS: PROPOSED** (T184)
+### 4.3b · Secrets-redaction lane, distinct from `pii_*` — **ADDENDUM, STATUS: BUILT** (T184)
 
-> **Status of this subsection: PROPOSED (2026-08-26, T184).** The rest of this ADR is unchanged
+> **Status of this subsection: BUILT (filed PROPOSED 2026-08-26, T184; shipped in `samen_core/lib/samen/ai/agent/secrets.ex`).** The rest of this ADR is unchanged
 > and remains **ACCEPTED**. This addendum **extends** §4.3a; it amends nothing and moves no §9
 > ratified decision. Source pattern: Condukt (MIT library) — **adapted, not translated**.
 
@@ -551,9 +551,9 @@ exactly as T40 added four optional fields without breaking any `%Context{}` matc
 `workflow_id` becomes nil-able **only** when `origin` is `{:agent, _}`. A single builder,
 `Samen.AI.Agent.Context.build/2`, is the only site that constructs an agent-origin context.
 
-### 5.1a · Surface-scoped tool registries — **ADDENDUM, STATUS: PROPOSED** (T183)
+### 5.1a · Surface-scoped tool registries — **ADDENDUM, STATUS: BUILT** (T183)
 
-> **Status of this subsection: PROPOSED (2026-08-25, T183).** The rest of this ADR is unchanged
+> **Status of this subsection: BUILT (filed PROPOSED 2026-08-25, T183; shipped as `samen_core/lib/samen/ai/tool_surface.ex` + `mix samen.verify.tool_surface`).** The rest of this ADR is unchanged
 > and remains **ACCEPTED**. This addendum **extends** §5.1 by adding a fifth *narrowing* arm; it
 > amends nothing, widens nothing, and moves no §9 ratified decision — propose-then-approve
 > (§9#1), masked-only runs (§9#2), the budgets (§9#3), the 90-day retention (§9#4), the

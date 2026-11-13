@@ -1,6 +1,6 @@
 # ADR-008: Samen product-UI kit (function components + shared CSS)
 
-Status: Accepted
+Status: Superseded by ADR-009 (the kit was extracted into `samen_web`; corrected 2026-11-13 — this header previously read "Accepted")
 Date: 2026-07-08
 Supersedes: none
 Related: ADR-001 (key hierarchy / `%Masked{}`), the T5.3 web planes
