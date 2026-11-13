@@ -126,6 +126,37 @@ defmodule Samen.Web.Auth.RateLimitTest do
   # 2. Both key axes are INDEPENDENT (ADR-038 §6.3)
   # ===========================================================================
 
+  describe "an over-limit human lands on a real page, not a bare 429 (login + 2FA)" do
+    test "RED: over-limit sign-in redirects to /login?error=rate_limited (no text/plain 429); under-limit is the ordinary ?error=1" do
+      m = mount()
+      acct = register!()
+      {limit, _} = @limits.signin_account
+
+      for i <- 1..limit do
+        under = do_login(m, acct.email, "wrong", {10, 1, 0, i})
+        assert location(under) == "/login?error=1"
+      end
+
+      over = do_login(m, acct.email, "wrong", {10, 1, 0, 250})
+      assert over.status == 302
+      assert location(over) == "/login?error=rate_limited"
+      refute over.status == 429
+    end
+
+    test "RED: over-limit 2FA verify redirects to /2fa?error=rate_limited, the pending token is untouched" do
+      {m, pending} = arm_totp_pending!()
+      {limit, _} = @limits.totp_verify_credential
+
+      for _ <- 1..limit do
+        assert location(SessionController.verify_totp(totp_conn(m, pending), %{"code" => "000000"})) == "/2fa?error=1"
+      end
+
+      over = SessionController.verify_totp(totp_conn(m, pending), %{"code" => "000000"})
+      assert over.status == 302
+      assert location(over) == "/2fa?error=rate_limited"
+    end
+  end
+
   describe "per-IP AND per-account keys, proven independently" do
     test "an IP-ROTATING attacker on one account is still limited PER-ACCOUNT" do
       m = mount()
@@ -334,14 +365,20 @@ defmodule Samen.Web.Auth.RateLimitTest do
   end
 
   # `:allowed` = the request was processed (wrong-password redirect back to login);
-  # `:refused` = the limiter returned a 429 before processing.
+  # `:refused` = the limiter redirected to `?error=rate_limited` before processing.
   defp login_outcome(mount, email, password, ip) do
     conn = do_login(mount, email, password, ip)
     outcome(conn)
   end
 
-  defp outcome(%{status: 429}), do: :refused
-  defp outcome(%{status: status}) when status in 300..399, do: :allowed
+  # Over-limit is a redirect back to the login / 2FA page with `?error=rate_limited` (a human
+  # lands on a real page, not a bare text/plain 429); an under-limit wrong credential is the
+  # ordinary `?error=1` redirect. The request is refused BEFORE any credential work either way.
+  defp outcome(%{status: status} = conn) when status in 300..399 do
+    if (conn |> Plug.Conn.get_resp_header("location") |> List.first() || "") =~ "error=rate_limited",
+      do: :refused,
+      else: :allowed
+  end
 
   defp location(conn), do: conn |> get_resp_header("location") |> List.first()
 
@@ -377,7 +414,7 @@ defmodule Samen.Web.Auth.RateLimitTest do
   end
 
   # A WRONG code never consumes the pending token, so the same interstitial can be
-  # replayed: under limit → /2fa?error=1 (302); over limit → 429.
+  # replayed: under limit → /2fa?error=1 (302); over limit → /2fa?error=rate_limited (302).
   defp totp_verify_outcome(mount, pending) do
     conn = SessionController.verify_totp(totp_conn(mount, pending), %{"code" => "000000"})
     outcome(conn)

@@ -727,37 +727,41 @@ defmodule Samen.Web.Auth.SessionTest do
       assert html =~ "login-remember-me"
     end
 
-    test "valid credentials arm phx-trigger-action (the LiveView never sets the cookie itself)" do
+    test "the form is a plain POST to the controller: no phx-submit, no phx-trigger-action (JS-off arc is the only arc)" do
+      mount = build_mount(:auth)
+      html = mount_smoke(LoginLive, mount)
+
+      assert html =~ ~s(action="/login")
+      assert html =~ ~s(method="post")
+      refute html =~ "phx-submit"
+      refute html =~ "phx-trigger-action"
+    end
+
+    test "RED: the LiveView is NOT a password oracle — a crafted `login` event cannot authenticate (the controller is the only, rate-limited, checker)" do
       result = register!()
       mount = build_mount(:auth)
       session = mount_session(mount)
       {:ok, socket} = LoginLive.mount(%{}, session, %Phoenix.LiveView.Socket{})
+      params = %{"login" => %{"email" => result.email, "password" => result.password}}
 
-      {:noreply, socket} =
-        LoginLive.handle_event("login", %{"login" => %{"email" => result.email, "password" => result.password}}, socket)
+      # Before the fix this returned {:noreply, socket} with trigger_submit true/false — an
+      # unthrottled ok/error signal over the websocket. There is no handler to ask any more.
+      assert_raise UndefinedFunctionError, fn -> LoginLive.handle_event("login", params, socket) end
 
-      assert socket.assigns.trigger_submit == true
-      assert socket.assigns.error == nil
+      # Positive control: the real checker is the controller, and it still signs this user in.
+      conn = SessionController.create(auth_conn(Mount.new(:auth, Samen.WebTest.Operator, Repo)), params)
+      assert conn.status in 300..399
+      refute (conn |> get_resp_header("location") |> List.first()) =~ "error"
     end
 
-    test "RED: wrong password shows the generic error, never arms the trigger — SAME message as an unknown email" do
-      result = register!()
+    test "invalid-credential and rate-limit feedback render from the controller's ?error= redirect" do
       mount = build_mount(:auth)
-      session = mount_session(mount)
 
-      {:ok, socket1} = LoginLive.mount(%{}, session, %Phoenix.LiveView.Socket{})
+      assert mount_smoke(LoginLive, mount, %{"error" => "1"}) =~ "Invalid email or password."
 
-      {:noreply, socket1} =
-        LoginLive.handle_event("login", %{"login" => %{"email" => result.email, "password" => "wrong"}}, socket1)
-
-      {:ok, socket2} = LoginLive.mount(%{}, session, %Phoenix.LiveView.Socket{})
-
-      {:noreply, socket2} =
-        LoginLive.handle_event("login", %{"login" => %{"email" => unique_email(), "password" => "whatever"}}, socket2)
-
-      refute socket1.assigns.trigger_submit
-      refute socket2.assigns.trigger_submit
-      assert socket1.assigns.error == socket2.assigns.error
+      limited = mount_smoke(LoginLive, mount, %{"error" => "rate_limited"})
+      assert limited =~ "Too many sign-in attempts"
+      refute limited =~ "Invalid email or password."
     end
   end
 

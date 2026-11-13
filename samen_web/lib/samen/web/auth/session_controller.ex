@@ -147,7 +147,8 @@ defmodule Samen.Web.Auth.SessionController do
     # runs BEFORE authenticate and is CONSTANT-SHAPE for a known vs unknown account
     # (an `email_bidx` HMAC + two counter bumps, identical either way), so it adds no
     # enumeration timing signal on top of `SignIn.authenticate/3`'s own dummy-verify
-    # parity (ADR-035 §4.4). Over-limit → a generic 429, the same for any caller.
+    # parity (ADR-035 §4.4). Over-limit → a redirect back to the login page with
+    # `?error=rate_limited` (the signup precedent), the same for any caller.
     case rate_limit_signin(conn, mount, email) do
       :ok ->
         case SignIn.authenticate(email, password, sign_in_mods(mount)) do
@@ -163,7 +164,7 @@ defmodule Samen.Web.Auth.SessionController do
         end
 
       {:error, :rate_limited} ->
-        rate_limited(conn)
+        rate_limited(conn, login_path(conn))
     end
   end
 
@@ -207,10 +208,11 @@ defmodule Samen.Web.Auth.SessionController do
     # ADR-035 §4.5 / ADR-038 §6.3 — TOTP-verify brute-force control (T103): 5/min per
     # credential id (a UUID, non-PII). Keyed on the ALREADY-resolved pending credential,
     # so a stale/absent interstitial (handled by `verify_totp/2` before this is reached)
-    # is never charged against a real account's budget. Over-limit → generic 429.
+    # is never charged against a real account's budget. Over-limit → back to the 2FA page
+    # with `?error=rate_limited`.
     case RateLimit.check(:totp_verify_credential, :credential, to_string(credential_id)) do
       {:error, :rate_limited} ->
-        rate_limited(conn)
+        rate_limited(conn, totp_path(conn))
 
       :ok ->
         complete_second_factor_verified(conn, mount, credential_id, digest, code)
@@ -723,13 +725,13 @@ defmodule Samen.Web.Auth.SessionController do
 
   defp remote_ip(_), do: "unknown"
 
-  # The over-limit response (ADR-035 §4.5 "429 or interstitial"): a bare 429, identical
-  # for every caller — carries no account/enumeration signal.
-  defp rate_limited(conn) do
-    conn
-    |> put_resp_content_type("text/plain")
-    |> send_resp(429, "rate_limited")
-    |> halt()
+  # The over-limit response (ADR-035 §4.5 "429 or interstitial"): a human lands on the real
+  # login / 2FA page (a bare text/plain 429 was a dead end with no layout and no way back),
+  # via the same `?error=rate_limited` redirect `AccountController.register/2` uses. Identical
+  # for every caller — carries no account/enumeration signal. The refusal itself is unchanged:
+  # the request is refused BEFORE any credential work.
+  defp rate_limited(conn, path) do
+    redirect(conn, to: "#{path}?error=rate_limited")
   end
 
   defp trim(v) when is_binary(v), do: String.trim(v)
