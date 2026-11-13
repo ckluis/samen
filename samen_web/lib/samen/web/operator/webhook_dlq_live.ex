@@ -32,6 +32,7 @@ defmodule Samen.Web.Operator.WebhookDlqLive do
 
   alias Samen.Web.Mount
   alias Samen.Web.Operator
+  alias Samen.Web.Reads.Guard
   alias Samen.Webhook.Event
 
   @impl true
@@ -46,14 +47,24 @@ defmodule Samen.Web.Operator.WebhookDlqLive do
 
     case mount && Operator.org_id(mount) do
       nil ->
-        assign(socket, no_org: true, envelopes: [], dead_count: 0)
+        assign_new(socket, :action_error, fn -> nil end)
+        |> assign(no_org: true, envelopes: [], dead_count: 0, load_error: false)
 
       _org_id ->
-        envelopes = list_envelopes(mount)
+        {envelopes, load_error} =
+          case list_envelopes(mount) do
+            {:ok, envelopes} -> {envelopes, false}
+            # A failed read is NOT an empty queue: "No webhook envelopes — nothing has dead-lettered"
+            # over an outage would tell the operator there is nothing to replay.
+            {:error, _} -> {[], true}
+          end
 
-        assign(socket,
+        socket
+        |> assign_new(:action_error, fn -> nil end)
+        |> assign(
           no_org: false,
           envelopes: envelopes,
+          load_error: load_error,
           dead_count: Enum.count(envelopes, &(&1.status == "dead"))
         )
     end
@@ -68,26 +79,76 @@ defmodule Samen.Web.Operator.WebhookDlqLive do
   @write_roles [:operator_admin, :operator_support]
 
   @impl true
-  def handle_event("replay", %{"id" => id}, socket) do
-    with {:ok, repo} <- authorize_write(socket),
-         %Event{} = row <- Event.get_dead(repo, id),
-         {:ok, row} <- Event.reset_for_replay(repo, row) do
-      # Re-enqueue the processing job — safe because processing is idempotent (§5.5).
-      _ = safe_enqueue(row, repo)
-    end
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket)}
 
-    {:noreply, load(socket)}
+  def handle_event("replay", %{"id" => id}, socket) do
+    error =
+      with {:ok, repo} <- authorize_write(socket),
+           {:ok, row} <- fetch_dead(repo, id),
+           {:ok, row} <- Guard.write(:operator_dlq_reset, nil, fn -> Event.reset_for_replay(repo, row) end),
+           # Re-enqueue the processing job — safe because processing is idempotent (§5.5).
+           :ok <- enqueue(row, repo) do
+        nil
+      else
+        {:error, reason} -> action_copy(:replay, reason)
+        :denied -> action_copy(:replay, :denied)
+      end
+
+    {:noreply, socket |> assign(action_error: error) |> load()}
   end
 
   @impl true
   def handle_event("resolve", %{"id" => id}, socket) do
-    with {:ok, repo} <- authorize_write(socket),
-         %Event{} = row <- Event.get_dead(repo, id) do
-      _ = Event.mark_processed(repo, row)
-    end
+    error =
+      with {:ok, repo} <- authorize_write(socket),
+           {:ok, row} <- fetch_dead(repo, id),
+           {:ok, _row} <- Guard.write(:operator_dlq_resolve, nil, fn -> Event.mark_processed(repo, row) end) do
+        nil
+      else
+        {:error, reason} -> action_copy(:resolve, reason)
+        :denied -> action_copy(:resolve, :denied)
+      end
 
-    {:noreply, load(socket)}
+    {:noreply, socket |> assign(action_error: error) |> load()}
   end
+
+  # A malformed id is "not found" (cast before the query: no logged failure); a read that raises
+  # is `{:error, :unavailable}`; a row that is no longer dead-lettered is `{:error, :not_found}`.
+  defp fetch_dead(repo, id) do
+    with {:ok, id} <- cast_id(id),
+         {:ok, row} <- Guard.run(:operator_dlq_fetch, nil, fn -> Event.get_dead(repo, id) end) do
+      if row, do: {:ok, row}, else: {:error, :not_found}
+    end
+  end
+
+  defp cast_id(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, id} -> {:ok, id}
+      :error -> {:error, :not_found}
+    end
+  end
+
+  # Enqueue AFTER the reset committed: a failure leaves the envelope reset ("received") but not
+  # queued, which the operator must be told (it is no longer in the dead set to replay again).
+  defp enqueue(row, repo) do
+    case Guard.write(:operator_dlq_enqueue, nil, fn -> Samen.Webhook.IngestWorker.enqueue(row, repo: repo) end) do
+      {:error, _} = error -> error
+      _ -> :ok
+    end
+  end
+
+  # Value-free copy: outage copy only for an outage, denial copy only for a real denial.
+  defp action_copy(_action, :denied), do: "Your operator role may not change the webhook queue."
+  defp action_copy(_action, :forbidden), do: "Your operator role may not change the webhook queue."
+  defp action_copy(_action, :not_found), do: "That envelope is no longer in the dead-letter set — nothing was changed."
+
+  defp action_copy(:replay, :unavailable),
+    do: "We couldn't replay that envelope right now — it may not have been queued. Check the list and try again."
+
+  defp action_copy(:resolve, :unavailable),
+    do: "We couldn't mark that envelope handled right now — nothing was changed. Try again."
+
+  defp action_copy(_action, _other), do: "The webhook queue was not changed."
 
   # The S14 write gate, three ANDed conjuncts — all strictly narrowing, never widening:
   #   1. ROLE — `:samen_operator_role` ∈ @write_roles (see above; fail closed on nil);
@@ -112,20 +173,10 @@ defmodule Samen.Web.Operator.WebhookDlqLive do
   # ---------------------------------------------------------------------------
 
   defp list_envelopes(%Mount{repo: repo}) when is_atom(repo) and not is_nil(repo) do
-    Event.list_for_operator(repo, limit: 100)
-  rescue
-    _ -> []
+    Guard.run(:operator_dlq_envelopes, nil, fn -> Event.list_for_operator(repo, limit: 100) end)
   end
 
-  defp list_envelopes(_), do: []
-
-  defp safe_enqueue(row, repo) do
-    Samen.Webhook.IngestWorker.enqueue(row, repo: repo)
-  rescue
-    _ -> :ok
-  catch
-    _, _ -> :ok
-  end
+  defp list_envelopes(_), do: {:ok, []}
 
   @impl true
   def render(assigns) do
@@ -155,6 +206,10 @@ defmodule Samen.Web.Operator.WebhookDlqLive do
               construction.
             </.token_blind_bar>
 
+            <div :if={@action_error} id="dlq-action-error" class="card form-error" role="alert" style="padding:10px 14px;margin-top:14px;font-size:12px">
+              {@action_error}
+            </div>
+
             <div id="dlq-envelopes" style="margin-top:14px">
               <div class="gtitle">
                 <h3>Webhook envelopes</h3>
@@ -164,8 +219,10 @@ defmodule Samen.Web.Operator.WebhookDlqLive do
                 </span>
               </div>
 
+              <.error_state :if={@load_error} class="dlq-error" body={Guard.message()} retry_event="retry_load" />
+
               <.empty_state
-                :if={@envelopes == []}
+                :if={@envelopes == [] and not @load_error}
                 class="dlq-empty"
                 icon="✓"
                 title="No webhook envelopes."
