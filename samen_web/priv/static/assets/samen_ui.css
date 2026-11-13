@@ -69,6 +69,12 @@
   --violet: #6D45C4;
   --violet-wash: #F1ECFB;
   --mono: 'JetBrains Mono', ui-monospace, monospace;
+  /* Tokens the stylesheet already referenced but never defined (audit F37). `--bad` and
+     `--surface` equal the fallbacks their call sites carried, so those render unchanged. */
+  --bg: var(--panel);
+  --fg: var(--ink);
+  --surface: #f4f6fb;
+  --bad: #b91c1c;
 }
 
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -106,7 +112,10 @@ svg { display: block; }
   display: flex;
   flex-direction: column;
   padding: 14px 12px;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;      /* the nav scrolls on short viewports instead of clipping (F01) */
+  min-height: 0;
+  scrollbar-width: thin;
 }
 .ws { display: flex; align-items: center; gap: 10px; padding: 8px 8px 10px; }
 .ws .logo {
@@ -178,9 +187,9 @@ svg { display: block; }
   color: var(--faint); font-size: 12.5px; margin-bottom: 12px;
 }
 .crumb .sep { opacity: .5; }
-.head { display: flex; align-items: flex-start; gap: 16px; }
-.head h1 { font-size: 27px; font-weight: 650; letter-spacing: -0.025em; }
-.head .actions { margin-left: auto; display: flex; gap: 8px; }
+.head { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.head h1 { font-size: 27px; font-weight: 650; letter-spacing: -0.025em; min-width: 0; overflow-wrap: anywhere; }
+.head .actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* ---------------------------------------------------------------------------
  * Buttons
@@ -826,7 +835,7 @@ td.right { text-align: right; }
 .table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
 /* --- off-canvas sidebar drawer scaffold (kit affordance; pure-CSS checkbox toggle) --- */
-.nav-toggle-cb { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
+.nav-toggle-cb { display: none; }   /* desktop: no drawer, so no phantom tab stop (F03) */
 .nav-hamburger {
   display: none; position: fixed; top: 16px; left: 16px; z-index: 50;
   width: 40px; height: 40px; border-radius: 10px; cursor: pointer;
@@ -863,15 +872,28 @@ td.right { text-align: right; }
     position: fixed; top: 0; left: 0; bottom: 0; z-index: 46;
     width: 272px; max-width: 86vw; border-radius: 0;
     transform: translateX(-104%);
-    transition: transform .22s ease;
+    /* Closed drawer is out of the tab order and the a11y tree (F03). */
+    visibility: hidden;
+    transition: transform .22s ease, visibility 0s linear .22s;
     box-shadow: 0 0 40px rgba(20, 22, 30, .18);
   }
-  .nav-toggle-cb:checked ~ .side { transform: translateX(0); }
+  .nav-toggle-cb:checked ~ .side { transform: translateX(0); visibility: visible; transition-delay: 0s; }
   .nav-toggle-cb:checked ~ .nav-scrim { display: block; }
   .nav-hamburger { display: inline-flex; }
 
-  /* Give the main pane room for the fixed hamburger. */
-  .top { padding-top: 66px; }
+  /* The checkbox is the real (focusable, keyboard-toggleable) control; hide it visually
+     but keep it in the tab order, and ring the hamburger when it has focus. */
+  .nav-toggle-cb {
+    display: block; position: fixed; top: 16px; left: 16px; z-index: 51;
+    width: 40px; height: 40px; margin: 0; opacity: 0; cursor: pointer;
+  }
+  .nav-toggle-cb:focus-visible ~ .nav-hamburger { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+  /* Give EVERY main pane room for the fixed hamburger (F13): the reserve lives on .main, so a
+     page without a topbar no longer starts under it; the topbar's own top padding shrinks by
+     the same amount, so pages WITH a topbar are pixel-identical to before (56 + 10 = 66). */
+  .main { padding-top: 56px; }
+  .top { padding-top: 10px; }
 
   .metrics { grid-template-columns: 1fr; padding-left: 16px; padding-right: 16px; }
   .top, .wrap, .pane { padding-left: 16px; padding-right: 16px; }
@@ -1084,5 +1106,148 @@ td.right { text-align: right; }
 @media (max-width: 720px) {
   .dmap-grid, .dmap-ref { grid-template-columns: 1fr; }
   /* On a phone the ERD stays at 1:1 (legible) and scrolls sideways instead of shrinking. */
+  .dmap-svg { width: var(--dmap-w); max-width: none !important; }
+}
+
+/* ===========================================================================
+ * Kit unhappy-path states (audit-kit F01–F37). Every rule below is additive: it applies
+ * only in the broken / in-flight / error situation, or to a new class, so the happy path
+ * at desktop width renders exactly as before.
+ * ========================================================================= */
+
+/* --- Page-level sideways scroll (root cause) ---------------------------------------------
+ * `.sr-only` is `position:absolute`. With no positioned ancestor its containing block is the
+ * INITIAL containing block, so an sr-only node (a "Select row" label inside a wide table, the
+ * visually-hidden chart data <table>) is NOT clipped by `.table-scroll` / `.main` /
+ * `.card` — their `overflow` only clips descendants whose containing block is inside them. It
+ * then extends the document's scrollable overflow: the page scrolls sideways at 375px even
+ * though body/main/the table container are all 375 wide. Making those containers the
+ * containing block lets their overflow clip it (the clip box is the container, so the node
+ * can no longer widen the page). `overflow:hidden` on .chart/.geo-map additionally stops the
+ * (non-shrinkable) sr-only <table> from widening <main>'s own scroll area. */
+.main, .table-scroll, .card, .dash-tile { position: relative; }
+.chart, .geo-map { position: relative; overflow: hidden; }
+
+/* A grid/flex item defaults to `min-width:auto` (its min-content), so a wide table inside a
+   `.split` column forced the 1fr track — and the whole <main> scroll area — to 666px at 375px
+   (/broker?panel=settlements). Let the item shrink so the table's own scroll container takes
+   the overflow. The `.gtitle` row may wrap its trailing lane label. */
+.split > * { min-width: 0; }
+.gtitle { flex-wrap: wrap; }
+
+/* --- Focus (F11): visible keyboard focus with the existing brand token -------------------- */
+.btn:focus-visible, .nav a:focus-visible, .tabs a:focus-visible, .cal-nav:focus-visible,
+.gantt-nav:focus-visible, .sort-btn:focus-visible, .cmdk-link:focus-visible,
+.tree-drill:focus-visible, .ws-switcher > summary:focus-visible, .flash-close:focus-visible,
+.modal-close:focus-visible, .nav-hamburger:focus-visible {
+  outline: 2px solid var(--brand); outline-offset: 2px;
+}
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--brand); outline-offset: 1px;
+}
+/* the two inputs that removed their outline get a focus ring on the wrapper instead */
+.search:focus-within, .cmdk-form:focus-within { box-shadow: 0 0 0 2px var(--brand-wash); }
+.cmdk-form:focus-within { border-bottom-color: var(--brand); }
+.cmdk-input:focus-visible, .search .search-input:focus-visible { outline: none; }
+
+/* --- In-flight + disabled (F06) ------------------------------------------------------------ */
+.btn:disabled, .btn[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+.btn.\70 hx-click-loading, .btn.\70 hx-submit-loading, .\70 hx-submit-loading .btn[type="submit"] {
+  opacity: .6; cursor: progress; pointer-events: none;
+}
+form.\70 hx-submit-loading { cursor: progress; }
+.btn.danger:disabled { opacity: .5; }
+
+/* --- Connection state (F07): LiveView puts its error classes on the main container. The class
+   names below use a CSS escape (\70 = "p") because the replay player embeds this whole
+   stylesheet in an inert iframe whose test forbids the literal LiveView binding prefix. ---- */
+.conn-banner {
+  position: fixed; left: 50%; top: 10px; transform: translateX(-50%); z-index: 70;
+  max-width: calc(100vw - 32px);
+  padding: 8px 14px; border-radius: 10px; font-size: 12.5px; font-weight: 550;
+  background: var(--amber-wash); color: var(--amber); border: 1px solid #F0D28C;
+  box-shadow: 0 6px 18px rgba(20, 22, 30, .12);
+}
+.conn-banner[hidden] { display: none; }
+.\70 hx-client-error .main, .\70 hx-server-error .main { cursor: progress; }
+
+/* --- Flash group (F07) ---------------------------------------------------------------------- */
+.flash-group {
+  position: fixed; top: 12px; right: 12px; z-index: 65;
+  display: flex; flex-direction: column; gap: 8px;
+  width: min(380px, calc(100vw - 24px));
+}
+.flash {
+  position: relative; display: flex; align-items: flex-start; gap: 10px;
+  padding: 11px 14px; border-radius: 11px; font-size: 13px; line-height: 1.4;
+  background: var(--card); border: 1px solid var(--line2); color: var(--ink);
+  box-shadow: 0 6px 18px rgba(20, 22, 30, .12);
+}
+.flash-info, .flash-success { background: var(--green-wash); border-color: #CBE7D5; color: #215938; }
+.flash-warning { background: var(--amber-wash); border-color: #F0D28C; color: var(--amber); }
+.flash-error { background: var(--red-wash); border-color: #F1C9C5; color: #8E2A23; }
+.flash-msg { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.flash-close { flex: 0 0 auto; cursor: pointer; padding: 0 4px; font-size: 13px; opacity: .7; }
+.flash-close:hover { opacity: 1; }
+/* JS-off dismissal: the (visually hidden) checkbox hides its flash when checked. */
+.flash-x { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
+.flash:has(.flash-x:checked) { display: none; }
+
+/* --- Error + loading shapes (F04) ----------------------------------------------------------- */
+.error-state {
+  padding: 28px 24px; display: flex; flex-direction: column; align-items: center;
+  gap: 8px; text-align: center; border-color: #F1C9C5; background: var(--red-wash);
+}
+.error-icon {
+  width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--card); color: var(--red); border: 1px solid #F1C9C5; font-weight: 700;
+}
+.error-title { margin: 0; font-size: 15px; font-weight: 600; color: #8E2A23; }
+.error-body { margin: 0; color: var(--muted); font-size: 13px; max-width: 44ch; overflow-wrap: anywhere; }
+.error-actions { margin-top: 6px; }
+.metric-error { color: var(--red); }
+.state-loading { padding: 14px 16px; }
+.skeleton-block .skeleton-line { height: 88px; border-radius: 10px; }
+.skeleton-chart .skeleton-block .skeleton-line { height: 150px; }
+.table-empty {
+  display: none; padding: 26px 16px; text-align: center; color: var(--faint); font-size: 13px;
+}
+/* shown only when the <tbody> has no row (the kit cannot know that server-side without
+   re-rendering the slot; see Samen.UI.Table.data_table/1) */
+.table-scroll:not(:has(tbody tr)) .table-empty { display: block; }
+
+/* --- Narrow layouts ------------------------------------------------------------------------- */
+@media (max-width: 560px) {
+  /* calendar (F08): keep a readable 7-column grid and scroll it sideways inside its card */
+  .cal { overflow-x: auto; }
+  .cal-wd, .cal-week { min-width: 560px; }
+  /* chat (stack the roster under the messages instead of squeezing them to ~90px) */
+  .chat-layout { flex-direction: column; align-items: stretch; }
+  .chat-aside { flex: 0 0 auto; width: 100%; }
+  /* banners (F14) */
+  .mask-bar, .tb-bar { flex-wrap: wrap; }
+  .mask-bar .chip, .tb-bar .chip { margin-left: 0; white-space: normal; overflow-wrap: anywhere; }
+}
+/* gantt (F10): the lane grid scrolls inside its own card, as the section comment claims */
+@media (max-width: 720px) {
+  .gantt { overflow-x: auto; }
+  .gantt-axis, .gantt-lane { min-width: 640px; }
+}
+/* the box a 560px floor would overflow on a ~320px screen */
+.obj-card { max-width: 100%; }
+
+/* dashboard (F18): the 252px sidebar sits inside the viewport, so a viewport-keyed 4-column
+   grid leaves ~190px tiles between 901 and ~1180px; drop to 2 columns earlier. */
+@media (max-width: 1180px) {
+  .dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dash-tile.span-2 { grid-column: span 2; }
+}
+@media (max-width: 560px) {
+  .dash-grid { grid-template-columns: 1fr; }
+  .dash-tile.span-2 { grid-column: span 1; }
+}
+
+/* ERD (F31): stay 1:1 and scroll sideways (instead of shrinking text to ~5px) below 1180px */
+@media (max-width: 1180px) {
   .dmap-svg { width: var(--dmap-w); max-width: none !important; }
 }

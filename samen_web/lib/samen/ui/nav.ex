@@ -31,7 +31,7 @@ defmodule Samen.UI.Nav do
 
   def sidebar(assigns) do
     ~H"""
-    <aside class="side">
+    <aside class="side" id="samen-nav">
       <div class="ws">
         <div class="logo" style={@logo_style}>{@logo}</div>
         <div class="who">
@@ -344,8 +344,11 @@ defmodule Samen.UI.Nav do
     case Mount.label(mount, :host_nav_extra, nil) do
       {mod, fun, args} when is_atom(mod) and is_atom(fun) and is_list(args) ->
         case apply(mod, fun, args ++ [org_id]) do
-          %{label: label, items: items} = group when is_binary(label) and is_list(items) -> group
-          _ -> nil
+          %{label: label, items: items} = group when is_binary(label) and is_list(items) ->
+            %{group | items: Enum.filter(items, &nav_item_shape?/1)}
+
+          _ ->
+            nil
         end
 
       _ ->
@@ -354,6 +357,12 @@ defmodule Samen.UI.Nav do
   rescue
     _ -> nil
   end
+
+  # An item the sidebar can render: a map with a binary `:label` and `:href`. Anything else
+  # (missing key, non-map, nil href) is dropped here instead of raising a KeyError in the
+  # template — outside this module's `rescue` — and taking the whole sidebar down (F22).
+  defp nav_item_shape?(%{label: label, href: href}) when is_binary(label) and is_binary(href), do: true
+  defp nav_item_shape?(_), do: false
 
   # ---------------------------------------------------------------------------
   # Topbar (breadcrumb + title + actions)
