@@ -61,7 +61,7 @@ defmodule Samen.Web.ChatThreadSubscribeGateTest do
     {:ok, _} = Samen.Impersonation.close(session.id)
 
     before = length(socket.assigns.messages)
-    envelope = Samen.Web.Chat.envelope(chat.message)
+    envelope = Samen.Web.Chat.envelope(Seeds.append_chat_message(chat, org_id, "after the gate closed"))
     {:noreply, socket} = ThreadLive.handle_info({:chat_message, envelope}, socket)
 
     assert length(socket.assigns.messages) == before,
@@ -73,7 +73,7 @@ defmodule Samen.Web.ChatThreadSubscribeGateTest do
     socket = build_socket(ThreadLive, mount, [org_id, chat.thread.id])
 
     before = length(socket.assigns.messages)
-    envelope = Samen.Web.Chat.envelope(chat.message)
+    envelope = Samen.Web.Chat.envelope(Seeds.append_chat_message(chat, org_id, "after the gate closed"))
     {:noreply, socket} = ThreadLive.handle_info({:chat_message, envelope}, socket)
 
     assert length(socket.assigns.messages) == before,
