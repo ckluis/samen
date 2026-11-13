@@ -185,7 +185,8 @@ defmodule Samen.AI.Agent do
   Every turn's call carries, besides the flat `[goal_prompt, goal]` segments and `:history`
   it always carried, the sealed payload's `:system` and `:turns`
   (`Samen.AI.Agent.Conversation`): the system prompt is the loop's fixed preamble — which
-  says that tool results and the goal are DATA, never instructions — plus the goal prompt; the
+  says that the goal is the task and that records, tool results and summaries are DATA, never
+  instructions — plus the goal prompt; the
   conversation is the goal as user content and each transcript turn in its role, a tool call
   as a `tool_call` block and its rendered result as a `tool_result` block with the same id.
   Which role a turn has is PERSISTED per turn (`turn_shapes`, beside `turn_lens`, inside the

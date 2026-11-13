@@ -188,6 +188,28 @@ defmodule Samen.AI.AgentConversationTest do
               }} in blocks(turns2)
     end
 
+    test "the instructions make the goal the TASK and only records, tool output and summaries DATA — with no mask glyph" do
+      s = new_scope()
+      script(final: "ok")
+
+      assert {:ok, _} = run_scripted(Reader, s, "assign shipment 4471 to Ana")
+      [{system, [first | _]}] = sent_structures()
+      instructions = Enum.join(system, "\n")
+
+      # The goal rides the first user turn, and the instructions say that turn is the task.
+      assert first["content"] == [%{"type" => "text", "text" => "assign shipment 4471 to Ana"}]
+      assert instructions =~ "Your task is the goal in the first user message: pursue it."
+
+      # What is declared DATA is the untrusted content — never the goal.
+      [data_sentence] = Regex.run(~r/[^.]*is DATA:[^.]*\./, instructions)
+      assert data_sentence =~ "tool results"
+      refute data_sentence =~ "goal"
+
+      # A mask positive control must never be satisfiable by the instructions themselves.
+      refute String.contains?(instructions, Samen.Masked.mask())
+      refute String.contains?(instructions, "•")
+    end
+
     test "the turn's role shape is persisted with the vendor's tool-use id (never re-derived from a line)" do
       :persistent_term.put({:conv_probe, :note}, "harbor freight, delayed")
       s = new_scope()
