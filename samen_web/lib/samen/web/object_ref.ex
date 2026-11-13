@@ -171,6 +171,15 @@ defmodule Samen.Web.ObjectRef do
   # the vault field NEVER leaks: it loads as the token-only `%Masked{}`, and PiiResolution
   # (step 3) resolves it per plane. Same discipline as `Samen.Web.CRM.Reads`.
   defp load_scoped(resource, id, scope) do
+    # The id is whatever the client typed into a ref: a malformed one is "no such object" (the
+    # inert chip), decided BEFORE the query — it must not raise, log an error, or read as an outage.
+    case cast_id(resource, id) do
+      {:ok, id} -> load_cast(resource, id, scope)
+      :error -> {:error, :not_found}
+    end
+  end
+
+  defp load_cast(resource, id, scope) do
     case Guard.run(:object_ref_load, scope, fn ->
            resource
            |> Ash.Query.ensure_selected(selectable_attrs(resource))
@@ -181,6 +190,19 @@ defmodule Samen.Web.ObjectRef do
       {:ok, []} -> {:error, :not_found}
       {:error, :forbidden} -> {:error, :forbidden}
       {:error, :unavailable} -> {:error, :unavailable}
+    end
+  end
+
+  defp cast_id(resource, id) do
+    case Ash.Resource.Info.attribute(resource, :id) do
+      %{type: type, constraints: constraints} ->
+        case Ash.Type.cast_input(type, id, constraints) do
+          {:ok, value} when not is_nil(value) -> {:ok, value}
+          _ -> :error
+        end
+
+      _ ->
+        {:ok, id}
     end
   end
 

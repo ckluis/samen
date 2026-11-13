@@ -121,7 +121,12 @@ defmodule Samen.Web.Notifications.Reads do
   `{:error, reason}`.
   """
   def mark_read(mount, scope, id) do
-    Guard.write(:notifications_mark_read, scope, fn -> do_mark_read(mount, scope, id) end)
+    # A malformed id (the client chose it) is "no such notification" — never a raise, an error log
+    # or the outage copy: cast it before it can reach the query.
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> Guard.write(:notifications_mark_read, scope, fn -> do_mark_read(mount, scope, uuid) end)
+      :error -> {:error, :not_found}
+    end
   end
 
   defp do_mark_read(mount, scope, id) do
