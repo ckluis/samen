@@ -12,23 +12,24 @@
 # MUST_FAIL: CROSS-ORG: another tenant's mailbox connections NEVER appear in this org's settings read
 # MUST_FAIL: CROSS-ORG: the match is ORG-PINNED
 diff --git a/samen_web/lib/samen/web/crm/reads.ex b/samen_web/lib/samen/web/crm/reads.ex
+index f1d9c360..10053646 100644
 --- a/samen_web/lib/samen/web/crm/reads.ex
 +++ b/samen_web/lib/samen/web/crm/reads.ex
-@@ -832,7 +832,7 @@
-         |> build_query.()
-         |> Ash.Query.sort(occurred_at: :desc)
-         |> Ash.Query.limit(@detail_limit)
--        |> Ash.read!(scope: scope)
-+        |> Ash.read!(authorize?: false)
-         |> resolve_mail_pii(mount, resource, scope)
-     end
-   rescue
-@@ -864,7 +864,7 @@
-         |> Ash.Query.ensure_selected(@connection_fields)
-         |> Ash.Query.sort(inserted_at: :desc)
-         |> Ash.Query.limit(@detail_limit)
--        |> Ash.read!(scope: scope)
-+        |> Ash.read!(authorize?: false)
-         |> resolve_mail_pii(mount, resource, scope)
-     end
-   rescue
+@@ -1275,7 +1275,7 @@ defmodule Samen.Web.CRM.Reads do
+           |> build_query.()
+           |> Ash.Query.sort(occurred_at: :desc)
+           |> Ash.Query.limit(@detail_limit)
+-          |> Ash.read!(scope: scope)
++          |> Ash.read!(authorize?: false)
+           |> resolve_mail_pii(mount, resource, scope)
+       end
+     end)
+@@ -1315,7 +1315,7 @@ defmodule Samen.Web.CRM.Reads do
+           |> Ash.Query.ensure_selected(@connection_fields)
+           |> Ash.Query.sort(inserted_at: :desc)
+           |> Ash.Query.limit(@detail_limit)
+-          |> Ash.read!(scope: scope)
++          |> Ash.read!(authorize?: false)
+           |> resolve_mail_pii(mount, resource, scope)
+       end
+     end)

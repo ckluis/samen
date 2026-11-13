@@ -55,6 +55,7 @@ defmodule Samen.Web.CRM.DashboardLive do
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CRM.Reads
+  alias Samen.Web.Reads.Guard
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
   alias Samen.Web.Series
@@ -66,7 +67,8 @@ defmodule Samen.Web.CRM.DashboardLive do
     stats: %{companies: 0, contacts: 0, open_opps: 0, pipeline_value: nil},
     # T76/I3 — honest-empty defaults: nil rates (never a fabricated 0%), an empty leaderboard.
     rates: %{win_rate: nil, conversion_rate: nil, won: 0, lost: 0, open: 0, on_hold: 0},
-    leaderboard: %{rows: [], capped: false, shown: 0, hidden_owners: 0, hidden_count: 0}
+    leaderboard: %{rows: [], capped: false, shown: 0, hidden_owners: 0, hidden_count: 0},
+    errors: %{}
   }
 
   @impl true
@@ -99,7 +101,19 @@ defmodule Samen.Web.CRM.DashboardLive do
     |> assign(no_org: false, org_id: org_id, dash: dash)
   end
 
+  # `crm_dashboard/3` guards every tile's read itself (WP6): a failing tile is named in
+  # `dash.errors` and keeps an empty default; the other tiles still render. It no longer raises,
+  # so a database error here cannot loop the LiveView through reconnects (audit F05).
   defp safe_dashboard(mount, scope), do: Reads.crm_dashboard(mount, scope)
+
+  @impl true
+  def handle_event("retry_load", _params, socket) do
+    {:noreply, load(socket, socket.assigns.org_id)}
+  end
+
+  # The tile/metric error for `key`: the generic, value-free copy, or nil when the tile read.
+  defp tile_error(dash, key), do: if(Map.has_key?(dash.errors, key), do: Guard.message())
+  defp metric_error?(dash, key), do: Map.has_key?(dash.errors, key)
 
   defp ensure_return_to(socket) do
     if Map.has_key?(socket.assigns, :return_to), do: socket, else: assign(socket, return_to: nil)
@@ -122,40 +136,47 @@ defmodule Samen.Web.CRM.DashboardLive do
         <% else %>
           <span id="org-banner" style="display:none">CRM org: {@org_id}</span>
 
+          <.error_state
+            :if={@dash.errors != %{}}
+            title="Some figures couldn't be loaded"
+            body={Guard.message()}
+            retry_event="retry_load"
+          />
+
           <.dashboard id="crm-dash-grid">
             <:tile title="Companies">
-              <.metric label="Companies" value={@dash.stats.companies} />
+              <.metric label="Companies" value={@dash.stats.companies} error={metric_error?(@dash, :companies)} />
             </:tile>
             <:tile title="Contacts">
-              <.metric label="Contacts" value={@dash.stats.contacts} />
+              <.metric label="Contacts" value={@dash.stats.contacts} error={metric_error?(@dash, :contacts)} />
             </:tile>
             <:tile title="Open opportunities">
-              <.metric label="Open" value={@dash.stats.open_opps} />
+              <.metric label="Open" value={@dash.stats.open_opps} error={metric_error?(@dash, :open_opps)} />
             </:tile>
             <:tile title="Pipeline value">
-              <.metric label="Value" value={dollars(@dash.stats.pipeline_value)} sub="open pipeline" />
+              <.metric label="Value" value={dollars(@dash.stats.pipeline_value)} sub="open pipeline" error={metric_error?(@dash, :pipeline_value)} />
             </:tile>
 
             <%!-- T76/I3 — win-rate (closed-deals basis) + conversion-rate (all-created basis).
                  See Samen.Web.CRM.Reads.pipeline_rates/2 for the two denominators; a nil rate
                  (no closed/no created deals yet) renders "—", never a fabricated 0%. Fix round
                  1 LOW-3: both tiles disclose their raw denominator, symmetrically. --%>
-            <:tile title="Win rate">
+            <:tile title="Win rate" error={tile_error(@dash, :rates)}>
               <.metric label="Win rate" value={pct(@dash.rates.win_rate)} sub={"#{@dash.rates.won} won / #{@dash.rates.won + @dash.rates.lost} closed"} />
             </:tile>
-            <:tile title="Conversion rate">
+            <:tile title="Conversion rate" error={tile_error(@dash, :rates)}>
               <.metric label="Conversion" value={pct(@dash.rates.conversion_rate)} sub={"#{@dash.rates.won} won / #{@dash.rates.won + @dash.rates.lost + @dash.rates.open + @dash.rates.on_hold} created"} />
             </:tile>
 
-            <:tile title="Pipeline value by stage" span={2}>
+            <:tile title="Pipeline value by stage" span={2} error={tile_error(@dash, :value_by_stage)}>
               <.bar_chart id="dash-value-by-stage" series={@dash.value_by_stage} format={&money_cents/1} />
             </:tile>
 
-            <:tile title="Opportunities by status">
+            <:tile title="Opportunities by status" error={tile_error(@dash, :by_status)}>
               <.pie_chart id="dash-by-status" series={@dash.by_status} />
             </:tile>
 
-            <:tile title="Closing over time" span={2}>
+            <:tile title="Closing over time" span={2} error={tile_error(@dash, :closing_over_time)}>
               <.line_chart id="dash-closing-over-time" series={@dash.closing_over_time} />
             </:tile>
 
@@ -165,7 +186,7 @@ defmodule Samen.Web.CRM.DashboardLive do
                  never resolved through the vault. Fix round 1 MED-1: ranked BEFORE capped, so
                  the true top performer always appears; the cap — when it binds — is DISCLOSED
                  (mirrors Samen.UI.Map's geo-map-capped idiom), never silently swallowed. --%>
-            <:tile title="Activity leaderboard" span={2}>
+            <:tile title="Activity leaderboard" span={2} error={tile_error(@dash, :leaderboard)}>
               <div id="dash-leaderboard">
                 <%= if @dash.leaderboard.rows == [] do %>
                   <p class="chart-empty">No activity yet</p>

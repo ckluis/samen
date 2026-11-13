@@ -19,16 +19,18 @@
 # TEST_FILES: test/samen/web/crm_detail_render_test.exs
 # MUST_FAIL: MULTI-ANCHOR
 diff --git a/samen_web/lib/samen/web/crm/reads.ex b/samen_web/lib/samen/web/crm/reads.ex
+index f1d9c360..93c36ae8 100644
 --- a/samen_web/lib/samen/web/crm/reads.ex
 +++ b/samen_web/lib/samen/web/crm/reads.ex
-@@ -208,9 +208,6 @@ def activities_for_company(mount, scope, company_id) do
-     work_task_resource(mount)
-     |> Ash.Query.ensure_selected(@timeline_fields)
--    |> Ash.Query.filter(
--      (subject_key == "crm.company" and subject_id == ^company_id) or
--        get_path(custom, ["crm_refs", "company_id"]) == ^company_id
--    )
-+    |> Ash.Query.filter(subject_key == "crm.company" and subject_id == ^company_id)
-     |> Ash.Query.sort(inserted_at: :desc)
-     |> Ash.Query.limit(@detail_limit)
-     |> Ash.read!(scope: scope)
+@@ -407,10 +407,7 @@ defmodule Samen.Web.CRM.Reads do
+         task_mod ->
+           task_mod
+           |> Ash.Query.ensure_selected(@timeline_fields)
+-          |> Ash.Query.filter(
+-            (subject_key == "crm.company" and subject_id == ^company_id) or
+-              get_path(custom, ["crm_refs", "company_id"]) == ^company_id
+-          )
++          |> Ash.Query.filter(subject_key == "crm.company" and subject_id == ^company_id)
+           |> Ash.Query.sort(inserted_at: :desc)
+           |> Ash.Query.limit(@detail_limit)
+           |> Ash.read!(scope: scope)

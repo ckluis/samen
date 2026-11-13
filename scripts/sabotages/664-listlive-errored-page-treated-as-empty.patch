@@ -1,0 +1,23 @@
+# SABOTAGE: ListLive.reread stops recognising a read-built %Page{error: :unavailable}: the failed read is 
+#   assigned as a real (empty) page, list_error stays nil, and the list renders 'No contacts yet' 
+#   with its create CTA.
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/reads_honest_failure_test.exs
+# MUST_FAIL: contacts: the first read fails → error state, no empty copy, no create CTA; retry recovers
+# MUST_FAIL: contacts: a failed re-read (filter) keeps the previous page, the typed filter and the selection
+diff --git a/samen_web/lib/samen/web/list_live.ex b/samen_web/lib/samen/web/list_live.ex
+index cd8c3e75..56a3f248 100644
+--- a/samen_web/lib/samen/web/list_live.ex
++++ b/samen_web/lib/samen/web/list_live.ex
+@@ -351,9 +351,6 @@ defmodule Samen.Web.ListLive do
+     %{view: view, mount: mount, scope: scope, config: config} = list_assigns(socket)
+ 
+     case Guard.run(view, scope, fn -> config.reads.(mount, scope, state) end) do
+-      {:ok, %Samen.Web.Page{error: error}} when not is_nil(error) ->
+-        reread_failed(socket, state)
+-
+       {:ok, page} ->
+         socket
+         |> Phoenix.Component.assign(:list_state, state)

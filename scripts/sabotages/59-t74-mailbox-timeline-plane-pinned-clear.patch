@@ -14,16 +14,15 @@
 # MUST_FAIL: RED: the COMPANY timeline masks the same message identically
 # MUST_FAIL: ANTI-TAUTOLOGY: the SAME record is CLEAR on tenant and MASKED on operator (plane flip)
 diff --git a/samen_web/lib/samen/web/crm/reads.ex b/samen_web/lib/samen/web/crm/reads.ex
+index f1d9c360..375e4739 100644
 --- a/samen_web/lib/samen/web/crm/reads.ex
 +++ b/samen_web/lib/samen/web/crm/reads.ex
-@@ -842,8 +842,8 @@
-   # The SAME PiiResolution chokepoint `resolve_pii/4` uses — kept separate only
+@@ -1285,7 +1285,7 @@ defmodule Samen.Web.CRM.Reads do
    # because the Mailbox resource is derived from the host root, not from the CRM
    # mount's own namespace map.
--  defp resolve_mail_pii(records, mount, resource, scope) do
+   defp resolve_mail_pii(records, mount, resource, scope) do
 -    Samen.Api.PiiResolution.resolve(records, resource, actor_of(scope), repo: mount.repo)
-+  defp resolve_mail_pii(records, mount, resource, _scope) do
 +    Samen.Api.PiiResolution.resolve(records, resource, %{plane: :tenant}, repo: mount.repo)
    rescue
-     _ -> records
-   end
+     e ->
+       # Fail-closed (the records stay as read), but not silent: a resolver outage is logged.

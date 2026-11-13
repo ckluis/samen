@@ -11,13 +11,15 @@
 # TEST_FILES: test/samen/web/crm_reporting_test.exs
 # MUST_FAIL: activity_leaderboard ranks owners by CRM-anchored activity COUNT, descending, EXACT ranks
 diff --git a/samen_web/lib/samen/web/crm/reads.ex b/samen_web/lib/samen/web/crm/reads.ex
+index f1d9c360..1f49b61b 100644
 --- a/samen_web/lib/samen/web/crm/reads.ex
 +++ b/samen_web/lib/samen/web/crm/reads.ex
-@@ -852,6 +852,6 @@
-         ranked =
-           series.points
-           |> Enum.reject(&(&1.key == other))
--          |> Enum.sort_by(&(-&1.value))
-+          |> Enum.sort_by(&(&1.value))
-
-         shown = Enum.take(ranked, top)
+@@ -1065,7 +1065,7 @@ defmodule Samen.Web.CRM.Reads do
+           ranked =
+             series.points
+             |> Enum.reject(&(&1.key == other))
+-            |> Enum.sort_by(&(-&1.value))
++            |> Enum.sort_by(&(&1.value))
+ 
+           shown = Enum.take(ranked, top)
+           shown_total = Enum.reduce(shown, 0, &(&1.value + &2))

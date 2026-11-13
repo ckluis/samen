@@ -14,11 +14,12 @@
 # MUST_FAIL: UNCONFIGURED: the page says so, offers NO connect affordance, and fabricates NO data
 # MUST_FAIL: UNCONFIGURED even when connection ROWS exist — the provider is the source of truth
 diff --git a/samen_web/lib/samen/web/crm/mailbox_live.ex b/samen_web/lib/samen/web/crm/mailbox_live.ex
+index cc593391..dcda1c8e 100644
 --- a/samen_web/lib/samen/web/crm/mailbox_live.ex
 +++ b/samen_web/lib/samen/web/crm/mailbox_live.ex
-@@ -76,7 +76,7 @@
-       org_id: org_id,
-       connections: Reads.mailbox_connections(mount, scope),
+@@ -87,7 +87,7 @@ defmodule Samen.Web.CRM.MailboxLive do
+       connections: connections,
+       connections_error: connections_error,
        # The fail-honest predicate — read from the adapter itself, never assumed.
 -      provider_configured: Samen.Mailbox.provider_configured?(),
 +      provider_configured: true,

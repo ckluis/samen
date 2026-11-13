@@ -16,14 +16,15 @@
 # TEST_FILES: test/samen/web/crm_reporting_test.exs
 # MUST_FAIL: activity_leaderboard counts ONLY CRM-anchored tasks — a non-CRM Work task never inflates the count
 diff --git a/samen_web/lib/samen/web/crm/reads.ex b/samen_web/lib/samen/web/crm/reads.ex
+index f1d9c360..38225074 100644
 --- a/samen_web/lib/samen/web/crm/reads.ex
 +++ b/samen_web/lib/samen/web/crm/reads.ex
-@@ -842,7 +842,7 @@
-         series =
-           task_mod
-           |> Ash.Query.new()
--          |> Ash.Query.filter(not is_nil(owner_id) and subject_key in ^@crm_subject_keys)
-+          |> Ash.Query.filter(not is_nil(owner_id))
-           |> Samen.Web.Reads.aggregate_by!(:owner_id, scope: scope, max_points: discovery_limit)
-
-         other = Samen.Web.Reads.other_key()
+@@ -1055,7 +1055,7 @@ defmodule Samen.Web.CRM.Reads do
+           series =
+             task_mod
+             |> Ash.Query.new()
+-            |> Ash.Query.filter(not is_nil(owner_id) and subject_key in ^@crm_subject_keys)
++            |> Ash.Query.filter(not is_nil(owner_id))
+             |> Samen.Web.Reads.aggregate_by!(:owner_id, scope: scope, max_points: discovery_limit)
+ 
+           other = Samen.Web.Reads.other_key()

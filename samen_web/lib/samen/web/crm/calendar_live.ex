@@ -42,6 +42,7 @@ defmodule Samen.Web.CRM.CalendarLive do
   alias Samen.UI.Calendar
   alias Samen.Web.Board
   alias Samen.Web.CRM.Reads
+  alias Samen.Web.Reads.Guard
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
 
@@ -73,7 +74,8 @@ defmodule Samen.Web.CRM.CalendarLive do
       org_id: nil,
       month: Calendar.first_of_month(month),
       board: %Board{groups: [], group_field: :close_date},
-      total_opps: 0
+      total_opps: 0,
+      board_error: nil
     )
     |> assign_nav_hrefs(nil)
   end
@@ -83,7 +85,13 @@ defmodule Samen.Web.CRM.CalendarLive do
     scope = Mount.scope(mount, org_id)
     month = Calendar.first_of_month(month || socket.assigns[:month] || Date.utc_today())
 
-    %{board: board} = Reads.opportunity_calendar(mount, scope, month)
+    # A FAILED read is not an empty month (WP6): the calendar shows the kit error state + retry.
+    {board, board_error} =
+      case Reads.opportunity_calendar_result(mount, scope, month) do
+        {:ok, %{board: board}} -> {board, nil}
+        {:error, :unavailable} -> {%Board{groups: [], group_field: :close_date}, Guard.message()}
+        {:error, _denied} -> {%Board{groups: [], group_field: :close_date}, nil}
+      end
 
     socket
     |> ensure_return_to()
@@ -92,9 +100,15 @@ defmodule Samen.Web.CRM.CalendarLive do
       org_id: org_id,
       month: month,
       board: board,
-      total_opps: total_opps(board)
+      total_opps: total_opps(board),
+      board_error: board_error
     )
     |> assign_nav_hrefs(org_id)
+  end
+
+  @impl true
+  def handle_event("retry_load", _params, socket) do
+    {:noreply, load(socket, socket.assigns.org_id, socket.assigns.month)}
   end
 
   defp ensure_return_to(socket) do
@@ -140,7 +154,7 @@ defmodule Samen.Web.CRM.CalendarLive do
           <span id="org-banner" style="display:none">CRM org: {@org_id}</span>
 
           <div class="metrics">
-            <.metric label="Opportunities this month" value={@total_opps} sub="by close date">
+            <.metric label="Opportunities this month" value={@total_opps} sub="by close date" error={@board_error != nil}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <rect x="3" y="4" width="18" height="17" rx="2" /><path d="M3 9h18M8 2v4M16 2v4" />
@@ -157,6 +171,8 @@ defmodule Samen.Web.CRM.CalendarLive do
               prev_href={@prev_href}
               next_href={@next_href}
               empty_cell_text=""
+              error={@board_error}
+              retry_event="retry_load"
             >
               <:event :let={opp}>
                 <div class="opp-ev" id={"opp-#{opp.id}"}>

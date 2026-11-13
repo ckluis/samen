@@ -80,6 +80,10 @@ defmodule Samen.UI.Overlay do
       itself carries a `:href` / `:path`. Only same-origin paths (`/…`, not `//…`) become links;
       any other value (a `javascript:` URL, an absolute URL, nil) is ignored and the hit renders
       as plain text exactly as before (F02).
+    * `error`       — a message (binary) or `true`: the search itself FAILED. The list shows the
+      kit `error_state/1` (with `retry_event`'s "Try again") instead of results or "No matches." —
+      a failed engine read is not an empty result (WP6). The input and `q` are kept.
+    * `retry_event` — LiveView event the error state's retry button fires.
   """
   attr :id, :string, default: "cmdk"
   attr :q, :string, default: ""
@@ -87,6 +91,8 @@ defmodule Samen.UI.Overlay do
   attr :event, :string, default: "search"
   attr :placeholder, :string, default: "Search everything…"
   attr :href, :any, default: nil, doc: "1-arity fun %Result{} -> same-origin path | nil"
+  attr :error, :any, default: nil, doc: "an error message (binary) or `true`: render the error state"
+  attr :retry_event, :string, default: nil, doc: "LiveView event the error state's retry button fires"
 
   def command_palette(assigns) do
     ~H"""
@@ -107,6 +113,9 @@ defmodule Samen.UI.Overlay do
       </form>
 
       <ul class="cmdk-results" role="listbox">
+        <li :if={Samen.UI.State.error?(@error)} class="cmdk-error">
+          <Samen.UI.State.error_state body={Samen.UI.State.error_body(@error)} retry_event={@retry_event} />
+        </li>
         <li :for={r <- @results} class="cmdk-hit" role="option">
           <%= case hit_path(r, @href) do %>
             <% nil -> %>
@@ -119,7 +128,7 @@ defmodule Samen.UI.Overlay do
               </a>
           <% end %>
         </li>
-        <li :if={@q not in [nil, ""] and @results == []} class="cmdk-empty">No matches.</li>
+        <li :if={@q not in [nil, ""] and @results == [] and not Samen.UI.State.error?(@error)} class="cmdk-empty">No matches.</li>
       </ul>
     </div>
     """

@@ -60,3 +60,23 @@ New `Samen.Web.Page` struct + a `Reads` convention: reads take a `%ListState{}`,
 - **+** `samen_core` stays web-dep-free — only a record+dispatch engine + `NotificationPreference` resource land there.
 - **−** One new abbrev (`npr`, per-mount registry rows, ADR-006 tax). `dsk` only if `LocalSink` is a resource (recommendation: keep it a log — no abbrev).
 - **−** `api_contract`/LiveView test snapshots shift (expected deltas, regenerated per phase).
+
+## 8 · Amendment (2026-11-13, WP6) — a failed read is not an empty list
+
+§2/§3's `reads/3` contract returned a `%Page{}` and the helpers rescued every error to an EMPTY page, so
+a database outage rendered as "No contacts yet" with its create CTA (audit F07/F13, pattern P3). Amended:
+
+- `Samen.Web.Reads.Guard` is the one convention (`run/3`, `page/4`; `{:ok, v} | {:error, :unavailable | :forbidden}`).
+  A failure is logged once (read name, org id, exception module names — never row data) and emits
+  `[:samen, :web, :read, :error]`.
+- `%Page{}` gains `error` (`nil | :unavailable`). A page read that failed returns an EMPTY page with
+  `error: :unavailable`; the §3 bound is unchanged.
+- `ListLive.reread/2` runs the view's `reads/3` through the Guard; on failure it keeps the previous
+  `:page`, the new `:list_state` (filter text, sort, selection) and sets `:list_error`; the new
+  `"list_retry"` event re-runs the read. A view renders it with `list_view error={@list_error}
+  retry_event="list_retry"` (kit `error_state/1`); a view that does not is unchanged (empty/stale page).
+- §5's empty state is shown only for an honest empty result. Detail screens keep 404 semantics for a
+  missing record and show the error state for a failure.
+
+Scope shipped: CRM, Search, Support (WP6 phase 1); the rest is tracked in the swallow ratchet
+(`Samen.Web.Reads.SwallowLint`). Recipe: `docs/guides/cookbook.md` Recipe 11.

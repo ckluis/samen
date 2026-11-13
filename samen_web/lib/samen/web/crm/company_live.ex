@@ -31,6 +31,7 @@ defmodule Samen.Web.CRM.CompanyLive do
 
   alias Samen.Web.AccountHealth
   alias Samen.Web.CRM.Reads
+  alias Samen.Web.Reads.Guard
 
   @impl true
   def mount(params, session, socket) do
@@ -61,6 +62,10 @@ defmodule Samen.Web.CRM.CompanyLive do
   end
 
   @impl true
+  def handle_event("retry_load", _params, socket) do
+    {:noreply, load(socket, socket.assigns.org_id, socket.assigns.company_id)}
+  end
+
   def handle_event("switch_tab", %{"tab" => tab}, socket) do
     {:noreply, assign(socket, active_tab: tab)}
   end
@@ -92,10 +97,20 @@ defmodule Samen.Web.CRM.CompanyLive do
 
     case AshPhoenix.Form.submit(socket.assigns.activity_form, params: params) do
       {:ok, _task} ->
+        # The write succeeded; if re-reading the timeline fails, say so (and keep the entries
+        # already on screen) rather than rendering the new activity as lost.
+        {activities, errors} =
+          section(
+            Reads.activities_for_company_result(mount, scope, company_id),
+            socket.assigns.activities,
+            :activity
+          )
+
         {:noreply,
          assign(socket,
            activity_form: activity_form(mount, scope),
-           activities: Reads.activities_for_company(mount, scope, company_id)
+           activities: activities,
+           section_errors: Enum.uniq(Enum.reject(socket.assigns.section_errors, &(&1 == :activity)) ++ errors)
          )}
 
       {:error, form} ->
@@ -179,6 +194,8 @@ defmodule Samen.Web.CRM.CompanyLive do
       org_id: nil,
       company_id: nil,
       company: nil,
+      load_error: nil,
+      section_errors: [],
       contacts: [],
       activities: [],
       mail: [],
@@ -198,26 +215,31 @@ defmodule Samen.Web.CRM.CompanyLive do
     mount = socket.assigns.samen_mount
     scope = Mount.scope(mount, org_id)
 
-    company =
+    # A FAILED read is not "not found" (WP6): `load_error` names it and the page shows the kit
+    # error state with a retry; `company == nil` with no `load_error` is a genuinely missing
+    # record and keeps its 404 copy. Each secondary read fails on its own (`section_errors`).
+    {company, load_error} =
       if company_id do
-        case Reads.get_company(mount, scope, company_id) do
-          {:ok, c} -> c
-          :error -> nil
+        case Reads.get_company_result(mount, scope, company_id) do
+          {:ok, c} -> {c, nil}
+          {:error, :unavailable} -> {nil, Guard.message()}
+          {:error, _not_found} -> {nil, nil}
         end
+      else
+        {nil, nil}
       end
 
-    {activities, mail, deals, contacts} =
+    {activities, mail, deals, contacts, section_errors} =
       if company do
-        {
-          Reads.activities_for_company(mount, scope, company_id),
-          # T74 §I1: synced mailbox messages (both directions) share this timeline.
-          # `[]` when no Mailbox scope is mounted — the honest absence.
-          Reads.mail_for_company(mount, scope, company_id),
-          Reads.opportunities_for_company(mount, scope, company_id),
-          Reads.contacts_for_company(mount, scope, company_id)
-        }
+        {acts, e1} = section(Reads.activities_for_company_result(mount, scope, company_id), [], :activity)
+        # T74 §I1: synced mailbox messages (both directions) share this timeline.
+        # `[]` when no Mailbox scope is mounted — the honest absence.
+        {mail, e2} = section(Reads.mail_for_company_result(mount, scope, company_id), [], :activity)
+        {deals, e3} = section(Reads.opportunities_for_company_result(mount, scope, company_id), [], :deals)
+        {contacts, e4} = section(Reads.contacts_for_company_result(mount, scope, company_id), [], :contacts)
+        {acts, mail, deals, contacts, Enum.uniq(e1 ++ e2 ++ e3 ++ e4)}
       else
-        {[], [], [], []}
+        {[], [], [], [], []}
       end
 
     tab = Map.get(socket.assigns, :active_tab, "overview")
@@ -243,6 +265,8 @@ defmodule Samen.Web.CRM.CompanyLive do
       org_id: org_id,
       company_id: company_id,
       company: company,
+      load_error: load_error,
+      section_errors: section_errors,
       contacts: contacts,
       activities: activities,
       mail: mail,
@@ -257,6 +281,12 @@ defmodule Samen.Web.CRM.CompanyLive do
     )
     |> assign_new(:show_edit, fn -> false end)
   end
+
+  # A tagged read result as `{value, errors}`: the value (or `default`) and `[section]` iff the
+  # read FAILED. A denial is not a failure (same empty value as ever).
+  defp section({:ok, value}, _default, _section), do: {value, []}
+  defp section({:error, :unavailable}, default, section), do: {default, [section]}
+  defp section({:error, _denied}, default, _section), do: {default, []}
 
   defp edit_form(company, scope) do
     company
@@ -323,7 +353,11 @@ defmodule Samen.Web.CRM.CompanyLive do
 
           <%= if @company == nil do %>
             <div class="wrap">
-              <div class="card" style="padding:22px 20px;color:var(--muted)">Company not found.</div>
+              <%= if @load_error do %>
+                <.error_state body={@load_error} retry_event="retry_load" />
+              <% else %>
+                <div class="card" style="padding:22px 20px;color:var(--muted)">Company not found.</div>
+              <% end %>
             </div>
           <% else %>
             <div class="wrap" style="margin-bottom:0">
@@ -461,7 +495,10 @@ defmodule Samen.Web.CRM.CompanyLive do
 
             <%= case @active_tab do %>
               <% "activity" -> %>
-                <div class="wrap" id="activity-pane">
+                <div :if={:activity in @section_errors} class="wrap" id="activity-pane">
+                  <.error_state body={Guard.message()} retry_event="retry_load" />
+                </div>
+                <div :if={:activity not in @section_errors} class="wrap" id="activity-pane">
                   <div class="card" style="padding:8px 4px 12px">
                     <.timeline
                       entries={merge_timeline(timeline_entries(@activities), mail_timeline_entries(@mail))}
@@ -475,14 +512,17 @@ defmodule Samen.Web.CRM.CompanyLive do
                 </div>
               <% "deals" -> %>
                 <div class="wrap" id="deals-pane">
-                  <%= if @deals == [] do %>
-                    <.empty_state
-                      class="deals-empty"
-                      icon="◇"
-                      title="No deals yet."
-                      body="Deals for this company appear here — start one from the Pipeline."
-                    />
-                  <% else %>
+                  <%= cond do %>
+                    <% :deals in @section_errors -> %>
+                      <.error_state body={Guard.message()} retry_event="retry_load" />
+                    <% @deals == [] -> %>
+                      <.empty_state
+                        class="deals-empty"
+                        icon="◇"
+                        title="No deals yet."
+                        body="Deals for this company appear here — start one from the Pipeline."
+                      />
+                    <% true -> %>
                     <.data_table>
                       <:head>
                         <th style="width:50%">Deal</th>
@@ -526,6 +566,7 @@ defmodule Samen.Web.CRM.CompanyLive do
                       </tr>
                     </table>
 
+                    <.error_state :if={:contacts in @section_errors} body={Guard.message()} retry_event="retry_load" />
                     <%= if @contacts != [] do %>
                       <div class="gtitle" style="margin:20px 0 12px"><h3>Contacts <small style="font-weight:400;color:var(--muted)">(🔒 PII resolved per plane)</small></h3></div>
                       <.data_table>

@@ -104,3 +104,8 @@ config :samen_web, Samen.WebTest.SecurityEndpoint,
 # table (samen_core exercises the {module, function} path against a fixture). Test-env only:
 # `Samen.WebTest.Operator` is test-support, and an unwired env must stay fail-closed.
 config :samen_core, Samen.AI.Agent, approver_membership: Samen.WebTest.Operator.Membership
+
+# The read-failure injection seam (Samen.Web.Reads.Guard): compiled in for THIS app's own test
+# env only, so a test can make one named read fail through the real failure path. Every other
+# env (prod, dev, and the verticals that depend on samen_web) compiles it out.
+config :samen_web, :read_fault_seam, true

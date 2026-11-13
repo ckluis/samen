@@ -18,14 +18,15 @@
 # MUST_FAIL: ORG-SCOPE: org B's activities never contribute to org A's leaderboard (and DO rank on org B's own)
 # MUST_FAIL: activity_leaderboard ranks owners by CRM-anchored activity COUNT, descending, EXACT ranks
 diff --git a/samen_web/lib/samen/web/crm/reads.ex b/samen_web/lib/samen/web/crm/reads.ex
+index f1d9c360..1df05c78 100644
 --- a/samen_web/lib/samen/web/crm/reads.ex
 +++ b/samen_web/lib/samen/web/crm/reads.ex
-@@ -843,7 +843,7 @@
-           task_mod
-           |> Ash.Query.new()
-           |> Ash.Query.filter(not is_nil(owner_id) and subject_key in ^@crm_subject_keys)
--          |> Samen.Web.Reads.aggregate_by!(:owner_id, scope: scope, max_points: discovery_limit)
-+          |> Samen.Web.Reads.aggregate_by!(:owner_id, max_points: discovery_limit)
-
-         other = Samen.Web.Reads.other_key()
-
+@@ -1056,7 +1056,7 @@ defmodule Samen.Web.CRM.Reads do
+             task_mod
+             |> Ash.Query.new()
+             |> Ash.Query.filter(not is_nil(owner_id) and subject_key in ^@crm_subject_keys)
+-            |> Samen.Web.Reads.aggregate_by!(:owner_id, scope: scope, max_points: discovery_limit)
++            |> Samen.Web.Reads.aggregate_by!(:owner_id, max_points: discovery_limit)
+ 
+           other = Samen.Web.Reads.other_key()
+ 

@@ -65,6 +65,23 @@ defmodule Samen.Web.ListLive do
       current page, is a no-op — never a crash (T37h; no per-vertical hand-wiring:
       any view riding this mixin inherits `restore` "for free" the moment its
       resource is archivable and its `reads/3` surfaces archived rows).
+    * `"list_retry"` — no params; re-runs the read for the CURRENT `%ListState{}` (filter text,
+      sort, cursor and selection are exactly as the failed attempt left them). The kit error
+      state's "Try again" button fires it.
+
+  ## A failed read is not an empty list (WP6)
+
+  `reread/2` runs the caller's `reads/3` through `Samen.Web.Reads.Guard`. When the read FAILS
+  (it raised, or it returned a `%Page{error: :unavailable}`) the socket keeps the PREVIOUS
+  `:page` (an empty one on the first read), keeps the new `:list_state` — so the filter text,
+  sort and selection the user just made survive — and sets `:list_error` to a generic,
+  value-free message. A view passes it to the kit:
+
+      <.list_view page={@page} state={@list_state}
+                  error={@list_error} retry_event="list_retry" ...>
+
+  `:list_error` is `nil` after every successful read. A denial (`Ash.Error.Forbidden`) is not
+  a failure: it yields an empty page, as it always did.
 
   ## Session replay (ADR-052 P2)
 
@@ -83,9 +100,10 @@ defmodule Samen.Web.ListLive do
 
   alias Samen.Web.ListState
   alias Samen.Web.Reads
+  alias Samen.Web.Reads.Guard
 
   @hook_id :samen_list_live
-  @events ~w(sort filter paginate select select_all bulk toggle_archived restore)
+  @events ~w(sort filter paginate select select_all bulk toggle_archived restore list_retry)
 
   defmacro __using__(opts) do
     # ADR-052 P2 — the replay keep-list's closed set for "sort": the view's literal `:sortable`
@@ -314,6 +332,11 @@ defmodule Samen.Web.ListLive do
     end
   end
 
+  def handle_list_event("list_retry", _params, socket) do
+    %{state: state} = list_assigns(socket)
+    {:noreply, reread(socket, state)}
+  end
+
   def handle_list_event(_event, _params, socket), do: {:noreply, socket}
 
   @doc "The list events this mixin owns (the hook halts exactly these)."
@@ -325,13 +348,41 @@ defmodule Samen.Web.ListLive do
   # the caller's `reads/3`, which returns a `%Page{}` built by `Samen.Web.Reads.page!/3`
   # (limit always applied) — the mixin never issues an unbounded read.
   defp reread(socket, %ListState{} = state) do
-    %{mount: mount, scope: scope, config: config} = list_assigns(socket)
+    %{view: view, mount: mount, scope: scope, config: config} = list_assigns(socket)
 
-    page = config.reads.(mount, scope, state)
+    case Guard.run(view, scope, fn -> config.reads.(mount, scope, state) end) do
+      {:ok, %Samen.Web.Page{error: error}} when not is_nil(error) ->
+        reread_failed(socket, state)
 
+      {:ok, page} ->
+        socket
+        |> Phoenix.Component.assign(:list_state, state)
+        |> Phoenix.Component.assign(:list_error, nil)
+        |> Phoenix.Component.assign(:page, %{page | prev_cursor: List.first(state.cursor_stack)})
+
+      {:error, :forbidden} ->
+        reread_denied(socket, state)
+
+      {:error, :unavailable} ->
+        reread_failed(socket, state)
+    end
+  end
+
+  # The read failed (a raise, or a `%Page{error: :unavailable}` the read itself built). Keep
+  # what the user was looking at and what they typed; say so; offer a retry.
+  defp reread_failed(socket, state) do
     socket
     |> Phoenix.Component.assign(:list_state, state)
-    |> Phoenix.Component.assign(:page, %{page | prev_cursor: List.first(state.cursor_stack)})
+    |> Phoenix.Component.assign(:list_error, Guard.message())
+    |> Phoenix.Component.assign(:page, socket.assigns[:page] || %Samen.Web.Page{page_size: state.page_size})
+  end
+
+  # An authorization denial is a denial, not an outage: the same empty page it always was.
+  defp reread_denied(socket, state) do
+    socket
+    |> Phoenix.Component.assign(:list_state, state)
+    |> Phoenix.Component.assign(:list_error, nil)
+    |> Phoenix.Component.assign(:page, Guard.failed_page(state, :forbidden))
   end
 
   # The `search.used` framework choke point (WS-B / G12, design §4.2). Every list view

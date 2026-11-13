@@ -1,0 +1,21 @@
+# SABOTAGE: The swallow ratchet stops recognising a catch-all rescue, so a new bare 'rescue _ -> []' in a 
+#   read helper (an outage rendered as an empty page) passes the gate.
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/reads_swallow_lint_test.exs
+# MUST_FAIL: RED: flags a function-level
+# MUST_FAIL: the tree matches the baseline exactly
+diff --git a/samen_web/lib/samen/web/reads/swallow_lint.ex b/samen_web/lib/samen/web/reads/swallow_lint.ex
+index 25e3f536..ce0a90d3 100644
+--- a/samen_web/lib/samen/web/reads/swallow_lint.ex
++++ b/samen_web/lib/samen/web/reads/swallow_lint.ex
+@@ -255,7 +255,7 @@ defmodule Samen.Web.Reads.SwallowLint do
+   defp clause(_fun, _key, _other, acc), do: acc
+ 
+   # rescue: one pattern, a bare/underscore variable. catch: every pattern a variable or `:exit`.
+-  defp catch_all?(:rescue, [pattern]), do: variable?(pattern)
++  defp catch_all?(:rescue, [_pattern]), do: false
+ 
+   defp catch_all?(:catch, patterns),
+     do: patterns != [] and Enum.all?(patterns, &(variable?(&1) or &1 in [:exit, :throw, :error]))

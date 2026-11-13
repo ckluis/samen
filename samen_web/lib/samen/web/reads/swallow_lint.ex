@@ -1,0 +1,287 @@
+defmodule Samen.Web.Reads.SwallowLint do
+  @moduledoc """
+  The SWALLOW ratchet (WP6): a read helper that ends in `rescue _ -> []` renders an outage as
+  an empty workspace (audit P3, ARCH-14). `Samen.Web.Reads.Guard` is the fix; this lint stops
+  the swallow from coming back, and from spreading, while the rest of the tree is converted.
+
+  ## What counts as a swallow
+
+  A `rescue` / `catch` clause whose pattern is a CATCH-ALL (`_`, `_e`, `e`, or `_kind, _reason`)
+  and whose body does NOT:
+
+    * log (`Logger.*`) or report (`Guard.report/3`),
+    * re-raise (`raise` / `reraise`), or
+    * hand the exception on — it references the variable the clause bound (`e -> {:error, e}`,
+      `Exception.message(e)`), which is a write/probe that tells its caller.
+
+  `rescue ArgumentError -> …`, `rescue e in [A, B] -> …` and any other TYPED clause is not a
+  swallow: the author named what can go wrong.
+
+  ## The ratchet
+
+  `baseline/0` is the per-file count of swallows that still exist (the converted tree has none
+  in the files that were converted). `check/1` compares a scan of `samen_web/lib`,
+  `driftwood/lib` and `pawchart/lib` to it and fails when
+
+    * a file has MORE swallows than its baseline (including any file not listed — a NEW bare
+      `rescue _ -> []` fails the suite), or
+    * a file has FEWER — the baseline must then be lowered to the new count, so converted code
+      cannot quietly re-grow (shrink-only).
+
+  Each phase of WP6 deletes rows from `baseline/0`; the goal state is an empty map plus the
+  handful of reviewed total helpers in `reviewed/0`. A reviewed helper is a swallow that is
+  correct (an optional-scope probe, a fail-closed authorization lookup): list it by
+  `{file, function}` WITH its reason — never a bare entry.
+
+  The lint reads SOURCE only; it never compiles, runs or inspects a value.
+  """
+
+  @roots ["samen_web/lib", "driftwood/lib", "pawchart/lib"]
+
+  # Reviewed-correct swallows, `{file, function} => reason`. They are subtracted from the count.
+  @reviewed %{
+    {"samen_web/lib/samen/web/reads/guard.ex", :run} =>
+      "the exit/throw clauses funnel into failed/3, which Guard.report/3s — the lint cannot see through the call",
+    {"samen_web/lib/samen/web/reads/guard.ex", :emit} =>
+      "best-effort telemetry: observability must never break the read it observes",
+    {"samen_web/lib/samen/web/crm/reads.ex", :work_resource?} =>
+      "optional-scope probe: an unmounted Work scope IS 'absent' — the honest answer",
+    {"samen_web/lib/samen/web/crm/sequences_reads.ex", :live_resource?} =>
+      "optional-scope probe: an unmounted Outreach scope IS 'absent' — the honest answer",
+    {"samen_web/lib/samen/web/crm/sequences_reads.ex", :sends_configured?} =>
+      "fail-honest predicate: 'no sender configured' is the safe, truthful default"
+  }
+
+  # Swallows that still exist, per file, AFTER the reviewed ones are subtracted. Shrink-only: a
+  # phase that converts a file lowers or deletes its row. Rows include class-b helpers that are
+  # correct as they are (fail-closed authz, seed probes, …) and have not yet been moved to
+  # `@reviewed` with a reason — see spec/evaluation-2026-11-13/reads-rescue-inventory.md.
+  @baseline %{
+    "driftwood/lib/driftwood/directory.ex" => 1,
+    "driftwood/lib/driftwood/operator_reveal.ex" => 1,
+    "driftwood/lib/driftwood/operator_seeds.ex" => 4,
+    "driftwood/lib/driftwood/reads.ex" => 6,
+    "driftwood/lib/driftwood/seeds.ex" => 5,
+    "driftwood/lib/driftwood_web/broker_live.ex" => 1,
+    "driftwood/lib/driftwood_web/operator_impersonation_live.ex" => 2,
+    "driftwood/lib/driftwood_web/page_controller.ex" => 1,
+    "pawchart/lib/pawchart/auth.ex" => 1,
+    "pawchart/lib/pawchart/directory.ex" => 1,
+    "pawchart/lib/pawchart/operator_seeds.ex" => 2,
+    "pawchart/lib/pawchart_web/clinic_reads.ex" => 5,
+    "pawchart/lib/pawchart_web/operator_impersonation_live.ex" => 3,
+    "samen_web/lib/samen/ui/form.ex" => 1,
+    "samen_web/lib/samen/ui/gantt.ex" => 1,
+    "samen_web/lib/samen/ui/nav.ex" => 1,
+    "samen_web/lib/samen/ui/overlay.ex" => 1,
+    "samen_web/lib/samen/web/account_health.ex" => 2,
+    "samen_web/lib/samen/web/ai/agent_reads.ex" => 8,
+    "samen_web/lib/samen/web/ai/server.ex" => 3,
+    "samen_web/lib/samen/web/auth/totp_enroll_controller.ex" => 1,
+    "samen_web/lib/samen/web/auth/totp_pending.ex" => 2,
+    "samen_web/lib/samen/web/auth_gate.ex" => 1,
+    "samen_web/lib/samen/web/automation/reads.ex" => 2,
+    "samen_web/lib/samen/web/billing/dunning.ex" => 1,
+    "samen_web/lib/samen/web/billing/reads.ex" => 15,
+    "samen_web/lib/samen/web/billing/settings_live.ex" => 1,
+    "samen_web/lib/samen/web/chat.ex" => 1,
+    "samen_web/lib/samen/web/chat/identity.ex" => 1,
+    "samen_web/lib/samen/web/chat/reads.ex" => 8,
+    "samen_web/lib/samen/web/csv.ex" => 1,
+    "samen_web/lib/samen/web/current_org.ex" => 6,
+    "samen_web/lib/samen/web/files/reads.ex" => 3,
+    "samen_web/lib/samen/web/first_run.ex" => 2,
+    "samen_web/lib/samen/web/flags/reads.ex" => 3,
+    "samen_web/lib/samen/web/live.ex" => 1,
+    "samen_web/lib/samen/web/marketing/leads_live.ex" => 1,
+    "samen_web/lib/samen/web/marketing/reads.ex" => 18,
+    "samen_web/lib/samen/web/metrics_controller.ex" => 2,
+    "samen_web/lib/samen/web/notifications/reads.ex" => 5,
+    "samen_web/lib/samen/web/object_ref.ex" => 3,
+    "samen_web/lib/samen/web/object_ref/catalog.ex" => 1,
+    "samen_web/lib/samen/web/object_ref/default_card.ex" => 1,
+    "samen_web/lib/samen/web/object_ref/registry.ex" => 1,
+    "samen_web/lib/samen/web/onboarding.ex" => 2,
+    "samen_web/lib/samen/web/onboarding/wizard_controller.ex" => 1,
+    "samen_web/lib/samen/web/onboarding/wizard_live.ex" => 1,
+    "samen_web/lib/samen/web/operator.ex" => 2,
+    "samen_web/lib/samen/web/operator/activity_reads.ex" => 7,
+    "samen_web/lib/samen/web/operator/aggregate_live.ex" => 1,
+    "samen_web/lib/samen/web/operator/analytics/reads.ex" => 3,
+    "samen_web/lib/samen/web/operator/analytics_live.ex" => 1,
+    "samen_web/lib/samen/web/operator/authz.ex" => 1,
+    "samen_web/lib/samen/web/operator/deliverability_reads.ex" => 3,
+    "samen_web/lib/samen/web/operator/desk_detail_live.ex" => 1,
+    "samen_web/lib/samen/web/operator/fleet_live.ex" => 1,
+    "samen_web/lib/samen/web/operator/impersonation.ex" => 2,
+    "samen_web/lib/samen/web/operator/reads.ex" => 26,
+    "samen_web/lib/samen/web/operator/revenue/reads.ex" => 3,
+    "samen_web/lib/samen/web/operator/revenue_live.ex" => 1,
+    "samen_web/lib/samen/web/operator/webhook_dlq_live.ex" => 3,
+    "samen_web/lib/samen/web/reads.ex" => 1,
+    "samen_web/lib/samen/web/replay/recorder.ex" => 5,
+    "samen_web/lib/samen/web/replay/renderer.ex" => 3,
+    "samen_web/lib/samen/web/settings/api_keys.ex" => 1,
+    "samen_web/lib/samen/web/settings/invitations.ex" => 2,
+    "samen_web/lib/samen/web/settings/invitations_live.ex" => 1,
+    "samen_web/lib/samen/web/settings/reads.ex" => 3,
+    "samen_web/lib/samen/web/settings/reveal_approvals_live.ex" => 1,
+    "samen_web/lib/samen/web/settings/security_live.ex" => 5,
+    "samen_web/lib/samen/web/support/kb_reads.ex" => 1,
+    "samen_web/lib/samen/web/tags.ex" => 2,
+    "samen_web/lib/samen/web/tenant/analytics_reads.ex" => 1,
+    "samen_web/lib/samen/web/tenant_gate.ex" => 1,
+    "samen_web/lib/samen/web/webhook/ingress.ex" => 2,
+    "samen_web/lib/samen/web/work/reads.ex" => 7
+  }
+
+  def roots, do: @roots
+  def baseline, do: @baseline
+  def reviewed, do: @reviewed
+
+  @doc "Repo root, anchored on this file's compile-time path (cwd-independent)."
+  def repo_root do
+    __ENV__.file |> Path.dirname() |> Path.join("../../../../..") |> Path.expand()
+  end
+
+  @doc "Every `.ex` file under the scanned roots, as repo-relative paths."
+  def files do
+    root = repo_root()
+
+    for tree <- @roots,
+        path <- Path.wildcard(Path.join([root, tree, "**", "*.ex"])),
+        do: Path.relative_to(path, root)
+  end
+
+  @doc """
+  Scan one source and return the swallowing clauses as `[%{fun:, line:}]` (reviewed ones are NOT
+  filtered here — `scan_file/1` does that, so a fixture can be linted without a path).
+  """
+  def scan_source(source, file \\ "nofile") do
+    ast = Code.string_to_quoted!(source, file: file, columns: false)
+
+    {_ast, acc} =
+      Macro.prewalk(ast, [], fn
+        {kind, _meta, [head, body]} = node, acc when kind in [:def, :defp] ->
+          {node, collect(fun_name(head), body, acc)}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    acc |> Enum.reverse() |> Enum.uniq()
+  end
+
+  @doc "Swallow count per file for `files` (default `files/0`), reviewed helpers subtracted."
+  def scan(files \\ files()) do
+    root = repo_root()
+
+    files
+    |> Enum.map(fn rel ->
+      swallows =
+        root
+        |> Path.join(rel)
+        |> File.read!()
+        |> scan_source(rel)
+        |> Enum.reject(&Map.has_key?(@reviewed, {rel, &1.fun}))
+
+      {rel, length(swallows)}
+    end)
+    |> Enum.reject(fn {_rel, n} -> n == 0 end)
+    |> Map.new()
+  end
+
+  @doc """
+  Compare a `scan/1` result to `baseline/0`. `:ok`, or `{:error, [message]}` — each message names
+  the file, the two counts and what to do.
+  """
+  def check(counts \\ scan(), baseline \\ @baseline) do
+    problems =
+      for file <- Enum.uniq(Map.keys(counts) ++ Map.keys(baseline)),
+          have = Map.get(counts, file, 0),
+          allowed = Map.get(baseline, file, 0),
+          have != allowed do
+        if have > allowed do
+          "#{file}: #{have} swallowing rescue/catch clause(s), baseline allows #{allowed} — a read must not " <>
+            "turn a failure into an empty result: wrap it in Samen.Web.Reads.Guard.run/3 (docs/guides/cookbook.md), " <>
+            "or log/report and re-raise; do NOT raise the baseline"
+        else
+          "#{file}: #{have} swallowing clause(s) left but the baseline still allows #{allowed} — " <>
+            "lower it to #{have} in Samen.Web.Reads.SwallowLint (the ratchet only shrinks)"
+        end
+      end
+
+    if problems == [], do: :ok, else: {:error, problems}
+  end
+
+  # -- AST ------------------------------------------------------------------------
+
+  defp fun_name({:when, _, [head | _]}), do: fun_name(head)
+  defp fun_name({name, _, _}) when is_atom(name), do: name
+  defp fun_name(_), do: :__unknown__
+
+  # The def's do-block keyword list carries `:rescue` / `:catch` for a function-level handler;
+  # a `try` expression carries them in its own. Collect both.
+  defp collect(fun, body, acc) do
+    {_body, acc} =
+      Macro.prewalk(body, acc, fn
+        kw, acc when is_list(kw) ->
+          acc =
+            Enum.reduce(kw, acc, fn
+              {key, clauses}, acc when key in [:rescue, :catch] and is_list(clauses) ->
+                Enum.reduce(clauses, acc, &clause(fun, key, &1, &2))
+
+              _other, acc ->
+                acc
+            end)
+
+          {kw, acc}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    acc
+  end
+
+  defp clause(fun, key, {:->, meta, [patterns, body]}, acc) do
+    if catch_all?(key, patterns) and not handled?(body, bound_vars(patterns)) do
+      [%{fun: fun, line: meta[:line]} | acc]
+    else
+      acc
+    end
+  end
+
+  defp clause(_fun, _key, _other, acc), do: acc
+
+  # rescue: one pattern, a bare/underscore variable. catch: every pattern a variable or `:exit`.
+  defp catch_all?(:rescue, [pattern]), do: variable?(pattern)
+
+  defp catch_all?(:catch, patterns),
+    do: patterns != [] and Enum.all?(patterns, &(variable?(&1) or &1 in [:exit, :throw, :error]))
+
+  defp variable?({name, _, ctx}) when is_atom(name) and is_atom(ctx), do: true
+  defp variable?(_), do: false
+
+  defp bound_vars(patterns) do
+    for {name, _, ctx} <- patterns, is_atom(name), is_atom(ctx), not underscored?(name), do: name
+  end
+
+  defp underscored?(name), do: name |> Atom.to_string() |> String.starts_with?("_")
+
+  # Logged / reported / re-raised, or the bound exception is used (handed on to the caller).
+  defp handled?(body, vars) do
+    {_, found?} =
+      Macro.prewalk(body, false, fn
+        node, true -> {node, true}
+        {{:., _, [{:__aliases__, _, [:Logger]}, _]}, _, _} = node, _ -> {node, true}
+        {{:., _, [{:__aliases__, _, aliases}, :report]}, _, _} = node, _ -> {node, List.last(aliases) == :Guard}
+        {:raise, _, _} = node, _ -> {node, true}
+        {:reraise, _, _} = node, _ -> {node, true}
+        {name, _, ctx} = node, _ when is_atom(name) and is_atom(ctx) -> {node, name in vars}
+        node, found -> {node, found}
+      end)
+
+    found?
+  end
+end

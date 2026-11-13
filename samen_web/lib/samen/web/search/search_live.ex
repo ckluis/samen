@@ -31,6 +31,7 @@ defmodule Samen.Web.Search.SearchLive do
   alias Samen.Search
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   @limit 20
 
@@ -65,30 +66,47 @@ defmodule Samen.Web.Search.SearchLive do
     socket
     |> Phoenix.Component.assign(:org_id, org_id)
     |> Phoenix.Component.assign(:q, q)
-    |> Phoenix.Component.assign(:results, run(socket.assigns[:samen_mount], org_id, q))
+    |> assign_results(run(socket.assigns[:samen_mount], org_id, q))
   end
+
+  # A FAILED engine read is not "No matches." (WP6, audit F22): `search_error` makes the palette
+  # show the kit error state (with a retry that re-runs the same term); `results` is `[]`.
+  defp assign_results(socket, {:ok, results}),
+    do: Phoenix.Component.assign(socket, results: results, search_error: nil)
+
+  defp assign_results(socket, {:error, :unavailable}),
+    do: Phoenix.Component.assign(socket, results: [], search_error: Guard.message())
+
+  defp assign_results(socket, {:error, _denied}),
+    do: Phoenix.Component.assign(socket, results: [], search_error: nil)
 
   @impl true
   def handle_event("search", %{"q" => q}, socket) do
     {:noreply, load(socket, socket.assigns.org_id, q)}
   end
 
-  # The one call into the engine — mount facts + acting scope in, ranked masked-safe
-  # results out. No org / blank term → no results (the engine is fail-closed anyway).
-  defp run(_mount, nil, _q), do: []
-
-  defp run(%Mount{} = mount, org_id, q) do
-    Search.query(Mount.scope(mount, org_id), q,
-      resources: searchable_resources(mount),
-      search_index: Mount.resource(mount, SearchIndex),
-      repo: mount.repo,
-      limit: @limit
-    )
-  rescue
-    _ -> []
+  def handle_event("retry_search", _params, socket) do
+    {:noreply, load(socket, socket.assigns.org_id, socket.assigns.q)}
   end
 
-  defp run(_mount, _org_id, _q), do: []
+  # The one call into the engine — mount facts + acting scope in, ranked masked-safe
+  # results out. No org / blank term → no results (the engine is fail-closed anyway).
+  defp run(_mount, nil, _q), do: {:ok, []}
+
+  defp run(%Mount{} = mount, org_id, q) do
+    scope = Mount.scope(mount, org_id)
+
+    Guard.run(:search_query, scope, fn ->
+      Search.query(scope, q,
+        resources: searchable_resources(mount),
+        search_index: Mount.resource(mount, SearchIndex),
+        repo: mount.repo,
+        limit: @limit
+      )
+    end)
+  end
+
+  defp run(_mount, _org_id, _q), do: {:ok, []}
 
   # The candidate resources are the mount domain's resources MINUS the registry itself.
   defp searchable_resources(%Mount{domain: domain} = mount) do
@@ -97,8 +115,6 @@ defmodule Samen.Web.Search.SearchLive do
     domain
     |> Ash.Domain.Info.resources()
     |> Enum.reject(&(&1 == index))
-  rescue
-    _ -> []
   end
 
   @impl true
@@ -128,7 +144,7 @@ defmodule Samen.Web.Search.SearchLive do
         <.no_org_card mount={@samen_mount} />
       <% else %>
         <div class="pane">
-          <.command_palette id="cmdk" q={@q} results={@results} event="search" />
+          <.command_palette id="cmdk" q={@q} results={@results} event="search" error={@search_error} retry_event="retry_search" />
         </div>
       <% end %>
     </.app_shell>

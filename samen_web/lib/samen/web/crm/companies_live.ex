@@ -54,8 +54,8 @@ defmodule Samen.Web.CRM.CompaniesLive do
   def load(socket, nil) do
     socket
     |> ensure_return_to()
-    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, metrics: nil)
-    |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
+    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, metrics: nil, metric_errors: [])
+    |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{}, list_error: nil)
     |> assign(show_new: false, new_form: nil)
     |> assign_new(:delete_error, fn -> nil end)
   end
@@ -64,12 +64,15 @@ defmodule Samen.Web.CRM.CompaniesLive do
     mount = socket.assigns.samen_mount
     scope = Mount.scope(mount, org_id)
 
+    {metrics, metric_errors} = Reads.metrics_status(mount, scope)
+
     socket
     |> ensure_return_to()
     |> assign(
       no_org: false,
       org_id: org_id,
-      metrics: Reads.metrics(mount, scope)
+      metrics: metrics,
+      metric_errors: metric_errors
     )
     |> assign_new(:show_new, fn -> false end)
     |> assign_new(:delete_error, fn -> nil end)
@@ -175,21 +178,21 @@ defmodule Samen.Web.CRM.CompaniesLive do
           </div>
 
           <div class="metrics">
-            <.metric label="Companies" value={@metrics && @metrics.companies || 0}>
+            <.metric label="Companies" value={@metrics && @metrics.companies || 0} error={:companies in @metric_errors}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Contacts" value={@metrics && @metrics.contacts || 0}>
+            <.metric label="Contacts" value={@metrics && @metrics.contacts || 0} error={:contacts in @metric_errors}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <circle cx="12" cy="8" r="3.2" /><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Open opportunities" value={@metrics && @metrics.open_opps || 0}>
+            <.metric label="Open opportunities" value={@metrics && @metrics.open_opps || 0} error={:open_opps in @metric_errors}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
@@ -200,6 +203,7 @@ defmodule Samen.Web.CRM.CompaniesLive do
               label="Pipeline value"
               value={dollars((@metrics && @metrics.pipeline_value) || 0)}
               sub="open opportunities"
+              error={:pipeline_value in @metric_errors}
             >
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
@@ -220,6 +224,8 @@ defmodule Samen.Web.CRM.CompaniesLive do
                 id="companies-list"
                 page={@page}
                 state={@list_state}
+                error={@list_error}
+                retry_event="list_retry"
                 row_class="company-row"
                 filter_placeholder="Filter companies…"
                 empty_text="No companies yet."

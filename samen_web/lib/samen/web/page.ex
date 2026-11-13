@@ -12,6 +12,11 @@ defmodule Samen.Web.Page do
   Cursors are OPAQUE SERVER-SIDE TERMS (`{sort_value, id}`) that never leave the
   server (see `Samen.Web.ListState`). `has_more` is derived from the read's
   `limit(page_size + 1)` probe row.
+
+  `error` is `nil` for every page a read actually produced (including an honestly empty
+  one). A read that FAILED returns an empty page with `error: :unavailable`
+  (`Samen.Web.Reads.Guard.page/4`), so a screen can tell "no rows" from "could not read"
+  without a new return shape; `Samen.Web.ListLive` turns it into the kit error state.
   """
 
   defstruct items: [],
@@ -22,7 +27,8 @@ defmodule Samen.Web.Page do
             page_size: 50,
             sort: nil,
             filter: "",
-            total_estimate: nil
+            total_estimate: nil,
+            error: nil
 
   @type t :: %__MODULE__{
           items: [term()],
@@ -33,6 +39,7 @@ defmodule Samen.Web.Page do
           page_size: pos_integer(),
           sort: {atom(), :asc | :desc} | nil,
           filter: String.t(),
-          total_estimate: non_neg_integer() | nil
+          total_estimate: non_neg_integer() | nil,
+          error: nil | :unavailable
         }
 end

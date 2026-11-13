@@ -1,0 +1,21 @@
+# SABOTAGE: A failed page read loses its :unavailable marker, so the failed read is indistinguishable from 
+#   an empty page and the list renders 'No contacts yet' + its create CTA again.
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/reads_guard_test.exs test/samen/web/reads_honest_failure_test.exs
+# MUST_FAIL: a page passes through; a failed read is an EMPTY page marked :unavailable
+# MUST_FAIL: contacts: the first read fails → error state, no empty copy, no create CTA; retry recovers
+diff --git a/samen_web/lib/samen/web/reads/guard.ex b/samen_web/lib/samen/web/reads/guard.ex
+index b43d3aa1..87d26327 100644
+--- a/samen_web/lib/samen/web/reads/guard.ex
++++ b/samen_web/lib/samen/web/reads/guard.ex
+@@ -106,7 +106,7 @@ defmodule Samen.Web.Reads.Guard do
+     %Page{
+       items: [],
+       page_size: Samen.Web.Reads.bounded_page_size(Map.get(state, :page_size)),
+-      error: if(kind == :unavailable, do: :unavailable)
++      error: nil
+     }
+   end
+ 

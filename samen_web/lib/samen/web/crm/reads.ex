@@ -29,12 +29,16 @@ defmodule Samen.Web.CRM.Reads do
 
   alias Samen.Web.Mount
   alias Samen.Web.ObjectRef
+  alias Samen.Web.Reads.Guard
 
   # A3 read-bounding (WS-A design §1.1 "read! elimination"): every non-page read on the
   # CRM surfaces carries an explicit limit. Detail sub-lists (a company's contacts, a
   # person's timeline, …) are bounded to the kit's hard page cap rather than paginated —
   # they are single-parent fan-outs, not hot lists.
   @detail_limit 200
+
+  # Honest-empty rates (nil, never a fabricated 0%) — also the legacy value of a failed read.
+  @empty_rates %{win_rate: nil, conversion_rate: nil, won: 0, lost: 0, open: 0, on_hold: 0}
 
   # The Work Task fields the CRM detail timeline projects onto its entry map (ADR-041 §6.1:
   # kind → :type, title → :subject, completed_at||inserted_at → :at, custom["author"] → :who).
@@ -63,14 +67,19 @@ defmodule Samen.Web.CRM.Reads do
   the paginated `companies_page/3` — this remains only as the lookup read (e.g. the
   contact form's company select / the contacts list's company-name map).
   """
-  def companies(mount, scope) do
-    Mount.resource(mount, Company)
-    |> Ash.Query.ensure_selected([:name, :industry, :size, :custom])
-    |> Ash.Query.sort(name: :asc)
-    |> Ash.Query.limit(@detail_limit)
-    |> Ash.read!(scope: scope)
-  rescue
-    _ -> []
+  def companies(mount, scope), do: companies_result(mount, scope) |> Guard.value([])
+
+  @doc """
+  Tagged sibling of `companies/2` (WP6): `{:ok, value}`, or `{:error, :unavailable}` when the read FAILED (an outage is not an empty result), or `{:error, :forbidden}` for a denial.
+  """
+  def companies_result(mount, scope) do
+    Guard.run(:crm_companies, scope, fn ->
+      Mount.resource(mount, Company)
+      |> Ash.Query.ensure_selected([:name, :industry, :size, :custom])
+      |> Ash.Query.sort(name: :asc)
+      |> Ash.Query.limit(@detail_limit)
+      |> Ash.read!(scope: scope)
+    end)
   end
 
   @doc """
@@ -81,26 +90,31 @@ defmodule Samen.Web.CRM.Reads do
   page is EMPTY — never unbounded.
   """
   def companies_page(mount, scope, state) do
-    Mount.resource(mount, Company)
-    |> Ash.Query.ensure_selected([:name, :domain, :industry, :size, :website, :custom])
-    |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:name, :industry])
-  rescue
-    _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(state.page_size)}
+    Guard.page(:crm_companies_page, scope, state, fn ->
+      Mount.resource(mount, Company)
+      |> Ash.Query.ensure_selected([:name, :domain, :industry, :size, :website, :custom])
+      |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:name, :industry])
+    end)
   end
 
   @doc """
   Read all CRM people (contacts) for `scope`, with PII (full_name/emails/phones)
   plane-resolved through `Samen.Api.PiiResolution` (tenant clear / operator ••••).
   """
-  def contacts(mount, scope) do
-    Mount.resource(mount, Person)
-    |> Ash.Query.ensure_selected([:full_name, :emails, :phones, :display_name, :job_title, :company_id, :custom])
-    |> Ash.Query.sort(display_name: :asc)
-    |> Ash.Query.limit(@detail_limit)
-    |> Ash.read!(scope: scope)
-    |> resolve_pii(mount, Person, scope)
-  rescue
-    _ -> []
+  def contacts(mount, scope), do: contacts_result(mount, scope) |> Guard.value([])
+
+  @doc """
+  Tagged sibling of `contacts/2` (WP6): `{:ok, value}`, or `{:error, :unavailable}` when the read FAILED (an outage is not an empty result), or `{:error, :forbidden}` for a denial.
+  """
+  def contacts_result(mount, scope) do
+    Guard.run(:crm_contacts, scope, fn ->
+      Mount.resource(mount, Person)
+      |> Ash.Query.ensure_selected([:full_name, :emails, :phones, :display_name, :job_title, :company_id, :custom])
+      |> Ash.Query.sort(display_name: :asc)
+      |> Ash.Query.limit(@detail_limit)
+      |> Ash.read!(scope: scope)
+      |> resolve_pii(mount, Person, scope)
+    end)
   end
 
   @doc """
@@ -126,26 +140,26 @@ defmodule Samen.Web.CRM.Reads do
   resolver.
   """
   def contacts_page(mount, scope, state) do
-    base = Mount.resource(mount, Person)
-    base = if state.show_archived, do: Ash.Query.for_read(base, :archived), else: base
+    Guard.page(:crm_contacts_page, scope, state, fn ->
+      base = Mount.resource(mount, Person)
+      base = if state.show_archived, do: Ash.Query.for_read(base, :archived), else: base
 
-    page =
-      base
-      |> Ash.Query.ensure_selected([
-        :full_name,
-        :emails,
-        :phones,
-        :display_name,
-        :job_title,
-        :company_id,
-        :custom,
-        :archived_at
-      ])
-      |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:display_name, :job_title])
+      page =
+        base
+        |> Ash.Query.ensure_selected([
+          :full_name,
+          :emails,
+          :phones,
+          :display_name,
+          :job_title,
+          :company_id,
+          :custom,
+          :archived_at
+        ])
+        |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:display_name, :job_title])
 
-    %{page | items: resolve_pii(page.items, mount, Person, scope)}
-  rescue
-    _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(state.page_size)}
+      %{page | items: resolve_pii(page.items, mount, Person, scope)}
+    end)
   end
 
   @doc """
@@ -169,49 +183,49 @@ defmodule Samen.Web.CRM.Reads do
     cursor = if after_id in [nil, ""], do: nil, else: {after_id}
     state = %Samen.Web.ListState{sort: {:id, :asc}, cursor: cursor, page_size: size}
 
-    page =
-      Mount.resource(mount, Person)
-      |> Ash.Query.ensure_selected([
-        :full_name,
-        :emails,
-        :phones,
-        :display_name,
-        :job_title,
-        :company_id,
-        :custom
-      ])
-      |> Samen.Web.Reads.page!(state, scope: scope)
+    Guard.page(:crm_contacts_gallery, scope, state, fn ->
+      page =
+        Mount.resource(mount, Person)
+        |> Ash.Query.ensure_selected([
+          :full_name,
+          :emails,
+          :phones,
+          :display_name,
+          :job_title,
+          :company_id,
+          :custom
+        ])
+        |> Samen.Web.Reads.page!(state, scope: scope)
 
-    %{page | items: resolve_pii(page.items, mount, Person, scope)}
-  rescue
-    _ ->
-      %Samen.Web.Page{
-        items: [],
-        page_size: Samen.Web.Reads.bounded_page_size(Keyword.get(opts, :page_size, 12))
-      }
+      %{page | items: resolve_pii(page.items, mount, Person, scope)}
+    end)
   end
 
   @doc """
   Whether `id` is a (non-archived) contact of the scope's org. Org-scoped by the same Ash read
   policy as every other CRM read; a malformed uuid is simply `false`. No PII is loaded.
   """
-  def contact_exists?(mount, scope, id) when is_binary(id) do
-    case Ecto.UUID.cast(id) do
-      {:ok, uuid} ->
-        Mount.resource(mount, Person)
-        |> Ash.Query.filter(id == ^uuid)
-        |> Ash.Query.limit(1)
-        |> Ash.read!(scope: scope)
-        |> Kernel.!=([])
-
-      :error ->
-        false
-    end
-  rescue
-    _ -> false
-  end
-
+  def contact_exists?(mount, scope, id) when is_binary(id), do: contact_exists_result(mount, scope, id) |> Guard.value(false)
   def contact_exists?(_mount, _scope, _id), do: false
+
+  @doc """
+  Tagged sibling of `contact_exists?/3` (WP6): `{:ok, boolean}`, or `{:error, :unavailable}` when the read FAILED.
+  """
+  def contact_exists_result(mount, scope, id) when is_binary(id) do
+    Guard.run(:crm_contact_exists, scope, fn ->
+      case Ecto.UUID.cast(id) do
+        {:ok, uuid} ->
+          Mount.resource(mount, Person)
+          |> Ash.Query.filter(id == ^uuid)
+          |> Ash.Query.limit(1)
+          |> Ash.read!(scope: scope)
+          |> Kernel.!=([])
+
+        :error ->
+          false
+      end
+    end)
+  end
 
   @doc """
   Read a single CRM person (contact) by id for `scope`, with PII plane-resolved
@@ -219,7 +233,19 @@ defmodule Samen.Web.CRM.Reads do
   PII surface** (ADR-011 §5 — the masking-test target).
   """
   def get_contact(mount, scope, id) do
-    result =
+    case get_contact_result(mount, scope, id) do
+      {:ok, person} -> {:ok, person}
+      {:error, _kind} -> :error
+    end
+  end
+
+  @doc """
+  Tagged sibling of `get_contact/3` (WP6): `{:ok, person}`, `{:error, :not_found}` for a missing
+  (or malformed / denied) id, and `{:error, :unavailable}` when the read FAILED — an outage is
+  not "Contact not found".
+  """
+  def get_contact_result(mount, scope, id) do
+    single_result(:crm_get_contact, scope, id, fn uuid ->
       Mount.resource(mount, Person)
       |> Ash.Query.ensure_selected([
         :full_name,
@@ -230,34 +256,47 @@ defmodule Samen.Web.CRM.Reads do
         :company_id,
         :custom
       ])
-      |> Ash.Query.filter(id == ^id)
+      |> Ash.Query.filter(id == ^uuid)
       |> Ash.Query.limit(1)
       |> Ash.read!(scope: scope)
       |> resolve_pii(mount, Person, scope)
-
-    case result do
-      [person | _] -> {:ok, person}
-      [] -> :error
-    end
-  rescue
-    _ -> :error
+    end)
   end
 
   @doc "Read a single CRM company by id for `scope`. Non-PII. `{:ok, company}` or `:error`."
   def get_company(mount, scope, id) do
-    result =
+    case get_company_result(mount, scope, id) do
+      {:ok, company} -> {:ok, company}
+      {:error, _kind} -> :error
+    end
+  end
+
+  @doc "Tagged sibling of `get_company/3` (WP6); same contract as `get_contact_result/3`."
+  def get_company_result(mount, scope, id) do
+    single_result(:crm_get_company, scope, id, fn uuid ->
       Mount.resource(mount, Company)
       |> Ash.Query.ensure_selected([:name, :domain, :industry, :size, :website, :notes, :custom])
-      |> Ash.Query.filter(id == ^id)
+      |> Ash.Query.filter(id == ^uuid)
       |> Ash.Query.limit(1)
       |> Ash.read!(scope: scope)
+    end)
+  end
 
-    case result do
-      [company | _] -> {:ok, company}
-      [] -> :error
+  # One record by id: a malformed id is a plain not-found (no read is attempted), an empty
+  # result is not-found, a denial is not-found (no existence oracle), and only a FAILED read is
+  # `:unavailable`. `read` returns the (<= 1 row) list.
+  defp single_result(key, scope, id, read) do
+    with {:ok, uuid} <- Ecto.UUID.cast(id),
+         {:ok, rows} <- Guard.run(key, scope, fn -> read.(uuid) end) do
+      case rows do
+        [record | _] -> {:ok, record}
+        [] -> {:error, :not_found}
+      end
+    else
+      :error -> {:error, :not_found}
+      {:error, :forbidden} -> {:error, :not_found}
+      {:error, :unavailable} = unavailable -> unavailable
     end
-  rescue
-    _ -> :error
   end
 
   @doc """
@@ -297,16 +336,21 @@ defmodule Samen.Web.CRM.Reads do
   defp scope_org_id(_scope), do: nil
 
   @doc "Read this company's contacts (people) for `scope`, PII plane-resolved. Optional (ADR-011 §4.2)."
-  def contacts_for_company(mount, scope, company_id) do
-    Mount.resource(mount, Person)
-    |> Ash.Query.ensure_selected([:full_name, :emails, :phones, :display_name, :job_title, :company_id])
-    |> Ash.Query.filter(company_id == ^company_id)
-    |> Ash.Query.sort(display_name: :asc)
-    |> Ash.Query.limit(@detail_limit)
-    |> Ash.read!(scope: scope)
-    |> resolve_pii(mount, Person, scope)
-  rescue
-    _ -> []
+  def contacts_for_company(mount, scope, company_id), do: contacts_for_company_result(mount, scope, company_id) |> Guard.value([])
+
+  @doc """
+  Tagged sibling of `contacts_for_company/3` (WP6): `{:ok, value}`, or `{:error, :unavailable}` when the read FAILED (an outage is not an empty result), or `{:error, :forbidden}` for a denial.
+  """
+  def contacts_for_company_result(mount, scope, company_id) do
+    Guard.run(:crm_contacts_for_company, scope, fn ->
+      Mount.resource(mount, Person)
+      |> Ash.Query.ensure_selected([:full_name, :emails, :phones, :display_name, :job_title, :company_id])
+      |> Ash.Query.filter(company_id == ^company_id)
+      |> Ash.Query.sort(display_name: :asc)
+      |> Ash.Query.limit(@detail_limit)
+      |> Ash.read!(scope: scope)
+      |> resolve_pii(mount, Person, scope)
+    end)
   end
 
   @doc """
@@ -317,62 +361,91 @@ defmodule Samen.Web.CRM.Reads do
   `custom.crm_refs.person_id` — so a task that a migrated multi-anchored Activity
   produced still appears in BOTH the person and company timelines (zero timeline loss).
   """
-  def activities_for_person(mount, scope, person_id) do
-    person_id = to_string(person_id)
+  def activities_for_person(mount, scope, person_id), do: activities_for_person_result(mount, scope, person_id) |> Guard.value([])
 
-    work_task_resource(mount)
-    |> Ash.Query.ensure_selected(@timeline_fields)
-    |> Ash.Query.filter(
-      (subject_key == "crm.person" and subject_id == ^person_id) or
-        get_path(custom, ["crm_refs", "person_id"]) == ^person_id
-    )
-    |> Ash.Query.sort(inserted_at: :desc)
-    |> Ash.Query.limit(@detail_limit)
-    |> Ash.read!(scope: scope)
-  rescue
-    _ -> []
+  @doc """
+  Tagged sibling of `activities_for_person/3` (WP6): `{:ok, value}`, or `{:error, :unavailable}` when the read FAILED (an outage is not an empty result), or `{:error, :forbidden}` for a denial.
+  """
+  def activities_for_person_result(mount, scope, person_id) do
+    Guard.run(:crm_activities_for_person, scope, fn ->
+      person_id = to_string(person_id)
+
+      case work_task_resource(mount) do
+        # No Work scope mounted: the honest absence (an empty timeline), not a failure.
+        nil ->
+          []
+
+        task_mod ->
+          task_mod
+          |> Ash.Query.ensure_selected(@timeline_fields)
+          |> Ash.Query.filter(
+            (subject_key == "crm.person" and subject_id == ^person_id) or
+              get_path(custom, ["crm_refs", "person_id"]) == ^person_id
+          )
+          |> Ash.Query.sort(inserted_at: :desc)
+          |> Ash.Query.limit(@detail_limit)
+          |> Ash.read!(scope: scope)
+      end
+    end)
   end
 
   @doc "Read a company's activity timeline, newest-first (Work `Task`, anchored to `crm.company`). Non-PII."
-  def activities_for_company(mount, scope, company_id) do
-    company_id = to_string(company_id)
+  def activities_for_company(mount, scope, company_id), do: activities_for_company_result(mount, scope, company_id) |> Guard.value([])
 
-    work_task_resource(mount)
-    |> Ash.Query.ensure_selected(@timeline_fields)
-    |> Ash.Query.filter(
-      (subject_key == "crm.company" and subject_id == ^company_id) or
-        get_path(custom, ["crm_refs", "company_id"]) == ^company_id
-    )
-    |> Ash.Query.sort(inserted_at: :desc)
-    |> Ash.Query.limit(@detail_limit)
-    |> Ash.read!(scope: scope)
-  rescue
-    _ -> []
+  @doc """
+  Tagged sibling of `activities_for_company/3` (WP6): `{:ok, value}`, or `{:error, :unavailable}` when the read FAILED (an outage is not an empty result), or `{:error, :forbidden}` for a denial.
+  """
+  def activities_for_company_result(mount, scope, company_id) do
+    Guard.run(:crm_activities_for_company, scope, fn ->
+      company_id = to_string(company_id)
+
+      case work_task_resource(mount) do
+        # No Work scope mounted: the honest absence (an empty timeline), not a failure.
+        nil ->
+          []
+
+        task_mod ->
+          task_mod
+          |> Ash.Query.ensure_selected(@timeline_fields)
+          |> Ash.Query.filter(
+            (subject_key == "crm.company" and subject_id == ^company_id) or
+              get_path(custom, ["crm_refs", "company_id"]) == ^company_id
+          )
+          |> Ash.Query.sort(inserted_at: :desc)
+          |> Ash.Query.limit(@detail_limit)
+          |> Ash.read!(scope: scope)
+      end
+    end)
   end
 
   @doc """
   Read a company's opportunities with its pipeline stage joined. Non-PII (ADR-011 §5).
   Each row gets a `:__stage__` (the `Pipeline` row) for a stage pill.
   """
-  def opportunities_for_company(mount, scope, company_id) do
-    opps =
-      Mount.resource(mount, Opportunity)
-      |> Ash.Query.ensure_selected([:name, :value, :status, :pipeline_id, :company_id, :close_date])
-      |> Ash.Query.filter(company_id == ^company_id)
-      |> Ash.Query.sort(inserted_at: :asc)
-      |> Ash.Query.limit(@detail_limit)
-      |> Ash.read!(scope: scope)
+  def opportunities_for_company(mount, scope, company_id), do: opportunities_for_company_result(mount, scope, company_id) |> Guard.value([])
 
-    stage_by_id =
-      Mount.resource(mount, Pipeline)
-      |> Ash.Query.ensure_selected([:name, :label, :stage_order])
-      |> Ash.Query.limit(@detail_limit)
-      |> Ash.read!(scope: scope)
-      |> Map.new(fn s -> {s.id, s} end)
+  @doc """
+  Tagged sibling of `opportunities_for_company/3` (WP6): `{:ok, value}`, or `{:error, :unavailable}` when the read FAILED (an outage is not an empty result), or `{:error, :forbidden}` for a denial.
+  """
+  def opportunities_for_company_result(mount, scope, company_id) do
+    Guard.run(:crm_opportunities_for_company, scope, fn ->
+      opps =
+        Mount.resource(mount, Opportunity)
+        |> Ash.Query.ensure_selected([:name, :value, :status, :pipeline_id, :company_id, :close_date])
+        |> Ash.Query.filter(company_id == ^company_id)
+        |> Ash.Query.sort(inserted_at: :asc)
+        |> Ash.Query.limit(@detail_limit)
+        |> Ash.read!(scope: scope)
 
-    Enum.map(opps, fn opp -> Map.put(opp, :__stage__, Map.get(stage_by_id, opp.pipeline_id)) end)
-  rescue
-    _ -> []
+      stage_by_id =
+        Mount.resource(mount, Pipeline)
+        |> Ash.Query.ensure_selected([:name, :label, :stage_order])
+        |> Ash.Query.limit(@detail_limit)
+        |> Ash.read!(scope: scope)
+        |> Map.new(fn s -> {s.id, s} end)
+
+      Enum.map(opps, fn opp -> Map.put(opp, :__stage__, Map.get(stage_by_id, opp.pipeline_id)) end)
+    end)
   end
 
   @doc """
@@ -455,8 +528,6 @@ defmodule Samen.Web.CRM.Reads do
         _ -> false
       end
     end)
-  rescue
-    _ -> []
   end
 
   @doc """
@@ -469,23 +540,23 @@ defmodule Samen.Web.CRM.Reads do
   `%Masked{}` (••••). On any read error the page is EMPTY, never a plaintext downgrade.
   """
   def leads_page(mount, scope, state, stages \\ ~w(lead mql sql)) do
-    page =
-      Mount.resource(mount, Person)
-      |> Ash.Query.ensure_selected([
-        :full_name,
-        :emails,
-        :phones,
-        :display_name,
-        :job_title,
-        :company_id,
-        :custom
-      ])
-      |> Ash.Query.filter(expr(get_path(custom, ["lifecycle_stage"]) in ^stages))
-      |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:display_name, :job_title])
+    Guard.page(:crm_leads_page, scope, state, fn ->
+      page =
+        Mount.resource(mount, Person)
+        |> Ash.Query.ensure_selected([
+          :full_name,
+          :emails,
+          :phones,
+          :display_name,
+          :job_title,
+          :company_id,
+          :custom
+        ])
+        |> Ash.Query.filter(expr(get_path(custom, ["lifecycle_stage"]) in ^stages))
+        |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:display_name, :job_title])
 
-    %{page | items: resolve_pii(page.items, mount, Person, scope)}
-  rescue
-    _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(state.page_size)}
+      %{page | items: resolve_pii(page.items, mount, Person, scope)}
+    end)
   end
 
   @doc """
@@ -495,39 +566,44 @@ defmodule Samen.Web.CRM.Reads do
   opportunities than the cap sees the oldest `#{@detail_limit}` on the board, never an
   unbounded row transfer.
   """
-  def pipeline(mount, scope) do
-    opps =
-      Mount.resource(mount, Opportunity)
-      |> Ash.Query.ensure_selected([:name, :value, :status, :pipeline_id, :company_id, :close_date])
-      |> Ash.Query.sort(inserted_at: :asc)
-      |> Ash.Query.limit(@detail_limit)
-      |> Ash.read!(scope: scope)
+  def pipeline(mount, scope), do: pipeline_result(mount, scope) |> Guard.value([])
 
-    stages =
-      Mount.resource(mount, Pipeline)
-      |> Ash.Query.ensure_selected([:name, :label, :stage_order])
-      |> Ash.Query.sort(stage_order: :asc)
-      |> Ash.Query.limit(@detail_limit)
-      |> Ash.read!(scope: scope)
+  @doc """
+  Tagged sibling of `pipeline/2` (WP6): `{:ok, value}`, or `{:error, :unavailable}` when the read FAILED (an outage is not an empty result), or `{:error, :forbidden}` for a denial.
+  """
+  def pipeline_result(mount, scope) do
+    Guard.run(:crm_pipeline, scope, fn ->
+      opps =
+        Mount.resource(mount, Opportunity)
+        |> Ash.Query.ensure_selected([:name, :value, :status, :pipeline_id, :company_id, :close_date])
+        |> Ash.Query.sort(inserted_at: :asc)
+        |> Ash.Query.limit(@detail_limit)
+        |> Ash.read!(scope: scope)
 
-    stage_by_id = Map.new(stages, fn s -> {s.id, s} end)
+      stages =
+        Mount.resource(mount, Pipeline)
+        |> Ash.Query.ensure_selected([:name, :label, :stage_order])
+        |> Ash.Query.sort(stage_order: :asc)
+        |> Ash.Query.limit(@detail_limit)
+        |> Ash.read!(scope: scope)
 
-    opps_by_stage =
-      Enum.group_by(opps, fn opp ->
-        case Map.get(stage_by_id, opp.pipeline_id) do
-          nil -> %{name: "unknown", label: "Unknown", stage_order: 99}
-          stage -> stage
-        end
+      stage_by_id = Map.new(stages, fn s -> {s.id, s} end)
+
+      opps_by_stage =
+        Enum.group_by(opps, fn opp ->
+          case Map.get(stage_by_id, opp.pipeline_id) do
+            nil -> %{name: "unknown", label: "Unknown", stage_order: 99}
+            stage -> stage
+          end
+        end)
+
+      stages
+      |> Enum.map(fn stage ->
+        stage_opps = Map.get(opps_by_stage, stage, [])
+        %{stage: stage, opportunities: stage_opps}
       end)
-
-    stages
-    |> Enum.map(fn stage ->
-      stage_opps = Map.get(opps_by_stage, stage, [])
-      %{stage: stage, opportunities: stage_opps}
+      |> Enum.filter(fn %{opportunities: o} -> length(o) > 0 end)
     end)
-    |> Enum.filter(fn %{opportunities: o} -> length(o) > 0 end)
-  rescue
-    _ -> []
   end
 
   # The non-PII Opportunity fields a pipeline card renders.
@@ -555,30 +631,40 @@ defmodule Samen.Web.CRM.Reads do
       framework group cap). The board is bounded by construction either way.
   """
   def pipeline_board(mount, scope, opts \\ []) do
-    cap = Keyword.get(opts, :per_group_limit, Samen.Web.Reads.default_group_cap())
+    case pipeline_board_result(mount, scope, opts) do
+      {:ok, value} -> value
+      {:error, _kind} -> %{board: %Samen.Web.Board{groups: [], group_field: :pipeline_id}, stages: []}
+    end
+  end
 
-    stages =
-      Mount.resource(mount, Pipeline)
-      |> Ash.Query.ensure_selected([:name, :label, :stage_order, :stage_type])
-      |> Ash.Query.sort(stage_order: :asc)
-      |> Ash.Query.limit(@detail_limit)
-      |> Ash.read!(scope: scope)
+  @doc """
+  Tagged sibling of `pipeline_board/3` (WP6): `{:ok, %{board:, stages:}}`, `{:error, :unavailable}` when the read FAILED (the screen shows the error state, not "No pipeline stages yet"), or `{:error, :forbidden}` for a denial.
+  """
+  def pipeline_board_result(mount, scope, opts \\ []) do
+    Guard.run(:crm_pipeline_board, scope, fn ->
+      cap = Keyword.get(opts, :per_group_limit, Samen.Web.Reads.default_group_cap())
 
-    columns = Enum.map(stages, fn s -> {s.id, s.label || s.name} end)
+      stages =
+        Mount.resource(mount, Pipeline)
+        |> Ash.Query.ensure_selected([:name, :label, :stage_order, :stage_type])
+        |> Ash.Query.sort(stage_order: :asc)
+        |> Ash.Query.limit(@detail_limit)
+        |> Ash.read!(scope: scope)
 
-    board =
-      Mount.resource(mount, Opportunity)
-      |> Ash.Query.ensure_selected(@opp_card_fields)
-      |> Samen.Web.Reads.group_by!(:pipeline_id,
-        scope: scope,
-        groups: columns,
-        per_group_limit: cap,
-        row_sort: {:id, :asc}
-      )
+      columns = Enum.map(stages, fn s -> {s.id, s.label || s.name} end)
 
-    %{board: board, stages: stages}
-  rescue
-    _ -> %{board: %Samen.Web.Board{groups: [], group_field: :pipeline_id}, stages: []}
+      board =
+        Mount.resource(mount, Opportunity)
+        |> Ash.Query.ensure_selected(@opp_card_fields)
+        |> Samen.Web.Reads.group_by!(:pipeline_id,
+          scope: scope,
+          groups: columns,
+          per_group_limit: cap,
+          row_sort: {:id, :asc}
+        )
+
+      %{board: board, stages: stages}
+    end)
   end
 
   @doc """
@@ -602,21 +688,31 @@ defmodule Samen.Web.CRM.Reads do
       framework calendar cap). The calendar is bounded by construction either way.
   """
   def opportunity_calendar(mount, scope, month, opts \\ []) do
-    cap = Keyword.get(opts, :per_group_limit, Samen.Web.Reads.default_calendar_cap())
+    case opportunity_calendar_result(mount, scope, month, opts) do
+      {:ok, value} -> value
+      {:error, _kind} -> %{board: %Samen.Web.Board{groups: [], group_field: :close_date}, month: Samen.UI.Calendar.first_of_month(month)}
+    end
+  end
 
-    board =
-      Mount.resource(mount, Opportunity)
-      |> Ash.Query.ensure_selected(@opp_card_fields)
-      |> Samen.Web.Reads.calendar_by_day!(:close_date,
-        scope: scope,
-        month: month,
-        per_group_limit: cap,
-        row_sort: {:id, :asc}
-      )
+  @doc """
+  Tagged sibling of `opportunity_calendar/4` (WP6): `{:ok, %{board:, month:}}`, `{:error, :unavailable}` when the read FAILED, or `{:error, :forbidden}` for a denial.
+  """
+  def opportunity_calendar_result(mount, scope, month, opts \\ []) do
+    Guard.run(:crm_opportunity_calendar, scope, fn ->
+      cap = Keyword.get(opts, :per_group_limit, Samen.Web.Reads.default_calendar_cap())
 
-    %{board: board, month: Samen.UI.Calendar.first_of_month(month)}
-  rescue
-    _ -> %{board: %Samen.Web.Board{groups: [], group_field: :close_date}, month: Samen.UI.Calendar.first_of_month(month)}
+      board =
+        Mount.resource(mount, Opportunity)
+        |> Ash.Query.ensure_selected(@opp_card_fields)
+        |> Samen.Web.Reads.calendar_by_day!(:close_date,
+          scope: scope,
+          month: month,
+          per_group_limit: cap,
+          row_sort: {:id, :asc}
+        )
+
+      %{board: board, month: Samen.UI.Calendar.first_of_month(month)}
+    end)
   end
 
   @doc """
@@ -634,12 +730,12 @@ defmodule Samen.Web.CRM.Reads do
     size = Keyword.get(opts, :per_group_limit, Samen.Web.Reads.default_group_cap())
     state = %Samen.Web.ListState{cursor: cursor, sort: {:id, :asc}, page_size: size}
 
-    Mount.resource(mount, Opportunity)
-    |> Ash.Query.ensure_selected(@opp_card_fields)
-    |> stage_filter(stage_key)
-    |> Samen.Web.Reads.page!(state, scope: scope)
-  rescue
-    _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(nil)}
+    Guard.page(:crm_pipeline_stage_page, scope, state, fn ->
+      Mount.resource(mount, Opportunity)
+      |> Ash.Query.ensure_selected(@opp_card_fields)
+      |> stage_filter(stage_key)
+      |> Samen.Web.Reads.page!(state, scope: scope)
+    end)
   end
 
   defp stage_filter(query, key) when key in [nil, ""],
@@ -654,18 +750,31 @@ defmodule Samen.Web.CRM.Reads do
   construction (A3 read-bounding: this replaced an unbounded open-opportunities `read!`).
   """
   def metrics(mount, scope) do
-    open_opps_query =
-      Mount.resource(mount, Opportunity)
-      |> Ash.Query.filter(status == :open)
+    {stats, _failed} = metrics_status(mount, scope)
+    stats
+  end
 
-    %{
-      companies: count_resource(Mount.resource(mount, Company), scope),
-      contacts: count_resource(Mount.resource(mount, Person), scope),
-      open_opps: count_resource(open_opps_query, scope),
+  @doc """
+  `metrics/2` plus WHICH of its four numbers could not be read (WP6): `{stats, failed}` where
+  `failed` is a subset of `[:companies, :contacts, :open_opps, :pipeline_value]`. A failed number
+  is `0` in `stats` (the legacy value) but is named in `failed`, so a tile can show an error
+  instead of a confident zero. Each number is its own guarded read: one failing aggregate does
+  not blank the other three.
+  """
+  def metrics_status(mount, scope) do
+    open_opps = fn -> Mount.resource(mount, Opportunity) |> Ash.Query.filter(status == :open) end
+
+    parts = [
+      companies: count_result(:crm_metric_companies, fn -> Mount.resource(mount, Company) end, scope),
+      contacts: count_result(:crm_metric_contacts, fn -> Mount.resource(mount, Person) end, scope),
+      open_opps: count_result(:crm_metric_open_opps, open_opps, scope),
       # ADR-036 §4.5(3): value_cents was dropped by the H1 Money migration;
       # :value sums as a Money composite via ash_money's Postgres sum aggregate.
-      pipeline_value: sum_resource(open_opps_query, :value, scope)
-    }
+      pipeline_value: sum_result(:crm_metric_pipeline_value, open_opps, :value, scope)
+    ]
+
+    {Map.new(parts, fn {key, result} -> {key, Guard.value(result, 0)} end),
+     for({key, result} <- parts, Guard.unavailable?(result), do: key)}
   end
 
   @doc """
@@ -673,13 +782,18 @@ defmodule Samen.Web.CRM.Reads do
   aggregate — no row transfer, bounded by construction. Powers the pipeline header's value
   metric without loading the (per-column-capped) board rows. `0` on any error.
   """
-  def pipeline_value_cents(mount, scope) do
-    case Ash.sum!(Mount.resource(mount, Opportunity), :value, scope: scope) do
-      %Money{} = money -> Samen.Type.Money.cents(money)
-      _ -> 0
-    end
-  rescue
-    _ -> 0
+  def pipeline_value_cents(mount, scope), do: pipeline_value_cents_result(mount, scope) |> Guard.value(0)
+
+  @doc """
+  Tagged sibling of `pipeline_value_cents/2` (WP6): `{:ok, value}`, or `{:error, :unavailable}` when the read FAILED (an outage is not an empty result), or `{:error, :forbidden}` for a denial.
+  """
+  def pipeline_value_cents_result(mount, scope) do
+    Guard.run(:crm_pipeline_value_cents, scope, fn ->
+      case Ash.sum!(Mount.resource(mount, Opportunity), :value, scope: scope) do
+        %Money{} = money -> Samen.Type.Money.cents(money)
+        _ -> 0
+      end
+    end)
   end
 
   # The bounded Opportunity status domain (blueprint `one_of`) → dashboard slice labels.
@@ -706,6 +820,11 @@ defmodule Samen.Web.CRM.Reads do
       CRM-anchored activity volume, RANKED BEFORE CAPPED (fix round 1, MED-1 — the true top
       performer always surfaces regardless of uuid sort order). `rows: []` when the org has no
       owned CRM activities yet (honest empty, never fabricated rows).
+    * `:errors` — (WP6) `%{tile => :unavailable}` for every tile whose read FAILED (`:value_by_stage`
+      `:by_status` `:closing_over_time` `:rates` `:leaderboard`, and the four `:stats` numbers
+      `:companies` `:contacts` `:open_opps` `:pipeline_value`). A failed tile keeps its empty
+      default under its own key, but a screen must show the error state for it — an empty default
+      is not an answer. `%{}` when everything read.
 
   This is the THIN vertical wiring: it names the resource (`Opportunity`), the facets
   (`:pipeline_id` / `:status` / `:close_date`) and the measures, then delegates ALL discovery,
@@ -721,30 +840,52 @@ defmodule Samen.Web.CRM.Reads do
     * `:today` — the window anchor `Date` (default `Date.utc_today/0`).
   """
   def crm_dashboard(mount, scope, opts \\ []) do
-    stages =
-      Mount.resource(mount, Pipeline)
-      |> Ash.Query.ensure_selected([:name, :label, :stage_order])
-      |> Ash.Query.sort(stage_order: :asc)
-      |> Ash.Query.limit(@detail_limit)
-      |> Ash.read!(scope: scope)
-
-    stage_cols = Enum.map(stages, fn s -> {s.id, s.label || s.name} end)
-
     months = Keyword.get(opts, :months, 6)
     today = Keyword.get(opts, :today, Date.utc_today())
     range_start = today |> Date.beginning_of_month() |> add_months(-(months - 1))
     range_end = today |> Date.beginning_of_month() |> add_months(1)
 
-    %{
-      value_by_stage: value_by_stage(mount, scope, stage_cols),
-      by_status: opportunities_by_status(mount, scope),
-      closing_over_time: opportunities_over_time(mount, scope, range_start, range_end),
-      stats: metrics(mount, scope),
-      # T76/I3 — conversion + win-rate + the activity leaderboard, folded into the SAME
-      # dashboard aggregate so one `crm_dashboard/3` call powers every G8 tile.
-      rates: pipeline_rates(mount, scope),
-      leaderboard: activity_leaderboard(mount, scope)
-    }
+    # Every tile is its own guarded read: one failing tile is named in `:errors` and keeps its
+    # empty default here; the others still compute (a dashboard is not all-or-nothing).
+    stages =
+      Guard.run(:crm_dashboard_stages, scope, fn ->
+        Mount.resource(mount, Pipeline)
+        |> Ash.Query.ensure_selected([:name, :label, :stage_order])
+        |> Ash.Query.sort(stage_order: :asc)
+        |> Ash.Query.limit(@detail_limit)
+        |> Ash.read!(scope: scope)
+      end)
+
+    value_by_stage =
+      with {:ok, rows} <- stages do
+        value_by_stage_result(mount, scope, Enum.map(rows, fn s -> {s.id, s.label || s.name} end))
+      end
+
+    by_status = opportunities_by_status_result(mount, scope)
+    closing = opportunities_over_time_result(mount, scope, range_start, range_end)
+    {stats, stats_failed} = metrics_status(mount, scope)
+    leaderboard = activity_leaderboard_result(mount, scope)
+
+    # The rates are DERIVED from the status counts already read for the pie (numerically
+    # consistent with it by construction) — no second query, and a failed status read fails
+    # the rates tile too instead of fabricating `nil`/0 rates.
+    rates = with {:ok, series} <- by_status, do: {:ok, rates_from_series(series)}
+
+    tiles = [
+      value_by_stage: {value_by_stage, %Samen.Web.Series{points: [], measure: {:sum, :value}, dimension: :pipeline_id}},
+      by_status: {by_status, %Samen.Web.Series{points: [], measure: :count, dimension: :status}},
+      closing_over_time: {closing, %Samen.Web.Series{points: [], measure: :count, dimension: :bucket}},
+      rates: {rates, @empty_rates},
+      leaderboard: {leaderboard, empty_leaderboard()}
+    ]
+
+    errors =
+      for({key, {result, _default}} <- tiles, Guard.unavailable?(result), do: {key, :unavailable}) ++
+        for(key <- stats_failed, do: {key, :unavailable})
+
+    tiles
+    |> Map.new(fn {key, {result, default}} -> {key, Guard.value(result, default)} end)
+    |> Map.merge(%{stats: stats, errors: Map.new(errors)})
   end
 
   # ---------------------------------------------------------------------------
@@ -782,11 +923,24 @@ defmodule Samen.Web.CRM.Reads do
   counts ride along so a caller can render "12 won / 30 closed" alongside the percentage.
   """
   def pipeline_rates(mount, scope) do
-    counts =
-      mount
-      |> opportunities_by_status(scope)
-      |> Map.get(:points)
-      |> Map.new(fn point -> {point.key, round_count(point.value)} end)
+    mount |> pipeline_rates_result(scope) |> Guard.value(@empty_rates)
+  end
+
+  @doc """
+  Tagged sibling of `pipeline_rates/2` (WP6): `{:ok, rates}` or `{:error, :unavailable}` — a
+  failed read is NOT the honest-empty `nil` rate (that means "no deals decided yet").
+  """
+  def pipeline_rates_result(mount, scope) do
+    with {:ok, series} <- opportunities_by_status_result(mount, scope) do
+      {:ok, rates_from_series(series)}
+    end
+  end
+
+  @doc false
+  # The two rates from a status-count series (pure; shared by the dashboard so it reads the
+  # status counts once).
+  def rates_from_series(%Samen.Web.Series{points: points}) do
+    counts = Map.new(points, fn point -> {point.key, round_count(point.value)} end)
 
     won = Map.get(counts, :won, 0)
     lost = Map.get(counts, :lost, 0)
@@ -801,8 +955,6 @@ defmodule Samen.Web.CRM.Reads do
       open: open,
       on_hold: on_hold
     }
-  rescue
-    _ -> %{win_rate: nil, conversion_rate: nil, won: 0, lost: 0, open: 0, on_hold: 0}
   end
 
   defp rate(_won, 0), do: nil
@@ -889,55 +1041,60 @@ defmodule Samen.Web.CRM.Reads do
       that invariant is the caller's — this function does not clamp `:top` against it).
   """
   def activity_leaderboard(mount, scope, opts \\ []) do
-    top = Keyword.get(opts, :top, Samen.Web.Reads.default_agg_points())
-    discovery_limit = Keyword.get(opts, :discovery_limit, Samen.Web.Reads.max_agg_points())
+    mount |> activity_leaderboard_result(scope, opts) |> Guard.value(empty_leaderboard())
+  end
 
-    case work_task_resource(mount) do
-      nil ->
-        empty_leaderboard()
+  @doc "Tagged sibling of `activity_leaderboard/3` (WP6): `{:ok, board}` or `{:error, :unavailable}`."
+  def activity_leaderboard_result(mount, scope, opts \\ []) do
+    Guard.run(:crm_activity_leaderboard, scope, fn ->
+      top = Keyword.get(opts, :top, Samen.Web.Reads.default_agg_points())
+      discovery_limit = Keyword.get(opts, :discovery_limit, Samen.Web.Reads.max_agg_points())
 
-      task_mod ->
-        series =
-          task_mod
-          |> Ash.Query.new()
-          |> Ash.Query.filter(not is_nil(owner_id) and subject_key in ^@crm_subject_keys)
-          |> Samen.Web.Reads.aggregate_by!(:owner_id, scope: scope, max_points: discovery_limit)
+      case work_task_resource(mount) do
+        nil ->
+          empty_leaderboard()
 
-        other = Samen.Web.Reads.other_key()
+        task_mod ->
+          series =
+            task_mod
+            |> Ash.Query.new()
+            |> Ash.Query.filter(not is_nil(owner_id) and subject_key in ^@crm_subject_keys)
+            |> Samen.Web.Reads.aggregate_by!(:owner_id, scope: scope, max_points: discovery_limit)
 
-        # Rank the FULL discovered pool (never the Other sentinel — MED-2) BEFORE truncating to
-        # the display count — this ordering is the whole MED-1 fix: cap comes AFTER rank.
-        ranked =
-          series.points
-          |> Enum.reject(&(&1.key == other))
-          |> Enum.sort_by(&(-&1.value))
+          other = Samen.Web.Reads.other_key()
 
-        shown = Enum.take(ranked, top)
-        shown_total = Enum.reduce(shown, 0, &(&1.value + &2))
-        grand_total = round_count(Samen.Web.Series.total_value(series))
+          # Rank the FULL discovered pool (never the Other sentinel — MED-2) BEFORE truncating to
+          # the display count — this ordering is the whole MED-1 fix: cap comes AFTER rank.
+          ranked =
+            series.points
+            |> Enum.reject(&(&1.key == other))
+            |> Enum.sort_by(&(-&1.value))
 
-        # geo_markers!/3's capped_count idiom: an EXACT withheld count when knowable, else nil
-        # (never a fabricated number) — discovery capping means the true excess is unknown.
-        hidden_owners =
-          if series.capped, do: nil, else: max(length(ranked) - top, 0)
+          shown = Enum.take(ranked, top)
+          shown_total = Enum.reduce(shown, 0, &(&1.value + &2))
+          grand_total = round_count(Samen.Web.Series.total_value(series))
 
-        capped? = series.capped or (is_integer(hidden_owners) and hidden_owners > 0)
+          # geo_markers!/3's capped_count idiom: an EXACT withheld count when knowable, else nil
+          # (never a fabricated number) — discovery capping means the true excess is unknown.
+          hidden_owners =
+            if series.capped, do: nil, else: max(length(ranked) - top, 0)
 
-        rows =
-          shown
-          |> Enum.with_index(1)
-          |> Enum.map(fn {point, rank} -> %{rank: rank, owner_id: point.key, count: round_count(point.value)} end)
+          capped? = series.capped or (is_integer(hidden_owners) and hidden_owners > 0)
 
-        %{
-          rows: rows,
-          capped: capped?,
-          shown: length(rows),
-          hidden_owners: hidden_owners,
-          hidden_count: max(grand_total - shown_total, 0)
-        }
-    end
-  rescue
-    _ -> empty_leaderboard()
+          rows =
+            shown
+            |> Enum.with_index(1)
+            |> Enum.map(fn {point, rank} -> %{rank: rank, owner_id: point.key, count: round_count(point.value)} end)
+
+          %{
+            rows: rows,
+            capped: capped?,
+            shown: length(rows),
+            hidden_owners: hidden_owners,
+            hidden_count: max(grand_total - shown_total, 0)
+          }
+      end
+    end)
   end
 
   defp empty_leaderboard, do: %{rows: [], capped: false, shown: 0, hidden_owners: 0, hidden_count: 0}
@@ -947,26 +1104,36 @@ defmodule Samen.Web.CRM.Reads do
   org-scoped) — the dashboard's bar breakdown. `stage_cols` are the ordered `{pipeline_id,
   label}` slices. EMPTY series on any error.
   """
-  def value_by_stage(mount, scope, stage_cols) do
-    Mount.resource(mount, Opportunity)
-    |> Samen.Web.Reads.aggregate_by!(:pipeline_id,
-      scope: scope,
-      measure: {:sum, :value},
-      groups: stage_cols
-    )
-  rescue
-    _ -> %Samen.Web.Series{points: [], measure: {:sum, :value}, dimension: :pipeline_id}
+  def value_by_stage(mount, scope, stage_cols), do: value_by_stage_result(mount, scope, stage_cols) |> Guard.value(%Samen.Web.Series{points: [], measure: {:sum, :value}, dimension: :pipeline_id})
+
+  @doc """
+  Tagged sibling of `value_by_stage/3` (WP6): `{:ok, value}`, or `{:error, :unavailable}` when the read FAILED (an outage is not an empty result), or `{:error, :forbidden}` for a denial.
+  """
+  def value_by_stage_result(mount, scope, stage_cols) do
+    Guard.run(:crm_value_by_stage, scope, fn ->
+      Mount.resource(mount, Opportunity)
+      |> Samen.Web.Reads.aggregate_by!(:pipeline_id,
+        scope: scope,
+        measure: {:sum, :value},
+        groups: stage_cols
+      )
+    end)
   end
 
   @doc """
   Opportunity COUNT per status as a bounded `%Samen.Web.Series{}` (a DB `count` per slice,
   org-scoped) — the dashboard's pie. Slices are the bounded status enum. EMPTY on any error.
   """
-  def opportunities_by_status(mount, scope) do
-    Mount.resource(mount, Opportunity)
-    |> Samen.Web.Reads.aggregate_by!(:status, scope: scope, groups: @opp_statuses)
-  rescue
-    _ -> %Samen.Web.Series{points: [], measure: :count, dimension: :status}
+  def opportunities_by_status(mount, scope), do: opportunities_by_status_result(mount, scope) |> Guard.value(%Samen.Web.Series{points: [], measure: :count, dimension: :status})
+
+  @doc """
+  Tagged sibling of `opportunities_by_status/2` (WP6): `{:ok, value}`, or `{:error, :unavailable}` when the read FAILED (an outage is not an empty result), or `{:error, :forbidden}` for a denial.
+  """
+  def opportunities_by_status_result(mount, scope) do
+    Guard.run(:crm_opportunities_by_status, scope, fn ->
+      Mount.resource(mount, Opportunity)
+      |> Samen.Web.Reads.aggregate_by!(:status, scope: scope, groups: @opp_statuses)
+    end)
   end
 
   @doc """
@@ -974,16 +1141,21 @@ defmodule Samen.Web.CRM.Reads do
   `%Samen.Web.Series{}` (one DB `count` per month bucket, org-scoped) — the dashboard's line.
   EMPTY on any error.
   """
-  def opportunities_over_time(mount, scope, range_start, range_end) do
-    Mount.resource(mount, Opportunity)
-    |> Samen.Web.Reads.time_series!(:close_date,
-      scope: scope,
-      range_start: range_start,
-      range_end: range_end,
-      unit: :month
-    )
-  rescue
-    _ -> %Samen.Web.Series{points: [], measure: :count, dimension: :bucket}
+  def opportunities_over_time(mount, scope, range_start, range_end), do: opportunities_over_time_result(mount, scope, range_start, range_end) |> Guard.value(%Samen.Web.Series{points: [], measure: :count, dimension: :bucket})
+
+  @doc """
+  Tagged sibling of `opportunities_over_time/4` (WP6): `{:ok, value}`, or `{:error, :unavailable}` when the read FAILED (an outage is not an empty result), or `{:error, :forbidden}` for a denial.
+  """
+  def opportunities_over_time_result(mount, scope, range_start, range_end) do
+    Guard.run(:crm_opportunities_over_time, scope, fn ->
+      Mount.resource(mount, Opportunity)
+      |> Samen.Web.Reads.time_series!(:close_date,
+        scope: scope,
+        range_start: range_start,
+        range_end: range_end,
+        unit: :month
+      )
+    end)
   end
 
   defp add_months(%Date{year: y, month: m, day: d}, n) do
@@ -1061,10 +1233,14 @@ defmodule Samen.Web.CRM.Reads do
   operator-without-grant `••••`. Returns `[]` — the honest empty list — when no
   Mailbox scope is mounted.
   """
-  def mail_for_person(mount, scope, person_id) do
+  def mail_for_person(mount, scope, person_id),
+    do: mount |> mail_for_person_result(scope, person_id) |> Guard.value([])
+
+  @doc "Tagged sibling of `mail_for_person/3` (WP6): `{:ok, messages}` or `{:error, :unavailable}`."
+  def mail_for_person_result(mount, scope, person_id) do
     pid = to_string(person_id)
 
-    read_mail(mount, scope, fn query ->
+    read_mail(:crm_mail_for_person, mount, scope, fn query ->
       Ash.Query.filter(query, subject_key == "crm.person" and subject_id == ^pid)
     end)
   end
@@ -1074,10 +1250,14 @@ defmodule Samen.Web.CRM.Reads do
   PERSON at that company appears here too (the secondary `company_id` anchor) —
   zero timeline loss, the same OR-shape `activities_for_company/3` uses.
   """
-  def mail_for_company(mount, scope, company_id) do
+  def mail_for_company(mount, scope, company_id),
+    do: mount |> mail_for_company_result(scope, company_id) |> Guard.value([])
+
+  @doc "Tagged sibling of `mail_for_company/3` (WP6): `{:ok, messages}` or `{:error, :unavailable}`."
+  def mail_for_company_result(mount, scope, company_id) do
     cid = to_string(company_id)
 
-    read_mail(mount, scope, fn query ->
+    read_mail(:crm_mail_for_company, mount, scope, fn query ->
       Ash.Query.filter(
         query,
         (subject_key == "crm.company" and subject_id == ^cid) or company_id == ^cid
@@ -1085,23 +1265,23 @@ defmodule Samen.Web.CRM.Reads do
     end)
   end
 
-  defp read_mail(mount, scope, build_query) do
-    case mailbox_message_resource(mount) do
-      nil ->
-        []
+  defp read_mail(key, mount, scope, build_query) do
+    Guard.run(key, scope, fn ->
+      case mailbox_message_resource(mount) do
+        nil ->
+          []
 
-      resource ->
-        resource
-        |> Ash.Query.new()
-        |> Ash.Query.ensure_selected(@mail_fields)
-        |> build_query.()
-        |> Ash.Query.sort(occurred_at: :desc)
-        |> Ash.Query.limit(@detail_limit)
-        |> Ash.read!(scope: scope)
-        |> resolve_mail_pii(mount, resource, scope)
-    end
-  rescue
-    _ -> []
+        resource ->
+          resource
+          |> Ash.Query.new()
+          |> Ash.Query.ensure_selected(@mail_fields)
+          |> build_query.()
+          |> Ash.Query.sort(occurred_at: :desc)
+          |> Ash.Query.limit(@detail_limit)
+          |> Ash.read!(scope: scope)
+          |> resolve_mail_pii(mount, resource, scope)
+      end
+    end)
   end
 
   # The SAME PiiResolution chokepoint `resolve_pii/4` uses — kept separate only
@@ -1110,7 +1290,10 @@ defmodule Samen.Web.CRM.Reads do
   defp resolve_mail_pii(records, mount, resource, scope) do
     Samen.Api.PiiResolution.resolve(records, resource, actor_of(scope), repo: mount.repo)
   rescue
-    _ -> records
+    e ->
+      # Fail-closed (the records stay as read), but not silent: a resolver outage is logged.
+      Guard.report(:crm_resolve_mail_pii, scope, e)
+      records
   end
 
   @doc """
@@ -1118,22 +1301,27 @@ defmodule Samen.Web.CRM.Reads do
   Mailbox scope is not mounted — the honest absence, which the CRM mailbox settings
   surface renders as "not connected", never as "no mail yet".
   """
-  def mailbox_connections(mount, scope) do
-    case mailbox_connection_resource(mount) do
-      nil ->
-        []
+  def mailbox_connections(mount, scope), do: mailbox_connections_result(mount, scope) |> Guard.value([])
 
-      resource ->
-        resource
-        |> Ash.Query.new()
-        |> Ash.Query.ensure_selected(@connection_fields)
-        |> Ash.Query.sort(inserted_at: :desc)
-        |> Ash.Query.limit(@detail_limit)
-        |> Ash.read!(scope: scope)
-        |> resolve_mail_pii(mount, resource, scope)
-    end
-  rescue
-    _ -> []
+  @doc """
+  Tagged sibling of `mailbox_connections/2` (WP6): `{:ok, value}`, or `{:error, :unavailable}` when the read FAILED (an outage is not an empty result), or `{:error, :forbidden}` for a denial.
+  """
+  def mailbox_connections_result(mount, scope) do
+    Guard.run(:crm_mailbox_connections, scope, fn ->
+      case mailbox_connection_resource(mount) do
+        nil ->
+          []
+
+        resource ->
+          resource
+          |> Ash.Query.new()
+          |> Ash.Query.ensure_selected(@connection_fields)
+          |> Ash.Query.sort(inserted_at: :desc)
+          |> Ash.Query.limit(@detail_limit)
+          |> Ash.read!(scope: scope)
+          |> resolve_mail_pii(mount, resource, scope)
+      end
+    end)
   end
 
   # Resolve the CRM subject anchor (precedence opportunity ▸ person ▸ company, ADR-041
@@ -1198,22 +1386,19 @@ defmodule Samen.Web.CRM.Reads do
       repo: mount.repo
     )
   rescue
-    _ -> records
+    e ->
+      # Fail-closed (no plaintext downgrade), but not silent: a resolver outage is logged.
+      Guard.report(:crm_resolve_pii, scope, e)
+      records
   end
 
   defp actor_of(%Samen.Scope{actor: actor}), do: actor
   defp actor_of(actor) when is_map(actor), do: actor
   defp actor_of(_), do: %{}
 
-  defp count_resource(resource, scope) do
-    Ash.count!(resource, scope: scope)
-  rescue
-    _ -> 0
-  end
+  defp count_result(key, resource_fun, scope),
+    do: Guard.run(key, scope, fn -> Ash.count!(resource_fun.(), scope: scope) end)
 
-  defp sum_resource(query, field, scope) do
-    Ash.sum!(query, field, scope: scope) || 0
-  rescue
-    _ -> 0
-  end
+  defp sum_result(key, query_fun, field, scope),
+    do: Guard.run(key, scope, fn -> Ash.sum!(query_fun.(), field, scope: scope) || 0 end)
 end
