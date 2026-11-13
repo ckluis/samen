@@ -1,0 +1,22 @@
+# SABOTAGE: WP6 phase 2: a failed WRITE is told to the user. The inbox's mark_read failure branch is made 
+#   to discard the result again (the pre-phase-2 'discard with _ =' shape), so no flash is raised 
+#   and the user believes the notification was marked read.
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/reads_honest_failure_p2_test.exs
+# MUST_FAIL: mark_read / mark_all_read: a failed write tells the user
+diff --git a/samen_web/lib/samen/web/notifications/inbox_live.ex b/samen_web/lib/samen/web/notifications/inbox_live.ex
+index c14fef46..dde4bedd 100644
+--- a/samen_web/lib/samen/web/notifications/inbox_live.ex
++++ b/samen_web/lib/samen/web/notifications/inbox_live.ex
+@@ -113,7 +113,8 @@ defmodule Samen.Web.Notifications.InboxLive do
+       :ok -> {:noreply, refresh(socket)}
+       # A missing / cross-org id is a no-op (OrgScope; no existence oracle) — not a failure.
+       {:error, :not_found} -> {:noreply, refresh(socket)}
+-      {:error, _} -> {:noreply, socket |> write_failed("Couldn't mark that notification read.") |> refresh()}
++      # SABOTAGE: the failed write is discarded again — the user is never told.
++      {:error, _} -> {:noreply, refresh(socket)}
+     end
+   end
+ 

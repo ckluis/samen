@@ -1,0 +1,24 @@
+# SABOTAGE: WP6 phase 2: ListLive shows a failed page's error by default. The kept page is no longer 
+#   flagged error: :unavailable, so a screen that never wired error= (Billing overview, Marketing 
+#   leads) renders its empty state with its create CTA on a failed read again.
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/reads_honest_failure_p2_test.exs
+# MUST_FAIL: the Billing overview never passes
+diff --git a/samen_web/lib/samen/web/list_live.ex b/samen_web/lib/samen/web/list_live.ex
+index 16861c32..533f79a8 100644
+--- a/samen_web/lib/samen/web/list_live.ex
++++ b/samen_web/lib/samen/web/list_live.ex
+@@ -382,8 +382,9 @@ defmodule Samen.Web.ListLive do
+   # `:list_error` (a first read that fails is otherwise an empty page = an empty-state lie).
+   defp failed_page(socket, state) do
+     case socket.assigns[:page] do
+-      %Samen.Web.Page{} = page -> %{page | error: :unavailable}
+-      _ -> %Samen.Web.Page{page_size: state.page_size, error: :unavailable}
++      # SABOTAGE: the failed page is no longer flagged, so an unwired list_view shows the empty state.
++      %Samen.Web.Page{} = page -> page
++      _ -> %Samen.Web.Page{page_size: state.page_size}
+     end
+   end
+ 
