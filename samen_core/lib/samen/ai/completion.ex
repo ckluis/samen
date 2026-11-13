@@ -27,7 +27,9 @@ defmodule Samen.AI.Completion do
   ## `:tool_calls` — native provider tool selection (ADR-047 §5.2, batch A3)
 
   An adapter that supports native (vendor-side) tool use maps the vendor response into
-  this bounded field — a list of `%{"name" => kind, "args" => map}` entries; an adapter
+  this bounded field — a list of `%{"name" => kind, "args" => map}` entries, plus the
+  vendor's tool-use `"id"` when it has one (2026-11-13: the loop persists it and replays the
+  result under it; a missing or malformed id is replaced by a deterministic one); an adapter
   that does not leaves it `[]` (the default) and the agent loop falls back to parsing
   the bounded `TOOL:` JSON envelope out of `:text` (`Samen.AI.Agent.parse_next/1`).
   The field is provider **ingress**, so INV-7 does not govern its arrival — but its

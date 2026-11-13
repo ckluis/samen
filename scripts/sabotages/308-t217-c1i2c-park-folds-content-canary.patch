@@ -10,15 +10,15 @@
 # TEST_FILES: test/ai/agent_dual_view_test.exs
 # MUST_FAIL: PARK FOLDS CONTENT: the park path's folds ledger equals the empty ledger, not merely present
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
-index 647f225..42f9d04 100644
+index 8b55dbc9..fc79dfe2 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -2979,7 +2979,7 @@ defmodule Samen.AI.Agent do
+@@ -3596,7 +3596,7 @@ defmodule Samen.AI.Agent do
        "lines" => lines,
        "ui_view" => ui_view,
        "llm_view" => lines,
 -      "folds" => folds,
 +      "folds" => ["FAKE-PARK-FOLD-CANARY"],
-       "turn_lens" => turn_lens
+       "turn_lens" => turn_lens,
+       "turn_shapes" => turn_shapes
      }
-

@@ -141,6 +141,21 @@ defmodule Samen.AI.Chokepoint do
       `scrub_tools/1` (below): each def must pass the `safe_metadata?/1` allowlist (keys AND
       values, `vt_`-scanned) AND be byte-identical to an OPTED-IN registry action's
       compile-time `tool_schema/0` — a runtime-composed def REFUSES (the static-schema rule).
+    * `:system` — INSTRUCTION binaries kept apart from data (2026-11-13, ADR-043 §5.1a): a
+      list of binaries, each passing the SAME `safe_segment?/1` allowlist as `segments`. Any
+      non-binary refuses (an instruction is authored text, never a structure).
+    * `:turns` — the ROLE-STRUCTURED conversation (same amendment): a list in the closed shape
+      `Samen.AI.MaskedPayload` documents (`"role"` + `"content"` blocks of type `"text"`,
+      `"tool_call"`, `"tool_result"`). Refused fail-closed unless EVERY turn matches that shape
+      exactly AND passes the metadata allowlist whole (keys and leaves `vt_`-scanned, structs
+      and tuples refused; a `tool_call` input holds JSON values only). A payload with turns is
+      sealed ONLY in a call that cannot produce grant plaintext: when grant egress is
+      effective for the call, or any `:history` entry is a `{:grant_span, …}`, `seal/3`
+      refuses `{:error, :pii_egress_refused}` (`turns_without_grants/2`). The §3.2a re-check
+      runs only over `:history`, and an adapter that sends turns sends them INSTEAD of the
+      segments the re-masked history lands in — so a turns call is a masked-only call by
+      construction. (A turn's text is otherwise admitted on the same terms as a free-text
+      segment: the chokepoint cannot recognise plaintext a caller obtained elsewhere.)
     * `:grounding` (metadata map) and `:meta` (bounded dispatch metadata).
   """
   @spec seal(MaskedPayload.kind(), [term()] | term(), keyword()) ::
@@ -150,16 +165,21 @@ defmodule Samen.AI.Chokepoint do
     grounding = Keyword.get(opts, :grounding, %{})
     meta = Keyword.get(opts, :meta, %{})
 
-    with {:ok, binding_segs} <- resolve_bindings(kind, opts),
+    with :ok <- turns_without_grants(kind, opts),
+         {:ok, binding_segs} <- resolve_bindings(kind, opts),
          {:ok, history_segs} <- rescrub_history(kind, opts),
          {:ok, assembled} <- assemble_and_scrub(segments, binding_segs, history_segs),
          {:ok, tools} <- scrub_tools(Keyword.get(opts, :tools, [])),
+         {:ok, system} <- scrub_system(Keyword.get(opts, :system, [])),
+         {:ok, turns} <- scrub_turns(Keyword.get(opts, :turns, [])),
          :ok <- scrub_metadata(grounding),
          :ok <- scrub_metadata(meta) do
       {:ok,
        %MaskedPayload{
          kind: kind,
          segments: assembled,
+         system: system,
+         turns: turns,
          tools: tools,
          grounding: grounding,
          meta: meta
@@ -211,6 +231,33 @@ defmodule Samen.AI.Chokepoint do
       dispatch(provider, :embed, payload, config)
     end
   end
+
+  # --- step 0: a role-structured call is a masked-only call (ADR-043 §5.1a) --------------
+  #
+  # §3.2a re-checks a grant span ONLY where it rides `:history`, and an adapter that sends
+  # `:turns` sends them in place of the segments — the re-masked history among them. So a
+  # call with turns must be one in which no grant plaintext can exist at all: grant egress
+  # OFF for this call (bindings resolve masked) and no grant-tagged span in its history.
+  # Anything else refuses before resolution, fail-closed and payload-free. Any value of the
+  # grant opt other than a literal `false` counts as ON.
+  defp turns_without_grants(kind, opts) do
+    case Keyword.get(opts, :turns, []) do
+      empty when empty in [nil, []] ->
+        :ok
+
+      _turns ->
+        history = opts |> Keyword.get(:history, []) |> List.wrap()
+
+        if grant_egress?(kind, opts) != false or Enum.any?(history, &grant_span?/1),
+          do: @refusal,
+          else: :ok
+    end
+  rescue
+    _ -> @refusal
+  end
+
+  defp grant_span?(entry),
+    do: is_tuple(entry) and tuple_size(entry) > 0 and elem(entry, 0) == :grant_span
 
   # --- step 1: resolve vault-routed bindings in egress mode ------------------------------
 
@@ -504,9 +551,16 @@ defmodule Samen.AI.Chokepoint do
   defp safe_segment?(_other), do: false
 
   # A charlist's ELEMENTS are all safe integers, but its rendering can carry the sentinel
-  # (`~c"vt_dead…"`), so scan the rendering too.
+  # (`~c"vt_dead…"`), so scan the rendering too. EVERY list that renders as chardata is
+  # scanned — not only an ASCII-printable one: `~c"vt_…€"` (one non-ASCII codepoint) and
+  # nested chardata (`[~c"vt", "_…"]`, whose pieces are each sentinel-free) render to a
+  # string carrying the sentinel exactly as an adapter's `to_string/1` would. A list that
+  # does not render (a map or an atom inside, an invalid codepoint) has no string form for a
+  # sentinel to appear in; its elements are each scanned by the caller.
   defp charlist_sentinel?(seg) do
-    List.ascii_printable?(seg) and String.contains?(List.to_string(seg), @vt_sentinel)
+    String.contains?(List.to_string(seg), @vt_sentinel)
+  rescue
+    _ -> false
   end
 
   # --- grounding/meta scrub (ADR-043 §3.1 EG1 "grounding" / §3.2 step 3, T65-F8 close) ---
@@ -642,6 +696,77 @@ defmodule Samen.AI.Chokepoint do
   end
 
   defp scrub_tools(_other), do: @refusal
+
+  # --- instruction + role-structured conversation scrub (ADR-043 §5.1a, 2026-11-13) ------
+  #
+  # `:system` is INSTRUCTION text and `:turns` is the conversation the instructions apply to.
+  # Neither widens what may egress: system entries pass the very `safe_segment?/1` predicate
+  # `segments` do (and must be binaries), and every turn must be the closed shape below AND
+  # pass `safe_metadata?/1` whole — so a `vt_` token, a struct (`%Samen.Masked{}`, an
+  # un-rendered record) or a tuple anywhere in a turn refuses exactly as it would in a segment.
+  # `[]`/nil = "none" (the pre-amendment shape of every payload); any non-list refuses.
+  defp scrub_system(nil), do: {:ok, []}
+  defp scrub_system([]), do: {:ok, []}
+
+  defp scrub_system(system) when is_list(system) do
+    if Enum.all?(system, &(is_binary(&1) and safe_segment?(&1))),
+      do: {:ok, system},
+      else: @refusal
+  rescue
+    _ -> @refusal
+  end
+
+  defp scrub_system(_other), do: @refusal
+
+  defp scrub_turns(nil), do: {:ok, []}
+  defp scrub_turns([]), do: {:ok, []}
+
+  defp scrub_turns(turns) when is_list(turns) do
+    if Enum.all?(turns, &(turn_shape?(&1) and not unsafe_metadata?(&1))),
+      do: {:ok, turns},
+      else: @refusal
+  rescue
+    _ -> @refusal
+  end
+
+  defp scrub_turns(_other), do: @refusal
+
+  # The CLOSED turn shape: exactly the keys "role" + "content", a known role, and a non-empty
+  # list of known blocks. Anything else — an extra key, an unknown block type, a non-binary
+  # text — is not a turn this boundary knows how to vouch for, so it refuses.
+  defp turn_shape?(%{"role" => role, "content" => [_ | _] = blocks} = turn)
+       when role in ["user", "assistant"] and map_size(turn) == 2,
+       do: Enum.all?(blocks, &block_shape?/1)
+
+  defp turn_shape?(_turn), do: false
+
+  defp block_shape?(%{"type" => "text", "text" => text} = block)
+       when is_binary(text) and map_size(block) == 2,
+       do: true
+
+  # A tool call's input is the RENDERED argument map (`ToolResult.render_input/1`): JSON
+  # values only, so a struct at any depth — even an already-sealed `%MaskedPayload{}`, which
+  # the metadata allowlist trusts — is not a turn this boundary vouches for.
+  defp block_shape?(%{"type" => "tool_call", "id" => id, "name" => name, "input" => input} = b)
+       when is_binary(id) and is_binary(name) and is_map(input) and not is_struct(input) and
+              map_size(b) == 4,
+       do: json_value?(input)
+
+  defp block_shape?(
+         %{"type" => "tool_result", "id" => id, "content" => content, "is_error" => err} = b
+       )
+       when is_binary(id) and is_binary(content) and is_boolean(err) and map_size(b) == 4,
+       do: true
+
+  defp block_shape?(_block), do: false
+
+  defp json_value?(v) when is_binary(v) or is_number(v) or is_boolean(v) or is_nil(v), do: true
+  defp json_value?(v) when is_list(v), do: Enum.all?(v, &json_value?/1)
+
+  defp json_value?(v) when is_map(v) and not is_struct(v),
+    do: Enum.all?(v, fn {k, val} -> is_binary(k) and json_value?(val) end)
+
+  defp json_value?(_v), do: false
 
   defp safe_tool_def?(def) when is_map(def) and not is_struct(def) do
     not unsafe_metadata?(def) and static_tool_def?(def)

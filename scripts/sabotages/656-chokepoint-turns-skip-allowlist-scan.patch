@@ -1,0 +1,23 @@
+# SABOTAGE: INV-7 (ADR-043 §5.1a): seal/3 checks the role-structured turns' closed shape but skips the 
+#   metadata allowlist scan, so a vt_ vault token inside a turn's text, tool input or tool result 
+#   egresses to the provider through the new structure channel
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_conversation_test.exs
+# MUST_FAIL: RED: a vt_ token anywhere in a turn, or in the instructions, refuses
+diff --git a/samen_core/lib/samen/ai/chokepoint.ex b/samen_core/lib/samen/ai/chokepoint.ex
+index aa0ffde2..1ee31a64 100644
+--- a/samen_core/lib/samen/ai/chokepoint.ex
++++ b/samen_core/lib/samen/ai/chokepoint.ex
+@@ -681,7 +681,9 @@ defmodule Samen.AI.Chokepoint do
+   defp scrub_turns([]), do: {:ok, []}
+ 
+   defp scrub_turns(turns) when is_list(turns) do
+-    if Enum.all?(turns, &(turn_shape?(&1) and not unsafe_metadata?(&1))),
++    # SABOTAGE (INV-7): the closed SHAPE is checked, but the allowlist scan over the turns'
++    # keys and leaves is skipped — a vt_ token inside a turn egresses to the provider.
++    if Enum.all?(turns, &turn_shape?/1),
+       do: {:ok, turns},
+       else: @refusal
+   rescue

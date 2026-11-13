@@ -23,19 +23,19 @@
 # MUST_FAIL: re-arms with a non-nil watchdog
 # MUST_FAIL: never-nil invariant holds at every non-terminal point
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
-index ecb3ecb..dfcddba 100644
+index 8b55dbc9..01400dd5 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -1918,7 +1918,7 @@ defmodule Samen.AI.Agent do
+@@ -2021,7 +2021,7 @@ defmodule Samen.AI.Agent do
              Map.merge(
                %{
                  current_turn: turn_index,
 -                next_turn_at: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds),
 +                next_turn_at: nil,
-                 transcript: encode_transcript_finalizing(run, goal, lines ++ [completion.text])
-               },
-               spend_attrs(run, spend)
-@@ -3533,8 +3533,12 @@ defmodule Samen.AI.Agent do
+                 transcript:
+                   encode_transcript_finalizing(
+                     run,
+@@ -3716,8 +3716,12 @@ defmodule Samen.AI.Agent do
              # durability path for this. Shared by run/4 AND start/4 (both funnel through
              # this one function), so both modes now agree on what they persisted.
              hooks: opts |> Keyword.get(:hooks) |> List.wrap() |> Enum.map(&Atom.to_string/1),

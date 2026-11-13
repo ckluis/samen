@@ -72,7 +72,27 @@ defmodule Samen.AI.MaskedPayload do
       match is allowed everywhere). `:mcp` is the external-agent tool-response class (EG4;
       the MCP server proper is T69) — routed through the same scrub as `:complete`, but
       grants never apply to it (persisted/external egress, INV-7).
-    * `:segments` — the sealed, already-scrubbed payload segments the provider transmits.
+    * `:segments` — the sealed, already-scrubbed payload segments, in order: the COMPLETE flat
+      projection of what the call carries. An adapter with no notion of roles transmits these
+      (joined into one prompt) and is exactly as correct as it was before `:system`/`:turns`
+      existed — the two fields below are additive.
+    * `:system` — INSTRUCTION text, kept apart from data (2026-11-13 amendment, ADR-043 §5.1a):
+      a list of binaries authored by the kernel or the host (a goal prompt, the loop's own
+      preamble) — never tenant data, never a tool result. Scrubbed by the same `safe_segment?/1`
+      allowlist as `:segments`, and binaries only. An adapter that supports a system/instruction
+      channel sends these there; `[]` means "no separate instructions".
+    * `:turns` — the ROLE-STRUCTURED conversation (same amendment): a list of
+      `%{"role" => "user" | "assistant", "content" => [block]}` where a block is exactly one of
+      `%{"type" => "text", "text" => binary}`,
+      `%{"type" => "tool_call", "id" => id, "name" => name, "input" => map}` (JSON values
+      only: binary keys; binaries, numbers, booleans, nil, lists and plain maps) or
+      `%{"type" => "tool_result", "id" => id, "content" => binary, "is_error" => boolean}`.
+      A CLOSED shape: `Samen.AI.Chokepoint.seal/3` refuses anything else, and scans every key
+      and leaf with the metadata allowlist (`vt_`-free, no structs, no tuples). Tool results and
+      tenant data ride here as DATA (user content / tool results), never as instruction text.
+      A payload with turns is masked-only: `seal/3` refuses one whose call has grant egress on
+      or a grant span in `:history` (an adapter sending turns does not send the segments).
+      `[]` means "no structure — use `:segments`".
     * `:tools` — the EG2 tool DEFINITIONS the provider may offer the model (ADR-047 §4.2,
       batch A3): a list of bounded, STATIC schema maps (`%{name:, description:, params:}`),
       scrubbed by the chokepoint's `safe_metadata?/1` (keys AND values, `vt_`-scanned) AND
@@ -83,18 +103,20 @@ defmodule Samen.AI.MaskedPayload do
       renders only the tool COUNT — never names or descriptions.
     * `:grounding` — catalog-derived grounding metadata (§8; metadata only, never sample
       values). A map keyed by bounded label atoms.
-    * `:meta` — bounded, content-free dispatch metadata (payload id, size hints) safe for
-      telemetry/logs.
+    * `:meta` — bounded, content-free dispatch metadata (payload id, size hints, and the
+      `:model` the caller asked for, when it named one) safe for telemetry/logs.
   """
 
   @enforce_keys [:kind]
-  defstruct kind: nil, segments: [], tools: [], grounding: %{}, meta: %{}
+  defstruct kind: nil, segments: [], system: [], turns: [], tools: [], grounding: %{}, meta: %{}
 
   @type kind :: :complete | :embed | :mcp
 
   @type t :: %__MODULE__{
           kind: kind(),
           segments: [term()],
+          system: [String.t()],
+          turns: [map()],
           tools: [map()],
           grounding: map(),
           meta: map()
@@ -116,6 +138,8 @@ defmodule Samen.AI.MaskedPayload do
       # Samen.AI.Chokepoint — never here (this is redaction, not construction).
       seg_count = if is_list(payload.segments), do: length(payload.segments), else: 1
       tool_count = if is_list(payload.tools), do: length(payload.tools), else: 1
+      system_count = if is_list(payload.system), do: length(payload.system), else: 1
+      turn_count = if is_list(payload.turns), do: length(payload.turns), else: 1
       grounding_keys = payload.grounding |> Map.keys() |> Enum.sort()
 
       concat([
@@ -124,7 +148,11 @@ defmodule Samen.AI.MaskedPayload do
         Kernel.inspect(payload.kind),
         ", segments: ",
         Integer.to_string(seg_count),
-        " sealed, tools: ",
+        " sealed, system: ",
+        Integer.to_string(system_count),
+        ", turns: ",
+        Integer.to_string(turn_count),
+        ", tools: ",
         Integer.to_string(tool_count),
         ", grounding: ",
         Kernel.inspect(grounding_keys),

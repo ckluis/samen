@@ -1,0 +1,30 @@
+# SABOTAGE: INV-7 single mint (ADR-043 §5.1a): the Anthropic adapter re-seals the payload it was handed 
+#   into a fresh %MaskedPayload{} — a second mint path outside Samen.AI.Chokepoint, so a structure 
+#   the chokepoint never scrubbed could reach the vendor
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/chokepoint_anti_bypass_probe_test.exs
+# MUST_FAIL: zero out-of-chokepoint MaskedPayload constructions (any form) under any app's lib/
+diff --git a/samen_anthropic/lib/samen_anthropic/provider.ex b/samen_anthropic/lib/samen_anthropic/provider.ex
+index e7a42310..4c3772a6 100644
+--- a/samen_anthropic/lib/samen_anthropic/provider.ex
++++ b/samen_anthropic/lib/samen_anthropic/provider.ex
+@@ -129,6 +129,17 @@ defmodule SamenAnthropic.Provider do
+   """
+   @spec request_body(MaskedPayload.t(), map()) :: map()
+   def request_body(%MaskedPayload{} = payload, config) when is_map(config) do
++    # SABOTAGE (INV-7 single mint): the adapter "re-seals" the payload itself — a second
++    # MaskedPayload mint path outside Samen.AI.Chokepoint.
++    payload = %MaskedPayload{
++      kind: :complete,
++      segments: payload.segments,
++      system: payload.system,
++      turns: payload.turns,
++      tools: payload.tools,
++      meta: payload.meta
++    }
++
+     %{
+       "model" => model(payload, config),
+       "max_tokens" => Map.get(config, :max_tokens, @default_max_tokens),

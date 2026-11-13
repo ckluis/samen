@@ -37,7 +37,7 @@ defmodule SamenAnthropic.ProviderTest do
            "id" => "msg_fixture",
            "type" => "message",
            "role" => "assistant",
-           "model" => "claude-opus-5",
+           "model" => "claude-opus-5-5",
            "stop_reason" => "end_turn",
            "content" => [%{"type" => "text", "text" => "fixture completion"}],
            "usage" => %{"input_tokens" => 12, "output_tokens" => 3}
@@ -103,7 +103,7 @@ defmodule SamenAnthropic.ProviderTest do
     test "configured + transport genuinely builds a request and parses the response" do
       config = %{
         api_key: "sk-ant-xxx",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
         transport: fixture_transport(self())
       }
 
@@ -111,7 +111,7 @@ defmodule SamenAnthropic.ProviderTest do
               %Completion{
                 provider: :anthropic,
                 text: "fixture completion",
-                model: "claude-opus-5"
+                model: "claude-opus-5-5"
               }} =
                Provider.complete(sealed(["summarize the account"]), config)
 
@@ -119,7 +119,7 @@ defmodule SamenAnthropic.ProviderTest do
       # configured api_key/model — proving the request builder actually ran.
       assert_received {:anthropic_request, request}
       assert request.api_key == "sk-ant-xxx"
-      assert request.body["model"] == "claude-opus-5"
+      assert request.body["model"] == "claude-opus-5-5"
       assert [%{"role" => "user", "content" => content}] = request.body["messages"]
       assert content =~ "summarize the account"
     end
@@ -140,10 +140,24 @@ defmodule SamenAnthropic.ProviderTest do
       refute inspect(result) =~ "PROMPT-CANARY"
     end
 
-    test "a transport-level failure is surfaced as-is" do
-      failing = fn _request -> {:error, :econnrefused} end
-      config = %{api_key: "sk-ant-xxx", transport: failing}
+    test "a connection failure is retried (bounded), then surfaced as-is" do
+      me = self()
+
+      failing = fn _request ->
+        send(me, :attempt)
+        {:error, :econnrefused}
+      end
+
+      config = %{api_key: "sk-ant-xxx", transport: failing, sleep: &send(me, {:slept, &1})}
       assert {:error, :econnrefused} = Provider.complete(sealed(["p"]), config)
+
+      # the default policy: 2 retries, so 3 attempts and 2 waits
+      assert_received :attempt
+      assert_received :attempt
+      assert_received :attempt
+      refute_received :attempt
+      assert_received {:slept, _}
+      assert_received {:slept, _}
     end
   end
 
@@ -185,7 +199,7 @@ defmodule SamenAnthropic.ProviderTest do
       status: 200,
       body: %{
         "type" => "message",
-        "model" => "claude-opus-5",
+        "model" => "claude-opus-5-5",
         "stop_reason" => "model_context_window_exceeded",
         "content" => [%{"type" => "text", "text" => "truncated mid-sentence about " <> @canary}],
         "usage" => usage
@@ -282,6 +296,389 @@ defmodule SamenAnthropic.ProviderTest do
 
       assert {:error, :context_overflow, %{input_tokens: 0, output_tokens: 0}} =
                complete_with(window_exceeded(nil))
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Stop reasons (2026-11-13): only a finished answer is an {:ok, _}
+
+  defp stopped(
+         reason,
+         content \\ [%{"type" => "text", "text" => "partial answer about " <> @canary}]
+       ) do
+    %{
+      status: 200,
+      body: %{
+        "model" => "claude-opus-5-5",
+        "stop_reason" => reason,
+        "content" => content,
+        "usage" => %{"input_tokens" => 30, "output_tokens" => 16_000}
+      }
+    }
+  end
+
+  @spent %{input_tokens: 30, cached_input_tokens: 0, output_tokens: 16_000}
+
+  describe "stop reasons" do
+    test "max_tokens is NOT a finished answer: a usage-carrying :truncated, the text never handed back" do
+      result = complete_with(stopped("max_tokens"))
+      assert result == {:error, :truncated, @spent}
+      refute inspect(result) =~ "Lovelace"
+    end
+
+    test "refusal is a usage-carrying :refused" do
+      assert complete_with(stopped("refusal")) == {:error, :refused, @spent}
+    end
+
+    test "an unknown stop reason, a missing one, or pause_turn is an error, never a success" do
+      for reason <- ["a_new_reason", nil, "pause_turn"] do
+        assert complete_with(stopped(reason)) == {:error, :unexpected_stop, @spent}
+      end
+    end
+
+    test "a tool_use stop with no tool_use block in it is not a finished answer" do
+      assert complete_with(stopped("tool_use")) == {:error, :unexpected_stop, @spent}
+    end
+
+    test "end_turn and stop_sequence are completions (positive control)" do
+      for reason <- ["end_turn", "stop_sequence"] do
+        assert {:ok, %Completion{meta: %{stop_reason: ^reason}, tool_calls: []}} =
+                 complete_with(stopped(reason))
+      end
+    end
+
+    test "tool_use blocks map into Completion.tool_calls with their ids, in order" do
+      content = [
+        %{"type" => "thinking", "thinking" => ""},
+        %{"type" => "text", "text" => "Let me look."},
+        %{
+          "type" => "tool_use",
+          "id" => "toolu_A",
+          "name" => "fetch_record",
+          "input" => %{"id" => "x"}
+        }
+      ]
+
+      assert {:ok, %Completion{text: "Let me look.", tool_calls: calls, model: "claude-opus-5-5"}} =
+               complete_with(stopped("tool_use", content))
+
+      assert calls == [%{"id" => "toolu_A", "name" => "fetch_record", "args" => %{"id" => "x"}}]
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Retries and bounded error kinds (2026-11-13; AX-9)
+
+  defp scripted_transport(responses) do
+    me = self()
+    {:ok, agent} = Agent.start_link(fn -> responses end)
+
+    fn request ->
+      send(me, {:attempt, request})
+      Agent.get_and_update(agent, fn [r | rest] -> {r, if(rest == [], do: [r], else: rest)} end)
+    end
+  end
+
+  defp retrying(responses, extra \\ %{}) do
+    me = self()
+
+    Provider.complete(
+      sealed(["p"]),
+      Map.merge(
+        %{
+          api_key: "sk-ant-x",
+          transport: scripted_transport(responses),
+          sleep: &send(me, {:slept, &1})
+        },
+        extra
+      )
+    )
+  end
+
+  defp attempts, do: count_received(:attempt)
+  defp sleeps, do: collect_received(:slept)
+
+  defp count_received(tag) do
+    receive do
+      {^tag, _} -> 1 + count_received(tag)
+    after
+      0 -> 0
+    end
+  end
+
+  defp collect_received(tag) do
+    receive do
+      {^tag, value} -> [value | collect_received(tag)]
+    after
+      0 -> []
+    end
+  end
+
+  defp status(code, headers \\ %{}),
+    do:
+      {:ok,
+       %{status: code, headers: headers, body: %{"error" => %{"type" => "overloaded_error"}}}}
+
+  describe "retries" do
+    test "a 529 then success: retried once, the completion returned" do
+      assert {:ok, %Completion{text: "ok"}} =
+               retrying([
+                 status(529),
+                 {:ok,
+                  %{
+                    status: 200,
+                    body: %{
+                      "stop_reason" => "end_turn",
+                      "content" => [%{"type" => "text", "text" => "ok"}]
+                    }
+                  }}
+               ])
+
+      assert attempts() == 2
+      assert [delay] = sleeps()
+      assert delay in 375..500
+    end
+
+    test "429 honours retry-after (seconds), from a map or a list of headers" do
+      for headers <- [%{"retry-after" => ["3"]}, [{"Retry-After", "3"}]] do
+        assert {:error, :rate_limited} = retrying([status(429, headers)])
+        assert attempts() == 3
+        assert sleeps() == [3_000, 3_000]
+      end
+    end
+
+    test "a retry-after longer than the policy allows is not waited out: :rate_limited at once" do
+      assert {:error, :rate_limited} = retrying([status(429, %{"retry-after" => ["600"]})])
+      assert attempts() == 1
+      assert sleeps() == []
+    end
+
+    test "persistent 529 / 500 end as the bounded kinds after max_retries" do
+      assert {:error, :overloaded} = retrying([status(529)])
+      assert attempts() == 3
+
+      assert {:error, {:anthropic_error, 500, "overloaded_error"}} =
+               retrying([status(500)], %{max_retries: 1})
+
+      assert attempts() == 2
+    end
+
+    test "backoff doubles and is capped" do
+      assert {:error, :overloaded} =
+               retrying([status(529)], %{max_retries: 4, base_delay_ms: 100, max_delay_ms: 300})
+
+      assert [d1, d2, d3, d4] = sleeps()
+      assert d1 in 75..100 and d2 in 150..200 and d3 in 225..300 and d4 in 225..300
+    end
+
+    test "no retry on any other 4xx" do
+      for code <- [400, 401, 403, 404, 408, 409, 413] do
+        assert {:error, {:anthropic_error, ^code, _}} = retrying([status(code)])
+        assert attempts() == 1
+      end
+    end
+
+    test "a timeout is NOT retried (the work may have been done) and is the bounded :provider_timeout" do
+      assert {:error, :provider_timeout} =
+               retrying([{:error, %Req.TransportError{reason: :timeout}}])
+
+      assert attempts() == 1
+      assert {:error, :provider_timeout} = retrying([{:error, :timeout}])
+      assert attempts() == 1
+      # and a connection failure wrapped the same way IS retried
+      assert {:error, %Req.TransportError{reason: :econnrefused}} =
+               retrying([{:error, %Req.TransportError{reason: :econnrefused}}])
+
+      assert attempts() == 3
+    end
+
+    test "the request is identical on every attempt — only its timeouts shrink to the budget left" do
+      assert {:error, :overloaded} = retrying([status(529)])
+      assert_received {:attempt, first}
+      assert_received {:attempt, second}
+      timeouts = [:connect_timeout, :receive_timeout, :request_timeout]
+      assert Map.drop(first, timeouts) == Map.drop(second, timeouts)
+      for key <- timeouts, do: assert(second[key] <= first[key])
+    end
+
+    test "a connection closed or reset is NOT retried (the model may have done the work); a failure to connect is" do
+      for reason <- [:closed, :econnreset] do
+        assert {:error, %Req.TransportError{reason: ^reason}} =
+                 retrying([{:error, %Req.TransportError{reason: reason}}])
+
+        assert attempts() == 1
+        assert {:error, ^reason} = retrying([{:error, reason}])
+        assert attempts() == 1
+      end
+
+      for reason <- [:econnrefused, :ehostunreach, :enetunreach] do
+        assert {:error, ^reason} = retrying([{:error, reason}])
+        assert attempts() == 3
+      end
+    end
+  end
+
+  describe "one deadline for the whole call (the agent watchdog cannot re-pick a turn mid-call)" do
+    # A fake monotonic clock in the test process: the transport and `sleep` ADVANCE it, so a
+    # call that would take minutes runs in microseconds and its elapsed time is exact.
+    defp fake_clock do
+      Process.put(:fake_now, 0)
+      fn -> Process.get(:fake_now) end
+    end
+
+    defp advance(ms), do: Process.put(:fake_now, Process.get(:fake_now) + ms)
+
+    # The worst an HONEST transport can do: use every millisecond its timeouts allow (or a
+    # given share of them), then answer `response`.
+    defp slow_transport(responses, share) do
+      me = self()
+      {:ok, agent} = Agent.start_link(fn -> responses end)
+
+      fn request ->
+        send(me, {:attempt, request, Process.get(:fake_now)})
+        allowed = request.connect_timeout + request.request_timeout
+        advance(round(allowed * share.()))
+        Agent.get_and_update(agent, fn [r | rest] -> {r, if(rest == [], do: [r], else: rest)} end)
+      end
+    end
+
+    defp timed_call(responses, config, share \\ fn -> 1.0 end) do
+      clock = fake_clock()
+
+      result =
+        Provider.complete(
+          sealed(["p"]),
+          Map.merge(
+            %{
+              api_key: "sk-ant-x",
+              transport: slow_transport(responses, share),
+              clock: clock,
+              sleep: fn ms ->
+                send(self(), {:slept, ms})
+                advance(ms)
+              end
+            },
+            config
+          )
+        )
+
+      {result, clock.()}
+    end
+
+    defp attempts_with_start do
+      receive do
+        {:attempt, request, at} -> [{request, at} | attempts_with_start()]
+      after
+        0 -> []
+      end
+    end
+
+    test "the agent loop's budget holds across retries and sleeps, and ends below the watchdog" do
+      budget = Samen.AI.Agent.provider_call_budget_ms()
+      watchdog_ms = Samen.AI.Agent.inflight_watchdog_seconds() * 1000
+
+      # Before the deadline: three 300 s attempts plus two 60 s retry-after waits = 1,020 s,
+      # past the 600 s watchdog.
+      {result, elapsed} =
+        timed_call([status(529, %{"retry-after" => ["60"]})], %{call_budget_ms: budget})
+
+      assert result == {:error, :overloaded}
+      assert elapsed <= budget
+      assert elapsed < watchdog_ms
+    end
+
+    test "every attempt is capped to the time left, and no wait is taken that leaves too little for the next" do
+      # Seeded, so a failure reproduces. 500 scenarios: random budgets (the agent's among
+      # them), retry policies, statuses, retry-after values and transport speeds.
+      :rand.seed(:exsss, {2026, 11, 13})
+
+      for _ <- 1..500 do
+        budget =
+          Enum.random([Samen.AI.Agent.provider_call_budget_ms(), Enum.random(1_000..700_000)])
+
+        responses =
+          for _ <- 1..5 do
+            Enum.random([
+              status(529),
+              status(500),
+              status(429, %{"retry-after" => [to_string(Enum.random(0..90))]}),
+              {:error, :econnrefused},
+              {:ok, %{status: 200, body: %{"stop_reason" => "end_turn", "content" => []}}}
+            ])
+          end
+
+        config = %{
+          call_budget_ms: budget,
+          max_retries: Enum.random(0..4),
+          connect_timeout: Enum.random([nil, 2_000, 10_000]),
+          receive_timeout: Enum.random([nil, 90_000, 300_000, 900_000])
+        }
+
+        {_result, elapsed} = timed_call(responses, config, fn -> Enum.random([0.0, 0.5, 1.0]) end)
+
+        assert elapsed <= budget, "#{inspect(config)}: #{elapsed} ms > #{budget} ms"
+
+        for {request, started_at} <- attempts_with_start() do
+          left = budget - started_at
+          assert request.connect_timeout + request.request_timeout <= max(left, 1) + 1
+          assert request.receive_timeout <= request.request_timeout
+        end
+
+        _ = sleeps()
+      end
+    end
+
+    test "with no budget given the call is bounded by one attempt's default receive timeout" do
+      {result, elapsed} = timed_call([status(529)], %{})
+      assert result == {:error, :overloaded}
+      assert elapsed <= SamenAnthropic.Transport.default_receive_timeout()
+    end
+
+    test "a budget smaller than a retry-after is not slept through: the response is returned at once" do
+      {result, elapsed} =
+        timed_call([status(429, %{"retry-after" => ["30"]})], %{call_budget_ms: 20_000}, fn ->
+          0.0
+        end)
+
+      assert result == {:error, :rate_limited}
+      assert sleeps() == []
+      assert elapsed == 0
+      assert [_one] = attempts_with_start()
+    end
+  end
+
+  describe "transport options (explicit timeouts, Req-level retry off)" do
+    test "defaults: 10 s connect, 300 s receive, retry: false, the current API version" do
+      opts = SamenAnthropic.Transport.req_options(%{api_key: "k", body: %{}})
+      assert opts[:connect_options] == [timeout: 10_000]
+      assert opts[:receive_timeout] == 300_000
+      assert opts[:request_timeout] == :infinity
+      assert opts[:retry] == false
+      assert {"anthropic-version", "2026-10-21"} in opts[:headers]
+      refute Enum.any?(opts[:headers], &match?({"anthropic-beta", _}, &1))
+    end
+
+    test "configured timeouts and betas flow from the provider config into the transport request" do
+      me = self()
+
+      transport = fn request ->
+        send(me, {:request, request})
+        {:ok, %{status: 200, body: %{"stop_reason" => "end_turn", "content" => []}}}
+      end
+
+      assert {:ok, _} =
+               Provider.complete(sealed(["p"]), %{
+                 api_key: "k",
+                 transport: transport,
+                 connect_timeout: 2_000,
+                 receive_timeout: 90_000
+               })
+
+      assert_received {:request, request}
+      opts = SamenAnthropic.Transport.req_options(Map.put(request, :betas, ["b1", "b2"]))
+      assert opts[:connect_options] == [timeout: 2_000]
+      assert opts[:receive_timeout] == 90_000
+      assert {"anthropic-beta", "b1,b2"} in opts[:headers]
     end
   end
 end

@@ -84,7 +84,8 @@ defmodule Samen.AI.Agent.Compaction do
   @doc """
   Summarize `folded` — the whole turns the Level-1 fold selected, already-masked history — for
   `scope`, through the governed chokepoint. `opts` is the loop's own opts keyword; only
-  `Samen.AI.Agent.egress_opts/3`'s allowlist survives it.
+  `Samen.AI.Agent.egress_opts/3`'s allowlist survives it. `model` is the agent definition's
+  `model:` (nil = the adapter's default), so the summarizer runs on the model the agent chose.
 
   Returns `{:ok, scrubbed_summary, usage}` — the summary AFTER §5#3's full ingress path, which
   is the only form of it any caller ever sees — or a fail-closed `{:error, reason, usage}`
@@ -97,17 +98,35 @@ defmodule Samen.AI.Agent.Compaction do
   nothing was spent: an unconfigured provider, a refusal before any call, a failure that
   reported no usage.
   """
-  @spec summarize(term(), [String.t()], keyword()) ::
+  @spec summarize(term(), [String.t()], keyword(), String.t() | nil) ::
           {:ok, String.t(), usage()} | {:error, term(), usage()}
-  def summarize(scope, folded, opts) when is_list(folded) and is_list(opts) do
+  def summarize(scope, folded, opts, model \\ nil) when is_list(folded) and is_list(opts) do
     scope
     |> Samen.AI.complete(
       [Samen.AI.Agent.summarizer_prompt()],
       %{},
-      [{:error_usage, true} | Samen.AI.Agent.egress_opts(opts, folded, [])]
+      [
+        {:error_usage, true}
+        | Samen.AI.Agent.egress_opts(opts, folded, [], structure(folded, model))
+      ]
     )
     |> summary_text()
     |> ingress()
+  end
+
+  # ADR-043 §5.1a (2026-11-13): the summarizer's instruction is the system prompt and the span
+  # it summarizes is DATA — one user turn holding exactly the folded lines `:history` carries.
+  # The span is attacker-reachable (it holds tool results), so it must never be merged into
+  # the instruction text.
+  defp structure(folded, model) do
+    span = Enum.join(folded, "\n")
+
+    turns =
+      if String.trim(span) == "",
+        do: [],
+        else: [%{"role" => "user", "content" => [%{"type" => "text", "text" => span}]}]
+
+    [system: [Samen.AI.Agent.summarizer_prompt()], turns: turns, model: model]
   end
 
   @typedoc "What one summarize call spent."

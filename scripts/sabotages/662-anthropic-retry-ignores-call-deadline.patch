@@ -1,0 +1,24 @@
+# SABOTAGE: the adapter retries and sleeps past the call budget, so one provider call outlasts the agent 
+#   watchdog and the turn can be re-picked and paid for twice
+#
+# Flips the named test(s).
+# APP: samen_anthropic
+# TEST_FILES: test/provider_test.exs
+# MUST_FAIL: the agent loop's budget holds across retries and sleeps, and ends below the watchdog
+# MUST_FAIL: every attempt is capped to the time left, and no wait is taken that leaves too little for the next
+diff --git a/samen_anthropic/lib/samen_anthropic/retry.ex b/samen_anthropic/lib/samen_anthropic/retry.ex
+index 753a2942..6a8f333d 100644
+--- a/samen_anthropic/lib/samen_anthropic/retry.ex
++++ b/samen_anthropic/lib/samen_anthropic/retry.ex
+@@ -87,9 +87,9 @@ defmodule SamenAnthropic.Retry do
+   defp loop(attempt, policy, t, n) do
+     result = call(attempt, t.deadline - t.clock.())
+ 
++    # SABOTAGE (S2): retries and their waits ignore the call's deadline.
+     with true <- n < policy.max_retries,
+-         {:retry, delay} <- decide(result, policy, n),
+-         true <- t.clock.() + delay + policy.min_attempt_ms <= t.deadline do
++         {:retry, delay} <- decide(result, policy, n) do
+       t.sleep.(delay)
+       loop(attempt, policy, t, n + 1)
+     else

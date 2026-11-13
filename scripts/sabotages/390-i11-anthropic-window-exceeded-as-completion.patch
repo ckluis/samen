@@ -10,21 +10,24 @@
 # TEST_FILES: test/provider_test.exs
 # MUST_FAIL: a 200 that filled the context window is a usage-carrying :context_overflow, never a completion
 diff --git a/samen_anthropic/lib/samen_anthropic/provider.ex b/samen_anthropic/lib/samen_anthropic/provider.ex
-index bdbbb81..bc5ace6 100644
+index e7a42310..d0a572db 100644
 --- a/samen_anthropic/lib/samen_anthropic/provider.ex
 +++ b/samen_anthropic/lib/samen_anthropic/provider.ex
-@@ -120,12 +120,8 @@ defmodule SamenAnthropic.Provider do
+@@ -257,13 +257,12 @@ defmodule SamenAnthropic.Provider do
+     usage = normalize_usage(Map.get(body, "usage", %{}))
  
-   # Generation filled the context window: truncated, and it spent tokens — the
-   # usage-carrying overflow (see the moduledoc). Ordered before the success clause.
--  defp handle_response(
--         {:ok, %{status: 200, body: %{"stop_reason" => "model_context_window_exceeded"} = body}},
--         _model
--       ) do
--    {:error, :context_overflow, normalize_usage(Map.get(body, "usage", %{}))}
--  end
-+  # SABOTAGE (#11): a response that filled the context window is no longer recognised;
-+  # it falls through to the success clause and is handed back as a completion.
+     case Map.get(body, "stop_reason") do
+-      reason when reason in ["end_turn", "stop_sequence", "tool_use"] ->
++      # SABOTAGE (#11): a response that filled the context window is no longer recognised;
++      # it falls through to the success clause and is handed back as a completion.
++      reason
++      when reason in ["end_turn", "stop_sequence", "tool_use", "model_context_window_exceeded"] ->
+         completion(body, reason, usage, model)
  
-   defp handle_response({:ok, %{status: 200, body: %{"content" => content} = body}}, model)
-        when is_list(content) do
+-      # Generation filled the context window: truncated, and it spent tokens.
+-      "model_context_window_exceeded" ->
+-        {:error, :context_overflow, usage}
+-
+       # Cut off at the output limit: not an answer, and the tokens were spent.
+       "max_tokens" ->
+         {:error, :truncated, usage}

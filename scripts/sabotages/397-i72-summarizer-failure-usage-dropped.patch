@@ -9,16 +9,16 @@
 # TEST_FILES: test/ai/agent_durability_test.exs
 # MUST_FAIL: #72 RED: a summarize call that FAILS reporting usage is billed (a summarizer that overflows)
 diff --git a/samen_core/lib/samen/ai/agent/compaction.ex b/samen_core/lib/samen/ai/agent/compaction.ex
-index 6bce58b..92f638a 100644
+index bd11e848..87acdd70 100644
 --- a/samen_core/lib/samen/ai/agent/compaction.ex
 +++ b/samen_core/lib/samen/ai/agent/compaction.ex
-@@ -104,7 +104,8 @@ defmodule Samen.AI.Agent.Compaction do
-     |> Samen.AI.complete(
+@@ -106,7 +106,8 @@ defmodule Samen.AI.Agent.Compaction do
        [Samen.AI.Agent.summarizer_prompt()],
        %{},
--      [{:error_usage, true} | Samen.AI.Agent.egress_opts(opts, folded, [])]
-+      # SABOTAGE (#72): the summarize call does not ask the chokepoint for a failure's usage.
-+      [{:error_usage, false} | Samen.AI.Agent.egress_opts(opts, folded, [])]
+       [
+-        {:error_usage, true}
++        # SABOTAGE (#72): the summarize call does not ask the chokepoint for a failure's usage.
++        {:error_usage, false}
+         | Samen.AI.Agent.egress_opts(opts, folded, [], structure(folded, model))
+       ]
      )
-     |> summary_text()
-     |> ingress()

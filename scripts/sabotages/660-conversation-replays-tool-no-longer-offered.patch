@@ -1,0 +1,21 @@
+# SABOTAGE: a persisted call is replayed as a native tool_call even when this request no longer offers that 
+#   tool, so a run resumed after a deploy sends tool_use for an undefined tool
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_conversation_property_test.exs
+# MUST_FAIL: a transcript replaying a tool the deploy removed renders as text — native or not, tools offered or none
+# MUST_FAIL: every built conversation meets the request-shape invariants the API enforces
+diff --git a/samen_core/lib/samen/ai/agent/conversation.ex b/samen_core/lib/samen/ai/agent/conversation.ex
+index 01c2a00f..d13f63a8 100644
+--- a/samen_core/lib/samen/ai/agent/conversation.ex
++++ b/samen_core/lib/samen/ai/agent/conversation.ex
+@@ -229,7 +229,7 @@ defmodule Samen.AI.Agent.Conversation do
+     id = Map.get(sh, "id")
+     name = Map.get(sh, "name")
+ 
+-    ctx.native? and is_binary(name) and MapSet.member?(ctx.names, name) and is_binary(id) and
++    ctx.native? and is_binary(name) and is_binary(id) and
+       Regex.match?(@id_pattern, id) and not Map.has_key?(used, id) and
+       is_map(Map.get(sh, "input", %{}))
+   end

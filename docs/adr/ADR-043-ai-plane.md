@@ -341,6 +341,61 @@ first-party-but-separate mix app (the samen_stripe/samen_postmark layout precede
 implementing the behaviour with recorded-fixture tests; samen_core gains **zero**
 vendor deps and its grep-proof stays green with the package absent (INV-4).
 
+### 5.1a · Amendment 2026-11-13 — instructions apart from data (the provider contract grows two fields and one optional callback)
+
+**Why.** The only real adapter joined every sealed segment into ONE user message: the goal
+prompt, the model's own earlier turns, tool-call echoes and attacker-reachable tool results were
+one undifferentiated string, with no system parameter, no roles, no native tools and nowhere
+stable for a cache breakpoint (evaluation 2026-11-13, AX-1/AX-2/AX-12/AX-19).
+
+**What changed (additive, backward compatible).**
+
+- `%Samen.AI.MaskedPayload{}` gains **`:system`** — instruction binaries authored by the kernel
+  or host (a goal prompt, the agent loop's preamble), never tenant data — and **`:turns`** — the
+  role-structured conversation: `%{"role" => "user" | "assistant", "content" => [block]}`, a
+  block being exactly a `"text"`, a `"tool_call"` (`id`, `name`, `input` map) or a
+  `"tool_result"` (`id`, `content` binary, `is_error` boolean). Both default to `[]`.
+- **`:segments` is unchanged** and remains the complete flat projection, so an adapter that
+  ignores roles behaves exactly as before. An adapter that supports roles SHOULD send `:system`
+  as instructions and `:turns` as the conversation, so tool results and tenant data reach the
+  model as data and are never merged into instruction text.
+- `Samen.AI.Provider` gains the OPTIONAL callback **`native_tools?/0`** (default `false`): a
+  provider that sends `:tools` as native tool definitions and maps vendor tool calls back into
+  `Completion.tool_calls` (`%{"id", "name", "args"}`) declares it; for one that does not, the
+  agent loop teaches the bounded `TOOL:` envelope in its instructions.
+- `Samen.AI.complete/4` gains `:model` (a bounded identifier carried on `meta.model`; an adapter
+  that honours per-call models reads it before its configured default) and passes `:system` /
+  `:turns` through to `seal/3`.
+
+**The single-mint guarantee is unchanged.** Both fields are minted only by
+`Samen.AI.Chokepoint.seal/3`, through the SAME allowlist: `:system` entries must be binaries
+passing `safe_segment?/1`; every turn must match the closed shape above exactly AND pass
+`safe_metadata?/1` whole (keys and leaves `vt_`-scanned, every list's chardata rendering
+scanned, structs and tuples refused; a `tool_call` input holds JSON values only, so not even a
+sealed payload nests in one) — so a `%Samen.Masked{}`, an un-rendered record, a grant span or a
+`vt_*` token anywhere in a turn refuses `{:error, :pii_egress_refused}` exactly as it would in a
+segment.
+
+**A call with turns is a masked-only call, enforced at the seal.** The §3.2a re-check runs only
+over `:history`, and an adapter that sends `:turns` sends them in place of the segments the
+re-masked history lands in. So `seal/3` refuses `{:error, :pii_egress_refused}` whenever
+`:turns` is non-empty AND either grant egress is effective for the call (`grant_egress?:` any
+value but `false`, or the host's `grant_plaintext_egress` when the caller does not pin it) or any
+`:history` entry is a `{:grant_span, …}`. What this enforces: no turns-bearing payload is minted
+in a call where the chokepoint itself could resolve or re-admit grant plaintext. What it cannot
+enforce: a turn's text is admitted on the same terms as a free-text segment, so plaintext a
+caller obtained OUTSIDE the AI plane and typed into a turn is the §7.2 operator-responsibility
+case, exactly as it is for a segment. The agent loop and the summarizer pin `grant_egress?: false`
+and carry no grant spans, so they meet the rule by construction (sabotage-proven, 657). No module
+outside the chokepoint constructs the struct; the AST anti-bypass
+probe is unchanged and sabotage-proven against an adapter that "re-seals" a payload itself.
+
+**What this does NOT change.** INV-7 (every byte through the chokepoint), §3.2's pipeline, the
+EG6 normalization of adapter errors (new provider failure kinds are bounded atoms:
+`:truncated`, `:refused`, `:unexpected_stop`, `:rate_limited`, `:overloaded`,
+`:provider_timeout`), the keyless/fail-honest posture (§4), INV-4 (the adapter stays out of
+core; core reads the capability through an optional callback, never by module name).
+
 ### 5.2 · Provider resolution (the Delivery `decide/3` mirror)
 
 `config :samen_core, Samen.AI, provider: {module, config}` — host-wired, exactly the

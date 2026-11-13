@@ -137,6 +137,14 @@ defmodule Samen.AI do
       `:grounding` to opt out entirely.
     * `:env_reader` — test-only seam (`Samen.AI.resolved_env/1`, T66-F2): overrides how the
       unwired-provider env fallback is read. Never set this outside a test.
+    * `:model` — the model to ask for (a bounded identifier such as `"claude-haiku-5-5"`),
+      carried on the sealed payload's `:meta`; an adapter that supports per-call models uses
+      it ahead of its configured default. Invalid identifiers are dropped.
+    * `:system` / `:turns` — instructions and the role-structured conversation, sealed as
+      their own fields (see `Samen.AI.MaskedPayload`; ADR-043 §5.1a).
+    * `:call_budget_ms` — a positive integer: the wall-clock budget for this ONE call, retries
+      and waits included, handed to the adapter as `config[:call_budget_ms]` (the smaller of it
+      and a host-configured one). See `Samen.AI.Provider` ("The call budget").
     * `:error_usage` — `true` to receive a failure that spent tokens as
       `{:error, reason, %{input_tokens: n, cached_input_tokens: n, output_tokens: n}}` (the
       usage scrubbed to three non-negative integers by the chokepoint) instead of `{:error, reason}`. The agent loop
@@ -159,10 +167,67 @@ defmodule Samen.AI do
 
       {provider, config} ->
         segments = assemble(scope, prompt_ref, bindings)
-        opts = ensure_grounding(scope, opts)
-        Chokepoint.complete(provider, config, :complete, segments, opts)
+        {budget, opts} = Keyword.pop(opts, :call_budget_ms)
+        opts = scope |> ensure_grounding(opts) |> model_meta()
+        Chokepoint.complete(provider, put_call_budget(config, budget), :complete, segments, opts)
     end
   end
+
+  # The caller's budget can only TIGHTEN a host-configured one, never widen it.
+  defp put_call_budget(config, budget) when is_integer(budget) and budget > 0 do
+    case Map.get(config, :call_budget_ms) do
+      host when is_integer(host) and host > 0 ->
+        Map.put(config, :call_budget_ms, min(host, budget))
+
+      _ ->
+        Map.put(config, :call_budget_ms, budget)
+    end
+  end
+
+  defp put_call_budget(config, _budget), do: config
+
+  @doc """
+  Does the provider this call would resolve to support NATIVE tool use? (ADR-043 §5.1a;
+  the optional `c:Samen.AI.Provider.native_tools?/0` capability.) `false` for an unwired
+  call, a provider that does not declare it, or one whose declaration raises — the honest
+  default, under which the agent loop teaches the bounded `TOOL:` text envelope instead.
+  """
+  @spec native_tools?(keyword()) :: boolean()
+  def native_tools?(opts \\ []) do
+    case provider_for(opts, resolved_env(env_reader(opts))) do
+      {:error, :not_configured} ->
+        false
+
+      {provider, _config} ->
+        Code.ensure_loaded?(provider) and function_exported?(provider, :native_tools?, 0) and
+          provider.native_tools?() == true
+    end
+  rescue
+    _ -> false
+  end
+
+  # `:model` names the model the caller wants (an agent definition's, a verb's). It rides
+  # the sealed payload's bounded `:meta` — a short identifier, scrubbed like all metadata —
+  # and an adapter that honours per-call models reads it there, ahead of its own config.
+  # A value that is not a bounded identifier is dropped, never forwarded.
+  @model_pattern ~r/\A[A-Za-z0-9][A-Za-z0-9._:\-]{0,99}\z/
+
+  defp model_meta(opts) do
+    case Keyword.pop(opts, :model) do
+      {model, opts} when is_binary(model) ->
+        if Regex.match?(@model_pattern, model) do
+          Keyword.update(opts, :meta, %{model: model}, &put_model(&1, model))
+        else
+          opts
+        end
+
+      {_none, opts} ->
+        opts
+    end
+  end
+
+  defp put_model(meta, model) when is_map(meta), do: Map.put(meta, :model, model)
+  defp put_model(meta, _model), do: meta
 
   @doc """
   Embed `source` in the calling actor's `scope`. Routes through `Samen.AI.Chokepoint`'s

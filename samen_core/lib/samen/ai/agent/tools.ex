@@ -129,6 +129,60 @@ defmodule Samen.AI.Agent.Tools do
   @spec defs([resolved()]) :: [map()]
   def defs(resolved) when is_list(resolved), do: Enum.map(resolved, & &1.schema)
 
+  # The JSON Schema type names a `params` entry may declare. Anything else is not guessed at:
+  # the property is emitted without a `type`, which a model reads as "any value".
+  @json_types ~w(string integer number boolean object array)
+
+  @doc """
+  A tool definition's `params` list as a JSON Schema object — the `input_schema` a vendor's
+  native tool-use channel expects (ADR-047 §5.2, the 2026-11-13 amendment).
+
+  A pure function of the compile-time `tool_schema/0` constant, so it adds no egress the
+  definition does not already carry: each param becomes a property with its `type` and
+  `description`; `required: true` params are listed in `required`; and
+  `additionalProperties: false` states the default-deny `validate/2` every tool action
+  already enforces (an unknown key is refused `:invalid_args`).
+  """
+  @spec input_schema(map()) :: map()
+  def input_schema(%{params: params}) when is_list(params) do
+    properties =
+      params
+      |> Enum.filter(&(is_map(&1) and is_binary(Map.get(&1, :name))))
+      |> Map.new(fn param -> {param.name, property(param)} end)
+
+    required =
+      params
+      |> Enum.filter(
+        &(is_map(&1) and is_binary(Map.get(&1, :name)) and Map.get(&1, :required) == true)
+      )
+      |> Enum.map(& &1.name)
+
+    %{
+      "type" => "object",
+      "properties" => properties,
+      "required" => required,
+      "additionalProperties" => false
+    }
+  end
+
+  def input_schema(_def),
+    do: %{
+      "type" => "object",
+      "properties" => %{},
+      "required" => [],
+      "additionalProperties" => false
+    }
+
+  defp property(param) do
+    %{}
+    |> put_if("type", Map.get(param, :type), &(&1 in @json_types))
+    |> put_if("description", Map.get(param, :description), &is_binary/1)
+  end
+
+  defp put_if(map, key, value, ok?) do
+    if ok?.(value), do: Map.put(map, key, value), else: map
+  end
+
   @doc """
   Resolve ONE model-chosen tool call against the run's RESOLVED set (the per-call
   re-check of intersection arms 1–3; sabotage 249's target). The model's kind is

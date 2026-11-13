@@ -1,0 +1,20 @@
+# SABOTAGE: scrub_system admits any binary without the segment allowlist, so a vt_ token rides the system 
+#   instructions
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_conversation_test.exs
+# MUST_FAIL: RED: a vt_ token anywhere in a turn, or in the instructions, refuses
+diff --git a/samen_core/lib/samen/ai/chokepoint.ex b/samen_core/lib/samen/ai/chokepoint.ex
+index 03319493..583f3d2e 100644
+--- a/samen_core/lib/samen/ai/chokepoint.ex
++++ b/samen_core/lib/samen/ai/chokepoint.ex
+@@ -709,7 +709,7 @@ defmodule Samen.AI.Chokepoint do
+   defp scrub_system([]), do: {:ok, []}
+ 
+   defp scrub_system(system) when is_list(system) do
+-    if Enum.all?(system, &(is_binary(&1) and safe_segment?(&1))),
++    if Enum.all?(system, &is_binary/1),
+       do: {:ok, system},
+       else: @refusal
+   rescue

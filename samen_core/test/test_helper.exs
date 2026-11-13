@@ -110,4 +110,9 @@ Ecto.Adapters.SQL.Sandbox.mode(TestRepo, :manual)
 multinode_exclude =
   if System.get_env("SAMEN_MULTINODE") == "1", do: [], else: [:multinode]
 
-ExUnit.start(exclude: multinode_exclude)
+# The LIVE AI trajectory eval (test/ai_eval/agent_live_trajectory_test.exs) makes real,
+# billable model calls: excluded from every run unless `SAMEN_AI_LIVE=1` (and it then still
+# skips without ANTHROPIC_API_KEY). CI never sets it.
+live_exclude = if System.get_env("SAMEN_AI_LIVE") == "1", do: [], else: [:ai_live]
+
+ExUnit.start(exclude: multinode_exclude ++ live_exclude)

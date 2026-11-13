@@ -1,0 +1,23 @@
+# SABOTAGE: the loop calls the provider for a turn attempt or its Level-2 retry without re-stamping 
+#   next_turn_at, so a slow earlier call lets the watchdog re-pick the turn mid-call and a second 
+#   worker pays for it again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_provider_lease_test.exs
+# MUST_FAIL: before EVERY provider call of a turn the lease outlasts the call's budget, and the budget is below the watchdog
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 3de3c8bd..fa3c5acf 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1243,9 +1243,7 @@ defmodule Samen.AI.Agent do
+          opts,
+          attempt
+        ) do
+-    # The lease, renewed before EACH attempt (the Level-2 retry included): see
+-    # `provider_call_budget_ms/0` for why the watchdog then cannot re-pick this turn.
+-    run = renew_lease!(run)
++    # SABOTAGE (S2): the lease is NOT renewed before the attempt or the Level-2 retry.
+     started = System.monotonic_time(:millisecond)
+ 
+     defs = Tools.defs(tools)

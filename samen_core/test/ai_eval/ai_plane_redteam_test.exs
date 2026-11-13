@@ -130,10 +130,26 @@ defmodule Samen.AI.Eval.MaskLeakRedTeamTest do
   # All %MaskedPayload{} segments the Fake was sent this process, flattened to a scannable
   # string (the honest provider-side recording — a leak that reaches the provider is here).
   defp recorded_text do
+    # Segments AND (2026-11-13, ADR-043 §5.1a) the sealed instructions + role-structured turns
+    # an adapter transmits instead — a leak that rides only the structure is here too.
+    # The turns are scanned as their actual STRING leaves (keys and values), never through
+    # `inspect/2`, which escapes quotes and newlines and so would hide a quoted or multi-line
+    # canary from the `=~` below.
     Provider.Fake.sent_payloads()
-    |> Enum.flat_map(fn {_cb, p} -> Enum.map(p.segments, &to_string/1) end)
+    |> Enum.flat_map(fn {_cb, p} ->
+      Enum.map(p.segments, &to_string/1) ++ p.system ++ turn_leaves(p.turns)
+    end)
     |> Enum.join("\n")
   end
+
+  defp turn_leaves(v) when is_binary(v), do: [v]
+  defp turn_leaves(v) when is_list(v), do: Enum.flat_map(v, &turn_leaves/1)
+
+  defp turn_leaves(v) when is_map(v) and not is_struct(v),
+    do: Enum.flat_map(v, fn {k, x} -> turn_leaves(k) ++ turn_leaves(x) end)
+
+  defp turn_leaves(v) when is_number(v) or is_boolean(v), do: [to_string(v)]
+  defp turn_leaves(_v), do: []
 
   # An org-scoped read of the seeded person with public fields selected — the vault-routed
   # emails reads back as %Samen.Masked{} (the Crm.read_source mechanism), the shape the
@@ -227,6 +243,24 @@ defmodule Samen.AI.Eval.MaskLeakRedTeamTest do
   # ==========================================================================
   # EG1 + draft body — the CRM AI surfaces
   # ==========================================================================
+
+  describe "the recording the reds scan is the bytes an adapter sends (anti-vacuity)" do
+    test "a quoted, multi-line canary riding only a turn IS found by recorded_text/0" do
+      canary = ~s(canary "quoted"\nsecond line @leak.example)
+
+      turn = %{
+        "role" => "user",
+        "content" => [
+          %{"type" => "tool_result", "id" => "t1", "content" => canary, "is_error" => false}
+        ]
+      }
+
+      assert {:ok, %Completion{}} =
+               Chokepoint.complete(Provider.Fake, %{}, :complete, ["x"], turns: [turn])
+
+      assert recorded_text() =~ canary
+    end
+  end
 
   describe "EG1 — the CRM AI surfaces never egress the seeded canary" do
     test "summarize_timeline / recommend_next_step / draft_sequence mask the canary everywhere",

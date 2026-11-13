@@ -23,7 +23,8 @@ defmodule Samen.AI.Provider.Scripted do
     * `{:tool_call, kind, args}` — a NATIVE tool selection (A3, ADR-047 §5.2): a
       completion with `tool_calls: [%{"name" => kind, "args" => args}]` and empty text
       (the vendor-native shape an adapter maps into `%Completion{}`);
-      `{:tool_call, kind, args, usage}` is the token-budget sugar. The TEXT-envelope
+      `{:tool_call, kind, args, usage}` is the token-budget sugar, and
+      `{:tool_call_id, id, kind, args}` carries the vendor's tool-use id. The TEXT-envelope
       fallback needs no special form — script `{:continue, ~s(TOOL: {"tool": ...})}`;
     * `{:error, reason}` — a scripted provider failure (the chokepoint EG6-normalizes it);
     * `{:error, reason, usage}` — the SAME failure carrying the tokens the failed call
@@ -97,6 +98,12 @@ defmodule Samen.AI.Provider.Scripted do
   @impl Samen.AI.Provider
   def simulated?, do: true
 
+  # The double answers with NATIVE tool selections (`{:tool_call, …}` entries), so it
+  # declares the capability — the loop then offers tools natively rather than teaching the
+  # `TOOL:` envelope (which a scripted `{:continue, ~s(TOOL: …)}` still exercises).
+  @impl Samen.AI.Provider
+  def native_tools?, do: true
+
   # --- scripting -------------------------------------------------------------------------
 
   @doc """
@@ -139,6 +146,12 @@ defmodule Samen.AI.Provider.Scripted do
   # vendor tool_use block into %Completion{tool_calls: [...]}.
   defp normalize({:tool_call, kind, args}) when is_binary(kind) and is_map(args),
     do: %{text: "", tool_calls: [%{"name" => kind, "args" => args}]}
+
+  # The vendor-native shape WITH the tool-use id an adapter carries through (2026-11-13), so
+  # a test can prove the id is persisted and echoed on the matching tool_result.
+  defp normalize({:tool_call_id, id, kind, args})
+       when is_binary(id) and is_binary(kind) and is_map(args),
+       do: %{text: "", tool_calls: [%{"id" => id, "name" => kind, "args" => args}]}
 
   defp normalize({:tool_call, kind, args, usage}) when is_binary(kind) and is_map(args),
     do: %{text: "", tool_calls: [%{"name" => kind, "args" => args}], usage: usage}

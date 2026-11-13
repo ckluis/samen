@@ -268,6 +268,21 @@ defmodule Samen.AI.Agent.ToolResult do
   end
 
   @doc """
+  Render the model's own tool-call ARGUMENTS to a map of rendered binaries — the `input` of
+  the `tool_call` block the conversation replays (ADR-047 §5.2, 2026-11-13 amendment).
+
+  The same per-key, per-value renderer `render_call/2` uses (`render_key/1`,
+  `render_scalar/2`: sentinel-bearing values and keys become `[unrenderable:<key>]`, freeform
+  text passes the secrets lane and ingress sanitization, nothing is `inspect`ed), so the echo
+  is still "a single `vt_`-free rendering, never the raw arg map" (§4.3#6) — merely keyed
+  instead of joined. Every value is a binary.
+  """
+  @spec render_input(map()) :: %{String.t() => String.t()}
+  def render_input(args) when is_map(args) do
+    Map.new(args, fn {k, v} -> {render_key(k), render_scalar(v, to_string(k))} end)
+  end
+
+  @doc """
   Render a governed action's outcome to the ordered list of plain binaries that
   re-enters the prompt as `:history` (§4.3 step 2).
 

@@ -12,18 +12,20 @@
 # APP: samen_core
 # TEST_FILES: test/ai/ai_prompt_masking_test.exs
 # MUST_FAIL: P10 — ADR-048 §5 summarizer egress: its compile-time-literal prompt is vt_-free (EG5) and a canary in the folded span reaches the provider MASKED
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 8b55dbc9..5745f72a 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -531,7 +531,7 @@ defmodule Samen.AI.Agent do
-   @spec egress_opts(keyword(), [String.t()], [map()]) :: keyword()
-   def egress_opts(opts, history, tool_defs \\ []) do
+@@ -596,7 +596,7 @@ defmodule Samen.AI.Agent do
+   @spec egress_opts(keyword(), [String.t()], [map()], keyword()) :: keyword()
+   def egress_opts(opts, history, tool_defs \\ [], structure \\ []) do
      opts
 -    |> Keyword.take([:provider, :grounding, :meta, :env_reader])
 +    |> Keyword.take([:provider, :grounding, :meta, :env_reader, :grant_egress?])
      |> Keyword.put(:history, history)
      |> Keyword.put(:tools, tool_defs)
-     # LAST, POSITIONALLY, and appended by `++` after a `delete` — not merely last-wins.
-@@ -541,8 +541,7 @@ defmodule Samen.AI.Agent do
+     # ADR-043 §5.1a (2026-11-13): the instructions and the role-structured conversation the
+@@ -612,8 +612,7 @@ defmodule Samen.AI.Agent do
      # then unassertable by reading the list, which is the only way a reviewer or an
      # ADR-048 §8 P10 arm can check it. The `delete` makes the key unique as well as final,
      # so no later duplicate can shadow it either.
@@ -32,4 +34,4 @@
 +    |> Keyword.put_new(:grant_egress?, false)
    end
  
-   # ADR-048 §5#2 — the summarizer instruction is a COMPILE-TIME LITERAL owned by the loop,
+   defp put_model(opts, model) when is_binary(model), do: Keyword.put(opts, :model, model)

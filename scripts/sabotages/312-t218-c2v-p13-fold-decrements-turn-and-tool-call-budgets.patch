@@ -13,12 +13,12 @@
 # TEST_FILES: test/ai/agent_compaction_test.exs
 # MUST_FAIL: a fold NEVER decrements max_turns or max_tool_calls
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
-index bb202cc..8f4690c 100644
+index 8b55dbc9..f9e5a89d 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -1785,7 +1785,13 @@ defmodule Samen.AI.Agent do
+@@ -1871,7 +1871,13 @@ defmodule Samen.AI.Agent do
              folded_views.folds,
-             folded_views.turn_lens,
+             {folded_views.turn_lens, folded_views.turn_shapes},
              views.pending
 -          )
 +          ),

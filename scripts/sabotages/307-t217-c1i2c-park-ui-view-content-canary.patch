@@ -10,10 +10,10 @@
 # TEST_FILES: test/ai/agent_dual_view_test.exs
 # MUST_FAIL: PARK UI VIEW CONTENT: the park path's ui_view equals its transcript lines, encoded through encode_transcript/3
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
-index 647f225..b067dd6 100644
+index 8b55dbc9..d2fb5648 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -2977,7 +2977,7 @@ defmodule Samen.AI.Agent do
+@@ -3594,7 +3594,7 @@ defmodule Samen.AI.Agent do
      base = %{
        "goal" => goal,
        "lines" => lines,
@@ -21,4 +21,4 @@ index 647f225..b067dd6 100644
 +      "ui_view" => ["CORRUPTED-PARK-UI-VIEW-CANARY"],
        "llm_view" => lines,
        "folds" => folds,
-       "turn_lens" => turn_lens
+       "turn_lens" => turn_lens,
