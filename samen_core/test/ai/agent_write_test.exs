@@ -745,6 +745,83 @@ defmodule Samen.AI.AgentWriteTest do
 
   # ── budgets + cancellation ──────────────────────────────────────────────────────────
 
+  describe "the request a resumed run sends (ADR-047 §5.2a: park → approve → resume, from real loop state)" do
+    test "after the approve, the resumed call carries the proposal and its execution as ONE tool exchange with the persisted id" do
+      previous = Application.get_env(:samen_core, Samen.AI.Agent, [])
+
+      Application.put_env(
+        :samen_core,
+        Samen.AI.Agent,
+        Keyword.put(previous, :provider, scripted_provider())
+      )
+
+      on_exit(fn -> Application.put_env(:samen_core, Samen.AI.Agent, previous) end)
+
+      {_s, run, target, approval, new_owner} = propose!()
+      [{system_at_park, turns_at_park}] = sent_structures()
+      [tools_at_park] = sent_tool_defs()
+
+      assert {:ok, _decided, _meta} = Approvals.approve(approval.id, approver_id(approval.org_id))
+
+      # The parked run RESUMES through the durable engine (the worker's own entry point).
+      assert {:ok, %{answer: "assigned (should never be reached before approval)"}} =
+               Agent.execute_batch(reload_run!(run))
+
+      assert [_, {system, turns}] = sent_structures()
+      assert [_, tools] = sent_tool_defs()
+
+      # The persisted transcript the resumed call was built from: the proposal turn (the call
+      # echo + the "proposed" line), then the approved execution's lines.
+      # (The run has since finished, so its final answer is a third turn after those two.)
+      %{"lines" => lines, "turn_shapes" => shapes, "turn_lens" => [n1, n2, _n3]} =
+        revealed_transcript(run)
+
+      [echo, proposed_line] = Enum.take(lines, n1)
+      executed_lines = lines |> Enum.drop(n1) |> Enum.take(n2)
+
+      assert echo =~ "tool_call: assign_record_owner"
+
+      assert [%{"k" => "proposed", "id" => id, "input" => input}, %{"k" => "approved"}, _final] =
+               shapes
+
+      assert id == "toolu_samen_turn_1"
+
+      # EXACTLY the request the adapter maps 1:1 into `system` / `tools` / `messages`.
+      assert system == system_at_park
+      assert tools == tools_at_park
+      assert Enum.any?(tools, &(Map.get(&1, :name) == "assign_record_owner"))
+
+      assert turns == [
+               hd(turns_at_park),
+               %{
+                 "role" => "assistant",
+                 "content" => [
+                   %{
+                     "type" => "tool_call",
+                     "id" => id,
+                     "name" => "assign_record_owner",
+                     "input" => input
+                   }
+                 ]
+               },
+               %{
+                 "role" => "user",
+                 "content" => [
+                   %{
+                     "type" => "tool_result",
+                     "id" => id,
+                     "content" => Enum.join([proposed_line | executed_lines], "\n"),
+                     "is_error" => false
+                   }
+                 ]
+               }
+             ]
+
+      assert input == %{"id" => target.id, "resource" => @target_key, "user_id" => new_owner}
+      assert executed_lines != []
+    end
+  end
+
   describe "budget + interrupt semantics on the write path" do
     test "a PROPOSAL bills no tool call; the approved EXECUTION bills exactly one" do
       {_s, run, _target, approval, _new_owner} = propose!()

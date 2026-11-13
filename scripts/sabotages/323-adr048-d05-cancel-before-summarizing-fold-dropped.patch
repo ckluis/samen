@@ -3,7 +3,7 @@
 # sabotage-241 shape ONE MECHANISM AND ONE LEVEL over: 241 removes the cancel re-check at
 # the TURN boundary in `loop/5`, so a cancel landing between turn N and turn N+1 is silently
 # ignored; THIS removes it inside `derive_fold/8`, on the `span ->` arm, immediately before
-# `summarize_fold/7` → `summarize_span/3` — so a cancel landing DURING the overflowing
+# `summarize_fold/8` → `summarize_span/4` — so a cancel landing DURING the overflowing
 # attempt is silently ignored and the LEVEL 2 INLINE fold ships the tenant's folded
 # conversation to the provider FOR SUMMARIZATION after the tenant has already asked to stop.
 # D-05's ruling is that the harm is the EGRESS, not the turn.
@@ -19,7 +19,7 @@
 # checked at BOTH the turn boundary and the retry boundary, exactly as P5/D-04 shipped it —
 # sabotage 322 owns that clause), the deterministic `reuse_fold!/5` replay arm (no model
 # call, no data leaves — D-05 says it is NOT to be guarded), `fold_span/6`'s pure span
-# SELECTION, and the whole body of `summarize_fold/7`, which is left byte-for-byte alone.
+# SELECTION, and the whole body of `summarize_fold/8`, which is left byte-for-byte alone.
 #
 # Deletes ONE CONTIGUOUS `if/else` and its comment, replacing it with the `else` branch's own
 # single call, AND the `cancel_requested?/1` predicate the `if` was the only caller of — both
@@ -32,9 +32,10 @@
 # TEST_FILES: test/ai/agent_durability_test.exs
 # MUST_FAIL: D-05 ARM 1 RED: a cancel issued DURING the overflowing first attempt means the Level 2 SUMMARIZE call never leaves
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index d321b79e..6ef19806 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -1343,38 +1343,17 @@
+@@ -1527,48 +1527,27 @@ defmodule Samen.AI.Agent do
            {:ok, run, lines, views}
  
          span ->
@@ -52,20 +53,38 @@ diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
 -          if cancel_requested?(run) do
 -            {:ok, run, lines, refused(views, :run_cancelled)}
 -          else
--            summarize_fold(run, scope, views, goal, lines, span, opts)
+-            summarize_fold(
+-              run,
+-              scope,
+-              views,
+-              goal,
+-              lines,
+-              span,
+-              Map.get(definition, :model),
+-              opts
+-            )
 -          end
 +          # SABOTAGE (D-05, ADR-048 §8 `P8`, ruling D-05): the DURABLE cancel check before
 +          # the SUMMARIZING fold is REMOVED — the sabotage-241 shape one mechanism over. A
 +          # cancel issued DURING the overflowing attempt is silently ignored and the LEVEL 2
 +          # INLINE fold summarizes the tenant's conversation anyway: the egress D-05 exists
 +          # to stop goes out after the tenant asked to stop.
-+          summarize_fold(run, scope, views, goal, lines, span, opts)
++          summarize_fold(
++            run,
++            scope,
++            views,
++            goal,
++            lines,
++            span,
++            Map.get(definition, :model),
++            opts
++          )
        end
      else
        {:ok, run, lines, views}
      end
    end
--
+ 
 -  # D-05 (ADR-048 §8 `P8`, operator ruling D-05) — the DURABLE half of the cancel flag,
 -  # re-read from the run ROW on the same `run.id` through the loop's own `reload!/1` rather
 -  # than hand-rolled as a second reader. NEVER the in-memory struct: the turn boundary in
@@ -76,6 +95,7 @@ diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
 -  # and the vault-routed `:transcript` are non-default; `:cancel_requested_at` is a plain
 -  # attribute the boundary already reads off the same reload.
 -  defp cancel_requested?(%Run{} = run), do: reload!(run).cancel_requested_at != nil
- 
+-
    # The SUMMARIZING fold itself, lifted out of `derive_fold/8`'s `span ->` arm UNCHANGED so
    # that D-05's guard above it is one contiguous `if/else`. That is what lets sabotage 323
+   # remove the guard — the `if/else` plus the now-orphaned `cancel_requested?/1` it was the

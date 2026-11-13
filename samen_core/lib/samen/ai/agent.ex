@@ -1541,7 +1541,16 @@ defmodule Samen.AI.Agent do
           if cancel_requested?(run) do
             {:ok, run, lines, refused(views, :run_cancelled)}
           else
-            summarize_fold(run, scope, views, goal, lines, span, opts)
+            summarize_fold(
+              run,
+              scope,
+              views,
+              goal,
+              lines,
+              span,
+              Map.get(definition, :model),
+              opts
+            )
           end
       end
     else
@@ -1566,7 +1575,7 @@ defmodule Samen.AI.Agent do
   # only caller of — and NOTHING else, while the file still compiles under
   # `--warnings-as-errors` (leaving the predicate behind would trip the unused-private
   # warning; an `if false do` shape would trip the always-same-result one).
-  defp summarize_fold(%Run{} = run, scope, views, goal, lines, span, opts) do
+  defp summarize_fold(%Run{} = run, scope, views, goal, lines, span, model, opts) do
     # `summarize_span/3` returns the summary ALREADY through §5#3's ingress path —
     # `Secrets.redact/1` then `Ingress.sanitize/1` then the chokepoint allowlist — so
     # there is no spelling of this call site that appends an unscrubbed binary.
@@ -1578,7 +1587,7 @@ defmodule Samen.AI.Agent do
     # usage, never an estimate; `est_tokens/1` only decides WHEN to fold. The spend also
     # rides `views` to the turn row (`note_summarizer_usage!/2`), so the turn ledger keeps
     # explaining the run's total.
-    {result, usage} = summarize_span(scope, span, opts)
+    {result, usage} = summarize_span(scope, span, model, opts)
     run = bill_summarizer!(run, usage)
     views = Map.put(views, :summarizer_usage, usage)
 
@@ -1626,8 +1635,10 @@ defmodule Samen.AI.Agent do
   # exact field prior turns re-enter through (re-scrubbed per §3.2a and allowlist-scanned per
   # §3.2 step 3/4, every call), and the only authored bytes are the compile-time
   # `summarizer_prompt/0` literal. No tool defs are offered — the summarizer selects nothing.
-  defp summarize_span(scope, span, opts) do
-    case Compaction.summarize(scope, span.folded, opts) do
+  # The summarizer runs on the agent's own `model:` (the definition's choice is the cost and
+  # data-processing decision for EVERY call the run makes), else the adapter's default.
+  defp summarize_span(scope, span, model, opts) do
+    case Compaction.summarize(scope, span.folded, opts, model) do
       {:ok, summary, usage} -> {{:ok, summary}, usage}
       {:error, reason, usage} -> {{:error, reason}, usage}
     end
@@ -3826,7 +3837,12 @@ defmodule Samen.AI.Agent do
   defp default_origin(%Samen.Scope{actor: %{id: id}}) when is_binary(id), do: "user:" <> id
   defp default_origin(_scope), do: "user:unknown"
 
-  defp validate_goal(goal) when is_binary(goal) and goal != "", do: :ok
+  # A whitespace-only goal is no goal: it would reach the provider as a blank first user
+  # message (a request the Messages API rejects) with nothing to pursue.
+  defp validate_goal(goal) when is_binary(goal) do
+    if String.trim(goal) == "", do: {:error, :invalid_goal}, else: :ok
+  end
+
   defp validate_goal(_), do: {:error, :invalid_goal}
 
   # Budget precedence: defaults < host config < agent definition < per-run opts. Every

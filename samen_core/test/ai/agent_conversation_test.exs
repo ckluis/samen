@@ -413,6 +413,52 @@ defmodule Samen.AI.AgentConversationTest do
       assert [%{meta: %{"model" => "scripted-1"}}] = turn_rows(run)
     end
 
+    test "the compaction summarizer call runs on the definition's model: too" do
+      s = new_scope()
+
+      script([
+        {:tool_call_id, "toolu_m1", "conv_note_probe", %{}},
+        {:continue, "looked at the note"},
+        {:continue, "Summary: the probe was read."},
+        {:final, "done"}
+      ])
+
+      assert {:ok, _} = run_scripted(Reader, s, "goal", budgets: [context_cutoff_tokens: 1])
+
+      payloads = for {:complete, %MaskedPayload{} = p} <- Scripted.sent_payloads(), do: p
+      summarizer = Enum.filter(payloads, &(&1.system == [Agent.summarizer_prompt()]))
+
+      assert summarizer != [], "the fold never summarized — the control is vacuous"
+      assert Enum.all?(payloads, &(&1.meta[:model] == "claude-haiku-5-5"))
+
+      # The direct entry point honours an explicit model, and sends none without one.
+      Scripted.reset()
+      script(continue: "Summary: x.")
+
+      assert {:ok, _, _} =
+               Compaction.summarize(s, ["a"], [provider: scripted_provider()], "claude-haiku-5-5")
+
+      assert [{:complete, %MaskedPayload{} = p}] = Scripted.sent_payloads()
+      assert p.meta.model == "claude-haiku-5-5"
+    end
+
+    test "a whitespace-only goal is refused :invalid_goal before any provider call (run and start)" do
+      s = new_scope()
+      script(final: "never")
+
+      for goal <- ["   ", "\n\t ", ""] do
+        assert {:error, :invalid_goal} = run_scripted(Plain, s, goal)
+
+        assert {:error, :invalid_goal} =
+                 Agent.start(Plain, s, goal, provider: scripted_provider())
+      end
+
+      assert Scripted.sent_payloads() == []
+
+      # Positive control: a goal with surrounding whitespace is still a goal.
+      assert {:ok, %{answer: "never"}} = run_scripted(Plain, s, "  check 4471  ")
+    end
+
     test "a definition without model: sends none (the adapter's default applies)" do
       s = new_scope()
       script(final: "ok")

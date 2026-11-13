@@ -18,22 +18,25 @@
 # TEST_FILES: test/ai/ai_prompt_masking_provenance_test.exs
 # MUST_FAIL: P10: the compaction summarizer's persisted summary is provenanced to an actual provider reply, not fabricated (CF-21)
 diff --git a/samen_core/lib/samen/ai/agent/compaction.ex b/samen_core/lib/samen/ai/agent/compaction.ex
-index 23feb9e3..7be80156 100644
+index bd11e848..6de0e8ea 100644
 --- a/samen_core/lib/samen/ai/agent/compaction.ex
 +++ b/samen_core/lib/samen/ai/agent/compaction.ex
-@@ -100,14 +100,8 @@ defmodule Samen.AI.Agent.Compaction do
-   @spec summarize(term(), [String.t()], keyword()) ::
+@@ -101,17 +101,8 @@ defmodule Samen.AI.Agent.Compaction do
+   @spec summarize(term(), [String.t()], keyword(), String.t() | nil) ::
            {:ok, String.t(), usage()} | {:error, term(), usage()}
-   def summarize(scope, folded, opts) when is_list(folded) and is_list(opts) do
+   def summarize(scope, folded, opts, model \\ nil) when is_list(folded) and is_list(opts) do
 -    scope
 -    |> Samen.AI.complete(
 -      [Samen.AI.Agent.summarizer_prompt()],
 -      %{},
--      [{:error_usage, true} | Samen.AI.Agent.egress_opts(opts, folded, [], structure(folded))]
+-      [
+-        {:error_usage, true}
+-        | Samen.AI.Agent.egress_opts(opts, folded, [], structure(folded, model))
+-      ]
 -    )
 -    |> summary_text()
 -    |> ingress()
-+    _ = {scope, folded, opts, structure(folded)}
++    _ = {scope, folded, opts, structure(folded, model)}
 +    ingress({:ok, "Summary: the assistant handled the request.", %{input_tokens: 0, output_tokens: 0}})
    end
  

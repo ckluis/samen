@@ -706,7 +706,9 @@ call whose input is present but not an object is `:invalid_tool_call`, never "no
 count toward the consecutive-error breaker.
 
 **Models.** `use Samen.AI.Agent, …, model: "<id>"` (compile-time validated) rides every turn's
-sealed payload as `meta.model`; the model that answered is recorded on the turn row's bounded
+sealed payload as `meta.model` — and the ADR-048 summarizer call's too, so every call a run
+makes honours the definition's choice (corrected after review: the summarizer first ran on the
+adapter's default); the model that answered is recorded on the turn row's bounded
 `meta["model"]` (no migration). The ADR-048 summarizer call is split the same way: its literal
 prompt is `:system`, the folded span one user turn of data.
 
