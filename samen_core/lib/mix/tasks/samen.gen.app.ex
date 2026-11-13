@@ -145,7 +145,7 @@ defmodule Mix.Tasks.Samen.Gen.App do
 
   @impl Mix.Task
   def run(argv) do
-    {opts, _rest, _invalid} = OptionParser.parse(argv, strict: @switches)
+    opts = Samen.Gen.Args.parse!("samen.gen.app", argv, @switches)
 
     module = require_opt!(opts, :module)
     prefix = require_opt!(opts, :prefix)

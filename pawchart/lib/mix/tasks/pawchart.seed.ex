@@ -19,10 +19,11 @@ defmodule Mix.Tasks.Pawchart.Seed do
   """
   use Mix.Task
 
-  @requirements ["app.start"]
-
   @impl Mix.Task
   def run(_args) do
+    # No HTTP listener: dev config has `server: true`, which would collide with a running dev server (:eaddrinuse).
+    Samen.SeedBoot.start!(:pawchart, PawChartWeb.Endpoint)
+
     org_id = PawChart.Seeds.run()
     Mix.shell().info("Seeded Happy Paws Clinic tenant org: #{org_id}")
     Mix.shell().info("Open: /crm/contacts?org=#{org_id}")

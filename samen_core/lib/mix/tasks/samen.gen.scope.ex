@@ -29,7 +29,7 @@ defmodule Mix.Tasks.Samen.Gen.Scope do
 
   @impl Mix.Task
   def run(argv) do
-    {opts, _rest, _invalid} = OptionParser.parse(argv, strict: @switches)
+    opts = Samen.Gen.Args.parse!("samen.gen.scope", argv, @switches)
 
     scope =
       case Keyword.get(opts, :scope) do

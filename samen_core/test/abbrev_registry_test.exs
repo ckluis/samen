@@ -43,6 +43,10 @@ defmodule Samen.AbbrevRegistryTest do
     assert {:error, reason} = Reg.validate(@registry, "zzz", "MyApp.New.Thing")
     assert reason =~ "not in the abbrev registry"
     assert reason =~ "permanent"
+    # DX-8: prescribes the sanctioned allocator, never a hand edit of the registry
+    assert reason =~ "mix samen.abbrev.reserve --host "
+    assert reason =~ "--abbrev zzz --owner MyApp.New.Thing"
+    refute reason =~ "to the \"abbrevs\" map"
   end
 
   test "validate: an abbrev owned by a DIFFERENT resource fails (collision / recycle)" do

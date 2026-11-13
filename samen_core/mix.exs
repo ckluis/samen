@@ -7,7 +7,7 @@ defmodule SamenCore.MixProject do
     [
       app: :samen_core,
       version: @version,
-      elixir: "~> 1.18",
+      elixir: ">= 1.20.4",
       elixirc_paths: elixirc_paths(Mix.env()),
       # Protocol consolidation OFF in :test only. Property fixtures (e.g.
       # abbrev_property_test.exs) recompile modules at runtime via

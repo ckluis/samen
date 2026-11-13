@@ -377,7 +377,7 @@ defmodule Samen.Gen.App do
   or duplicate abbrevs among the app's own derived set.
   """
   def validate!(%__MODULE__{} = s) do
-    validate_against!(s, AbbrevRegistry.load())
+    validate_against!(s, AbbrevRegistry.load(), AbbrevRegistry.path())
 
     if File.dir?(s.app_dir) do
       raise ArgumentError,
@@ -393,7 +393,8 @@ defmodule Samen.Gen.App do
   IO, no filesystem checks) so the generator's fail-closed rules are unit-testable without
   touching the committed registry.
   """
-  def validate_against!(%__MODULE__{} = s, registry) when is_map(registry) do
+  def validate_against!(%__MODULE__{} = s, registry, source \\ AbbrevRegistry.path())
+      when is_map(registry) and is_binary(source) do
     # WS-D D3: the JSON:API surface is FORWARDED from the host web router
     # (`forward "/api/v1", …Web.Api.Endpoint`) — there is no API without the web layer.
     if s.api? and not s.web? do
@@ -458,14 +459,42 @@ defmodule Samen.Gen.App do
       case Map.get(registry, abbrev) do
         nil -> :ok
         ^owner -> :ok
-        other -> raise ArgumentError,
-                       "abbrev #{inspect(abbrev)} is already reserved to #{other} in the " <>
-                         "global registry (#{AbbrevRegistry.path()}). Abbrevs are permanent " <>
-                         "and never recycled — pick a different --prefix/--abbrev."
+        other ->
+          raise ArgumentError, collision_message(s, abbrev, other, source)
       end
     end
 
     :ok
+  end
+
+  # Names the abbrev, its owner, the host(s) holding it, the registry file that was ACTUALLY read (`source`), and
+  # the cause: the operator/primitives abbrevs are `<first letter of --prefix>` + two letters, so every prefix
+  # that starts with the same letter as an already-generated app collides with that app's abbrevs.
+  defp collision_message(s, abbrev, other, source) do
+    hosts =
+      try do
+        for {h, ns} <- AbbrevRegistry.load_namespaced(source).hosts, Map.get(ns, abbrev) == other, do: h
+      rescue
+        _ -> []
+      end
+
+    held_by =
+      case hosts do
+        [] -> "in the global map"
+        hs -> "in host " <> Enum.map_join(hs, ", ", &inspect/1)
+      end
+
+    cause =
+      if String.first(abbrev) == String.first(s.prefix) do
+        "Cause: the operator/primitives abbrevs are derived from the FIRST letter of --prefix " <>
+          "(#{inspect(String.first(s.prefix))}), so any prefix starting with that letter collides with the app " <>
+          "that already owns them. Pick a --prefix with a different first letter. "
+      else
+        "Pick a different --abbrev (or --prefix). "
+      end
+
+    "abbrev #{inspect(abbrev)} is already reserved to #{other} #{held_by} of #{source} " <>
+      "(the registry file that was read). Abbrevs are permanent and never recycled. " <> cause
   end
 
   @doc """

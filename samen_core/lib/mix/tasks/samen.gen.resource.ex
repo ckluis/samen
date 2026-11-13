@@ -77,7 +77,7 @@ defmodule Mix.Tasks.Samen.Gen.Resource do
 
   @impl Mix.Task
   def run(argv) do
-    {opts, _rest, _invalid} = OptionParser.parse(argv, strict: @switches)
+    opts = Samen.Gen.Args.parse!("samen.gen.resource", argv, @switches)
 
     scope = require_opt!(opts, :scope)
     resource = require_opt!(opts, :resource)

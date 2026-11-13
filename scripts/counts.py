@@ -21,6 +21,17 @@ Sources of truth (nothing is typed here):
     corpus_targets     scripts/mutate.sh --corpus --list-targets   (derived from the sabotage headers)
     corpus_mutants     the same engine call, summed over the corpus rows
 
+Front-door numbers in the prose docs (`--docs`, DOC_COUNTS below; DX-12 — these once said 17/18/19 steps,
+"seventeen" verifiers, 33/49 ADRs, 24/285 sabotages while the repo had 18-20 / 26 / 55 / 649):
+    adrs                  docs/adr/ADR-*.md files
+    verifiers             samen_core/lib/mix/tasks/samen.verify.*.ex tasks
+    gate_steps_app        the N of "step X/N" in the generated app's ci.sh (samen_core/priv/templates/ci_sh.eex)
+    gate_steps_app_api    the same for the --api variant (ci_sh_api.eex; the flagship / deploy gate)
+    gate_steps_driftwood  the same for driftwood/ci.sh
+    gate_steps_pawchart   the same for pawchart/ci.sh
+    scripts/counts --check --docs | --write --docs     every file in DOC_COUNTS (a marker must be present for
+                                                       each name listed for that file, and current)
+
 Per-file mutant counts are cached in _ci/counts/ keyed by sha256(engine + file), so a warm check is
 a handful of hashes; only an edited target file is re-enumerated.
 """
@@ -36,6 +47,18 @@ REPO = os.environ.get("SAMEN_COUNTS_REPO") or os.path.abspath(os.path.join(os.pa
 CACHE = os.environ.get("SAMEN_COUNTS_CACHE") or os.path.join(os.environ.get("SAMEN_CI_HOME") or os.path.join(REPO, "_ci"), "counts")
 MARK = re.compile(r"<!--count:([a-z_]+)-->(.*?)<!--/count-->")
 NAMES = ["sabotages", "driver_sabotages", "watchlist_modules", "watchlist_mutants", "corpus_targets", "corpus_mutants"]
+DOC_NAMES = ["adrs", "verifiers", "gate_steps_app", "gate_steps_app_api", "gate_steps_driftwood", "gate_steps_pawchart"]
+ALL_NAMES = NAMES + DOC_NAMES
+# file -> the counts it MUST carry a marker for (a number that lost its marker is a number nobody checks)
+DOC_COUNTS = {
+    "README.md": ["adrs", "gate_steps_app_api", "sabotages"],
+    "docs/README.md": ["adrs"],
+    "docs/adr/README.md": ["adrs"],
+    "docs/guides/gate-failures.md": ["verifiers", "gate_steps_app", "gate_steps_driftwood", "gate_steps_pawchart"],
+    "docs/guides/getting-started.md": ["gate_steps_app"],
+    "docs/guides/cookbook.md": ["gate_steps_app", "sabotages"],
+    "docs/guides/generators.md": ["gate_steps_app"],
+}
 GUARD_TEST = "ci_driver_guard_test.exs"
 
 
@@ -61,6 +84,23 @@ def hdr(path, key):
 
 def n_sabotages():
     return str(len(patches()))
+
+
+def n_adrs():
+    return str(len(glob.glob(os.path.join(REPO, "docs", "adr", "ADR-*.md"))))
+
+
+def n_verifiers():
+    return str(len(glob.glob(os.path.join(REPO, "samen_core", "lib", "mix", "tasks", "samen.verify.*.ex"))))
+
+
+def n_gate_steps(rel):
+    """The single N of every `step X/N` banner in a gate script (it must be unique, or the gate lies about itself)."""
+    with open(os.path.join(REPO, rel), encoding="utf-8") as f:
+        totals = set(re.findall(r"step \w+/(\d+)", f.read()))
+    if len(totals) != 1:
+        raise SystemExit("counts: %s has %s step totals (%s); expected exactly one" % (rel, len(totals), ", ".join(sorted(totals))))
+    return totals.pop()
 
 
 def n_driver_range():
@@ -130,44 +170,26 @@ def derive(name):
         v = str(len(target_rows(True)))
     elif name == "corpus_mutants":
         v = "{:,}".format(mutants(target_rows(True)))
+    elif name == "adrs":
+        v = n_adrs()
+    elif name == "verifiers":
+        v = n_verifiers()
+    elif name == "gate_steps_app":
+        v = n_gate_steps("samen_core/priv/templates/ci_sh.eex")
+    elif name == "gate_steps_app_api":
+        v = n_gate_steps("samen_core/priv/templates/ci_sh_api.eex")
+    elif name == "gate_steps_driftwood":
+        v = n_gate_steps("driftwood/ci.sh")
+    elif name == "gate_steps_pawchart":
+        v = n_gate_steps("pawchart/ci.sh")
     else:
-        raise SystemExit("counts: unknown count name %r (known: %s)" % (name, ", ".join(NAMES)))
+        raise SystemExit("counts: unknown count name %r (known: %s)" % (name, ", ".join(ALL_NAMES)))
     _memo[name] = v
     return v
 
 
-def main(argv):
-    mode, path, only = None, os.path.join(REPO, "CLAUDE.md"), None
-    i = 0
-    while i < len(argv):
-        a = argv[i]
-        if a in ("--check", "--write", "--list"):
-            if mode:
-                print("counts: give one of --check / --write / --list", file=sys.stderr)
-                return 2
-            mode = a[2:]
-        elif a in ("--file", "--only") and i + 1 < len(argv):
-            i += 1
-            if a == "--file":
-                path = argv[i]
-            else:
-                only = [x for x in argv[i].split(",") if x]
-        else:
-            print(__doc__.split("\n\n")[0] + "\n\nusage: scripts/counts --check|--write|--list [--file PATH] [--only a,b]", file=sys.stderr)
-            return 2
-        i += 1
-    if not mode:
-        print("usage: scripts/counts --check|--write|--list [--file PATH] [--only a,b]", file=sys.stderr)
-        return 2
-    wanted = only if only is not None else NAMES
-    for n in wanted:
-        if n not in NAMES:
-            print("counts: unknown count name %r (known: %s)" % (n, ", ".join(NAMES)), file=sys.stderr)
-            return 2
-    if mode == "list":
-        for n in wanted:
-            print("%-18s %s" % (n, derive(n)))
-        return 0
+def run_file(mode, path, wanted):
+    """--check / --write one document against the counts it must carry. Returns the exit code."""
     with open(path, encoding="utf-8") as f:
         text = f.read()
     problems, seen = [], set()
@@ -175,7 +197,7 @@ def main(argv):
     for ln, line in enumerate(lines, 1):
         for m in MARK.finditer(line):
             name = m.group(1)
-            if name not in NAMES:
+            if name not in ALL_NAMES:
                 problems.append("%s:%d: unknown count marker %r" % (path, ln, name))
                 continue
             seen.add(name)
@@ -221,6 +243,60 @@ def main(argv):
         print("COUNTS: %s %s -> %s" % (name, have, want))
     print("COUNTS: %s (%d updated)" % ("written" if drift else "already current", len(drift)))
     return 0
+
+
+USAGE = "usage: scripts/counts --check|--write|--list [--docs] [--file PATH] [--only a,b]"
+
+
+def main(argv):
+    mode, path, only, docs = None, os.path.join(REPO, "CLAUDE.md"), None, False
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a in ("--check", "--write", "--list"):
+            if mode:
+                print("counts: give one of --check / --write / --list", file=sys.stderr)
+                return 2
+            mode = a[2:]
+        elif a == "--docs":
+            docs = True
+        elif a in ("--file", "--only") and i + 1 < len(argv):
+            i += 1
+            if a == "--file":
+                path = argv[i]
+            else:
+                only = [x for x in argv[i].split(",") if x]
+        else:
+            print(__doc__.split("\n\n")[0] + "\n\n" + USAGE, file=sys.stderr)
+            return 2
+        i += 1
+    if not mode:
+        print(USAGE, file=sys.stderr)
+        return 2
+    if docs:
+        if mode == "list":
+            for n in DOC_NAMES:
+                print("%-20s %s" % (n, derive(n)))
+            return 0
+        rc = 0
+        for rel, names in DOC_COUNTS.items():
+            doc = os.path.join(REPO, rel)
+            if not os.path.isfile(doc):
+                print("COUNTS: DRIFT  %s: missing — it is listed in scripts/counts.py DOC_COUNTS" % rel)
+                rc = 1
+                continue
+            rc = max(rc, run_file(mode, doc, names))
+        return rc
+    wanted = only if only is not None else NAMES
+    for n in wanted:
+        if n not in ALL_NAMES:
+            print("counts: unknown count name %r (known: %s)" % (n, ", ".join(ALL_NAMES)), file=sys.stderr)
+            return 2
+    if mode == "list":
+        for n in wanted:
+            print("%-18s %s" % (n, derive(n)))
+        return 0
+    return run_file(mode, path, wanted)
 
 
 if __name__ == "__main__":

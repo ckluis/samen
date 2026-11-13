@@ -36,7 +36,7 @@ defmodule SamenPostmark.MixProject do
       ],
       app: :samen_postmark,
       version: "0.1.0",
-      elixir: "~> 1.18",
+      elixir: ">= 1.20.4",
       start_permanent: Mix.env() == :prod,
       # test/fixtures/conformance.exs is data loaded via Code.eval_file by the
       # shared harness, not an ExUnit test file — ignore it the same way

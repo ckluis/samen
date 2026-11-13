@@ -1,6 +1,6 @@
-## Code Exploration — MANDATORY (codemunch)
+## Code Exploration — codemunch FIRST (when available)
 
-**Agents: use `codemunch:search`/`codemunch:fetch` for exploration, not raw Read/Grep sweeps — this has been missed before (agents keep defaulting to plain Read/Grep); it is not optional. It stays mandatory.**
+**Agents: use `codemunch:search`/`codemunch:fetch` for exploration, not raw Read/Grep sweeps — this has been missed before (agents keep defaulting to plain Read/Grep); it is not optional while the plugin is available.**
 
 <CRITICAL>
 You MUST use codemunch for ALL code exploration. This is NON-NEGOTIABLE. Do NOT ignore this rule.
@@ -37,4 +37,12 @@ directory to orient yourself) is exactly what codemunch replaces — route it th
 - Need to find references? → `/codemunch:refs`
 - Need to edit a file? → Read first, then Edit (this is the ONLY valid use of Read for source files)
 
-The index auto-updates — no manual indexing needed.
+### When codemunch is unavailable, stale, or blind
+
+- **Plugin not installed** (other harness, subagent without plugins): use targeted `rg -n 'defmodule X'` /
+  `rg -n 'def name'`, then Read only the file you need. Do not stall.
+- **Stale index:** `.claude/codemunch/index.json` records the `commit` it was built at (the committed
+  `driftwood/.claude/codemunch/index.json` is older still). Check `git rev-list --count <commit>..HEAD`; if it is large,
+  or a symbol you know exists is missing, rebuild with `codemunch:index` or verify with `rg`.
+- **Blind spot:** only `def`/`defmodule`/macros are indexed, not Spark/Ash DSL entities (`attribute`, `actions`,
+  `policies`, `pii do`). Use `rg -n 'attribute :x'` or read the resource file for those.

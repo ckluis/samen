@@ -47,7 +47,10 @@ scripts/ci pr                     # when the round is done; on INCOMPLETE:
 scripts/ci resume                 # …repeat until  CI(pr): PASS n/n … — PR-READY
 ```
 
-Every call is a single foreground tool call: the default budget is 540 s so it fits a 600 s ceiling.
+Every call is a single foreground tool call: the default budget is 540 s so it fits a 600 s ceiling. **An agent must
+invoke every `scripts/ci pr`, `resume` and `full` call with a tool timeout of at least 600 s (600000 ms)**: each call
+is budgeted to 540 s, and a harness's default tool timeout (Claude Code's is 120 s) kills it long before that, leaving
+a half-run step and no verdict.
 Never background a run and poll it, and never hand-segment `ci.sh`. A failing step prints its digest;
 read that and `_ci/logs/<id>.log`, fix, re-run the same command — passed steps are CACHED, so you only
 pay for what changed. `scripts/ci pr` re-keys on any edit, so the final run is the one on the tree you

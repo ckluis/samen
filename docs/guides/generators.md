@@ -182,20 +182,24 @@ With `--compile` (the default), after writing files the generator, in the new ap
 
 ## The gate the generated app runs
 
-`<app>/ci.sh` runs the full 17-step gate (identical shape to `pawchart/ci.sh`):
+`<app>/ci.sh` runs the full <!--count:gate_steps_app-->18<!--/count-->-step gate (<!--count:gate_steps_app_api-->19<!--/count--> with the `--api` surface). The steps are numbered in its
+own output (`--- step N/M: …`); this is the headless/web shape, in order:
 
 ```
 1   mix compile --force --warnings-as-errors
 1a  DB bootstrap (recreate + migrate the test DB)
 1b  schema.dict.json drift check
-2   samen.verify.catalog_parity        10  samen.verify.vault_declared_parity
-3   samen.verify.prefixes              11  samen.verify.tnt_catalog
-4   samen.verify.pii_reads             12  samen.verify.tnt_boundary
-5   samen.verify.pii_classify          13  samen.verify.same_org_fk
-6   samen.verify.no_plaintext_pii      14  samen.verify.no_pii_columns
-7   samen.verify.migrations            15  samen.verify.aggregate_privacy
-8   samen.verify.sink_schema           16  mix test --warnings-as-errors
-9   samen.verify.metric_labels         17  anti-tautology probe (vault path)
+2   samen.verify.catalog_parity         10  samen.verify.vault_declared_parity
+3   samen.verify.prefixes               11  samen.verify.tnt_catalog
+4   samen.verify.pii_reads              12  samen.verify.tnt_boundary
+5   samen.verify.pii_classify           13  samen.verify.same_org_fk
+6   samen.verify.no_plaintext_pii       13b samen.verify.erasure_completeness
+7   samen.verify.migrations             14  samen.verify.no_pii_columns
+8   samen.verify.sink_schema (+ replay_schema, signals_no_pii)
+9   samen.verify.metric_labels          14b samen.verify.no_pan_columns
+9b  samen.verify.oban_queues            15  samen.verify.aggregate_privacy
+16  samen.verify.ai_prompt_masking      17  mix test (default suite)
+18  anti-tautology probe (vault path)
 ```
 
 ## Red paths (must-fail) + anti-tautology probe
@@ -204,7 +208,7 @@ The generator's guarantees each ship a red path, per the repo's hard rules:
 
 1. **Generated gate PASSES (green path, correct-by-construction).**
    Scaffold an app, run its `ci.sh`, assert exit 0. Verified in the T6.4 workflow by
-   generating `Widgetco` and running `widgetco/ci.sh` (all 17 steps green).
+   generating `Widgetco` and running `widgetco/ci.sh` (every step green).
 
 2. **Missing abbrev → the gate/compile catches it (red path).**
    `mix samen.gen.app --module Noabbrevco --prefix nb --abbrev nbx --no-reserve-abbrevs
@@ -245,7 +249,7 @@ The generator's guarantees each ship a red path, per the repo's hard rules:
 
 ## Unit coverage
 
-`samen_core/test/gen_app_test.exs` (15 tests) covers the pure engine hermetically (temp
+`samen_core/test/gen_app_test.exs` covers the pure engine hermetically (temp
 registry file + temp target, never touching the committed registry): spec derivation, the
 computed `samen_core` relative path (sibling vs nested), every `validate_against!/2`
 fail-closed rule, idempotent reservation, and `$comment`/formatting preservation.

@@ -20,7 +20,7 @@ in your module/abbrevs.
 `samen_core/lib/mix/tasks/samen.gen.resource.ex`).
 **Verified against:** the permanent post-app generator probe
 (`samen_core/priv/gen_post_probe.exs`, a root `ci.sh` step) which runs exactly these
-commands against a fresh app and re-runs the app's full 18-step gate.
+commands against a fresh app and re-runs the app's full <!--count:gate_steps_app-->18<!--/count-->-step gate.
 
 A *scope* is an `Ash.Domain` namespace you own. The scope generator emits the domain module
 and registers it in **both** `:ash_domains` config lists (the app's own + `:samen_core`) so
@@ -60,7 +60,7 @@ idiom (fresh `f`-prefixed abbrevs, because the scope defaults are already owned 
 mount in the global registry):
 
 ```elixir
-# lib/harbor/billing.ex — mirrors driftwood/lib/driftwood/billing.ex
+# lib/harbor/billing.ex — mirrors the generated billing.ex (`mix samen.gen.app --prefix hb`: plan `hbl`, price `hbp`, usage_event `hbx`)
 defmodule Harbor.Billing do
   use Ash.Domain, validate_config_inclusion?: false
 
@@ -69,9 +69,10 @@ defmodule Harbor.Billing do
     repo: Harbor.Repo,
     namespace: Harbor.Billing,
     abbrevs: %{
-      customer: "hbc", subscription: "hbs", plan: "hbp",
-      price: "hbr", invoice: "hbi", payment: "hby",
-      usage: "hbu", entitlement: "hbe", subscription_event: "hbv"
+      customer: "hbc", subscription: "hbs", plan: "hbl",
+      price: "hbp", invoice: "hbi", payment: "hby",
+      usage: "hbu", entitlement: "hbe", subscription_event: "hbv",
+      usage_event: "hbx"
     }
 end
 ```
@@ -413,7 +414,7 @@ patch IS the change now; the tree should go back to green). Prove it flips befor
 it — `scripts/sabotage.sh` does all five steps for every committed patch: SHA-256 the touched
 files, apply, run `TEST_FILES` and assert the `MUST_FAIL` names are among the failures, revert,
 and re-SHA to confirm a byte-exact restore. Run it locally against your new patch, then run the
-whole committed suite (24 patches as of this writing) — both are opt-in (they deliberately
+whole committed suite (<!--count:sabotages-->655<!--/count--> patches today; the number is generated) — both are opt-in (they deliberately
 break the tree and re-run DB-backed suites), so they're run explicitly, not by the default
 `bash ci.sh`:
 

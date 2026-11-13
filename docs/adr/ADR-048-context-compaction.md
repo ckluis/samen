@@ -5,13 +5,11 @@
   C1–C4 (§9) are **AUTHORISED** and filed as backlog rows (see `Binds`, below); C4 is additionally
   gated on the O-3 implementation spike.
 - **Date:** 2026-08-26
-- **Build status:** **NOT STARTED — no code exists and none is authored here.** This ADR authors
-  no product code: it touches no source, no test, no sabotage, no migration, no mix task, no
-  abbrev-registry row, no `schema.dict.json`. It is docs-only per the standing
-  decompose-cross-cutting-changes rule. The build lands in the batches §9 sequences, now ratified
-  and filed as backlog rows (see `Binds`, below), each behind its own adversarial gate. Code
-  fragments below are **illustrative shapes, not shipped modules** — no module named in §4–§7
-  exists today.
+- **Build status:** **BUILT — C1–C4 all shipped** (corrected 2026-11-13; this header previously still read
+  "NOT STARTED — no code exists"). C1 dual-view transcript `cd2f7cd2`, C2 deterministic fold + context-exhausted
+  terminal `e66fcc2e`, C3 the summarizer `1c3c3884`, C4 withdrawal propagation `fbfbc16e`; the engine is
+  `samen_core/lib/samen/ai/agent/compaction.ex`. The "Task" paragraph below and §4–§7's code fragments describe the
+  state and the shapes *at filing time* (2026-08-26) — they are the recorded design, not the current gap.
 - **Task:** ADR-047's loop has **no compaction story at all.** `context_cutoff`, `token_budget`,
   `context.window` and `overflow_recover` return **zero hits** across `samen_core/lib` and
   `samen_web/lib` (re-checked at `c41e169`; all 30 `compact` hits are CSV/UI helpers), nothing

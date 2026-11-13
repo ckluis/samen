@@ -62,7 +62,8 @@ defmodule Samen.Gen.AppTest do
     "test/record_vault_test.exs",
     "ci.sh",
     ".gitignore",
-    "README.md"
+    "README.md",
+    "AGENTS.md"
   ]
 
   @web_only_paths [
@@ -250,6 +251,24 @@ defmodule Samen.Gen.AppTest do
       end
     end
 
+    test "red: the collision message names the registry file ACTUALLY read, the holding host, and the first-letter cause" do
+      dir = Path.join(System.tmp_dir!(), "gen_app_msg_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf(dir) end)
+      path = Path.join(dir, "scratch_registry.json")
+
+      s = spec(module: "Hx", prefix: "hx", abbrev: "hqz")
+      {clash, _} = Enum.find(Gen.reserved_pairs(s), fn {a, _} -> String.starts_with?(a, "h") and a != "hqz" end)
+
+      File.write!(path, ~s({"abbrevs": {}, "hosts": {"harbor": {"#{clash}": "Harbor.Primitives.Notification"}}}))
+      registry = Samen.AbbrevRegistry.load(path)
+
+      err = assert_raise ArgumentError, fn -> Gen.validate_against!(s, registry, path) end
+      assert err.message =~ ~s(abbrev "#{clash}" is already reserved to Harbor.Primitives.Notification)
+      assert err.message =~ ~s(in host "harbor" of #{path})
+      assert err.message =~ "FIRST letter of --prefix"
+    end
+
     test "green: an abbrev already owned by the SAME resource is fine (idempotent re-run)" do
       registry = %{"wid" => "Widgetco.Vertical.Record"}
       assert Gen.validate_against!(spec(), registry) == :ok
@@ -324,6 +343,27 @@ defmodule Samen.Gen.AppTest do
     test "a nested scratch parent resolves with extra .. segments" do
       s = spec(target: Path.join(Gen.default_target(), "_scratch"))
       assert Gen.samen_core_rel_path(s) == "../../samen_core"
+    end
+  end
+
+  describe "AGENTS.md (AX-3 — agent instructions travel with every generated app)" do
+    for {label, args} <- [headless: [false, false], web: [true, false], api: [true, true], deploy: [true, true, true]] do
+      test "#{label} apps emit a rendered AGENTS.md with the gate, failure index and hands-off rules" do
+        {"AGENTS.md", template} =
+          Enum.find(apply(Samen.Gen.Templates, :files, unquote(args)), &(elem(&1, 0) == "AGENTS.md"))
+
+        out = Gen.render(template, Gen.bindings(spec()))
+
+        refute out =~ "<%=", "every binding must be substituted"
+        assert out =~ "# Widgetco"
+        assert out =~ "MIX_ENV=test bash ci.sh"
+        assert out =~ "widgetco CI gate: ALL PASSED"
+        assert out =~ "docs/guides/gate-failures.md"
+        assert out =~ "mix samen.abbrev.reserve --host widgetco"
+        assert out =~ "NEVER add or edit rows"
+        assert out =~ "schema.dict.json"
+        assert length(String.split(out, "\n")) <= 80
+      end
     end
   end
 
@@ -705,7 +745,9 @@ defmodule Samen.Gen.AppTest do
       task = rendered_api_files()["lib/mix/tasks/widgetco.seed.ex"]
 
       assert task =~ "defmodule Mix.Tasks.Widgetco.Seed"
-      assert task =~ ~s{@requirements ["app.start"]}
+      # no HTTP listener (dev config has `server: true`; it would die with :eaddrinuse next to a dev server)
+      refute task =~ ~s{@requirements ["app.start"]}
+      assert task =~ "Samen.SeedBoot.start!(:widgetco, WidgetcoWeb.Endpoint)"
       assert task =~ "Widgetco.Seeds.run()"
     end
 

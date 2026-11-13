@@ -6,6 +6,102 @@ All notable changes to Samen are recorded here. The format follows
 
 ## [Unreleased]
 
+> **Catch-up, 2026-11-13.** This file had not been touched since 2026-09-21 (`72717d25`); the entries below,
+> through "Generators, docs and agent experience", are reconstructed from `git log 72717d25..HEAD` and grouped by theme.
+> There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
+> older entries follow unchanged under "Added" and onward.
+
+### Host action required (existing hosts and generated apps)
+
+A generated app is a copy, so these do **not** reach an app generated before the change. Re-generate into a scratch
+directory and diff, or apply by hand:
+
+1. **Copy new migrations** (fixed timestamps; each file is the reference in `driftwood/priv/repo/migrations/` or the
+   `samen_core/priv/templates/m_*.eex` template), then re-dump `schema.dict.json` with `mix samen.catalog.dump`:
+   `20260925100000` rollup `subject_id` becomes text (host-named, e.g. driftwood's `…_driver_load_rollup_subject_id_text.exs`) ·
+   `20260925110000` usage-event ledger · `20260926100000` usage tally `reported_quantity` ·
+   `20261005100000` entitlement usage limit · `20261006100000` agent cached-input bucket (hosts running the agent loop) ·
+   `20261009100000` `samen_replay` (also register `Samen.Replay.Domain` in **both** `:ash_domains` lists).
+2. **Mount `plug Samen.Web.SecureHeaders`** in the browser pipeline (security headers + a conservative CSP,
+   `frame-ancestors 'self'`), and make the session cookie `Secure` in prod: `secure: Application.compile_env(:app,
+   :secure_session_cookie, false)` in the endpoint's `@session_options` plus `config :app, secure_session_cookie: true`
+   in `config/prod.exs` (see `samen_core/priv/templates/{endpoint_ex,config_prod_exs_web,router_ex}.eex`).
+3. **`layout: {Samen.Web.Layouts, :app}` on host-authored `live_session`s.** The framework's route macros now pass it so the
+   flash group and connection banner render once from the layout; a host `live_session` without it loses them.
+4. **`Samen.Automation.Health.kill` and `rearm` take an `org_id` as their second argument** (`kill(operator, org_id, workflow_id, opts)`): the
+   old arity could act on another tenant's workflow. Update direct callers.
+5. **AI provider contract (additive).** `%MaskedPayload{}` gains `:system` and `:turns`, `Provider` gains the optional
+   `native_tools?/0`, and `Samen.AI.complete/4` accepts `:model`. An adapter that ignores roles behaves as before; one that
+   wants native tool use must map `:system`/`:turns` (see `samen_anthropic`). The Anthropic adapter's default model is now
+   `claude-opus-5-5` and `max_tokens` 16 000.
+6. **Dependency floors.** Ash 3.37.2, AshPostgres 2.15.2, AshOban 0.10.2 (exact pins, moved together with all lock files),
+   Bandit `~> 1.14`, and Elixir `>= 1.20.4` / OTP 29.1.1 (every `mix.exs` now says so).
+7. **Oban hosts that do not call `Samen.Jobs.install_defaults/1`** must add `{Samen.Jobs.BootRun, workers:
+   Samen.Jobs.default_boot_workers()}` so the `aud_event` partition rolls forward at boot (a fresh deploy could not
+   write audit events from its first request otherwise). Hosts using `install_defaults/1` get it automatically.
+8. **Seed tasks** should boot through `Samen.SeedBoot.start!/2` instead of `@requirements ["app.start"]`, or
+   `mix <app>.seed` dies with `:eaddrinuse` while the dev server runs.
+
+### Security and correctness fixes
+
+- The LiveView login oracle is closed; rate-limited users land on a real page. Sessions that are revoked disconnect their
+  LiveView sockets; a failed revoke is never reported as revoked. Webhook raw-body reading honours the `read_body`
+  contract (413, not 500).
+- Audit: chain appends are transactional with a per-org advisory lock; `aud_event` partitions roll forward by calendar
+  month and at boot.
+- Cross-tenant workflow kill/rearm in operator automation health fixed (see host action 4). A feature flag resolves from its
+  owner org's rows only. Marketing sends cover the whole segment, are paged and idempotent per (campaign, subscriber);
+  CRM sequence enrollment with a blank or unknown contact id is an error.
+- Fleet ingress: an unconfigured `/fleet/health` answers 503 with a body that says so. TOTP enrolment keeps its pending
+  secret across remounts. Chat/support/operator views show the newest 200 messages. Billing overview shows a plan's real price.
+- No local machine paths in tracked files (`scripts/no_local_paths`, with its own sabotages).
+
+### AI plane
+
+- **Instructions apart from data** (ADR-043 §5.1a, ADR-047 §5.2a): sealed `:system` and role-structured `:turns`; native
+  tool use with `tool_use`/`tool_result` and honest stop reasons (`:truncated`, `:refused`, `:unexpected_stop`,
+  `:rate_limited`, `:overloaded`, `:provider_timeout`); explicit transport timeouts and bounded retry; prompt-cache
+  breakpoints; per-agent `model:`. An opt-in live agent trajectory eval (`SAMEN_AI_LIVE`) joins the keyless suite.
+- Context compaction (ADR-048) fixes: the failed attempt and the Level 2 summarizer are billed what they spent; cached input
+  is its own token bucket end to end (#74).
+
+### Observability, replay and usage metering
+
+- **ADR-052:** the observability plane is lit (LiveView/request wide events, reveal and job spans, OTLP mapping, `:logger` tier
+  of `no_plaintext_pii`), and a masked **session replay** ships (capture kernel, default-deny sanitizer, player on both
+  planes, `replay_schema` verifier, runbook). Driftwood captures in dev only.
+- **ADR-051:** usage-metering capture — an insert-only ledger behind `Samen.Billing.Meter`, `Usage` as a tally derived from it,
+  a mirrored per-period limit (`within_limit?/4` fails closed), and a tenant usage panel.
+
+### Ash Signals and dependencies
+
+- Ash 3.34.4 → 3.37.2 (clears 31 advisories), AshPostgres 2.15.2, AshOban 0.10.2; `mix samen.verify.signals_no_pii` (no PII in a
+  signal); archive/restore cascades of the CMS, Support, Chat and Work scopes are now Signals listeners (#96).
+
+### CI, tooling and the proof corpus
+
+- **ADR-053:** one driver (`scripts/ci quick|pr|full`), budgeted and resumable, content-cached, mirrored in GitHub Actions;
+  `scripts/counts`, `scripts/docs_check`, `sabotage new|reanchor`, N-lane sabotage replay, concurrent gen probes on a private
+  abbrev registry, a compiled-dependency cache. The sabotage corpus grew from 356 to the generated count in CLAUDE.md.
+- Toolchain pinned (`.tool-versions`: Elixir 1.20.4 / OTP 29.1.1) and enforced by the `toolchain` step; Dialyzer in the default
+  gate over all product projects; one sanctioned shared-sandbox helper, `Samen.TestSandbox.shared!/1`.
+- Flakes fixed rather than retried: pinned clocks, tests wait for events not durations, sandbox mode is never left `:auto` (#103).
+
+### UI kit, data map and landing page
+
+- Kit: loading/error/empty states, drawer accessibility, flash/connection banner from the LiveView layout, files links that carry
+  `?org=`, a sideways-scroll root cause fixed. The operator plane gains a generated **data map** (ERD + architecture, #97).
+  The landing page was rebuilt as a feature-by-feature story with real product screens.
+
+### Generators, docs and agent experience
+
+- Generators and `mix samen.abbrev.reserve` refuse unknown or malformed flags before any side effect. Abbrev errors name the
+  sanctioned `mix samen.abbrev.reserve` command and the registry file actually read.
+- Generated apps ship `AGENTS.md` (the gate, the failure index, the hands-off rules). `mix <app>.seed` no longer starts the
+  HTTP listener. Every `mix.exs` and generator template declares `elixir: ">= 1.20.4"`, checked by the `toolchain` step.
+- Docs: the glossary, a docs index that separates using Samen from project history, an ADR status column, front-door counts
+  generated by `scripts/counts --docs`, getting-started prerequisites; `docs/next-session-brief.md` moved to `docs/archive/`.
+
 ### Added
 
 - **The G-06 double sweep is machinery, not prose** (`scripts/double-sweep.sh`, wired

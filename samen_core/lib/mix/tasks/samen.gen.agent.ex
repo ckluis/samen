@@ -36,7 +36,7 @@ defmodule Mix.Tasks.Samen.Gen.Agent do
 
   @impl Mix.Task
   def run(argv) do
-    {opts, _rest, _invalid} = OptionParser.parse(argv, strict: @switches)
+    opts = Samen.Gen.Args.parse!("samen.gen.agent", argv, @switches)
 
     spec = Agent.build_spec(opts)
     Agent.validate!(spec)

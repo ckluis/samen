@@ -37,7 +37,7 @@ defmodule SamenAnthropic.MixProject do
       ],
       app: :samen_anthropic,
       version: "0.1.0",
-      elixir: "~> 1.18",
+      elixir: ">= 1.20.4",
       start_permanent: Mix.env() == :prod,
       test_ignore_filters: [&String.starts_with?(&1, "test/fixtures/")],
       deps: deps()
