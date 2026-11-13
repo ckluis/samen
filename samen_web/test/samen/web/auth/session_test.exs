@@ -746,7 +746,7 @@ defmodule Samen.Web.Auth.SessionTest do
 
       # Before the fix this returned {:noreply, socket} with trigger_submit true/false — an
       # unthrottled ok/error signal over the websocket. There is no handler to ask any more.
-      assert_raise UndefinedFunctionError, fn -> LoginLive.handle_event("login", params, socket) end
+      assert_raise UndefinedFunctionError, fn -> apply(LoginLive, :handle_event, ["login", params, socket]) end
 
       # Positive control: the real checker is the controller, and it still signs this user in.
       conn = SessionController.create(auth_conn(Mount.new(:auth, Samen.WebTest.Operator, Repo)), params)
