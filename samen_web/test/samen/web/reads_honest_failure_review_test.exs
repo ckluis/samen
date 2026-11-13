@@ -123,4 +123,180 @@ defmodule Samen.Web.ReadsHonestFailureReviewTest do
       refute log =~ "zz_gone"
     end
   end
+
+  # ===========================================================================
+  # S3 / S4 — onboarding wizard
+  # ===========================================================================
+
+  describe "S3/S4 — onboarding wizard" do
+    alias Samen.Web.Onboarding.{WizardController, WizardLive}
+    alias Samen.WebTest.Operator.{Invitation, Membership, Org, User}
+
+    setup do
+      prev = Application.get_env(:samen_core, :delivery_env)
+      Application.put_env(:samen_core, :delivery_env, :test)
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:samen_core, :delivery_env, prev),
+          else: Application.delete_env(:samen_core, :delivery_env)
+      end)
+
+      org_id = Ash.UUID.generate()
+
+      user =
+        User
+        |> Ash.Changeset.for_create(:create, %{org_id: org_id, handle: "wiz-#{System.unique_integer([:positive])}", full_name: %Samen.Type.FullName{first: "Wiz", last: "Admin"}})
+        |> Ash.create!(authorize?: false)
+
+      Membership
+      |> Ash.Changeset.for_create(:create, %{org_id: org_id, user_id: user.id, role: :admin})
+      |> Ash.create!(authorize?: false)
+
+      %{wiz_org: org_id, wiz_user: user.id}
+    end
+
+    defp wizard_socket(ctx) do
+      %Phoenix.LiveView.Socket{}
+      |> Phoenix.Component.assign(
+        samen_mount: build_mount(:settings),
+        samen_acting_as: false,
+        return_to: nil,
+        org_id: ctx.wiz_org,
+        user_id: ctx.wiz_user,
+        samen_session: %{},
+        invite_error: nil,
+        invited_raw_token: nil,
+        step: :invite
+      )
+    end
+
+    defp wizard_invite(ctx) do
+      {:noreply, socket} =
+        WizardLive.handle_event("invite", %{"invitation" => %{"email" => "wiz-new@example.com", "role" => "member"}}, wizard_socket(ctx))
+
+      socket
+    end
+
+    test "invite: a failed MEMBERSHIP lookup says 'couldn't send', not 'No membership in context'", ctx do
+      # POSITIVE CONTROL first: the healthy path mints a token and shows no error.
+      healthy = wizard_invite(ctx)
+      assert is_binary(healthy.assigns.invited_raw_token)
+      assert healthy.assigns.invite_error == nil
+
+      # And a genuinely missing membership keeps the 'no membership' copy.
+      missing = wizard_invite(%{ctx | wiz_user: Ash.UUID.generate()})
+      assert missing.assigns.invite_error =~ "No membership in context"
+
+      break_table!(Membership)
+      {socket, _log} = with_log(fn -> wizard_invite(ctx) end)
+
+      assert socket.assigns.invite_error =~ "Nothing was sent"
+      refute socket.assigns.invite_error =~ "No membership in context"
+      refute socket.assigns.invite_error =~ "refused"
+      assert socket.assigns.invited_raw_token == nil
+    end
+
+    test "invite: a failed WRITE (a real outage) says 'nothing was sent', never 'Invite refused (admin role required…)'", ctx do
+      break_table!(Invitation)
+      {socket, log} = with_log(fn -> wizard_invite(ctx) end)
+
+      assert socket.assigns.invite_error =~ "Couldn't send that invitation right now. Nothing was sent"
+      refute socket.assigns.invite_error =~ "refused"
+      assert socket.assigns.invited_raw_token == nil
+      assert log =~ "write failed write=settings_invitation_create"
+    end
+
+    test "invite: a real REFUSAL (a member cannot invite) keeps the refusal copy", ctx do
+      member =
+        User
+        |> Ash.Changeset.for_create(:create, %{org_id: ctx.wiz_org, handle: "wiz-member", full_name: %Samen.Type.FullName{first: "M", last: "Ember"}})
+        |> Ash.create!(authorize?: false)
+
+      Membership
+      |> Ash.Changeset.for_create(:create, %{org_id: ctx.wiz_org, user_id: member.id, role: :member})
+      |> Ash.create!(authorize?: false)
+
+      socket = wizard_invite(%{ctx | wiz_user: member.id})
+      assert socket.assigns.invite_error =~ "Invite refused"
+      refute socket.assigns.invite_error =~ "Nothing was sent"
+    end
+
+    test "the no-JS controller redirects an outage to the 'nothing was sent' flag, and the wizard renders that copy", ctx do
+      invite_conn = fn ->
+        Plug.Test.conn(:post, "/onboarding/invite")
+        |> Plug.Test.init_test_session(%{})
+        |> Plug.Conn.put_private(:samen_mount, build_mount(:settings))
+        |> WizardController.invite(%{
+          "org_id" => ctx.wiz_org,
+          "user_id" => ctx.wiz_user,
+          "invitation" => %{"email" => "wiz-conn@example.com", "role" => "member"}
+        })
+      end
+
+      # POSITIVE CONTROL: healthy → the invited flag.
+      assert Phoenix.ConnTest.redirected_to(invite_conn.()) =~ "invited=1"
+
+      break_table!(Invitation)
+      {conn, _log} = with_log(fn -> invite_conn.() end)
+      location = Phoenix.ConnTest.redirected_to(conn)
+      assert location =~ "invite_error=unavailable"
+
+      socket = wizard_socket(ctx)
+      {:noreply, socket} = WizardLive.handle_params(%{"invite_error" => "unavailable", "org" => ctx.wiz_org}, "http://x/onboarding", socket)
+      assert socket.assigns.invite_error =~ "Nothing was sent"
+    end
+
+    test "S4: 'You're all set' is derived from the ONE org read — the load issues a single org query", ctx do
+      mount = build_mount(:settings)
+
+      {:ok, reg} =
+        Samen.Identity.Register.register(
+          %{
+            org_name: "Review Co #{System.unique_integer([:positive])}",
+            first_name: "Ada",
+            last_name: "Lovelace",
+            email: "review-#{System.unique_integer([:positive])}@example.test",
+            password: "correct horse battery staple"
+          },
+          %{org: Org, credential: Samen.WebTest.Operator.Credential, user: User, membership: Membership, auth_token: Samen.WebTest.Operator.AuthToken, repo: Samen.WebTest.Repo}
+        )
+
+      org_id = reg.org.id
+      table = AshPostgres.DataLayer.Info.table(Org)
+      prefix = Keyword.get(Samen.WebTest.Repo.config(), :telemetry_prefix, [:samen, :web_test, :repo]) ++ [:query]
+      counter = :counters.new(1, [])
+      handler = "org-reads-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach(
+        handler,
+        prefix,
+        fn _event, _m, %{query: query}, {counter, table} ->
+          if String.contains?(query, ~s(FROM "#{table}")), do: :counters.add(counter, 1, 1)
+        end,
+        {counter, table}
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      socket =
+        %Phoenix.LiveView.Socket{}
+        |> Phoenix.Component.assign(samen_mount: mount, samen_acting_as: false, return_to: nil)
+        |> then(&WizardLive.load(&1, org_id, nil))
+
+      assert :counters.get(counter, 1) == 1
+      assert socket.assigns.complete? == false
+
+      # Completing flips it: the same single read now says complete.
+      owner = %Samen.Scope{actor: %{id: reg.user.id, org_id: org_id, role: :owner, verified?: true, kind: :tenant, plane: :tenant}}
+      {:ok, _} = Samen.Web.Onboarding.complete!(mount, owner, org_id)
+
+      done =
+        %Phoenix.LiveView.Socket{}
+        |> Phoenix.Component.assign(samen_mount: mount, samen_acting_as: false, return_to: nil)
+        |> then(&WizardLive.load(&1, org_id, nil))
+
+      assert done.assigns.complete? == true
+    end
+  end
 end

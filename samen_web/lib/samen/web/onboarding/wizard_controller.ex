@@ -100,6 +100,8 @@ defmodule Samen.Web.Onboarding.WizardController do
            Invitations.create(mount, scope, Map.get(invitation, "email", ""), Map.get(invitation, "role", "member")) do
       redirect(conn, to: step_path(conn, org_id, user_id, "invite", "&invited=1"))
     else
+      # The lookup / write itself failed (an outage, not a refusal): the wizard says nothing was sent.
+      {:error, :unavailable} -> redirect(conn, to: step_path(conn, org_id, user_id, "invite", "&invite_error=unavailable"))
       _ -> redirect(conn, to: step_path(conn, org_id, user_id, "invite", "&invite_error=1"))
     end
   end
@@ -171,7 +173,7 @@ defmodule Samen.Web.Onboarding.WizardController do
   end
 
   defp membership(mount, org_id, user_id) when is_binary(org_id) and is_binary(user_id) do
-    Reads.current_membership(mount, Mount.scope(mount, org_id), user_id, org_id)
+    Reads.current_membership_result(mount, Mount.scope(mount, org_id), user_id, org_id)
   end
 
   defp membership(_mount, _org_id, _user_id), do: {:error, :not_found}

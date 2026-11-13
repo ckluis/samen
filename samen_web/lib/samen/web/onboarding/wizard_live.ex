@@ -94,6 +94,7 @@ defmodule Samen.Web.Onboarding.WizardLive do
     socket
     |> then(fn s -> if params["invited"] == "1", do: assign(s, invited?: true), else: s end)
     |> then(fn s -> if params["invite_error"] == "1", do: assign(s, invite_error: invite_refused_copy()), else: s end)
+    |> then(fn s -> if params["invite_error"] == "unavailable", do: assign(s, invite_error: invite_unavailable_copy()), else: s end)
     |> then(fn s -> if params["error"] == "1", do: assign(s, org_error: "Could not save — try again."), else: s end)
   end
 
@@ -106,6 +107,9 @@ defmodule Samen.Web.Onboarding.WizardLive do
 
   defp invite_refused_copy,
     do: "Invite refused (admin role required, verified account required, or the invited role outranks yours)."
+
+  # The membership lookup or the write itself FAILED (not a refusal): say so, value-free.
+  defp invite_unavailable_copy, do: "Couldn't send that invitation right now. Nothing was sent — try again."
 
   @doc false
   def load(socket, org_id, user_id) do
@@ -121,9 +125,10 @@ defmodule Samen.Web.Onboarding.WizardLive do
     else
       scope = Mount.scope(mount, org_id)
 
-      # A FAILED org read is the error state (retry): it must never read as "You're all set"
-      # (`needed?/3` fails safe to "not needed" on a read error, which is right for the offer
-      # probe but would paint a false "complete" here).
+      # A FAILED org read is the error state (retry): it must never read as "You're all set".
+      # `complete?` is derived from THIS read — not from a second one (`Onboarding.needed?/3`
+      # fails safe to "not needed" on a read error, right for the offer probe but a false
+      # "complete" here, and a second read could fail on its own after this one succeeded).
       case Onboarding.org_result(mount, scope, org_id) do
         {:error, :unavailable} ->
           assign(socket,
@@ -142,7 +147,7 @@ defmodule Samen.Web.Onboarding.WizardLive do
             end
 
           assign(socket,
-            complete?: not Onboarding.needed?(mount, scope, org_id),
+            complete?: complete?(org),
             org: org,
             org_form: org_form(org),
             plan_choices: Onboarding.plan_choices(mount, org_id),
@@ -151,6 +156,13 @@ defmodule Samen.Web.Onboarding.WizardLive do
       end
     end
   end
+
+  # Only a loaded org carrying `onboarded_at` is complete. An unknown / cross-org org keeps the
+  # offer-probe's fail-safe ("not needed", as `Onboarding.needed?/3`): no wizard for an org that
+  # is not ours to set up. (A FAILED read never gets here — it is the error state above.)
+  defp complete?(nil), do: true
+  defp complete?(%{onboarded_at: nil}), do: false
+  defp complete?(_org), do: true
 
   @impl true
   def handle_event("retry_load", _params, socket),
@@ -201,11 +213,12 @@ defmodule Samen.Web.Onboarding.WizardLive do
       {:error, :not_found} ->
         {:noreply, assign(socket, invite_error: "No membership in context — cannot invite.")}
 
+      # The lookup / write itself failed (an outage, not a refusal): nothing was sent.
+      {:error, :unavailable} ->
+        {:noreply, assign(socket, invite_error: invite_unavailable_copy())}
+
       {:error, _reason} ->
-        {:noreply,
-         assign(socket,
-           invite_error: "Invite refused (admin role required, verified account required, or the invited role outranks yours)."
-         )}
+        {:noreply, assign(socket, invite_error: invite_refused_copy())}
     end
   end
 
@@ -223,7 +236,7 @@ defmodule Samen.Web.Onboarding.WizardLive do
 
   defp membership(mount, org_id, user_id) when is_binary(org_id) and is_binary(user_id) do
     scope = Mount.scope(mount, org_id)
-    Reads.current_membership(mount, scope, user_id, org_id)
+    Reads.current_membership_result(mount, scope, user_id, org_id)
   end
 
   defp membership(_mount, _org_id, _user_id), do: {:error, :not_found}
