@@ -414,7 +414,7 @@ patch IS the change now; the tree should go back to green). Prove it flips befor
 it — `scripts/sabotage.sh` does all five steps for every committed patch: SHA-256 the touched
 files, apply, run `TEST_FILES` and assert the `MUST_FAIL` names are among the failures, revert,
 and re-SHA to confirm a byte-exact restore. Run it locally against your new patch, then run the
-whole committed suite (<!--count:sabotages-->666<!--/count--> patches today; the number is generated) — both are opt-in (they deliberately
+whole committed suite (<!--count:sabotages-->670<!--/count--> patches today; the number is generated) — both are opt-in (they deliberately
 break the tree and re-run DB-backed suites), so they're run explicitly, not by the default
 `bash ci.sh`:
 
@@ -579,6 +579,21 @@ failure by name and exception module with `Guard.report/3` instead of vanishing 
 the denied state would read as a denial for an outage, say so in the `@reviewed` reason or fix the copy. A `@reviewed` reason must be
 literally true of the code ("fail-SECURE: an unresolvable environment is :prod, which arms the gate"); a kit rescue says precisely
 what it guards ("a host-supplied hit-path function that raises yields nil").
+
+**An optional raw table is "not adopted" only structurally, also for a RETURNED error (review fixes).** The revenue and analytics
+rollup tables are host migrations the generator does not create. On `{:error, _}` from the query call
+`Adoption.absent_after_failure?(repo, table)`: `:table_missing` / `:not_adopted` is the honest empty (logged once by table name),
+anything else (`:ready` — e.g. a renamed column —, `:repo_down`, `:unknown`) still raises into `Guard.run`. Prove both with REAL
+faults inside the sandbox transaction (`DROP TABLE` / `ALTER TABLE … RENAME COLUMN` roll back), not the seam: the seam fires at
+`Guard.run` entry, before the body. A `DROP TABLE` of a table touched by a *transaction* (the Oban jobs table) disconnects the pooled
+connection on the type reload; use `ADD CONSTRAINT … CHECK (false) NOT VALID` there.
+
+**A gate has three answers, not two.** `Impersonation.gate/3` returns `{:ok, …} | :denied | :out_of_scope | :unavailable`. Cast the
+URL `org_id` first (malformed is `:denied`, never an error log), and a *raise* is `:unavailable`: render the kit `error_state` with a
+retry and NEVER the open-session-with-reason form — each retry during an outage would otherwise open another tenant-visible session.
+A host caller must handle `:unavailable`. An unresolvable `otp_app` arms, it never disarms; log an org id only after a UUID cast.
+A write that must enqueue a job does it in the SAME transaction (`Ecto.Multi` + `Oban.insert(multi, …)` on the same repo), never
+reset-then-enqueue. A denial (`{:error, :forbidden}`) gets denial copy and no retry button.
 
 **"Not adopted" is a structural fact, never error text.** A feature a host may not have (the AI draft domain, the
 impersonation-sessions table) reads as an honest empty only when `Samen.Web.Reads.Adoption` says so — resolve the repo, is it
