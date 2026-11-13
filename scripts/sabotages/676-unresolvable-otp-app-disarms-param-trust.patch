@@ -1,0 +1,34 @@
+# SABOTAGE: A raising repo config reads as no otp_app (rescue to nil) and a nil otp_app reads as disarmed, 
+#   so an unresolvable host trusts ?operator_id and ?org= params
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/operator_impersonation_gate_test.exs
+# MUST_FAIL: a repo whose config RAISES crashes the otp_app lookup
+# MUST_FAIL: no mount / no otp_app: the ?operator_id and ?org= param legs are OFF
+diff --git a/samen_web/lib/samen/web/operator.ex b/samen_web/lib/samen/web/operator.ex
+index 98685df1..23813ac0 100644
+--- a/samen_web/lib/samen/web/operator.ex
++++ b/samen_web/lib/samen/web/operator.ex
+@@ -128,6 +128,8 @@ defmodule Samen.Web.Operator do
+     if Code.ensure_loaded?(repo) and function_exported?(repo, :config, 0) do
+       repo.config()[:otp_app]
+     end
++  rescue
++    _ -> nil
+   end
+ 
+   defp repo_otp_app(_), do: nil
+diff --git a/samen_web/lib/samen/web/operator/impersonation.ex b/samen_web/lib/samen/web/operator/impersonation.ex
+index f82e25f7..ed7f3ad7 100644
+--- a/samen_web/lib/samen/web/operator/impersonation.ex
++++ b/samen_web/lib/samen/web/operator/impersonation.ex
+@@ -101,7 +101,7 @@ defmodule Samen.Web.Operator.Impersonation do
+   @spec auth_disarmed?(Phoenix.LiveView.Socket.t()) :: boolean()
+   def auth_disarmed?(socket) do
+     case Operator.otp_app(socket.assigns[:samen_mount]) do
+-      nil -> false
++      nil -> true
+       otp_app -> not Samen.Web.TenantGate.armed?(otp_app)
+     end
+   end
