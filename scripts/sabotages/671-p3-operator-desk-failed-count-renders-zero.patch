@@ -1,0 +1,20 @@
+# SABOTAGE: Operator desk header: a failed queue count is not named in the failed list, so its tile renders 
+#   a confident 0 instead of couldn't load
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/reads_honest_failure_p3_test.exs
+# MUST_FAIL: ONE failed queue count is one
+diff --git a/samen_web/lib/samen/web/operator/reads.ex b/samen_web/lib/samen/web/operator/reads.ex
+index eb26c4a5..494cf699 100644
+--- a/samen_web/lib/samen/web/operator/reads.ex
++++ b/samen_web/lib/samen/web/operator/reads.ex
+@@ -338,7 +338,7 @@ defmodule Samen.Web.Operator.Reads do
+     ]
+ 
+     {Map.new(parts, fn {key, result} -> {key, Guard.value(result, 0)} end),
+-     for({key, result} <- parts, Guard.unavailable?(result), do: key)}
++     []}
+   end
+ 
+   defp count_tickets(mount, scope, filter_fn) do

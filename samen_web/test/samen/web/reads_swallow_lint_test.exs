@@ -112,7 +112,18 @@ defmodule Samen.Web.Reads.SwallowLintTest do
       assert length(files) > 300
       assert Enum.any?(files, &String.ends_with?(&1, "crm/reads.ex"))
       assert Enum.any?(files, &String.ends_with?(&1, "driftwood/lib/driftwood/reads.ex"))
-      assert Enum.sum(Map.values(SwallowLint.scan())) > 100
+      # The scanner sees the whole tree: the UNFILTERED swallow count (reviewed ones included) stays
+      # large however far the baseline is paid down, so a scanner that stopped matching could not
+      # hide behind a baseline that reached zero.
+      root = SwallowLint.repo_root()
+
+      unfiltered =
+        files
+        |> Enum.map(&length(SwallowLint.scan_source(File.read!(Path.join(root, &1)), &1)))
+        |> Enum.sum()
+
+      assert unfiltered > 60
+      assert Enum.sum(Map.values(SwallowLint.scan())) > 0
     end
 
     test "the converted read modules are swallow-free (WP6 phase 1)" do

@@ -1,0 +1,20 @@
+# SABOTAGE: Operator console gate: a raising operator-authority seam resolves to operator_admin instead of 
+#   failing CLOSED to not-an-operator
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/reads_honest_failure_p3_test.exs
+# MUST_FAIL: an operator-authority seam that RAISES is not an operator
+diff --git a/samen_web/lib/samen/web/operator/authz.ex b/samen_web/lib/samen/web/operator/authz.ex
+index ce7190c5..8df607a3 100644
+--- a/samen_web/lib/samen/web/operator/authz.ex
++++ b/samen_web/lib/samen/web/operator/authz.ex
+@@ -107,7 +107,7 @@ defmodule Samen.Web.Operator.Authz do
+       # authority seam is an OUTAGE the host operator must be able to see, so it is reported by
+       # name and exception module — never swallowed silently into "just not an operator".
+       Guard.report(:operator_authz_resolve_role, nil, e)
+-      nil
++      :operator_admin
+   end
+ 
+   def resolve_role(_mount, _session), do: nil

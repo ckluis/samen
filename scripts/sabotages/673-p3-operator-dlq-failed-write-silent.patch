@@ -1,0 +1,30 @@
+# SABOTAGE: Operator webhook DLQ: a failed or refused replay/resolve is discarded silently instead of 
+#   telling the operator
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/reads_honest_failure_p3_test.exs
+# MUST_FAIL: a failed replay says so
+# MUST_FAIL: a read-only operator is told it may not
+diff --git a/samen_web/lib/samen/web/operator/webhook_dlq_live.ex b/samen_web/lib/samen/web/operator/webhook_dlq_live.ex
+index 5bbd92a4..35f331b4 100644
+--- a/samen_web/lib/samen/web/operator/webhook_dlq_live.ex
++++ b/samen_web/lib/samen/web/operator/webhook_dlq_live.ex
+@@ -94,7 +94,7 @@ defmodule Samen.Web.Operator.WebhookDlqLive do
+         :denied -> action_copy(:replay, :denied)
+       end
+ 
+-    {:noreply, socket |> assign(action_error: error) |> load()}
++    {:noreply, socket |> assign(action_error: nil) |> load()}
+   end
+ 
+   @impl true
+@@ -109,7 +109,7 @@ defmodule Samen.Web.Operator.WebhookDlqLive do
+         :denied -> action_copy(:resolve, :denied)
+       end
+ 
+-    {:noreply, socket |> assign(action_error: error) |> load()}
++    {:noreply, socket |> assign(action_error: nil) |> load()}
+   end
+ 
+   # A malformed id is "not found" (cast before the query: no logged failure); a read that raises
