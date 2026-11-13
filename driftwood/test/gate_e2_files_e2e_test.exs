@@ -109,7 +109,7 @@ defmodule Driftwood.GateE2FilesE2ETest do
     html = preview_html(org_id, promoted.id, [])
     assert html =~ ~s(id="preview-byte-view")
     assert html =~ "manifest.txt"
-    assert html =~ ~s(href="/files/#{promoted.id}/bytes")
+    assert html =~ ~s(href="/files/#{promoted.id}/bytes?org=#{org_id}")
     refute html =~ ~s(id="preview-quarantined")
 
     # 5. BYTE-SERVE (tenant, :active) — exact bytes, correct content-type.
