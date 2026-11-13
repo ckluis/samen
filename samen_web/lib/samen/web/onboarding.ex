@@ -42,6 +42,7 @@ defmodule Samen.Web.Onboarding do
   require Ash.Query
 
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   @type mods :: %{required(:org) => module(), required(:repo) => module()}
 
@@ -56,20 +57,37 @@ defmodule Samen.Web.Onboarding do
   """
   @spec org(Mount.t(), Samen.Scope.t() | map(), String.t()) :: {:ok, term()} | {:error, :not_found}
   def org(%Mount{} = mount, scope, org_id) when is_binary(org_id) do
-    Mount.resource(mount, Org)
-    |> Ash.Query.ensure_selected([:id, :name, :plan, :onboarded_at])
-    |> Ash.Query.filter(id == ^org_id)
-    |> Ash.Query.limit(1)
-    |> Ash.read!(scope: scope)
-    |> case do
-      [org | _] -> {:ok, org}
-      [] -> {:error, :not_found}
+    case org_result(mount, scope, org_id) do
+      {:ok, org} -> {:ok, org}
+      {:error, _} -> {:error, :not_found}
     end
-  rescue
-    _ -> {:error, :not_found}
   end
 
   def org(_mount, _scope, _org_id), do: {:error, :not_found}
+
+  @doc """
+  Tagged sibling of `org/3` (WP6): `{:ok, org}`, `{:error, :not_found}` for an unknown / cross-org
+  org, and `{:error, :unavailable}` ONLY when the read FAILED — a failed read must never look like
+  "setup already complete" (the wizard shows the error state instead).
+  """
+  @spec org_result(Mount.t(), Samen.Scope.t() | map(), String.t()) ::
+          {:ok, term()} | {:error, :not_found | :unavailable}
+  def org_result(%Mount{} = mount, scope, org_id) when is_binary(org_id) do
+    case Guard.run(:onboarding_org, scope, fn ->
+           Mount.resource(mount, Org)
+           |> Ash.Query.ensure_selected([:id, :name, :plan, :onboarded_at])
+           |> Ash.Query.filter(id == ^org_id)
+           |> Ash.Query.limit(1)
+           |> Ash.read!(scope: scope)
+         end) do
+      {:ok, [org | _]} -> {:ok, org}
+      {:ok, []} -> {:error, :not_found}
+      {:error, :forbidden} -> {:error, :not_found}
+      {:error, :unavailable} = unavailable -> unavailable
+    end
+  end
+
+  def org_result(_mount, _scope, _org_id), do: {:error, :not_found}
 
   @doc """
   TRUE while the wizard should be OFFERED for `org_id` (`onboarded_at` is
@@ -129,7 +147,11 @@ defmodule Samen.Web.Onboarding do
         :not_configured
     end
   rescue
-    _ -> :not_configured
+    e ->
+      # The honest "unwired" outcome stays (a raising host hook is not a partially-fake list), but
+      # it is no longer silent: logged by name and cause only.
+      Guard.report(:onboarding_plan_choices, org_id, e)
+      :not_configured
   end
 
   defp normalize_plans(list) when is_list(list) do

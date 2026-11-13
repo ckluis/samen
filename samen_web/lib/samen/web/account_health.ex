@@ -559,7 +559,10 @@ defmodule Samen.Web.AccountHealth do
     # fail-safe-empty contract; only this call site gained the canary.
     Ash.count!(Mount.resource(billing_mount, Customer), scope: scope)
 
-    metrics = Samen.Web.Billing.Reads.metrics(billing_mount, scope)
+    # WP6: `metrics_status/2` names the figures that could not be read; any failed figure makes the
+    # whole snapshot the honest "billing unavailable" (the rescue below), never a real-looking 0.
+    {metrics, failed} = Samen.Web.Billing.Reads.metrics_status(billing_mount, scope)
+    if failed != [], do: raise("billing metrics unavailable")
 
     now = DateTime.utc_now()
     sub_query = Ash.Query.new(Mount.resource(billing_mount, Subscription))

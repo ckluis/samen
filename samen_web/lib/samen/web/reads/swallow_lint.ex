@@ -73,7 +73,27 @@ defmodule Samen.Web.Reads.SwallowLint do
     {"samen_web/lib/samen/web/replay/renderer.ex", :view_mount} =>
       "optional-scope probe: a view with no resolvable router mount has no live mount; nil is the honest answer the caller handles",
     {"samen_web/lib/samen/web/ai/server.ex", :public_field_names} =>
-      "pure introspection of a resource module (no read): a module with no resource info yields no extra fields, which only narrows what the grounding preview shows"
+      "pure introspection of a resource module (no read): a module with no resource info yields no extra fields, which only narrows what the grounding preview shows",
+    {"samen_web/lib/samen/web/object_ref/catalog.ex", :catalogued_resource?} =>
+      "pure module introspection (no read): a module that is not a loaded Ash resource is not catalogued — the inert chip, no existence oracle",
+    {"samen_web/lib/samen/web/object_ref/default_card.ex", :public_attributes} =>
+      "pure resource introspection (no read): a module with no resource info shows no extra fields on the card",
+    {"samen_web/lib/samen/web/object_ref/registry.ex", :card_for} =>
+      "a host card override that raises falls back to the default card (which resolves through the same PiiResolution output) — presentation only, never data",
+    {"samen_web/lib/samen/web/object_ref.ex", :selectable_attrs} =>
+      "pure resource introspection (no read): no attributes means the default card shows only what it was handed",
+    {"samen_web/lib/samen/web/account_health.ex", :sibling_mount} =>
+      "optional-scope probe: an unmounted sibling Billing/Support scope IS 'not mounted' — the framework-level honest absence (documented 'billing_available? false')",
+    {"samen_web/lib/samen/web/account_health.ex", :resource?} =>
+      "optional-scope probe: a module that is not a compiled Ash resource is 'not mounted'",
+    {"samen_web/lib/samen/web/onboarding/wizard_live.ex", :verified?} =>
+      "fail-CLOSED capability probe (ADR-035 §5 A2): an unresolvable principal is unverified on an armed host, never an elevated default",
+    {"samen_web/lib/samen/web/first_run.ex", :any_rows?} =>
+      "fail-safe probe: a failed existence check answers 'has records' so the first-run sample-data offer is NOT shown (never offers sample data into a possibly populated org)",
+    {"samen_web/lib/samen/web/reads.ex", :safe_count} =>
+      "an exact-total aggregate that fails is nil = 'total unknown', which the caller renders as unknown rather than a number — never a fabricated count",
+    {"samen_web/lib/samen/web/onboarding/wizard_controller.ex", :verified?} =>
+      "fail-CLOSED capability probe (ADR-035 §5 A2): an unresolvable principal is unverified on an armed host, never an elevated default"
   }
 
   # Swallows that still exist, per file, AFTER the reviewed ones are subtracted. Shrink-only: a
@@ -98,23 +118,14 @@ defmodule Samen.Web.Reads.SwallowLint do
     "samen_web/lib/samen/ui/gantt.ex" => 1,
     "samen_web/lib/samen/ui/nav.ex" => 1,
     "samen_web/lib/samen/ui/overlay.ex" => 1,
-    "samen_web/lib/samen/web/account_health.ex" => 2,
         "samen_web/lib/samen/web/auth/totp_enroll_controller.ex" => 1,
     "samen_web/lib/samen/web/auth/totp_pending.ex" => 2,
     "samen_web/lib/samen/web/auth_gate.ex" => 1,
     "samen_web/lib/samen/web/csv.ex" => 1,
     "samen_web/lib/samen/web/current_org.ex" => 6,
-    "samen_web/lib/samen/web/first_run.ex" => 2,
     "samen_web/lib/samen/web/live.ex" => 1,
     "samen_web/lib/samen/web/metrics_controller.ex" => 2,
-    "samen_web/lib/samen/web/object_ref.ex" => 3,
-    "samen_web/lib/samen/web/object_ref/catalog.ex" => 1,
-    "samen_web/lib/samen/web/object_ref/default_card.ex" => 1,
-    "samen_web/lib/samen/web/object_ref/registry.ex" => 1,
-    "samen_web/lib/samen/web/onboarding.ex" => 2,
-    "samen_web/lib/samen/web/onboarding/wizard_controller.ex" => 1,
-    "samen_web/lib/samen/web/onboarding/wizard_live.ex" => 1,
-    "samen_web/lib/samen/web/operator.ex" => 2,
+                            "samen_web/lib/samen/web/operator.ex" => 2,
     "samen_web/lib/samen/web/operator/activity_reads.ex" => 7,
     "samen_web/lib/samen/web/operator/aggregate_live.ex" => 1,
     "samen_web/lib/samen/web/operator/analytics/reads.ex" => 3,
@@ -128,11 +139,7 @@ defmodule Samen.Web.Reads.SwallowLint do
     "samen_web/lib/samen/web/operator/revenue/reads.ex" => 3,
     "samen_web/lib/samen/web/operator/revenue_live.ex" => 1,
     "samen_web/lib/samen/web/operator/webhook_dlq_live.ex" => 3,
-    "samen_web/lib/samen/web/reads.ex" => 1,
-    "samen_web/lib/samen/web/tags.ex" => 2,
-    "samen_web/lib/samen/web/tenant/analytics_reads.ex" => 1,
-    "samen_web/lib/samen/web/tenant_gate.ex" => 1,
-    "samen_web/lib/samen/web/webhook/ingress.ex" => 2
+        "samen_web/lib/samen/web/tenant_gate.ex" => 1
   }
 
   def roots, do: @roots

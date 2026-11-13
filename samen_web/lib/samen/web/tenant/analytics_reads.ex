@@ -51,6 +51,7 @@ defmodule Samen.Web.Tenant.AnalyticsReads do
   """
 
   alias Samen.Aggregate.{CohortSpec, Privacy, Suppressed}
+  alias Samen.Web.Reads.Guard
 
   # The org-partitioned rollup (identical name in every host DB — the operator precedent).
   @rollup_table "paf_product_event_rollup"
@@ -100,19 +101,38 @@ defmodule Samen.Web.Tenant.AnalyticsReads do
   @spec funnel(Samen.Web.Mount.t() | nil, Samen.Scope.t(), keyword()) :: [map()]
   def funnel(mount, scope, opts \\ [])
 
-  def funnel(%Samen.Web.Mount{repo: repo}, %Samen.Scope{actor: actor} = scope, opts) do
+  def funnel(mount, scope, opts) do
+    case funnel_result(mount, scope, opts) do
+      {:ok, rows} -> rows
+      {:error, _} -> []
+    end
+  end
+
+  @doc """
+  Tagged sibling of `funnel/3` (WP6): `{:ok, rows}` — `{:ok, []}` is the honest "no data yet, or
+  analytics is not available for your role" (a fail-closed denial, unchanged) — or
+  `{:error, :unavailable}` when the rollup read itself FAILED (an outage is not "no activation data
+  yet").
+  """
+  @spec funnel_result(Samen.Web.Mount.t() | nil, Samen.Scope.t(), keyword()) ::
+          {:ok, [map()]} | {:error, :unavailable}
+  def funnel_result(mount, scope, opts \\ [])
+
+  def funnel_result(%Samen.Web.Mount{repo: repo}, %Samen.Scope{actor: actor} = scope, opts) do
     org_id = org_id(actor)
 
     if can_query?(scope) and is_binary(org_id) do
-      floored_funnel(repo, org_id, opts)
+      case Guard.run(:tenant_analytics_funnel, scope, fn -> floored_funnel(repo, org_id, opts) end) do
+        {:ok, rows} -> {:ok, rows}
+        {:error, :forbidden} -> {:ok, []}
+        {:error, :unavailable} = unavailable -> unavailable
+      end
     else
-      []
+      {:ok, []}
     end
-  rescue
-    _ -> []
   end
 
-  def funnel(_, _scope, _opts), do: []
+  def funnel_result(_, _scope, _opts), do: {:ok, []}
 
   @doc "How many funnel stages arrived `%Suppressed{}` (feeds the suppression note)."
   def suppressed_count(funnel) when is_list(funnel),
@@ -150,8 +170,9 @@ defmodule Samen.Web.Tenant.AnalyticsReads do
         {:ok, floored} = Privacy.apply(stage_rows, @funnel_spec, Keyword.take(opts, [:k, :l]))
         floored
 
+      # A failed query is a FAILURE (raised so the surrounding `Guard.run/3` reports it), not "[]".
       _ ->
-        []
+        raise "tenant funnel rollup query failed"
     end
   end
 

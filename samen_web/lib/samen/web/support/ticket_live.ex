@@ -276,12 +276,12 @@ defmodule Samen.Web.Support.TicketLive do
 
     {ticket_tags, conversations, agents, macros, csat, section_errors} =
       if ticket do
-        tags = Reads.ticket_tag_names(mount, scope, ticket_id)
+        {tags, e0} = section(Reads.ticket_tag_names_result(mount, scope, ticket_id), [], :tags)
         {convs, e1} = section(Reads.conversations_for_ticket_result(mount, scope, ticket_id), [], :conversations)
         {ags, e2} = section(Reads.agents_result(mount, scope), [], :agents)
         {macros, e3} = section(Reads.macros_result(mount, scope), [], :macros)
         {csat, e4} = section(Reads.csat_for_ticket_result(mount, scope, ticket_id), nil, :csat)
-        {tags, convs, ags, macros, csat, e1 ++ e2 ++ e3 ++ e4}
+        {tags, convs, ags, macros, csat, e0 ++ e1 ++ e2 ++ e3 ++ e4}
       else
         {[], [], [], [], nil, []}
       end
@@ -552,7 +552,7 @@ defmodule Samen.Web.Support.TicketLive do
                     </tr>
                     <tr style="border-bottom:1px solid var(--border)">
                       <td style="padding:10px 0;color:var(--muted)">Tags</td>
-                      <td style="padding:10px 0;font-size:12px;color:var(--muted)">{tags_label(@ticket_tags)}</td>
+                      <td style="padding:10px 0;font-size:12px;color:var(--muted)"><%= if :tags in @section_errors do %><span class="tags-unavailable">couldn't be loaded</span><% else %>{tags_label(@ticket_tags)}<% end %></td>
                     </tr>
                   </table>
 

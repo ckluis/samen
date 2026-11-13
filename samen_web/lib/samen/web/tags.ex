@@ -40,6 +40,7 @@ defmodule Samen.Web.Tags do
 
   alias Samen.Web.ObjectRef
   alias Samen.Web.ObjectRef.Catalog
+  alias Samen.Web.Reads.Guard
 
   require Ash.Query
 
@@ -121,23 +122,30 @@ defmodule Samen.Web.Tags do
   """
   @spec names_by_subject(Samen.Web.Mount.t(), Samen.Scope.t(), String.t(), [String.t()]) ::
           %{optional(String.t()) => [String.t()]}
-  def names_by_subject(mount, scope, subject_key, subject_ids) when is_list(subject_ids) do
+  def names_by_subject(mount, scope, subject_key, subject_ids) when is_list(subject_ids),
+    do: names_by_subject_result(mount, scope, subject_key, subject_ids) |> Guard.value(%{})
+
+  @doc """
+  Tagged sibling of `names_by_subject/4` (WP6): `{:ok, %{id => [names]}}` — an empty map is the
+  honest "no tags" (and a host that has not mounted the Tags scope is an honest empty too) — or
+  `{:error, :unavailable | :forbidden}` when the read itself FAILED (a failed read is not "untagged").
+  """
+  @spec names_by_subject_result(Samen.Web.Mount.t(), Samen.Scope.t(), String.t(), [String.t()]) ::
+          Guard.result(%{optional(String.t()) => [String.t()]})
+  def names_by_subject_result(mount, scope, subject_key, subject_ids) when is_list(subject_ids) do
     case Catalog.resource_for(mount, "tags.tagging") do
       {:ok, tagging_mod} ->
-        tagging_mod
-        |> Ash.Query.filter(subject_key == ^subject_key and subject_id in ^subject_ids)
-        |> Ash.Query.load(:tag)
-        |> Ash.read(scope: scope)
-        |> case do
-          {:ok, taggings} -> group_names(taggings)
-          {:error, _} -> %{}
-        end
+        Guard.run(:tags_names_by_subject, scope, fn ->
+          tagging_mod
+          |> Ash.Query.filter(subject_key == ^subject_key and subject_id in ^subject_ids)
+          |> Ash.Query.load(:tag)
+          |> Ash.read!(scope: scope)
+          |> group_names()
+        end)
 
       {:error, _} ->
-        %{}
+        {:ok, %{}}
     end
-  rescue
-    _ -> %{}
   end
 
   @doc """
@@ -150,24 +158,27 @@ defmodule Samen.Web.Tags do
   """
   @spec names_by_subject_key(Samen.Web.Mount.t(), Samen.Scope.t(), String.t(), pos_integer()) ::
           %{optional(String.t()) => [String.t()]}
-  def names_by_subject_key(mount, scope, subject_key, limit) do
+  def names_by_subject_key(mount, scope, subject_key, limit),
+    do: names_by_subject_key_result(mount, scope, subject_key, limit) |> Guard.value(%{})
+
+  @doc "Tagged sibling of `names_by_subject_key/4` (WP6); same contract as `names_by_subject_result/4`."
+  @spec names_by_subject_key_result(Samen.Web.Mount.t(), Samen.Scope.t(), String.t(), pos_integer()) ::
+          Guard.result(%{optional(String.t()) => [String.t()]})
+  def names_by_subject_key_result(mount, scope, subject_key, limit) do
     case Catalog.resource_for(mount, "tags.tagging") do
       {:ok, tagging_mod} ->
-        tagging_mod
-        |> Ash.Query.filter(subject_key == ^subject_key)
-        |> Ash.Query.limit(limit)
-        |> Ash.Query.load(:tag)
-        |> Ash.read(scope: scope)
-        |> case do
-          {:ok, taggings} -> group_names(taggings)
-          {:error, _} -> %{}
-        end
+        Guard.run(:tags_names_by_subject_key, scope, fn ->
+          tagging_mod
+          |> Ash.Query.filter(subject_key == ^subject_key)
+          |> Ash.Query.limit(limit)
+          |> Ash.Query.load(:tag)
+          |> Ash.read!(scope: scope)
+          |> group_names()
+        end)
 
       {:error, _} ->
-        %{}
+        {:ok, %{}}
     end
-  rescue
-    _ -> %{}
   end
 
   @doc "Tag names for ONE subject — `names_by_subject/4` for a single id."
@@ -175,6 +186,15 @@ defmodule Samen.Web.Tags do
   def names_for(mount, scope, subject_key, subject_id) do
     names_by_subject(mount, scope, subject_key, [subject_id])
     |> Map.get(subject_id, [])
+  end
+
+  @doc "Tagged sibling of `names_for/4` (WP6): `{:ok, names}` or `{:error, :unavailable | :forbidden}`."
+  @spec names_for_result(Samen.Web.Mount.t(), Samen.Scope.t(), String.t(), String.t()) ::
+          Guard.result([String.t()])
+  def names_for_result(mount, scope, subject_key, subject_id) do
+    with {:ok, by_subject} <- names_by_subject_result(mount, scope, subject_key, [subject_id]) do
+      {:ok, Map.get(by_subject, subject_id, [])}
+    end
   end
 
   defp group_names(taggings) do

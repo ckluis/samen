@@ -14,6 +14,7 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
   use Samen.WebTest.DataCase, async: false
 
   import ExUnit.CaptureLog
+  import Phoenix.LiveViewTest, only: [render_component: 2]
 
   alias Samen.Web.ListLive
 
@@ -61,6 +62,8 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
 
     %{
       org_id: seeded.org_id,
+      person_id: seeded.crm.person.id,
+      ticket_id: seeded.support.ticket.id,
       campaign_id: seeded.marketing.campaign.id,
       segment_id: seeded.marketing.segment.id,
       template_id: seeded.marketing.template.id
@@ -1334,6 +1337,101 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
       socket = failing(fn -> event(PortalKbLive, socket, "deflect", %{"deflect" => %{"subject" => "password", "description" => "reset"}}) end)
       assert socket.assigns.suggestion == %{state: :error, hits: []}
       assert html(PortalKbLive, socket) =~ "Article suggestions are unavailable right now."
+    end
+  end
+
+  # ===========================================================================
+  # Tenant analytics, onboarding, object-ref cards, account health
+  # ===========================================================================
+
+  describe "Tenant analytics" do
+    alias Samen.Web.Tenant.AnalyticsLive
+
+    test "a failed rollup read is the error state, not 'No own-org activation data yet'; retry recovers" do
+      org = Ash.UUID.generate()
+      mount = build_mount(:crm)
+      assert html(AnalyticsLive, socket_for(AnalyticsLive, mount, [org])) =~ "analytics-empty"
+
+      inject_read_faults([:tenant_analytics_funnel])
+      socket = failing(fn -> socket_for(AnalyticsLive, mount, [org]) end)
+      rendered = html(AnalyticsLive, socket)
+      assert_error_state(rendered)
+      refute rendered =~ "analytics-empty"
+
+      clear_read_faults()
+      rendered = html(AnalyticsLive, event(AnalyticsLive, socket, "retry_load"))
+      refute_error_state(rendered)
+      assert rendered =~ "analytics-empty"
+    end
+  end
+
+  describe "Onboarding" do
+    alias Samen.Web.Onboarding.WizardLive
+
+    test "a FAILED org read is the error state, never 'You're all set'; retry recovers", %{org_id: org_id} do
+      mount = build_mount(:settings)
+      healthy = html(WizardLive, socket_for(WizardLive, mount, [org_id, nil]))
+      refute_error_state(healthy)
+
+      inject_read_faults([:onboarding_org])
+      socket = failing(fn -> socket_for(WizardLive, mount, [org_id, nil]) end)
+      rendered = html(WizardLive, socket)
+      assert_error_state(rendered)
+      refute rendered =~ "all set"
+      refute rendered =~ "onboarding-already-done"
+
+      clear_read_faults()
+      refute_error_state(html(WizardLive, event(WizardLive, socket, "retry_load")))
+    end
+  end
+
+  describe "ObjectRef cards" do
+    alias Samen.Web.ObjectRef
+
+    test "a FAILED load is 'couldn't load', distinct from a missing object; a missing id stays the inert chip", %{org_id: org_id, person_id: person_id} do
+      mount = build_mount(:crm)
+      scope = Samen.Web.Mount.scope(mount, org_id)
+      ref = %ObjectRef{key: "crm.person", id: person_id, raw: "samen:crm.person:#{person_id}"}
+
+      assert {:ok, _card} = ObjectRef.resolve(mount, scope, ref)
+
+      inject_read_faults([:object_ref_load])
+      {result, _log} = with_log(fn -> ObjectRef.resolve(mount, scope, ref) end)
+      assert result == {:error, :unavailable}
+      chip = render_component(&Samen.UI.object_card/1, %{card: result})
+      assert chip =~ "Couldn't load this object"
+      refute chip =~ "Object not available"
+      refute chip =~ "vt_"
+
+      clear_read_faults()
+      missing = %ObjectRef{key: "crm.person", id: Ash.UUID.generate(), raw: "x"}
+      assert {:error, :not_found} = ObjectRef.resolve(mount, scope, missing)
+      assert render_component(&Samen.UI.object_card/1, %{card: {:error, :not_found}}) =~ "Object not available"
+    end
+  end
+
+  describe "Tags" do
+    alias Samen.Web.Support.TicketLive
+    alias Samen.Web.Tags
+
+    test "a failed tag read is 'couldn't be loaded' on the ticket, not 'untagged'; an unmounted Tags scope stays the honest empty",
+         %{org_id: org_id, ticket_id: ticket_id} do
+      mount = build_mount(:support)
+      scope = Samen.Web.Mount.scope(mount, org_id)
+
+      inject_read_faults([:tags_names_by_subject])
+      socket = failing(fn -> socket_for(TicketLive, mount, [org_id, ticket_id], active_tab: "details") end)
+      rendered = html(TicketLive, socket)
+      assert :tags in socket.assigns.section_errors
+      assert rendered =~ "tags-unavailable"
+      refute rendered =~ "ticket-error"
+
+      assert {:error, :unavailable} = with_log(fn -> Tags.names_for_result(mount, scope, "support.ticket", ticket_id) end) |> elem(0)
+
+      clear_read_faults()
+      healthy = socket_for(TicketLive, mount, [org_id, ticket_id], active_tab: "details")
+      refute :tags in healthy.assigns.section_errors
+      refute html(TicketLive, healthy) =~ "tags-unavailable"
     end
   end
 end

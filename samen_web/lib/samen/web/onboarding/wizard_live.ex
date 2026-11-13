@@ -117,29 +117,47 @@ defmodule Samen.Web.Onboarding.WizardLive do
       |> assign(org_id: org_id, user_id: user_id, return_to: Map.get(socket.assigns, :return_to))
 
     if is_nil(org_id) do
-      assign(socket, complete?: false, org: nil, org_form: blank_org_form(), plan_choices: :not_configured)
+      assign(socket, complete?: false, org: nil, org_form: blank_org_form(), plan_choices: :not_configured, load_error: nil)
     else
       scope = Mount.scope(mount, org_id)
-      complete? = not Onboarding.needed?(mount, scope, org_id)
 
-      org =
-        case Onboarding.org(mount, scope, org_id) do
-          {:ok, org} -> org
-          {:error, _} -> nil
-        end
+      # A FAILED org read is the error state (retry): it must never read as "You're all set"
+      # (`needed?/3` fails safe to "not needed" on a read error, which is right for the offer
+      # probe but would paint a false "complete" here).
+      case Onboarding.org_result(mount, scope, org_id) do
+        {:error, :unavailable} ->
+          assign(socket,
+            complete?: false,
+            org: nil,
+            org_form: blank_org_form(),
+            plan_choices: :not_configured,
+            load_error: Samen.Web.Reads.Guard.message()
+          )
 
-      assign(socket,
-        complete?: complete?,
-        org: org,
-        org_form: org_form(org),
-        plan_choices: Onboarding.plan_choices(mount, org_id)
-      )
+        result ->
+          org =
+            case result do
+              {:ok, org} -> org
+              {:error, _} -> nil
+            end
+
+          assign(socket,
+            complete?: not Onboarding.needed?(mount, scope, org_id),
+            org: org,
+            org_form: org_form(org),
+            plan_choices: Onboarding.plan_choices(mount, org_id),
+            load_error: nil
+          )
+      end
     end
   end
 
+  @impl true
+  def handle_event("retry_load", _params, socket),
+    do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.user_id)}
+
   # -- step 1: org naming ------------------------------------------------------
 
-  @impl true
   def handle_event("name_org", %{"org" => %{"name" => name}}, socket) do
     %{samen_mount: mount, org_id: org_id, user_id: user_id} = socket.assigns
     name = String.trim(name || "")
@@ -256,12 +274,15 @@ defmodule Samen.Web.Onboarding.WizardLive do
       |> assign_new(:invited?, fn -> false end)
       |> assign_new(:onboarding_path, fn -> "/onboarding" end)
       |> assign_new(:samen_acting_as, fn -> false end)
+      |> assign_new(:load_error, fn -> nil end)
 
     ~H"""
     <div id="onboarding" class="wrap" style="max-width:480px;margin:60px auto">
       <%= cond do %>
         <% is_nil(@org_id) -> %>
           <.no_org_card mount={@samen_mount} />
+        <% @load_error != nil -> %>
+          <.error_state class="onboarding-error" body={@load_error} retry_event="retry_load" />
         <% @complete? -> %>
           <div id="onboarding-already-done" class="card" style="padding:28px 24px">
             <h2 style="margin:0 0 4px">You're all set</h2>
