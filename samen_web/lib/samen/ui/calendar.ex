@@ -35,6 +35,8 @@ defmodule Samen.UI.Calendar do
   """
   use Phoenix.Component
 
+  alias Samen.UI.State
+
   @weekdays_sun ~w(Sun Mon Tue Wed Thu Fri Sat)
   @weekdays_mon ~w(Mon Tue Wed Thu Fri Sat Sun)
   @month_names ~w(January February March April May June July August September October November December)
@@ -55,17 +57,28 @@ defmodule Samen.UI.Calendar do
   """
   attr :id, :string, default: "calendar"
   attr :board, :any, required: true, doc: "a %Samen.Web.Board{} with Date group keys"
-  attr :month, Date, required: true
+  attr :month, Date, default: nil, doc: "any Date in the month; nil falls back to the month of `today`"
   attr :today, Date, default: nil
   attr :prev_href, :string, default: nil
   attr :next_href, :string, default: nil
   attr :week_starts_on, :atom, default: :sunday
   attr :empty_cell_text, :string, default: ""
+  attr :loading, :boolean, default: false, doc: "render the skeleton instead of the grid (F04)"
+  attr :error, :any, default: nil, doc: "an error message (binary) or `true`: render the error state"
+  attr :retry_event, :string, default: nil, doc: "LiveView event the error state's retry button fires"
   slot :event, required: true, doc: "renders one event from a day's row (:let={row})"
 
   def calendar(assigns) do
-    month = first_of_month(assigns.month)
+    if State.gated?(assigns) do
+      State.state_view(assigns, "card")
+    else
+      calendar_body(assigns)
+    end
+  end
+
+  defp calendar_body(assigns) do
     today = assigns.today || Date.utc_today()
+    month = first_of_month(assigns.month || today)
 
     assigns =
       assigns
@@ -204,7 +217,7 @@ defmodule Samen.UI.Calendar do
   defp ceil_div(a, b), do: div(a + b - 1, b)
 
   # O(1) lookup: day Date -> its %Board.Group{}.
-  defp day_map(%{groups: groups}), do: Map.new(groups, fn g -> {g.key, g} end)
+  defp day_map(%{groups: groups}) when is_list(groups), do: Map.new(groups, fn g -> {g.key, g} end)
   defp day_map(_), do: %{}
 
   defp events(nil), do: []

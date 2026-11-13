@@ -39,6 +39,8 @@ defmodule Samen.UI.Gallery do
 
   import Samen.UI.Feedback, only: [empty_state: 1]
 
+  alias Samen.UI.State
+
   @doc """
   Render a `%Samen.Web.Page{}` as a responsive card grid.
 
@@ -62,14 +64,30 @@ defmodule Samen.UI.Gallery do
   attr :empty_text, :string, default: "Nothing here yet."
   attr :empty_icon, :string, default: nil
   attr :empty_body, :string, default: nil
+  attr :loading, :boolean, default: false, doc: "render the skeleton instead of the grid (F04)"
+  attr :error, :any, default: nil, doc: "an error message (binary) or `true`: render the error state"
+  attr :retry_event, :string, default: nil, doc: "LiveView event the error state's retry button fires"
   slot :card, required: true, doc: "renders one card's body from a page item (:let={item})"
   slot :media, doc: "optional leading media/thumbnail facet for a card (:let={item})"
   slot :empty, doc: "optional replacement for the default empty state"
 
   def gallery(assigns) do
+    if State.gated?(assigns) do
+      State.state_view(assigns, "card")
+    else
+      assigns = assign(assigns, :items, page_items(assigns.page))
+      gallery_body(assigns)
+    end
+  end
+
+  # A nil / unloaded page is an empty gallery, not a crash.
+  defp page_items(%{items: items}) when is_list(items), do: items
+  defp page_items(_), do: []
+
+  defp gallery_body(assigns) do
     ~H"""
     <div class="gallery" id={@id}>
-      <%= if @page.items == [] do %>
+      <%= if @items == [] do %>
         <%= if @empty != [] do %>
           {render_slot(@empty)}
         <% else %>
@@ -78,7 +96,7 @@ defmodule Samen.UI.Gallery do
       <% else %>
         <div class="gallery-grid" role="list">
           <article
-            :for={item <- @page.items}
+            :for={item <- @items}
             class="gcard"
             role="listitem"
             id={"#{@id}-card-#{Map.get(item, :id)}"}
@@ -96,6 +114,7 @@ defmodule Samen.UI.Gallery do
             type="button"
             class="btn gallery-more-btn"
             phx-click={@load_more_event}
+            phx-disable-with="Loading…"
           >
             Load more
           </button>

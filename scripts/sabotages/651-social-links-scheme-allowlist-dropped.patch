@@ -1,0 +1,20 @@
+# SABOTAGE: social_links: drop the scheme deny-list so javascript:/data: tenant text reaches an href 
+#   (audit-kit F12)
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/ui/kit_states_test.exs
+# MUST_FAIL: and other schemes are NEVER an href
+diff --git a/samen_web/lib/samen/ui/helpers.ex b/samen_web/lib/samen/ui/helpers.ex
+index 8598cfe7..221a776c 100644
+--- a/samen_web/lib/samen/ui/helpers.ex
++++ b/samen_web/lib/samen/ui/helpers.ex
+@@ -117,7 +117,7 @@ defmodule Samen.UI.Helpers do
+     cond do
+       Regex.match?(~r/\A[hH][tT][tT][pP][sS]?:\/\//, value) -> http_url(value)
+       # Any other scheme (`javascript:`, `data:`, `mailto:`, `vbscript:` …) is never a link.
+-      Regex.match?(~r/\A[A-Za-z][A-Za-z0-9+.\-]*:/, value) -> nil
++      Regex.match?(~r/\A[A-Za-z][A-Za-z0-9+.\-]*:/, value) -> value
+       true -> handle_url(network, String.trim_leading(value, "@"))
+     end
+   end

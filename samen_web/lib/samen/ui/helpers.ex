@@ -47,6 +47,14 @@ defmodule Samen.UI.Helpers do
   handles are flat string fields, not a nested map). Unknown/blank keys render
   nothing. Non-PII business-directory data (a public profile URL) — rendered on both
   planes. Purely presentational; reads the bag it is handed, writes nothing.
+
+  ## Link allow-list (security — F12)
+
+  The value is free-form tenant text that operators later view, so it never reaches an
+  `href` unchecked. Only an `http`/`https` URL with a host becomes a link; a bare handle
+  (`jdoe` / `@jdoe`, letters, digits, `.`, `_`, `-`) becomes the network's profile URL
+  (`https://github.com/jdoe`). ANYTHING else — `javascript:`, `data:`, `mailto:`, a
+  scheme-less `host/path`, text with spaces — renders as plain escaped text, not a link.
   """
   attr :custom, :any, default: nil
 
@@ -55,17 +63,27 @@ defmodule Samen.UI.Helpers do
 
     ~H"""
     <span :if={@links != []} class="social-links" style="display:inline-flex;align-items:center;gap:8px">
-      <a
-        :for={{network, url} <- @links}
-        href={url}
-        target="_blank"
-        rel="noopener noreferrer"
-        class={"social-#{network}"}
-        title={social_label(network)}
-        style="display:inline-flex;color:var(--muted)"
-      >
-        {social_glyph(network)}
-      </a>
+      <%= for {network, entry} <- @links do %>
+        <a
+          :if={match?({:link, _}, entry)}
+          href={elem(entry, 1)}
+          target="_blank"
+          rel="noopener noreferrer"
+          class={"social-#{network}"}
+          title={social_label(network)}
+          style="display:inline-flex;color:var(--muted)"
+        >
+          {social_glyph(network)}
+        </a>
+        <span
+          :if={match?({:text, _}, entry)}
+          class={"social-#{network} social-text"}
+          title={social_label(network)}
+          style="display:inline-flex;align-items:center;gap:4px;color:var(--muted);font-size:12px"
+        >
+          {social_glyph(network)}{elem(entry, 1)}
+        </span>
+      <% end %>
     </span>
     """
   end
@@ -75,21 +93,56 @@ defmodule Samen.UI.Helpers do
 
   defp social_entries(custom) when is_map(custom) do
     for network <- social_networks(),
-        url = social_url(Map.get(custom, "social_#{network}")),
-        url != nil,
-        do: {network, url}
+        entry = social_entry(network, Map.get(custom, "social_#{network}")),
+        entry != nil,
+        do: {network, entry}
   end
 
   defp social_entries(_), do: []
 
-  defp social_url(v) when is_binary(v) do
+  # `{:link, url}` for an allow-listed value, `{:text, trimmed}` for anything else non-blank,
+  # nil for blank / non-binary. The allow-list is the security guarantee (F12).
+  defp social_entry(network, v) when is_binary(v) do
     case String.trim(v) do
       "" -> nil
-      trimmed -> trimmed
+      trimmed -> if url = social_url(network, trimmed), do: {:link, url}, else: {:text, trimmed}
     end
   end
 
-  defp social_url(_), do: nil
+  defp social_entry(_network, _v), do: nil
+
+  @doc false
+  # The href for a trimmed, non-blank value — or nil when it may not be a link.
+  def social_url(network, value) do
+    cond do
+      Regex.match?(~r/\A[hH][tT][tT][pP][sS]?:\/\//, value) -> http_url(value)
+      # Any other scheme (`javascript:`, `data:`, `mailto:`, `vbscript:` …) is never a link.
+      Regex.match?(~r/\A[A-Za-z][A-Za-z0-9+.\-]*:/, value) -> nil
+      true -> handle_url(network, String.trim_leading(value, "@"))
+    end
+  end
+
+  defp http_url(value) do
+    case URI.parse(value) do
+      %URI{scheme: scheme, host: host} when is_binary(host) and host != "" ->
+        if String.downcase(scheme) in ["http", "https"] and not Regex.match?(~r/[\s<>"'`\\]/, value),
+          do: value
+
+      _ ->
+        nil
+    end
+  end
+
+  defp handle_url(network, handle) do
+    base = profile_base(network)
+
+    if base != nil and Regex.match?(~r/\A[A-Za-z0-9._-]{1,100}\z/, handle), do: base <> handle
+  end
+
+  defp profile_base("linkedin"), do: "https://www.linkedin.com/in/"
+  defp profile_base("twitter"), do: "https://x.com/"
+  defp profile_base("github"), do: "https://github.com/"
+  defp profile_base(_), do: nil
 
   defp social_label("linkedin"), do: "LinkedIn"
   defp social_label("twitter"), do: "Twitter / X"

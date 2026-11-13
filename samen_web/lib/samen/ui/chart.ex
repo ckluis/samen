@@ -27,6 +27,7 @@ defmodule Samen.UI.Chart do
   """
   use Phoenix.Component
 
+  alias Samen.UI.State
   alias Samen.Web.Series
 
   # A bounded categorical palette (mid-tones legible on light AND dark) for pie/bar slices,
@@ -51,13 +52,24 @@ defmodule Samen.UI.Chart do
     * `:format` — a 1-arg fun `%Series.Point{} -> iodata` formatting a value (default the number).
     * `:show_table` — render the data table visibly (default `false` = screen-reader only).
   """
-  attr :series, :any, required: true, doc: "a %Samen.Web.Series{}"
+  attr :series, :any, default: nil, doc: "a %Samen.Web.Series{}; nil renders the empty state"
   attr :id, :string, default: "bar-chart"
   attr :title, :string, default: nil
   attr :format, :any, default: nil
   attr :show_table, :boolean, default: false
+  attr :loading, :boolean, default: false, doc: "render the skeleton instead of the chart (F04)"
+  attr :error, :any, default: nil, doc: "an error message (binary) or `true`: render the error state"
+  attr :retry_event, :string, default: nil, doc: "LiveView event the error state's retry button fires"
 
   def bar_chart(assigns) do
+    if State.gated?(assigns) do
+      State.state_view(assigns, "chart")
+    else
+      bar_chart_body(assigns)
+    end
+  end
+
+  defp bar_chart_body(assigns) do
     assigns =
       assigns
       |> assign_new(:fmt, fn -> assigns.format || (&default_format/1) end)
@@ -101,13 +113,24 @@ defmodule Samen.UI.Chart do
 
   Same attrs as `bar_chart/1` (`:series`, `:id`, `:title`, `:format`, `:show_table`).
   """
-  attr :series, :any, required: true
+  attr :series, :any, default: nil
   attr :id, :string, default: "line-chart"
   attr :title, :string, default: nil
   attr :format, :any, default: nil
   attr :show_table, :boolean, default: false
+  attr :loading, :boolean, default: false, doc: "render the skeleton instead of the chart (F04)"
+  attr :error, :any, default: nil, doc: "an error message (binary) or `true`: render the error state"
+  attr :retry_event, :string, default: nil, doc: "LiveView event the error state's retry button fires"
 
   def line_chart(assigns) do
+    if State.gated?(assigns) do
+      State.state_view(assigns, "chart")
+    else
+      line_chart_body(assigns)
+    end
+  end
+
+  defp line_chart_body(assigns) do
     assigns =
       assigns
       |> assign_new(:fmt, fn -> assigns.format || (&default_format/1) end)
@@ -145,14 +168,25 @@ defmodule Samen.UI.Chart do
 
     * `:donut` — render as a donut (a center hole) rather than a full pie (default `true`).
   """
-  attr :series, :any, required: true
+  attr :series, :any, default: nil
   attr :id, :string, default: "pie-chart"
   attr :title, :string, default: nil
   attr :format, :any, default: nil
   attr :show_table, :boolean, default: false
+  attr :loading, :boolean, default: false, doc: "render the skeleton instead of the chart (F04)"
+  attr :error, :any, default: nil, doc: "an error message (binary) or `true`: render the error state"
+  attr :retry_event, :string, default: nil, doc: "LiveView event the error state's retry button fires"
   attr :donut, :boolean, default: true
 
   def pie_chart(assigns) do
+    if State.gated?(assigns) do
+      State.state_view(assigns, "chart")
+    else
+      pie_chart_body(assigns)
+    end
+  end
+
+  defp pie_chart_body(assigns) do
     assigns =
       assigns
       |> assign_new(:fmt, fn -> assigns.format || (&default_format/1) end)
@@ -191,7 +225,7 @@ defmodule Samen.UI.Chart do
 
   # -- the accessible data-table fallback (always in the DOM) -------------------
 
-  attr :series, :any, required: true
+  attr :series, :any, default: nil
   attr :fmt, :any, required: true
   attr :id, :string, required: true
   attr :show, :boolean, default: false
@@ -207,7 +241,7 @@ defmodule Samen.UI.Chart do
         </tr>
       </thead>
       <tbody>
-        <tr :for={p <- @series.points}>
+        <tr :for={p <- points(@series)}>
           <th scope="row">{p.label}</th>
           <td>{@fmt.(p)}</td>
         </tr>
@@ -222,8 +256,8 @@ defmodule Samen.UI.Chart do
   # `[%{key,label,value,point,x,y,width,height,cx}]` — one bar per slice, height ∝ value/max.
   def bar_geometry(%Series{points: []}), do: []
 
-  def bar_geometry(%Series{points: points} = series) do
-    max = max(Series.max_value(series), 1)
+  def bar_geometry(%Series{points: points}) when is_list(points) do
+    max = max_of(points)
     n = length(points)
     plot_w = @w - 2 * @pad_x
     plot_h = @h - @pad_top - @pad_bottom
@@ -234,7 +268,7 @@ defmodule Samen.UI.Chart do
     |> Enum.with_index()
     |> Enum.map(fn {p, i} ->
       cx = @pad_x + slot * (i + 0.5)
-      h = Float.round(p.value / max * plot_h, 2)
+      h = Float.round(val(p) / max * plot_h, 2)
       y = Float.round(@h - @pad_bottom - h, 2)
 
       %{
@@ -251,13 +285,16 @@ defmodule Samen.UI.Chart do
     end)
   end
 
+  def bar_geometry(_), do: []
+
   @doc false
   # `[%{key,label,value,point,cx,cy}]` — one dot per bucket, cy ∝ value/max (inverted).
   def line_geometry(%Series{points: []}), do: []
-  def line_geometry(%Series{} = s), do: line_geometry_n(s)
+  def line_geometry(%Series{points: points} = s) when is_list(points), do: line_geometry_n(s)
+  def line_geometry(_), do: []
 
-  defp line_geometry_n(%Series{points: points} = series) do
-    max = max(Series.max_value(series), 1)
+  defp line_geometry_n(%Series{points: points}) do
+    max = max_of(points)
     n = length(points)
     plot_w = @w - 2 * @pad_x
     plot_h = @h - @pad_top - @pad_bottom
@@ -267,7 +304,7 @@ defmodule Samen.UI.Chart do
     |> Enum.with_index()
     |> Enum.map(fn {p, i} ->
       cx = if n > 1, do: @pad_x + step * i, else: @pad_x + plot_w / 2
-      cy = @h - @pad_bottom - p.value / max * plot_h
+      cy = @h - @pad_bottom - val(p) / max * plot_h
 
       %{key: p.key, label: p.label, value: p.value, point: p, cx: Float.round(cx, 2), cy: Float.round(cy, 2)}
     end)
@@ -280,15 +317,15 @@ defmodule Samen.UI.Chart do
   # non-zero slice becomes a full circle (a degenerate arc path can't draw 100%).
   def pie_geometry(%Series{points: []}), do: []
 
-  def pie_geometry(%Series{points: points}) do
-    total = points |> Enum.map(& &1.value) |> Enum.sum()
+  def pie_geometry(%Series{points: points}) when is_list(points) do
+    total = points |> Enum.map(&val/1) |> Enum.sum()
 
     if total <= 0 do
       []
     else
       {slices, _acc} =
         Enum.map_reduce(points, 0.0, fn p, acc ->
-          frac = p.value / total
+          frac = val(p) / total
           d = arc_path(acc, acc + frac)
           pct = Float.round(frac * 100, 1)
           {%{key: p.key, label: p.label, value: p.value, point: p, d: d, pct: pct}, acc + frac}
@@ -297,6 +334,8 @@ defmodule Samen.UI.Chart do
       slices
     end
   end
+
+  def pie_geometry(_), do: []
 
   # An SVG arc path for [start_frac, end_frac) of a unit circle (r=40, centered at 50,50). A
   # full-circle fraction (a lone slice) is drawn as two half-arcs (a single arc can't close 360°).
@@ -323,6 +362,19 @@ defmodule Samen.UI.Chart do
   end
 
   # -- helpers -----------------------------------------------------------------
+
+  # nil / unloaded series → the empty state, never a crash (F04).
+  defp points(%Series{points: points}) when is_list(points), do: points
+  defp points(_), do: []
+
+  # A drawable magnitude: a non-negative number. A nil / non-numeric / negative value draws as 0
+  # (a negative height is invalid SVG and a nil would raise); the real figure stays in the
+  # accessible data table (F17).
+  defp val(%{value: v}) when is_number(v) and v > 0, do: v
+  defp val(_), do: 0
+
+  # The axis scale: the largest drawable value, never below 1 (no division by zero).
+  defp max_of(points), do: points |> Enum.map(&val/1) |> Enum.max(fn -> 0 end) |> max(1)
 
   # The fixed SVG canvas dims + derived axis coordinates, as ASSIGNS (a HEEx `@w` reads
   # assigns, not a module attribute — so the canvas geometry must be assigned, not inlined).

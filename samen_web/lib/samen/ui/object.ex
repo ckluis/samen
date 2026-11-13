@@ -9,7 +9,10 @@ defmodule Samen.UI.Object do
   """
   use Phoenix.Component
 
-  import Samen.UI.Feedback, only: [pill: 1]
+  import Samen.UI.Feedback, only: [pill: 1, skeleton: 1]
+  import Samen.UI.State, only: [error_state: 1]
+
+  alias Samen.UI.State
 
   # ---------------------------------------------------------------------------
   # Object-unfurl card (ADR-012 §4.4 — the crown jewel's renderer)
@@ -42,7 +45,7 @@ defmodule Samen.UI.Object do
     assigns = assign(assigns, :reason, reason)
 
     ~H"""
-    <span class="obj-card obj-card-na" data-obj-error={to_string(@reason)}>
+    <span class="obj-card obj-card-na" data-obj-error={reason_text(@reason)}>
       <span class="obj-na-icon">∅</span>
       <span class="obj-na-text">Object not available</span>
     </span>
@@ -159,22 +162,33 @@ defmodule Samen.UI.Object do
   `status` are the bounded activity enums (atoms), `at` a `DateTime | nil`, `subject`
   / `body` / `who` strings. A `%Samen.Masked{}` in any slot renders `••••` verbatim.
   """
-  attr :entries, :list, required: true
+  attr :entries, :list, default: [], doc: "nil (not loaded yet) renders the empty state"
   attr :empty, :string, default: "No activity yet."
+  attr :loading, :boolean, default: false, doc: "show a skeleton in place of the entries (F04)"
+  attr :error, :any, default: nil, doc: "an error message (binary) or `true`: show the error state"
+  attr :retry_event, :string, default: nil, doc: "LiveView event the error state's retry button fires"
   slot :composer
 
   def timeline(assigns) do
+    assigns =
+      assigns
+      |> assign(:entries, if(is_list(assigns.entries), do: assigns.entries, else: []))
+      |> assign(:tl_error, State.error?(assigns.error))
+
     ~H"""
     <div class="tl">
       <div :if={@composer != []} class="tl-composer">
         {render_slot(@composer)}
       </div>
 
-      <div :if={@entries == []} class="tl-empty" style="padding:22px 20px;color:var(--muted)">
+      <.error_state :if={@tl_error} body={State.error_body(@error)} retry_event={@retry_event} />
+      <.skeleton :if={@loading and not @tl_error} rows={3} />
+
+      <div :if={@entries == [] and not @loading and not @tl_error} class="tl-empty" style="padding:22px 20px;color:var(--muted)">
         {@empty}
       </div>
 
-      <div :if={@entries != []} class="tl-rail">
+      <div :if={@entries != [] and not @loading and not @tl_error} class="tl-rail">
         <div :for={e <- @entries} class="tl-entry" id={timeline_entry_id(e)}>
           <div class={"tl-glyph tl-#{timeline_type(e)}"} style="width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0">
             {timeline_glyph(timeline_type(e))}
@@ -267,4 +281,9 @@ defmodule Samen.UI.Object do
   defp timeline_dt(_), do: "—"
 
   defp tl_pad(n), do: String.pad_leading(to_string(n), 2, "0")
+
+  # `to_string/1` raises on a tuple reason (`{:error, {:db, ...}}`). The attribute is a coarse
+  # label only — a non-atom/binary reason is NOT inspected into the DOM (it could carry detail).
+  defp reason_text(reason) when is_atom(reason) or is_binary(reason), do: to_string(reason)
+  defp reason_text(_), do: "error"
 end
