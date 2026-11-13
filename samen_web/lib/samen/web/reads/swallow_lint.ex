@@ -102,7 +102,6 @@ defmodule Samen.Web.Reads.SwallowLint do
     "samen_web/lib/samen/web/auth/totp_enroll_controller.ex" => 1,
     "samen_web/lib/samen/web/auth/totp_pending.ex" => 2,
     "samen_web/lib/samen/web/auth_gate.ex" => 1,
-    "samen_web/lib/samen/web/automation/reads.ex" => 2,
         "samen_web/lib/samen/web/csv.ex" => 1,
     "samen_web/lib/samen/web/current_org.ex" => 6,
     "samen_web/lib/samen/web/first_run.ex" => 2,

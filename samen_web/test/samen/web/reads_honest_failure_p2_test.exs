@@ -1098,4 +1098,60 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
       assert html(SettingsLive, failed) =~ "Nothing was lost"
     end
   end
+
+  # ===========================================================================
+  # Automation builder
+  # ===========================================================================
+
+  describe "Automation builder" do
+    alias Samen.Web.Automation.BuilderLive
+    alias Samen.WebTest.Automation.Workflow
+
+    defp seed_workflow!(org_id) do
+      Workflow
+      |> Ash.Changeset.for_create(:create, %{org_id: org_id, name: "p2-flow", status: :active, trigger_kind: :manual, conditions: [], actions: []})
+      |> Ash.create!(authorize?: false)
+    end
+
+    test "a failed page read is the error state, not the empty builder; retry recovers; empty stays empty" do
+      org_id = Ash.UUID.generate()
+      seed_workflow!(org_id)
+      mount = build_mount(:automation)
+      assert html(BuilderLive, socket_for(BuilderLive, mount, [Ash.UUID.generate()])) =~ "No workflows yet."
+
+      inject_read_faults([:automation_workflows_page])
+      socket = failing(fn -> socket_for(BuilderLive, mount, [org_id]) end)
+      rendered = html(BuilderLive, socket)
+      assert_error_state(rendered)
+      refute rendered =~ "No workflows yet."
+      refute rendered =~ "p2-flow"
+
+      clear_read_faults()
+      rendered = html(BuilderLive, list_event(socket, "list_retry"))
+      refute_error_state(rendered)
+      assert rendered =~ "p2-flow"
+    end
+
+    test "a failed single-workflow read is an error, never 'Workflow not found.'; nothing is written" do
+      org_id = Ash.UUID.generate()
+      wf = seed_workflow!(org_id)
+      mount = build_mount(:automation)
+      socket = socket_for(BuilderLive, mount, [org_id])
+
+      inject_read_faults([:automation_get_workflow])
+      paused = failing(fn -> event(BuilderLive, socket, "toggle_pause", %{"id" => wf.id}) end)
+      rendered = html(BuilderLive, paused)
+      assert rendered =~ "couldn&#39;t load this workflow right now"
+      refute rendered =~ "Workflow not found."
+      assert Ash.get!(Workflow, wf.id, authorize?: false).status == :active
+
+      ran = failing(fn -> event(BuilderLive, socket, "run_now", %{"id" => wf.id}) end)
+      assert ran.assigns.run_error =~ "Nothing was run"
+      refute ran.assigns.run_error =~ "not found"
+
+      clear_read_faults()
+      gone = event(BuilderLive, socket, "run_now", %{"id" => Ash.UUID.generate()})
+      assert gone.assigns.run_error == "Workflow not found."
+    end
+  end
 end

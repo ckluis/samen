@@ -53,6 +53,9 @@ defmodule Samen.Web.Automation.Reads do
 
   alias Samen.Automation.{Action, NonPiiPredicates}
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
+
+  @unavailable_copy "We couldn't load this workflow right now. Nothing was changed — try again."
 
   @doc """
   Read ONE keyset page of the org's workflows — the `ListLive` reads contract
@@ -63,34 +66,63 @@ defmodule Samen.Web.Automation.Reads do
   surfaced to the render).
   """
   def workflows_page(mount, scope, state) do
-    Mount.resource(mount, Workflow)
-    |> Ash.Query.ensure_selected([
-      :name,
-      :status,
-      :trigger_kind,
-      :resource_key,
-      :event,
-      :schedule_cron,
-      :next_fire_at,
-      :conditions,
-      :actions,
-      :owner_id,
-      :disabled_by_operator_at,
-      :disabled_reason
-    ])
-    |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:name, :resource_key])
-  rescue
-    _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(state.page_size)}
+    Guard.page(:automation_workflows_page, scope, state, fn ->
+      Mount.resource(mount, Workflow)
+      |> Ash.Query.ensure_selected([
+        :name,
+        :status,
+        :trigger_kind,
+        :resource_key,
+        :event,
+        :schedule_cron,
+        :next_fire_at,
+        :conditions,
+        :actions,
+        :owner_id,
+        :disabled_by_operator_at,
+        :disabled_reason
+      ])
+      |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:name, :resource_key])
+    end)
   end
 
   @doc "Read ONE workflow by id for `scope` (bounded lookup). `nil` when absent/denied."
   def get_workflow(mount, scope, id) do
-    Mount.resource(mount, Workflow)
-    |> Ash.Query.filter(id == ^id)
-    |> Ash.Query.limit(1)
-    |> Ash.read_one!(scope: scope)
-  rescue
-    _ -> nil
+    case get_workflow_result(mount, scope, id) do
+      {:ok, workflow} -> workflow
+      {:error, _} -> nil
+    end
+  end
+
+  @doc """
+  Tagged sibling of `get_workflow/3` (WP6): `{:ok, workflow}`, `{:error, :not_found}` for an
+  absent, malformed-id or denied record, and `{:error, :unavailable}` ONLY when the read FAILED.
+  """
+  def get_workflow_result(mount, scope, id) do
+    with {:ok, uuid} <- Ecto.UUID.cast(id),
+         {:ok, workflow} <-
+           Guard.run(:automation_get_workflow, scope, fn ->
+             Mount.resource(mount, Workflow)
+             |> Ash.Query.filter(id == ^uuid)
+             |> Ash.Query.limit(1)
+             |> Ash.read_one!(scope: scope)
+           end) do
+      if workflow, do: {:ok, workflow}, else: {:error, :not_found}
+    else
+      :error -> {:error, :not_found}
+      {:error, :forbidden} -> {:error, :not_found}
+      {:error, :unavailable} = unavailable -> unavailable
+    end
+  end
+
+  # A write that first reads the workflow: "not found" and "could not read" are different
+  # answers (a failed read must not tell the user the workflow is gone).
+  defp with_workflow(mount, scope, id, fun) do
+    case get_workflow_result(mount, scope, id) do
+      {:ok, workflow} -> fun.(workflow)
+      {:error, :not_found} -> {:error, "Workflow not found."}
+      {:error, :unavailable} -> {:error, @unavailable_copy}
+    end
   end
 
   @doc """
@@ -120,16 +152,12 @@ defmodule Samen.Web.Automation.Reads do
   action the pause/resume switch uses). `{:ok, workflow}` or `{:error, message}`.
   """
   def update_workflow(mount, scope, id, attrs) do
-    case get_workflow(mount, scope, id) do
-      nil ->
-        {:error, "Workflow not found."}
-
-      workflow ->
-        workflow
-        |> Ash.Changeset.for_update(:update, attrs, scope: scope)
-        |> Ash.update()
-        |> friendly()
-    end
+    with_workflow(mount, scope, id, fn workflow ->
+      workflow
+      |> Ash.Changeset.for_update(:update, attrs, scope: scope)
+      |> Ash.update()
+      |> friendly()
+    end)
   end
 
   @doc """
@@ -137,11 +165,10 @@ defmodule Samen.Web.Automation.Reads do
   `:update` action — see moduledoc. `{:ok, workflow}` or `{:error, message}`.
   """
   def toggle_pause(mount, scope, id) do
-    case get_workflow(mount, scope, id) do
-      nil -> {:error, "Workflow not found."}
+    with_workflow(mount, scope, id, fn
       %{status: :paused} = wf -> update_workflow(mount, scope, wf.id, %{status: :active})
       wf -> update_workflow(mount, scope, wf.id, %{status: :paused})
-    end
+    end)
   end
 
   @doc """
@@ -152,18 +179,16 @@ defmodule Samen.Web.Automation.Reads do
   `{:error, message}` (the refusal message on an ineligible attribute).
   """
   def add_condition(mount, scope, id, condition) when is_map(condition) do
-    case get_workflow(mount, scope, id) do
-      nil -> {:error, "Workflow not found."}
-      wf -> update_workflow(mount, scope, id, %{conditions: (wf.conditions || []) ++ [condition]})
-    end
+    with_workflow(mount, scope, id, fn wf ->
+      update_workflow(mount, scope, id, %{conditions: (wf.conditions || []) ++ [condition]})
+    end)
   end
 
   @doc "Remove the condition at `index` from a workflow's `conditions` list."
   def remove_condition(mount, scope, id, index) when is_integer(index) do
-    case get_workflow(mount, scope, id) do
-      nil -> {:error, "Workflow not found."}
-      wf -> update_workflow(mount, scope, id, %{conditions: List.delete_at(wf.conditions || [], index)})
-    end
+    with_workflow(mount, scope, id, fn wf ->
+      update_workflow(mount, scope, id, %{conditions: List.delete_at(wf.conditions || [], index)})
+    end)
   end
 
   @doc """
@@ -172,18 +197,16 @@ defmodule Samen.Web.Automation.Reads do
   refused (ADR-039 §4.4 gate 2).
   """
   def add_action(mount, scope, id, action) when is_map(action) do
-    case get_workflow(mount, scope, id) do
-      nil -> {:error, "Workflow not found."}
-      wf -> update_workflow(mount, scope, id, %{actions: (wf.actions || []) ++ [action]})
-    end
+    with_workflow(mount, scope, id, fn wf ->
+      update_workflow(mount, scope, id, %{actions: (wf.actions || []) ++ [action]})
+    end)
   end
 
   @doc "Remove the action at `index` from a workflow's `actions` list."
   def remove_action(mount, scope, id, index) when is_integer(index) do
-    case get_workflow(mount, scope, id) do
-      nil -> {:error, "Workflow not found."}
-      wf -> update_workflow(mount, scope, id, %{actions: List.delete_at(wf.actions || [], index)})
-    end
+    with_workflow(mount, scope, id, fn wf ->
+      update_workflow(mount, scope, id, %{actions: List.delete_at(wf.actions || [], index)})
+    end)
   end
 
   @doc """
