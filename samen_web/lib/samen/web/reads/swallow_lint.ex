@@ -130,8 +130,7 @@ defmodule Samen.Web.Reads.SwallowLint do
     "samen_web/lib/samen/web/tags.ex" => 2,
     "samen_web/lib/samen/web/tenant/analytics_reads.ex" => 1,
     "samen_web/lib/samen/web/tenant_gate.ex" => 1,
-    "samen_web/lib/samen/web/webhook/ingress.ex" => 2,
-    "samen_web/lib/samen/web/work/reads.ex" => 7
+    "samen_web/lib/samen/web/webhook/ingress.ex" => 2
   }
 
   def roots, do: @roots

@@ -41,28 +41,53 @@ defmodule Samen.Web.Work.TaskLive do
 
   @doc false
   def load(socket, nil, _task_id) do
-    assign(socket, no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), task: nil, subtasks: [])
+    assign(socket,
+      no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil),
+      task: nil,
+      subtasks: [],
+      load_error: nil,
+      subtasks_failed: false
+    )
   end
 
   def load(socket, org_id, task_id) do
     mount = socket.assigns.samen_mount
     scope = Mount.scope(mount, org_id)
 
-    case Reads.get_task(mount, scope, task_id) do
+    # A FAILED read is the error state (retry), never "Task not found."; the subtasks read
+    # fails on its own and blanks only its own list.
+    case Reads.get_task_result(mount, scope, task_id) do
       {:ok, task} ->
+        subtasks = Reads.subtasks_result(mount, scope, task.id)
+
         assign(socket,
           no_org: false,
           task: task,
-          subtasks: Reads.subtasks(mount, scope, task.id),
+          load_error: nil,
+          subtasks: Samen.Web.Reads.Guard.value(subtasks, []),
+          subtasks_failed: Samen.Web.Reads.Guard.unavailable?(subtasks),
           status_error: nil
         )
 
-      :error ->
-        assign(socket, no_org: false, task: nil, subtasks: [], status_error: nil)
+      {:error, :not_found} ->
+        assign(socket, no_org: false, task: nil, subtasks: [], load_error: nil, subtasks_failed: false, status_error: nil)
+
+      {:error, :unavailable} ->
+        assign(socket,
+          no_org: false,
+          task: nil,
+          subtasks: [],
+          load_error: Samen.Web.Reads.Guard.message(),
+          subtasks_failed: false,
+          status_error: nil
+        )
     end
   end
 
   @impl true
+  def handle_event("retry_load", _params, socket),
+    do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.task_id)}
+
   def handle_event("update_status", %{"status" => status}, socket) do
     %{samen_mount: mount, org_id: org_id, task_id: task_id} = socket.assigns
     scope = Mount.scope(mount, org_id)
@@ -93,6 +118,10 @@ defmodule Samen.Web.Work.TaskLive do
         <%= cond do %>
           <% @no_org -> %>
             <.no_org_card mount={@samen_mount} />
+          <% is_nil(@task) and @load_error != nil -> %>
+            <div class="wrap">
+              <.error_state class="task-error" body={@load_error} retry_event="retry_load" />
+            </div>
           <% is_nil(@task) -> %>
             <div class="wrap">
               <div class="card" id="task-not-found" style="padding:20px">Task not found.</div>
@@ -139,6 +168,7 @@ defmodule Samen.Web.Work.TaskLive do
                 <h3 id="subtasks-heading" style="font-size:14px;margin-bottom:8px">
                   Subtasks <span class="n">{length(@subtasks)}</span>
                 </h3>
+                <.error_state :if={@subtasks_failed} class="subtasks-error" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
                 <ul :if={@subtasks != []} id="subtasks-list" style="list-style:none;padding:0;margin:0">
                   <li :for={sub <- @subtasks} class="subtask-row" style="padding:8px 0;border-top:1px solid var(--line,#eee)">
                     <a href={"#{work_path(@samen_mount)}/tasks/#{sub.id}?org=#{@org_id}"} style="text-decoration:none;color:#3a3b45;font-weight:500">
@@ -147,7 +177,7 @@ defmodule Samen.Web.Work.TaskLive do
                     <.pill variant={if sub.status == :completed, do: "ok", else: "mut"}>{sub.status}</.pill>
                   </li>
                 </ul>
-                <p :if={@subtasks == []} id="subtasks-empty" style="color:var(--muted);font-size:13px">No subtasks.</p>
+                <p :if={@subtasks == [] and not @subtasks_failed} id="subtasks-empty" style="color:var(--muted);font-size:13px">No subtasks.</p>
               </div>
             </div>
         <% end %>

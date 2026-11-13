@@ -82,7 +82,8 @@ defmodule Samen.Web.Work.TimelineLive do
       org_id: nil,
       from: from,
       board: %Board{groups: [], group_field: :status},
-      total_tasks: 0
+      total_tasks: 0,
+      load_error: nil
     )
     |> assign_window(nil)
   end
@@ -93,7 +94,13 @@ defmodule Samen.Web.Work.TimelineLive do
     from = from || socket.assigns[:from] || default_from()
     range = window_range(from)
 
-    %{board: board} = Reads.tasks_timeline(mount, scope, range)
+    # A failed board read is the kit error state (retry), never an empty board.
+    {board, load_error} =
+      case Reads.tasks_timeline_result(mount, scope, range) do
+        {:ok, %{board: board}} -> {board, nil}
+        {:error, :unavailable} -> {%Board{groups: [], group_field: :status}, Samen.Web.Reads.Guard.message()}
+        {:error, _denied} -> {%Board{groups: [], group_field: :status}, nil}
+      end
 
     socket
     |> ensure_return_to()
@@ -102,7 +109,8 @@ defmodule Samen.Web.Work.TimelineLive do
       org_id: org_id,
       from: from,
       board: board,
-      total_tasks: total_tasks(board)
+      total_tasks: total_tasks(board),
+      load_error: load_error
     )
     |> assign_window(org_id)
   end
@@ -161,6 +169,9 @@ defmodule Samen.Web.Work.TimelineLive do
     do: Enum.reduce(groups, 0, fn g, acc -> acc + (g.count || length(g.rows)) end)
 
   @impl true
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
+
+  @impl true
   def render(assigns) do
     ~H"""
     <div id="work-timeline">
@@ -179,7 +190,7 @@ defmodule Samen.Web.Work.TimelineLive do
           <span id="org-banner" style="display:none">Work org: {@org_id}</span>
 
           <div class="metrics">
-            <.metric label="Tasks in window" value={@total_tasks} sub="by created → due">
+            <.metric label="Tasks in window" value={@total_tasks} sub="by created → due" error={!!@load_error}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M3 6h18M3 12h12M3 18h7" />
@@ -201,6 +212,8 @@ defmodule Samen.Web.Work.TimelineLive do
               prev_href={@prev_href}
               next_href={@next_href}
               empty_text="No tasks"
+              error={@load_error}
+              retry_event="retry_load"
             >
               <:bar :let={task}>
                 <span class="mono gantt-bar-name" id={"task-bar-#{task.id}"}>{task.title || "(untitled)"}</span>

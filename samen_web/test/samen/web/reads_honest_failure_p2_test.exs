@@ -442,4 +442,118 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
       assert socket.assigns.send_results == nil
     end
   end
+
+  # ===========================================================================
+  # Work
+  # ===========================================================================
+
+  describe "Work" do
+    alias Samen.Web.Work.{ProjectsLive, TaskLive, TaskTreeLive, TasksLive, TimelineLive}
+    alias Samen.WebTest.Work.{Project, Task}
+
+    defp seed_work do
+      org_id = Ash.UUID.generate()
+
+      project =
+        Project
+        |> Ash.Changeset.for_create(:create, %{org_id: org_id, name: "Q3 Launch"})
+        |> Ash.create!(authorize?: false)
+
+      task =
+        Task
+        |> Ash.Changeset.for_create(:create, %{org_id: org_id, title: "Draft the launch brief", status: :in_progress, priority: :high, project_id: project.id})
+        |> Ash.create!(authorize?: false)
+
+      Task
+      |> Ash.Changeset.for_create(:create, %{org_id: org_id, title: "Get stakeholder sign-off", status: :pending, parent_id: task.id})
+      |> Ash.create!(authorize?: false)
+
+      %{org_id: org_id, task: task}
+    end
+
+    test "tasks list: failed page → error state, not 'No tasks yet'; retry recovers; empty stays empty" do
+      %{org_id: org_id} = seed_work()
+      mount = build_mount(:work)
+      assert html(TasksLive, socket_for(TasksLive, mount, [Ash.UUID.generate()])) =~ "empty-new-task"
+
+      inject_read_faults([:work_tasks_page])
+      socket = failing(fn -> socket_for(TasksLive, mount, [org_id]) end)
+      rendered = html(TasksLive, socket)
+      assert_error_state(rendered)
+      refute rendered =~ "empty-new-task"
+      refute rendered =~ "task-row"
+
+      clear_read_faults()
+      rendered = html(TasksLive, list_event(socket, "list_retry"))
+      refute_error_state(rendered)
+      assert rendered =~ "task-row"
+    end
+
+    test "task detail: a FAILED read is the error state, not 'Task not found.'; 404 survives; subtasks fail alone" do
+      %{org_id: org_id, task: task} = seed_work()
+      mount = build_mount(:work)
+
+      inject_read_faults([:work_get_task])
+      socket = failing(fn -> socket_for(TaskLive, mount, [org_id, task.id], org_id: org_id, task_id: task.id) end)
+      rendered = html(TaskLive, socket)
+      assert_error_state(rendered)
+      refute rendered =~ "Task not found."
+      refute rendered =~ "task-detail"
+
+      clear_read_faults()
+      rendered = html(TaskLive, event(TaskLive, socket, "retry_load"))
+      refute_error_state(rendered)
+      assert rendered =~ "task-detail"
+
+      for id <- [Ash.UUID.generate(), "not-a-uuid"] do
+        rendered = html(TaskLive, socket_for(TaskLive, mount, [org_id, id], org_id: org_id, task_id: id))
+        assert rendered =~ "Task not found."
+        refute_error_state(rendered)
+      end
+
+      inject_read_faults([:work_subtasks])
+      rendered = html(TaskLive, failing(fn -> socket_for(TaskLive, mount, [org_id, task.id], org_id: org_id, task_id: task.id) end))
+      assert rendered =~ "subtasks-error"
+      assert rendered =~ "task-detail"
+      refute rendered =~ "No subtasks."
+    end
+
+    test "projects: failed read → error state, not 'No projects yet.'" do
+      %{org_id: org_id} = seed_work()
+      mount = build_mount(:work)
+      assert html(ProjectsLive, socket_for(ProjectsLive, mount, [Ash.UUID.generate()])) =~ "No projects yet."
+
+      inject_read_faults([:work_projects])
+      socket = failing(fn -> socket_for(ProjectsLive, mount, [org_id], org_id: org_id) end)
+      rendered = html(ProjectsLive, socket)
+      assert_error_state(rendered)
+      refute rendered =~ "No projects yet."
+      refute rendered =~ "new-project-modal"
+
+      clear_read_faults()
+      rendered = html(ProjectsLive, event(ProjectsLive, socket, "retry_load"))
+      refute_error_state(rendered)
+      assert rendered =~ "project-row"
+    end
+
+    test "timeline and tree: a failed board / walk is the error state with an error tile, not 'No tasks'" do
+      %{org_id: org_id} = seed_work()
+      mount = build_mount(:work)
+
+      inject_read_faults([:work_tasks_timeline, :work_tasks_tree])
+      tl = failing(fn -> socket_for(TimelineLive, mount, [org_id]) end)
+      tr = failing(fn -> socket_for(TaskTreeLive, mount, [org_id]) end)
+
+      for {mod, socket} <- [{TimelineLive, tl}, {TaskTreeLive, tr}] do
+        rendered = html(mod, socket)
+        assert_error_state(rendered)
+        assert rendered =~ "metric-error"
+        refute rendered =~ "No tasks"
+      end
+
+      clear_read_faults()
+      refute_error_state(html(TimelineLive, event(TimelineLive, tl, "retry_load")))
+      refute_error_state(html(TaskTreeLive, event(TaskTreeLive, tr, "retry_load")))
+    end
+  end
 end

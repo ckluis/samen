@@ -35,6 +35,7 @@ defmodule Samen.Web.Work.ProjectsLive do
       no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil),
       org_id: nil,
       projects: [],
+      load_error: nil,
       show_new: false,
       new_form: nil
     )
@@ -46,13 +47,23 @@ defmodule Samen.Web.Work.ProjectsLive do
     scope = Mount.scope(mount, org_id)
 
     socket
-    |> assign(no_org: false, org_id: org_id, projects: Reads.projects(mount, scope))
+    |> assign_projects(Reads.projects_result(mount, scope))
+    |> assign(no_org: false, org_id: org_id)
     |> assign_new(:show_new, fn -> false end)
     |> assign_new(:delete_error, fn -> nil end)
     |> assign(new_form: new_project_form(mount, scope))
   end
 
+  # A failed read is the kit error state (retry), never "No projects yet."; a denial stays empty.
+  defp assign_projects(socket, {:ok, projects}), do: assign(socket, projects: projects, load_error: nil)
+  defp assign_projects(socket, {:error, :forbidden}), do: assign(socket, projects: [], load_error: nil)
+
+  defp assign_projects(socket, {:error, :unavailable}),
+    do: assign(socket, projects: [], load_error: Samen.Web.Reads.Guard.message())
+
   @impl true
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
+
   def handle_event("new_project", _params, socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
     {:noreply, assign(socket, show_new: true, new_form: new_project_form(mount, Mount.scope(mount, org_id)))}
@@ -119,7 +130,8 @@ defmodule Samen.Web.Work.ProjectsLive do
 
           <div class="wrap">
             <div id="projects-list">
-              <p :if={@projects == []} id="projects-empty" style="color:var(--muted)">No projects yet.</p>
+              <.error_state :if={@load_error} class="projects-error" body={@load_error} retry_event="retry_load" />
+              <p :if={@projects == [] and is_nil(@load_error)} id="projects-empty" style="color:var(--muted)">No projects yet.</p>
               <ul :if={@projects != []} style="list-style:none;padding:0;margin:0">
                 <li :for={p <- @projects} class="project-row" style="padding:10px 0;border-top:1px solid var(--line,#eee);display:flex;justify-content:space-between;align-items:center">
                   <span style="font-weight:500">{p.name}</span>
