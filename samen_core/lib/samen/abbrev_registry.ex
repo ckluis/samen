@@ -376,8 +376,9 @@ defmodule Samen.AbbrevRegistry do
       not Map.has_key?(registry, abbrev) ->
         {:error,
          "abbrev #{inspect(abbrev)} for #{resource} is not in the abbrev registry " <>
-           "(#{path()}). Abbrevs are permanent and must be reserved: add " <>
-           "\"#{abbrev}\": \"#{resource}\" to the \"abbrevs\" map and commit it. " <>
+           "(#{path()}). Abbrevs are permanent and must be reserved through the sanctioned allocator, " <>
+           "never by editing the registry by hand. Run: #{reserve_command(abbrev, resource)}  " <>
+           "(or `--propose` in place of `--abbrev` to let it pick a free one). " <>
            "This prevents two resources ever racing for the same prefix."}
 
       Map.fetch!(registry, abbrev) != resource ->
@@ -404,6 +405,14 @@ defmodule Samen.AbbrevRegistry do
       nil -> Map.get(global, abbrev)
       found -> found
     end
+  end
+
+  # The exact sanctioned command for reserving `abbrev` for `resource` (the host is the project's otp_app).
+  defp reserve_command(abbrev, resource) do
+    host =
+      if Code.ensure_loaded?(Mix.Project), do: Mix.Project.config()[:app], else: nil
+
+    "mix samen.abbrev.reserve --host #{host || "<your_otp_app>"} --abbrev #{abbrev} --owner #{resource}"
   end
 
   @doc """

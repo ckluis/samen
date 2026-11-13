@@ -250,6 +250,24 @@ defmodule Samen.Gen.AppTest do
       end
     end
 
+    test "red: the collision message names the registry file ACTUALLY read, the holding host, and the first-letter cause" do
+      dir = Path.join(System.tmp_dir!(), "gen_app_msg_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf(dir) end)
+      path = Path.join(dir, "scratch_registry.json")
+
+      s = spec(module: "Hx", prefix: "hx", abbrev: "hqz")
+      {clash, _} = Enum.find(Gen.reserved_pairs(s), fn {a, _} -> String.starts_with?(a, "h") and a != "hqz" end)
+
+      File.write!(path, ~s({"abbrevs": {}, "hosts": {"harbor": {"#{clash}": "Harbor.Primitives.Notification"}}}))
+      registry = Samen.AbbrevRegistry.load(path)
+
+      err = assert_raise ArgumentError, fn -> Gen.validate_against!(s, registry, path) end
+      assert err.message =~ ~s(abbrev "#{clash}" is already reserved to Harbor.Primitives.Notification)
+      assert err.message =~ ~s(in host "harbor" of #{path})
+      assert err.message =~ "FIRST letter of --prefix"
+    end
+
     test "green: an abbrev already owned by the SAME resource is fine (idempotent re-run)" do
       registry = %{"wid" => "Widgetco.Vertical.Record"}
       assert Gen.validate_against!(spec(), registry) == :ok
