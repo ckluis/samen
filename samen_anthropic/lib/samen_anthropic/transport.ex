@@ -12,11 +12,13 @@ defmodule SamenAnthropic.Transport do
 
   ## Timeouts are explicit (2026-11-13; AX-9)
 
-  Req's own default receive timeout is 15 s — shorter than many real completions — so both
+  Req's own default receive timeout is 15 s — shorter than many real completions — so the
   timeouts are set on every request from the request map the provider builds (and the
-  provider takes them from its config): `:connect_timeout` (default 10 s) and
-  `:receive_timeout` (default 300 s, below the agent loop's 600 s in-flight watchdog, so a
-  hung call surfaces as `:provider_timeout` before the watchdog would re-pick the turn).
+  provider takes them from its config): `:connect_timeout` (default 10 s), `:receive_timeout`
+  (default 300 s) and `:request_timeout` (the whole response; Finch's, best effort on HTTP/1).
+  The provider caps all three to what is left of the CALL's budget (`SamenAnthropic.Retry`),
+  so one attempt cannot outlast it — and it is the budget, not these per-attempt defaults,
+  that keeps a call below the agent loop's in-flight watchdog.
 
   Req's built-in retry is OFF here (`retry: false`): retrying is the provider's
   `SamenAnthropic.Retry` policy, which wraps whichever transport is in use — this one or a
@@ -30,7 +32,7 @@ defmodule SamenAnthropic.Transport do
 
   @doc """
   `request` is `%{api_key:, body:, anthropic_version:, connect_timeout:, receive_timeout:,
-  betas:}` (all but `:api_key` and `:body` optional). Returns
+  request_timeout:, betas:}` (all but `:api_key` and `:body` optional). Returns
   `{:ok, %{status: integer(), body: map() | binary(), headers: map()}}` or `{:error, reason}`
   on a transport-level failure (DNS/connect/timeout).
   """
@@ -69,7 +71,16 @@ defmodule SamenAnthropic.Transport do
         ] ++ beta_headers,
       connect_options: [timeout: Map.get(request, :connect_timeout) || @connect_timeout],
       receive_timeout: Map.get(request, :receive_timeout) || @receive_timeout,
+      request_timeout: Map.get(request, :request_timeout) || :infinity,
       retry: false
     ]
   end
+
+  @doc "The default connect timeout (ms) of one attempt."
+  @spec default_connect_timeout() :: pos_integer()
+  def default_connect_timeout, do: @connect_timeout
+
+  @doc "The default receive timeout (ms) of one attempt — also the default call budget."
+  @spec default_receive_timeout() :: pos_integer()
+  def default_receive_timeout, do: @receive_timeout
 end

@@ -606,6 +606,8 @@ defmodule Samen.AI.Agent do
     |> Keyword.put(:system, Keyword.get(structure, :system, []))
     |> Keyword.put(:turns, Keyword.get(structure, :turns, []))
     |> put_model(Keyword.get(structure, :model))
+    # Every loop call is bounded below the in-flight watchdog (`provider_call_budget_ms/0`).
+    |> Keyword.put(:call_budget_ms, provider_call_budget_ms())
     # LAST, POSITIONALLY, and appended by `++` after a `delete` — not merely last-wins.
     # `Keyword.put/3` PREPENDS, so the pre-C3 pipeline left `grant_egress?` at the HEAD of
     # the list while its own docstring claimed the tail. Semantically equivalent for
@@ -789,6 +791,36 @@ defmodule Samen.AI.Agent do
   @doc "The in-flight watchdog window (seconds) — never-nil `next_turn_at` (§4.1)."
   @spec inflight_watchdog_seconds() :: pos_integer()
   def inflight_watchdog_seconds, do: @inflight_watchdog_seconds
+
+  @doc """
+  The wall-clock budget of ONE provider call the loop makes — the adapter's retries and the
+  waits between them included (`config[:call_budget_ms]`, `Samen.AI.Provider`): HALF the
+  in-flight watchdog, derived from it so the two can never drift apart.
+
+  Why it cannot double-call (ADR-047 §5.2a, the 2026-11-13 review): before EVERY provider call
+  a turn makes — the attempt, the ADR-048 Level-2 retry and both summarizer calls — the loop
+  re-stamps `next_turn_at` to now + the watchdog (`renew_lease!/1`), and the call itself ends
+  within this budget. So for the whole of the call `next_turn_at` lies at least half a watchdog
+  in the future, the `:agent_turn_due` scan (`next_turn_at <= now()`) cannot select the run,
+  and no second worker can re-pick the turn and call the provider for it again. The other half
+  is the margin for the turn's commit after the call returns.
+  """
+  @spec provider_call_budget_ms() :: pos_integer()
+  def provider_call_budget_ms, do: div(@inflight_watchdog_seconds * 1000, 2)
+
+  # The lease (see `provider_call_budget_ms/0`): re-arm the in-flight watchdog immediately
+  # before a provider call, durably. Only `next_turn_at` is taken from the write: the rest of
+  # the threaded struct (its revealed-state fields among them) stays exactly as loaded.
+  defp renew_lease!(%Run{} = run) do
+    renewed =
+      run
+      |> Ash.Changeset.for_update(:advance, %{
+        next_turn_at: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds)
+      })
+      |> Ash.update!(authorize?: false)
+
+    %{run | next_turn_at: renewed.next_turn_at}
+  end
 
   @doc "Turns executed per Oban job before the worker re-arms (host-configurable)."
   @spec turns_per_job() :: pos_integer()
@@ -1211,6 +1243,9 @@ defmodule Samen.AI.Agent do
          opts,
          attempt
        ) do
+    # The lease, renewed before EACH attempt (the Level-2 retry included): see
+    # `provider_call_budget_ms/0` for why the watchdog then cannot re-pick this turn.
+    run = renew_lease!(run)
     started = System.monotonic_time(:millisecond)
 
     defs = Tools.defs(tools)
@@ -1587,6 +1622,8 @@ defmodule Samen.AI.Agent do
     # usage, never an estimate; `est_tokens/1` only decides WHEN to fold. The spend also
     # rides `views` to the turn row (`note_summarizer_usage!/2`), so the turn ledger keeps
     # explaining the run's total.
+    # The summarize call is a provider call too: the same lease renewal first.
+    run = renew_lease!(run)
     {result, usage} = summarize_span(scope, span, model, opts)
     run = bill_summarizer!(run, usage)
     views = Map.put(views, :summarizer_usage, usage)

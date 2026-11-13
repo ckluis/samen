@@ -142,6 +142,9 @@ defmodule Samen.AI do
       it ahead of its configured default. Invalid identifiers are dropped.
     * `:system` / `:turns` — instructions and the role-structured conversation, sealed as
       their own fields (see `Samen.AI.MaskedPayload`; ADR-043 §5.1a).
+    * `:call_budget_ms` — a positive integer: the wall-clock budget for this ONE call, retries
+      and waits included, handed to the adapter as `config[:call_budget_ms]` (the smaller of it
+      and a host-configured one). See `Samen.AI.Provider` ("The call budget").
     * `:error_usage` — `true` to receive a failure that spent tokens as
       `{:error, reason, %{input_tokens: n, cached_input_tokens: n, output_tokens: n}}` (the
       usage scrubbed to three non-negative integers by the chokepoint) instead of `{:error, reason}`. The agent loop
@@ -164,10 +167,24 @@ defmodule Samen.AI do
 
       {provider, config} ->
         segments = assemble(scope, prompt_ref, bindings)
+        {budget, opts} = Keyword.pop(opts, :call_budget_ms)
         opts = scope |> ensure_grounding(opts) |> model_meta()
-        Chokepoint.complete(provider, config, :complete, segments, opts)
+        Chokepoint.complete(provider, put_call_budget(config, budget), :complete, segments, opts)
     end
   end
+
+  # The caller's budget can only TIGHTEN a host-configured one, never widen it.
+  defp put_call_budget(config, budget) when is_integer(budget) and budget > 0 do
+    case Map.get(config, :call_budget_ms) do
+      host when is_integer(host) and host > 0 ->
+        Map.put(config, :call_budget_ms, min(host, budget))
+
+      _ ->
+        Map.put(config, :call_budget_ms, budget)
+    end
+  end
+
+  defp put_call_budget(config, _budget), do: config
 
   @doc """
   Does the provider this call would resolve to support NATIVE tool use? (ADR-043 §5.1a;

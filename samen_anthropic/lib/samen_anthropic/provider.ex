@@ -63,10 +63,13 @@ defmodule SamenAnthropic.Provider do
   ## Transport, timeouts, retries
 
   `config[:transport]` (default `SamenAnthropic.Transport.live/1`) makes ONE request with
-  explicit `:connect_timeout` / `:receive_timeout`; `SamenAnthropic.Retry` wraps it (429,
-  529, 5xx and connection failures, bounded, honouring `retry-after`; never another 4xx,
-  never a timeout). Once retries are spent: 429 → `:rate_limited`, 529 → `:overloaded`, a
-  timeout → `:provider_timeout`; any other API error stays the bounded
+  explicit `:connect_timeout` / `:receive_timeout` / `:request_timeout`; `SamenAnthropic.Retry`
+  wraps it (429, 529, 5xx and failures to connect, bounded, honouring `retry-after`; never
+  another 4xx, never a timeout or a closed/reset connection). The whole call — every attempt
+  and every wait — fits `config[:call_budget_ms]` (the agent loop passes half its in-flight
+  watchdog): each attempt's timeouts are capped to the time left, and no wait is taken that
+  would leave too little for the next attempt. Once retries are spent: 429 → `:rate_limited`,
+  529 → `:overloaded`, a timeout → `:provider_timeout`; any other API error stays the bounded
   `{:anthropic_error, status, type}` the chokepoint reduces to `:provider_error`.
 
   ## Usage
@@ -156,9 +159,24 @@ defmodule SamenAnthropic.Provider do
       betas: if(Map.has_key?(body, "fallbacks"), do: [@fallback_beta], else: [])
     }
 
-    fn -> transport.(request) end
+    fn remaining_ms -> transport.(within(request, remaining_ms)) end
     |> Retry.run(config)
     |> handle_response(body["model"])
+  end
+
+  # One attempt may take at most what is left of the call's budget: connect within (at most
+  # half of) it, and the whole response within the rest (`receive_timeout` bounds each wait for
+  # data, `request_timeout` the response as a whole) — connect + response <= remaining.
+  defp within(request, remaining_ms) do
+    configured = request.connect_timeout || Transport.default_connect_timeout()
+    connect = max(min(configured, div(remaining_ms, 2)), 1)
+    rest = max(remaining_ms - connect, 1)
+    receive = min(request.receive_timeout || Transport.default_receive_timeout(), rest)
+
+    request
+    |> Map.put(:connect_timeout, connect)
+    |> Map.put(:receive_timeout, receive)
+    |> Map.put(:request_timeout, rest)
   end
 
   # Field-less match + dot access on purpose (the single-mint anti-bypass probe

@@ -712,6 +712,26 @@ adapter's default); the model that answered is recorded on the turn row's bounde
 `meta["model"]` (no migration). The ADR-048 summarizer call is split the same way: its literal
 prompt is `:system`, the folded span one user turn of data.
 
+**A turn in its provider call is never re-picked (2026-11-13 review).** The `:agent_turn_due` scan
+selects a `:queued`/`:running` run whose `next_turn_at <= now()`, and a replay reuses the turn's
+`:proposed` row and calls the provider again — while a slow first call (one 300 s attempt, or
+three with retries and `retry-after` waits; or the four calls of a Level-2 turn) could still be
+running past the 600 s window, so a second worker could pay for the same turn (the 60 s Oban
+uniqueness period does not cover a job inserted earlier). Closed by construction, two halves:
+the loop re-stamps `next_turn_at` to now + the watchdog immediately before EVERY provider call
+it makes (the attempt, the Level-2 retry, both summarizer calls), and every such call carries
+`call_budget_ms` = half the watchdog (`Samen.AI.Agent.provider_call_budget_ms/0`, derived from
+it), which the adapter honours for the whole call — attempts, retries and waits
+(`SamenAnthropic.Retry`; each attempt's connect/receive/response timeouts capped to the time
+left). So while a call can still be running its lease is at least half a watchdog away, and the
+scan cannot select the run. Proven with no real waiting: `agent_provider_lease_test.exs`
+(the lease at every call of a four-call turn whose calls each "use up" the window) and the
+injected-clock deadline tests in `samen_anthropic/test/provider_test.exs`. What it relies on: an
+adapter honouring `config[:call_budget_ms]` (the `Samen.AI.Provider` contract; the reference
+adapter does, Finch's whole-response timeout being best effort on HTTP/1 and pool checkout
+outside it — the other half of the watchdog is that margin). A connection closed or reset is no
+longer retried: the generation may have finished, and a retry would pay for it twice.
+
 **Residuals (named).** Thinking blocks are not replayed (the transcript does not keep them; the API
 accepts a history with all of them removed, at the cost of earlier reasoning). The context
 watermark estimator still counts the goal prompt and lines, not the few-hundred-byte preamble.

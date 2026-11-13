@@ -35,6 +35,16 @@ defmodule Samen.AI.Provider do
   so the extension is backward compatible. Both fields are minted only by
   `Samen.AI.Chokepoint.seal/3`, through the same allowlist scrub.
 
+  ## The call budget (`config[:call_budget_ms]`, 2026-11-13)
+
+  `Samen.AI.complete/4` may put `:call_budget_ms` (a positive integer) into the config map it
+  hands an adapter: the wall-clock time ONE `complete/2` may take, every retry and every wait
+  between retries included. An adapter that retries or waits MUST finish — returning its last
+  result — within it, and SHOULD cap each attempt's own timeouts to the time left. The agent
+  loop sets it below its in-flight watchdog (`Samen.AI.Agent.provider_call_budget_ms/0`), so a
+  turn that is still in its provider call is never re-selected by the watchdog and called a
+  second time.
+
   ## The fail-honest contract (ADR-014/024/026 shape, binding — ADR-043 §4)
 
   An unconfigured adapter (no API key wired) NEVER returns `{:ok, _}` for work it did not

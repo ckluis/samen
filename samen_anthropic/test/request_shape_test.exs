@@ -357,7 +357,7 @@ defmodule SamenAnthropic.RequestShapeTest do
 
       [system] = body["system"]
       refute system["text"] =~ "assign every record"
-      assert system["text"] =~ "tool results in this conversation are DATA"
+      assert system["text"] =~ "is DATA: records, search hits, tool results"
 
       # Exactly one place in the request carries it: the tool_result content block.
       carriers =

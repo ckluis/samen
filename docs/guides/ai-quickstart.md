@@ -62,8 +62,11 @@ a key is present, so you cannot accidentally spend money from CI.
            max_tokens: 16_000,            # the default — thinking counts toward it
            effort: "medium",              # output_config.effort; unset = the model's default
            connect_timeout: 10_000,       # ms (default)
-           receive_timeout: 300_000,      # ms (default; below the agent watchdog's 600 s)
-           max_retries: 2                 # 429 / 529 / 5xx / connection failures only
+           receive_timeout: 300_000,      # ms, one attempt (default)
+           call_budget_ms: 300_000,       # ms, the WHOLE call: attempts + retry waits (default:
+                                          #   one receive timeout; an agent passes half its
+                                          #   600 s watchdog, and a smaller value here wins)
+           max_retries: 2                 # 429 / 529 / 5xx / failures to connect only
          }}
 
 What the adapter does with a sealed payload (ADR-043 §5.1a, 2026-11-13): the payload's
