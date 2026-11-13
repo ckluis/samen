@@ -493,6 +493,75 @@ means re-deriving its masking guarantee.
 
 ---
 
+## Recipe 11 — Write a read that cannot lie (a failed read is not an empty one)
+
+**Mechanism:** `Samen.Web.Reads.Guard` (WP6). A read helper that ends in `rescue _ -> []` turns a
+database outage, a decrypt failure or a bug into "No contacts yet — create your first contact":
+HTTP 200, nothing logged, and an empty-state CTA that creates duplicates. A read wraps its body in
+`Guard.run/3` and returns the tagged result; the screen shows the kit `error_state/1` for a failure
+and keeps the real empty state for an honestly empty result.
+**Verified against:** `samen_web/lib/samen/web/reads/guard.ex` (the convention),
+`samen_web/lib/samen/web/crm/reads.ex` (`contacts_for_company_result/3`, `get_contact_result/3`,
+`companies_page/3`), `samen_web/lib/samen/web/list_live.ex` (`reread/2`) and the screen proofs in
+`samen_web/test/samen/web/reads_honest_failure_test.exs`.
+
+```elixir
+# A detail/aggregate read: the tagged result is the real function; the legacy name is a shim.
+def contacts_for_company(mount, scope, id),
+  do: mount |> contacts_for_company_result(scope, id) |> Guard.value([])
+
+def contacts_for_company_result(mount, scope, id) do
+  Guard.run(:crm_contacts_for_company, scope, fn ->
+    Mount.resource(mount, Person)
+    |> Ash.Query.filter(company_id == ^id)
+    |> Ash.Query.limit(@detail_limit)
+    |> Ash.read!(scope: scope)
+  end)
+end
+
+# A page read for ListLive: Guard.page/4 returns an EMPTY page with error: :unavailable.
+def companies_page(mount, scope, state) do
+  Guard.page(:crm_companies_page, scope, state, fn ->
+    Mount.resource(mount, Company) |> Samen.Web.Reads.page!(state, scope: scope)
+  end)
+end
+```
+
+The result is `{:ok, value}` (an empty value is an honest empty), `{:error, :unavailable}` (the read
+raised or exited) or `{:error, :forbidden}` (an `Ash.Error.Forbidden` — a denial stays a denial, is
+not logged as an outage, and a screen treats it as it always did). `{:error, :not_configured}` and
+`{:error, :not_implemented}` are ordinary return values of the function inside `run/3` and pass
+through untouched. A missing record is `{:error, :not_found}` from your read, never `:unavailable`:
+a detail screen keeps its 404 copy for it and shows the error state (with a retry event) only for a
+failure.
+
+On the screen:
+
+```heex
+<.list_view page={@page} state={@list_state} error={@list_error} retry_event="list_retry" ...>
+```
+
+`ListLive` keeps the previous page, the filter text and the selection when a re-read fails and sets
+`@list_error`; `"list_retry"` re-runs the read. A dashboard reads each tile through its own
+`Guard.run` and passes `error=` per tile, so one failed tile shows its own error and the rest render.
+
+**What is logged.** One `Logger.error` per failure — `read=<name> org=<id> cause=<exception module
+names>` — and one `[:samen, :web, :read, :error]` telemetry event (`read`, `cause`; no org id, which
+is a forbidden metric dimension). Never the exception message or struct, a query, row data or a
+token: an Ash error interpolates the values being processed. Name the read with a stable atom.
+
+**Test it** with the fault seam, not by breaking the database: `inject_read_faults([:crm_contacts_page])`
+(`Samen.WebTest.DataCase`) makes that read raise through the real path; assert the error state, that the
+empty-state copy and its CTA are absent, and that `clear_read_faults()` + the retry event recovers. Pair
+it with a positive control that an empty result still renders the real empty state.
+
+**Ratchet.** `Samen.Web.Reads.SwallowLint` counts catch-all `rescue`/`catch` clauses that neither log, report
+nor re-raise, per file, and fails on any increase (and on a decrease that is not written into its
+baseline). Converting a file lowers its row; a swallow that is correct (an optional-scope probe, a
+fail-closed authz lookup) goes into `@reviewed` with its reason.
+
+---
+
 *Every recipe above cites shipped code. If a cited task or macro disappears from the tree,
 `doc_recipes_test.exs` fails; if a fenced command stops being executed by CI,
 `doc_commands_test.exs` fails. That is the point.*

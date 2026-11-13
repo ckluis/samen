@@ -201,8 +201,6 @@ defmodule Samen.Web.CRM.ContactsLive do
 
   defp company_name_map(mount, scope) do
     Reads.companies(mount, scope) |> Map.new(fn c -> {c.id, c.name} end)
-  rescue
-    _ -> %{}
   end
 
   @impl true

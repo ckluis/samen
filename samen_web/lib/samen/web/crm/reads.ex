@@ -528,8 +528,6 @@ defmodule Samen.Web.CRM.Reads do
         _ -> false
       end
     end)
-  rescue
-    _ -> []
   end
 
   @doc """
@@ -568,39 +566,44 @@ defmodule Samen.Web.CRM.Reads do
   opportunities than the cap sees the oldest `#{@detail_limit}` on the board, never an
   unbounded row transfer.
   """
-  def pipeline(mount, scope) do
-    opps =
-      Mount.resource(mount, Opportunity)
-      |> Ash.Query.ensure_selected([:name, :value, :status, :pipeline_id, :company_id, :close_date])
-      |> Ash.Query.sort(inserted_at: :asc)
-      |> Ash.Query.limit(@detail_limit)
-      |> Ash.read!(scope: scope)
+  def pipeline(mount, scope), do: pipeline_result(mount, scope) |> Guard.value([])
 
-    stages =
-      Mount.resource(mount, Pipeline)
-      |> Ash.Query.ensure_selected([:name, :label, :stage_order])
-      |> Ash.Query.sort(stage_order: :asc)
-      |> Ash.Query.limit(@detail_limit)
-      |> Ash.read!(scope: scope)
+  @doc """
+  Tagged sibling of `pipeline/2` (WP6): `{:ok, value}`, or `{:error, :unavailable}` when the read FAILED (an outage is not an empty result), or `{:error, :forbidden}` for a denial.
+  """
+  def pipeline_result(mount, scope) do
+    Guard.run(:crm_pipeline, scope, fn ->
+      opps =
+        Mount.resource(mount, Opportunity)
+        |> Ash.Query.ensure_selected([:name, :value, :status, :pipeline_id, :company_id, :close_date])
+        |> Ash.Query.sort(inserted_at: :asc)
+        |> Ash.Query.limit(@detail_limit)
+        |> Ash.read!(scope: scope)
 
-    stage_by_id = Map.new(stages, fn s -> {s.id, s} end)
+      stages =
+        Mount.resource(mount, Pipeline)
+        |> Ash.Query.ensure_selected([:name, :label, :stage_order])
+        |> Ash.Query.sort(stage_order: :asc)
+        |> Ash.Query.limit(@detail_limit)
+        |> Ash.read!(scope: scope)
 
-    opps_by_stage =
-      Enum.group_by(opps, fn opp ->
-        case Map.get(stage_by_id, opp.pipeline_id) do
-          nil -> %{name: "unknown", label: "Unknown", stage_order: 99}
-          stage -> stage
-        end
+      stage_by_id = Map.new(stages, fn s -> {s.id, s} end)
+
+      opps_by_stage =
+        Enum.group_by(opps, fn opp ->
+          case Map.get(stage_by_id, opp.pipeline_id) do
+            nil -> %{name: "unknown", label: "Unknown", stage_order: 99}
+            stage -> stage
+          end
+        end)
+
+      stages
+      |> Enum.map(fn stage ->
+        stage_opps = Map.get(opps_by_stage, stage, [])
+        %{stage: stage, opportunities: stage_opps}
       end)
-
-    stages
-    |> Enum.map(fn stage ->
-      stage_opps = Map.get(opps_by_stage, stage, [])
-      %{stage: stage, opportunities: stage_opps}
+      |> Enum.filter(fn %{opportunities: o} -> length(o) > 0 end)
     end)
-    |> Enum.filter(fn %{opportunities: o} -> length(o) > 0 end)
-  rescue
-    _ -> []
   end
 
   # The non-PII Opportunity fields a pipeline card renders.

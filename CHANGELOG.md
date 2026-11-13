@@ -42,6 +42,22 @@ directory and diff, or apply by hand:
 8. **Seed tasks** should boot through `Samen.SeedBoot.start!/2` instead of `@requirements ["app.start"]`, or
    `mix <app>.seed` dies with `:eaddrinuse` while the dev server runs.
 
+### Reads that lie (WP6 phase 1)
+
+- **A failed read no longer renders as an empty one.** `Samen.Web.Reads.Guard` is the single convention: a read returns
+  `{:ok, v} | {:error, :unavailable | :forbidden}`; a failure is logged once with the read name and org id (never row
+  data, PII or the exception message) and emits `[:samen, :web, :read, :error]`. `%Samen.Web.Page{}` gains `error`;
+  `ListLive` keeps the previous page, filter text and selection on a failed re-read and exposes `@list_error` plus a
+  `"list_retry"` event (audit F07). CRM (contacts, contact/company detail, companies, gallery, pipeline, calendar,
+  dashboard incl. the un-rescued `safe_dashboard` crash F05, sequences, mailbox), Search (F22) and Support (tickets,
+  ticket detail F08) show the kit `error_state` with a retry instead of "No contacts yet", "Contact not found",
+  "No pipeline stages yet", "No matches" or "No conversation thread yet" + Start conversation; a genuinely missing
+  record keeps its 404. Legacy read names keep their return shapes. `command_palette` gains `error`/`retry_event`.
+  A swallow ratchet (`Samen.Web.Reads.SwallowLint`) fails CI on any new catch-all `rescue _ -> []`.
+  **Host action:** none required. A host view that `use`s `Samen.Web.ListLive` should pass
+  `error={@list_error} retry_event="list_retry"` to its `list_view` (without it a failed re-read keeps the old page
+  silently; the first read shows the empty state as before). Recipe: `docs/guides/cookbook.md` Recipe 11.
+
 ### Security and correctness fixes
 
 - The LiveView login oracle is closed; rate-limited users land on a real page. Sessions that are revoked disconnect their

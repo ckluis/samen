@@ -500,7 +500,10 @@ defmodule Samen.Web.Support.Reads do
       repo: mount.repo
     )
   rescue
-    _ -> records
+    e ->
+      # Fail-closed (no plaintext downgrade), but not silent: a resolver outage is logged.
+      Guard.report(:support_resolve_pii, scope, e)
+      records
   end
 
   defp actor_of(%Samen.Scope{actor: actor}), do: actor
