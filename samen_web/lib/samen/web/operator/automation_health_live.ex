@@ -188,7 +188,8 @@ defmodule Samen.Web.Operator.AutomationHealthLive do
       {:ok, _actor, _info} ->
         operator = socket.assigns[:operator]
 
-        result = if action == :kill, do: Health.kill(operator, workflow_id), else: Health.rearm(operator, workflow_id)
+        result = if action == :kill, do: Health.kill(operator, target_org_id, workflow_id),
+            else: Health.rearm(operator, target_org_id, workflow_id)
 
         case result do
           {:ok, _wf} ->
@@ -201,6 +202,7 @@ defmodule Samen.Web.Operator.AutomationHealthLive do
   end
 
   defp error_copy(:not_authorized), do: "You do not have permission to manage automation for this org."
+  defp error_copy(:not_found), do: "That workflow was not found in this org."
   defp error_copy(:no_automation_module), do: "Automation is not configured on this host."
   defp error_copy(_other), do: "That action could not be completed."
 

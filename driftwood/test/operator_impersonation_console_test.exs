@@ -14,6 +14,8 @@ defmodule Driftwood.OperatorImpersonationConsoleTest do
   """
   use Driftwood.DataCase, async: false
 
+  import Ecto.Query, only: [from: 2]
+
   alias Samen.Impersonation
   alias Samen.OperatorPlane.Actor
 
@@ -168,6 +170,55 @@ defmodule Driftwood.OperatorImpersonationConsoleTest do
       assert socket.assigns.session_inactive
       assert socket.assigns.drivers == []
       assert socket.assigns.session_info == nil
+    end
+  end
+
+  describe "the per-second tick re-consults the impersonation gate (F07)" do
+    alias Samen.Impersonation.Session
+
+    # A tenant WITH a driver roster, so "the roster stays/leaves the screen" is observable.
+    defp open_loaded(operator_id) do
+      org_id = Driftwood.DogfoodScenario.build(lane: "IL->TX", tier: "starter", mrr_cents: 120_000).org_id
+      op = Actor.new(operator_id, :operator_support)
+      {:ok, session} = Impersonation.open(op, org_id, "ticket #7781: tick regate")
+      socket = DriftwoodWeb.OperatorImpersonationLive.load(empty_socket(), op.id, org_id)
+      {session, socket}
+    end
+
+    test "control: while the session is live a tick keeps the roster on screen" do
+      {_session, socket} = open_loaded("op-tick-live")
+      assert socket.assigns.impersonating
+      assert socket.assigns.drivers != []
+
+      {:noreply, ticked} = DriftwoodWeb.OperatorImpersonationLive.handle_info(:tick, socket)
+      assert ticked.assigns.impersonating
+      assert ticked.assigns.drivers != []
+    end
+
+    test "RED: once the session TTL elapses the next tick drops the roster and loads (access-denied state)" do
+      {session, socket} = open_loaded("op-tick-ttl")
+      assert socket.assigns.drivers != []
+
+      past = DateTime.add(DateTime.utc_now(), -60, :second)
+      Driftwood.Repo.update_all(from(s in Session, where: s.id == ^session.id), set: [expires_at: past])
+
+      {:noreply, ticked} = DriftwoodWeb.OperatorImpersonationLive.handle_info(:tick, socket)
+
+      assert ticked.assigns.session_inactive
+      refute ticked.assigns.impersonating
+      assert ticked.assigns.drivers == []
+      assert ticked.assigns.loads == []
+      assert render(ticked.assigns) =~ "no active impersonation session"
+    end
+
+    test "RED: a manually closed session is dropped on the next tick too" do
+      {session, socket} = open_loaded("op-tick-closed")
+      assert {:ok, _} = Impersonation.close(session.id)
+
+      {:noreply, ticked} = DriftwoodWeb.OperatorImpersonationLive.handle_info(:tick, socket)
+
+      assert ticked.assigns.session_inactive
+      assert ticked.assigns.drivers == []
     end
   end
 end

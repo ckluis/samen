@@ -46,3 +46,10 @@ case Samen.WebTest.SecurityEndpoint.start_link() do
   {:ok, _} -> :ok
   {:error, {:already_started, _}} -> :ok
 end
+
+# ARCH-13: the PubSub behind `SecurityEndpoint.broadcast/3` / `subscribe/1` — session-revocation
+# tests subscribe to a session's live_socket_id exactly as a connected LiveView socket does.
+case Phoenix.PubSub.Supervisor.start_link(name: Samen.WebTest.PubSub) do
+  {:ok, _} -> :ok
+  {:error, {:already_started, _}} -> :ok
+end

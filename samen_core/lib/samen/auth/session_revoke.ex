@@ -26,6 +26,34 @@ defmodule Samen.Auth.SessionRevoke do
   require Ash.Query
 
   @doc """
+  The token digests of the credential's LIVE (`revoked_at IS NULL`) sessions — read BEFORE a
+  revoke so the web layer can disconnect exactly the LiveView sockets those sessions hold
+  open (`Samen.Web.Auth.SessionSockets`; a revocation is only "immediate" for new requests
+  unless the connected sockets are told). The digest is the one thing a session cookie and
+  its row share without the raw token ever being stored.
+
+  Options: `:only` (a single session id) or `:except` (every session but this id).
+  """
+  @spec live_token_digests(module(), String.t(), keyword()) :: [String.t()]
+  def live_token_digests(session_mod, credential_id, opts \\ []) when is_binary(credential_id) do
+    query =
+      session_mod
+      |> Ash.Query.filter(credential_id == ^credential_id and is_nil(revoked_at))
+      |> Ash.Query.select([:id, :token_digest])
+
+    query =
+      case {Keyword.get(opts, :only), Keyword.get(opts, :except)} do
+        {id, _} when is_binary(id) -> Ash.Query.filter(query, id == ^id)
+        {_, id} when is_binary(id) -> Ash.Query.filter(query, id != ^id)
+        _ -> query
+      end
+
+    # authz-scope: per-credential session read keyed on the caller's own authenticated
+    # credential id; sessions are org-less identity-spine rows (same as `SessionList.list_live/2`)
+    query |> Ash.read!(authorize?: false) |> Enum.map(& &1.token_digest)
+  end
+
+  @doc """
   Revoke every live (`revoked_at IS NULL`) `Identity.Session` row belonging
   to `credential_id`. Idempotent — a credential with zero live sessions is a
   no-op, not an error.

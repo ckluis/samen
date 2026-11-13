@@ -112,6 +112,7 @@ defmodule Samen.Web.Auth do
     |> delete_session(@session_user_key)
     |> delete_session(@session_org_key)
     |> delete_session(@session_token_key)
+    |> delete_session("live_socket_id")
     |> delete_session(@totp_pending_key)
     |> clear_remember_cookie()
   end
@@ -157,8 +158,13 @@ defmodule Samen.Web.Auth do
   migration — both, briefly).
   """
   @spec put_session_token(Plug.Conn.t(), String.t()) :: Plug.Conn.t()
-  def put_session_token(conn, raw_token) when is_binary(raw_token),
-    do: put_session(conn, @session_token_key, raw_token)
+  def put_session_token(conn, raw_token) when is_binary(raw_token) do
+    conn
+    |> put_session(@session_token_key, raw_token)
+    # ARCH-13 — every LiveView mounted from this session subscribes to this topic, so a
+    # revoke can disconnect it (`Samen.Web.Auth.SessionSockets`).
+    |> put_session("live_socket_id", Samen.Web.Auth.SessionSockets.live_socket_id_for_token(raw_token))
+  end
 
   @doc """
   Write the standalone remember-me cookie (ADR-035 §4.3): **signed**,

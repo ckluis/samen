@@ -4,20 +4,20 @@ defmodule Samen.Web.Auth.LoginLive do
   `Samen.Web.Router.samen_auth_routes/1`. **Pre-actor public** (ADR-035 §6):
   no org data rendered.
 
-  A LiveView cannot set a cookie mid-mount, so this page only VALIDATES —
-  `Samen.Identity.SignIn.authenticate/3` runs here purely for the inline
-  error UX (the SAME generic "invalid email or password" message for a wrong
-  password AND an unknown email, no account-existence oracle). On a
-  successful validation, the form's `phx-trigger-action` fires a REAL browser
-  POST to `Samen.Web.Auth.SessionController.create/2`, which re-authenticates
-  (never trusts the client-side check alone), mints the `Identity.Session`
-  row, and writes the cookies on that real HTTP response.
+  This page NEVER authenticates. The form is a plain `POST` to
+  `Samen.Web.Auth.SessionController.create/2` (a real `action` + `method="post"`,
+  no `phx-submit`), which is the ONE place a password is checked: it applies the
+  T103 rate limits, mints the `Identity.Session` row, writes the cookies on that
+  real HTTP response, and redirects back here with `?error=<code>` on a bad
+  credential or an over-limit caller. A LiveView `handle_event` that ran
+  `SignIn.authenticate/3` ahead of the POST would be an unthrottled
+  password-guessing oracle over the websocket (it reveals ok/error), so there is
+  none; the JS-on and JS-off paths are the same request.
   """
   use Phoenix.LiveView
 
   import Samen.UI
 
-  alias Samen.Identity.SignIn
   alias Samen.Web.Mount
 
   @impl true
@@ -28,36 +28,19 @@ defmodule Samen.Web.Auth.LoginLive do
 
   @doc false
   def load(socket) do
-    assign(socket, form: blank_form(), error: nil, trigger_submit: false)
+    assign(socket, form: blank_form(), error: nil)
   end
 
   @impl true
   def handle_params(params, _uri, socket) do
-    error = if params["error"], do: "Invalid email or password.", else: socket.assigns[:error]
+    error = if code = params["error"], do: error_copy(code), else: socket.assigns[:error]
     {:noreply, assign(socket, error: error)}
   end
 
-  @impl true
-  def handle_event("login", %{"login" => params}, socket) do
-    mount = socket.assigns.samen_mount
-    email = String.trim(params["email"] || "")
-    password = params["password"] || ""
-
-    case SignIn.authenticate(email, password, sign_in_mods(mount)) do
-      {:ok, _credential} ->
-        {:noreply, assign(socket, form: to_form(params, as: :login), trigger_submit: true)}
-
-      {:error, _reason} ->
-        {:noreply,
-         assign(socket,
-           form: to_form(params, as: :login),
-           error: "Invalid email or password.",
-           trigger_submit: false
-         )}
-    end
-  end
-
-  defp sign_in_mods(%Mount{} = mount), do: %{credential: Mount.resource(mount, Credential)}
+  # The controller redirects with `?error=rate_limited` for an over-limit caller and
+  # `?error=1` for a bad credential (one generic message — no account-existence oracle).
+  defp error_copy("rate_limited"), do: "Too many sign-in attempts. Please wait a minute and try again."
+  defp error_copy(_), do: "Invalid email or password."
 
   defp blank_form, do: to_form(%{}, as: :login)
 
@@ -79,8 +62,6 @@ defmodule Samen.Web.Auth.LoginLive do
           id="login-form"
           action={login_action(@samen_mount)}
           method="post"
-          phx-submit="login"
-          phx-trigger-action={@trigger_submit}
         >
           <input type="hidden" name="_csrf_token" value={Phoenix.Controller.get_csrf_token()} />
 

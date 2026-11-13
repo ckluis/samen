@@ -348,6 +348,12 @@ defmodule Samen.Web.Auth.LoginFailureDurableTest do
     mount |> do_login(email, password, ip) |> outcome()
   end
 
-  defp outcome(%{status: 429}), do: :refused
-  defp outcome(%{status: status}) when status in 300..399, do: :allowed
+  # Over-limit is a redirect back to the login / 2FA page with `?error=rate_limited` (a human
+  # lands on a real page, not a bare text/plain 429); an under-limit wrong credential is the
+  # ordinary `?error=1` redirect. The request is refused BEFORE any credential work either way.
+  defp outcome(%{status: status} = conn) when status in 300..399 do
+    if (conn |> Plug.Conn.get_resp_header("location") |> List.first() || "") =~ "error=rate_limited",
+      do: :refused,
+      else: :allowed
+  end
 end

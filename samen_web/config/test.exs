@@ -88,6 +88,8 @@ config :samen_web, :fleet_wire_catalogs,
 config :samen_web, Samen.WebTest.SecurityEndpoint,
   secret_key_base: String.duplicate("samen-web-security-probe-", 4),
   live_view: [signing_salt: "sec-probe-lv"],
+  # ARCH-13: `Endpoint.broadcast/3` ("disconnect" on a session's live_socket_id) needs a PubSub.
+  pubsub_server: Samen.WebTest.PubSub,
   render_errors: [formats: [html: Samen.WebTest.SecurityErrorHTML], layout: false],
   server: false
 

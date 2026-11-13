@@ -9,7 +9,7 @@ defmodule Samen.Web.OperatorAutomationHealthTest do
       helper never wires a socket; workflow health + the run log both render
       real content from it (read affordances survive without JS).
     * **The kill-switch round-trip** — `handle_event("kill", ...)` writes
-      through `Samen.Automation.Health.kill/3` (the SAME columns/action T39's
+      through `Samen.Automation.Health.kill/4` (the SAME columns/action T39's
       dispatch/RunWorker honor — asserted via a direct resource read, not just
       UI state) and is idempotent + audited; `"rearm"` clears it.
     * **INV-1 no-leak DOM scan** — a run whose outcome carries a subject value/
@@ -61,7 +61,7 @@ defmodule Samen.Web.OperatorAutomationHealthTest do
     assert html =~ ~s(phx-click="kill")
   end
 
-  test "the kill-switch round-trips through Health.kill/3 — a direct resource read confirms the write" do
+  test "the kill-switch round-trips through Health.kill/4 — a direct resource read confirms the write" do
     org = Ash.UUID.generate()
     owner = Ash.UUID.generate()
     wf = create_workflow!(org, owner)
@@ -129,6 +129,28 @@ defmodule Samen.Web.OperatorAutomationHealthTest do
     socket = AutomationHealthLive.load(socket, org)
     _socket = event(socket, "kill", %{"id" => to_string(wf.id)})
     assert reload_workflow!(wf.id).disabled_by_operator_at
+  end
+
+  test "a session on org A cannot kill/rearm org B's workflow via a crafted workflow id (cross-tenant)" do
+    org_a = Ash.UUID.generate()
+    org_b = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+    wf_a = create_workflow!(org_a, owner)
+    wf_b = create_workflow!(org_b, owner)
+
+    # Active session for org A only; the page is mounted on org A.
+    socket = mount_socket(org_a)
+
+    # Crafted phx-click carrying org B's workflow id.
+    socket = event(socket, "kill", %{"id" => to_string(wf_b.id)})
+    refute reload_workflow!(wf_b.id).disabled_by_operator_at
+    assert socket.assigns.action_error =~ "not found"
+    assert html(socket) =~ "action-error"
+
+    # Positive control: org A's own workflow still kills through the same handler.
+    _socket = event(socket, "kill", %{"id" => to_string(wf_a.id)})
+    assert reload_workflow!(wf_a.id).disabled_by_operator_at
+    refute reload_workflow!(wf_b.id).disabled_by_operator_at
   end
 
   test "no PII / vault token / webhook secret ever renders in the health page (INV-1 red-path proof)" do

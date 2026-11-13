@@ -19,11 +19,28 @@ defmodule Samen.Web.Webhook.RawBodyReader do
 
   @assign :raw_webhook_body
 
-  @doc "Read the body and cache the raw bytes in `conn.assigns[:raw_webhook_body]`."
+  @doc """
+  Read the body and cache the raw bytes in `conn.assigns[:raw_webhook_body]`.
+
+  Honors the full `Plug.Conn.read_body/2` contract the parser expects. `{:more, _, conn}`
+  (the body exceeds the configured `:length`) and `{:error, reason}` pass through
+  untouched — `Plug.Parsers` turns them into its own 413 `RequestTooLargeError` /
+  connection error. A partial body is NOT cached: nothing may verify a signature over a
+  truncated payload. (This used to match `{:ok, _, _}` only, so an oversized unauthenticated
+  POST raised `MatchError` and answered 500.)
+  """
   def read_body(conn, opts) do
-    {:ok, body, conn} = Plug.Conn.read_body(conn, opts)
-    existing = conn.assigns[@assign] || ""
-    {:ok, body, Plug.Conn.assign(conn, @assign, existing <> body)}
+    case Plug.Conn.read_body(conn, opts) do
+      {:ok, body, conn} ->
+        existing = conn.assigns[@assign] || ""
+        {:ok, body, Plug.Conn.assign(conn, @assign, existing <> body)}
+
+      {:more, _partial, _conn} = more ->
+        more
+
+      {:error, _reason} = error ->
+        error
+    end
   end
 
   @doc """

@@ -24,7 +24,7 @@ defmodule Samen.Automation.ObservabilityTest do
   own filter would never even enqueue it; this proves the SECOND check
   independently, by enqueueing directly). An untouched sibling workflow fires
   normally in the SAME drain (control — the kill is per-workflow, not
-  global). `Samen.Automation.Health.kill/3` additionally proves the switch
+  global). `Samen.Automation.Health.kill/4` additionally proves the switch
   FLIP is audited (`Samen.AuditEvent.for_subject/2`) and idempotent (calling
   kill twice never double-stamps `disabled_by_operator_at`).
 
@@ -259,7 +259,7 @@ defmodule Samen.Automation.ObservabilityTest do
     assert alive_run.state == :succeeded
   end
 
-  test "Health.kill/3 audits the switch flip and is idempotent (double-kill never re-stamps)" do
+  test "Health.kill/4 audits the switch flip and is idempotent (double-kill never re-stamps)" do
     org = Ash.UUID.generate()
     owner = Ash.UUID.generate()
 
@@ -271,13 +271,13 @@ defmodule Samen.Automation.ObservabilityTest do
 
     operator = Actor.new(Ash.UUID.generate(), :operator_admin)
 
-    assert {:ok, killed_once} = Health.kill(operator, to_string(wf.id))
+    assert {:ok, killed_once} = Health.kill(operator, org, to_string(wf.id))
     stamp = killed_once.disabled_by_operator_at
     assert killed_once.disabled_reason == :operator
 
     # Idempotent: a second kill call is a no-op that preserves the ORIGINAL
     # stamp (fail-safe — "killing is idempotent").
-    assert {:ok, killed_twice} = Health.kill(operator, to_string(wf.id))
+    assert {:ok, killed_twice} = Health.kill(operator, org, to_string(wf.id))
     assert DateTime.compare(killed_twice.disabled_by_operator_at, stamp) == :eq
 
     events = Samen.AuditEvent.for_subject(TestRepo, to_string(wf.id))
@@ -287,9 +287,32 @@ defmodule Samen.Automation.ObservabilityTest do
     assert Enum.any?(events, &String.contains?(&1.detail, "operator_kill"))
 
     # Re-arm clears both columns, also audited.
-    assert {:ok, rearmed} = Health.rearm(operator, to_string(wf.id))
+    assert {:ok, rearmed} = Health.rearm(operator, org, to_string(wf.id))
     assert is_nil(rearmed.disabled_by_operator_at)
     assert is_nil(rearmed.disabled_reason)
+  end
+
+  test "Health.kill/rearm refuse a workflow that belongs to another org (cross-tenant, crafted id)" do
+    org_a = Ash.UUID.generate()
+    org_b = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+
+    wf_b =
+      create_workflow!(org_b, owner,
+        conditions: [],
+        actions: [%{"kind" => "notify", "recipient" => "owner", "event_type" => "workflow.fired"}]
+      )
+
+    admin = Actor.new(Ash.UUID.generate(), :operator_admin)
+
+    # Red: an operator vouched for org A cannot kill/rearm org B's workflow by id.
+    assert {:error, :not_found} = Health.kill(admin, org_a, to_string(wf_b.id))
+    assert {:error, :not_found} = Health.rearm(admin, org_a, to_string(wf_b.id))
+    assert is_nil(Ash.get!(wf_b.__struct__, wf_b.id, authorize?: false).disabled_by_operator_at)
+
+    # Positive control: the owning org's id works.
+    assert {:ok, killed} = Health.kill(admin, org_b, to_string(wf_b.id))
+    assert killed.disabled_reason == :operator
   end
 
   test "an operator_readonly actor may VIEW but may NOT kill (RBAC gate, red + control)" do
@@ -306,14 +329,14 @@ defmodule Samen.Automation.ObservabilityTest do
     admin = Actor.new(Ash.UUID.generate(), :operator_admin)
 
     # Red: readonly may not kill.
-    assert {:error, :not_authorized} = Health.kill(readonly, to_string(wf.id))
+    assert {:error, :not_authorized} = Health.kill(readonly, org, to_string(wf.id))
     # Readonly control: it MAY view.
     assert {:ok, _summary} = Health.summary(readonly, org)
     # A non-operator actor (e.g. a bare tenant scope) may not view either.
     assert {:error, :not_authorized} = Health.summary(%Samen.Scope{actor: %{id: "x", org_id: org, role: :member}}, org)
 
     # Control: an admin CAN kill.
-    assert {:ok, _} = Health.kill(admin, to_string(wf.id))
+    assert {:ok, _} = Health.kill(admin, org, to_string(wf.id))
   end
 
   # ---------------------------------------------------------------------------

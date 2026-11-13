@@ -52,7 +52,8 @@ defmodule Samen.Identity.Reset do
           required(:auth_token) => module(),
           required(:session) => module(),
           required(:repo) => module(),
-          optional(:user) => module()
+          optional(:user) => module(),
+          optional(:on_sessions_revoked) => ([String.t()] -> any())
         }
 
   @doc """
@@ -157,7 +158,9 @@ defmodule Samen.Identity.Reset do
         {:ok, updated} ->
           # c3 — revoke EVERY session, including the one that requested the
           # reset (the user re-authenticates).
+          digests = SessionRevoke.live_token_digests(mods.session, credential.id)
           :ok = SessionRevoke.revoke_all(mods.session, credential.id)
+          notify_sessions_revoked(mods, digests)
 
           Audit.auth_event(mods.repo,
             event: "password_reset",
@@ -190,4 +193,21 @@ defmodule Samen.Identity.Reset do
   end
 
   defp notify_reset(_mods, _credential_id), do: :ok
+
+  # Optional host seam: `mods[:on_sessions_revoked]` (a 1-arity fun over the revoked sessions'
+  # token digests) lets the web layer disconnect the LiveView sockets those sessions hold
+  # open — the row is revoked for new requests either way. Best-effort: never fails a reset.
+  defp notify_sessions_revoked(mods, digests) do
+    case Map.get(mods, :on_sessions_revoked) do
+      fun when is_function(fun, 1) ->
+        try do
+          fun.(digests)
+        rescue
+          _ -> :ok
+        end
+
+      _ ->
+        :ok
+    end
+  end
 end

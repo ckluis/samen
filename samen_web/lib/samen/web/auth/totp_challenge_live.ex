@@ -37,9 +37,12 @@ defmodule Samen.Web.Auth.TotpChallengeLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
-    error = if params["error"], do: "Invalid or expired code.", else: socket.assigns[:error]
+    error = if code = params["error"], do: error_copy(code), else: socket.assigns[:error]
     {:noreply, assign(socket, error: error)}
   end
+
+  defp error_copy("rate_limited"), do: "Too many attempts. Please wait a minute and try again."
+  defp error_copy(_), do: "Invalid or expired code."
 
   @impl true
   def handle_event("verify", %{"totp" => params}, socket) do
