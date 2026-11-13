@@ -23,7 +23,7 @@ features. End-user self-serve (profile, 2FA, sessions, API keys, DSAR/export, te
 None of this is a defect against the current gates — the gates scored the masking spine and the
 reuse thesis, both of which are real and strong. It IS the entire delta between "a governed
 framework that proves masking" and "a SaaS foundry that makes *using* the product a joy." The
-`next-session-brief.md` already names these as the end-user lens; this doc ranks them.
+`docs/archive/next-session-brief.md` already names these as the end-user lens; this doc ranks them.
 
 ---
 
@@ -43,7 +43,7 @@ framework that proves masking" and "a SaaS foundry that makes *using* the produc
   (Membership, Invitation, ApiKey).
 - CSS: https://github.com/ckluis/samen/blob/85058d1ed50e4a200c2769ca2e05a2812d4020d2/samen_web/priv/static/assets/samen_ui.css (500 lines,
   `@media` count = **0**, skeleton/loading/keyframes count = **0**).
-- Gate reports (`docs/gate-*.md`) + `docs/next-session-brief.md` for known residues.
+- Gate reports (`docs/gate-*.md`) + `docs/archive/next-session-brief.md` for known residues.
 
 ### Hard signals (grep-verified)
 

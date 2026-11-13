@@ -1,3 +1,5 @@
+> **HISTORICAL (2026-07-16) — superseded; do not follow as instructions.** It tells agents to background `ci.sh`, which `CLAUDE.md` and `docs/ci.md` forbid.
+
 # Samen — Fresh-Session Brief: gap → joy, continued
 
 > Paste this as the first message of a fresh **Fable** session. Your project memory
