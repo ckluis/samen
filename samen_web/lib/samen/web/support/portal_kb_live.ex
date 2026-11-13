@@ -57,7 +57,7 @@ defmodule Samen.Web.Support.PortalKbLive do
 
   @doc false
   def load(socket, nil) do
-    assign(socket, org_id: nil, articles: [], deflect_form: blank_deflect_form(), suggestion: nil)
+    assign(socket, org_id: nil, articles: [], articles_error: false, deflect_form: blank_deflect_form(), suggestion: nil)
   end
 
   def load(socket, org_id) do
@@ -65,10 +65,16 @@ defmodule Samen.Web.Support.PortalKbLive do
 
     socket
     |> assign(org_id: org_id, kb_mount: kb_mount)
-    |> assign(articles: kb_mount && KbReads.public_articles(kb_mount, org_id) |> Kernel.||([]))
+    |> assign_articles(kb_mount && KbReads.public_articles_result(kb_mount, org_id))
     |> assign_new(:deflect_form, fn -> blank_deflect_form() end)
     |> assign_new(:suggestion, fn -> nil end)
   end
+
+  # The portal is PUBLIC: a failed read must neither crash the page nor read as "no articles".
+  defp assign_articles(socket, nil), do: assign(socket, articles: [], articles_error: false)
+  defp assign_articles(socket, {:ok, articles}), do: assign(socket, articles: articles, articles_error: false)
+  defp assign_articles(socket, {:error, :forbidden}), do: assign(socket, articles: [], articles_error: false)
+  defp assign_articles(socket, {:error, :unavailable}), do: assign(socket, articles: [], articles_error: true)
 
   # `:kb`-kind mount = a mount pointed DIRECTLY at the CMS namespace (this page's own
   # `samen_module_routes :kb, Host.Cms, ...` mount) — no `:kb_namespace` label indirection
@@ -92,6 +98,8 @@ defmodule Samen.Web.Support.PortalKbLive do
   # -- events -------------------------------------------------------------------
 
   @impl true
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
+
   def handle_event("deflect", %{"deflect" => params}, socket) do
     form = to_form(params, as: :deflect)
     query = deflect_query(params)
@@ -151,7 +159,8 @@ defmodule Samen.Web.Support.PortalKbLive do
               <span class="n">{length(@articles)}</span>
             </div>
 
-            <%= if @articles == [] do %>
+            <.error_state :if={@articles_error} class="kb-portal-error" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
+            <%= if @articles == [] and not @articles_error do %>
               <.empty_state class="kb-portal-empty" icon="📚" title="No help articles published yet." body="Check back soon." />
             <% else %>
               <div :for={a <- @articles} class="card portal-article" id={"portal-article-#{a.id}"} style="padding:16px 18px;margin-bottom:10px">

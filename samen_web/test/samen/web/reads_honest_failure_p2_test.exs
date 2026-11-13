@@ -1253,4 +1253,87 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
       refute rendered =~ "No drafts yet"
     end
   end
+
+  # ===========================================================================
+  # Support KB + the PUBLIC portal KB
+  # ===========================================================================
+
+  describe "Support KB" do
+    alias Samen.Web.Support.{KbLive, KbReads, PortalKbLive}
+
+    defp kb_article!(org_id, attrs) do
+      kb_mount = build_mount(:kb)
+
+      Samen.Web.Mount.resource(kb_mount, Post)
+      |> Ash.Changeset.for_create(
+        :create,
+        Map.merge(%{title: "Untitled", slug: "s-#{System.unique_integer([:positive])}", body: "body", org_id: org_id}, attrs),
+        scope: Samen.Web.Mount.scope(kb_mount, org_id)
+      )
+      |> Ash.create!()
+    end
+
+    test "agent KB: a failed list is the error state, not the 'No articles yet.' create CTA; retry recovers; empty stays empty" do
+      org_id = Ash.UUID.generate()
+      kb_article!(org_id, %{title: "P2 article", visibility: :internal})
+      mount = build_mount(:support)
+      extra = [org_id: org_id]
+      assert html(KbLive, socket_for(KbLive, mount, [Ash.UUID.generate()], extra)) =~ "No articles yet."
+
+      inject_read_faults([:support_kb_articles])
+      socket = failing(fn -> socket_for(KbLive, mount, [org_id], extra) end)
+      rendered = html(KbLive, socket)
+      assert_error_state(rendered)
+      refute rendered =~ "No articles yet."
+      refute rendered =~ "empty-new-article"
+
+      clear_read_faults()
+      rendered = html(KbLive, event(KbLive, socket, "retry_load"))
+      refute_error_state(rendered)
+      assert rendered =~ "P2 article"
+    end
+
+    test "agent KB: a failed publish lookup says nothing was published (not 'admin role required')" do
+      org_id = Ash.UUID.generate()
+      article = kb_article!(org_id, %{title: "P2 draft", visibility: :public})
+      mount = build_mount(:support)
+      socket = socket_for(KbLive, mount, [org_id], org_id: org_id)
+
+      inject_read_faults([:support_kb_get_article])
+      failed = failing(fn -> event(KbLive, socket, "publish", %{"id" => article.id}) end)
+      assert failed.assigns.save_error =~ "Nothing was published"
+      refute failed.assigns.save_error =~ "admin role"
+    end
+
+    test "PUBLIC portal: a failed read neither crashes nor says 'No help articles'; retry recovers; empty stays empty" do
+      org_id = Ash.UUID.generate()
+      article = kb_article!(org_id, %{title: "P2 public help", visibility: :public})
+      {:ok, _} = KbReads.publish_article(build_mount(:kb), org_id, article.id)
+      mount = build_mount(:kb)
+      assert html(PortalKbLive, socket_for(PortalKbLive, mount, [Ash.UUID.generate()])) =~ "No help articles published yet."
+
+      inject_read_faults([:support_kb_public_articles])
+      socket = failing(fn -> socket_for(PortalKbLive, mount, [org_id]) end)
+      rendered = html(PortalKbLive, socket)
+      assert_error_state(rendered)
+      refute rendered =~ "No help articles published yet."
+      refute rendered =~ "P2 public help"
+
+      clear_read_faults()
+      rendered = html(PortalKbLive, event(PortalKbLive, socket, "retry_load"))
+      refute_error_state(rendered)
+      assert rendered =~ "P2 public help"
+    end
+
+    test "portal deflection: a failed suggestion read is the honest 'unavailable', never a crash" do
+      org_id = Ash.UUID.generate()
+      mount = build_mount(:kb)
+      socket = socket_for(PortalKbLive, mount, [org_id])
+
+      inject_read_faults([:support_kb_suggest])
+      socket = failing(fn -> event(PortalKbLive, socket, "deflect", %{"deflect" => %{"subject" => "password", "description" => "reset"}}) end)
+      assert socket.assigns.suggestion == %{state: :error, hits: []}
+      assert html(PortalKbLive, socket) =~ "Article suggestions are unavailable right now."
+    end
+  end
 end

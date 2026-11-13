@@ -129,7 +129,6 @@ defmodule Samen.Web.Reads.SwallowLint do
     "samen_web/lib/samen/web/operator/revenue_live.ex" => 1,
     "samen_web/lib/samen/web/operator/webhook_dlq_live.ex" => 3,
     "samen_web/lib/samen/web/reads.ex" => 1,
-    "samen_web/lib/samen/web/support/kb_reads.ex" => 1,
     "samen_web/lib/samen/web/tags.ex" => 2,
     "samen_web/lib/samen/web/tenant/analytics_reads.ex" => 1,
     "samen_web/lib/samen/web/tenant_gate.ex" => 1,

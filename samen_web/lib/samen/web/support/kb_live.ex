@@ -51,7 +51,7 @@ defmodule Samen.Web.Support.KbLive do
   def load(socket, nil) do
     socket
     |> ensure_return_to()
-    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, kb_mount: nil, articles: [])
+    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, kb_mount: nil, articles: [], articles_error: false)
     |> assign(show_new: false, new_form: nil, edit_id: nil, edit_form: nil, save_error: nil)
   end
 
@@ -63,7 +63,7 @@ defmodule Samen.Web.Support.KbLive do
     socket
     |> ensure_return_to()
     |> assign(no_org: false, org_id: org_id, kb_mount: kb_mount)
-    |> assign(articles: kb_articles(kb_mount, scope))
+    |> assign_articles(kb_articles(kb_mount, scope))
     |> assign_new(:show_new, fn -> false end)
     |> assign_new(:edit_id, fn -> nil end)
     |> assign(new_form: kb_mount && KbReads.new_article_form(kb_mount, scope))
@@ -71,23 +71,37 @@ defmodule Samen.Web.Support.KbLive do
     |> refresh_edit()
   end
 
-  defp kb_articles(nil, _scope), do: []
-  defp kb_articles(kb_mount, scope), do: KbReads.articles(kb_mount, scope)
+  defp kb_articles(nil, _scope), do: {:ok, []}
+  defp kb_articles(kb_mount, scope), do: KbReads.articles_result(kb_mount, scope)
+
+  # A FAILED read is the error state (retry), never the "No articles yet." create-your-first CTA.
+  defp assign_articles(socket, {:ok, articles}), do: assign(socket, articles: articles, articles_error: false)
+  defp assign_articles(socket, {:error, :forbidden}), do: assign(socket, articles: [], articles_error: false)
+  defp assign_articles(socket, {:error, :unavailable}), do: assign(socket, articles: [], articles_error: true)
 
   defp refresh_edit(%{assigns: %{edit_id: nil}} = socket), do: assign(socket, edit_form: nil)
 
   defp refresh_edit(%{assigns: %{edit_id: id, kb_mount: kb_mount, org_id: org_id, samen_mount: mount}} = socket) do
     scope = Mount.scope(mount, org_id)
 
-    case kb_mount && KbReads.get_article(kb_mount, scope, id) do
-      nil -> assign(socket, edit_id: nil, edit_form: nil)
-      article -> assign(socket, edit_form: KbReads.edit_article_form(kb_mount, scope, article))
+    case kb_mount && KbReads.get_article_result(kb_mount, scope, id) do
+      {:ok, article} ->
+        assign(socket, edit_form: KbReads.edit_article_form(kb_mount, scope, article))
+
+      # A failed lookup is not "no such article": say so and keep the list.
+      {:error, :unavailable} ->
+        assign(socket, edit_id: nil, edit_form: nil, save_error: Samen.Web.Reads.Guard.message())
+
+      _ ->
+        assign(socket, edit_id: nil, edit_form: nil)
     end
   end
 
   # -- events -------------------------------------------------------------------
 
   @impl true
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
+
   def handle_event("new_article", _params, socket) do
     scope = Mount.scope(socket.assigns.samen_mount, socket.assigns.org_id)
     form = socket.assigns.kb_mount && KbReads.new_article_form(socket.assigns.kb_mount, scope)
@@ -133,7 +147,11 @@ defmodule Samen.Web.Support.KbLive do
   def handle_event("publish", %{"id" => id}, socket) do
     case KbReads.publish_article(socket.assigns.kb_mount, socket.assigns.org_id, id) do
       {:ok, _} -> {:noreply, load(assign(socket, save_error: nil), socket.assigns.org_id)}
-      {:error, _} -> {:noreply, assign(socket, save_error: "Could not publish this article (admin role required).")}
+      {:error, :unavailable} ->
+        {:noreply, assign(socket, save_error: "Couldn't publish this article right now. Nothing was published — try again.")}
+
+      {:error, _} ->
+        {:noreply, assign(socket, save_error: "Could not publish this article (admin role required).")}
     end
   end
 
@@ -190,6 +208,9 @@ defmodule Samen.Web.Support.KbLive do
                   <span class="n">{length(@articles)}</span>
                 </div>
 
+                <.error_state :if={@articles_error} class="kb-error" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
+                <%= if @articles_error do %>
+                <% else %>
                 <%= if @articles == [] do %>
                   <.empty_state
                     class="kb-empty"
@@ -222,6 +243,7 @@ defmodule Samen.Web.Support.KbLive do
                       </td>
                     </tr>
                   </.data_table>
+                <% end %>
                 <% end %>
               </div>
             </div>
