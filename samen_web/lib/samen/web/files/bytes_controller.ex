@@ -38,6 +38,8 @@ defmodule Samen.Web.Files.BytesController do
 
   import Plug.Conn
 
+  require Logger
+
   alias Samen.Files
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Files.Reads
@@ -117,9 +119,17 @@ defmodule Samen.Web.Files.BytesController do
         conn |> put_status(403) |> text("quarantined")
 
       {:error, reason} ->
-        conn |> put_status(500) |> text("storage error: #{inspect(reason)}")
+        # The body is fixed, value-free copy: a storage reason can carry a path, a key or a bucket.
+        # The kind (atom / exception module) is logged for the operator; nothing else.
+        Logger.error("[Samen.Web.Files] storage read failed kind=#{reason_kind(reason)}")
+        conn |> put_status(500) |> text("storage error")
     end
   end
+
+  defp reason_kind(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp reason_kind(%{__struct__: module}), do: inspect(module)
+  defp reason_kind(reason) when is_tuple(reason) and tuple_size(reason) > 0 and is_atom(elem(reason, 0)), do: Atom.to_string(elem(reason, 0))
+  defp reason_kind(_reason), do: "other"
 
   defp operator_plane?(%Mount{plane: %{kind: :operator}}), do: true
   defp operator_plane?(_), do: false

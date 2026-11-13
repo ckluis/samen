@@ -16,7 +16,7 @@ defmodule Samen.Web.ReadsHonestFailureReviewTest do
 
   setup do
     seeded = Seeds.seed_all()
-    %{org_id: seeded.org_id, person_id: seeded.crm.person.id}
+    %{org_id: seeded.org_id, person_id: seeded.crm.person.id, campaign_id: seeded.marketing.campaign.id}
   end
 
   defp break_table!(resource) do
@@ -454,6 +454,38 @@ defmodule Samen.Web.ReadsHonestFailureReviewTest do
       absent = security_render(org_id, user_id)
       assert absent =~ "No impersonation sessions recorded."
       refute absent =~ "security-sessions-unavailable"
+    end
+  end
+
+  # ===========================================================================
+  # S7 — no inspect/1 of a reason in a rendered pill
+  # ===========================================================================
+
+  describe "S7 — campaign send results" do
+    alias Samen.Web.Marketing.CampaignLive
+
+    test "an unknown skip reason renders value-free copy (and is logged by kind only); a named reason keeps its own copy",
+         %{org_id: org_id, campaign_id: campaign_id} do
+      canary = "SECRET-CANARY-#{System.unique_integer([:positive])}"
+
+      results = [
+        %{subscriber_id: "11111111-1111-1111-1111-111111111111", result: {:error, {:enqueue_failed, "email=#{canary}@example.com"}}},
+        %{subscriber_id: "22222222-2222-2222-2222-222222222222", result: {:error, :suppressed}},
+        %{subscriber_id: "33333333-3333-3333-3333-333333333333", result: {:ok, :queued}}
+      ]
+
+      socket =
+        %Phoenix.LiveView.Socket{}
+        |> Phoenix.Component.assign(samen_mount: build_mount(:marketing), samen_acting_as: false, return_to: nil)
+        |> then(&CampaignLive.load(&1, org_id, campaign_id))
+        |> Phoenix.Component.assign(send_results: results)
+
+      html = render_html(CampaignLive, socket.assigns)
+
+      assert String.contains?(html, "skipped — could not be queued")
+      assert String.contains?(html, "suppressed — skipped")
+      refute html =~ canary
+      refute html =~ "enqueue_failed"
     end
   end
 end

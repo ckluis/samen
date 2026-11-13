@@ -454,6 +454,33 @@ defmodule Samen.Web.FilesSurfaceTest do
       assert get_resp_header(conn, "content-type") |> Enum.join() =~ "text/plain"
     end
 
+    test "a REAL storage failure is HTTP 500 with fixed copy: no storage key, path or reason term in the body" do
+      org_id = Ash.UUID.generate()
+      root = storage_root()
+      file = seed_file(org_id, root, binary: "GONE-BYTES", filename: "f.txt", content_type: "text/plain")
+      active = promote_file(file)
+
+      prev = Application.get_env(:samen_core, Samen.Files, [])
+      Application.put_env(:samen_core, Samen.Files, storage: Local, storage_config: %{root: root})
+      on_exit(fn -> Application.put_env(:samen_core, Samen.Files, prev) end)
+
+      # POSITIVE CONTROL: the same file serves while the bytes are on disk.
+      assert (bytes_conn(org_id) |> BytesController.serve(%{"id" => active.id})).status == 200
+
+      # The bytes vanish from storage (a real read failure, not a seam).
+      Elixir.File.rm_rf!(root)
+
+      {conn, log} = ExUnit.CaptureLog.with_log(fn -> bytes_conn(org_id) |> BytesController.serve(%{"id" => active.id}) end)
+
+      assert conn.status == 500
+      assert conn.resp_body == "storage error"
+      refute conn.resp_body =~ active.storage_key
+      refute conn.resp_body =~ root
+      refute conn.resp_body =~ "{"
+      assert log =~ "storage read failed kind="
+      refute log =~ root
+    end
+
     test "QUARANTINE gate: a :quarantined file returns 403 + body 'quarantined' (RP-FI-3)" do
       org_id = Ash.UUID.generate()
       root = storage_root()

@@ -27,6 +27,8 @@ defmodule Samen.Web.Marketing.CampaignLive do
   import Samen.Web.Marketing.Live, only: [assign_mount: 2, marketing_sidebar: 1, marketing_path: 1, marketing_plane_note: 1]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
+  require Logger
+
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
 
@@ -76,6 +78,7 @@ defmodule Samen.Web.Marketing.CampaignLive do
        )}
     else
       {results, notice} = run_send(mount, scope, campaign, segment_id, template_id, org_id)
+      log_unexpected_skips(results, org_id)
 
       {:noreply,
        assign(socket,
@@ -372,6 +375,29 @@ defmodule Samen.Web.Marketing.CampaignLive do
   defp campaign_title(%{name: name}) when is_binary(name), do: name
   defp campaign_title(_), do: "Campaign"
 
+  @known_skips [:already_sent, :suppressed, :unsubscribed, :bounced, :complained]
+
+  # Record WHY recipients were skipped for a reason the pill table does not name — by atom or
+  # exception module only, with a count; never the reason's contents (it can interpolate values).
+  defp log_unexpected_skips(results, org_id) when is_list(results) do
+    results
+    |> Enum.flat_map(fn
+      %{result: {:error, reason}} when reason not in @known_skips -> [reason_kind(reason)]
+      _ -> []
+    end)
+    |> Enum.frequencies()
+    |> Enum.each(fn {kind, count} ->
+      Logger.warning("[Samen.Web.Marketing] send skipped reason=#{kind} count=#{count} org=#{org_id}")
+    end)
+  end
+
+  defp log_unexpected_skips(_results, _org_id), do: :ok
+
+  defp reason_kind(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp reason_kind(%{__struct__: module}), do: inspect(module)
+  defp reason_kind(reason) when is_tuple(reason) and tuple_size(reason) > 0 and is_atom(elem(reason, 0)), do: Atom.to_string(elem(reason, 0))
+  defp reason_kind(_reason), do: "other"
+
   # Per-recipient result → a pill. The refusal is VISIBLE (suppressed/unsubscribed shown red).
   defp result_pill({:ok, _}), do: pilled("ok", "queued")
   defp result_pill({:error, :already_sent}), do: pilled("mut", "already sent — skipped")
@@ -379,7 +405,9 @@ defmodule Samen.Web.Marketing.CampaignLive do
   defp result_pill({:error, :unsubscribed}), do: pilled("bad", "unsubscribed — skipped")
   defp result_pill({:error, :bounced}), do: pilled("bad", "bounced — skipped")
   defp result_pill({:error, :complained}), do: pilled("bad", "complained — skipped")
-  defp result_pill({:error, reason}), do: pilled("warn", "skipped (#{inspect(reason)})")
+  # An unknown reason is NEVER printed: a reason term can carry the very values being sent. The
+  # row says it was skipped; the kind is logged by `log_unexpected_skips/2` (atom / module only).
+  defp result_pill({:error, _reason}), do: pilled("warn", "skipped — could not be queued")
 
   defp pilled(variant, label) do
     assigns = %{variant: variant, label: label}
