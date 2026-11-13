@@ -60,7 +60,7 @@ defmodule Mix.Tasks.Samen.Abbrev.Reserve do
 
   @impl Mix.Task
   def run(argv) do
-    {opts, _rest, _invalid} = OptionParser.parse(argv, strict: @switches)
+    opts = Samen.Gen.Args.parse!("samen.abbrev.reserve", argv, @switches)
 
     host = require_opt!(opts, :host)
     owner = require_opt!(opts, :owner)
