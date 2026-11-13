@@ -519,6 +519,114 @@ defmodule Samen.AI.AgentConversationTest do
       assert Chokepoint.seal(:complete, ["x"], turns: "not a list") ==
                {:error, :pii_egress_refused}
     end
+
+    test "RED: a call with turns refuses when grant egress is on or its history carries a grant span" do
+      span =
+        {:grant_span, "plain grant text",
+         %Samen.Reveal.Context{actor: nil, resource: nil, action: :read}}
+
+      for opts <- [
+            [turns: [@turn], grant_egress?: true],
+            [turns: [@turn], grant_egress?: :yes],
+            [turns: [@turn], grant_egress?: false, history: [span]],
+            [turns: [@turn], grant_egress?: false, history: ["fine", {:grant_span, "x", nil}]],
+            [turns: [@turn], grant_egress?: false, history: span]
+          ] do
+        assert Chokepoint.seal(:complete, ["x"], opts) == {:error, :pii_egress_refused},
+               inspect(opts)
+      end
+
+      # The host-wide opt-in counts too: a caller that does not pin the opt inherits it.
+      previous = Application.get_env(:samen_core, Samen.AI, [])
+
+      Application.put_env(
+        :samen_core,
+        Samen.AI,
+        Keyword.put(previous, :grant_plaintext_egress, true)
+      )
+
+      try do
+        assert Chokepoint.seal(:complete, ["x"], turns: [@turn]) == {:error, :pii_egress_refused}
+      after
+        Application.put_env(:samen_core, Samen.AI, previous)
+      end
+    end
+
+    test "POSITIVE CONTROL: the same grant inputs seal without turns, and turns seal on a masked-only call" do
+      span =
+        {:grant_span, "plain grant text",
+         %Samen.Reveal.Context{actor: nil, resource: nil, action: :read}}
+
+      # Without turns the span rides :history and §3.2a re-masks it (no approving grant here).
+      assert {:ok, %MaskedPayload{} = p} =
+               Chokepoint.seal(:complete, ["x"], grant_egress?: true, history: [span])
+
+      assert List.last(p.segments) == Samen.Masked.mask()
+
+      assert {:ok, %MaskedPayload{turns: [@turn]}} =
+               Chokepoint.seal(:complete, ["x"],
+                 turns: [@turn],
+                 grant_egress?: false,
+                 history: ["plain history line"]
+               )
+
+      # An empty turns list is "no turns": the grant path is the old one.
+      assert {:ok, %MaskedPayload{}} =
+               Chokepoint.seal(:complete, ["x"], turns: [], grant_egress?: true)
+    end
+
+    test "RED: a sentinel in a charlist with a non-ASCII codepoint, or in nested chardata, refuses" do
+      vt = "vt_" <> String.duplicate("b", 32)
+      non_ascii = String.to_charlist(vt <> "€")
+      nested = [~c"vt", String.to_charlist("_" <> String.duplicate("b", 32))]
+
+      for seg <- [non_ascii, nested, ["v", "t_", "bb"]] do
+        assert Chokepoint.seal(:complete, [seg]) == {:error, :pii_egress_refused}, inspect(seg)
+
+        input = %{"a" => seg}
+
+        turn = %{
+          "role" => "assistant",
+          "content" => [%{"type" => "tool_call", "id" => "t", "name" => "x", "input" => input}]
+        }
+
+        assert Chokepoint.seal(:complete, ["x"], turns: [turn]) == {:error, :pii_egress_refused}
+
+        assert Chokepoint.seal(:complete, ["x"], grounding: %{s: seg}) ==
+                 {:error, :pii_egress_refused}
+      end
+
+      # Positive control: the same shapes without the sentinel seal.
+      assert {:ok, _} = Chokepoint.seal(:complete, [~c"café", [~c"ab", "cd"]])
+    end
+
+    test "RED: a struct anywhere inside a tool_call input refuses — a sealed payload included" do
+      {:ok, sealed} = Chokepoint.seal(:complete, ["inner"])
+
+      for input <- [%{"a" => sealed}, %{"a" => [sealed]}, %{"a" => %{"b" => sealed}}, %{a: "x"}] do
+        turn = %{
+          "role" => "assistant",
+          "content" => [%{"type" => "tool_call", "id" => "t", "name" => "x", "input" => input}]
+        }
+
+        assert Chokepoint.seal(:complete, ["x"], turns: [turn]) == {:error, :pii_egress_refused},
+               inspect(input)
+      end
+
+      ok_turn = %{
+        "role" => "assistant",
+        "content" => [
+          %{
+            "type" => "tool_call",
+            "id" => "t",
+            "name" => "x",
+            "input" => %{"a" => "x", "n" => 1, "l" => ["y", true, nil], "m" => %{"k" => 2.5}}
+          }
+        ]
+      }
+
+      assert {:ok, _} = Chokepoint.seal(:complete, ["x"], turns: [ok_turn])
+    end
   end
 
   describe "Conversation.build/4 (pure)" do

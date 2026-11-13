@@ -370,11 +370,24 @@ stable for a cache breakpoint (evaluation 2026-11-13, AX-1/AX-2/AX-12/AX-19).
 **The single-mint guarantee is unchanged.** Both fields are minted only by
 `Samen.AI.Chokepoint.seal/3`, through the SAME allowlist: `:system` entries must be binaries
 passing `safe_segment?/1`; every turn must match the closed shape above exactly AND pass
-`safe_metadata?/1` whole (keys and leaves `vt_`-scanned, structs and tuples refused) — so a
-`%Samen.Masked{}`, an un-rendered record, a grant span or a `vt_*` token anywhere in a turn
-refuses `{:error, :pii_egress_refused}` exactly as it would in a segment. Turns never carry a
-grant span (the §3.2a re-check exists only for `:history`), so grant-resolved plaintext cannot
-ride the structure. No module outside the chokepoint constructs the struct; the AST anti-bypass
+`safe_metadata?/1` whole (keys and leaves `vt_`-scanned, every list's chardata rendering
+scanned, structs and tuples refused; a `tool_call` input holds JSON values only, so not even a
+sealed payload nests in one) — so a `%Samen.Masked{}`, an un-rendered record, a grant span or a
+`vt_*` token anywhere in a turn refuses `{:error, :pii_egress_refused}` exactly as it would in a
+segment.
+
+**A call with turns is a masked-only call, enforced at the seal.** The §3.2a re-check runs only
+over `:history`, and an adapter that sends `:turns` sends them in place of the segments the
+re-masked history lands in. So `seal/3` refuses `{:error, :pii_egress_refused}` whenever
+`:turns` is non-empty AND either grant egress is effective for the call (`grant_egress?:` any
+value but `false`, or the host's `grant_plaintext_egress` when the caller does not pin it) or any
+`:history` entry is a `{:grant_span, …}`. What this enforces: no turns-bearing payload is minted
+in a call where the chokepoint itself could resolve or re-admit grant plaintext. What it cannot
+enforce: a turn's text is admitted on the same terms as a free-text segment, so plaintext a
+caller obtained OUTSIDE the AI plane and typed into a turn is the §7.2 operator-responsibility
+case, exactly as it is for a segment. The agent loop and the summarizer pin `grant_egress?: false`
+and carry no grant spans, so they meet the rule by construction (sabotage-proven, 657). No module
+outside the chokepoint constructs the struct; the AST anti-bypass
 probe is unchanged and sabotage-proven against an adapter that "re-seals" a payload itself.
 
 **What this does NOT change.** INV-7 (every byte through the chokepoint), §3.2's pipeline, the

@@ -10,11 +10,11 @@
 # MUST_FAIL: a RUNTIME-COMPOSED tool def is REFUSED fail-closed
 # MUST_FAIL: a canary/vt_-bearing tool definition is REFUSED fail-closed
 diff --git a/samen_core/lib/samen/ai/chokepoint.ex b/samen_core/lib/samen/ai/chokepoint.ex
-index aa0ffde2..ea34a197 100644
+index 0331949..ecd9bed 100644
 --- a/samen_core/lib/samen/ai/chokepoint.ex
 +++ b/samen_core/lib/samen/ai/chokepoint.ex
-@@ -162,7 +162,10 @@ defmodule Samen.AI.Chokepoint do
-     with {:ok, binding_segs} <- resolve_bindings(kind, opts),
+@@ -169,7 +169,10 @@ defmodule Samen.AI.Chokepoint do
+          {:ok, binding_segs} <- resolve_bindings(kind, opts),
           {:ok, history_segs} <- rescrub_history(kind, opts),
           {:ok, assembled} <- assemble_and_scrub(segments, binding_segs, history_segs),
 -         {:ok, tools} <- scrub_tools(Keyword.get(opts, :tools, [])),

@@ -1,0 +1,20 @@
+# SABOTAGE: seal/3 mints a turns-bearing payload in a call where grant egress is on or the history carries 
+#   a grant span — the adapter would send the turns and drop the re-masked segments
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_conversation_test.exs
+# MUST_FAIL: RED: a call with turns refuses when grant egress is on or its history carries a grant span
+diff --git a/samen_core/lib/samen/ai/chokepoint.ex b/samen_core/lib/samen/ai/chokepoint.ex
+index 03319493..15d4f326 100644
+--- a/samen_core/lib/samen/ai/chokepoint.ex
++++ b/samen_core/lib/samen/ai/chokepoint.ex
+@@ -249,7 +249,7 @@ defmodule Samen.AI.Chokepoint do
+         history = opts |> Keyword.get(:history, []) |> List.wrap()
+ 
+         if grant_egress?(kind, opts) != false or Enum.any?(history, &grant_span?/1),
+-          do: @refusal,
++          do: :ok,
+           else: :ok
+     end
+   rescue
