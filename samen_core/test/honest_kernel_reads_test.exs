@@ -203,8 +203,50 @@ defmodule Samen.HonestKernelReadsTest do
   end
 
   describe "Erasure.Completeness — a module whose PII cannot be introspected fails the check, it does not drop out" do
-    test "RED: discovery over a non-resource raises (was silently 'nothing to erase')" do
-      assert catch_error(Samen.Erasure.Completeness.discover(resources: [String]))
+    # Three stub "resources" (modules the Spark/Ash introspection can half-read), so EACH un-rescued function is
+    # reached on its own: `discover(resources: [String])` raises from whichever runs first, so re-adding a rescue
+    # to only one of the later functions would flip nothing.
+    defmodule AttributesUnreadable do
+      @moduledoc false
+      def entities(_path), do: raise(ArgumentError, "attributes unreadable")
+      def persisted(_key, default), do: default
+    end
+
+    defmodule PersistedUnreadable do
+      @moduledoc false
+      # attributes read fine (none), but `Ash.Resource.Info.attribute/2` cannot read the persisted lookup
+      def entities(_path), do: []
+    end
+
+    defmodule PiiUnreadable do
+      @moduledoc false
+      # attributes and persisted lookups read fine; the PII declarations do not
+      def entities([:pii]), do: raise(ArgumentError, "pii unreadable")
+      def entities(_path), do: []
+      def persisted(_key, default), do: default
+    end
+
+    defmodule NothingToErase do
+      @moduledoc false
+      def entities(_path), do: []
+      def persisted(_key, default), do: default
+    end
+
+    test "RED: DerivedLinkable.discover over a module whose attributes cannot be read raises (was silently 'nothing to erase')" do
+      assert_raise ArgumentError, fn -> Samen.DerivedLinkable.discover([AttributesUnreadable]) end
+    end
+
+    test "RED: Completeness attribute lookup over a module it cannot introspect raises (was nil -> 'no storage_key')" do
+      assert_raise ArgumentError, fn -> Samen.Erasure.Completeness.discover(resources: [PersistedUnreadable]) end
+    end
+
+    test "RED: Completeness PII-field lookup over a module whose declarations cannot be read raises (was [] -> 'no transcript')" do
+      assert_raise ArgumentError, fn -> Samen.Erasure.Completeness.discover(resources: [PiiUnreadable]) end
+    end
+
+    test "POSITIVE CONTROL: the same stubs, when readable, discover nothing and do not raise" do
+      assert [] = Samen.DerivedLinkable.discover([NothingToErase])
+      assert %{storage_key: [], custom_bag: [], transcript: []} = Samen.Erasure.Completeness.discover(resources: [NothingToErase])
     end
 
     test "POSITIVE CONTROL: discovery over real resources still answers" do
