@@ -142,13 +142,24 @@ defmodule Mix.Tasks.Samen.Verify.ToolActorIdentity do
   @doc "Violations over the `Samen.Automation.Action` tool-schema params (public for tests)."
   @spec action_tool_violations() :: [String.t()]
   def action_tool_violations do
-    for {kind, mod} <- action_tool_modules(),
-        param_name <- action_param_names(mod),
-        identity_leak?(param_name) do
-      "#{inspect(mod)} (#{inspect(kind)}): tool_schema/0 declares an actor/org/tenant " <>
-        "identity parameter #{inspect(param_name)} — tool identity MUST come from " <>
-        "ctx[:actor] only (ADR-043 §6.2); an LLM-supplied identity parameter can spoof " <>
-        "or widen scope."
+    for {kind, mod} <- action_tool_modules(), violation <- action_tool_module_violations(kind, mod), do: violation
+  end
+
+  defp action_tool_module_violations(kind, mod) do
+    case action_param_names(mod) do
+      {:ok, names} ->
+        for param_name <- names, identity_leak?(param_name) do
+          "#{inspect(mod)} (#{inspect(kind)}): tool_schema/0 declares an actor/org/tenant " <>
+            "identity parameter #{inspect(param_name)} — tool identity MUST come from " <>
+            "ctx[:actor] only (ADR-043 §6.2); an LLM-supplied identity parameter can spoof " <>
+            "or widen scope."
+        end
+
+      # A schema that cannot be read is NOT an identity-free schema: it used to read as "no params" and PASS.
+      :unreadable ->
+        ["#{inspect(mod)} (#{inspect(kind)}): tool_schema/0 raised or did not return a map — the tool's " <>
+           "parameters cannot be read, so it cannot be shown to be free of an actor/org/tenant identity " <>
+           "parameter (ADR-043 §6.2); fix the schema."]
     end
   end
 
@@ -158,17 +169,23 @@ defmodule Mix.Tasks.Samen.Verify.ToolActorIdentity do
     |> Enum.reject(fn {_kind, mod} -> is_nil(mod) end)
   end
 
+  # `{:ok, names}` (possibly none: a tool with no params is legitimate) or `:unreadable`.
   defp action_param_names(mod) do
-    schema = safe(fn -> mod.tool_schema() end, :not_a_tool)
+    case safe(fn -> mod.tool_schema() end, :unreadable) do
+      schema when is_map(schema) and not is_struct(schema) ->
+        case Map.get(schema, :params) || Map.get(schema, "params") do
+          params when is_list(params) ->
+            {:ok,
+             params
+             |> Enum.map(fn param -> (is_map(param) && (Map.get(param, :name) || Map.get(param, "name"))) || nil end)
+             |> Enum.reject(&is_nil/1)}
 
-    with true <- is_map(schema) and not is_struct(schema),
-         params when is_list(params) <- Map.get(schema, :params) || Map.get(schema, "params") do
-      Enum.map(params, fn param ->
-        (is_map(param) && (Map.get(param, :name) || Map.get(param, "name"))) || nil
-      end)
-      |> Enum.reject(&is_nil/1)
-    else
-      _ -> []
+          _ ->
+            {:ok, []}
+        end
+
+      _ ->
+        :unreadable
     end
   end
 
