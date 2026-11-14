@@ -435,8 +435,11 @@ defmodule Samen.Lint.SwallowLintTest do
       :crypto.hash(:sha256, site.norm) |> Base.encode16(case: :lower) |> binary_part(0, 16)
     end
 
-    @tag :tmp_dir
-    test "RED: a REPLACED clause (same count) is no longer covered by the pin; the hash is stable across formatting", %{tmp_dir: dir} do
+    test "RED: a REPLACED clause (same count) is no longer covered by the pin; the hash is stable across formatting" do
+      # a plain scratch dir: ExUnit's :tmp_dir names a directory after the test name (quotes, brackets), which breaks
+      # the `find | xargs` scans of scripts/mutation_lint.sh while it lingers under samen_core/tmp
+      dir = Path.join(System.tmp_dir!(), "swallow_lint_#{System.unique_integer([:positive])}")
+      on_exit(fn -> File.rm_rf!(dir) end)
       File.mkdir_p!(Path.join(dir, "lib"))
       path = "lib/f.ex"
       File.write!(Path.join(dir, path), @src_a)
