@@ -177,7 +177,8 @@ defmodule Mix.Tasks.Samen.Verify.ToolActorIdentity do
   @doc "Violations over the MCP `tools/0` inputSchema properties (public for tests)."
   @spec mcp_tool_violations() :: [String.t()]
   def mcp_tool_violations do
-    for tool <- safe(fn -> Samen.AI.Mcp.tools() end, []),
+    # No `safe/2` here: a catalogue that cannot be listed must FAIL the verifier, not pass it over zero tools.
+    for tool <- Samen.AI.Mcp.tools(),
         property_name <- mcp_property_names(tool),
         identity_leak?(property_name) do
       "MCP tool #{inspect(Map.get(tool, "name"))}: inputSchema declares an actor/org/tenant " <>

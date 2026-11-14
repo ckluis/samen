@@ -294,8 +294,9 @@ defmodule Mix.Tasks.Samen.Verify.AiPromptMasking do
   end
 
   defp vault_routed?(resource, field) do
-    routed = safe(fn -> Samen.Pii.Info.vault_routed_columns(resource) end, [])
-    pii = safe(fn -> Enum.map(Samen.Pii.Info.pii_attributes(resource), & &1.name) end, [])
+    # No `safe/2`: a resource whose PII declarations cannot be read must FAIL the verifier, not read as "not PII".
+    routed = Samen.Pii.Info.vault_routed_columns(resource)
+    pii = Enum.map(Samen.Pii.Info.pii_attributes(resource), & &1.name)
     field in routed or field in pii
   end
 
