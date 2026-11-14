@@ -612,7 +612,8 @@ token: an Ash error interpolates the values being processed. Name the read with 
 empty-state copy and its CTA are absent, and that `clear_read_faults()` + the retry event recovers. Pair
 it with a positive control that an empty result still renders the real empty state.
 
-**Ratchet.** `Samen.Web.Reads.SwallowLint` counts catch-all `rescue`/`catch` clauses that neither log, report
+**Ratchet.** `Samen.Web.Reads.SwallowLint` (the web-layer configuration over the shared scanner `Samen.Lint.Swallow` in samen_core; the
+kernel has its own, below) counts catch-all `rescue`/`catch` clauses that neither log, report
 nor re-raise, per file, and fails on any increase (and on a decrease that is not written into its
 baseline). Converting a file lowers its row (the baseline map is EMPTY since phase 4 and stays as the ratchet: a file not listed is allowed 0); a swallow that is correct (an optional-scope probe, a
 fail-closed authz lookup) goes into `@reviewed` with its reason.
@@ -660,6 +661,22 @@ when the directory read failed. A console that polls (the reveal-window tick) re
 **The ratchet has a positive control.** With an empty baseline nothing else proves `SwallowLint.scan/1` can ever return a count:
 `samen_web/test/fixtures/swallow_fixture.ex` (outside every lint root, never compiled) holds known swallows and
 `reads_swallow_lint_test.exs` asserts `scan([fixture])` counts them and `check/2` against the real baseline fails naming the file.
+
+**The kernel (`samen_core/lib`) has the same ratchet.** `Samen.Lint.KernelSwallow` configures the one scanner, `Samen.Lint.Swallow`, for the
+kernel (web-dependency-free, so it runs in samen_core's own suite: `samen_core/test/swallow_lint_test.exs`, CI step `kernel_swallow_lint`).
+It has its own shrink-only baselines: `baseline/0` for the rescue form and `error_arm_baseline/0` for the **non-rescue** form,
+`{:error, _} -> []/%{}/""/0/nil/false/true/:ok` in a function that calls an Ash / Ecto / Repo read or write (a discarded error answered
+with an empty or zero literal: the same lie without the exception; `samen_web`, `driftwood` and `pawchart` carry the same second baseline,
+empty). A `@reviewed` entry is `{file, function} => {count, reason}`: the count pins how many swallowing clauses the function
+holds, so a clause **added** to an already-reviewed function is counted as an ordinary swallow and fails the ratchet, and a stale pin is
+named. The kernel reports through `Samen.Observability.Failure.report/3` (name, org, exception **module** names; never a message, a
+value or a parameter; `Guard.report/3` delegates to it). Convert a kernel site by what it protects: a failed read that is **fail-OPEN**
+(a verifier or guard that passes because its probe failed, an audit write that is skipped, a PII declaration read as "none") is a bug
+- return a tagged `{:error, :unavailable}` and make the caller fail; a site that fails **closed** silently keeps its closed answer and
+reports by name, and where a screen renders the result it gets a tagged `…_result` sibling (`Consent.state_result/3`,
+`OrgActor.resolve_result/3`, `Suspension.status/2`) so an outage is never shown as a denial, "not found" or "no grant". Test a kernel
+outage with `Samen.FaultRepo` (test support: delegates to `SamenCore.TestRepo`, raises a real `DBConnection.ConnectionError` for the
+operations or SQL fragments a test names) and pair every red with a positive control through the same module.
 
 ---
 
