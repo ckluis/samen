@@ -143,11 +143,14 @@ defmodule Acme.Repo.Migrations.MountPrimitivesScope do
       add(:aff_updated_at, :utc_datetime, null: false)
     end
 
+    # ARCH-4: the tenant keyset index (org_id, <keyset sort>, id) on every org-scoped table above.
+    create_org_keyset_indexes(@resources)
     catalog_sync(@resources)
   end
 
   def down do
     catalog_sync_down(@resources)
+    drop_org_keyset_indexes(@resources)
 
     drop(table(:aff_feature_flag))
     drop(table(:awh_webhook))

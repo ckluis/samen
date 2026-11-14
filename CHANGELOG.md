@@ -53,6 +53,22 @@ All notable changes to Samen are recorded here. The format follows
   `MapSet.new()` / `_ ->` error arms, transitive I/O, `defmacro` and module-body nodes; reviewed entries pinned by `{count, hash}`; a hard
   per-root ceiling on every baseline. Both baselines were regenerated from the tree. Sabotages 726-731.
 
+### Tenant indexes (ARCH-4)
+
+- **Every org-scoped keyset page is now an index scan.** The tenant tables had no index led by `org_id` (27 of 99
+  `org_id` tables in driftwood, 17 of 82 in pawchart, 14 of 74 in demo), so `WHERE org_id = $1 ORDER BY <sort>, id LIMIT n`
+  was a sequential scan. `Samen.Indexing` defines the contract, `(org_id, <keyset_sort>, id)`; a resource declares the sort
+  with `use Samen.Resource, keyset_sort: :name` (the scope blueprints do it for the resources that have a list view).
+- **`mix samen.verify.indexes`** (new; reads the live catalog, fails on anything it cannot inspect, no exemptions) runs as a
+  step per app in `ci/steps.conf` and as step 13b of a generated app's `ci.sh`. **`mix samen.gen.indexes`** writes the retrofit
+  migration. `Samen.Migration` gains `create_org_keyset_indexes/2` and `create_jsonb_path_index/4` (plus their `drop_` pairs).
+- `activities_for_person` / `activities_for_company` filter `get_path(custom, ["crm_refs", …])`; two partial expression
+  indexes on the exact expression Ash emits now let Postgres `BitmapOr` it with the `(subject_key, subject_id)` index.
+- Fixed on the way: `Samen.AI.Agent.FoldSource` had a table in driftwood but no repo wiring (it defaulted to `SamenCore.TestRepo`);
+  `config :samen_core, :samen_ai_agent_fold_source_repo, Driftwood.Repo` added. A host that runs the agent loop needs the same line.
+- Tests: `Samen.IndexingTest`, `Samen.Web.TenantIndexPlanTest` (EXPLAIN of the real page query, with a drop-the-index control),
+  `Samen.Web.CrmRefsIndexPlanTest`, `Samen.Web.KeysetSortParityTest`. Recorded in ADR-016 §9. Sabotages 732-735.
+
 ### Host action required (existing hosts and generated apps)
 
 A generated app is a copy, so these do **not** reach an app generated before the change. Re-generate into a scratch
@@ -63,7 +79,13 @@ directory and diff, or apply by hand:
    `20260925100000` rollup `subject_id` becomes text (host-named, e.g. driftwood's `…_driver_load_rollup_subject_id_text.exs`) ·
    `20260925110000` usage-event ledger · `20260926100000` usage tally `reported_quantity` ·
    `20261005100000` entitlement usage limit · `20261006100000` agent cached-input bucket (hosts running the agent loop) ·
-   `20261009100000` `samen_replay` (also register `Samen.Replay.Domain` in **both** `:ash_domains` lists).
+   `20261009100000` `samen_replay` (also register `Samen.Replay.Domain` in **both** `:ash_domains` lists) ·
+   `20261114100000` the tenant keyset indexes (**ARCH-4** — run `mix samen.gen.indexes` in the host; it writes a
+   `CREATE INDEX CONCURRENTLY` migration over every org-scoped resource, safe on populated tables, no write lock; copy the
+   `driftwood/priv/repo/migrations/` file as the reference) · `20261114110000` the Work `Task` `crm_refs` expression indexes
+   (hosts that mount the Work scope: copy the reference migration, same `CONCURRENTLY` form). Then add
+   `mix samen.verify.indexes` to the host gate; a host with large tables should run the two migrations in a quiet
+   window or by hand (`mix ecto.migrate --to 20261114100000`) — each index builds without blocking writes but reads the whole table once.
 2. **Mount `plug Samen.Web.SecureHeaders`** in the browser pipeline (security headers + a conservative CSP,
    `frame-ancestors 'self'`), and make the session cookie `Secure` in prod: `secure: Application.compile_env(:app,
    :secure_session_cookie, false)` in the endpoint's `@session_options` plus `config :app, secure_session_cookie: true`

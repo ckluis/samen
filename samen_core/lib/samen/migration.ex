@@ -133,6 +133,14 @@ defmodule Samen.Migration do
           add_nullable_column: 4,
           concurrent_index: 2,
           concurrent_index: 3,
+          create_org_keyset_indexes: 1,
+          create_org_keyset_indexes: 2,
+          drop_org_keyset_indexes: 1,
+          drop_org_keyset_indexes: 2,
+          create_jsonb_path_index: 3,
+          create_jsonb_path_index: 4,
+          drop_jsonb_path_index: 3,
+          drop_jsonb_path_index: 4,
           chunked_backfill: 3,
           chunked_backfill: 4
         ]
@@ -420,6 +428,171 @@ defmodule Samen.Migration do
 
       create(index(:tnt_record, [:tnr_org_id, :tnr_object_key], name: "tnt_record_org_object_index"))
     end
+  end
+
+  @doc """
+  Create the tenant keyset index `(org_id, <keyset_sort>, id)` (ARCH-4, `Samen.Indexing`) for
+  every org-scoped resource in `resources`; a listed resource that is not org-scoped is
+  skipped, one that cannot be inspected RAISES (never a silent skip).
+
+  Inside the DDL transaction by default (the table was just created in this migration, so
+  the build is instant). On a table that already holds rows pass `concurrently: true` in a
+  migration that declares `@disable_ddl_transaction true` (the `concurrent_index/3` carve-out):
+  the build then takes no write lock. Both forms are idempotent (`IF NOT EXISTS`).
+  """
+  defmacro create_org_keyset_indexes(resources, opts \\ []) do
+    caller_module = __CALLER__.module
+
+    quote do
+      Samen.Migration.__org_keyset_indexes__(
+        :up,
+        unquote(caller_module),
+        unquote(resources),
+        unquote(opts)
+      )
+    end
+  end
+
+  @doc "The `down` counterpart of `create_org_keyset_indexes/2` (`DROP INDEX IF EXISTS`)."
+  defmacro drop_org_keyset_indexes(resources, opts \\ []) do
+    caller_module = __CALLER__.module
+
+    quote do
+      Samen.Migration.__org_keyset_indexes__(
+        :down,
+        unquote(caller_module),
+        unquote(resources),
+        unquote(opts)
+      )
+    end
+  end
+
+  @doc false
+  def __org_keyset_indexes__(direction, caller_module, resources, opts) do
+    concurrently? = Keyword.get(opts, :concurrently, false)
+
+    for resource <- List.wrap(resources), spec <- org_keyset_spec!(resource) do
+      quoted_cols = Enum.map_join(spec.columns, ", ", &quote_ident/1)
+
+      case {direction, concurrently?} do
+        {:up, true} ->
+          Samen.Migration.ExpandContract.concurrent_index(spec.table, spec.columns,
+            name: spec.name,
+            caller: caller_module
+          )
+
+        {:up, false} ->
+          Ecto.Migration.execute(
+            "CREATE INDEX IF NOT EXISTS #{quote_ident(spec.name)} " <>
+              "ON #{quote_ident(spec.table)} (#{quoted_cols})"
+          )
+
+        {:down, true} ->
+          Ecto.Migration.execute("DROP INDEX CONCURRENTLY IF EXISTS #{quote_ident(spec.name)}")
+
+        {:down, false} ->
+          Ecto.Migration.execute("DROP INDEX IF EXISTS #{quote_ident(spec.name)}")
+      end
+    end
+
+    :ok
+  end
+
+  defp org_keyset_spec!(resource) do
+    case Samen.Indexing.classify(resource) do
+      :not_org_scoped ->
+        []
+
+      {:error, reason} ->
+        raise ArgumentError, "create_org_keyset_indexes: #{reason}"
+
+      :org_scoped ->
+        case Samen.Indexing.spec(resource) do
+          {:ok, spec} -> [spec]
+          {:error, reason} -> raise ArgumentError, "create_org_keyset_indexes: #{reason}"
+        end
+    end
+  end
+
+  defp quote_ident(name), do: "\"" <> String.replace(to_string(name), "\"", "\"\"") <> "\""
+
+  @doc """
+  An expression index serving an Ash `get_path(attr, path) == ^value` filter (e.g.
+  `get_path(custom, ["crm_refs", "person_id"])`). AshPostgres renders that filter as
+  `jsonb_extract_path_text(col::jsonb, $1::text, $2::text) = $3`; with the path and value bound
+  the planner sees a constant path, so an index on the SAME expression serves it. No btree on the
+  column can: it is a computed value. The index is PARTIAL (`WHERE <expr> IS NOT NULL`, which any
+  `<expr> = $3` clause implies) so it holds only the rows that carry the key. The index name is
+  `<table>_<attr>_<path>_idx`; pass `concurrently: true` (with `@disable_ddl_transaction true`) on a
+  populated table.
+  """
+  defmacro create_jsonb_path_index(resource, attr, path, opts \\ []) do
+    caller_module = __CALLER__.module
+
+    quote do
+      Samen.Migration.__jsonb_path_index__(
+        :up,
+        unquote(caller_module),
+        unquote(resource),
+        unquote(attr),
+        unquote(path),
+        unquote(opts)
+      )
+    end
+  end
+
+  @doc "The `down` counterpart of `create_jsonb_path_index/4`."
+  defmacro drop_jsonb_path_index(resource, attr, path, opts \\ []) do
+    caller_module = __CALLER__.module
+
+    quote do
+      Samen.Migration.__jsonb_path_index__(
+        :down,
+        unquote(caller_module),
+        unquote(resource),
+        unquote(attr),
+        unquote(path),
+        unquote(opts)
+      )
+    end
+  end
+
+  @doc false
+  def __jsonb_path_index__(direction, caller_module, resource, attr, path, opts) do
+    table = AshPostgres.DataLayer.Info.table(resource)
+    column = Ash.Resource.Info.attribute(resource, attr)
+
+    if is_nil(column), do: raise(ArgumentError, "#{inspect(resource)} has no attribute #{inspect(attr)}")
+
+    source = to_string(column.source || column.name)
+    name = "#{table}_#{source}_#{Enum.join(path, "_")}_idx"
+    keys = Enum.map_join(path, ", ", &("'" <> String.replace(&1, "'", "''") <> "'"))
+    expr = "jsonb_extract_path_text(#{quote_ident(source)}, #{keys})"
+    concurrently? = Keyword.get(opts, :concurrently, false)
+
+    case {direction, concurrently?} do
+      {:up, true} ->
+        Samen.Migration.ExpandContract.__require_disabled_ddl_transaction__!(caller_module)
+
+        Ecto.Migration.execute(
+          "CREATE INDEX CONCURRENTLY IF NOT EXISTS #{quote_ident(name)} " <>
+            "ON #{quote_ident(table)} ((#{expr})) WHERE #{expr} IS NOT NULL"
+        )
+
+      {:up, false} ->
+        Ecto.Migration.execute(
+          "CREATE INDEX IF NOT EXISTS #{quote_ident(name)} " <>
+            "ON #{quote_ident(table)} ((#{expr})) WHERE #{expr} IS NOT NULL"
+        )
+
+      {:down, true} ->
+        Ecto.Migration.execute("DROP INDEX CONCURRENTLY IF EXISTS #{quote_ident(name)}")
+
+      {:down, false} ->
+        Ecto.Migration.execute("DROP INDEX IF EXISTS #{quote_ident(name)}")
+    end
+
+    :ok
   end
 
   @doc "See `catalog_sync/2`."
