@@ -1,0 +1,18 @@
+# SABOTAGE: the generated app's table-creating migration stops creating the tenant keyset indexes
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/templates_parity_test.exs
+# MUST_FAIL: every emitted file is byte-identical to the frozen golden fixture
+diff --git a/samen_core/priv/templates/m_app_resources.eex b/samen_core/priv/templates/m_app_resources.eex
+index df85f539..7d310059 100644
+--- a/samen_core/priv/templates/m_app_resources.eex
++++ b/samen_core/priv/templates/m_app_resources.eex
+@@ -354,7 +354,6 @@ defmodule <%= module %>.Repo.Migrations.AppResources do
+ 
+     # ---- catalog every resource in THIS transaction ----
+     # ARCH-4: the tenant keyset index (org_id, <keyset sort>, id) on every org-scoped table above.
+-    create_org_keyset_indexes(@resources)
+     catalog_sync(@resources)
+   end
+ 
