@@ -144,7 +144,9 @@ defmodule Samen.AI.Catalog do
         end)
     }
   rescue
-    _ -> nil
+    e ->
+      Samen.Observability.Failure.report(:ai_catalog_table_entry, nil, e)
+      nil
   end
 
   @doc """
@@ -169,7 +171,9 @@ defmodule Samen.AI.Catalog do
   def schema(opts \\ []) do
     dict(resources(opts))
   rescue
-    _ -> %{"tables" => []}
+    e ->
+      Samen.Observability.Failure.report(:ai_catalog_schema, nil, e)
+      %{"tables" => []}
   end
 
   defp resources(opts) do
@@ -215,7 +219,9 @@ defmodule Samen.AI.Catalog do
       }
     end)
   rescue
-    _ -> []
+    e ->
+      Samen.Observability.Failure.report(:ai_catalog_custom_objects, org_id, e)
+      []
   end
 
   def custom_objects(_org_id, _opts), do: []
@@ -227,7 +233,9 @@ defmodule Samen.AI.Catalog do
       %{name: f.tnt_field_name, type: f.tnt_type, pii: f.tnt_pii_declared}
     end)
   rescue
-    _ -> []
+    e ->
+      Samen.Observability.Failure.report(:ai_catalog_object_fields, org_id, e)
+      []
   end
 
   @doc """
@@ -241,7 +249,9 @@ defmodule Samen.AI.Catalog do
   def grounding(scope, opts \\ []) do
     %{schema: schema(opts), custom_objects: custom_objects(org_id_of(scope), opts)}
   rescue
-    _ -> %{}
+    e ->
+      Samen.Observability.Failure.report(:ai_catalog_grounding, nil, e)
+      %{}
   end
 
   # `scope` is whatever the calling actor threads through `Samen.AI.complete/4` — a

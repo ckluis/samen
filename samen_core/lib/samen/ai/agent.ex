@@ -2766,7 +2766,14 @@ defmodule Samen.AI.Agent do
       log_terminal(run)
       :ok
     else
-      _ -> :ok
+      # A turn/run that is GONE, or a run already decided, never blocks the rejection (the ReplyHandler precedent);
+      # a turn or run that could not be READ is not "gone": the rejection rolls back (the approval stays pending
+      # and can be rejected again) instead of answering :ok for a run that is still parked.
+      {:error, :unavailable} -> {:error, :unavailable}
+      {:error, :turn_not_found} -> :ok
+      {:error, :not_found} -> :ok
+      {:ok, _decided_or_unparked_run} -> :ok
+      {:error, _read_failed} -> {:error, :unavailable}
     end
   end
 
@@ -3130,13 +3137,20 @@ defmodule Samen.AI.Agent do
     |> Ash.Query.limit(1)
     |> Ash.read(authorize?: false)
     |> case do
-      {:ok, [turn]} -> {:ok, turn}
-      _ -> {:error, :turn_not_found}
+      {:ok, [turn]} ->
+        {:ok, turn}
+
+      {:ok, _none} ->
+        {:error, :turn_not_found}
+
+      {:error, reason} ->
+        Samen.Observability.Failure.report(:agent_fetch_turn, nil, reason)
+        {:error, :unavailable}
     end
   rescue
     e ->
       Samen.Observability.Failure.report(:agent_fetch_turn, nil, e)
-      {:error, :turn_not_found}
+      {:error, :unavailable}
   end
 
   defp fetch_turn(_turn_id), do: {:error, :turn_not_found}
@@ -3254,8 +3268,6 @@ defmodule Samen.AI.Agent do
       _ ->
         nil
     end
-  rescue
-    _ -> nil
   end
 
   defp provenance_of(name) when is_atom(name) and not is_nil(name) do
@@ -3263,8 +3275,6 @@ defmodule Samen.AI.Agent do
       pid when is_pid(pid) -> provenance_of(pid)
       _ -> nil
     end
-  rescue
-    _ -> nil
   end
 
   defp provenance_of(_other), do: nil

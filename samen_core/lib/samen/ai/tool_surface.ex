@@ -206,7 +206,9 @@ defmodule Samen.AI.ToolSurface do
       true -> @default_surfaces
     end
   rescue
-    _ -> []
+    e ->
+      Samen.Observability.Failure.report(:tool_surface_surfaces_for, nil, e)
+      []
   end
 
   def surfaces_for(_mod), do: []

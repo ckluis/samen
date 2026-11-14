@@ -591,13 +591,17 @@ defmodule Samen.AI.Mcp do
   defp safe_domain_resources(domain) do
     Ash.Domain.Info.resources(domain)
   rescue
-    _ -> []
+    e ->
+      Samen.Observability.Failure.report(:mcp_domain_resources, nil, e)
+      []
   end
 
   defp safe_table_name(resource) do
     Samen.Catalog.table_name(resource)
   rescue
-    _ -> nil
+    e ->
+      Samen.Observability.Failure.report(:mcp_table_name, nil, e)
+      nil
   end
 
   # ==========================================================================
@@ -610,8 +614,6 @@ defmodule Samen.AI.Mcp do
 
   defp public_field_names(resource) do
     resource |> Ash.Resource.Info.public_attributes() |> Enum.map(& &1.name)
-  rescue
-    _ -> []
   end
 
   # Render a resolved value to a wire-safe scalar. The chokepoint already turned every 🔒 field
