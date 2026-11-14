@@ -1,0 +1,19 @@
+# SABOTAGE: a zero budget on a plain create becomes statement_timeout = 0, no limit
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: a zero window budget on a plain create is the named refusal
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index c608d8cf..a6792f84 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -392,7 +392,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+     end
+   end
+ 
+-  defp budget_left(ms) when ms > 0, do: :ok
++  defp budget_left(ms) when ms >= 0, do: :ok
+   defp budget_left(ms), do: {:error, {:partition_move_window_exceeded, ms}}
+ 
+   # {the monthly partition exists?, the DEFAULT partition exists?} — one catalog round trip.

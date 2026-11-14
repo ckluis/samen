@@ -1,0 +1,19 @@
+# SABOTAGE: an unreadable sibling bound crashes the move instead of falling back to the scanning ATTACH
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: a sibling partition whose bound cannot be read falls back
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index c608d8cf..5184aa9a 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -548,7 +548,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+     # A sibling whose bound the regexp cannot read (MINVALUE/MAXVALUE) is left out: the CHECK is then weaker than
+     # DEFAULT's constraint, so the re-ATTACH scans the table (slower, still correct) instead of the move failing.
+     siblings =
+-      for [lo, hi] <- rows, lo != nil and hi != nil do
++      for [lo, hi] <- rows do
+         " AND NOT (aud_occurred_at >= '#{DateTime.to_iso8601(lo)}'::timestamptz AND aud_occurred_at < '#{DateTime.to_iso8601(hi)}'::timestamptz)"
+       end
+ 

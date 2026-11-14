@@ -1,0 +1,19 @@
+# SABOTAGE: a configured lock_timeout of 0 is sent to Postgres, where it disables the limit
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: a zero (or non-integer) lock_timeout is REFUSED
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index c608d8cf..ff5c7249 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -380,7 +380,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+   # the move checks it before every window statement, a plain create before its one statement).
+   defp lock_timeout_ms do
+     case Application.get_env(:samen_core, :partition_move_lock_timeout_ms, @move_lock_ms) do
+-      ms when is_integer(ms) and ms > 0 -> {:ok, ms}
++      ms when is_integer(ms) -> {:ok, ms}
+       other -> {:error, {:invalid_partition_config, :partition_move_lock_timeout_ms, other}}
+     end
+   end

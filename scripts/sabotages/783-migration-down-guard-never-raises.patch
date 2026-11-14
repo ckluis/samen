@@ -5,13 +5,13 @@
 # TEST_FILES: test/aud_event_default_partition_test.exs
 # MUST_FAIL: the guard RAISES while the DEFAULT partition holds rows
 diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
-index a7409fe5..b94bf29e 100644
+index c608d8cf..9674c618 100644
 --- a/samen_core/lib/samen/audit_event/partition_manager.ex
 +++ b/samen_core/lib/samen/audit_event/partition_manager.ex
-@@ -689,7 +689,7 @@ defmodule Samen.AuditEvent.PartitionManager do
-         -- Held to the end of the migration: a writer cannot commit a row between this check and the DROP (the DROP
-         -- would wait for it and then destroy its row). Waits at most the migration's lock_timeout.
-         LOCK TABLE #{@default_partition} IN ACCESS EXCLUSIVE MODE;
+@@ -761,7 +761,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+         -- would wait for it and then destroy its row). The PARENT first (a writer's order: parent, then partition),
+         -- and it recurses to the DEFAULT. Waits at most the migration's lock_timeout.
+         LOCK TABLE aud_event IN ACCESS EXCLUSIVE MODE;
 -        IF EXISTS (SELECT 1 FROM ONLY #{@default_partition}) THEN
 +        IF false AND EXISTS (SELECT 1 FROM ONLY #{@default_partition}) THEN
            RAISE EXCEPTION '#{@default_partition} holds audit rows that are in no monthly partition; dropping it would destroy them. Create the missing months first (Samen.AuditEvent.PartitionManager.ensure_partition/2 moves the rows in), then roll back again.';

@@ -1,0 +1,20 @@
+# SABOTAGE: a host migration's down runs the guard without a lock_timeout, so it can queue every audited 
+#   write
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: every host migration's down takes a lock_timeout BEFORE
+diff --git a/samen_core/priv/test_repo/migrations/20261114120000_aud_event_default_partition.exs b/samen_core/priv/test_repo/migrations/20261114120000_aud_event_default_partition.exs
+index a7627bf2..ea539ef3 100644
+--- a/samen_core/priv/test_repo/migrations/20261114120000_aud_event_default_partition.exs
++++ b/samen_core/priv/test_repo/migrations/20261114120000_aud_event_default_partition.exs
+@@ -27,8 +27,6 @@ defmodule SamenCore.TestRepo.Migrations.AudEventDefaultPartition do
+   def down do
+     # The guard locks the PARENT first (the order an audited write takes: parent, then partition), so it cannot
+     # deadlock with a writer, and gives up instead of queueing every audited write behind it. Transaction-scoped.
+-    execute "SET LOCAL lock_timeout = '5s'"
+-
+     # refuses (raises) while the DEFAULT partition holds rows; the SQL is the framework's, shared by every host
+     execute Samen.AuditEvent.PartitionManager.default_partition_down_guard_sql()
+ 

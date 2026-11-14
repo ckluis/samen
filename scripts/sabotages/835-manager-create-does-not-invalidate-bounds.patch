@@ -5,14 +5,14 @@
 # TEST_FILES: test/aud_event_default_partition_test.exs
 # MUST_FAIL: the MANAGER invalidates the in-memory bounds itself
 diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
-index a7409fe5..e9f889ce 100644
+index c608d8cf..65ff44ec 100644
 --- a/samen_core/lib/samen/audit_event/partition_manager.ex
 +++ b/samen_core/lib/samen/audit_event/partition_manager.ex
-@@ -327,7 +327,6 @@ defmodule Samen.AuditEvent.PartitionManager do
+@@ -328,7 +328,6 @@ defmodule Samen.AuditEvent.PartitionManager do
  
-     case result do
-       {:ok, ^name} ->
--        invalidate_bounds(repo)
-         {:ok, name}
+       case result do
+         {:ok, ^name} ->
+-          invalidate_bounds(repo)
+           {:ok, name}
  
-       {:error, reason} ->
+         {:error, reason} ->

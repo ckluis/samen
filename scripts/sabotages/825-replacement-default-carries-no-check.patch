@@ -6,15 +6,15 @@
 # TEST_FILES: test/aud_event_default_partition_test.exs
 # MUST_FAIL: both ATTACHes of the move validate NOTHING
 diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
-index a7409fe5..95f0ba7d 100644
+index c608d8cf..5f0032b1 100644
 --- a/samen_core/lib/samen/audit_event/partition_manager.ex
 +++ b/samen_core/lib/samen/audit_event/partition_manager.ex
-@@ -427,7 +427,7 @@ defmodule Samen.AuditEvent.PartitionManager do
-           q!(repo, "SELECT pg_advisory_xact_lock(hashtext('samen:aud_event:partition_move'))", staging_ms)
- 
-           # ---- phase 1: stage, no lock on aud_event ----
+@@ -488,7 +488,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+           q!(repo, "CREATE TABLE #{@staged_default} (LIKE aud_event INCLUDING DEFAULTS INCLUDING INDEXES)", staging_ms)
+           # AFTER the first CREATE … LIKE: that holds ACCESS SHARE on aud_event, so no sibling can be detached between
+           # reading the bounds and the end of the move (a detach in that gap would make the CHECK too strict)
 -          default_check = default_check_sql(repo, in_range, staging_ms)
 +          default_check = "true"
-           q!(repo, "CREATE TABLE #{@staged_month} (LIKE aud_event INCLUDING DEFAULTS INCLUDING INDEXES)", staging_ms)
-           q!(repo, "CREATE TABLE #{@staged_default} (LIKE aud_event INCLUDING DEFAULTS INCLUDING INDEXES)", staging_ms)
            # the CHECKs go on the EMPTY tables (no scan to add them) and are what lets each ATTACH skip its scan
+           q!(repo, "ALTER TABLE #{@staged_month} ADD CONSTRAINT #{check} CHECK (#{in_range})", staging_ms)
+           q!(repo, "ALTER TABLE #{@staged_default} ADD CONSTRAINT #{check} CHECK (#{default_check})", staging_ms)
