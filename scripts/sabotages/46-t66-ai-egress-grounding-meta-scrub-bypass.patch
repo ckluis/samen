@@ -18,15 +18,18 @@
 # TEST_FILES: test/ai/ai_prompt_masking_test.exs
 # MUST_FAIL: a vt_* token embedded in :grounding is refused, never reaches the provider recording
 diff --git a/samen_core/lib/samen/ai/chokepoint.ex b/samen_core/lib/samen/ai/chokepoint.ex
---- a/samen_core/lib/samen/ai/chokepoint.ex	2026-08-04 11:11:53
-+++ b/samen_core/lib/samen/ai/chokepoint.ex	2026-08-04 11:12:58
-@@ -431,9 +431,13 @@
+index 1ab39e5d..ca6364e7 100644
+--- a/samen_core/lib/samen/ai/chokepoint.ex
++++ b/samen_core/lib/samen/ai/chokepoint.ex
+@@ -629,11 +629,13 @@ defmodule Samen.AI.Chokepoint do
    # `safe_metadata?/1`'s scalar leaf cases (which exist to scrub VALUES/KEYS *inside* an
    # already-map-shaped grounding/meta, not to bless a non-map top level).
    defp scrub_metadata(value) when is_map(value) do
 -    if unsafe_metadata?(value), do: @refusal, else: :ok
 -  rescue
--    _ -> @refusal
+-    e ->
+-      Samen.Observability.Failure.report(:chokepoint_scrub_metadata, nil, e)
+-      @refusal
 +    # SABOTAGE (T66 D9 grounding — T65-F8 close): RE-OPEN the grounding/meta scrub hole.
 +    # The safety verdict is still COMPUTED (so nothing here is orphaned) but the RESULT is
 +    # discarded — `:grounding`/`:meta` are admitted unconditionally, exactly the pre-fix
