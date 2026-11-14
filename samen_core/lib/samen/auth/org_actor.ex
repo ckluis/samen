@@ -141,9 +141,6 @@ defmodule Samen.Auth.OrgActor do
     Logger.error("[Samen.Auth.OrgActor] read failed read=#{name} cause=#{inspect(module)}")
   end
 
-  defp report(name, _other),
-    do: Logger.error("[Samen.Auth.OrgActor] read failed read=#{name} cause=unknown")
-
   defp find_user(mods, credential_id, org_id) do
     mods.user
     |> Ash.Query.filter(credential_id == ^credential_id and org_id == ^org_id)
