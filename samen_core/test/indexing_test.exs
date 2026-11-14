@@ -439,7 +439,7 @@ defmodule Samen.IndexingTest do
       assert source =~ "defmodule SamenCore.TestRepo.Migrations.OrgKeysetIndexes20261114100000 do"
       assert source =~ "use Samen.Migration, phase: :expand"
       assert source =~ "@disable_ddl_transaction true"
-      assert source =~ "create_org_keyset_indexes(@indexes, concurrently: true)"
+      assert source =~ "create_org_keyset_indexes(@indexes ++ @created_with_table, concurrently: true)"
       assert source =~ "drop_org_keyset_indexes(@indexes, concurrently: true)"
 
       assert source =~
@@ -470,6 +470,17 @@ defmodule Samen.IndexingTest do
 
       {resources, []} = Indexing.org_scoped(domains)
       assert File.read!(path) == Gen.render(SamenCore.TestRepo, resources, "20261114100000")
+    end
+
+    test "the replay tables' indexes are built by up but never dropped by down (their own migration owns them)" do
+      source = Gen.render(SamenCore.TestRepo, [WorkFixture.Task, Samen.Replay.Session], "20261114100000")
+      [own, rest] = String.split(source, "@created_with_table [", parts: 2)
+      [owned, _] = String.split(rest, "def up", parts: 2)
+
+      assert owned =~ "replay_session_org_id_idx"
+      refute owned =~ "stw_task"
+      refute own =~ "replay_session_org_id_idx"
+      assert own =~ "stw_task_org_title_id_idx"
     end
 
     test "a re-run (another timestamp) is a different module AND file name — Ecto accepts both" do

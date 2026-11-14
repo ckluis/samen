@@ -73,9 +73,8 @@ defmodule Samen.Replay.Migration do
     create(index(:replay_frame, [:rpf_org_id], name: "replay_frame_org_idx"))
     create(index(:replay_frame, [:rpf_inserted_at], name: "replay_frame_inserted_idx"))
 
-    # The ARCH-4 tenant keyset index is NOT built here: a host whose replay tables already exist
-    # never re-runs this, so `mix samen.gen.indexes` owns it for every table alike (and rolling
-    # that migration back therefore drops only indexes it built).
+    # ARCH-4: the tenant keyset index (org_id, <keyset sort>, id) on both tables.
+    Samen.Migration.__org_keyset_indexes__(:up, caller, @resources, [])
     Samen.Migration.__catalog_sync__(caller, @resources, [])
     :ok
   end
@@ -84,6 +83,7 @@ defmodule Samen.Replay.Migration do
   @spec down() :: :ok
   def down do
     Samen.Migration.__catalog_sync_down__(@resources, [])
+    Samen.Migration.__org_keyset_indexes__(:down, __MODULE__, @resources, [])
     drop(table(:replay_frame))
     drop(table(:replay_session))
     :ok

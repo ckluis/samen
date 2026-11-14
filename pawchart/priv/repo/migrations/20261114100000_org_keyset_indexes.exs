@@ -158,13 +158,18 @@ defmodule PawChart.Repo.Migrations.OrgKeysetIndexes20261114100000 do
     # PawChart.Work.Project
     {"pwp_project", ["pwp_org_id", "pwp_id"], "pwp_project_org_id_idx"},
     # PawChart.Work.Task
-    {"pwt_task", ["pwt_org_id", "pwt_title", "pwt_id"], "pwt_task_org_title_id_idx"},
+    {"pwt_task", ["pwt_org_id", "pwt_title", "pwt_id"], "pwt_task_org_title_id_idx"}
+  ]
+
+  # Tables whose own creating migration also builds the index: built here when missing,
+  # never dropped by this migration's `down`.
+  @created_with_table [
     # Samen.Replay.Frame
     {"replay_frame", ["rpf_org_id", "rpf_id"], "replay_frame_org_id_idx"},
     # Samen.Replay.Session
     {"replay_session", ["rps_org_id", "rps_id"], "replay_session_org_id_idx"}
   ]
 
-  def up, do: create_org_keyset_indexes(@indexes, concurrently: true)
+  def up, do: create_org_keyset_indexes(@indexes ++ @created_with_table, concurrently: true)
   def down, do: drop_org_keyset_indexes(@indexes, concurrently: true)
 end

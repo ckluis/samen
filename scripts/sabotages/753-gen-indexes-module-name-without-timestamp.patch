@@ -5,11 +5,11 @@
 # TEST_FILES: test/indexing_test.exs
 # MUST_FAIL: a re-run (another timestamp) is a different module AND file name
 diff --git a/samen_core/lib/mix/tasks/samen.gen.indexes.ex b/samen_core/lib/mix/tasks/samen.gen.indexes.ex
-index a034c5bb..ec4d48ae 100644
+index 3355021..60cdcea 100644
 --- a/samen_core/lib/mix/tasks/samen.gen.indexes.ex
 +++ b/samen_core/lib/mix/tasks/samen.gen.indexes.ex
-@@ -96,7 +96,7 @@ defmodule Mix.Tasks.Samen.Gen.Indexes do
-       end)
+@@ -103,7 +103,7 @@ defmodule Mix.Tasks.Samen.Gen.Indexes do
+     owned_list = render_entries(owned)
  
      """
 -    defmodule #{inspect(repo)}.Migrations.OrgKeysetIndexes#{timestamp} do

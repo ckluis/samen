@@ -76,8 +76,7 @@ All notable changes to Samen are recorded here. The format follows
   `mix samen.verify.indexes` against production after the migration: it counts only a valid, ready index.
 - `Samen.Web.Reads` ANDs a redundant bound onto the keyset cursor (`f <= v` for DESC; `f >= v` for ASC only on a column that
   cannot be NULL) so a deep page seeks in the index instead of filtering from the start of the org's range; the result set is unchanged.
-- `Samen.Replay.Migration` no longer builds the keyset indexes itself (a host whose replay tables exist never re-runs it); the
-  retrofit migration owns them, so rolling it back drops only what it built.
+- The retrofit migration builds the replay tables' indexes if missing but its `down` never drops them (`Samen.Replay.Migration` owns them for a fresh database).
 - `activities_for_person` / `activities_for_company` filter `get_path(custom, ["crm_refs", …])`; two partial expression
   indexes on the exact expression Ash emits now let Postgres `BitmapOr` it with the `(subject_key, subject_id)` index.
 - Fixed on the way: `Samen.AI.Agent.FoldSource` had a table in driftwood but no repo wiring (it defaulted to `SamenCore.TestRepo`);

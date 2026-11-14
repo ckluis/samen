@@ -190,13 +190,18 @@ defmodule Driftwood.Repo.Migrations.OrgKeysetIndexes20261114100000 do
     # Samen.AI.Prompt
     {"ai_prompt", ["aip_org_id", "aip_id"], "ai_prompt_org_id_idx"},
     # Samen.AI.SupportReplyDraft
-    {"ai_support_reply_draft", ["sas_org_id", "sas_id"], "ai_support_reply_draft_org_id_idx"},
+    {"ai_support_reply_draft", ["sas_org_id", "sas_id"], "ai_support_reply_draft_org_id_idx"}
+  ]
+
+  # Tables whose own creating migration also builds the index: built here when missing,
+  # never dropped by this migration's `down`.
+  @created_with_table [
     # Samen.Replay.Frame
     {"replay_frame", ["rpf_org_id", "rpf_id"], "replay_frame_org_id_idx"},
     # Samen.Replay.Session
     {"replay_session", ["rps_org_id", "rps_id"], "replay_session_org_id_idx"}
   ]
 
-  def up, do: create_org_keyset_indexes(@indexes, concurrently: true)
+  def up, do: create_org_keyset_indexes(@indexes ++ @created_with_table, concurrently: true)
   def down, do: drop_org_keyset_indexes(@indexes, concurrently: true)
 end

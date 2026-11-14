@@ -143,6 +143,12 @@ defmodule Demo.Repo.Migrations.OrgKeysetIndexes20261114100000 do
     {"wtk_task", ["wtk_org_id", "wtk_title", "wtk_id"], "wtk_task_org_title_id_idx"}
   ]
 
-  def up, do: create_org_keyset_indexes(@indexes, concurrently: true)
+  # Tables whose own creating migration also builds the index: built here when missing,
+  # never dropped by this migration's `down`.
+  @created_with_table [
+
+  ]
+
+  def up, do: create_org_keyset_indexes(@indexes ++ @created_with_table, concurrently: true)
   def down, do: drop_org_keyset_indexes(@indexes, concurrently: true)
 end

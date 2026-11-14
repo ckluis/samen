@@ -25,10 +25,6 @@ defmodule Samen.WebTest.Repo.Migrations.OrgKeysetIndexes20261114100000 do
     {"ai_agent_run", ["arn_org_id", "arn_id"], "ai_agent_run_org_id_idx"},
     # Samen.AI.Agent.Turn
     {"ai_agent_turn", ["atn_org_id", "atn_id"], "ai_agent_turn_org_id_idx"},
-    # Samen.Replay.Frame
-    {"replay_frame", ["rpf_org_id", "rpf_id"], "replay_frame_org_id_idx"},
-    # Samen.Replay.Session
-    {"replay_session", ["rps_org_id", "rps_id"], "replay_session_org_id_idx"},
     # Samen.WebTest.Analytics.ProductEvent
     {"wan_product_event", ["wan_org_id", "wan_id"], "wan_product_event_org_id_idx"},
     # Samen.WebTest.Automation.Escalation
@@ -207,6 +203,15 @@ defmodule Samen.WebTest.Repo.Migrations.OrgKeysetIndexes20261114100000 do
     {"wwt_task", ["wwt_org_id", "wwt_title", "wwt_id"], "wwt_task_org_title_id_idx"}
   ]
 
-  def up, do: create_org_keyset_indexes(@indexes, concurrently: true)
+  # Tables whose own creating migration also builds the index: built here when missing,
+  # never dropped by this migration's `down`.
+  @created_with_table [
+    # Samen.Replay.Frame
+    {"replay_frame", ["rpf_org_id", "rpf_id"], "replay_frame_org_id_idx"},
+    # Samen.Replay.Session
+    {"replay_session", ["rps_org_id", "rps_id"], "replay_session_org_id_idx"}
+  ]
+
+  def up, do: create_org_keyset_indexes(@indexes ++ @created_with_table, concurrently: true)
   def down, do: drop_org_keyset_indexes(@indexes, concurrently: true)
 end

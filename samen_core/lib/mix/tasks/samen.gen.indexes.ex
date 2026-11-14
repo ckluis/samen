@@ -17,7 +17,8 @@ defmodule Mix.Tasks.Samen.Gen.Indexes do
   Every run writes a new file whose module name carries its timestamp, so re-running never
   collides with an earlier migration (Ecto refuses two migrations with one module or version).
   The indexes are idempotent, so a re-run only builds what is missing. A rollback of this
-  migration drops every index it lists.
+  migration drops every index it lists except those a framework migration also creates with the
+  table (`Samen.Replay.Migration`).
 
   A freshly generated app does not need this: `mix samen.gen.app` creates the indexes inside
   the table-creating migrations (`create_org_keyset_indexes/1`).
@@ -31,6 +32,8 @@ defmodule Mix.Tasks.Samen.Gen.Indexes do
   (tests, and the committed host migrations).
   """
   use Mix.Task
+
+  @created_with_table [Samen.Replay.Session, Samen.Replay.Frame]
 
   @impl Mix.Task
   def run(argv) do
@@ -84,16 +87,20 @@ defmodule Mix.Tasks.Samen.Gen.Indexes do
   """
   @spec render(module(), [module()], String.t(), keyword()) :: String.t()
   def render(repo, resources, timestamp, opts \\ []) do
-    list =
+    entries =
       resources
       |> Enum.map(fn resource ->
         {:ok, spec} = Samen.Indexing.spec(resource, Keyword.take(opts, [:keyset_sorts]))
-        {inspect(resource), spec}
+        {resource, spec}
       end)
-      |> Enum.sort()
-      |> Enum.map_join(",\n", fn {name, spec} ->
-        "    # #{name}\n    {#{inspect(spec.table)}, #{inspect(spec.columns)}, #{inspect(spec.name)}}"
-      end)
+      |> Enum.sort_by(fn {resource, _} -> inspect(resource) end)
+
+    # A framework migration (`Samen.Replay.Migration`) builds its own tables' indexes when it
+    # creates them; this migration still builds them for a host whose tables predate that, but
+    # its `down` must not drop what another migration owns.
+    {owned, own} = Enum.split_with(entries, fn {resource, _} -> resource in @created_with_table end)
+    list = render_entries(own)
+    owned_list = render_entries(owned)
 
     """
     defmodule #{inspect(repo)}.Migrations.OrgKeysetIndexes#{timestamp} do
@@ -118,9 +125,21 @@ defmodule Mix.Tasks.Samen.Gen.Indexes do
     #{list}
       ]
 
-      def up, do: create_org_keyset_indexes(@indexes, concurrently: true)
+      # Tables whose own creating migration also builds the index: built here when missing,
+      # never dropped by this migration's `down`.
+      @created_with_table [
+    #{owned_list}
+      ]
+
+      def up, do: create_org_keyset_indexes(@indexes ++ @created_with_table, concurrently: true)
       def down, do: drop_org_keyset_indexes(@indexes, concurrently: true)
     end
     """
+  end
+
+  defp render_entries(entries) do
+    Enum.map_join(entries, ",\n", fn {resource, spec} ->
+      "    # #{inspect(resource)}\n    {#{inspect(spec.table)}, #{inspect(spec.columns)}, #{inspect(spec.name)}}"
+    end)
   end
 end

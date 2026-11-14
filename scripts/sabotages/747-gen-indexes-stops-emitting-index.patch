@@ -5,14 +5,14 @@
 # TEST_FILES: test/indexing_test.exs
 # MUST_FAIL: renders LITERAL {table, columns, name} tuples, sorted, and a reversible concurrent up/down
 diff --git a/samen_core/lib/mix/tasks/samen.gen.indexes.ex b/samen_core/lib/mix/tasks/samen.gen.indexes.ex
-index a034c5bb..f8725e81 100644
+index 33550210..4db76f34 100644
 --- a/samen_core/lib/mix/tasks/samen.gen.indexes.ex
 +++ b/samen_core/lib/mix/tasks/samen.gen.indexes.ex
-@@ -118,7 +118,7 @@ defmodule Mix.Tasks.Samen.Gen.Indexes do
-     #{list}
+@@ -131,7 +131,7 @@ defmodule Mix.Tasks.Samen.Gen.Indexes do
+     #{owned_list}
        ]
  
--      def up, do: create_org_keyset_indexes(@indexes, concurrently: true)
+-      def up, do: create_org_keyset_indexes(@indexes ++ @created_with_table, concurrently: true)
 +      def up, do: :ok
        def down, do: drop_org_keyset_indexes(@indexes, concurrently: true)
      end
