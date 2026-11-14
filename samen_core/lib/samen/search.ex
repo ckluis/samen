@@ -247,8 +247,6 @@ defmodule Samen.Search do
     resource
     |> Samen.Pii.Info.pii_attributes()
     |> Enum.map(& &1.name)
-  rescue
-    _ -> []
   end
 
   # The ad-hoc `:search_rank` expression calc lands in the record's `calculations`

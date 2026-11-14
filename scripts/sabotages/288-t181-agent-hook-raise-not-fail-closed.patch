@@ -13,26 +13,20 @@
 # MUST_FAIL: the tool never executes UNHOOKED
 # MUST_FAIL: a raise fails closed to the STRONGEST refusal the point accepts
 diff --git a/samen_core/lib/samen/ai/agent/hooks.ex b/samen_core/lib/samen/ai/agent/hooks.ex
-index f103273..8662568 100644
+index b95028b2..d93133cf 100644
 --- a/samen_core/lib/samen/ai/agent/hooks.ex
 +++ b/samen_core/lib/samen/ai/agent/hooks.ex
-@@ -116,11 +116,17 @@ defmodule Samen.AI.Agent.Hooks do
-   # `:__hook_error__` is a private sentinel — it is not part of the public contract and
-   # a hook returning it verbatim is treated exactly like any other malformed return.
-   defp safe_call(hook, point, ctx) do
-+    # SABOTAGE (T181, ADR-047 §10a row 25): the FAIL-CLOSED rescue is dropped. A hook that
-+    # raises, throws, exits, or simply does not export `call/2` now DEFERS like a hook that
-+    # returned `:ok`, so the loop runs the tool call UNHOOKED — the policy the chain was
-+    # configured to apply is silently skipped and the call executes anyway. This is the
-+    # silent degrade the seam exists to prevent: a broken hook must make the call not
-+    # happen, never make the call happen without its policy.
-     hook.call(point, ctx)
+@@ -120,11 +120,11 @@ defmodule Samen.AI.Agent.Hooks do
    rescue
--    _ -> :__hook_error__
-+    _ -> :ok
+     e ->
+       Samen.Observability.Failure.report(:hooks_safe_call, nil, e)
+-      :__hook_error__
++      :ok
    catch
--    _kind, _value -> :__hook_error__
-+    _kind, _value -> :ok
+     kind, _value ->
+       Samen.Observability.Failure.report(:hooks_safe_call, nil, kind)
+-      :__hook_error__
++      :ok
    end
  
    defp interpret(point, _ctx, {:block, reason}) do

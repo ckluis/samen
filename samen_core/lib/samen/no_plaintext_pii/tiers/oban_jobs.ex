@@ -110,15 +110,29 @@ defmodule Samen.NoPlaintextPii.Tiers.ObanJobs do
 
   def check(%Context{} = context) do
     case table_exists?(context.repo, "oban_jobs") do
-      false ->
+      {:ok, false} ->
         # oban_jobs absent: Oban not yet wired in this app. No finding.
         []
 
-      true ->
+      {:ok, true} ->
         ci_findings = ci_mode_findings(context)
         post_shred_findings = post_shred_findings(context)
         ci_findings ++ post_shred_findings
+
+      {:error, :unavailable} ->
+        [scan_failed("could not determine whether oban_jobs exists")]
     end
+  end
+
+  # A probe that FAILED is a violation, never a pass: the moduledoc's "table present but scan fails -> :violation"
+  # used to be untrue (`rescue _ -> false | []` made an unreadable table, or an unreadable row set, a clean scan).
+  defp scan_failed(what) do
+    Finding.violation(
+      @tier,
+      "oban_jobs",
+      "#{what} — the oban_jobs PII scan could not run (fail closed). See the " <>
+        "[Samen.Core] read failed line for the cause."
+    )
   end
 
   # ---------------------------------------------------------------------------
@@ -133,11 +147,15 @@ defmodule Samen.NoPlaintextPii.Tiers.ObanJobs do
   end
 
   defp scan_queue(queue, context) do
-    rows = fetch_recent_jobs(context.repo, to_string(queue), @sample_limit)
+    case fetch_recent_jobs(context.repo, to_string(queue), @sample_limit) do
+      {:ok, rows} ->
+        Enum.flat_map(rows, fn {job_id, args_json, worker} ->
+          scan_job_args(job_id, args_json, worker)
+        end)
 
-    Enum.flat_map(rows, fn {job_id, args_json, worker} ->
-      scan_job_args(job_id, args_json, worker)
-    end)
+      {:error, :unavailable} ->
+        [scan_failed("could not read the recent jobs of queue #{queue}")]
+    end
   end
 
   defp scan_job_args(job_id, args_json, worker) do
@@ -185,14 +203,14 @@ defmodule Samen.NoPlaintextPii.Tiers.ObanJobs do
   defp post_shred_findings(%Context{subject_id: nil}), do: []
 
   defp post_shred_findings(%Context{subject_id: subject_id, repo: repo}) do
-    rows = fetch_subject_job_rows(repo, subject_id)
+    case fetch_subject_job_rows(repo, subject_id) do
+      {:ok, rows} ->
+        Enum.flat_map(rows, fn {job_id, args_json, errors_json, meta_json} ->
+          scan_subject_row(job_id, subject_id, args_json, errors_json, meta_json)
+        end)
 
-    if rows == [] do
-      []
-    else
-      Enum.flat_map(rows, fn {job_id, args_json, errors_json, meta_json} ->
-        scan_subject_row(job_id, subject_id, args_json, errors_json, meta_json)
-      end)
+      {:error, :unavailable} ->
+        [scan_failed("could not read the oban_jobs rows that reference subject #{subject_id}")]
     end
   end
 
@@ -232,9 +250,11 @@ defmodule Samen.NoPlaintextPii.Tiers.ObanJobs do
         [table]
       )
 
-    count > 0
+    {:ok, count > 0}
   rescue
-    _ -> false
+    e ->
+      Samen.Observability.Failure.report(:oban_jobs_table_probe, nil, e)
+      {:error, :unavailable}
   end
 
   defp fetch_recent_jobs(repo, queue, limit) do
@@ -246,9 +266,11 @@ defmodule Samen.NoPlaintextPii.Tiers.ObanJobs do
         [queue, limit]
       )
 
-    Enum.map(rows, fn [id, args, worker] -> {id, args || "{}", worker || ""} end)
+    {:ok, Enum.map(rows, fn [id, args, worker] -> {id, args || "{}", worker || ""} end)}
   rescue
-    _ -> []
+    e ->
+      Samen.Observability.Failure.report(:oban_jobs_recent_scan, nil, e)
+      {:error, :unavailable}
   end
 
   defp fetch_subject_job_rows(repo, subject_id) do
@@ -265,10 +287,13 @@ defmodule Samen.NoPlaintextPii.Tiers.ObanJobs do
         ["%#{subject_id}%"]
       )
 
-    Enum.map(rows, fn [id, args, errors, meta] ->
-      {id, args || "{}", errors || "[]", meta || "{}"}
-    end)
+    {:ok,
+     Enum.map(rows, fn [id, args, errors, meta] ->
+       {id, args || "{}", errors || "[]", meta || "{}"}
+     end)}
   rescue
-    _ -> []
+    e ->
+      Samen.Observability.Failure.report(:oban_jobs_subject_scan, nil, e)
+      {:error, :unavailable}
   end
 end

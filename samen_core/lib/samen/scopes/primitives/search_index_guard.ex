@@ -48,38 +48,34 @@ defmodule Samen.Scopes.Primitives.SearchIndexGuard do
     end
 
     :ok
-  rescue
-    e in ArgumentError -> reraise(e, __STACKTRACE__)
-    _ -> :ok
   end
 
   @doc """
   Returns the list of PII-declared field names (as atoms) for a resource module.
 
-  Returns `[]` if the resource has no PII declarations or if introspection fails
-  (fail-open for introspection; the red path test validates the fail-closed path
-  directly).
+  Returns `[]` only when the resource genuinely declares no PII. A module whose declarations cannot be
+  introspected RAISES (fail closed): `assert_no_pii_column/2` must refuse the index registration, never read
+  "cannot introspect" as "declares no PII".
   """
   def get_pii_fields(resource_module) do
-    try do
-      entities =
-        Spark.Dsl.Extension.get_entities(resource_module, [:pii])
+    # No rescue: a module whose PII declarations cannot be introspected must REFUSE the index registration. The old
+    # `rescue _ -> []` (and `_ -> :ok` in `assert_no_pii_column/2`) read "cannot introspect" as "declares no PII", so
+    # a PII column could be indexed into a tsvector search index whenever the introspection failed.
+    entities =
+      Spark.Dsl.Extension.get_entities(resource_module, [:pii])
 
-      Enum.flat_map(entities, fn entity ->
-        cond do
-          # A pii_attribute entity has a :name key.
-          is_map(entity) and Map.has_key?(entity, :name) ->
-            [entity.name]
+    Enum.flat_map(entities, fn entity ->
+      cond do
+        # A pii_attribute entity has a :name key.
+        is_map(entity) and Map.has_key?(entity, :name) ->
+          [entity.name]
 
-          is_struct(entity) and Map.has_key?(entity, :name) ->
-            [entity.name]
+        is_struct(entity) and Map.has_key?(entity, :name) ->
+          [entity.name]
 
-          true ->
-            []
-        end
-      end)
-    rescue
-      _ -> []
-    end
+        true ->
+          []
+      end
+    end)
   end
 end

@@ -1,0 +1,20 @@
+# SABOTAGE: The Writer stops wrapping insert + chain append in its own transaction, so a chain failure 
+#   after the event insert leaves a chainless aud_event committed.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/audit_writer_callers_test.exs
+# MUST_FAIL: a chain append that fails AFTER the event insert leaves no chainless aud_event
+diff --git a/samen_core/lib/samen/audit_chain/writer.ex b/samen_core/lib/samen/audit_chain/writer.ex
+index c0efaf04..8c95af62 100644
+--- a/samen_core/lib/samen/audit_chain/writer.ex
++++ b/samen_core/lib/samen/audit_chain/writer.ex
+@@ -69,7 +69,7 @@ defmodule Samen.AuditChain.Writer do
+       # nest rollbacks: a nested `rollback` would poison the caller's transaction even when it tolerates the
+       # error), so there this returns `{:error, _}` and a caller that must be atomic rolls back on it. The probe
+       # runs BEFORE any insert, so an unavailable chain writes nothing in either case.
+-      if repo.in_transaction?() do
++      if true do
+         do_write(repo, attrs)
+       else
+         case repo.transaction(fn ->

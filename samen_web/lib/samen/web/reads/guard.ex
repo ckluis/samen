@@ -63,7 +63,6 @@ defmodule Samen.Web.Reads.Guard do
   is compiled out and `inject_faults/1` returns `{:error, :seam_disabled}`.
   """
 
-  require Logger
 
   alias Samen.Web.Page
 
@@ -282,60 +281,10 @@ defmodule Samen.Web.Reads.Guard do
   @spec report(atom(), term(), term()) :: :ok
   def report(name, scope, reason) when is_atom(name), do: log_failure(:read, name, scope, reason)
 
-  defp log_failure(kind, name, scope, reason) do
-    causes = causes(reason)
-
-    Logger.error(
-      "[Samen.Web.Reads] #{kind} failed #{kind}=#{name} org=#{org_of(scope)} cause=#{Enum.join(causes, ",")}"
-    )
-
-    emit(kind, name, causes)
-  end
-
-  # Module names only — never the exception message or struct (it interpolates row values).
-  defp causes(%{__struct__: module} = e) do
-    inner =
-      case e do
-        %{errors: errors} when is_list(errors) -> Enum.map(errors, &module_name/1)
-        _ -> []
-      end
-
-    Enum.uniq([module_name(module) | inner])
-  end
-
-  defp causes(kind) when is_atom(kind), do: [Atom.to_string(kind)]
-
-  defp module_name(%{__struct__: module}), do: module_name(module)
-  defp module_name(module) when is_atom(module), do: inspect(module)
-  defp module_name(_), do: "unknown"
-
-  defp org_of(%{actor: %{org_id: org_id}}) when is_binary(org_id), do: safe_org(org_id)
-  defp org_of(%{org_id: org_id}) when is_binary(org_id), do: safe_org(org_id)
-  defp org_of(org_id) when is_binary(org_id), do: safe_org(org_id)
-  defp org_of(_), do: "unknown"
-
-  # The org id may come straight from a URL or param (a drill-in's `:org_id`): only a canonical UUID reaches
-  # the log line, anything else (newlines, `cause=` forgeries, megabytes) is a fixed placeholder, so a caller
-  # cannot inject a fake log line. (`Ecto.UUID.cast/1` alone also accepts a raw 16-byte binary.)
-  defp safe_org(org_id) when byte_size(org_id) == 36 do
-    case Ecto.UUID.cast(org_id) do
-      {:ok, uuid} -> uuid
-      :error -> "invalid"
-    end
-  end
-
-  defp safe_org(_), do: "invalid"
-
-  # Reads keep `[:samen, :web, :read, :error]` (`read`, `cause`); a failed write has its own
-  # `[:samen, :web, :write, :error]` (`write`, `cause`) so an outage dashboard never mixes the two.
-  defp emit(kind, name, causes) do
-    :telemetry.execute([:samen, :web, kind, :error], %{count: 1}, %{
-      kind => name,
-      cause: List.first(causes)
-    })
-  rescue
-    _ -> :ok
-  end
+  # One implementation for the kernel and the web layer: `Samen.Observability.Failure` (samen_core). The web layer keeps
+  # its log tag and its `[:samen, :web, kind, :error]` telemetry event so dashboards and log greps are unchanged.
+  defp log_failure(kind, name, scope, reason),
+    do: Samen.Observability.Failure.report(kind, name, scope, reason, tag: "[Samen.Web.Reads]", event_prefix: [:samen, :web])
 
   # -- test seam -----------------------------------------------------------------
 

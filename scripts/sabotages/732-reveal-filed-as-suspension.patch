@@ -1,0 +1,19 @@
+# SABOTAGE: reveal filed as suspension
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/suspension_asymmetry_test.exs
+# MUST_FAIL: a reveal-shaped entry named operator_suspended anchors as break_glass
+diff --git a/samen_core/lib/samen/break_glass/reconciliation.ex b/samen_core/lib/samen/break_glass/reconciliation.ex
+index 870d4def..7b3c2133 100644
+--- a/samen_core/lib/samen/break_glass/reconciliation.ex
++++ b/samen_core/lib/samen/break_glass/reconciliation.ex
+@@ -150,7 +150,7 @@ defmodule Samen.BreakGlass.Reconciliation do
+   # failed) anchors as the `operator_suspension` event the live path would have written; everything else on the
+   # local chain is a break-glass reveal. Keyed on `kind`, a field only `Suspension` writes: a reveal's `action` is
+   # caller-supplied, so it must never decide the event type.
+-  defp central_event(%{kind: "operator_suspension"} = entry) do
++  defp central_event(%{action: "operator_suspended"} = entry) do
+     %{
+       org_id: entry.org_id,
+       event_type: "operator_suspension",

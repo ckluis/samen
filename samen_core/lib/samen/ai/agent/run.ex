@@ -344,8 +344,12 @@ defmodule Samen.AI.Agent.Run do
         |> Ash.Changeset.force_change_attribute(:next_turn_at, nil)
         |> Ash.Changeset.force_change_attribute(:error_kind, "deadline_expired")
         |> Ash.Changeset.after_action(fn _changeset, result ->
-          Samen.AI.Agent.on_proposal_expired(result)
-          {:ok, result}
+          # An incomplete expiry (the approval could not be withdrawn) fails the action: the transaction rolls
+          # back and the run stays parked, so it is never `:expired` with its approval still decidable.
+          case Samen.AI.Agent.on_proposal_expired(result) do
+            :ok -> {:ok, result}
+            {:error, _} = error -> error
+          end
         end)
       end)
 

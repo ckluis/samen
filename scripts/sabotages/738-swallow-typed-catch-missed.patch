@@ -1,0 +1,18 @@
+# SABOTAGE: swallow typed catch missed
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/swallow_lint_test.exs
+# MUST_FAIL: a typed `catch :exit, {:timeout, _} -> []` is flagged
+diff --git a/samen_core/lib/samen/lint/swallow.ex b/samen_core/lib/samen/lint/swallow.ex
+index dc6a8467..39ae560e 100644
+--- a/samen_core/lib/samen/lint/swallow.ex
++++ b/samen_core/lib/samen/lint/swallow.ex
+@@ -357,7 +357,6 @@ defmodule Samen.Lint.Swallow do
+       catch_all?(key, patterns) and not handled?(body, bound_vars(patterns)) -> [site(fun, :rescue, clause) | acc]
+       key == :rescue and typed?(patterns) and swallow_literal?(final_expr(body)) and not logged?(body) -> [site(fun, :rescue, clause) | acc]
+       # `catch :exit, {:timeout, _} -> []`: a typed catch answering a swallow literal is the same lie as a typed rescue.
+-      key == :catch and swallow_literal?(final_expr(body)) and not logged?(body) -> [site(fun, :rescue, clause) | acc]
+       true -> acc
+     end
+   end

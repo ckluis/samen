@@ -192,6 +192,11 @@ defmodule Samen.AI.Agent.WriteProposal do
   # The E3 handler faces — both run INSIDE the decision transaction (§4.3).
   # ==========================================================================
 
+  # The agent checks the approval's `deadline_at` itself at execution (`:proposal_expired`, plus the run's own expiry),
+  # so the engine's generic deadline refusal stands aside for this kind.
+  @impl true
+  def owns_deadline?, do: true
+
   @impl true
   def on_approve(approval, ctx) do
     with {:ok, turn_id} <- parse_subject_ref(approval.subject_ref) do
@@ -234,6 +239,8 @@ defmodule Samen.AI.Agent.WriteProposal do
       _ -> {:error, :turn_not_found}
     end
   rescue
-    _ -> {:error, :turn_not_found}
+    e ->
+      Samen.Observability.Failure.report(:write_proposal_fetch_turn, nil, e)
+      {:error, :turn_not_found}
   end
 end

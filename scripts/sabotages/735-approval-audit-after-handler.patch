@@ -1,0 +1,20 @@
+# SABOTAGE: approval audit after handler
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/support_operator_test.exs
+# MUST_FAIL: chain down: nothing is delivered and nothing commits
+diff --git a/samen_core/lib/samen/approvals.ex b/samen_core/lib/samen/approvals.ex
+index 93ccbe3d..3865833b 100644
+--- a/samen_core/lib/samen/approvals.ex
++++ b/samen_core/lib/samen/approvals.ex
+@@ -237,8 +237,8 @@ defmodule Samen.Approvals do
+              # The audit entry goes BEFORE the handler: a handler may do work no rollback can undo (`ReplyHandler` sends an
+              # email), so the chain write must have succeeded first. A chain outage then refuses the decision with
+              # nothing delivered, instead of delivering and rolling the approval back for a re-approve to deliver again.
+-             :ok <- audit!(repo, decided, event_for(decision), decided_by),
+              {:ok, meta} <- run_handler(handler, decided, decided_by, decision, repo, opts) do
++          audit!(repo, decided, event_for(decision), decided_by)
+           {decided, meta}
+         else
+           {:error, reason} -> repo.rollback(reason)

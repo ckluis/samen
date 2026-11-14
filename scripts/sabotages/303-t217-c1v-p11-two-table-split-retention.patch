@@ -12,10 +12,10 @@
 # TEST_FILES: test/ai/agent_dual_view_test.exs
 # MUST_FAIL: P11: RED — shredding the run's single DEK renders BOTH ui_view and llm_view unreadable in ONE operation (D2: one blob, two keys, one DEK)
 diff --git a/samen_core/lib/samen/erasure/completeness.ex b/samen_core/lib/samen/erasure/completeness.ex
-index 06fba42..a45b5bc 100644
+index 2c3ceb4..d5ca03b 100644
 --- a/samen_core/lib/samen/erasure/completeness.ex
 +++ b/samen_core/lib/samen/erasure/completeness.ex
-@@ -203,6 +203,16 @@ defmodule Samen.Erasure.Completeness do
+@@ -231,6 +231,16 @@ defmodule Samen.Erasure.Completeness do
          vault: field.vault
        }
      end
@@ -31,4 +31,4 @@ index 06fba42..a45b5bc 100644
 +    end)
    end
  
-   defp pii_fields(resource) do
+   # No rescue: a module whose PII declarations cannot be introspected must FAIL the completeness check, not drop

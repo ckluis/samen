@@ -89,27 +89,11 @@ defmodule Samen.Web.Tenant.AnalyticsReads do
   def can_query?(_), do: false
 
   @doc """
-  The own-org activation funnel, floored:
+  The own-org activation funnel, floored: `[%{stage: "signup", actor_count: n | %Suppressed{}}, ...]`.
+  `scope` is the caller's AUTHENTICATED tenant scope — the org id is taken from it, never from a param. `opts`
+  may override `:k` / `:l` (tests use this to prove the floor is load-bearing; production reads config).
 
-      [%{stage: "signup", actor_count: n | %Suppressed{}}, ...]
-
-  `scope` is the caller's AUTHENTICATED tenant scope — the org id is taken from it, never
-  from a param. Returns `[]` when the caller may not query (fail closed), the mount is
-  absent, or on any read error (never partial garbage). `opts` may override `:k` / `:l`
-  (tests use this to prove the floor is load-bearing; production reads config).
-  """
-  @spec funnel(Samen.Web.Mount.t() | nil, Samen.Scope.t(), keyword()) :: [map()]
-  def funnel(mount, scope, opts \\ [])
-
-  def funnel(mount, scope, opts) do
-    case funnel_result(mount, scope, opts) do
-      {:ok, rows} -> rows
-      {:error, _} -> []
-    end
-  end
-
-  @doc """
-  Tagged sibling of `funnel/3` (WP6): `{:ok, rows}` — `{:ok, []}` is the honest "no data yet, or
+  `{:ok, rows}` — `{:ok, []}` is the honest "no data yet, or
   analytics is not available for your role" (a fail-closed denial, unchanged) — or
   `{:error, :unavailable}` when the rollup read itself FAILED (an outage is not "no activation data
   yet").

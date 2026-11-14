@@ -61,7 +61,9 @@ defmodule Samen.Fleet.Resolution do
         :none
     end
   rescue
-    _ -> :none
+    e ->
+      Samen.Observability.Failure.report(:resolution_scope_of, nil, e)
+      :none
   end
 
   def scope_of(_otp_app, _principal_id), do: :none
@@ -138,7 +140,9 @@ defmodule Samen.Fleet.Resolution do
         end
     end
   rescue
-    _ -> :none
+    e ->
+      Samen.Observability.Failure.report(:resolution_scope_from_assignments, nil, e)
+      :none
   end
 
   def scope_from_assignments(_resource, _role, _app_scope, _principal_id), do: :none
@@ -258,7 +262,9 @@ defmodule Samen.Fleet.Resolution do
         %{}
     end
   rescue
-    _ -> %{}
+    e ->
+      Samen.Observability.Failure.report(:resolution_resolve, nil, e)
+      %{}
   end
 
   def resolve(_otp_app, _principal_id, _handles), do: %{}
@@ -340,7 +346,9 @@ defmodule Samen.Fleet.Resolution do
       end
     end)
   rescue
-    _ -> %{}
+    e ->
+      Samen.Observability.Failure.report(:resolution_resolve_via_org_scan, nil, e)
+      %{}
   end
 
   # ===========================================================================
@@ -375,7 +383,9 @@ defmodule Samen.Fleet.Resolution do
         :error
     end
   rescue
-    _ -> :error
+    e ->
+      Samen.Observability.Failure.report(:resolution_resolve_org_id, nil, e)
+      :error
   end
 
   def resolve_org_id(_otp_app, _handle), do: :error
@@ -393,6 +403,8 @@ defmodule Samen.Fleet.Resolution do
       org_id -> {:ok, org_id}
     end
   rescue
-    _ -> :error
+    e ->
+      Samen.Observability.Failure.report(:resolution_resolve_org_id_via_scan, nil, e)
+      :error
   end
 end

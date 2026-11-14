@@ -504,6 +504,18 @@ defmodule Samen.Replay.PlayerTest do
       assert Player.load(tenant_scope(ctx.org), "not-a-uuid") == {:error, :not_found}
     end
 
+    test "RED: list/2 RAISES when the read itself fails (it answered [] = 'no recorded sessions'); list_result/2 says unavailable", ctx do
+      broken = %Samen.Scope{actor: :not_an_actor}
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, :unavailable} = Player.list_result(broken)
+        assert_raise RuntimeError, ~r/could not be read/, fn -> Player.list(broken) end
+      end)
+
+      # POSITIVE CONTROL: the readable scope answers
+      assert [_] = Player.list(tenant_scope(ctx.org))
+    end
+
     # ADR-052 §2.4.1 (P3 gate note 7): one row with a kind outside the closed set (or a payload
     # that is not an object), written past RowGuard, failed the typed read — and the WHOLE
     # replay answered :not_found. It is now ONE :invalid frame; the rest still plays.

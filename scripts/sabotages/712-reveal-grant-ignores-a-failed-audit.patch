@@ -1,0 +1,19 @@
+# SABOTAGE: A reveal grant is committed although its audit entry could not be written.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/audit_writer_callers_test.exs
+# MUST_FAIL: grant: audit down → no grant
+diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+index 3abb46f1..3dca716b 100644
+--- a/samen_core/lib/samen/reveal/grants.ex
++++ b/samen_core/lib/samen/reveal/grants.ex
+@@ -353,7 +353,7 @@ defmodule Samen.Reveal.Grants do
+             org_id: Map.get(opts, :org_id),
+             detail: "expires_at=#{DateTime.to_iso8601(expires_at)}"
+           },
+-          strict: true
++          strict: false
+         )
+       end)
+       |> Oban.insert(:auto_revoke, AutoRevokeWorker.new(%{grant_id: grant_id},

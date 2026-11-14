@@ -230,7 +230,9 @@ defmodule Samen.Scopes.Marketing.SendWorker do
           detail: "marketing.send.blocked reason=adapter_unconfigured"
         })
       rescue
-        _ -> :ok
+        e ->
+          Samen.Observability.Failure.report(:send_worker_emit_blocked_audit, nil, e)
+          :ok
       end
     else
       Logger.warning(

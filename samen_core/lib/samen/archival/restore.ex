@@ -29,8 +29,7 @@ defmodule Samen.Archival.Restore do
       changeset
       |> Ash.Changeset.force_change_attribute(:archived_at, nil)
       |> Ash.Changeset.after_action(fn cs, record ->
-        Samen.Archival.Audit.write(cs, record, "record_restored")
-        {:ok, record}
+        with :ok <- Samen.Archival.Audit.write(cs, record, "record_restored"), do: {:ok, record}
       end)
     end
   end

@@ -8,15 +8,15 @@
 # TEST_FILES: test/reveal_ledger_read_signal_test.exs
 # MUST_FAIL: a failing ledger read returns
 diff --git a/samen_core/lib/samen/audit_chain.ex b/samen_core/lib/samen/audit_chain.ex
-index b2204d5..e92aaee 100644
+index 6a1720fb..44dd70f1 100644
 --- a/samen_core/lib/samen/audit_chain.ex
 +++ b/samen_core/lib/samen/audit_chain.ex
-@@ -132,7 +132,7 @@ defmodule Samen.AuditChain do
-   rescue
-     # A genuine READ failure (missing table, DB outage) is surfaced as a DISTINCT signal,
+@@ -135,7 +135,7 @@ defmodule Samen.AuditChain do
      # never masked as an empty ("clean") ledger — that masking is the O10 defect.
--    _ -> {:error, :unavailable}
-+    _ -> {:ok, []}
+     e ->
+       Samen.Observability.Failure.report(:audit_chain_reveal_events, org_id, e)
+-      {:error, :unavailable}
++      {:ok, []}
    end
  
    @doc """

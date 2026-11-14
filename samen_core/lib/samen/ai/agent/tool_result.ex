@@ -405,7 +405,9 @@ defmodule Samen.AI.Agent.ToolResult do
   rescue
     # A renderer crash must degrade to a bounded marker, never leak a term (EG6) —
     # and the chokepoint allowlist remains the last line regardless.
-    _ -> ["tool_result: [unrenderable]"]
+    e ->
+      Samen.Observability.Failure.report(:tool_result_render_records, nil, e)
+      ["tool_result: [unrenderable]"]
   end
 
   defp render_records(_records, _resource_mod, _fields, _opts), do: ["tool_result: [unrenderable]"]
@@ -780,12 +782,16 @@ defmodule Samen.AI.Agent.ToolResult do
   defp pii_names(resource_mod) do
     resource_mod |> Samen.Pii.Info.pii_attributes() |> Enum.map(& &1.name)
   rescue
-    _ -> []
+    e ->
+      Samen.Observability.Failure.report(:tool_result_pii_names, nil, e)
+      []
   end
 
   defp repo_of(resource_mod) do
     AshPostgres.DataLayer.Info.repo(resource_mod, :read)
   rescue
-    _ -> Application.get_env(:samen_core, :vault_repo)
+    e ->
+      Samen.Observability.Failure.report(:tool_result_repo_of, nil, e)
+      Application.get_env(:samen_core, :vault_repo)
   end
 end

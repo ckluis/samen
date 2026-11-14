@@ -12,15 +12,18 @@
 # TEST_FILES: test/ai/agent_tools_test.exs
 # MUST_FAIL: a SHAPE-VALID, IN-ALLOWLIST arg carrying a vt_ token
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 02b770e6..36588c51 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -1433,9 +1433,11 @@
+@@ -3299,11 +3299,11 @@ defmodule Samen.AI.Agent do
    # tool-args hole, re-proven on the agent path). Keys AND values, recursively —
    # fail-closed: an unscannable shape refuses.
    defp refuse_vt_args(args) do
 -    if vt_free?(args), do: :ok, else: {:error, :invalid_args}
 -  rescue
--    _ -> {:error, :invalid_args}
+-    e ->
+-      Samen.Observability.Failure.report(:agent_refuse_vt_args, nil, e)
+-      {:error, :invalid_args}
 +    # SABOTAGE (A4 fold (b), ADR-047 §4.3): the sentinel gate is NEUTERED — every arg set
 +    # passes, so only the action's own validate/2 remains. A shape-valid in-allowlist arg
 +    # carrying a vt_ token now reaches execution (and the wire).

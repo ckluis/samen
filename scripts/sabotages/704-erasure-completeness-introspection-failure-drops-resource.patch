@@ -1,0 +1,20 @@
+# SABOTAGE: A module whose attributes cannot be introspected silently drops out of the 
+#   derived-linkable discovery, so the erasure check passes over a smaller residue set.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_test.exs
+# MUST_FAIL: RED: DerivedLinkable.discover over a module whose attributes cannot be read raises
+diff --git a/samen_core/lib/samen/derived_linkable.ex b/samen_core/lib/samen/derived_linkable.ex
+index 03811539..ce9d20a0 100644
+--- a/samen_core/lib/samen/derived_linkable.ex
++++ b/samen_core/lib/samen/derived_linkable.ex
+@@ -122,6 +122,8 @@ defmodule Samen.DerivedLinkable do
+     |> Enum.filter(fn attr ->
+       attr.type in [:string, :ci_string, Ash.Type.String, Ash.Type.CiString]
+     end)
++  rescue
++    _ -> []
+   end
+ 
+   defp table(resource), do: AshPostgres.DataLayer.Info.table(resource)

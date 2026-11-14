@@ -766,7 +766,8 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
   end
 
   defp tool_kinds do
-    safe(fn -> Samen.Automation.Action.tool_kinds() end, [])
+    # No `safe/2`: a tool-kind listing that fails must fail the verifier, not shrink the set it covers.
+    Samen.Automation.Action.tool_kinds()
   end
 
   # --- path helpers ----------------------------------------------------------------------

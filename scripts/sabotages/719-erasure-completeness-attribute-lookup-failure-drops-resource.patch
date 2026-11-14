@@ -1,0 +1,24 @@
+# SABOTAGE: A module whose attribute lookup cannot be introspected reads as having no storage_key / bag / 
+#   transcript attribute, so it silently drops out of the erasure-completeness discovery.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_test.exs
+# MUST_FAIL: RED: Completeness attribute lookup over a module it cannot introspect raises
+diff --git a/samen_core/lib/samen/erasure/completeness.ex b/samen_core/lib/samen/erasure/completeness.ex
+index 2c3ceb48..216d6a8f 100644
+--- a/samen_core/lib/samen/erasure/completeness.ex
++++ b/samen_core/lib/samen/erasure/completeness.ex
+@@ -683,7 +683,11 @@ defmodule Samen.Erasure.Completeness do
+ 
+   # No rescue (see `pii_fields/1`): `Ash.Resource.Info.attribute/2` returns nil for an absent attribute; it only
+   # RAISES for a module that is not a resource, which must fail the check rather than skip the module.
+-  defp attribute(resource, name), do: Ash.Resource.Info.attribute(resource, name)
++  defp attribute(resource, name) do
++    Ash.Resource.Info.attribute(resource, name)
++  rescue
++    _ -> nil
++  end
+ 
+   defp table(resource), do: AshPostgres.DataLayer.Info.table(resource)
+ end

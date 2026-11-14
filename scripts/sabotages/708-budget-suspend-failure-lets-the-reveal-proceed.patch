@@ -1,0 +1,21 @@
+# SABOTAGE: An over-budget operator whose auto-suspension could not be written is waved through (reported 
+#   but not refused): fail-open on the privilege-removal path.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/suspension_asymmetry_test.exs
+# MUST_FAIL: the reveal is REFUSED and never reaches the vault
+# MUST_FAIL: over budget and the suspension cannot be written
+diff --git a/samen_core/lib/samen/break_glass/budget.ex b/samen_core/lib/samen/break_glass/budget.ex
+index 06282580..c164ad42 100644
+--- a/samen_core/lib/samen/break_glass/budget.ex
++++ b/samen_core/lib/samen/break_glass/budget.ex
+@@ -134,7 +134,7 @@ defmodule Samen.BreakGlass.Budget do
+ 
+         {:error, reason} ->
+           Samen.Observability.Failure.report(:budget_auto_suspend, nil, reason)
+-          {:error, :suspend_failed}
++          {:ok, count}
+       end
+     else
+       {:ok, count}

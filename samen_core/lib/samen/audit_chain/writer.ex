@@ -25,6 +25,14 @@ defmodule Samen.AuditChain.Writer do
   graceful-degradation posture `Samen.Reveal.Grants.write_audit/2` takes for the
   `aud_event` tier itself.
 
+  ## Atomicity and nesting
+
+  Outside a transaction the event and its chain entry commit together or not at all (the write opens its own
+  transaction). Inside a caller's transaction that transaction is the unit: `write/2` returns `{:error, _}` and a
+  caller that grants, opens or approves something MUST roll back on it (Ecto does not nest rollbacks, so a
+  rollback here would poison a caller that tolerates the error). An unavailable chain (the existence probe
+  failed) writes nothing in either case.
+
   ## Where it plugs in
 
   Wraps the existing writers so they gain a chain entry with no per-caller rewrite:
@@ -56,7 +64,24 @@ defmodule Samen.AuditChain.Writer do
   @spec write(module(), map()) :: {:ok, map()} | {:error, term}
   def write(repo, attrs) when is_atom(repo) and is_map(attrs) do
     with :ok <- Samen.PiiReasonScan.check(get(attrs, :detail), "audit detail") do
-      do_write(repo, attrs)
+      # Atomic: an `aud_event` without its chain entry never commits. Outside a transaction the insert and the
+      # chain append share one of their own. INSIDE a caller's transaction the caller's is the unit (Ecto does not
+      # nest rollbacks: a nested `rollback` would poison the caller's transaction even when it tolerates the
+      # error), so there this returns `{:error, _}` and a caller that must be atomic rolls back on it. The probe
+      # runs BEFORE any insert, so an unavailable chain writes nothing in either case.
+      if repo.in_transaction?() do
+        do_write(repo, attrs)
+      else
+        case repo.transaction(fn ->
+               case do_write(repo, attrs) do
+                 {:ok, written} -> written
+                 {:error, reason} -> repo.rollback(reason)
+               end
+             end) do
+          {:ok, written} -> {:ok, written}
+          {:error, reason} -> {:error, reason}
+        end
+      end
     end
   end
 
@@ -77,13 +102,14 @@ defmodule Samen.AuditChain.Writer do
       occurred_at: occurred_at(attrs)
     }
 
-    with {:ok, aud} <- AuditEvent.insert(repo, aud_attrs) do
+    with {:ok, chain_present?} <- aud_chain_exists?(repo, get(attrs, :org_id)),
+         {:ok, aud} <- AuditEvent.insert(repo, aud_attrs) do
       chain_attrs =
         attrs
         |> Map.put(:aud_id, aud.id)
         |> Map.put_new(:occurred_at, aud.occurred_at)
 
-      case append_chain(repo, chain_attrs) do
+      case append_chain(repo, chain_attrs, chain_present?) do
         {:ok, entry} -> {:ok, %{aud_event: aud, chain: entry}}
         {:skip, _} -> {:ok, %{aud_event: aud, chain: :skipped}}
         {:error, reason} -> {:error, reason}
@@ -91,25 +117,24 @@ defmodule Samen.AuditChain.Writer do
     end
   end
 
-  # Append the chain entry. If the aud_chain table is absent (host not yet migrated),
-  # skip gracefully — the aud_event row already landed. The existence CHECK happens
-  # BEFORE the insert (a cheap `to_regclass` probe) precisely because attempting an
-  # INSERT into a missing table inside the caller's transaction would ABORT the whole
-  # transaction (Postgres 25P02) — a rescue cannot un-poison it. Probing first keeps
-  # the graceful-skip real inside a multi.
-  defp append_chain(repo, chain_attrs) do
-    if aud_chain_exists?(repo) do
-      AuditChain.append(chain_attrs, repo: repo)
-    else
-      {:skip, :aud_chain_absent}
-    end
-  end
+  # Append the chain entry. If the aud_chain table is ABSENT (host not yet migrated), skip gracefully — the
+  # aud_event row still lands. The existence CHECK happens BEFORE any insert (a cheap `to_regclass` probe)
+  # precisely because attempting an INSERT into a missing table inside the caller's transaction would ABORT the
+  # whole transaction (Postgres 25P02) — a rescue cannot un-poison it.
+  #
+  # A probe that FAILED (an outage, a dropped connection) is NOT "absent": the old `rescue _ -> false` turned it
+  # into a silent skip, so an audit event landed with no chain entry and the write reported success. It is now an
+  # error the caller sees (reported by name + exception module), and NOTHING is written.
+  defp append_chain(repo, chain_attrs, true), do: AuditChain.append(chain_attrs, repo: repo)
+  defp append_chain(_repo, _chain_attrs, false), do: {:skip, :aud_chain_absent}
 
-  defp aud_chain_exists?(repo) do
+  defp aud_chain_exists?(repo, org_id) do
     %{rows: [[reg]]} = repo.query!("SELECT to_regclass('public.aud_chain')")
-    reg != nil
+    {:ok, reg != nil}
   rescue
-    _ -> false
+    e ->
+      Samen.Observability.Failure.report(:audit_chain_probe, org_id, e)
+      {:error, :audit_chain_unavailable}
   end
 
   defp occurred_at(attrs) do

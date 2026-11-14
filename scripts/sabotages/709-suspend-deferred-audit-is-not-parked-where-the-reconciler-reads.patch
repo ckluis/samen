@@ -1,0 +1,20 @@
+# SABOTAGE: The deferred suspension audit entry is parked outside the chain the reconciler reads, so a 
+#   failed audit write is never made durable for later.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/suspension_asymmetry_test.exs
+# MUST_FAIL: the audit entry is pending, reconcile writes it
+diff --git a/samen_core/lib/samen/operator_plane/suspension.ex b/samen_core/lib/samen/operator_plane/suspension.ex
+index e9f98a09..f08b674f 100644
+--- a/samen_core/lib/samen/operator_plane/suspension.ex
++++ b/samen_core/lib/samen/operator_plane/suspension.ex
+@@ -174,7 +174,7 @@ defmodule Samen.OperatorPlane.Suspension do
+   # The chain write failed (already reported by `emit_audit`). Park the entry on the local hash chain so the
+   # reconciler can anchor it; `:lost` only when even that fails, and that is reported by name.
+   defp defer_audit(attrs, operator_id, org_id, reason) do
+-    opts = if path = Map.get(attrs, :local_audit_path), do: [path: path], else: []
++    opts = if path = Map.get(attrs, :local_audit_path), do: [path: path <> ".elsewhere"], else: []
+ 
+     case Samen.BreakGlass.LocalAudit.append(
+            %{

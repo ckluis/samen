@@ -149,13 +149,7 @@ defmodule Samen.PiiReads.Registry do
   defp resources_from_domains(domains) do
     domains
     |> List.wrap()
-    |> Enum.flat_map(fn domain ->
-      try do
-        Ash.Domain.Info.resources(domain)
-      rescue
-        _ -> []
-      end
-    end)
+    |> Enum.flat_map(&Ash.Domain.Info.resources/1)
     |> Enum.uniq()
   end
 
@@ -165,13 +159,9 @@ defmodule Samen.PiiReads.Registry do
     logical = resource |> Info.pii_attributes() |> Enum.map(& &1.name)
     storage = Info.vault_routed_columns(resource)
     logical ++ storage
-  rescue
-    _ -> []
   end
 
   defp safe_reveal_actions(resource) do
     Info.reveal_actions(resource)
-  rescue
-    _ -> MapSet.new()
   end
 end

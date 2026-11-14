@@ -259,10 +259,12 @@ defmodule Samen.Scopes.Marketing.Blueprint do
 
         # F3 Unit 1: the consent-capture seam. On every create/update, append ONE
         # bounded, non-PII ConsentEvent row per consent transition via
-        # `Samen.Marketing.ConsentChange` — best-effort (an append failure NEVER aborts
-        # the subscriber write; the subscriber state is load-bearing, the ledger rides
-        # along), exactly like the Billing SubscriptionMovement seam. Verticals inherit
-        # emission at 0 LOC (the change is on the kernel blueprint).
+        # `Samen.Marketing.ConsentChange` — asymmetric: a failed GRANT append is reported and
+        # does not abort the subscriber write (the subscriber state is load-bearing, a
+        # missing grant only means no contact), but a failed WITHDRAWAL append FAILS the
+        # write closed (`{:error, :consent_ledger_unavailable}`; the do-not-contact fact
+        # must reach the ledger). Verticals inherit emission at 0 LOC (the change is on
+        # the kernel blueprint).
         changes do
           change({Samen.Marketing.ConsentChange, event_resource: unquote(consent_event_mod)})
         end

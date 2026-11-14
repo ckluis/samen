@@ -634,13 +634,16 @@ defmodule Samen.Web.Marketing.Reads do
   # Derive consent from the ledger (latest-event-wins). A most-recent :withdrawn refuses
   # the send even when the subscriber row's mutable status is still :active.
   defp refuse_if_consent_withdrawn(mount, org_id, subscriber_id) do
-    case Samen.Marketing.Consent.state(
+    case Samen.Marketing.Consent.state_result(
            Mount.resource(mount, ConsentEvent),
            to_string(org_id),
            to_string(subscriber_id)
          ) do
-      :withdrawn -> {:error, :consent_withdrawn}
-      _ -> :ok
+      {:ok, :withdrawn} -> {:error, :consent_withdrawn}
+      {:ok, _state} -> :ok
+      # An unreadable ledger is not "no withdrawal on file": the send is refused (fail-closed) and the caller
+      # renders the same outage copy as a failed deliverability check, never "consent withdrawn".
+      {:error, :unavailable} -> {:error, :deliverability_check_failed}
     end
   end
 

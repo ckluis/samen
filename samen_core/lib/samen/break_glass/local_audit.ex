@@ -65,7 +65,8 @@ defmodule Samen.BreakGlass.LocalAudit do
   @typedoc """
   A local break-glass entry. `seq`/`prior_hash`/`hash` are the chain fields; the
   rest is the who/what/why payload (token-only). `anchored?` is NOT stored in the
-  file — it is derived by the reconciler comparing against the central chain.
+  file — it is derived by the reconciler comparing against the central chain. A kernel writer may add an internal
+  `kind` (string) key; it is absent from ordinary entries.
   """
   @type entry :: %{
           seq: non_neg_integer(),
@@ -137,7 +138,14 @@ defmodule Samen.BreakGlass.LocalAudit do
         to_string(get(attrs, :correlation_id) || Ecto.UUID.generate()),
       occurred_at: iso(get(attrs, :occurred_at))
     }
+    |> put_kind(get(attrs, :kind))
   end
+
+  # `kind` is an INTERNAL discriminator set only by kernel writers (`Suspension.defer_audit`); `Samen.BreakGlass.reveal/1`
+  # never forwards a caller-supplied one. It is only present in the payload when given, so entries written before it
+  # existed keep their canonical bytes (and hashes).
+  defp put_kind(payload, nil), do: payload
+  defp put_kind(payload, kind), do: Map.put(payload, :kind, to_string(kind))
 
   @doc """
   Read + verify the whole local chain. Returns `{:ok, %{entries: [entry], head_seq,
@@ -341,7 +349,8 @@ defmodule Samen.BreakGlass.LocalAudit do
            action: raw["action"],
            correlation_id: raw["correlation_id"],
            occurred_at: raw["occurred_at"]
-         }}
+         }
+         |> put_kind(raw["kind"])}
 
       _ ->
         :error

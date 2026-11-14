@@ -28,7 +28,7 @@ defmodule Fixture.LiveSwallow do
     _ -> nil
   end
 
-  # Not swallows: logged, and typed.
+  # Not a swallow: logged. (`typed/1` below IS one since the S5 widening: a typed rescue that answers `[]`.)
   def logged(scope) do
     Ash.read!(Person, scope: scope)
   rescue

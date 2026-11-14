@@ -1,0 +1,20 @@
+# SABOTAGE: archive audit tolerant
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/soft_delete_test.exs
+# MUST_FAIL: archive: chain down
+diff --git a/samen_core/lib/samen/archival/archive.ex b/samen_core/lib/samen/archival/archive.ex
+index 47599c96..12308e02 100644
+--- a/samen_core/lib/samen/archival/archive.ex
++++ b/samen_core/lib/samen/archival/archive.ex
+@@ -30,7 +30,8 @@ defmodule Samen.Archival.Archive do
+       _ ->
+         # live → archiving: ash_archival sets the timestamp; we audit once it commits.
+         Ash.Changeset.after_action(changeset, fn cs, record ->
+-          with :ok <- Samen.Archival.Audit.write(cs, record, "record_archived"), do: {:ok, record}
++          Samen.Archival.Audit.write(cs, record, "record_archived")
++          {:ok, record}
+         end)
+     end
+   end

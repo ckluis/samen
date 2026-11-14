@@ -1,0 +1,19 @@
+# SABOTAGE: The hard ceiling is not enforced, so a raised baseline row passes.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/swallow_lint_test.exs
+# MUST_FAIL: RED: a baseline row raised without raising the ceiling fails
+diff --git a/samen_core/lib/samen/lint/swallow.ex b/samen_core/lib/samen/lint/swallow.ex
+index 8a05ab6a..0fd8da48 100644
+--- a/samen_core/lib/samen/lint/swallow.ex
++++ b/samen_core/lib/samen/lint/swallow.ex
+@@ -256,7 +256,7 @@ defmodule Samen.Lint.Swallow do
+       for root <- roots,
+           have = rooted.(root),
+           allowed = Map.get(ceiling, root, 0),
+-          have != allowed do
++          have != allowed and have < 0 do
+         if have > allowed do
+           "#{root}: the baseline sums to #{have} but the committed ceiling is #{allowed} — the ceiling only goes down; " <>
+             "convert a swallow instead of raising a baseline row"

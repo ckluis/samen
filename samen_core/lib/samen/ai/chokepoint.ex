@@ -253,7 +253,9 @@ defmodule Samen.AI.Chokepoint do
           else: :ok
     end
   rescue
-    _ -> @refusal
+    e ->
+      Samen.Observability.Failure.report(:chokepoint_turns_without_grants, nil, e)
+      @refusal
   end
 
   defp grant_span?(entry),
@@ -324,7 +326,9 @@ defmodule Samen.AI.Chokepoint do
   rescue
     # Belt to the braces of the shape validation above: NO adversarial binding escapes this
     # chokepoint as an exception. Any unexpected raise degrades to the payload-free refusal.
-    _ -> @refusal
+    e ->
+      Samen.Observability.Failure.report(:chokepoint_resolve_binding, nil, e)
+      @refusal
   end
 
   # A binding must be an explicit {records, resource} pair — anything else is an assembler bug;
@@ -387,7 +391,9 @@ defmodule Samen.AI.Chokepoint do
   defp granted?(grant_mod, ctx) do
     grant_mod.granted?(ctx) == true
   rescue
-    _ -> false
+    e ->
+      Samen.Observability.Failure.report(:chokepoint_granted, nil, e)
+      false
   end
 
   # --- grant gating ----------------------------------------------------------------------
@@ -481,7 +487,9 @@ defmodule Samen.AI.Chokepoint do
     Code.ensure_loaded?(provider) and function_exported?(provider, :simulated?, 0) and
       provider.simulated?() == true
   rescue
-    _ -> false
+    e ->
+      Samen.Observability.Failure.report(:chokepoint_simulated_provider, nil, e)
+      false
   end
 
   # --- steps 3+4: assemble + the scrub (fail-CLOSED by ALLOWLIST) -------------------------
@@ -493,7 +501,9 @@ defmodule Samen.AI.Chokepoint do
   rescue
     # Traversing an adversarial term (an improper list, a term whose enumeration raises) must
     # REFUSE, never raise — a crash is not the contract, and its stack trace is an EG6 egress.
-    _ -> @refusal
+    e ->
+      Samen.Observability.Failure.report(:chokepoint_assemble_and_scrub, nil, e)
+      @refusal
   end
 
   @doc """
@@ -524,7 +534,9 @@ defmodule Samen.AI.Chokepoint do
     not safe_segment?(seg)
   rescue
     # Un-inspectable / adversarial term ⇒ unsafe (fail-closed), never a raise.
-    _ -> true
+    e ->
+      Samen.Observability.Failure.report(:chokepoint_unsafe_segment, nil, e)
+      true
   end
 
   # The allowlist of provably-safe, already-rendered wire shapes:
@@ -606,7 +618,9 @@ defmodule Samen.AI.Chokepoint do
        when is_binary(value) or is_number(value) or is_atom(value) or is_list(value) do
     if unsafe_metadata?(value), do: @refusal, else: {:error, :invalid_grounding_shape}
   rescue
-    _ -> @refusal
+    e ->
+      Samen.Observability.Failure.report(:chokepoint_scrub_metadata, nil, e)
+      @refusal
   end
 
   # T66-F1 fix-round (delta-verifier finding): the TOP-LEVEL value must itself be a map — a
@@ -617,7 +631,9 @@ defmodule Samen.AI.Chokepoint do
   defp scrub_metadata(value) when is_map(value) do
     if unsafe_metadata?(value), do: @refusal, else: :ok
   rescue
-    _ -> @refusal
+    e ->
+      Samen.Observability.Failure.report(:chokepoint_scrub_metadata, nil, e)
+      @refusal
   end
 
   defp scrub_metadata(_value), do: @refusal
@@ -626,7 +642,9 @@ defmodule Samen.AI.Chokepoint do
     not safe_metadata?(seg)
   rescue
     # Un-inspectable / adversarial term ⇒ unsafe (fail-closed), never a raise.
-    _ -> true
+    e ->
+      Samen.Observability.Failure.report(:chokepoint_unsafe_metadata, nil, e)
+      true
   end
 
   # A previously-sealed payload is trusted whole (already scrubbed by this module).
@@ -661,7 +679,9 @@ defmodule Samen.AI.Chokepoint do
   defp safe_metadata?(seg) when is_atom(seg) do
     not (seg |> Atom.to_string() |> String.contains?(@vt_sentinel))
   rescue
-    _ -> false
+    e ->
+      Samen.Observability.Failure.report(:chokepoint_safe_metadata, nil, e)
+      false
   end
 
   # Every other leaf shape (binary, number, boolean/nil already caught above as atoms, pid,
@@ -692,7 +712,9 @@ defmodule Samen.AI.Chokepoint do
   defp scrub_tools(tools) when is_list(tools) do
     if Enum.all?(tools, &safe_tool_def?/1), do: {:ok, tools}, else: @refusal
   rescue
-    _ -> @refusal
+    e ->
+      Samen.Observability.Failure.report(:chokepoint_scrub_tools, nil, e)
+      @refusal
   end
 
   defp scrub_tools(_other), do: @refusal
@@ -713,7 +735,9 @@ defmodule Samen.AI.Chokepoint do
       do: {:ok, system},
       else: @refusal
   rescue
-    _ -> @refusal
+    e ->
+      Samen.Observability.Failure.report(:chokepoint_scrub_system, nil, e)
+      @refusal
   end
 
   defp scrub_system(_other), do: @refusal
@@ -726,7 +750,9 @@ defmodule Samen.AI.Chokepoint do
       do: {:ok, turns},
       else: @refusal
   rescue
-    _ -> @refusal
+    e ->
+      Samen.Observability.Failure.report(:chokepoint_scrub_turns, nil, e)
+      @refusal
   end
 
   defp scrub_turns(_other), do: @refusal
@@ -779,6 +805,8 @@ defmodule Samen.AI.Chokepoint do
   defp static_tool_def?(def) do
     Samen.AI.Agent.Tools.static_def?(def)
   rescue
-    _ -> false
+    e ->
+      Samen.Observability.Failure.report(:chokepoint_static_tool_def, nil, e)
+      false
   end
 end

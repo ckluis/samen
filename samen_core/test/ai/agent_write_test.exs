@@ -1089,6 +1089,51 @@ defmodule Samen.AI.AgentWriteTest do
     end
   end
 
+  describe "provenance from a pid on another node fails closed" do
+    # A pid of a node this VM is not connected to, built from the external term format (no distribution needed).
+    defp remote_pid do
+      node = "fake_remote@nowhere"
+      :erlang.binary_to_term(<<131, 88, 119, byte_size(node), node::binary, 7::32, 0::32, 1::32>>)
+    end
+
+    test "the fake remote pid really is remote (the test's own premise)" do
+      pid = remote_pid()
+      assert is_pid(pid)
+      assert node(pid) != node()
+    end
+
+    test "RED: a remote ancestor is unknown provenance and counts as AT the ceiling, not as top level" do
+      prior_callers = Process.get(:"$callers")
+      Process.put(:"$callers", [remote_pid()])
+      on_exit(fn -> if prior_callers, do: Process.put(:"$callers", prior_callers) end)
+
+      assert %{depth: depth, chain: []} = Agent.current_provenance()
+      assert depth == Agent.max_agent_depth()
+
+      # and a run started under it is refused (it used to start at depth 0: the guard was reset)
+      s = new_scope()
+      script(final: "never reached")
+      assert {:error, :depth_exceeded} = Agent.run(ReadOnly, s, "nested", provider: scripted_provider())
+    end
+
+    test "POSITIVE CONTROL: the same run with no remote ancestor is accepted" do
+      s = new_scope()
+      script(final: "ok")
+      assert {:ok, _} = Agent.run(ReadOnly, s, "top level", provider: scripted_provider())
+    end
+
+    test "POSITIVE CONTROL: a local ancestor with no marker is still 'not inside a tool' (nil)" do
+      parent = spawn(fn -> Process.sleep(:infinity) end)
+      on_exit(fn -> Process.exit(parent, :kill) end)
+
+      assert Task.async(fn ->
+               Process.put(:"$callers", [parent])
+               Agent.current_provenance()
+             end)
+             |> Task.await() == nil
+    end
+  end
+
   # ── A5 FOLD F3: a lapsed proposal expires; it never executes ────────────────────────
 
   describe "parked-proposal deadline expiry (the A4 verifier's R4b)" do
@@ -1149,6 +1194,37 @@ defmodule Samen.AI.AgentWriteTest do
       assert pending_approvals(s.actor.org_id) == []
     end
 
+    test "RED: a run whose transcript was SHREDDED still has its approval withdrawn on expiry (it used to stay decidable)" do
+      {s, run, target, approval, _new_owner} = propose!()
+      lapse!(run)
+
+      # The run subject is erased while the proposal is parked: the sealed transcript (which names the pending
+      # approval) is no longer readable. `withdraw_pending_approval` used to read "unreadable" as "nothing pending".
+      assert {:ok, %{attestation: %{state: :shredded}}} =
+               Samen.Erasure.shred(run.id, repo: TestRepo, org_id: s.actor.org_id)
+
+      assert [%{id: id}] = pending_approvals(s.actor.org_id)
+      assert id == approval.id
+
+      assert {:ok, expired} = Agent.expire_parked(run.id)
+      assert expired.state == :expired
+
+      # The approval was found through the proposed turn row and withdrawn: not decidable, nothing executed.
+      assert pending_approvals(s.actor.org_id) == []
+      assert {:error, :not_pending} = Approvals.approve(approval.id, approver_id(approval.org_id))
+      assert reload_target!(target.id).owner_id == nil
+    end
+
+    test "withdrawal results: only a FAILED withdrawal is incomplete; already-terminal / absent / unwired are fine" do
+      for ok <- [:ok, {:ok, :x}, {:error, :not_pending}, {:error, :not_found}, {:error, :no_approvals_module}] do
+        refute Agent.__withdrawal_failed__?(ok)
+      end
+
+      for bad <- [{:error, :unavailable}, {:error, %RuntimeError{}}, :boom] do
+        assert Agent.__withdrawal_failed__?(bad)
+      end
+    end
+
     test "expiry is idempotent and only ever applies to a PARKED run" do
       {_s, run, _target, _approval, _new_owner} = propose!()
       lapse!(run)
@@ -1156,6 +1232,69 @@ defmodule Samen.AI.AgentWriteTest do
       assert {:ok, _expired} = Agent.expire_parked(run.id)
       assert {:error, :run_not_parked} = Agent.expire_parked(run.id)
       assert {:error, :not_found} = Agent.expire_parked(Ash.UUID.generate())
+    end
+  end
+
+  describe "a lapsed proposal fails closed whether or not the expiry job could run" do
+    # `Approvals.cancel` rides the approvals repo: with its connection down the withdrawal fails, so the expiry
+    # rolls back and the run stays parked past its deadline.
+    defp with_approvals_repo(repo) do
+      prior = Application.get_env(:samen_core, Samen.Approvals)
+      Application.put_env(:samen_core, Samen.Approvals, Keyword.put(prior, :repo, repo))
+      on_exit(fn -> Application.put_env(:samen_core, Samen.Approvals, prior) end)
+    end
+
+    defp lapse_approval!(approval) do
+      {:ok, id} = Ecto.UUID.dump(approval.id)
+
+      Ecto.Adapters.SQL.query!(
+        TestRepo,
+        "UPDATE apv_approval SET apv_deadline_at = $1 WHERE apv_id = $2",
+        [DateTime.add(DateTime.utc_now(), -60), id]
+      )
+    end
+
+    test "RED: an approval past its deadline_at is refused at execution although the run was never expired" do
+      {s, run, target, approval, _new_owner} = propose!()
+      lapse_approval!(approval)
+
+      # the run is still parked (the expiry job has not run); the lapsed approval must still not execute
+      assert reload_run!(run).state == :awaiting_approval
+      assert {:error, :proposal_expired} = Approvals.approve(approval.id, approver_id(approval.org_id))
+
+      assert reload_target!(target.id).owner_id == nil
+      assert [%{id: id}] = pending_approvals(s.actor.org_id)
+      assert id == approval.id
+      assert reload_run!(run).state == :awaiting_approval
+    end
+
+    test "withdrawal down: expire_parked is an {:error, :expiry_incomplete}, the run stays parked, and once the outage lifts it reaches :expired" do
+      {s, run, target, approval, _new_owner} = propose!()
+      lapse!(run)
+      lapse_approval!(approval)
+
+      Samen.FaultRepo.fail([:transaction])
+      with_approvals_repo(Samen.FaultRepo)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, :expiry_incomplete} = Agent.expire_parked(run.id)
+          assert {:error, :expiry_incomplete} = Agent.expire_parked(run.id)
+        end)
+
+      # one value-free report per attempt (the cron re-enqueues every minute), never a stacktrace or a value
+      assert length(Regex.scan(~r/read=agent_expire_parked/, log)) == 2
+      refute log =~ "stacktrace"
+
+      # fail-closed does not depend on the job: still parked, and the lapsed approval cannot execute
+      assert reload_run!(run).state == :awaiting_approval
+      Samen.FaultRepo.heal()
+      assert {:error, :proposal_expired} = Approvals.approve(approval.id, approver_id(approval.org_id))
+      assert reload_target!(target.id).owner_id == nil
+      assert reload_run!(run).state == :awaiting_approval
+
+      assert {:ok, %{state: :expired}} = Agent.expire_parked(run.id)
+      assert pending_approvals(s.actor.org_id) == []
     end
   end
 

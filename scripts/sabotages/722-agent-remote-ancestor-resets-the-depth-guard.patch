@@ -1,0 +1,20 @@
+# SABOTAGE: A pid on another node is read as 'no provenance marker', so an agent chain spawned remotely 
+#   restarts at depth 0 and the nesting guard is reset.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_write_test.exs
+# MUST_FAIL: a remote ancestor is unknown provenance and counts as AT the ceiling
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index e46c98f2..12c1b64d 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -3238,7 +3238,7 @@ defmodule Samen.AI.Agent do
+   # reset the depth guard for a remote-spawned chain. Unknown provenance is not "top level": fail CLOSED, as if the
+   # caller sat at the ceiling, so the nested run is refused `:depth_exceeded`.
+   defp provenance_of(pid) when is_pid(pid) and node(pid) != node(),
+-    do: %{depth: @max_agent_depth, chain: []}
++    do: nil
+ 
+   defp provenance_of(pid) when is_pid(pid) do
+     case Process.info(pid, :dictionary) do

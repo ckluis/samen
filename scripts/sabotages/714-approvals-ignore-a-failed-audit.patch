@@ -1,0 +1,20 @@
+# SABOTAGE: Approval request/decide/cancel commit although their audit entry could not be written.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/audit_writer_callers_test.exs
+# MUST_FAIL: cancel: audit down → still pending
+# MUST_FAIL: request: audit down → no approval
+diff --git a/samen_core/lib/samen/approvals.ex b/samen_core/lib/samen/approvals.ex
+index a64ee3cb..383a1dc3 100644
+--- a/samen_core/lib/samen/approvals.ex
++++ b/samen_core/lib/samen/approvals.ex
+@@ -375,7 +375,7 @@ defmodule Samen.Approvals do
+ 
+       {:error, reason} ->
+         Samen.Observability.Failure.report(:approval_audit, approval.org_id, reason)
+-        repo.rollback({:audit_failed, reason})
++        :ok
+     end
+   end
+ 

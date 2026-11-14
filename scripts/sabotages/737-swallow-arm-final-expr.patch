@@ -1,0 +1,19 @@
+# SABOTAGE: swallow arm final expr
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/swallow_lint_test.exs
+# MUST_FAIL: an error arm that does something and THEN answers a swallow literal is flagged
+diff --git a/samen_core/lib/samen/lint/swallow.ex b/samen_core/lib/samen/lint/swallow.ex
+index dc6a8467..71c26ef0 100644
+--- a/samen_core/lib/samen/lint/swallow.ex
++++ b/samen_core/lib/samen/lint/swallow.ex
+@@ -555,7 +555,7 @@ defmodule Samen.Lint.Swallow do
+ 
+   # The arm ANSWERS a swallow literal (its final expression, so `_ = 1; []` and `:telemetry.execute(…); []` count) and
+   # neither logs, reports nor raises — the same test `rescue_clause/3` applies.
+-  defp swallow_arm?(body), do: swallow_literal?(final_expr(body)) and not logged?(body)
++  defp swallow_arm?(body), do: swallow_literal?(body)
+ 
+   defp wildcard?({:_, _, ctx}) when is_atom(ctx), do: true
+   defp wildcard?({name, _, ctx}) when is_atom(name) and is_atom(ctx), do: underscored?(name)

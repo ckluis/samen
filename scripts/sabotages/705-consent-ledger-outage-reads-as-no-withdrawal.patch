@@ -1,0 +1,20 @@
+# SABOTAGE: An unreadable consent ledger is again reported as {:ok, :none}, so a send gate that proceeds on 
+#   anything but :withdrawn lets a send through to a subscriber whose withdrawal could not be read.
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/marketing_consent_ledger_test.exs
+# MUST_FAIL: state_result/3 tells an UNREADABLE ledger from 'no consent on file'
+diff --git a/samen_core/lib/samen/marketing/consent.ex b/samen_core/lib/samen/marketing/consent.ex
+index 38b4211b..82b6376a 100644
+--- a/samen_core/lib/samen/marketing/consent.ex
++++ b/samen_core/lib/samen/marketing/consent.ex
+@@ -46,7 +46,7 @@ defmodule Samen.Marketing.Consent do
+   rescue
+     e ->
+       Samen.Observability.Failure.report(:marketing_consent_state, org_id, e)
+-      {:error, :unavailable}
++      {:ok, :none}
+   end
+ 
+   @doc """

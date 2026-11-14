@@ -321,9 +321,14 @@ defmodule Samen.Vault do
     rows =
       repo.all(from(r in VaultRow, where: r.subject_id == ^subject_id, select: r.token))
 
+    # Same direction as `scan_pitr_key_absent/2`: a failed probe (KMS outage) is not "no plaintext".
     leaks =
-      Enum.filter(rows, fn token ->
-        match?({:ok, _plaintext}, reveal_token(token, repo))
+      Enum.flat_map(rows, fn token ->
+        case probe_token(token, repo) do
+          :decryptable -> [token]
+          :clean -> []
+          {:failed, reason} -> [probe_failed_message(token, reason)]
+        end
       end)
 
     if leaks == [], do: {:ok, :no_plaintext}, else: {:leaks, leaks}
@@ -353,12 +358,29 @@ defmodule Samen.Vault do
   @spec scan_pitr_key_absent(String.t(), Ecto.Repo.t()) ::
           {:ok, :key_absent} | {:leaks, [String.t()]}
   def scan_pitr_key_absent(subject_id, repo) do
-    key_columns = key_shaped_columns(repo, "pii_vault")
+    case key_shaped_columns(repo, "pii_vault") do
+      {:ok, key_columns} ->
+        scan_pitr_key_absent(subject_id, repo, key_columns)
 
+      {:error, :unavailable} ->
+        # A failed column probe is NOT "no key-shaped column": the old `rescue _ -> []` made this verifier answer
+        # `{:ok, :key_absent}` (erasure proven) because the probe could not run. It fails closed instead.
+        {:leaks, ["pii_vault key-material column probe FAILED — cannot prove the key is absent (fail closed)"]}
+    end
+  end
+
+  defp scan_pitr_key_absent(subject_id, repo, key_columns) do
+    # Only `:shredded` / `:absent` / `:not_found` prove the key is gone. `{:error, :unavailable}` (a KMS outage) or
+    # any other failure is a PROBE failure, not "not decryptable": it used to read as proof of erasure.
     decryptable =
       repo.all(from(r in VaultRow, where: r.subject_id == ^subject_id, select: r.token))
-      |> Enum.filter(fn token -> match?({:ok, _}, reveal_token(token, repo)) end)
-      |> Enum.map(fn t -> "decryptable ciphertext for token #{t}" end)
+      |> Enum.flat_map(fn token ->
+        case probe_token(token, repo) do
+          :decryptable -> ["decryptable ciphertext for token #{token}"]
+          :clean -> []
+          {:failed, reason} -> [probe_failed_message(token, reason)]
+        end
+      end)
 
     key_col_leaks =
       Enum.map(key_columns, fn col ->
@@ -371,6 +393,26 @@ defmodule Samen.Vault do
       leaks -> {:leaks, leaks}
     end
   end
+
+  @clean_reveal_reasons [:shredded, :absent, :not_found]
+
+  # :decryptable | :clean | {:failed, reason}
+  defp probe_token(token, repo) do
+    case reveal_token(token, repo) do
+      {:ok, _plaintext} ->
+        :decryptable
+
+      {:error, reason} when reason in @clean_reveal_reasons ->
+        :clean
+
+      {:error, reason} ->
+        Samen.Observability.Failure.report(:vault_reveal_probe, nil, reason)
+        {:failed, reason}
+    end
+  end
+
+  defp probe_failed_message(token, reason),
+    do: "key-absence probe FAILED for token #{token} (#{inspect(reason)}) — cannot prove the key is absent (fail closed)"
 
   # Columns on `table` whose name looks like it could hold key material. The vault
   # schema stores only `ciphertext`; a `wrapped_dek` / `dek` / `key`-named column
@@ -390,8 +432,11 @@ defmodule Samen.Vault do
       String.contains?(n, "wrapped_dek") or n == "dek" or String.ends_with?(n, "_dek") or
         String.contains?(n, "master_key") or String.contains?(n, "key_material")
     end)
+    |> then(&{:ok, &1})
   rescue
-    _ -> []
+    e ->
+      Samen.Observability.Failure.report(:vault_key_column_probe, nil, e)
+      {:error, :unavailable}
   end
 
   @doc """

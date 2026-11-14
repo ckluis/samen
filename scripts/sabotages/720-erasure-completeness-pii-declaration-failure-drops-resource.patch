@@ -1,0 +1,24 @@
+# SABOTAGE: A module whose PII declarations cannot be introspected reads as declaring no PII, so it 
+#   silently drops out of the erasure-completeness transcript discovery.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_test.exs
+# MUST_FAIL: RED: Completeness PII-field lookup over a module whose declarations cannot be read raises
+diff --git a/samen_core/lib/samen/erasure/completeness.ex b/samen_core/lib/samen/erasure/completeness.ex
+index 2c3ceb48..103e89f3 100644
+--- a/samen_core/lib/samen/erasure/completeness.ex
++++ b/samen_core/lib/samen/erasure/completeness.ex
+@@ -235,7 +235,11 @@ defmodule Samen.Erasure.Completeness do
+ 
+   # No rescue: a module whose PII declarations cannot be introspected must FAIL the completeness check, not drop
+   # out of discovery (`rescue _ -> []` made an un-introspectable resource look like one with nothing to erase).
+-  defp pii_fields(resource), do: Samen.Pii.Info.fields(resource)
++  defp pii_fields(resource) do
++    Samen.Pii.Info.fields(resource)
++  rescue
++    _ -> []
++  end
+ 
+   # (f) DERIVED-SUMMARY segments (ADR-048 §7.3, batch C4) — the compaction fold ledger a
+   # vault-routed transcript carries.

@@ -32,6 +32,30 @@ defmodule RogueTenantParamTool do
   def effect, do: :read
 end
 
+defmodule RaisingSchemaTool do
+  @moduledoc false
+  # Raises on every call AFTER the first. `Action.tool_kinds/0` already drops a tool whose schema raises when it is
+  # enumerated (it is `:not_a_tool`, never offered to a model), so the verifier only ever meets a raising schema when
+  # one is flaky: valid at enumeration, raising when the verifier reads it. That used to read as "no params" and PASS.
+  def kind, do: :raising_schema
+
+  def tool_schema do
+    n = :counters.get(:persistent_term.get({__MODULE__, :calls}), 1)
+    :counters.add(:persistent_term.get({__MODULE__, :calls}), 1, 1)
+    if n == 0, do: %{name: "raising_schema", params: []}, else: raise("schema needs the database")
+  end
+
+  def effect, do: :read
+end
+
+defmodule NoParamsTool do
+  @moduledoc false
+  # Positive control: a schema with no params is legitimate and must stay clean.
+  def kind, do: :no_params
+  def tool_schema, do: %{name: "no_params"}
+  def effect, do: :read
+end
+
 defmodule RogueUserIdTool do
   @moduledoc false
   # Negative control: `user_id` names a TARGET record (assign_record_owner's shape), not
@@ -165,6 +189,19 @@ defmodule Mix.Tasks.Samen.Verify.ToolActorIdentityTest do
     test "a clean id param is NOT flagged (the scan is not blanket-failing)", ctx do
       register(%{"clean_id_param" => CleanIdParamTool}, ctx)
       refute Enum.any?(V.action_tool_violations(), &(&1 =~ "clean_id_param"))
+    end
+
+    test "a tool whose tool_schema/0 raises is a NAMED violation, not a pass", ctx do
+      :persistent_term.put({RaisingSchemaTool, :calls}, :counters.new(1, []))
+      on_exit(fn -> :persistent_term.erase({RaisingSchemaTool, :calls}) end)
+      register(%{"raising_schema" => RaisingSchemaTool}, ctx)
+      assert [violation] = Enum.filter(V.action_tool_violations(), &(&1 =~ "RaisingSchemaTool"))
+      assert violation =~ "cannot be read"
+    end
+
+    test "a tool with no params at all is NOT flagged (an unreadable schema is, an empty one is not)", ctx do
+      register(%{"no_params" => NoParamsTool}, ctx)
+      refute Enum.any?(V.action_tool_violations(), &(&1 =~ "NoParamsTool"))
     end
 
     test "a target-record user_id param is NOT flagged (anti-overreach)", ctx do

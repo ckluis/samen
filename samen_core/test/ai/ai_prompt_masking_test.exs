@@ -600,18 +600,25 @@ defmodule Samen.AI.AiPromptMaskingRedTeamTest do
       end
     end
 
-    test "a grant checker that RAISES is not a grant — the span re-masks, seal never raises",
+    test "a grant checker that RAISES is not a grant — the span re-masks, seal never raises (and the failure is REPORTED, value-free)",
          %{ctx: ctx, op: op} do
-      assert {:ok, payload} =
-               Chokepoint.seal(:complete, ["next turn"],
-                 actor: op,
-                 history: [{:grant_span, @canary, ctx}],
-                 grant_egress?: true,
-                 grant: RaisingGrantForEgress
-               )
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, payload} =
+                   Chokepoint.seal(:complete, ["next turn"],
+                     actor: op,
+                     history: [{:grant_span, @canary, ctx}],
+                     grant_egress?: true,
+                     grant: RaisingGrantForEgress
+                   )
 
-      refute Enum.any?(payload.segments, &(to_string(&1) =~ @canary))
-      assert mask() in payload.segments
+          refute Enum.any?(payload.segments, &(to_string(&1) =~ @canary))
+          assert mask() in payload.segments
+        end)
+
+      # the closed-silent site is now closed-REPORTED: named, with the exception module, and no content (EG6)
+      assert log =~ "read failed read=chokepoint_granted"
+      refute log =~ @canary
     end
   end
 

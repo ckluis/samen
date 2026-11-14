@@ -242,7 +242,9 @@ defmodule Samen.NonPii do
   rescue
     # A registry entry naming a table/column that does not exist in this repo is a
     # fail-closed condition for the oracle, surfaced as a large sentinel count.
-    _ -> :error
+    e ->
+      Samen.Observability.Failure.report(:non_pii_count_unredacted, nil, e)
+      :error
   end
 
   # Redact a single registered column for a subject. Uses a parameterized UPDATE:

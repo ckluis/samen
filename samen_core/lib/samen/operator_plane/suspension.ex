@@ -19,6 +19,13 @@ defmodule Samen.OperatorPlane.SuspensionRow do
     field(:cleared_at, :utc_datetime_usec, source: :osp_cleared_at)
     field(:inserted_at, :utc_datetime_usec, source: :osp_inserted_at)
     field(:updated_at, :utc_datetime_usec, source: :osp_updated_at)
+
+    # Not a column (no migration): how the suspension's audit entry stands on the row `suspend/1` returns.
+    # `:written` (in the chain), `:pending` (the chain write failed; a durable local entry awaits the reconciler)
+    # or `:lost` (the chain write AND the local entry both failed; reported, but nothing durable remains).
+    # `:unknown` is a row this call did not write the audit for (a loaded or already-suspended row): it must not claim
+    # `:written`.
+    field(:audit, Ecto.Enum, values: [:written, :pending, :lost, :unknown], default: :unknown, virtual: true)
   end
 end
 
@@ -72,11 +79,15 @@ defmodule Samen.OperatorPlane.Suspension do
   Auto-suspend an operator (T4.4 clause (d)). Idempotent: a second suspend of an
   already-suspended operator is a no-op returning the existing row. Writes an
   `operator_suspended` audit event (token-only) into the append-only tier + the
-  T4.3 chain.
+  T4.3 chain (or, if that write fails, defers it durably; see below).
 
   `attrs`: `:operator_id` (required), `:reason` (required), optional `:org_id`
   (the chain partition; defaults to `"__global__"` — a platform-scope event),
-  `:repo`.
+  `:repo`, `:local_audit_path` (where a deferred audit entry is parked).
+
+  The suspension commits FIRST, whatever happens to the audit. `{:ok, row}` always means the operator IS suspended;
+  `row.audit` is `:written`, `:pending` or `:lost` (see `SuspensionRow`); an idempotent re-suspend returns the existing
+  row with `:unknown` (this call wrote no audit, and cannot say how the earlier one stands). `{:error, _}` means it was NOT suspended.
   """
   @spec suspend(map()) :: {:ok, SuspensionRow.t()} | {:error, term}
   def suspend(attrs) do
@@ -86,10 +97,13 @@ defmodule Samen.OperatorPlane.Suspension do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
     case active_row(r, operator_id) do
-      %SuspensionRow{} = existing ->
+      {:error, :unavailable} ->
+        {:error, :unavailable}
+
+      {:ok, %SuspensionRow{} = existing} ->
         {:ok, existing}
 
-      nil ->
+      {:ok, nil} ->
         row =
           %SuspensionRow{}
           |> Ecto.Changeset.cast(
@@ -104,16 +118,86 @@ defmodule Samen.OperatorPlane.Suspension do
           )
           |> Ecto.Changeset.validate_required([:operator_id, :reason, :suspended_at])
 
-        with {:ok, inserted} <- r.insert(row) do
-          emit_audit(r, %{
-            event: "operator_suspended",
-            operator_id: operator_id,
-            org_id: Map.get(attrs, :org_id) || Samen.AuditChain.global_org(),
-            detail: "reason=#{reason}"
-          })
-
-          {:ok, inserted}
+        # ASYMMETRIC with `clear/2`. Suspending REMOVES privilege, so it must never wait on (or be undone by) the
+        # audit tables: the suspension row commits on its own first. A failed audit write is reported and made
+        # durable locally (`Samen.BreakGlass.LocalAudit`, the break-glass deferred-anchor precedent), to be
+        # anchored into the chain later by `Samen.BreakGlass.Reconciliation`; the returned row says which.
+        # `clear/2` RESTORES privilege and stays atomic with its audit entry (fail closed).
+        case insert_suspension(r, row) do
+          {:ok, inserted} -> {:ok, audit_after_commit(r, inserted, attrs, reason)}
+          {:error, _} = error -> error
         end
+    end
+  end
+
+  defp insert_suspension(r, row) do
+    case r.insert(row) do
+      {:ok, inserted} ->
+        {:ok, inserted}
+
+      {:error, failure} ->
+        Samen.Observability.Failure.report(:suspension_insert, nil, failure)
+        {:error, :unavailable}
+    end
+  rescue
+    e ->
+      Samen.Observability.Failure.report(:suspension_insert, nil, e)
+      {:error, :unavailable}
+  end
+
+  defp audit_after_commit(r, inserted, attrs, reason) do
+    operator_id = inserted.operator_id
+    org_id = Map.get(attrs, :org_id) || Samen.AuditChain.global_org()
+
+    audited =
+      try do
+        r.transaction(fn ->
+          case emit_audit(r, %{
+                 event: "operator_suspended",
+                 operator_id: operator_id,
+                 org_id: org_id,
+                 detail: "reason=#{reason}"
+               }) do
+            {:ok, _} -> :ok
+            {:error, failure} -> r.rollback(failure)
+          end
+        end)
+      rescue
+        e ->
+          Samen.Observability.Failure.report(:suspension_audit, org_id, e)
+          {:error, :audit_unavailable}
+      end
+
+    case audited do
+      {:ok, :ok} -> %{inserted | audit: :written}
+      {:error, _} -> %{inserted | audit: defer_audit(attrs, operator_id, org_id, reason)}
+    end
+  end
+
+  # The chain write failed (already reported by `emit_audit`). Park the entry on the local hash chain so the
+  # reconciler can anchor it; `:lost` only when even that fails, and that is reported by name.
+  defp defer_audit(attrs, operator_id, org_id, reason) do
+    opts = if path = Map.get(attrs, :local_audit_path), do: [path: path], else: []
+
+    case Samen.BreakGlass.LocalAudit.append(
+           %{
+             org_id: org_id,
+             subject_id: operator_id,
+             actor_id: operator_id,
+             reason: "reason=#{reason}",
+             resource: "operator_suspension",
+             action: "operator_suspended",
+             kind: "operator_suspension",
+             correlation_id: uuid_or_nil(operator_id)
+           },
+           opts
+         ) do
+      {:ok, _entry} ->
+        :pending
+
+      {:error, failure} ->
+        Samen.Observability.Failure.report(:suspension_audit_deferral, org_id, failure)
+        :lost
     end
   end
 
@@ -129,23 +213,31 @@ defmodule Samen.OperatorPlane.Suspension do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
     case active_row(r, operator_id) do
-      nil ->
+      {:error, :unavailable} ->
+        # A failed lookup is not "nothing to clear": the operator may still be suspended.
+        {:error, :unavailable}
+
+      {:ok, nil} ->
         {:ok, :not_suspended}
 
-      %SuspensionRow{} = row ->
-        with {:ok, updated} <-
-               row
-               |> Ecto.Changeset.change(cleared_at: now, updated_at: now)
-               |> r.update() do
-          emit_audit(r, %{
-            event: "operator_unsuspended",
-            operator_id: operator_id,
-            org_id: Map.get(opts, :org_id) || Samen.AuditChain.global_org(),
-            detail: "cleared_by=#{actor}"
-          })
-
-          {:ok, updated}
-        end
+      {:ok, %SuspensionRow{} = row} ->
+        r.transaction(fn ->
+          with {:ok, updated} <-
+                 row
+                 |> Ecto.Changeset.change(cleared_at: now, updated_at: now)
+                 |> r.update(),
+               {:ok, _} <-
+                 emit_audit(r, %{
+                   event: "operator_unsuspended",
+                   operator_id: operator_id,
+                   org_id: Map.get(opts, :org_id) || Samen.AuditChain.global_org(),
+                   detail: "cleared_by=#{actor}"
+                 }) do
+            updated
+          else
+            {:error, failure} -> r.rollback(failure)
+          end
+        end)
     end
   end
 
@@ -193,7 +285,9 @@ defmodule Samen.OperatorPlane.Suspension do
              )
            )}
         rescue
-          _ -> {:error, :unavailable}
+          e ->
+            Samen.Observability.Failure.report(:suspension_status, nil, e)
+            {:error, :unavailable}
         end
     end
   end
@@ -202,32 +296,55 @@ defmodule Samen.OperatorPlane.Suspension do
   # Internal
   # ==========================================================================
 
+  # `{:ok, row | nil}` or `{:error, :unavailable}`: a failed lookup is NOT "no active suspension".
   defp active_row(r, operator_id) do
-    r.one(
-      from(s in SuspensionRow,
-        where: s.operator_id == ^operator_id and is_nil(s.cleared_at),
-        limit: 1
-      )
-    )
+    {:ok,
+     r.one(
+       from(s in SuspensionRow,
+         where: s.operator_id == ^operator_id and is_nil(s.cleared_at),
+         limit: 1
+       )
+     )}
   rescue
-    _ -> nil
+    e ->
+      Samen.Observability.Failure.report(:suspension_active_row, nil, e)
+      {:error, :unavailable}
   end
 
   # Emit the suspend/clear event to the append-only tier + the T4.3 chain (tokens
   # only). Best-effort within the caller's connection; a missing aud_event/aud_chain
   # (unmigrated host) degrades gracefully like the other writers.
   defp emit_audit(r, attrs) do
-    Samen.AuditChain.Writer.write(r, %{
-      org_id: attrs.org_id,
-      event_type: "operator_suspension",
-      subject_id: attrs.operator_id,
-      actor_id: attrs.operator_id,
-      correlation_id: attrs.operator_id,
-      detail: "event=#{attrs.event} #{attrs.detail}",
-      occurred_at: DateTime.utc_now() |> DateTime.truncate(:microsecond)
-    })
+    case Samen.AuditChain.Writer.write(r, %{
+           org_id: attrs.org_id,
+           event_type: "operator_suspension",
+           subject_id: attrs.operator_id,
+           actor_id: attrs.operator_id,
+           correlation_id: uuid_or_nil(attrs.operator_id),
+           detail: "event=#{attrs.event} #{attrs.detail}",
+           occurred_at: DateTime.utc_now() |> DateTime.truncate(:microsecond)
+         }) do
+      {:ok, _} = ok ->
+        ok
+
+      {:error, reason} ->
+        Samen.Observability.Failure.report(:suspension_audit, attrs.org_id, reason)
+        {:error, :audit_unavailable}
+    end
   rescue
-    _ -> :ok
+    e ->
+      Samen.Observability.Failure.report(:suspension_audit, attrs.org_id, e)
+      {:error, :audit_unavailable}
+  end
+
+  # `aud_correlation_id` is a :binary_id column. An operator id that is not a UUID used to make the whole audit write
+  # raise — silently, under the old `rescue _ -> :ok` — so the suspension went unaudited. The event still names the
+  # operator as subject and actor; only the (UUID-typed) correlation id is dropped.
+  defp uuid_or_nil(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> uuid
+      :error -> nil
+    end
   end
 
   defp operator_id(op) when is_binary(op), do: op

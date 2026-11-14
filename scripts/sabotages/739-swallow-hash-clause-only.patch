@@ -1,0 +1,19 @@
+# SABOTAGE: swallow hash clause only
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/swallow_lint_test.exs
+# MUST_FAIL: editing the function body OUTSIDE the reviewed clause changes the pinned hash
+diff --git a/samen_core/lib/samen/lint/swallow.ex b/samen_core/lib/samen/lint/swallow.ex
+index dc6a8467..54d4b3e6 100644
+--- a/samen_core/lib/samen/lint/swallow.ex
++++ b/samen_core/lib/samen/lint/swallow.ex
+@@ -137,7 +137,7 @@ defmodule Samen.Lint.Swallow do
+   # function a reviewed clause protects changes the hash, not just rewriting the clause itself.
+   defp hash_of(sites) do
+     sites
+-    |> Enum.map(&(&1.span <> "\n==\n" <> &1.norm))
++    |> Enum.map(& &1.norm)
+     |> Enum.sort()
+     |> Enum.join("\n--\n")
+     |> then(&:crypto.hash(:sha256, &1))

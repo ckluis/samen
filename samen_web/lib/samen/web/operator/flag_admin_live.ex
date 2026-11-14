@@ -123,15 +123,20 @@ defmodule Samen.Web.Operator.FlagAdminLive do
   defp open_edit(socket, id) do
     %{samen_mount: mount, flags_mount: flags_mount, operator_org_id: org_id} = socket.assigns
 
-    case flags_mount && Reads.get_flag(flags_mount, Mount.scope(mount, org_id), id) do
-      nil ->
-        assign(socket, edit_flag: nil, ramp_form: nil)
-
-      flag ->
+    case flags_mount && Reads.get_flag_result(flags_mount, Mount.scope(mount, org_id), id) do
+      {:ok, flag} ->
         assign(socket,
           edit_flag: flag,
           ramp_form: to_form(%{"rollout_pct" => flag.rollout_pct}, as: :ramp)
         )
+
+      # A FAILED read is not "no such flag": say so, keep the list (the Guard error copy, as in the tenant SettingsLive).
+      {:error, :unavailable} ->
+        assign(socket, edit_flag: nil, ramp_form: nil, flag_error: Samen.Web.Reads.Guard.message())
+
+      # absent / denied / no flags mount
+      _ ->
+        assign(socket, edit_flag: nil, ramp_form: nil)
     end
   end
 
@@ -195,20 +200,22 @@ defmodule Samen.Web.Operator.FlagAdminLive do
 
   # A KILLED flag is enabled: false regardless of prior state (idempotent, unlike toggle).
   defp kill(flags_mount, scope, id) do
-    case Reads.get_flag(flags_mount, scope, id) do
-      nil -> {:error, "Flag not found."}
-      %{enabled: false} = flag -> {:ok, flag}
-      _flag -> Reads.toggle_flag(flags_mount, scope, id)
+    case Reads.get_flag_result(flags_mount, scope, id) do
+      {:error, :not_found} -> {:error, "Flag not found."}
+      {:error, :unavailable} -> {:error, Samen.Web.Reads.Guard.message()}
+      {:ok, %{enabled: false} = flag} -> {:ok, flag}
+      {:ok, _flag} -> Reads.toggle_flag(flags_mount, scope, id)
     end
   end
 
   # The idempotent twin (B6-N2): an ENABLED flag stays enabled regardless of how many
   # times Re-enable fires — the raw toggle is never exposed as a UI event.
   defp enable(flags_mount, scope, id) do
-    case Reads.get_flag(flags_mount, scope, id) do
-      nil -> {:error, "Flag not found."}
-      %{enabled: true} = flag -> {:ok, flag}
-      _flag -> Reads.toggle_flag(flags_mount, scope, id)
+    case Reads.get_flag_result(flags_mount, scope, id) do
+      {:error, :not_found} -> {:error, "Flag not found."}
+      {:error, :unavailable} -> {:error, Samen.Web.Reads.Guard.message()}
+      {:ok, %{enabled: true} = flag} -> {:ok, flag}
+      {:ok, _flag} -> Reads.toggle_flag(flags_mount, scope, id)
     end
   end
 

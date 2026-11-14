@@ -138,7 +138,9 @@ defmodule Samen.Fleet.PublicStatus do
     # A namespace that is not a mounted `Samen.Fleet.Scope` raises on resource
     # resolution. The public surface must not 500 on that, and must not render an
     # empty page that reads as "all clear" either.
-    _ -> {:error, :unavailable}
+    e ->
+      Samen.Observability.Failure.report(:public_status_read, nil, e)
+      {:error, :unavailable}
   end
 
   @doc """

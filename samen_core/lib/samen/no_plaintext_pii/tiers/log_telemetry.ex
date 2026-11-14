@@ -130,29 +130,60 @@ defmodule Samen.NoPlaintextPii.Tiers.LogTelemetry do
   # verify that the handler's config has db_statement: :disabled (or is absent,
   # since the opentelemetry_ecto 1.2.x default is :disabled).
   defp check_live_handlers do
-    otel_handlers = find_otel_ecto_handlers()
+    case find_otel_ecto_handlers() do
+      {:ok, otel_handlers} ->
+        Enum.flat_map(otel_handlers, fn handler ->
+          check_handler_config(handler)
+        end)
 
-    Enum.flat_map(otel_handlers, fn handler ->
-      check_handler_config(handler)
-    end)
+      {:error, :unavailable} ->
+        # The handler list could not be read, so a recording handler cannot be ruled out: a violation, not a pass.
+        [
+          Finding.violation(
+            @tier,
+            "opentelemetry_ecto live handlers",
+            "the attached :telemetry handlers could not be listed — cannot rule out an OpentelemetryEcto " <>
+              "handler recording db_statement (fail closed). See the [Samen.Core] read failed line."
+          )
+        ]
+    end
   end
 
   # Find all :telemetry handlers whose handler_id starts with {OpentelemetryEcto, _}
   defp find_otel_ecto_handlers do
     # :telemetry.list_handlers/1 returns all handlers for a given event prefix.
     # We use the empty prefix [] to list ALL handlers, then filter by module.
-    all_handlers = :telemetry.list_handlers([])
+    all_handlers = lister().([])
 
-    Enum.filter(all_handlers, fn handler ->
-      case Map.get(handler, :id) do
-        {OpentelemetryEcto, _} -> true
-        _ -> false
-      end
-    end)
+    {:ok,
+     Enum.filter(all_handlers, fn handler ->
+       case Map.get(handler, :id) do
+         {OpentelemetryEcto, _} -> true
+         _ -> false
+       end
+     end)}
   rescue
-    # If :telemetry is not available or errors, we can't check live handlers —
-    # fail closed by returning a violation.
-    _ -> []
+    # If :telemetry is not available or errors we cannot check live handlers: tagged, so the caller fails closed
+    # with a violation (this clause used to say so in a comment and return [] — "no handlers", a clean pass).
+    e ->
+      Samen.Observability.Failure.report(:log_telemetry_list_handlers, nil, e)
+      {:error, :unavailable}
+  end
+
+  # The handler lister: `:telemetry.list_handlers/1`. A test can replace it with `config :samen_core,
+  # :telemetry_handler_lister` (a 1-arity function) to make the listing fail for real and prove the tier fails
+  # closed. That seam is compiled in ONLY under `Mix.env() == :test`: in any other build the application
+  # environment is never read, so a production config cannot silence the live-handler check with `fn _ -> [] end`.
+  @lister_seam? Mix.env() == :test
+
+  @doc false
+  @spec lister_seam?() :: boolean()
+  def lister_seam?, do: @lister_seam?
+
+  if @lister_seam? do
+    defp lister, do: Application.get_env(:samen_core, :telemetry_handler_lister, &:telemetry.list_handlers/1)
+  else
+    defp lister, do: &:telemetry.list_handlers/1
   end
 
   # Check a single handler's config for db_statement safety.

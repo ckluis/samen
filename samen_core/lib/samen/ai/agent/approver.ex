@@ -141,7 +141,9 @@ defmodule Samen.AI.Agent.Approver do
   defp resolve_wired({mod, fun}, approver_id, org_id) do
     normalize(apply(mod, fun, [approver_id, org_id]), approver_id, org_id)
   rescue
-    _ -> {:error, :approver_unresolvable}
+    e ->
+      Samen.Observability.Failure.report(:approver_resolve_wired, nil, e)
+      {:error, :approver_unresolvable}
   end
 
   defp resolve_wired(resource, approver_id, org_id) when is_atom(resource) do
@@ -169,7 +171,9 @@ defmodule Samen.AI.Agent.Approver do
         true
     end
   rescue
-    _ -> true
+    e ->
+      Samen.Observability.Failure.report(:approver_castable_key, nil, e)
+      true
   end
 
   defp read_membership(resource, approver_id, org_id) do
@@ -184,7 +188,9 @@ defmodule Samen.AI.Agent.Approver do
       {:error, _} -> {:error, :approver_unresolvable}
     end
   rescue
-    _ -> {:error, :approver_unresolvable}
+    e ->
+      Samen.Observability.Failure.report(:approver_read_membership, nil, e)
+      {:error, :approver_unresolvable}
   end
 
   # A custom seam may answer with a membership-ish map, a bare role, or a refusal. Every

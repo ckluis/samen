@@ -59,7 +59,9 @@ defmodule Samen.Fleet.Authz do
         %{}
     end
   rescue
-    _ -> %{}
+    e ->
+      Samen.Observability.Failure.report(:authz_roles_for, nil, e)
+      %{}
   end
 
   def roles_for(_otp_app, _principal_id), do: %{}

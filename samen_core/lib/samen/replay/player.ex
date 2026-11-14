@@ -49,7 +49,7 @@ defmodule Samen.Replay.Player do
   def list(%Samen.Scope{} = scope, opts \\ []) do
     case list_result(scope, opts) do
       {:ok, sessions} -> sessions
-      {:error, _} -> []
+      {:error, reason} -> raise RuntimeError, "the recorded sessions could not be read (#{inspect(reason)}): not an empty list"
     end
   end
 

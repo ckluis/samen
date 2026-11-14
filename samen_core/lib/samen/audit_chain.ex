@@ -133,20 +133,21 @@ defmodule Samen.AuditChain do
   rescue
     # A genuine READ failure (missing table, DB outage) is surfaced as a DISTINCT signal,
     # never masked as an empty ("clean") ledger — that masking is the O10 defect.
-    _ -> {:error, :unavailable}
+    e ->
+      Samen.Observability.Failure.report(:audit_chain_reveal_events, org_id, e)
+      {:error, :unavailable}
   end
 
   @doc """
-  Back-compat LIST projection of `reveal_events_result/2` — a successful read yields the
-  events, a FAILED read degrades to `[]`. This exists for callers that only ever read a
-  populated org chain (the reveal-lifecycle tests). Tenant TRUST surfaces MUST use
-  `reveal_events_result/2` so a read failure is not shown as a clean, empty ledger (O10).
+  LIST projection of `reveal_events_result/2` — a successful read yields the events and a FAILED read RAISES
+  (it used to degrade to `[]`, which is a clean, empty ledger: the O10 defect). Callers that can render an outage
+  (every tenant TRUST surface) use `reveal_events_result/2`.
   """
   @spec reveal_events_for_org(String.t(), keyword()) :: [map()]
   def reveal_events_for_org(org_id, opts \\ []) do
     case reveal_events_result(org_id, opts) do
       {:ok, events} -> events
-      {:error, _} -> []
+      {:error, reason} -> raise RuntimeError, "the audit chain could not be read (#{inspect(reason)}): not an empty ledger"
     end
   end
 

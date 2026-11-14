@@ -218,7 +218,9 @@ defmodule Samen.OperatorPlane do
       |> Ash.Query.filter(org_id == ^org_id)
       |> Ash.read!(authorize?: false)
     rescue
-      _ -> []
+      e ->
+        Samen.Observability.Failure.report(:operator_plane_safe_read_by_org, nil, e)
+        []
     end
   end
 
@@ -227,7 +229,9 @@ defmodule Samen.OperatorPlane do
     try do
       Ash.get!(resource, id, authorize?: false)
     rescue
-      _ -> nil
+      e ->
+        Samen.Observability.Failure.report(:operator_plane_safe_get, nil, e)
+        nil
     end
   end
 end

@@ -199,8 +199,6 @@ defmodule Samen.Webhook.Payload do
     |> PiiInfo.pii_attributes()
     |> Enum.map(fn attr -> attr.name end)
     |> MapSet.new()
-  rescue
-    _ -> MapSet.new()
   end
 
   # The resource's DECLARED abbrev (the source of truth for its storage prefix),

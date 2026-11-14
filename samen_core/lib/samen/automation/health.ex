@@ -181,7 +181,9 @@ defmodule Samen.Automation.Health do
 
     :ok
   rescue
-    _ -> :ok
+    e ->
+      Samen.Observability.Failure.report(:health_audit_switch, nil, e)
+      :ok
   end
 
   defp operator_id(%Actor{id: id}), do: id

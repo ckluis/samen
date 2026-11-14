@@ -86,16 +86,8 @@ defmodule Samen.Web.Automation.Reads do
     end)
   end
 
-  @doc "Read ONE workflow by id for `scope` (bounded lookup). `nil` when absent/denied."
-  def get_workflow(mount, scope, id) do
-    case get_workflow_result(mount, scope, id) do
-      {:ok, workflow} -> workflow
-      {:error, _} -> nil
-    end
-  end
-
   @doc """
-  Tagged sibling of `get_workflow/3` (WP6): `{:ok, workflow}`, `{:error, :not_found}` for an
+  Read ONE workflow by id for `scope` (bounded lookup): `{:ok, workflow}`, `{:error, :not_found}` for an
   absent, malformed-id or denied record, and `{:error, :unavailable}` ONLY when the read FAILED.
   """
   def get_workflow_result(mount, scope, id) do

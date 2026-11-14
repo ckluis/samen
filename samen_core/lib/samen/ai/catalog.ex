@@ -264,7 +264,5 @@ defmodule Samen.AI.Catalog do
     |> Samen.Pii.Info.vault_routed_columns()
     |> Enum.map(&to_string/1)
     |> MapSet.new()
-  rescue
-    _ -> MapSet.new()
   end
 end

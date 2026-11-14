@@ -119,6 +119,8 @@ defmodule Samen.BreakGlass do
     * `{:error, :reason_required}`  — no who/what/why (clause (a) red path);
     * `{:error, :not_authorized}`   — actor lacks the break-glass role;
     * `{:error, :operator_suspended}` — the operator is suspended (clause (d));
+    * `{:error, :suspension_failed}` — this reveal is over the budget but the auto-suspension could not be written
+      (reported); the reveal is refused — fail closed;
     * `{:error, :budget_exceeded}`  — this reveal tripped the breadth budget →
       operator auto-suspended (clause (d));
     * `{:error, {:local_audit_failed, reason}}` — the local audit could not be
@@ -129,6 +131,7 @@ defmodule Samen.BreakGlass do
   @spec reveal(request()) :: {:ok, map()} | {:error, term}
   def reveal(req) when is_map(req) do
     with :ok <- require_reason(req),
+         :ok <- require_unreserved_action(req),
          :ok <- require_authorized(req),
          :ok <- require_not_suspended(req),
          :ok <- require_within_budget(req),
@@ -157,6 +160,15 @@ defmodule Samen.BreakGlass do
     end
   end
 
+  # `operator_suspended` is the action name `Samen.OperatorPlane.Suspension` files its deferred audit under; a reveal
+  # may not claim it (the reconciler keys on an internal `kind`, but the name stays reserved so the local trail is
+  # never ambiguous to a human reader).
+  defp require_unreserved_action(req) do
+    if to_string(Map.get(req, :action)) == "operator_suspended",
+      do: {:error, :reserved_action},
+      else: :ok
+  end
+
   # role gate — the single break-glass role.
   defp require_authorized(req) do
     if authorized?(Map.get(req, :operator)), do: :ok, else: {:error, :not_authorized}
@@ -181,10 +193,12 @@ defmodule Samen.BreakGlass do
            subject_id: req.subject_id,
            break_glass: true,
            org_id: org_id(req),
-           repo: repo(req)
+           repo: repo(req),
+           local_audit_path: Map.get(req, :local_audit_path)
          }) do
       {:ok, _count} -> :ok
       {:suspended, _count} -> {:error, :budget_exceeded}
+      {:error, :suspend_failed} -> {:error, :suspension_failed}
     end
   end
 

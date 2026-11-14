@@ -158,8 +158,6 @@ defmodule Samen.Verifiers.NoPiiColumns do
     else
       _ -> false
     end
-  rescue
-    _ -> false
   end
 
   defp pii_bearing?(_), do: false

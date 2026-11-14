@@ -1,0 +1,20 @@
+# SABOTAGE: The swallow lint's I/O check stops following local defs, so a wrapper over a helper that reads 
+#   is no longer seen.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/swallow_lint_test.exs
+# MUST_FAIL: io_call? is transitive over local defs
+diff --git a/samen_core/lib/samen/lint/swallow.ex b/samen_core/lib/samen/lint/swallow.ex
+index 8a05ab6a..cab3ba05 100644
+--- a/samen_core/lib/samen/lint/swallow.ex
++++ b/samen_core/lib/samen/lint/swallow.ex
+@@ -483,7 +483,7 @@ defmodule Samen.Lint.Swallow do
+       end)
+       |> elem(1)
+ 
+-    direct? or local_call_into?(body, io_funs)
++    direct? or MapSet.size(io_funs) < 0
+   end
+ 
+   defp io_module?([:Ash], fun), do: fun in @ash_calls

@@ -373,7 +373,10 @@ defmodule Samen.AuditEvent.PartitionManager do
       {:ok, %{rows: rows}} ->
         Enum.map(rows, fn [name, bounds] -> {name, bounds, bounds} end)
 
-      {:error, _} ->
+      {:error, error} ->
+        # A failed listing is not "no partitions": reported (the only consumer, `ensure_contiguous_partitions/3`,
+        # then ensures from the current month, which is harmless — but the outage is on record).
+        Samen.Observability.Failure.report(:audit_partitions_list, nil, error)
         []
     end
   end

@@ -298,6 +298,7 @@ defmodule Samen.AI.Agent do
     # A5: the A4 verifier's R4b — a proposal whose deadline lapsed with no human
     # decision, and the R2 fail-closed refusal of an unresolvable approver.
     :deadline_expired,
+    :proposal_expired,
     :approver_unresolvable,
     :depth_exceeded,
     :no_owner_attribute,
@@ -426,6 +427,10 @@ defmodule Samen.AI.Agent do
   # or `run/4` at all — which refuses the escape at compile/gate time regardless of
   # which spawn primitive the module would have used, and costs no concurrency. Recorded
   # as ADR-047 §10a row 19 and carried as an explicit A7 obligation.
+  #
+  # A CHAIN SPAWNED ON ANOTHER NODE is not part of that residual any more: its ancestors cannot be inspected
+  # (`Process.info/2` raises for a remote pid), so `provenance_of/1` treats it as AT the ceiling and the nested run is
+  # refused. A raw `spawn` on the SAME node remains the named residual.
   @max_agent_depth 0
   @provenance_key {__MODULE__, :tool_provenance}
 
@@ -2794,10 +2799,18 @@ defmodule Samen.AI.Agent do
 
   def expire_parked(run_id) when is_binary(run_id) do
     with {:ok, %Run{state: :awaiting_approval} = run} <- fetch_run(run_id) do
-      {:ok,
-       run
-       |> Ash.Changeset.for_update(:expire_due, %{})
-       |> Ash.update!(authorize?: false)}
+      # `Ash.update`, not `update!`: a failed expiry (the approval could not be withdrawn rolls the action back) is
+      # an `{:error, _}` per this function's spec, reported by name and value-free — not a stacktrace per cron tick.
+      case run
+           |> Ash.Changeset.for_update(:expire_due, %{})
+           |> Ash.update(authorize?: false) do
+        {:ok, expired} ->
+          {:ok, expired}
+
+        {:error, error} ->
+          Samen.Observability.Failure.report(:agent_expire_parked, run.org_id, error)
+          {:error, :expiry_incomplete}
+      end
     else
       {:ok, %Run{}} -> {:error, :run_not_parked}
       other -> other
@@ -2807,7 +2820,7 @@ defmodule Samen.AI.Agent do
   def expire_parked(_run), do: {:error, :not_found}
 
   @doc false
-  @spec on_proposal_expired(Ash.Resource.Record.t()) :: :ok
+  @spec on_proposal_expired(Ash.Resource.Record.t()) :: :ok | {:error, :expiry_incomplete}
   def on_proposal_expired(%Run{} = updated) do
     # Re-read the row so the vault-routed transcript is a `%Samen.Masked{}` this path can
     # reveal: the record an update hands back carries the just-written attributes, not
@@ -2819,11 +2832,15 @@ defmodule Samen.AI.Agent do
       end
 
     # 1. Withdraw the pending approval FIRST — the lapsed proposal must stop being
-    #    decidable in the same transaction that terminates the run.
-    _ = withdraw_pending_approval(run)
+    #    decidable in the same transaction that terminates the run. A withdrawal that FAILED (not one that was
+    #    already unnecessary) must roll that transaction back: `:expired` with the approval still decidable is
+    #    exactly the state this hook exists to make impossible (it used to be `_ =` / `rescue _ -> :ok`).
+    withdrawn = withdraw_pending_approval(run)
 
     # 2. Finalize the still-:proposed turn row honestly (token-only, bounded kind).
-    case pending_turn(run) do
+    turn = pending_turn(run)
+
+    case turn do
       {:ok, turn_row} ->
         finalize_turn!(turn_row, %{
           status: :failed,
@@ -2851,12 +2868,31 @@ defmodule Samen.AI.Agent do
         :ok
     end
 
-    log_terminal(run)
-    :ok
+    if withdrawal_failed?(withdrawn) or turn == {:error, :unavailable} do
+      Samen.Observability.Failure.report(:agent_on_proposal_expired, run.org_id, :approval_withdrawal_failed)
+      {:error, :expiry_incomplete}
+    else
+      log_terminal(run)
+      :ok
+    end
   rescue
-    _ -> :ok
+    e ->
+      Samen.Observability.Failure.report(:agent_on_proposal_expired, nil, e)
+      {:error, :expiry_incomplete}
   end
 
+  # Nothing to withdraw (`:ok`), withdrawn (`{:ok, _}`), or already terminal / absent / engine not wired are fine;
+  # any other error leaves the approval decidable.
+  @doc false
+  def __withdrawal_failed__?(result), do: withdrawal_failed?(result)
+
+  defp withdrawal_failed?(:ok), do: false
+  defp withdrawal_failed?({:ok, _}), do: false
+  defp withdrawal_failed?({:error, reason}) when reason in [:not_pending, :not_found, :no_approvals_module], do: false
+  defp withdrawal_failed?(_other), do: true
+
+  # `{:ok, turn}` | `{:error, :turn_not_found}` (no proposed turn) | `{:error, :unavailable}` (the read FAILED — it used
+  # to be reported as `:turn_not_found`, i.e. "nothing proposed").
   defp pending_turn(%Run{} = run) do
     require Ash.Query
 
@@ -2866,11 +2902,20 @@ defmodule Samen.AI.Agent do
     |> Ash.Query.limit(1)
     |> Ash.read(authorize?: false)
     |> case do
-      {:ok, [turn]} -> {:ok, turn}
-      _ -> {:error, :turn_not_found}
+      {:ok, [turn]} ->
+        {:ok, turn}
+
+      {:ok, []} ->
+        {:error, :turn_not_found}
+
+      {:error, error} ->
+        Samen.Observability.Failure.report(:agent_pending_turn, run.org_id, error)
+        {:error, :unavailable}
     end
   rescue
-    _ -> {:error, :turn_not_found}
+    e ->
+      Samen.Observability.Failure.report(:agent_pending_turn, nil, e)
+      {:error, :unavailable}
   end
 
   defp pending_kind(%Run{} = run) do
@@ -2902,6 +2947,12 @@ defmodule Samen.AI.Agent do
           loaded.subject_ref != WriteProposal.subject_ref(turn_row.id) ->
             {:error, :proposal_mismatch}
 
+          # A LAPSED proposal is never executable. Fail-closed must not depend on the expiry job having run (it
+          # rolls back, and re-enqueues, while the approval cannot be withdrawn): the approval's own deadline is
+          # checked here, from the row, at execution time.
+          deadline_lapsed?(loaded) ->
+            {:error, :proposal_expired}
+
           not is_binary(loaded.decided_by) or loaded.decided_by == "" ->
             {:error, :approval_not_approved}
 
@@ -2924,6 +2975,9 @@ defmodule Samen.AI.Agent do
     end
   end
 
+  defp deadline_lapsed?(%{deadline_at: %DateTime{} = at}), do: DateTime.compare(at, DateTime.utc_now()) != :gt
+  defp deadline_lapsed?(_approval), do: false
+
   # Fail-closed on every edge: a nil/garbled/unknown id is `:approval_not_found`, never a
   # raise escaping into the decision transaction.
   defp load_approval(nil), do: {:error, :approval_not_found}
@@ -2931,7 +2985,9 @@ defmodule Samen.AI.Agent do
   defp load_approval(id) do
     Samen.Approvals.get(id)
   rescue
-    _ -> {:error, :approval_not_found}
+    e ->
+      Samen.Observability.Failure.report(:agent_load_approval, nil, e)
+      {:error, :approval_not_found}
   end
 
   defp approval_id_of(%{id: id}) when is_binary(id), do: id
@@ -3078,7 +3134,9 @@ defmodule Samen.AI.Agent do
       _ -> {:error, :turn_not_found}
     end
   rescue
-    _ -> {:error, :turn_not_found}
+    e ->
+      Samen.Observability.Failure.report(:agent_fetch_turn, nil, e)
+      {:error, :turn_not_found}
   end
 
   defp fetch_turn(_turn_id), do: {:error, :turn_not_found}
@@ -3102,12 +3160,35 @@ defmodule Samen.AI.Agent do
   end
 
   defp withdraw_pending_approval(%Run{} = run) do
-    with {:ok, {_goal, _lines, pending}} <- transcript_state(run),
-         true <- is_map(pending),
-         approval_id when is_binary(approval_id) <- Map.get(pending, "approval_id") do
-      Samen.Approvals.cancel(approval_id, WriteProposal.requester_principal_id())
+    case transcript_state(run) do
+      {:ok, {_goal, _lines, pending}} ->
+        with true <- is_map(pending),
+             approval_id when is_binary(approval_id) <- Map.get(pending, "approval_id") do
+          Samen.Approvals.cancel(approval_id, WriteProposal.requester_principal_id())
+        else
+          _ -> :ok
+        end
+
+      {:error, :transcript_unavailable} ->
+        # The sealed transcript names the pending approval, but it CANNOT be read (a shredded or corrupt run key).
+        # That is not "nothing pending": the old `else _ -> :ok` let the run expire with its approval still
+        # decidable. Find the approval through the still-`:proposed` turn row instead (its subject_ref names the turn).
+        withdraw_by_turn(run)
+    end
+  end
+
+  # Cancel every pending write-proposal approval of `run`'s org whose subject is the run's pending turn.
+  defp withdraw_by_turn(%Run{} = run) do
+    with {:ok, turn} <- pending_turn(run),
+         {:ok, approvals} <- Samen.Approvals.list_pending(run.org_id, WriteProposal.kind()) do
+      approvals
+      |> Enum.filter(fn approval -> WriteProposal.parse_subject_ref(approval.subject_ref) == {:ok, turn.id} end)
+      |> Enum.map(&Samen.Approvals.cancel(&1.id, WriteProposal.requester_principal_id()))
+      |> Enum.find(:ok, &withdrawal_failed?/1)
     else
-      _ -> :ok
+      # no proposed turn row: nothing was parked behind an approval
+      {:error, :turn_not_found} -> :ok
+      {:error, _} = error -> error
     end
   end
 
@@ -3141,8 +3222,9 @@ defmodule Samen.AI.Agent do
   # Walk the spawn chain for an ambient marker. `$callers` is set by `Task.async`/
   # `Task.Supervisor` (transitively — a task of a task carries the whole chain);
   # `$ancestors` covers a bare `spawn_link`/GenServer start under a supervisor. Both
-  # are read defensively: a dead pid, a registered-name atom that no longer resolves,
-  # and a process that refuses inspection all contribute nothing.
+  # are read defensively: a dead LOCAL pid, a registered-name atom that no longer resolves,
+  # and a process that refuses inspection all contribute nothing. A pid on another node is the
+  # exception: it is unknowable, so it counts as AT the ceiling (fail closed, see `provenance_of/1`).
   #
   # A RAW `spawn/1` sets neither list and therefore still escapes this walk — a NAMED,
   # DEFERRED residual whose sound closure is A7's static AST check, argued in full at
@@ -3151,6 +3233,12 @@ defmodule Samen.AI.Agent do
     (Process.get(:"$callers", []) ++ Process.get(:"$ancestors", []))
     |> Enum.find_value(&provenance_of/1)
   end
+
+  # A pid on ANOTHER node cannot be inspected (`Process.info/2` raises for it), which used to read as "no marker" and
+  # reset the depth guard for a remote-spawned chain. Unknown provenance is not "top level": fail CLOSED, as if the
+  # caller sat at the ceiling, so the nested run is refused `:depth_exceeded`.
+  defp provenance_of(pid) when is_pid(pid) and node(pid) != node(),
+    do: %{depth: @max_agent_depth, chain: []}
 
   defp provenance_of(pid) when is_pid(pid) do
     case Process.info(pid, :dictionary) do
@@ -3242,7 +3330,9 @@ defmodule Samen.AI.Agent do
   defp refuse_vt_args(args) do
     if vt_free?(args), do: :ok, else: {:error, :invalid_args}
   rescue
-    _ -> {:error, :invalid_args}
+    e ->
+      Samen.Observability.Failure.report(:agent_refuse_vt_args, nil, e)
+      {:error, :invalid_args}
   end
 
   defp vt_free?(value) when is_binary(value), do: not String.contains?(value, @vt_sentinel)
@@ -3268,7 +3358,9 @@ defmodule Samen.AI.Agent do
       _ -> {:error, :invalid_args}
     end
   rescue
-    _ -> {:error, :invalid_args}
+    e ->
+      Samen.Observability.Failure.report(:agent_validate_args, nil, e)
+      {:error, :invalid_args}
   end
 
   defp validate_args(_module, _args), do: {:error, :invalid_args}
@@ -3292,7 +3384,9 @@ defmodule Samen.AI.Agent do
       end
     end)
   rescue
-    _ -> {:error, :tool_failed}
+    e ->
+      Samen.Observability.Failure.report(:agent_run_tool, nil, e)
+      {:error, :tool_failed}
   end
 
   # The tool DECISION stamp (ADR-047 §4.1 checkpoint 1, tool half): tool_kind + arg key

@@ -54,17 +54,10 @@ defmodule Samen.Web.Flags.Reads do
     end)
   end
 
-  @doc "Read ONE flag by id for `scope` (bounded lookup). `nil` when absent/denied."
-  def get_flag(mount, scope, id) do
-    case get_flag_result(mount, scope, id) do
-      {:ok, flag} -> flag
-      {:error, _} -> nil
-    end
-  end
-
   @doc """
-  Tagged sibling of `get_flag/3` (WP6): `{:ok, flag}`, `{:error, :not_found}` for an absent,
-  malformed-id or denied record, and `{:error, :unavailable}` ONLY when the read FAILED.
+  Read ONE flag by id for `scope` (bounded lookup): `{:ok, flag}`, `{:error, :not_found}` for an absent,
+  malformed-id or denied record, and `{:error, :unavailable}` ONLY when the read FAILED. (The `nil`-on-error
+  `get_flag/3` is gone: it rendered an outage as an absent flag.)
   """
   def get_flag_result(mount, scope, id) do
     with {:ok, uuid} <- Ecto.UUID.cast(id),

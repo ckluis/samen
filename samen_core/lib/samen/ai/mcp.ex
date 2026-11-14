@@ -606,8 +606,6 @@ defmodule Samen.AI.Mcp do
 
   defp pii_field_names(resource) do
     resource |> Info.pii_attributes() |> Enum.map(& &1.name)
-  rescue
-    _ -> []
   end
 
   defp public_field_names(resource) do
