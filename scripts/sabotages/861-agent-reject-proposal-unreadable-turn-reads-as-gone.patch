@@ -1,0 +1,19 @@
+# SABOTAGE: a turn that cannot be read answers ok for a rejection, leaving the run parked
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/honest_reads_test.exs
+# MUST_FAIL: a turn that cannot be READ rolls the rejection back
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index b54f3d74..0c4f8791 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -2769,7 +2769,7 @@ defmodule Samen.AI.Agent do
+       # A turn/run that is GONE, or a run already decided, never blocks the rejection (the ReplyHandler precedent);
+       # a turn or run that could not be READ is not "gone": the rejection rolls back (the approval stays pending
+       # and can be rejected again) instead of answering :ok for a run that is still parked.
+-      {:error, :unavailable} -> {:error, :unavailable}
++      {:error, :unavailable} -> :ok
+       {:error, :turn_not_found} -> :ok
+       {:error, :not_found} -> :ok
+       {:ok, _decided_or_unparked_run} -> :ok

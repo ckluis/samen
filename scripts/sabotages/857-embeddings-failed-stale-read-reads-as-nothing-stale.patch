@@ -1,0 +1,19 @@
+# SABOTAGE: a failed stale-row read answers nothing is stale, and reembed_stale claims zero re-embedded
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/honest_reads_test.exs
+# MUST_FAIL: a failed stale read is {:error, :unavailable}
+diff --git a/samen_core/lib/samen/ai/embeddings.ex b/samen_core/lib/samen/ai/embeddings.ex
+index 49139ac4..465ef669 100644
+--- a/samen_core/lib/samen/ai/embeddings.ex
++++ b/samen_core/lib/samen/ai/embeddings.ex
+@@ -227,7 +227,7 @@ defmodule Samen.AI.Embeddings do
+ 
+       {:error, reason} ->
+         Samen.Observability.Failure.report(:embeddings_stale_rows, nil, reason)
+-        {:error, :unavailable}
++        {:ok, []}
+     end
+   end
+ 

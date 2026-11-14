@@ -1,0 +1,19 @@
+# SABOTAGE: an unreadable kill table answers no kills
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/honest_reads_test.exs
+# MUST_FAIL: an org whose kill rows cannot be READ raises
+diff --git a/samen_core/lib/samen/ai/agent/breaker.ex b/samen_core/lib/samen/ai/agent/breaker.ex
+index 786580b5..133e7a40 100644
+--- a/samen_core/lib/samen/ai/agent/breaker.ex
++++ b/samen_core/lib/samen/ai/agent/breaker.ex
+@@ -372,7 +372,7 @@ defmodule Samen.AI.Agent.Breaker do
+   def kills(org_id) when is_binary(org_id) do
+     case kills_status(org_id) do
+       {:ok, rows} -> rows
+-      {:error, reason} -> raise RuntimeError, "the agent kill rows could not be read (#{inspect(reason)}): not an empty list"
++      {:error, _reason} -> []
+     end
+   end
+ 

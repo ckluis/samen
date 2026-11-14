@@ -1,0 +1,19 @@
+# SABOTAGE: a failed nearest-neighbour read answers no matches instead of unavailable
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/honest_reads_test.exs
+# MUST_FAIL: a failed nearest-neighbour read is {:error, :unavailable}
+diff --git a/samen_core/lib/samen/ai/embeddings.ex b/samen_core/lib/samen/ai/embeddings.ex
+index 49139ac4..075d4b25 100644
+--- a/samen_core/lib/samen/ai/embeddings.ex
++++ b/samen_core/lib/samen/ai/embeddings.ex
+@@ -550,7 +550,7 @@ defmodule Samen.AI.Embeddings do
+ 
+       {:error, reason} ->
+         Samen.Observability.Failure.report(:embeddings_knn, org_id, reason)
+-        {:error, :unavailable}
++        {:ok, []}
+     end
+   end
+ 

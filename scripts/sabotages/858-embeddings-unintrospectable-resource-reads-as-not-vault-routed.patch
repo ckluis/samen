@@ -1,0 +1,20 @@
+# SABOTAGE: a resource whose vault routing cannot be introspected reads as routing nothing, so a vault 
+#   field could embed
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/honest_reads_test.exs
+# MUST_FAIL: a resource whose vault routing cannot be introspected is NOT embeddable
+diff --git a/samen_core/lib/samen/ai/embeddings.ex b/samen_core/lib/samen/ai/embeddings.ex
+index 49139ac4..cf2dd12c 100644
+--- a/samen_core/lib/samen/ai/embeddings.ex
++++ b/samen_core/lib/samen/ai/embeddings.ex
+@@ -429,7 +429,7 @@ defmodule Samen.AI.Embeddings do
+   rescue
+     e ->
+       Samen.Observability.Failure.report(:embeddings_vault_routed, nil, e)
+-      true
++      false
+   end
+ 
+   # --- embedder resolution (the Samen.AI.provider_for/2 mirror, embeddings lane) ------------

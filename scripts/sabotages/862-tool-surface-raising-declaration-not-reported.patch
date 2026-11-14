@@ -1,0 +1,20 @@
+# SABOTAGE: a surface declaration that raises is dropped without a report
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/honest_reads_test.exs
+# MUST_FAIL: a surface declaration that raises is fail-closed [] AND on record
+diff --git a/samen_core/lib/samen/ai/tool_surface.ex b/samen_core/lib/samen/ai/tool_surface.ex
+index 7f1b82f7..fa4746c2 100644
+--- a/samen_core/lib/samen/ai/tool_surface.ex
++++ b/samen_core/lib/samen/ai/tool_surface.ex
+@@ -206,8 +206,7 @@ defmodule Samen.AI.ToolSurface do
+       true -> @default_surfaces
+     end
+   rescue
+-    e ->
+-      Samen.Observability.Failure.report(:tool_surface_surfaces_for, nil, e)
++    _ ->
+       []
+   end
+ 

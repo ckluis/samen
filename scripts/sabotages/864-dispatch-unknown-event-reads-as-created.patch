@@ -1,0 +1,21 @@
+# SABOTAGE: an unknown event string is dispatched as created
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: an unknown event string no longer dispatches the :created workflows
+diff --git a/samen_core/lib/samen/automation/dispatch_worker.ex b/samen_core/lib/samen/automation/dispatch_worker.ex
+index 18d2a31d..c4a89d4b 100644
+--- a/samen_core/lib/samen/automation/dispatch_worker.ex
++++ b/samen_core/lib/samen/automation/dispatch_worker.ex
+@@ -164,5 +164,9 @@ defmodule Samen.Automation.DispatchWorker do
+ 
+   # An event that is not one of the three (and not an existing atom) RAISES here and `perform/1` answers
+   # `{:error, e}`: it used to read as `:created`, dispatching the created-workflows for an event that never was.
+-  defp event_atom(other), do: String.to_existing_atom(other)
++  defp event_atom(other) do
++    String.to_existing_atom(other)
++  rescue
++    ArgumentError -> :created
++  end
+ end

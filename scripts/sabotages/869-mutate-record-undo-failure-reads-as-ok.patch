@@ -1,0 +1,19 @@
+# SABOTAGE: a failed compensation reads as ok and leaves the created record behind
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/actions_test.exs
+# MUST_FAIL: a compensation that FAILS is {:error, :undo_failed} AND reported
+diff --git a/samen_core/lib/samen/automation/actions/record_family.ex b/samen_core/lib/samen/automation/actions/record_family.ex
+index ca04280c..71b0d015 100644
+--- a/samen_core/lib/samen/automation/actions/record_family.ex
++++ b/samen_core/lib/samen/automation/actions/record_family.ex
+@@ -125,7 +125,7 @@ defmodule Samen.Automation.Actions.MutateRecord do
+   # A compensation that did not happen is on record and tagged, never an `:ok` for a record left behind.
+   defp undo_failed(reason) do
+     Samen.Observability.Failure.report(:record_family_undo, nil, reason)
+-    {:error, :undo_failed}
++    :ok
+   end
+ 
+   defp to_map(m) when is_map(m), do: m
