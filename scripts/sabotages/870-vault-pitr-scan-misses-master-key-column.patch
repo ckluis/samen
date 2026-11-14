@@ -3,7 +3,7 @@
 # Flips the named test(s).
 # APP: samen_core
 # TEST_FILES: test/vault_key_column_scan_test.exs
-# MUST_FAIL: a master_key column on pii_vault is reported as a PITR key leak
+# MUST_FAIL: a lone master_key column is reported as a PITR key leak
 diff --git a/samen_core/lib/samen/vault.ex b/samen_core/lib/samen/vault.ex
 index 92f4dc64..088424d5 100644
 --- a/samen_core/lib/samen/vault.ex

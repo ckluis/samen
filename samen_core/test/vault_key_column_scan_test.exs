@@ -33,6 +33,13 @@ defmodule Samen.VaultKeyColumnScanTest do
     assert {:ok, :key_absent} = Vault.scan_pitr_key_absent(@subject, @repo)
   end
 
+  test "RED: a lone master_key column is reported as a PITR key leak (the detector ORs its shapes)" do
+    plant!("master_key")
+
+    assert {:leaks, [msg]} = Vault.scan_pitr_key_absent(@subject, @repo)
+    assert msg =~ "key-material-shaped column 'master_key'"
+  end
+
   for col <- ["wrapped_dek", "dek", "subject_dek", "master_key", "key_material", "Master_Key_X"] do
     test "RED: a #{col} column on pii_vault is reported as a PITR key leak" do
       plant!(unquote(col))
