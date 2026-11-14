@@ -67,7 +67,7 @@ All notable changes to Samen are recorded here. The format follows
 - Fixed on the way: `Samen.AI.Agent.FoldSource` had a table in driftwood but no repo wiring (it defaulted to `SamenCore.TestRepo`);
   `config :samen_core, :samen_ai_agent_fold_source_repo, Driftwood.Repo` added. A host that runs the agent loop needs the same line.
 - Tests: `Samen.IndexingTest`, `Samen.Web.TenantIndexPlanTest` (EXPLAIN of the real page query, with a drop-the-index control),
-  `Samen.Web.CrmRefsIndexPlanTest`, `Samen.Web.KeysetSortParityTest`. Recorded in ADR-016 §9. Sabotages 732-737.
+  `Samen.Web.CrmRefsIndexPlanTest`, `Samen.Web.KeysetSortParityTest`. Recorded in ADR-016 §9. Sabotages 745-750.
 
 ### Host action required (existing hosts and generated apps)
 
