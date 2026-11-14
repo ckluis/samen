@@ -25,7 +25,7 @@ defmodule Samen.SingleNode do
   Behind a load balancer two instances are NOT Erlang-clustered, so half 1 never fires. The only thing they
   share is Postgres, so Postgres is the detector: each serving instance holds a session-level SHARED advisory
   lock on a dedicated long-lived connection and counts the other holders in `pg_locks`. See `Lease` for why
-  this survives connection drops, pool recycling and a pooler.
+  this survives connection drops and pool recycling (a pooler does not: it latches UNKNOWN).
 
   A rolling deploy overlaps two instances on purpose. So the second instance boots, and:
 
@@ -35,7 +35,7 @@ defmodule Samen.SingleNode do
     * with `strict: true` the LATE instance (the one whose lease booted later, by the database clock) answers 503 instead,
       so a deploy strategy that does not stop the old instance in time stops being ready by itself.
 
-  If the state cannot be read (database down, lock query fails, a pooler in the way, a holder that stopped
+  If the state cannot be read (database down, lock query fails, a pooler in the way (from the first statement that proves it; see `Lease`), a holder that stopped
   beating, a lease that died or hung) the answer is `{:unknown, reason}` — never "single", and never a strict 503.
 
   `Peers` sees nodes that are connected or connect to this one. A clustering topology BUILT IN CODE (a supervised

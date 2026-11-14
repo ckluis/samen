@@ -1,5 +1,5 @@
-# SABOTAGE: the beat is derived from a stale value instead of the check row: the session ends up holding 
-#   two beats
+# SABOTAGE: the beat is pinned to 0 instead of read from the check row: it never advances (re-locking (b,1) is
+#   re-entrant), so a peer never sees it change and never confirms the holder alive
 #
 # Flips the named test(s).
 # APP: samen_core
