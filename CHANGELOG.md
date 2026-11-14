@@ -31,6 +31,28 @@ All notable changes to Samen are recorded here. The format follows
 - Closed-but-silent security sites (AI egress chokepoint, agent approver/breaker/hooks, fleet resolution/authz, identity, operator plane,
   break-glass anchoring) keep their closed answers and now report by name.
 
+### Kernel review fixes (samen_core, samen_web, demo, driftwood, pawchart)
+
+- **Auto-suspend no longer depends on the audit.** `Suspension.suspend/1` commits the suspension first; a failed audit write is
+  reported and parked on the break-glass local chain for `Reconciliation` (which now anchors `operator_suspended` entries as
+  `operator_suspension` events). `{:ok, row}` carries `row.audit` (`:written | :pending | :lost`; a virtual field, no migration).
+  `Budget.record_and_check/1` matches the result explicitly and `BreakGlass.reveal/1` refuses with `{:error, :suspension_failed}` when the
+  suspension cannot be written (it used to raise `MatchError` after the ledger row committed). `clear/2` stays atomic. Sabotages 707-709.
+- **`AuditChain.Writer.write/2` is atomic** (probe first, insert + chain append in one transaction outside a caller's transaction) and
+  the callers that grant or open something propagate its error: impersonation `open/1`, reveal request and grant, approval
+  request/decide/cancel; revoke, expiry and archival report instead of dropping it. `FaultRepo` runs `Ecto.Multi`. Sabotages 710-714.
+- `Vault.scan_pitr_key_absent/2` and `scan_no_plaintext/2` no longer read a KMS outage as proof of erasure (715). Agent proposals past
+  their `deadline_at` cannot be approved into execution whether or not the expiry job ran, `expire_parked/1` returns
+  `{:error, :expiry_incomplete}` instead of raising (716-717). `tool_actor_identity` names a tool whose schema cannot be read (718).
+  Erasure completeness: one RED test per un-rescued introspection function, sabotage 704 split into 704/719/720. The send gate's unreadable-ledger arm is
+  tested (721). A pid on another node is unknown agent provenance and counts as at the depth ceiling (722). The telemetry handler
+  lister override exists only in a test build. A failed `:withdrawn` consent row aborts the unsubscribe (723). `reveal_events_for_org/2`,
+  `pending_for_org/2` and `Replay.Player.list/2` raise on a failed read; the driftwood and pawchart analytics `register_all/1` return the
+  registration error (724-725). `Consent.state/3` is `@deprecated` (use `state_result/3`).
+- **Swallow lint widened** (see cookbook Recipe 11): typed literal-returning rescues, "mentioned" rescue variables, `{:ok, lit}` / bare-atom /
+  `MapSet.new()` / `_ ->` error arms, transitive I/O, `defmacro` and module-body nodes; reviewed entries pinned by `{count, hash}`; a hard
+  per-root ceiling on every baseline. Both baselines were regenerated from the tree. Sabotages 726-731.
+
 ### Host action required (existing hosts and generated apps)
 
 A generated app is a copy, so these do **not** reach an app generated before the change. Re-generate into a scratch

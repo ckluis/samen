@@ -414,7 +414,7 @@ patch IS the change now; the tree should go back to green). Prove it flips befor
 it — `scripts/sabotage.sh` does all five steps for every committed patch: SHA-256 the touched
 files, apply, run `TEST_FILES` and assert the `MUST_FAIL` names are among the failures, revert,
 and re-SHA to confirm a byte-exact restore. Run it locally against your new patch, then run the
-whole committed suite (<!--count:sabotages-->699<!--/count--> patches today; the number is generated) — both are opt-in (they deliberately
+whole committed suite (<!--count:sabotages-->724<!--/count--> patches today; the number is generated) — both are opt-in (they deliberately
 break the tree and re-run DB-backed suites), so they're run explicitly, not by the default
 `bash ci.sh`:
 
@@ -667,7 +667,7 @@ kernel (web-dependency-free, so it runs in samen_core's own suite: `samen_core/t
 It has its own shrink-only baselines: `baseline/0` for the rescue form and `error_arm_baseline/0` for the **non-rescue** form,
 `{:error, _} -> []/%{}/""/0/nil/false/true/:ok` in a function that calls an Ash / Ecto / Repo read or write (a discarded error answered
 with an empty or zero literal: the same lie without the exception; `samen_web`, `driftwood` and `pawchart` carry the same second baseline,
-empty). A `@reviewed` entry is `{file, function} => {count, reason}`: the count pins how many swallowing clauses the function
+empty). A `@reviewed` entry is `{file, function} => {count, hash, reason}`: the count (and, since the lint widening, the hash of the clauses) pins how many swallowing clauses the function
 holds, so a clause **added** to an already-reviewed function is counted as an ordinary swallow and fails the ratchet, and a stale pin is
 named. The kernel reports through `Samen.Observability.Failure.report/3` (name, org, exception **module** names; never a message, a
 value or a parameter; `Guard.report/3` delegates to it). Convert a kernel site by what it protects: a failed read that is **fail-OPEN**
@@ -677,6 +677,31 @@ reports by name, and where a screen renders the result it gets a tagged `…_res
 `OrgActor.resolve_result/3`, `Suspension.status/2`) so an outage is never shown as a denial, "not found" or "no grant". Test a kernel
 outage with `Samen.FaultRepo` (test support: delegates to `SamenCore.TestRepo`, raises a real `DBConnection.ConnectionError` for the
 operations or SQL fragments a test names) and pair every red with a positive control through the same module.
+
+**Suspend removes privilege, clear restores it: they answer to the audit differently.** `Suspension.suspend/1` commits the
+suspension row FIRST and never waits on (or is undone by) the audit tables. If the audit write fails it is reported
+(`Failure.report`) and parked on the break-glass local hash chain (`Samen.BreakGlass.LocalAudit`, the deferred-anchor precedent);
+`Samen.BreakGlass.Reconciliation` anchors it later as the `operator_suspension` event, and the returned row says which
+(`row.audit` is `:written`, `:pending` or `:lost`; `{:ok, row}` always means the operator IS suspended). `Budget.record_and_check/1`
+therefore never crashes and never lets an over-budget reveal through: if the suspension itself cannot be written the reveal is
+refused (`{:error, :suspension_failed}`). `clear/2`, which restores privilege, stays atomic with its audit entry and fails closed.
+
+**Audit-or-refuse for grants.** `AuditChain.Writer.write/2` is atomic (the event and its chain entry commit together; the existence
+probe runs first, so an unavailable chain writes nothing) and returns `{:error, _}` when it cannot. Anything that GRANTS or OPENS
+something (impersonation `open/1`, a reveal request, a reveal grant, an approval request/decide/cancel) propagates that error and
+rolls back; anything that REMOVES access (revoke, expiry, denials) or is documented best-effort (the archival sink) reports it and
+never depends on it. Inside a caller's transaction the caller's transaction is the unit (Ecto does not nest rollbacks), so a caller
+that must be atomic rolls back on the error itself.
+
+**What the lint now sees, and its stated limit.** Besides catch-all rescues it counts a typed rescue that answers a swallow literal
+(`rescue _ in [Postgrex.Error, …] -> []`), a rescue variable that is only *mentioned* (`_ = e; []`: the variable has to reach the
+clause's final expression, or be logged/reported/re-raised), `{:error, _} -> {:ok, []} | :none | :not_found | MapSet.new()`, a `_ ->`
+arm over an I/O scrutinee, I/O reached through a local def, and `defmacro` / module-body nodes (Ash DSL `change fn`, `after_action fn`)
+under the pseudo-function `:__module__`. A `@reviewed` entry is now `{count, hash, reason}`: the hash (`Samen.Lint.Swallow.reviewed_hash/5`)
+is of the clauses' normalised source, so a REPLACED clause no longer hides behind an unchanged count. Each baseline has a hard per-root
+ceiling that it must sum to, and the suite compares the ceiling with the merge base: it can only go down. **The limit:** a *reported
+fail-open* (`rescue e -> report(e); true`: the failure is on record and the answer is still "allowed") is not decidable from source. It
+is the reviewer's job; read every clause that reports and then returns `true`, `:ok` or a grant.
 
 ---
 
