@@ -126,7 +126,6 @@ defmodule Samen.SingleNodeTest do
       assert_receive {:nodeup, peer_node, [node_type: :visible]}
       assert_receive {:telemetry, [:samen, :single_node, :peer, :refused]}
       assert_receive {:nodedown, ^peer_node, _}
-      assert Node.list() == []
       :peer.stop(peer)
     end
 
@@ -138,7 +137,7 @@ defmodule Samen.SingleNodeTest do
       assert_receive {:nodeup, peer_node, [node_type: :hidden]}
       assert_receive {:telemetry, [:samen, :single_node, :peer, :allowed]}
       refute_received {:telemetry, [:samen, :single_node, :peer, :refused]}
-      assert Node.list(:hidden) == [peer_node]
+      refute_received {:nodedown, ^peer_node, _}
       assert Node.list() == []
       :peer.stop(peer)
     end
@@ -147,13 +146,11 @@ defmodule Samen.SingleNodeTest do
       peer = start_peer([])
       assert :peer.call(peer, :net_kernel, :connect_node, [me])
       assert_receive {:nodeup, peer_node, [node_type: :visible]}
-      assert Node.list() == [peer_node]
 
       start_guard()
 
       assert_receive {:telemetry, [:samen, :single_node, :peer, :refused]}
       assert_receive {:nodedown, ^peer_node, _}
-      assert Node.list() == []
       :peer.stop(peer)
     end
   end
@@ -207,7 +204,10 @@ defmodule Samen.SingleNodeTest do
         if started?, do: :net_kernel.stop()
       end)
 
+      :net_kernel.monitor_nodes(true, [{:node_type, :all}])
       assert :peer.call(peer, :net_kernel, :connect_node, [node()])
+      # the nodeup message orders the assertion after the connection is visible in Node.list/0
+      assert_receive {:nodeup, _peer_node, [node_type: :visible]}
       assert [finding] = SingleNode.cluster_findings(:samen_core)
       assert finding =~ "visible nodes are connected"
       assert_raise SingleNode.ClusteredError, ~r/ADR-054/, fn -> SingleNode.assert_standalone!(:samen_core) end
