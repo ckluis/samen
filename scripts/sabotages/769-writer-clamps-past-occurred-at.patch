@@ -1,0 +1,19 @@
+# SABOTAGE: the Writer clamps a legitimately backdated occurred_at (break-glass, replay) to the write time
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: within the skew a future time is kept untouched
+diff --git a/samen_core/lib/samen/audit_chain/writer.ex b/samen_core/lib/samen/audit_chain/writer.ex
+index 1c8eddaf..75a0de3d 100644
+--- a/samen_core/lib/samen/audit_chain/writer.ex
++++ b/samen_core/lib/samen/audit_chain/writer.ex
+@@ -181,7 +181,7 @@ defmodule Samen.AuditChain.Writer do
+       %DateTime{} = dt ->
+         dt = DateTime.truncate(dt, :microsecond)
+ 
+-        if DateTime.diff(dt, now, :second) > future_skew_seconds() do
++        if abs(DateTime.diff(dt, now, :second)) > future_skew_seconds() do
+           Samen.Observability.Failure.report(:write, :audit_occurred_at_clamped, nil, :future_occurred_at, [])
+           :telemetry.execute([:samen, :audit, :occurred_at, :clamped], %{count: 1}, %{})
+           {now, clamp_note(detail, dt), true}

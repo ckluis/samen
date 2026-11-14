@@ -97,7 +97,7 @@ All notable changes to Samen are recorded here. The format follows
 - **Runway**: `PartitionManager.runway/2` per partitioned table; gauges `samen.audit.partition.runway_days` / `.default_rows`; `/readyz`
   gains a non-gating `partitions:` advisory (WARN < 31 days or rows in DEFAULT, CRITICAL <= 0, UNKNOWN when unreadable); `Readiness.report/1`
   replaces the controllers' hand-rolled body; alerts.md §7. The roll-forward job now fails when a month cannot be created.
-- **`occurred_at`**: a time more than 300 s ahead is clamped to the write time (claim kept in `detail`); past times are kept. Recorded in ADR-002 §7.
+- **`occurred_at`**: a time more than 300 s ahead is clamped to the write time (claim kept in `detail`); past times are kept. Recorded in ADR-002 §7. Sabotages 763-770.
 - Existing tests changed: the T128 baseline in `aud_event_test.exs` now drops the DEFAULT partition first (it proves the mechanism, which the
   default now hides).
 

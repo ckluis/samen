@@ -1,0 +1,19 @@
+# SABOTAGE: a row landing in the DEFAULT partition is no longer reported
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: log line + telemetry carry no row value
+diff --git a/samen_core/lib/samen/audit_event/schema.ex b/samen_core/lib/samen/audit_event/schema.ex
+index 1500078c..8f45e788 100644
+--- a/samen_core/lib/samen/audit_event/schema.ex
++++ b/samen_core/lib/samen/audit_event/schema.ex
+@@ -142,7 +142,7 @@ defmodule Samen.AuditEvent do
+         [Ecto.UUID.dump!(row.id), row.occurred_at]
+       )
+ 
+-    if rows == [[true]], do: Samen.AuditEvent.PartitionManager.report_default_landing("aud_event")
++    if rows == [[:never]], do: Samen.AuditEvent.PartitionManager.report_default_landing("aud_event")
+     :ok
+   rescue
+     e ->

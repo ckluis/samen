@@ -1,0 +1,19 @@
+# SABOTAGE: the Writer passes a far-future occurred_at through to the partition key
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: a far-future occurred_at is CLAMPED
+diff --git a/samen_core/lib/samen/audit_chain/writer.ex b/samen_core/lib/samen/audit_chain/writer.ex
+index 1c8eddaf..1df2e6dc 100644
+--- a/samen_core/lib/samen/audit_chain/writer.ex
++++ b/samen_core/lib/samen/audit_chain/writer.ex
+@@ -181,7 +181,7 @@ defmodule Samen.AuditChain.Writer do
+       %DateTime{} = dt ->
+         dt = DateTime.truncate(dt, :microsecond)
+ 
+-        if DateTime.diff(dt, now, :second) > future_skew_seconds() do
++        if DateTime.diff(dt, now, :second) > 100_000_000_000 do
+           Samen.Observability.Failure.report(:write, :audit_occurred_at_clamped, nil, :future_occurred_at, [])
+           :telemetry.execute([:samen, :audit, :occurred_at, :clamped], %{count: 1}, %{})
+           {now, clamp_note(detail, dt), true}

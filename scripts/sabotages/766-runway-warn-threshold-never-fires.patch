@@ -1,0 +1,19 @@
+# SABOTAGE: the runway warning threshold collapses so a month-short runway is reported healthy
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: below one month is a WARNING
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index 4dae51f6..e912e20a 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -567,7 +567,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+       Enum.reject(
+         [
+           if(runway_days <= 0, do: :runway_critical),
+-          if(runway_days > 0 and runway_days < warn_days, do: :runway_low),
++          if(runway_days > 0 and runway_days < 1, do: :runway_low),
+           if(default_rows > 0, do: :default_rows),
+           if(default == nil, do: :no_default_partition)
+         ],
