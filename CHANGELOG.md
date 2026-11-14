@@ -592,4 +592,4 @@ First tagged release — the public snapshot of the Samen foundry.
   DEFAULT landing was never classified). `/readyz` emits `runway_unknown` when its refresh misses its deadline. The migration `up` has a
   `lock_timeout`; its `down` guard locks the DEFAULT partition before checking it. Existing tests changed: the `:force` detach test is back on
   2099 with a without-force refusal as its control; `FaultRepo`/`CountingRepo`/`ToggleRepo` delegate `in_transaction?/0`; the February-bounds test
-  asserts the row's partition. Sabotages 824-840.
+  asserts the row's partition. Sabotages 824-838.

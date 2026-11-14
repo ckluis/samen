@@ -1,0 +1,18 @@
+# SABOTAGE: the daily CREATE PARTITION OF waits for its lock without a lock_timeout
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: creating a month (nothing to move) behind a held conflicting lock fails FAST
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index a7409fe5..8b144087 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -319,7 +319,6 @@ defmodule Samen.AuditEvent.PartitionManager do
+ 
+     result =
+       repo.transaction(fn ->
+-        q!(repo, "SET LOCAL lock_timeout = #{lock_ms}", budget_ms)
+         q!(repo, "SET LOCAL statement_timeout = #{budget_ms}", budget_ms)
+         q!(repo, create_partition_sql(name, from_ts, to_ts), budget_ms + 5_000)
+         name

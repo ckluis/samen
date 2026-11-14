@@ -1,0 +1,28 @@
+# SABOTAGE: the :force override is ignored, so the erasure gate cannot be bypassed
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_test.exs
+# MUST_FAIL: without it the gate refuses
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index a7409fe5..2293398d 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -1031,7 +1031,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+   # Private helpers
+   # ---------------------------------------------------------------------------
+ 
+-  defp gate_check(_policy, _name, _from_ts, _to_ts, true = _force) do
++  defp gate_check(_policy, _name, _from_ts, _to_ts, :never = _force) do
+     Logger.warning(
+       "[PartitionManager] detach_partition called with :force=true — " <>
+         "bypassing erasure-window gate (operator override)"
+@@ -1040,7 +1040,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+     :ok
+   end
+ 
+-  defp gate_check(policy, name, from_ts, to_ts, false) do
++  defp gate_check(policy, name, from_ts, to_ts, _force) do
+     case policy.still_relevant?(%{
+            partition_name: name,
+            from_ts: from_ts,

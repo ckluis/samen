@@ -500,7 +500,7 @@ defmodule Samen.AuditEventTest do
       assert :not_relevant = result
     end
 
-    test "detach with :force bypasses the erasure window gate (operator override)" do
+    test "detach with :force bypasses the erasure window gate (operator override); without it the gate refuses" do
       # A partition INSIDE the erasure window (a far-future month, so it can be created and detached safely). It
       # holds no row, so the insert clamp is not involved. WITHOUT :force the gate refuses (the control that makes
       # this test unable to pass when :force is ignored); WITH it the detach goes through.

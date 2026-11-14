@@ -1,0 +1,19 @@
+# SABOTAGE: window statements keep the staging statement_timeout instead of the budget left
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: every statement of the window runs under the budget LEFT
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index a7409fe5..2b7bea09 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -444,7 +444,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+           window! = fn sql ->
+             left = budget_ms - (System.monotonic_time(:millisecond) - started)
+             if left <= 0, do: repo.rollback({:partition_move_window_exceeded, budget_ms})
+-            q!(repo, "SET LOCAL statement_timeout = #{left}", left + 5_000)
++            :ok
+             q!(repo, sql, left + 5_000)
+           end
+ 

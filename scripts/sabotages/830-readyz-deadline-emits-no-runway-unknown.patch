@@ -1,0 +1,18 @@
+# SABOTAGE: a /readyz refresh that misses its deadline emits no runway_unknown, so the alert stays silent
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/readiness_test.exs
+# MUST_FAIL: emits runway_unknown
+diff --git a/samen_web/lib/samen/web/readiness.ex b/samen_web/lib/samen/web/readiness.ex
+index 388f709f..3954b462 100644
+--- a/samen_web/lib/samen/web/readiness.ex
++++ b/samen_web/lib/samen/web/readiness.ex
+@@ -132,7 +132,6 @@ defmodule Samen.Web.Readiness do
+         {:unknown, "runway unreadable (task_exit)"}
+ 
+       nil ->
+-        PartitionManager.emit_runway({:error, :deadline_exceeded})
+         {:unknown, "runway unreadable (deadline_exceeded)"}
+     end
+   end
