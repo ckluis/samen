@@ -304,7 +304,10 @@ defmodule Samen.SingleNodeLeaseTest do
       assert %{state: :single} = Lease.check_now(a.name)
       b = start_lease(ctx)
 
-      assert %{state: :overlap, exceeded?: false} = Lease.check_now(a.name)
+      # The clock starts at the first CONFIRMED sight (b's beat changed between two checks of a), here at t = 0.
+      assert %{state: :overlap, verified?: false, exceeded?: false} = Lease.check_now(a.name)
+      Lease.check_now(b.name)
+      assert %{state: :overlap, verified?: true, exceeded?: false} = Lease.check_now(a.name)
       assert SingleNode.advisory(table: a.table, now: 0) == :ok
 
       Agent.update(ctx.clock, fn _ -> 59_999 end)
@@ -336,14 +339,15 @@ defmodule Samen.SingleNodeLeaseTest do
       confirm(a, b)
       assert %{state: :overlap, exceeded?: false} = Lease.check_now(a.name)
 
-      # A's reading becomes unreadable (what a pooled statement looks like) for a while ...
+      # A's reading becomes unreadable for a while (its presence lock is released: :lease_lost) ...
+      {k1, k2} = ctx.key
       set.(30_000)
-      Postgrex.query!(lease_conn(a), "SELECT set_config('samen.single_node_lease', '', false)", [])
-      assert %{state: :unknown, reason: :connection_pooler} = Lease.check_now(a.name)
+      Postgrex.query!(lease_conn(a), "SELECT pg_advisory_unlock_shared($1::int, $2::int)", [k1, k2])
+      assert %{state: :unknown, reason: :lease_lost} = Lease.check_now(a.name)
 
       # ... and readable again after the grace period would have elapsed IF the overlap had been going on all along.
       set.(60_000)
-      Postgrex.query!(lease_conn(a), "SELECT set_config('samen.single_node_lease', $1, false)", [:sys.get_state(a.name).token])
+      Postgrex.query!(lease_conn(a), "SELECT pg_advisory_lock_shared($1::int, $2::int)", [k1, k2])
       Lease.check_now(b.name)
       assert %{state: :overlap, since_ms: 60_000, exceeded?: true} = Lease.check_now(a.name)
 
@@ -353,9 +357,11 @@ defmodule Samen.SingleNodeLeaseTest do
       Postgrex.query!(ctx.admin, "SELECT pg_terminate_backend($1, 10000)", [b_pid])
       set.(70_000)
       assert %{state: :single} = Lease.check_now(a.name)
-      _b2 = start_lease(ctx)
+      b2 = start_lease(ctx)
       set.(80_000)
-      assert %{state: :overlap, since_ms: 0, exceeded?: false} = Lease.check_now(a.name)
+      Lease.check_now(a.name)
+      Lease.check_now(b2.name)
+      assert %{state: :overlap, verified?: true, since_ms: 0, exceeded?: false} = Lease.check_now(a.name)
     end
   end
 
@@ -423,7 +429,8 @@ defmodule Samen.SingleNodeLeaseTest do
     test "control: a pooler that pins this client to one server session is indistinguishable from direct, and right", ctx do
       Agent.update(ctx.selector, fn _ -> ctx.x end)
       a = start_pooled(ctx, ctx.selector)
-      assert %{state: :single} = Lease.check_now(a.name)
+      for _ <- 1..3, do: assert(%{state: :single} = Lease.check_now(a.name))
+      refute :sys.get_state(a.name).pooled?
     end
 
     test "TWO instances sharing ONE server session are UNKNOWN, never single (the false negative)", ctx do
@@ -463,14 +470,77 @@ defmodule Samen.SingleNodeLeaseTest do
       :ok = PoolDouble.reconnect(lease_conn(a))
       assert length(holders(ctx)) == 2
 
-      # A statement served by X now: the token matches, the pid is not the one recorded.
+      # A statement served by X now: the token matches, the pid is not the one recorded, and no reconnect happened while
+      # it ran: proof of a pooler. It latches.
       Agent.update(ctx.selector, fn _ -> ctx.x end)
+      log = capture_log(fn -> assert %{state: :unknown, reason: :connection_pooler} = Lease.check_now(a.name) end)
+      assert log =~ "DATABASE_DIRECT_URL"
+
+      # Served by Y it is the lease's own session again, but it stays UNKNOWN: a pooler was PROVEN, and no later
+      # check on the right server connection makes the lock on the others any less stranded. ONE error, not one per check.
+      Agent.update(ctx.selector, fn _ -> ctx.y end)
+
+      log =
+        capture_log(fn ->
+          assert %{state: :unknown, reason: :connection_pooler} = Lease.check_now(a.name)
+          assert %{state: :unknown, reason: :connection_pooler} = Lease.check_now(a.name)
+        end)
+
+      refute log =~ "DATABASE_DIRECT_URL"
+    end
+
+    test "a route X -> Z -> X stays UNKNOWN after returning to the server connection that holds the locks", ctx do
+      z = server_session()
+      Agent.update(ctx.selector, fn _ -> ctx.x end)
+      a = start_pooled(ctx, ctx.selector)
+
+      # On X, its own session: reads single, as a direct connection would.
+      assert %{state: :single} = Lease.check_now(a.name)
+
+      # Z never ran after_connect: no session variable. Proof of a pooler.
+      Agent.update(ctx.selector, fn _ -> z end)
       assert %{state: :unknown, reason: :connection_pooler} = Lease.check_now(a.name)
 
-      # Control: served by Y it is the lease's own session; the leftover on X carries MY epoch, so it is a ghost of
-      # my own earlier session and not a second instance.
-      Agent.update(ctx.selector, fn _ -> ctx.y end)
+      # Back on X, where the locks and the token are: it would verify, but it must not read single.
+      Agent.update(ctx.selector, fn _ -> ctx.x end)
+      for _ <- 1..3, do: assert(%{state: :unknown, reason: :connection_pooler} = Lease.check_now(a.name))
+      refute SingleNode.advisory(table: a.table) == :ok
+    end
+
+    test "control: a genuine reconnect on a direct connection is NOT a pooler and does not latch", ctx do
+      a = start_lease(ctx, pool_opts: [queue_target: 20, queue_interval: 50])
       assert %{state: :single} = Lease.check_now(a.name)
+      first = backend_pid(a)
+
+      for _ <- 1..2 do
+        pid = backend_pid(a)
+        Postgrex.query!(ctx.admin, "SELECT pg_terminate_backend($1, 10000)", [pid])
+
+        Enum.reduce_while(1..200, nil, fn _, _ ->
+          case Lease.check_now(a.name) do
+            %{state: :single} -> {:halt, nil}
+            %{state: :unknown, reason: :connection_down} -> {:cont, nil}
+            other -> flunk("a genuine reconnect must not latch: #{inspect(other)}")
+          end
+        end)
+      end
+
+      assert backend_pid(a) != first
+      refute :sys.get_state(a.name).pooled?
+      assert %{state: :single} = Lease.check_now(a.name)
+    end
+
+    test "pooler_proof?/2: a pid that changed DURING the statement is the reconnect race, not proof" do
+      row = fn var, me -> {:ok, %Postgrex.Result{rows: [[me, var, nil, nil, nil, nil]]}} end
+      ctx = %{token: "tok", pid: 10, pid_before: 10, epoch: 1}
+
+      assert Lease.pooler_proof?(row.(nil, 10), ctx)
+      assert Lease.pooler_proof?(row.("other", 10), ctx)
+      assert Lease.pooler_proof?(row.("tok", 77), ctx)
+      refute Lease.pooler_proof?(row.("tok", 10), ctx)
+      # the recorded pid moved while the statement ran (after_connect re-ran): the statement was on the old session
+      refute Lease.pooler_proof?(row.("tok", 77), %{ctx | pid_before: 77})
+      refute Lease.pooler_proof?({:error, %DBConnection.ConnectionError{message: "x"}}, ctx)
     end
 
     test "a DIRECT instance facing a leftover from a pooled one is UNKNOWN, not overlap (never a strict 503)", ctx do
@@ -485,13 +555,15 @@ defmodule Samen.SingleNodeLeaseTest do
       set = fn t -> Agent.update(clock, fn _ -> t end) end
       d = start_lease(ctx, strict: true, grace_ms: 30_000, stale_ms: 60_000, clock: fn -> Agent.get(clock, & &1) end)
 
-      # Seen for the first time: it counts as a holder, but nothing is confirmed alive.
+      telemetry_to_self([:samen, :single_node, :overlap])
+
+      # Seen for the first time: it counts as a holder, but nothing is confirmed alive, so no clock starts.
       assert %{state: :overlap, peers: 1, verified?: false, late?: true} = Lease.check_now(d.name)
 
-      # Past the grace period but before it is stale: still not CRITICAL, still no strict 503 (not confirmed alive).
+      # Past the would-be grace period but before it is stale: not CRITICAL, no overlap report, no strict 503.
       set.(45_000)
-      assert %{state: :overlap, exceeded?: true, verified?: false} = Lease.check_now(d.name)
-      assert {:unknown, _} = SingleNode.advisory(table: d.table, now: 45_000)
+      assert %{state: :overlap, exceeded?: false, verified?: false} = Lease.check_now(d.name)
+      assert SingleNode.advisory(table: d.table, now: 45_000) == :ok
       assert SingleNode.strict_check(table: d.table, now: 45_000) == :ok
 
       # Its beat never changes: it stops counting.
@@ -499,16 +571,26 @@ defmodule Samen.SingleNodeLeaseTest do
       assert %{state: :unknown, reason: :stale_holder} = Lease.check_now(d.name)
       assert {:unknown, _} = SingleNode.advisory(table: d.table, now: 60_000)
       assert SingleNode.strict_check(table: d.table, now: 60_000) == :ok
+      refute_received {:telemetry, [:samen, :single_node, :overlap], _}
 
-      # Positive control: a REAL second instance beats, is confirmed alive, and the overlap is CRITICAL at once
-      # (the unreadable stretch in between did not restart the clock).
+      # A legitimate rolling deploy an hour later gets its FULL grace: the ghost did not use any of it up.
       e = start_lease(ctx)
-      set.(65_000)
-      Lease.check_now(d.name)
+      set.(3_600_000)
+      assert %{state: :overlap, verified?: false} = Lease.check_now(d.name)
       Lease.check_now(e.name)
-      set.(70_000)
+      assert %{state: :overlap, verified?: true, exceeded?: false, since_ms: 0} = Lease.check_now(d.name)
+      assert SingleNode.advisory(table: d.table, now: 3_600_000) == :ok
+      refute_received {:telemetry, [:samen, :single_node, :overlap], _}
+
+      # Only once the CONFIRMED overlap has lasted the grace period: CRITICAL, with exactly one report.
+      set.(3_629_999)
+      Lease.check_now(e.name)
+      assert %{exceeded?: false} = Lease.check_now(d.name)
+      set.(3_630_000)
+      Lease.check_now(e.name)
       assert %{state: :overlap, verified?: true, exceeded?: true} = Lease.check_now(d.name)
-      assert {:critical, _} = SingleNode.advisory(table: d.table, now: 70_000)
+      assert {:critical, _} = SingleNode.advisory(table: d.table, now: 3_630_000)
+      assert_received {:telemetry, [:samen, :single_node, :overlap], _}
     end
   end
 
@@ -603,6 +685,13 @@ defmodule Samen.SingleNodeLeaseTest do
     end
   end
 
+  describe "an empty lease_url is unset" do
+    test "DATABASE_DIRECT_URL=\"\" does not crash the lease (it uses the repo's own config)", ctx do
+      a = start_lease(ctx, lease_url: "")
+      assert %{state: :single} = Lease.check_now(a.name)
+    end
+  end
+
   describe "interpret/2 and decide/5 (pure)" do
     defp res(rows), do: {:ok, %Postgrex.Result{rows: rows}}
     @ctx %{token: "tok", pid: 10, epoch: 5_000_000}
@@ -682,6 +771,34 @@ defmodule Samen.SingleNodeLeaseTest do
       assert {:overlap, 1, false, true} = v
       {v, _} = Lease.decide([mk.([2])], seen2, 1_150, 100, me)
       assert v == {:unknown, :stale_holder}
+    end
+  end
+
+  describe "the alerts runbook names the lease's real lock" do
+    # alerts.md §8 step 3 tells an operator which session holds the lease (and what to pg_terminate_backend for a
+    # stale_holder). A wrong constant returns no rows during the incident, so the runbook is held to the code's key.
+    test "the step-3 query filters on Lease.key/0 (classid, objid) and the int,int form (objsubid 2)" do
+      {k1, k2} = Lease.key()
+      runbook = File.read!(Path.expand("../../docs/runbooks/alerts.md", __DIR__))
+
+      assert [[_, classid, objid, objsubid]] =
+               Regex.scan(~r/locktype='advisory' AND classid=(\d+) AND objid=(\d+) AND objsubid=(\d+)/, runbook)
+
+      assert {String.to_integer(classid), String.to_integer(objid), String.to_integer(objsubid)} == {k1, k2, 2}
+    end
+
+    test "control: the runbook's constants are really what a lease holds in pg_locks", ctx do
+      a = start_lease(ctx)
+      assert %{state: :single} = Lease.check_now(a.name)
+      {k1, k2} = ctx.key
+
+      # the same shape of query the runbook gives, with this test's private key standing in for Lease.key/0
+      assert %{rows: [[1]]} =
+               Postgrex.query!(
+                 ctx.admin,
+                 "SELECT count(*)::int FROM pg_locks WHERE locktype='advisory' AND classid=$1 AND objid=$2 AND objsubid=2 AND granted",
+                 [k1, k2]
+               )
     end
   end
 

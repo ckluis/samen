@@ -36,7 +36,7 @@ by the second one and a kill switch thrown on one leaves agents running on the o
   `single_node: CRITICAL N other instance(s) share this database ...` to its 200 body. Page on that line (see
   `docs/runbooks/alerts.md` of the Samen repo, "Second instance on the database").
 - `single_node: UNKNOWN ... (connection_pooler)` means the lease connection goes through a transaction pooler (Neon's
-  `-pooler` host, PgBouncer), where session locks do not work. A pooled URL can only ever give UNKNOWN: set the secret
+  `-pooler` host, PgBouncer), where session locks do not work. A pooled lease latches UNKNOWN at the first check that proves it (until then it can read `single` next to a second instance): set the secret
   `DATABASE_DIRECT_URL` to the DIRECT (unpooled) connection string (Neon: the same string without `-pooler` in the
   host); `config/runtime.exs` hands it to the lease as `lease_url`. `single_node: UNKNOWN ... (stale_holder)` is a lock
   left by a crashed machine that no longer beats; it clears when Postgres drops that session (within ~15 s on Postgres

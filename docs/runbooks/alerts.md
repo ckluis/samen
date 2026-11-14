@@ -191,20 +191,26 @@ draining a machine would not cure it), or answers **503** on the LATE instance w
 strict: true`. Alert on the metrics or the body line.
 
 - `single_node: CRITICAL N other instance(s) share this database for Ns` — another instance has been on this database longer
-  than `grace_ms` (default 300 s). A rolling deploy produces `samen.single_node.peers` = 1 for a few minutes and no line; the line
+  than `grace_ms` (default 300 s). A rolling deploy produces `samen.single_node.peers` = 1 for a few minutes and no line; the grace clock starts when the other instance is confirmed alive
+  (a holder that never beats starts nothing); the line
   means the old instance was not stopped, or someone scaled the app.
 - `single_node: UNKNOWN … (reason)` — the lease cannot say. It never refuses traffic, not even with `strict: true` (ADR-054 §2.2:
   strict does not 503 on UNKNOWN). `connection_down` / `query_failed`: the database or the dedicated connection is failing (§5 will
   usually be failing too). **`connection_pooler`: the lease connection goes through a transaction pooler (PgBouncer, Neon's
-  `-pooler` host), where session locks do not work. A pooled URL can ONLY give UNKNOWN; `lease_url` (generated apps:
-  `DATABASE_DIRECT_URL`) must be a DIRECT, unpooled URL.** Two instances whose statements share one server connection (also a
-  pooler) read the same. `lease_lost`: the lock vanished under a live session (`pg_advisory_unlock_all()`, a pooler `DISCARD ALL`);
+  `-pooler` host), where session locks do not work. The lease LATCHES this reading at the first check that proves it and logs
+  one error; a pooled lease reads UNKNOWN only from then on (until it does, and after the pooler recycles its server
+  connection, an instance sharing the database can read `single` while it serves), so treat any `connection_pooler` as a real
+  fault; `lease_url` (generated apps: `DATABASE_DIRECT_URL`) must be a DIRECT, unpooled URL.** Two instances whose statements
+  share one server connection (also a pooler) read the same. `query_failed` can also be a pooler: behind a transaction pooler
+  without prepared-statement support the lease's named prepares fail with `prepared statement ... does not exist`. `lease_lost`: the lock vanished under a live session (`pg_advisory_unlock_all()`, a pooler `DISCARD ALL`);
   the lease re-takes it only on a new session, restart the instance. `stale_holder`: a lock whose owner stopped beating (a crashed
   machine whose session Postgres has not dropped yet, or a lock left on a pooler's server connection); it clears when the session
-  ends (15 s after the owner went silent on Postgres 14+, else when TCP keepalive drops it; or `SELECT pg_terminate_backend(pid)` for
+  ends (15 s after the owner went silent on Postgres 14+, else when TCP keepalive drops it, which behind a proxy or session pooler can take hours; or `SELECT pg_terminate_backend(pid)` for
   the pid in step 3 below). `lease_not_running` / `lease_stale`: this instance's lease process died or hung; its supervisor restarts it,
   a persistent line means it keeps failing (look for `Samen.SingleNode.Lease` in the log). `not confirmed alive`: another holder
   exists but its beat has not changed yet; it resolves to CRITICAL or `stale_holder` within one to three check intervals.
+- The gauge `samen.single_node.unknown` is emitted by a RUNNING lease only: `lease_not_running` and `lease_stale` leave it at its
+  last value, so alert on the `/readyz` body line as well as on the metric.
 - `samen.single_node.peer_refused.count` rising — something connects a VISIBLE Erlang node (a clustering library, or an operator
   starting `iex`/`:observer` without `--hidden`). It is disconnected each time. Use `bin/app remote` or `iex --hidden --remsh`.
 
@@ -212,5 +218,6 @@ First response to CRITICAL:
 1. `fly status` / `fly machines list`: how many machines run this app? Expect one.
 2. Stop the extra one (`fly machines stop <id>` then `fly scale count 1`). The line clears on the next check (5 s).
 3. If only one machine exists, look for a second deployment pointing at the same `DATABASE_URL` (a staging app, a preview, a laptop with the production URL):
-   `SELECT pid, application_name, client_addr, backend_start FROM pg_stat_activity WHERE pid IN (SELECT pid FROM pg_locks WHERE locktype='advisory' AND classid=1397244229 AND objid=1313096773);`
+   `SELECT pid, application_name, client_addr, backend_start FROM pg_stat_activity WHERE pid IN (SELECT pid FROM pg_locks WHERE locktype='advisory' AND classid=1396788549 AND objid=1313817669 AND objsubid=2);`
+   (`client_addr`, `backend_start` and `application_name` read NULL for another role's session: run it as the database owner, a superuser or a `pg_read_all_stats` member.)
 4. Meanwhile treat the node-local state as unreliable (ADR-054 §1.1): re-check the AI kill switch on BOTH instances if it was thrown, and review fleet heartbeat rejections.
