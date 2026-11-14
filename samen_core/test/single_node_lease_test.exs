@@ -470,6 +470,12 @@ defmodule Samen.SingleNodeLeaseTest do
       :ok = PoolDouble.reconnect(lease_conn(a))
       assert length(holders(ctx)) == 2
 
+      # Control: served by Y it is the lease's own session; the leftover on X carries MY epoch, so it is a ghost of
+      # my own earlier session and not a second instance.
+      Agent.update(ctx.selector, fn _ -> ctx.y end)
+      assert %{state: :single} = Lease.check_now(a.name)
+      refute :sys.get_state(a.name).pooled?
+
       # A statement served by X now: the token matches, the pid is not the one recorded, and no reconnect happened while
       # it ran: proof of a pooler. It latches.
       Agent.update(ctx.selector, fn _ -> ctx.x end)

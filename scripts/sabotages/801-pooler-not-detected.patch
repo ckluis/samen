@@ -6,10 +6,10 @@
 # TEST_FILES: test/single_node_lease_test.exs
 # MUST_FAIL: a statement served by a session that never ran after_connect
 diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
-index edeca69e..879ff20d 100644
+index 068c893e..fcbfb296 100644
 --- a/samen_core/lib/samen/single_node/lease.ex
 +++ b/samen_core/lib/samen/single_node/lease.ex
-@@ -252,7 +252,7 @@ defmodule Samen.SingleNode.Lease do
+@@ -268,7 +268,7 @@ defmodule Samen.SingleNode.Lease do
    @spec interpret(term(), map()) :: {:view, [map()]} | {:unknown, atom()}
    def interpret({:ok, %Postgrex.Result{rows: [[me, var | _] | _] = rows}}, ctx) do
      cond do
@@ -18,3 +18,13 @@ index edeca69e..879ff20d 100644
          {:unknown, :connection_pooler}
  
        true ->
+@@ -534,7 +534,8 @@ defmodule Samen.SingleNode.Lease do
+   """
+   @spec pooler_proof?(term(), map()) :: boolean()
+   def pooler_proof?({:ok, %Postgrex.Result{rows: [[me, var | _] | _]}}, ctx) do
+-    var in [nil, ""] or var != ctx.token or (me != ctx.pid and Map.get(ctx, :pid_before, ctx.pid) == ctx.pid)
++    _ = {me, var, ctx}
++    false
+   end
+ 
+   def pooler_proof?(_result, _ctx), do: false
