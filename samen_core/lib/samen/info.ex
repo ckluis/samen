@@ -69,4 +69,13 @@ defmodule Samen.Info do
   def embeddable_fields(resource) do
     Spark.Dsl.Extension.get_opt(resource, [:samen], :embeddable, [])
   end
+
+  @doc """
+  The logical attribute the resource's default keyset list page sorts by, or `nil`
+  (`id`-only) — the `samen` section's `keyset_sort` (ARCH-4, `Samen.Indexing`).
+  """
+  @spec keyset_sort(Spark.Dsl.t() | module()) :: atom() | nil
+  def keyset_sort(resource) do
+    Spark.Dsl.Extension.get_opt(resource, [:samen], :keyset_sort, nil)
+  end
 end

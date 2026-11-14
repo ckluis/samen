@@ -344,6 +344,11 @@ config :samen_core, :samen_ai_support_reply_draft_repo, Driftwood.Repo
 config :samen_core, :samen_ai_agent_run_repo, Driftwood.Repo
 config :samen_core, :samen_ai_agent_turn_repo, Driftwood.Repo
 
+# ARCH-4 (`mix samen.verify.indexes` found it): `Samen.AI.Agent.FoldSource` has a table here
+# (`20260908100000_ai_agent_fold_source`) but its repo defaulted to `SamenCore.TestRepo`, a repo
+# this host does not have — compaction would have written to a database that does not exist.
+config :samen_core, :samen_ai_agent_fold_source_repo, Driftwood.Repo
+
 # A5 (ADR-047 §6): the durable per-{org, definition} agent kill switch.
 config :samen_core, :samen_ai_agent_kill_repo, Driftwood.Repo
 

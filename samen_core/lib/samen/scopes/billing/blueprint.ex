@@ -199,6 +199,7 @@ defmodule Samen.Scopes.Billing.Blueprint do
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
+          keyset_sort: :status,
           abbrev: unquote(abbrev)
 
         postgres do
@@ -298,6 +299,7 @@ defmodule Samen.Scopes.Billing.Blueprint do
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
+          keyset_sort: :name,
           abbrev: unquote(abbrev),
           archivable: true
 
@@ -441,6 +443,7 @@ defmodule Samen.Scopes.Billing.Blueprint do
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
+          keyset_sort: :due_date,
           abbrev: unquote(abbrev)
 
         postgres do

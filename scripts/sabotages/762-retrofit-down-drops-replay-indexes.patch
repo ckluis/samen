@@ -1,0 +1,19 @@
+# SABOTAGE: the retrofit down drops the indexes Samen.Replay.Migration created with the tables
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/indexing_test.exs
+# MUST_FAIL: the replay tables' indexes are built by up but never dropped by down (their own migration owns them)
+diff --git a/samen_core/lib/mix/tasks/samen.gen.indexes.ex b/samen_core/lib/mix/tasks/samen.gen.indexes.ex
+index 33550210..f567a4ae 100644
+--- a/samen_core/lib/mix/tasks/samen.gen.indexes.ex
++++ b/samen_core/lib/mix/tasks/samen.gen.indexes.ex
+@@ -98,7 +98,7 @@ defmodule Mix.Tasks.Samen.Gen.Indexes do
+     # A framework migration (`Samen.Replay.Migration`) builds its own tables' indexes when it
+     # creates them; this migration still builds them for a host whose tables predate that, but
+     # its `down` must not drop what another migration owns.
+-    {owned, own} = Enum.split_with(entries, fn {resource, _} -> resource in @created_with_table end)
++    {owned, own} = Enum.split_with(entries, fn {resource, _} -> resource in [] end)
+     list = render_entries(own)
+     owned_list = render_entries(owned)
+ 

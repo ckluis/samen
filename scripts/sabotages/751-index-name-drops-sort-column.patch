@@ -1,0 +1,20 @@
+# SABOTAGE: the index name omits the sort column, so a changed keyset_sort names the same index and the 
+#   verifier and generator cannot tell the shapes apart
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/indexing_test.exs
+# MUST_FAIL: the old literal migration builds the old index; a new sort is red with the concrete next step; the re-run builds it
+diff --git a/samen_core/lib/samen/indexing.ex b/samen_core/lib/samen/indexing.ex
+index caf88369..25fcbf97 100644
+--- a/samen_core/lib/samen/indexing.ex
++++ b/samen_core/lib/samen/indexing.ex
+@@ -144,7 +144,7 @@ defmodule Samen.Indexing do
+   @max_name_bytes 63
+ 
+   defp index_name(resource, table, sort) do
+-    name = "#{table}_org_#{if sort, do: "#{sort}_"}id_idx"
++    name = "#{table}_org_id_idx"
+ 
+     if byte_size(name) <= @max_name_bytes do
+       {:ok, name}

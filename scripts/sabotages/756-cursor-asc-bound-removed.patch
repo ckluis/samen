@@ -1,0 +1,19 @@
+# SABOTAGE: the ASC cursor on a NOT NULL column carries no index-usable bound
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_index_plan_test.exs
+# MUST_FAIL: message — a DEEP ASC page seeks on inserted_at (NOT NULL column): the Index Cond names it
+diff --git a/samen_web/lib/samen/web/reads.ex b/samen_web/lib/samen/web/reads.ex
+index 51a98afa..2bf7e6fe 100644
+--- a/samen_web/lib/samen/web/reads.ex
++++ b/samen_web/lib/samen/web/reads.ex
+@@ -1754,7 +1754,7 @@ defmodule Samen.Web.Reads do
+ 
+   defp bound_asc(%Ash.Query{resource: resource}, field, value, chain) do
+     case Ash.Resource.Info.attribute(resource, field) do
+-      %{allow_nil?: false} -> expr(^ref(field) >= ^value and ^chain)
++      %{allow_nil?: false} -> chain
+       _ -> chain
+     end
+   end

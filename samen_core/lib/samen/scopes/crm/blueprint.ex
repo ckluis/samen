@@ -64,6 +64,7 @@ defmodule Samen.Scopes.Crm.Blueprint do
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
+          keyset_sort: :name,
           abbrev: unquote(abbrev),
           archivable: true
 
@@ -133,6 +134,7 @@ defmodule Samen.Scopes.Crm.Blueprint do
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
+          keyset_sort: :display_name,
           abbrev: unquote(abbrev),
           base: Samen.Fragments.CorePerson,
           archivable: true

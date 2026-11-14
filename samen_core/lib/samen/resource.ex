@@ -87,6 +87,8 @@ defmodule Samen.Resource do
     # logical attribute names whose plain-text values may enter vector space. Refused at
     # compile time for a vault-routed field (`Samen.Verifiers.EmbeddableNoPii`).
     {embeddable, opts} = Keyword.pop(opts, :embeddable, [])
+    # ARCH-4: the logical attribute the default keyset list page sorts by (`nil` = `id`).
+    {keyset_sort, opts} = Keyword.pop(opts, :keyset_sort)
     embeddable = normalize_embeddable!(embeddable, __CALLER__)
     {base, ash_opts} = Keyword.pop(opts, :base)
 
@@ -141,6 +143,7 @@ defmodule Samen.Resource do
         versioned(unquote(versioned?))
         versioned_mode(unquote(versioned_mode))
         embeddable(unquote(embeddable))
+        unquote(keyset_sort_dsl(keyset_sort))
       end
 
       unquote(archival_dsl)
@@ -148,6 +151,9 @@ defmodule Samen.Resource do
       unquote(embeddable_seam(embeddable))
     end
   end
+
+  defp keyset_sort_dsl(nil), do: nil
+  defp keyset_sort_dsl(field) when is_atom(field), do: quote(do: keyset_sort(unquote(field)))
 
   # D3/T67 (ADR-043 §7.2): inject the `embeddable_fields/0` seam ONLY for a resource that
   # declares embeddable fields (keeps the injection off every other resource — zero blast

@@ -147,6 +147,7 @@ defmodule Samen.Scopes.Work.Blueprint do
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
+          keyset_sort: :title,
           abbrev: unquote(abbrev),
           archivable: true,
           archival_signals: unquote(signals_mod)

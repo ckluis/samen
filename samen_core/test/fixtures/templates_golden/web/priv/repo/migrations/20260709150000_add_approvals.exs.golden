@@ -62,11 +62,14 @@ defmodule Acme.Repo.Migrations.AddApprovals do
 
     create(index(:acz_approval, [:acz_org_id], name: "acz_approval_org_idx"))
 
+    # ARCH-4: the tenant keyset index (org_id, <keyset sort>, id) on every org-scoped table above.
+    create_org_keyset_indexes(@resources)
     catalog_sync(@resources)
   end
 
   def down do
     catalog_sync_down(@resources)
+    drop_org_keyset_indexes(@resources)
 
     drop(index(:acz_approval, [:acz_org_id], name: "acz_approval_org_idx"))
 

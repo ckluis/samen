@@ -309,12 +309,16 @@ defmodule Samen.Gen.PostTemplates do
           add(:<%= abbrev %>_updated_at, :utc_datetime, null: false)<%= archived_at_migration_line %>
         end
 
+        # ---- ARCH-4: the tenant keyset index (org_id, <keyset sort>, id) ----
+        create_org_keyset_indexes(@resources)
+
         # ---- catalog the resource in THIS transaction ----
         catalog_sync(@resources)
       end
 
       def down do
         catalog_sync_down(@resources)
+        drop_org_keyset_indexes(@resources)
         drop(table(:<%= table %>))
       end
     end

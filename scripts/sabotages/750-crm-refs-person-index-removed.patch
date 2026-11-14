@@ -1,0 +1,19 @@
+# SABOTAGE: the crm_refs person_id expression index is not created, so the activities_for_person OR is no 
+#   longer index-served
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_refs_index_plan_test.exs
+# MUST_FAIL: the person timeline reads both arms through an index (BitmapOr), and returns both rows
+diff --git a/samen_web/priv/repo/migrations/20261114110000_work_task_crm_ref_indexes.exs b/samen_web/priv/repo/migrations/20261114110000_work_task_crm_ref_indexes.exs
+index 875ca99c..063217a0 100644
+--- a/samen_web/priv/repo/migrations/20261114110000_work_task_crm_ref_indexes.exs
++++ b/samen_web/priv/repo/migrations/20261114110000_work_task_crm_ref_indexes.exs
+@@ -15,7 +15,6 @@ defmodule Samen.WebTest.Repo.Migrations.WorkTaskCrmRefIndexes do
+   @disable_migration_lock true
+ 
+   def up do
+-    create_jsonb_path_index(Samen.WebTest.Work.Task, :custom, ["crm_refs", "person_id"], concurrently: true)
+     create_jsonb_path_index(Samen.WebTest.Work.Task, :custom, ["crm_refs", "company_id"], concurrently: true)
+   end
+ 

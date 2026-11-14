@@ -80,3 +80,45 @@ a database outage rendered as "No contacts yet" with its create CTA (audit F07/F
 
 Scope shipped: CRM, Search, Support (WP6 phase 1); the rest is tracked in the swallow ratchet
 (`Samen.Web.Reads.SwallowLint`). Recipe: `docs/guides/cookbook.md` Recipe 11.
+
+## 9 · Amendment (2026-11-14, ARCH-4) — the keyset page needs a tenant index
+
+§3 bounded every page and made it keyset-stable, but nothing made it *cheap*: the tenant tables carried
+no index led by `org_id`, so `WHERE org_id = $1 ORDER BY <sort>, id LIMIT n` was a sequential scan that
+slowed with the table. Of 99 / 82 / 74 tables carrying `org_id` in driftwood / pawchart / demo, 27 / 17 /
+14 had any btree led by it (89 / 73 / 62 are `OrgScope`-read; none had the `id` tie-break). Amended:
+
+- **The shape.** `Samen.Web.Reads.build/3` orders by `<sort> <dir>, id <dir>` (one direction for both) after
+  the `OrgScope` filter. A btree on `(org_id, <sort>, id)` is walked forward for ASC and backward for DESC
+  (NULLS included: the defaults Ash emits are exactly a forward / backward scan) and stops at the LIMIT with no
+  sort node. The cursor OR-chain is a filter on that walk; a page after a cursor reads from the start of the
+  org's range, bounded by one org, not by the table. To make the walk a seek, `Reads` ANDs a redundant bound the
+  index can use onto the OR-chain: `f <= v` for DESC always, `f >= v` for ASC only when the attribute is
+  `allow_nil? false` (an ASC cursor is followed by the NULLS-LAST tail, which `>=` would drop). The result set is
+  identical; `Samen.Web.ReadsCursorBoundTest` pages whole orgs over NULLs/duplicates against an unpaged read, and
+  `TenantIndexPlanTest` asserts the Index Cond of a deep page names the sort column.
+- **The index name carries the sort column** (`<table>_org_<sort>_id_idx`), and the retrofit migrations the
+  generator writes are LITERAL `{table, columns, name}` tuples. A changed `keyset_sort` is therefore a new name:
+  the verifier goes red naming the old index, a generator re-run builds the new one (each run is a new
+  timestamped file/module), and the old index is dropped by a follow-up migration. A concurrent build first drops a
+  same-named INVALID leftover. The verifier also requires the default NULLS ordering, the column's collation and the
+  type's default operator class.
+- **The sort is declared on the resource**: `use Samen.Resource, keyset_sort: :name` (the `samen` section;
+  `Samen.Info.keyset_sort/1`), `nil` meaning `(org_id, id)`. It must equal the list view's `default_sort`
+  (`Samen.Web.KeysetSortParityTest` pins the pair). A user who clicks another column header sorts a column the
+  index does not lead with: that page reads the org's rows and sorts them, bounded by the org.
+- **One module owns the contract** — `Samen.Indexing` — and the migration helper
+  (`create_org_keyset_indexes/2`), the retrofit generator (`mix samen.gen.indexes`) and the verifier
+  (`mix samen.verify.indexes`) derive from it. Generated apps get the indexes inside the table-creating
+  migrations; existing hosts run the generated retrofit migration (`CREATE INDEX CONCURRENTLY`, the
+  `concurrent_index/3` carve-out).
+- **The verifier reads the live catalog**, not the resource DSL: the hosts' schema is hand-written/templated
+  `Samen.Migration`s, so a declared index can be one no migration made, and the planner uses only what the
+  database has. A resource it cannot inspect is a violation; the exemption list is empty.
+- **Proof the planner uses it**: `Samen.Web.TenantIndexPlanTest` captures the SQL the real `Reads.page!/3`
+  sends and `EXPLAIN`s it (person, ticket, message; ASC and DESC; first page and after a cursor), with a
+  drop-the-index positive control.
+- **`activities_for_person` / `_for_company`**: the `get_path(custom, ["crm_refs", …])` arm renders as
+  `jsonb_extract_path_text(custom, 'crm_refs', '<kind>_id') = $n`; partial expression indexes on that exact
+  expression let the planner `BitmapOr` it with the `(subject_key, subject_id)` index
+  (`Samen.Web.CrmRefsIndexPlanTest`).

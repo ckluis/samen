@@ -1,0 +1,19 @@
+# SABOTAGE: serves? ignores the NULLS bit, so an index with the wrong NULLS ordering counts as serving
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/indexing_test.exs
+# MUST_FAIL: ASC NULLS FIRST is rejected
+diff --git a/samen_core/lib/samen/indexing.ex b/samen_core/lib/samen/indexing.ex
+index caf88369..db4e2a89 100644
+--- a/samen_core/lib/samen/indexing.ex
++++ b/samen_core/lib/samen/indexing.ex
+@@ -291,7 +291,7 @@ defmodule Samen.Indexing do
+     index.valid and index.ready and not index.partial and index.method == "btree" and
+       length(index.keys) >= n and Enum.take(index.keys, n) == columns and
+       same_direction?(Enum.take(index.desc, n)) and
+-      default_nulls?(Enum.take(index.desc, n), Enum.take(index.nulls_first, n)) and
++      true and
+       Enum.all?(Enum.take(index.default_collation, n)) and
+       Enum.all?(Enum.take(index.default_opclass, n))
+   end

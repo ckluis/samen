@@ -18,7 +18,7 @@ FAIL: <task name> found N violation(s):
 
 On success each prints `<task name>: OK — no violations found.` Step numbers below are the
 generated app's <!--count:gate_steps_app-->18<!--/count-->-step `ci.sh` (emitted by `mix samen.gen.app`; the `--api` variant has <!--count:gate_steps_app_api-->19<!--/count-->); Driftwood's
-<!--count:gate_steps_driftwood-->20<!--/count-->-step and PawChart's <!--count:gate_steps_pawchart-->17<!--/count-->-step gates run the same tiers in the same order. There are <!--count:verifiers-->26<!--/count--> `samen.verify.*` tasks in
+<!--count:gate_steps_driftwood-->20<!--/count-->-step and PawChart's <!--count:gate_steps_pawchart-->17<!--/count-->-step gates run the same tiers in the same order. There are <!--count:verifiers-->27<!--/count--> `samen.verify.*` tasks in
 total; each has an entry below (`doc_recipes_test.exs` enforces it).
 
 ---
@@ -416,6 +416,32 @@ interfaces (impersonation, the token-blind aggregate plane), never a direct FK.
 write could store a dangling cross-org reference.
 **Fix:** add `change {Samen.Policy.SameOrgFk, relationships: [:<rel>]}` to the resource's
 create/update actions (exactly what the error message prints).
+
+---
+
+## Step 13b — `mix samen.verify.indexes`
+
+**Error** (`samen_core/lib/mix/tasks/samen.verify.indexes.ex`):
+
+```text
+<Module> (<table>): no index serves the org-scoped keyset page — need btree (<org_id>, <sort>, <id>); has ...
+cannot inspect <Module>: ...
+no Ash domains are configured — nothing was inspected, so nothing is proven
+```
+
+**Meaning:** an org-scoped resource has no plain btree in the LIVE database led by `(org_id, <keyset sort>, id)`, so its
+`Samen.Web.Reads` keyset page is a sequential scan that slows as the table grows (ARCH-4, ADR-016 §9). A resource the check
+cannot inspect (absent table, unreadable policies, a `keyset_sort` that is not a stored attribute) and a run that inspected
+nothing are violations too: a silent pass would prove nothing. A partial, invalid, expression-led or mixed-direction index does
+not count; nor does one whose NULLS ordering, collation or operator class differs from what the page's ORDER BY needs. The check
+reads the migrated database, so run it after `mix ecto.migrate` (and against production after the index migration: a failed
+`CONCURRENTLY` build leaves an INVALID index, which counts as missing).
+**Changed `keyset_sort`:** the index name carries the sort column, so the message then reads "The shape changed … <old> was built
+for another shape". Run `mix samen.gen.indexes` (a NEW migration builds the new index; never edit an applied one), and once green
+drop the old index in a follow-up migration (`DROP INDEX CONCURRENTLY`).
+**Fix:** `mix samen.gen.indexes` writes the `CREATE INDEX CONCURRENTLY` migration; for a resource added with
+`mix samen.gen.resource` the index is already in its migration. Set `keyset_sort:` on the resource to the field its list view
+sorts by (`default_sort`).
 
 ---
 

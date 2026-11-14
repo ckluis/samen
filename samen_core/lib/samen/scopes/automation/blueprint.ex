@@ -62,6 +62,7 @@ defmodule Samen.Scopes.Automation.Blueprint do
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
           extensions: [AshOban],
+          keyset_sort: :name,
           abbrev: unquote(abbrev)
 
         postgres do

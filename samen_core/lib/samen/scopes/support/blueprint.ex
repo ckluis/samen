@@ -159,6 +159,7 @@ defmodule Samen.Scopes.Support.Blueprint do
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
+          keyset_sort: :subject,
           abbrev: unquote(abbrev),
           archivable: true,
           archival_signals: unquote(signals_mod)
@@ -462,6 +463,7 @@ defmodule Samen.Scopes.Support.Blueprint do
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
+          keyset_sort: :inserted_at,
           abbrev: unquote(abbrev),
           archivable: true
 

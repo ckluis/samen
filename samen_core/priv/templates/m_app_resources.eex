@@ -353,11 +353,14 @@ defmodule <%= module %>.Repo.Migrations.AppResources do
     end
 
     # ---- catalog every resource in THIS transaction ----
+    # ARCH-4: the tenant keyset index (org_id, <keyset sort>, id) on every org-scoped table above.
+    create_org_keyset_indexes(@resources)
     catalog_sync(@resources)
   end
 
   def down do
     catalog_sync_down(@resources)
+    drop_org_keyset_indexes(@resources)
 
     drop(table(:<%= agg_table %>))
     drop(table(:<%= resource_table %>))

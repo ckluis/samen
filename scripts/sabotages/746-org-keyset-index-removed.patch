@@ -1,0 +1,21 @@
+# SABOTAGE: a resource's tenant keyset index is not created, so the verifier and the live-catalog check 
+#   must go red
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/indexing_test.exs
+# MUST_FAIL: the migrated fixture table carries the index the contract names
+diff --git a/samen_core/priv/test_repo/migrations/20261114100000_org_keyset_indexes.exs b/samen_core/priv/test_repo/migrations/20261114100000_org_keyset_indexes.exs
+index 1d764945..7b9eac59 100644
+--- a/samen_core/priv/test_repo/migrations/20261114100000_org_keyset_indexes.exs
++++ b/samen_core/priv/test_repo/migrations/20261114100000_org_keyset_indexes.exs
+@@ -47,8 +47,7 @@ defmodule SamenCore.TestRepo.Migrations.OrgKeysetIndexes20261114100000 do
+     {"csp_pipeline", ["csp_org_id", "csp_id"], "csp_pipeline_org_id_idx"},
+     # SamenCore.Support.WorkFixture.Project
+     {"spw_project", ["spw_org_id", "spw_id"], "spw_project_org_id_idx"},
+-    # SamenCore.Support.WorkFixture.Task
+-    {"stw_task", ["stw_org_id", "stw_title", "stw_id"], "stw_task_org_title_id_idx"}
++
+   ]
+ 
+   # Tables whose own creating migration also builds the index: built here when missing,

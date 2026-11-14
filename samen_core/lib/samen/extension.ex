@@ -111,6 +111,18 @@ defmodule Samen.Extension do
                 "reconstruction; CMS content, §6.5). `:full_diff` is refused " <>
                 "substrate-wide (it forces `require_atomic? false`)."
           ],
+          keyset_sort: [
+            type: :atom,
+            required: false,
+            doc:
+              "The logical attribute the resource's DEFAULT keyset list page sorts by " <>
+                "(ARCH-4). `Samen.Web.Reads` orders a page by `<sort>, id` in one direction, " <>
+                "so the serving index is `(org_id, <sort>, id)`; nil (the default) means " <>
+                "the page sorts by `id` and `(org_id, id)` serves it. Read by " <>
+                "`Samen.Indexing` and `mix samen.verify.indexes`; usually set via " <>
+                "`use Samen.Resource, keyset_sort: :name`. It must equal the " <>
+                "`default_sort` field of the resource's list view."
+          ],
           embeddable: [
             type: {:list, :atom},
             required: false,

@@ -1726,21 +1726,37 @@ defmodule Samen.Web.Reads do
 
   defp apply_cursor(query, {value, id}, {field, :asc}) do
     # Strictly after (value, id) — including the nulls-last tail.
-    Ash.Query.do_filter(
-      query,
+    chain =
       expr(
         ^ref(field) > ^value or
           (^ref(field) == ^value and ^id_after(id, :asc)) or
           is_nil(^ref(field))
       )
-    )
+
+    # The OR-chain alone is only a filter; the redundant bound `field >= value` is what the
+    # (org_id, field, id) index can seek on (ARCH-4). It is implied by the chain for every
+    # non-null row, but it would drop the nulls-last tail, so it is added only when the
+    # attribute cannot be null.
+    Ash.Query.do_filter(query, bound_asc(query, field, value, chain))
   end
 
   defp apply_cursor(query, {value, id}, {field, :desc}) do
+    # `field <= value` is implied by the chain (DESC puts nulls first, so none follow a
+    # non-null cursor) and is the bound the index seeks on; always safe (ARCH-4).
     Ash.Query.do_filter(
       query,
-      expr(^ref(field) < ^value or (^ref(field) == ^value and ^id_after(id, :desc)))
+      expr(
+        ^ref(field) <= ^value and
+          (^ref(field) < ^value or (^ref(field) == ^value and ^id_after(id, :desc)))
+      )
     )
+  end
+
+  defp bound_asc(%Ash.Query{resource: resource}, field, value, chain) do
+    case Ash.Resource.Info.attribute(resource, field) do
+      %{allow_nil?: false} -> expr(^ref(field) >= ^value and ^chain)
+      _ -> chain
+    end
   end
 
   defp id_after(id, :asc), do: expr(id > ^id)
