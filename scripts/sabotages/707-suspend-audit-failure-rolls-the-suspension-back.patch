@@ -1,0 +1,22 @@
+# SABOTAGE: A failed audit write undoes the auto-suspension (the pre-fix atomic behaviour): an over-budget 
+#   operator keeps their privilege through an audit outage.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/suspension_asymmetry_test.exs
+# MUST_FAIL: audit down + over budget: the operator IS suspended
+diff --git a/samen_core/lib/samen/operator_plane/suspension.ex b/samen_core/lib/samen/operator_plane/suspension.ex
+index e9f98a09..01305e61 100644
+--- a/samen_core/lib/samen/operator_plane/suspension.ex
++++ b/samen_core/lib/samen/operator_plane/suspension.ex
+@@ -167,7 +167,9 @@ defmodule Samen.OperatorPlane.Suspension do
+ 
+     case audited do
+       {:ok, :ok} -> inserted
+-      {:error, _} -> %{inserted | audit: defer_audit(attrs, operator_id, org_id, reason)}
++      {:error, _} ->
++        r.delete!(inserted)
++        %{inserted | audit: defer_audit(attrs, operator_id, org_id, reason)}
+     end
+   end
+ 

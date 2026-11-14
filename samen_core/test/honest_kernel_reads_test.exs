@@ -51,18 +51,22 @@ defmodule Samen.HonestKernelReadsTest do
   end
 
   describe "Suspension — a failed audit write or lookup is not 'suspended and audited' / 'nothing to clear'" do
-    test "RED: suspend with the audit probe down fails and the suspension is rolled back", %{org: org} do
+    test "RED: suspend with the audit probe down fails to audit: the suspension STANDS and the audit is pending, never written as done",
+         %{org: org} do
       op = "op-#{System.unique_integer([:positive])}"
+      path = Path.join(System.tmp_dir!(), "hk_susp_#{System.unique_integer([:positive])}.local")
+      on_exit(fn -> File.rm_rf!(path) end)
       FaultRepo.fail([:probe])
 
       capture_log(fn ->
-        assert {:error, :audit_unavailable} =
-                 Suspension.suspend(%{operator_id: op, reason: "r", org_id: org, repo: FaultRepo})
+        assert {:ok, %{audit: :pending}} =
+                 Suspension.suspend(%{operator_id: op, reason: "r", org_id: org, repo: FaultRepo, local_audit_path: path})
       end)
 
       FaultRepo.heal()
-      # rolled back: no active suspension row exists (an un-audited privilege change must not stand)
-      assert {:ok, false} = Suspension.status(op, repo: Repo)
+      # suspending removes privilege: it stands, and the missing chain entry is parked locally for the reconciler
+      assert {:ok, true} = Suspension.status(op, repo: Repo)
+      assert Samen.BreakGlass.LocalAudit.count(path: path) == 1
     end
 
     test "POSITIVE CONTROL: with the audit healthy the suspension lands, is audited, and clears", %{org: org} do
