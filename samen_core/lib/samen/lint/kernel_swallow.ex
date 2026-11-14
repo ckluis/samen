@@ -30,22 +30,22 @@ defmodule Samen.Lint.KernelSwallow do
 
   @reviewed %{
     {"samen_core/lib/samen/ai/chokepoint.ex", :charlist_sentinel?} =>
-      {1, "9d7f67079dcb6075",
+      {1, "0b17c23d9eddf284",
        "List.to_string/1 raises only for a list that is not chardata; a vt sentinel is a UTF-8 binary and can only be spelled by valid chardata, so for such a list `false` (no sentinel) is the exact answer — the element-wise allowlist (`safe_segment?/1`) still applies to it"},
     {"samen_core/lib/samen/ai.ex", :resolved_env} =>
-      {1, "97449507153aaec4",
+      {1, "6e5f8d3527e06c4e",
        "fail-SECURE: an environment that cannot be resolved reads as :prod, the posture that refuses simulated providers and unconfigured adapters — never the permissive :dev/:test"},
     {"samen_core/lib/samen/kms.ex", :resolved_env} =>
-      {1, "97449507153aaec4",
+      {1, "4f80883edc8535bc",
        "fail-SECURE: an environment that cannot be resolved reads as :prod, the posture that refuses an unimplemented skeleton adapter — never the permissive :dev/:test"},
     {"samen_core/lib/samen/fleet/crypto.ex", :verify_ed25519} =>
-      {1, "9d7f67079dcb6075",
+      {1, "3edb3c5dd1080096",
        ":crypto.verify raises for a malformed public key or signature (wrong size/type); a signature that cannot be verified is not valid, so `false` (reject) is the exact answer, never an accept"},
     {"samen_core/lib/samen/observability/failure.ex", :report} =>
-      {1, "3fa3f61a5b0ac7e7",
+      {1, "5effab65c1a31e95",
        "the failure reporter itself: observability must never break the operation it observes, and a reporter that raised would turn every handled failure into a crash — the clause is the last line, there is nothing left to report to"},
     {"samen_core/lib/samen/observability/failure.ex", :emit} =>
-      {1, "3fa3f61a5b0ac7e7", "best-effort telemetry: observability must never break the read or write it observes"}
+      {1, "15b438c33ee4efe2", "best-effort telemetry: observability must never break the read or write it observes"}
   }
 
   @baseline %{

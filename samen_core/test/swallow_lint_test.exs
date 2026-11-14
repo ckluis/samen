@@ -501,31 +501,63 @@ defmodule Samen.Lint.SwallowLintTest do
       assert base_ceiling("@ceilings %{\n    rescue: %{\"a\" => 7}\n  }", :rescue, "b") == nil
     end
 
-    test "a ceiling can only go down: it is no higher than the one on the merge base" do
-      for {label, rel, fun} <- [
-            {"kernel", "samen_core/lib/samen/lint/kernel_swallow.ex", &KernelSwallow.ceilings/0}
-          ] do
-        case merge_base_source(rel) do
-          nil ->
-            :skip
+    @ceiling_files [
+      {"kernel", "samen_core/lib/samen/lint/kernel_swallow.ex"},
+      {"web", "samen_web/lib/samen/web/reads/swallow_lint.ex"}
+    ]
 
-          base_src ->
-            for {class, roots} <- fun.(), {root, total} <- roots do
-              case base_ceiling(base_src, class, root) do
-                nil -> :new_root
-                base_total -> assert total <= base_total, "#{label} #{class} ceiling for #{root} rose: #{base_total} -> #{total}"
-              end
+    test "a ceiling can only go down: no root's ceiling, nor a class total, is higher than on the merge base (kernel AND web)" do
+      for {label, rel} <- @ceiling_files, class <- [:rescue, :error_arm] do
+        current = ceiling_pairs(File.read!(Path.join(fixture_root(), rel)), class)
+        assert current != %{}, "#{label}: no #{class} ceilings parsed from #{rel} (the reader is blind)"
+
+        case merge_base_source(rel) do
+          {:ok, base_src} ->
+            base = ceiling_pairs(base_src, class)
+
+            for {root, total} <- current, Map.has_key?(base, root) do
+              assert total <= base[root], "#{label} #{class} ceiling for #{root} rose: #{base[root]} -> #{total}"
+            end
+
+            # A renamed or new root has nothing to compare with per root, so the CLASS total must not rise either.
+            # (A base with no ceilings block at all predates the hard ceiling: nothing to compare.)
+            assert base == %{} or Enum.sum(Map.values(current)) <= Enum.sum(Map.values(base)),
+                   "#{label} #{class} ceilings rose in total: #{Enum.sum(Map.values(base))} -> #{Enum.sum(Map.values(current))}"
+
+          :new_file ->
+            :ok
+
+          :no_merge_base ->
+            # Skipping would turn the guard off exactly where it matters (a shallow CI checkout): fail there.
+            if System.get_env("CI") in [nil, ""] do
+              :skip
+            else
+              flunk("no merge base with origin/main in CI: the ceiling can-only-go-down check cannot run (fetch-depth: 0)")
             end
         end
       end
     end
 
     defp merge_base_source(rel) do
-      with {base, 0} <- System.cmd("git", ["merge-base", "HEAD", "origin/main"], cd: fixture_root(), stderr_to_stdout: true),
-           {src, 0} <- System.cmd("git", ["show", "#{String.trim(base)}:#{rel}"], cd: fixture_root(), stderr_to_stdout: true) do
-        src
+      case System.cmd("git", ["merge-base", "HEAD", "origin/main"], cd: fixture_root(), stderr_to_stdout: true) do
+        {base, 0} ->
+          case System.cmd("git", ["show", "#{String.trim(base)}:#{rel}"], cd: fixture_root(), stderr_to_stdout: true) do
+            {src, 0} -> {:ok, src}
+            _ -> :new_file
+          end
+
+        _ ->
+          :no_merge_base
+      end
+    end
+
+    # Every `"root" => n` of one class in the committed `@ceilings` literal.
+    defp ceiling_pairs(src, class) do
+      with [_, block] <- Regex.run(~r/@ceilings %\{(.*?)\n  \}/s, src),
+           [_, inner] <- Regex.run(~r/#{class}: %\{(.*?)\}/s, block) do
+        ~r/"([^"]+)" => (\d+)/ |> Regex.scan(inner) |> Map.new(fn [_, root, n] -> {root, String.to_integer(n)} end)
       else
-        _ -> nil
+        _ -> %{}
       end
     end
 
@@ -642,6 +674,110 @@ defmodule Samen.Lint.SwallowLintTest do
       assert :ok = KernelSwallow.check()
       assert :ok = KernelSwallow.check_error_arms()
       assert :ok = KernelSwallow.check_ceilings()
+    end
+  end
+
+  describe "re-review: multi-statement error arms, typed catch, hash over the enclosing definition" do
+    test "RED: an error arm that does something and THEN answers a swallow literal is flagged; logging or reporting clears it" do
+      src = """
+      defmodule Fixture.MultiArms do
+        def blank_then_empty(s) do
+          case Ash.read(P, scope: s) do
+            {:ok, r} -> r
+            {:error, _} ->
+              _ = 1
+              []
+          end
+        end
+
+        def telemetry_then_empty(s) do
+          case Ash.read(P, scope: s) do
+            {:ok, r} -> r
+            {:error, _} ->
+              :telemetry.execute([:x], %{}, %{})
+              []
+          end
+        end
+
+        def wildcard_block(s) do
+          case Ash.read(P, scope: s) do
+            {:ok, r} -> r
+            _ ->
+              _ = 1
+              nil
+          end
+        end
+
+        def logged_then_empty(s) do
+          case Ash.read(P, scope: s) do
+            {:ok, r} -> r
+            {:error, _} ->
+              Logger.error("read failed")
+              []
+          end
+        end
+
+        def reported_then_tagged(s) do
+          case Ash.read(P, scope: s) do
+            {:ok, r} -> r
+            {:error, _} ->
+              _ = 1
+              {:error, :unavailable}
+          end
+        end
+      end
+      """
+
+      assert Swallow.scan_source(src, "m.ex", :error_arm) |> Enum.map(& &1.fun) ==
+               [:blank_then_empty, :telemetry_then_empty, :wildcard_block]
+    end
+
+    test "RED: a typed `catch :exit, {:timeout, _} -> []` is flagged; one that logs, or answers a tagged error, is not" do
+      src = """
+      defmodule Fixture.TypedCatch do
+        def timed_out(pid) do
+          GenServer.call(pid, :x)
+        catch
+          :exit, {:timeout, _} -> []
+        end
+
+        def logged(pid) do
+          GenServer.call(pid, :x)
+        catch
+          :exit, {:timeout, _} ->
+            Logger.error("timeout")
+            []
+        end
+
+        def tagged(pid) do
+          GenServer.call(pid, :x)
+        catch
+          :exit, {:timeout, _} -> {:error, :timeout}
+        end
+      end
+      """
+
+      assert Swallow.scan_source(src, "c.ex", :rescue) |> Enum.map(& &1.fun) == [:timed_out]
+    end
+
+    test "RED: editing the function body OUTSIDE the reviewed clause changes the pinned hash (the pin covers the whole definition)" do
+      dir = Path.join(System.tmp_dir!(), "swallow_span_#{System.unique_integer([:positive])}")
+      on_exit(fn -> File.rm_rf!(dir) end)
+      File.mkdir_p!(Path.join(dir, "lib"))
+      path = "lib/f.ex"
+
+      write = fn body -> File.write!(Path.join(dir, path), "defmodule F do\n  def f(s) do\n    #{body}\n  rescue\n    _ -> []\n  end\nend\n") end
+
+      write.("Ash.read!(P, scope: s)")
+      hash = Swallow.reviewed_hash(dir, path, :f, 1)
+      reviewed = %{{path, :f} => {1, hash, "a reason"}}
+      assert %{} == Swallow.scan(dir, [path], reviewed)
+
+      # the clause is byte-identical; only the guarded body changed
+      write.("Ash.destroy!(P, scope: s)")
+      assert %{^path => 1} = Swallow.scan(dir, [path], reviewed)
+      assert [msg] = Swallow.reviewed_problems(dir, [path], reviewed)
+      assert msg =~ "REPLACED"
     end
   end
 end

@@ -43,8 +43,9 @@ defmodule Samen.Lint.Swallow do
   ## Reviewed entries — pinned to a count AND a hash
 
   `reviewed` maps `{file, function} => {count, hash, reason}`: the function legitimately swallows exactly
-  `count` clauses, and `hash` is the digest of those clauses' NORMALISED source (metadata stripped, so it is stable
-  across formatting and line moves, and changes when a clause is replaced). More clauses than pinned: the EXCESS
+  `count` clauses, and `hash` is the digest of those clauses' (and their enclosing definitions') NORMALISED source (metadata stripped, so it is stable
+  across formatting and line moves, and changes when a clause is replaced OR anything else in the enclosing function,
+  `try` body included, is edited: the hash covers each clause together with its whole definition). More clauses than pinned: the EXCESS
   counts as an ordinary swallow. A clause that was replaced (the hash no longer matches) is not covered at all.
   Fewer, or a changed hash: `reviewed_problems/3` names the stale pin. `reviewed_hash/4` computes the digest.
 
@@ -58,7 +59,7 @@ defmodule Samen.Lint.Swallow do
   """
 
   @type reviewed :: %{{String.t(), atom()} => {pos_integer(), String.t(), String.t()}}
-  @type site :: %{fun: atom(), line: integer() | nil, kind: :rescue | :error_arm, norm: String.t()}
+  @type site :: %{fun: atom(), line: integer() | nil, kind: :rescue | :error_arm, norm: String.t(), span: String.t()}
 
   @literals [[], 0, 0.0, "", nil, false, true, :ok]
 
@@ -90,7 +91,7 @@ defmodule Samen.Lint.Swallow do
     {_ast, acc} =
       Macro.prewalk(ast, [], fn
         {kind, _meta, [head, body]} = node, acc when kind in @def_kinds ->
-          {node, collect(class, fun_name(head), body, ctx, acc)}
+          {node, acc |> then(&tag_span(collect(class, fun_name(head), body, ctx, &1), &1, node))}
 
         {:defmodule, _meta, [_name, [do: block]]} = node, acc ->
           {node, collect_module_body(class, block, ctx, acc)}
@@ -132,9 +133,11 @@ defmodule Samen.Lint.Swallow do
     file |> sites(root, class) |> Enum.filter(&(&1.fun == fun)) |> Enum.take(count) |> hash_of()
   end
 
+  # Each site hashes its clause AND the whole enclosing definition (`span`): editing the `try` body or the rest of the
+  # function a reviewed clause protects changes the hash, not just rewriting the clause itself.
   defp hash_of(sites) do
     sites
-    |> Enum.map(& &1.norm)
+    |> Enum.map(&(&1.span <> "\n==\n" <> &1.norm))
     |> Enum.sort()
     |> Enum.join("\n--\n")
     |> then(&:crypto.hash(:sha256, &1))
@@ -284,7 +287,14 @@ defmodule Samen.Lint.Swallow do
     |> Macro.to_string()
   end
 
-  defp site(fun, kind, {:->, meta, _} = clause), do: %{fun: fun, line: meta[:line], kind: kind, norm: normalise(clause)}
+  defp site(fun, kind, {:->, meta, _} = clause), do: %{fun: fun, line: meta[:line], kind: kind, norm: normalise(clause), span: ""}
+
+  # Stamp the sites a collector just added (the head of `acc` beyond `before`) with the normalised enclosing definition.
+  defp tag_span(acc, before, enclosing) do
+    {added, rest} = Enum.split(acc, length(acc) - length(before))
+    span = if added == [], do: "", else: normalise(enclosing)
+    Enum.map(added, &Map.put(&1, :span, span)) ++ rest
+  end
 
   # -- AST: module bodies ----------------------------------------------------------------
 
@@ -293,7 +303,7 @@ defmodule Samen.Lint.Swallow do
   # names); a nested defmodule is left to the outer walk too.
   defp collect_module_body(class, block, ctx, acc) do
     stmts = block |> block_statements() |> Enum.map(&prune_defs/1) |> Enum.reject(&is_nil/1)
-    Enum.reduce(stmts, acc, fn stmt, acc -> collect(class, :__module__, stmt, ctx, acc) end)
+    Enum.reduce(stmts, acc, fn stmt, acc -> tag_span(collect(class, :__module__, stmt, ctx, acc), acc, stmt) end)
   end
 
   defp block_statements({:__block__, _, stmts}), do: stmts
@@ -346,6 +356,8 @@ defmodule Samen.Lint.Swallow do
     cond do
       catch_all?(key, patterns) and not handled?(body, bound_vars(patterns)) -> [site(fun, :rescue, clause) | acc]
       key == :rescue and typed?(patterns) and swallow_literal?(final_expr(body)) and not logged?(body) -> [site(fun, :rescue, clause) | acc]
+      # `catch :exit, {:timeout, _} -> []`: a typed catch answering a swallow literal is the same lie as a typed rescue.
+      key == :catch and swallow_literal?(final_expr(body)) and not logged?(body) -> [site(fun, :rescue, clause) | acc]
       true -> acc
     end
   end
@@ -499,7 +511,7 @@ defmodule Samen.Lint.Swallow do
     {_, acc} =
       Macro.prewalk(body, acc, fn
         {:->, _meta, [[pattern], arm_body]} = node, acc ->
-          if error_pattern?(pattern) and swallow_literal?(arm_body) do
+          if error_pattern?(pattern) and swallow_arm?(arm_body) do
             {node, [site(fun, :error_arm, node) | acc]}
           else
             {node, acc}
@@ -522,7 +534,7 @@ defmodule Samen.Lint.Swallow do
   defp wildcard_arms(fun, true, clauses, acc) do
     Enum.reduce(clauses, acc, fn
       {:->, _, [[pattern], arm_body]} = clause, acc ->
-        if wildcard?(pattern) and swallow_literal?(arm_body), do: [site(fun, :error_arm, clause) | acc], else: acc
+        if wildcard?(pattern) and swallow_arm?(arm_body), do: [site(fun, :error_arm, clause) | acc], else: acc
 
       _other, acc ->
         acc
@@ -540,6 +552,10 @@ defmodule Samen.Lint.Swallow do
       _ -> acc
     end
   end
+
+  # The arm ANSWERS a swallow literal (its final expression, so `_ = 1; []` and `:telemetry.execute(…); []` count) and
+  # neither logs, reports nor raises — the same test `rescue_clause/3` applies.
+  defp swallow_arm?(body), do: swallow_literal?(final_expr(body)) and not logged?(body)
 
   defp wildcard?({:_, _, ctx}) when is_atom(ctx), do: true
   defp wildcard?({name, _, ctx}) when is_atom(name) and is_atom(ctx), do: underscored?(name)
