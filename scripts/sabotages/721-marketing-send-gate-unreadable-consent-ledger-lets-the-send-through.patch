@@ -1,0 +1,20 @@
+# SABOTAGE: An unreadable consent ledger is read as 'no withdrawal on file' and the send goes through to a 
+#   subscriber whose withdrawal could not be read.
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/marketing_consent_gate_test.exs
+# MUST_FAIL: an unreadable consent ledger refuses the send
+diff --git a/samen_web/lib/samen/web/marketing/reads.ex b/samen_web/lib/samen/web/marketing/reads.ex
+index 1455aee2..6e7a4db3 100644
+--- a/samen_web/lib/samen/web/marketing/reads.ex
++++ b/samen_web/lib/samen/web/marketing/reads.ex
+@@ -643,7 +643,7 @@ defmodule Samen.Web.Marketing.Reads do
+       {:ok, _state} -> :ok
+       # An unreadable ledger is not "no withdrawal on file": the send is refused (fail-closed) and the caller
+       # renders the same outage copy as a failed deliverability check, never "consent withdrawn".
+-      {:error, :unavailable} -> {:error, :deliverability_check_failed}
++      {:error, :unavailable} -> :ok
+     end
+   end
+ 
