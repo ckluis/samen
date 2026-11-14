@@ -1023,6 +1023,23 @@ DOC
   $C --write > "$T/c10i" 2>&1; eq "$?" 1 "C10: --write never re-adds a marker"
   printf '\n- x <!--count:nonsense-->1<!--/count-->\n' >> "$F/CLAUDE.md"
   $C --check > "$T/c10j" 2>&1; has "$T/c10j" "unknown count marker 'nonsense'" "C10: an unknown marker name fails"
+  # one file on SEVERAL target rows, cold cache: four threads count the rows, so two writers of one pid
+  # race on the same cache entry. A pid-only temp name made the loser's rename fail (PR #130's preflight).
+  local F2="$T/c10dup" B2="$T/c10dupbin"
+  rm -rf "$F2" "$B2" "$T/c10dupcache"
+  mkdir -p "$F2/scripts/sabotages" "$F2/scripts/mutation" "$F2/app1/lib" "$B2"
+  cp "$ROOT/scripts/counts" "$ROOT/scripts/counts.py" "$F2/scripts/"
+  : > "$F2/scripts/mutation/mutate.exs"; printf 'm\nm\nm\n' > "$F2/app1/lib/a.ex"
+  cat > "$F2/scripts/mutate.sh" <<'STUB'
+#!/usr/bin/env bash
+for _ in 1 2 3 4 5 6 7 8; do printf 'app1/lib/a.ex\tapp1\n'; done; echo "MUTATION TARGETS: 8 ($*)"
+STUB
+  printf '#!/usr/bin/env bash\nsleep 0.3\ncat "$3"\n' > "$B2/elixir"; chmod +x "$B2/elixir"   # slow: every thread misses the cold cache
+  printf -- '- corpus <!--count:corpus_mutants-->24<!--/count--> mutants\n' > "$F2/CLAUDE.md"
+  env PATH="$B2:$PATH" SAMEN_COUNTS_CACHE="$T/c10dupcache" bash "$F2/scripts/counts" --check --only corpus_mutants > "$T/c10dup.out" 2>&1
+  eq "$?" 0 "C10: a file named on several target rows is counted on a cold cache without the writers racing"
+  hasnt "$T/c10dup.out" 'FileNotFoundError' "C10: ... no cache writer loses its temp file"
+  eq "$(ls "$T/c10dupcache" | wc -l | tr -d ' ')" 1 "C10: ... and the cache holds the one entry, no stray temp files"
   # the real document: the two counts that need no Elixir are current
   bash "$ROOT/scripts/counts" --check --only sabotages,driver_sabotages > "$T/c10k" 2>&1
   eq "$?" 0 "C10: the real CLAUDE.md's sabotage counts are current"

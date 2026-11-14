@@ -41,6 +41,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 REPO = os.environ.get("SAMEN_COUNTS_REPO") or os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -140,8 +141,12 @@ def engine_count(rel):
     out = sh(["elixir", engine, "list", rel])
     n = len([l for l in out.splitlines() if l.strip()])
     os.makedirs(CACHE, exist_ok=True)
-    tmp = "%s.%d" % (cp, os.getpid())
-    with open(tmp, "w") as f:
+    # The temp name must be unique per WRITER, not per process: the target list can name one file on
+    # several rows, and `mutants/1` counts rows on four threads, so two threads of this one pid can be
+    # writing the same cache entry at once. A pid-only name made the second `os.replace` fail on a cold
+    # cache (FileNotFoundError: the first rename had already moved the shared temp file).
+    fd, tmp = tempfile.mkstemp(prefix=os.path.basename(cp) + ".", dir=CACHE)
+    with os.fdopen(fd, "w") as f:
         f.write(str(n))
     os.replace(tmp, cp)
     return n
