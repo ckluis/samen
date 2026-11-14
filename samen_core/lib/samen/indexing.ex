@@ -289,21 +289,31 @@ defmodule Samen.Indexing do
     with %{} = attribute <- Ash.Resource.Info.attribute(resource, attr),
          table when is_binary(table) <- AshPostgres.DataLayer.Info.table(resource),
          repo when not is_nil(repo) <-
-           Keyword.get_lazy(opts, :repo, fn -> AshPostgres.DataLayer.Info.repo(resource, :read) end),
-         schema = AshPostgres.DataLayer.Info.schema(resource) || "public",
-         column = to_string(attribute.source || attribute.name),
-         {:ok, %{rows: [[notnull]]}} <-
-           repo.query(
+           Keyword.get_lazy(opts, :repo, fn -> AshPostgres.DataLayer.Info.repo(resource, :read) end) do
+      schema = AshPostgres.DataLayer.Info.schema(resource) || "public"
+
+      case repo.query(
              "SELECT a.attnotnull FROM pg_attribute a WHERE a.attrelid = to_regclass($1) " <>
                "AND a.attname = $2 AND NOT a.attisdropped",
-             [~s("#{schema}"."#{table}"), column]
+             [~s("#{schema}"."#{table}"), to_string(attribute.source || attribute.name)]
            ) do
-      {:ok, notnull}
+        {:ok, %{rows: [[notnull]]}} when is_boolean(notnull) ->
+          {:ok, notnull}
+
+        {:ok, _no_such_column} ->
+          :unknown
+
+        {:error, reason} ->
+          Samen.Observability.Failure.report(:column_nullability, nil, reason)
+          :unknown
+      end
     else
-      _ -> :unknown
+      _not_a_stored_attribute -> :unknown
     end
   rescue
-    _ -> :unknown
+    e ->
+      Samen.Observability.Failure.report(:column_nullability, nil, e)
+      :unknown
   end
 
   @doc """
