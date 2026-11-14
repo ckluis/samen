@@ -87,7 +87,11 @@ defmodule DriftwoodWeb.Api.KeyAuthPlug do
     |> case do
       {:ok, nil} -> :error
       {:ok, key_row} -> {:ok, key_row}
-      {:error, _} -> :error
+      # Fail CLOSED either way (no key row => no actor), but a lookup that FAILED is an outage, not "an invalid
+      # key": report it by name and exception module so it is not invisible.
+      {:error, error} ->
+        Samen.Web.Reads.Guard.report(:driftwood_api_key_lookup, nil, error)
+        :error
     end
   end
 

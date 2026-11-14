@@ -28,6 +28,8 @@ defmodule Driftwood.Reads do
 
   require Ash.Query
 
+  alias Samen.Web.Reads.Guard
+
   # ADR-045 §4.2 (O8) — the HARD read bound for the vertical read layer. Every list read here
   # decrypts vault fields per row (`resolve_pii/2`), so an UNBOUNDED read on a large org's
   # roster is a per-navigation resource-exhaustion / KMS-cost hazard. `@limit` caps every list
@@ -49,26 +51,36 @@ defmodule Driftwood.Reads do
   caller can only ever narrow the page — never exceed the cap. The bound does not change WHICH
   plane resolves the vault fields, so masking is untouched (tenant CLEAR, operator masked).
   """
-  def driver_roster(scope, opts \\ []) do
-    Driftwood.Freight.Driver
-    |> Ash.Query.ensure_selected([
-      :full_name,
-      :cdl_number,
-      :cdl_state,
-      :cdl_expiry,
-      :medical_card_expiry,
-      :status,
-      :eld_provider
-    ])
-    |> Ash.Query.sort(inserted_at: :asc)
-    |> Ash.Query.limit(bounded_limit(opts))
-    |> Ash.read!(scope: scope)
-    |> resolve_pii(scope)
-    |> Enum.map(fn d ->
-      Map.put(d, :__fmcsa__, fmcsa_status(d))
+  def driver_roster(scope, opts \\ []),
+    do: scope |> driver_roster_result(opts) |> Guard.value([])
+
+  @doc """
+  The tagged sibling of `driver_roster/2` (WP6 phase 4): `{:ok, rows}` (an empty list is an HONEST
+  empty roster), `{:error, :unavailable}` (the read raised: outage, decrypt failure, bug — reported by
+  name and exception module) or `{:error, :forbidden}` (a denial). A screen shows the kit error state
+  for a failure and keeps its empty state for `{:ok, []}`.
+  """
+  @spec driver_roster_result(term(), keyword()) :: Guard.result([map()])
+  def driver_roster_result(scope, opts \\ []) do
+    Guard.run(:driftwood_driver_roster, scope, fn ->
+      Driftwood.Freight.Driver
+      |> Ash.Query.ensure_selected([
+        :full_name,
+        :cdl_number,
+        :cdl_state,
+        :cdl_expiry,
+        :medical_card_expiry,
+        :status,
+        :eld_provider
+      ])
+      |> Ash.Query.sort(inserted_at: :asc)
+      |> Ash.Query.limit(bounded_limit(opts))
+      |> Ash.read!(scope: scope)
+      |> resolve_pii(scope)
+      |> Enum.map(fn d ->
+        Map.put(d, :__fmcsa__, fmcsa_status(d))
+      end)
     end)
-  rescue
-    _ -> []
   end
 
   # Clamp a requested page into `1..@limit` — a caller can narrow the page but NEVER exceed the
@@ -92,28 +104,41 @@ defmodule Driftwood.Reads do
   """
   @spec get_driver(term(), binary()) :: {:ok, struct()} | :error
   def get_driver(scope, id) do
-    result =
-      Driftwood.Freight.Driver
-      |> Ash.Query.ensure_selected([
-        :full_name,
-        :cdl_number,
-        :cdl_state,
-        :cdl_expiry,
-        :medical_card_expiry,
-        :status,
-        :eld_provider
-      ])
-      |> Ash.Query.filter(id == ^id)
-      |> Ash.Query.limit(1)
-      |> Ash.read!(scope: scope)
-      |> resolve_pii(scope)
-
-    case result do
-      [driver | _] -> {:ok, driver}
-      [] -> :error
+    case get_driver_result(scope, id) do
+      {:ok, driver} -> {:ok, driver}
+      {:error, _kind} -> :error
     end
-  rescue
-    _ -> :error
+  end
+
+  @doc """
+  The tagged sibling of `get_driver/2` (WP6 phase 4): `{:ok, driver}`, `{:error, :not_found}` (no such
+  driver in this org, including a malformed or cross-org id), `{:error, :unavailable}` (the read
+  failed: an outage is NOT "driver not found") or `{:error, :forbidden}`. The id is cast before it
+  reaches a query, so a malformed id is a plain not-found with no error log.
+  """
+  @spec get_driver_result(term(), term()) ::
+          {:ok, struct()} | {:error, :not_found | :unavailable | :forbidden}
+  def get_driver_result(scope, id) do
+    with {:ok, id} <- Guard.cast_id(id),
+         {:ok, rows} <-
+           Guard.run(:driftwood_get_driver, scope, fn ->
+             Driftwood.Freight.Driver
+             |> Ash.Query.ensure_selected([
+               :full_name,
+               :cdl_number,
+               :cdl_state,
+               :cdl_expiry,
+               :medical_card_expiry,
+               :status,
+               :eld_provider
+             ])
+             |> Ash.Query.filter(id == ^id)
+             |> Ash.Query.limit(1)
+             |> Ash.read!(scope: scope)
+             |> resolve_pii(scope)
+           end) do
+      Guard.first_or_not_found(rows)
+    end
   end
 
   @doc """
@@ -126,16 +151,46 @@ defmodule Driftwood.Reads do
   """
   @spec get_settlement(term(), binary()) :: {:ok, struct()} | :error
   def get_settlement(scope, id) do
-    Driftwood.Freight.Settlement
-    |> Ash.Query.filter(id == ^id)
-    |> Ash.Query.limit(1)
-    |> Ash.read_one!(scope: scope)
-    |> case do
-      nil -> :error
-      settlement -> {:ok, settlement}
+    case get_settlement_result(scope, id) do
+      {:ok, settlement} -> {:ok, settlement}
+      {:error, _kind} -> :error
     end
-  rescue
-    _ -> :error
+  end
+
+  @doc "The tagged sibling of `get_settlement/2` — same contract as `get_driver_result/2`."
+  @spec get_settlement_result(term(), term()) ::
+          {:ok, struct()} | {:error, :not_found | :unavailable | :forbidden}
+  def get_settlement_result(scope, id) do
+    with {:ok, id} <- Guard.cast_id(id),
+         {:ok, row} <-
+           Guard.run(:driftwood_get_settlement, scope, fn ->
+             Driftwood.Freight.Settlement
+             |> Ash.Query.filter(id == ^id)
+             |> Ash.Query.limit(1)
+             |> Ash.read_one!(scope: scope)
+           end) do
+      Guard.first_or_not_found(List.wrap(row))
+    end
+  end
+
+  @doc """
+  ONE load (a `Driftwood.Crm.Opportunity`) by id for `scope` — the fetch the load edit and delete
+  writes start from. `{:ok, load}`, `{:error, :not_found}` (including a malformed or cross-org id),
+  `{:error, :unavailable}` or `{:error, :forbidden}`; an outage is never "not found".
+  """
+  @spec get_load_result(term(), term()) ::
+          {:ok, struct()} | {:error, :not_found | :unavailable | :forbidden}
+  def get_load_result(scope, id) do
+    with {:ok, id} <- Guard.cast_id(id),
+         {:ok, row} <-
+           Guard.run(:driftwood_get_load, scope, fn ->
+             Driftwood.Crm.Opportunity
+             |> Ash.Query.filter(id == ^id)
+             |> Ash.Query.limit(1)
+             |> Ash.read_one!(scope: scope)
+           end) do
+      Guard.first_or_not_found(List.wrap(row))
+    end
   end
 
   # F2 (Gate-5 carry) — the SHARED tenant-plane PII resolver.
@@ -160,8 +215,11 @@ defmodule Driftwood.Reads do
     )
   rescue
     # Any resolver failure MUST NOT downgrade to plaintext — return the records with
-    # the fields still masked (the read already produced %Masked{}).
-    _ -> records
+    # the fields still masked (the read already produced %Masked{}). The failure is reported by name
+    # and exception module, never swallowed.
+    e ->
+      Guard.report(:driftwood_resolve_pii, scope, e)
+      records
   end
 
   # The plane-bearing actor map the resolver keys on. A `%Samen.Scope{}` carries it in
@@ -177,6 +235,15 @@ defmodule Driftwood.Reads do
   org boundary.
   """
   def load_board(scope), do: load_board(scope, %{})
+
+  @doc """
+  The tagged sibling of `load_board/2` (WP6 phase 4): `{:ok, rows}` (`{:ok, []}` is an honest empty
+  board or an honest "filter matched nothing"), `{:error, :unavailable}` or `{:error, :forbidden}`.
+  """
+  @spec load_board_result(term(), map()) :: Guard.result([map()])
+  def load_board_result(scope, filters \\ %{}) when is_map(filters) do
+    Guard.run(:driftwood_load_board, scope, fn -> read_load_board(scope, filters) end)
+  end
 
   @doc """
   T158 — the REAL filtered load board. `filters` is a plain map (string or atom
@@ -196,7 +263,10 @@ defmodule Driftwood.Reads do
   here that widens the read past the scope's own org). No matches is an HONEST
   empty list — never a fabricated/sample row.
   """
-  def load_board(scope, filters) when is_map(filters) do
+  def load_board(scope, filters) when is_map(filters),
+    do: scope |> load_board_result(filters) |> Guard.value([])
+
+  defp read_load_board(scope, filters) do
     status = normalize_load_status(fetch(filters, :status))
     q = filters |> fetch(:q) |> to_string() |> String.trim() |> String.downcase()
 
@@ -211,8 +281,6 @@ defmodule Driftwood.Reads do
       Map.put(l, :__lane__, lane)
     end)
     |> filter_by_query(q)
-  rescue
-    _ -> []
   end
 
   defp fetch(map, key), do: Map.get(map, key) || Map.get(map, to_string(key))
@@ -252,7 +320,15 @@ defmodule Driftwood.Reads do
   settlement with the stored inputs + the derived fields flattened. Reads through the
   scope's org boundary; all columns are non-PII cents/enums.
   """
-  def settlements(scope) do
+  def settlements(scope), do: scope |> settlements_result() |> Guard.value([])
+
+  @doc "The tagged sibling of `settlements/1` — same contract as `driver_roster_result/2`."
+  @spec settlements_result(term()) :: Guard.result([map()])
+  def settlements_result(scope) do
+    Guard.run(:driftwood_settlements, scope, fn -> read_settlements(scope) end)
+  end
+
+  defp read_settlements(scope) do
     Samen.Context.reshaped_query(Driftwood.Context, Driftwood.Freight.Settlement)
     |> Ash.Query.sort(inserted_at: :asc)
     |> Ash.Query.limit(@limit)
@@ -272,8 +348,6 @@ defmodule Driftwood.Reads do
         carryover_cents: to_int(Map.get(calc, :carryover_cents))
       }
     end)
-  rescue
-    _ -> []
   end
 
   # The reshape returns :integer calcs (sometimes a Decimal from the numeric SQL path).

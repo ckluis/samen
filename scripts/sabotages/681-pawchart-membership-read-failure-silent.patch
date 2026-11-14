@@ -1,0 +1,21 @@
+# SABOTAGE: The pawchart authorized-orgs seam swallows a failed membership read as 'no orgs' again, so an 
+#   outage on the authorization boundary is invisible
+#
+# Flips the named test(s).
+# APP: pawchart
+# TEST_FILES: test/reads_honest_failure_p4_test.exs
+# MUST_FAIL: a membership read that FAILS resolves no org (closed) and is reported by name
+# MUST_FAIL: the seam itself raises on a failed read instead of answering
+diff --git a/pawchart/lib/pawchart/auth.ex b/pawchart/lib/pawchart/auth.ex
+index 4c04f67b..1c7ef3d1 100644
+--- a/pawchart/lib/pawchart/auth.ex
++++ b/pawchart/lib/pawchart/auth.ex
+@@ -90,6 +90,8 @@ defmodule PawChart.Auth do
+     |> Enum.map(& &1.org_id)
+     |> Enum.filter(&is_binary/1)
+     |> Enum.uniq()
++  rescue
++    _ -> []
+   end
+ 
+   def authorized_org_ids(_user_id), do: []

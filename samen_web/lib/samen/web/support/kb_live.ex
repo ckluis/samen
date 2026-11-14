@@ -31,6 +31,7 @@ defmodule Samen.Web.Support.KbLive do
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
+  alias Samen.Web.Reads.Guard
   alias Samen.Web.Mount
   alias Samen.Web.Support.KbReads
 
@@ -116,8 +117,11 @@ defmodule Samen.Web.Support.KbLive do
   end
 
   def handle_event("save_new", %{"form" => params}, socket) do
-    case AshPhoenix.Form.submit(socket.assigns.new_form, params: with_org(params, socket)) do
+    case Guard.submit_form(:support_save_article, socket.assigns[:org_id], socket.assigns.new_form, with_org(params, socket)) do
       {:ok, _article} -> {:noreply, socket |> assign(show_new: false) |> load(socket.assigns.org_id)}
+      {:error, kind} when is_atom(kind) ->
+        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "save that article"))}
+
       {:error, form} -> {:noreply, assign(socket, new_form: form)}
     end
   end
@@ -134,8 +138,11 @@ defmodule Samen.Web.Support.KbLive do
   end
 
   def handle_event("save_edit", %{"form" => params}, socket) do
-    case AshPhoenix.Form.submit(socket.assigns.edit_form, params: params) do
+    case Guard.submit_form(:support_edit_article, socket.assigns[:org_id], socket.assigns.edit_form, params) do
       {:ok, _article} -> {:noreply, socket |> assign(edit_id: nil, edit_form: nil) |> load(socket.assigns.org_id)}
+      {:error, kind} when is_atom(kind) ->
+        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "save that article"))}
+
       {:error, form} -> {:noreply, assign(socket, edit_form: form)}
     end
   end

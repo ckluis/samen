@@ -164,23 +164,37 @@ defmodule Samen.OperatorPlane.Suspension do
   """
   @spec suspended?(String.t() | term(), keyword()) :: boolean()
   def suspended?(operator, opts \\ []) do
-    operator_id = operator_id(operator)
-    r = Keyword.get(opts, :repo, repo())
-    on_error = Keyword.get(opts, :on_error, true)
+    case status(operator, opts) do
+      {:ok, suspended?} -> suspended?
+      {:error, :unavailable} -> Keyword.get(opts, :on_error, true)
+    end
+  end
 
-    if is_nil(operator_id) do
-      # No resolvable operator id → cannot be an un-suspended operator → deny.
-      on_error
-    else
-      try do
-        r.exists?(
-          from(s in SuspensionRow,
-            where: s.operator_id == ^operator_id and is_nil(s.cleared_at)
-          )
-        )
-      rescue
-        _ -> on_error
-      end
+  @doc """
+  `suspended?/2` as a tagged result: `{:ok, boolean}`, or `{:error, :unavailable}` when the suspension table
+  cannot be reached. A caller that must TELL the user (a reveal screen) uses this to say "couldn't check" instead of
+  "denied"; the reveal paths themselves still use `suspended?/2`, which fails closed. A missing operator id is
+  `{:ok, true}` (it cannot be an un-suspended operator).
+  """
+  @spec status(String.t() | term(), keyword()) :: {:ok, boolean()} | {:error, :unavailable}
+  def status(operator, opts \\ []) do
+    case operator_id(operator) do
+      nil ->
+        {:ok, true}
+
+      operator_id ->
+        r = Keyword.get(opts, :repo, repo())
+
+        try do
+          {:ok,
+           r.exists?(
+             from(s in SuspensionRow,
+               where: s.operator_id == ^operator_id and is_nil(s.cleared_at)
+             )
+           )}
+        rescue
+          _ -> {:error, :unavailable}
+        end
     end
   end
 

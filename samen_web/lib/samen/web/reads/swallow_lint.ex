@@ -112,25 +112,11 @@ defmodule Samen.Web.Reads.SwallowLint do
       "fail-CLOSED capability probe (ADR-035 §5 A2): an unresolvable principal is unverified on an armed host, never an elevated default"
   }
 
-  # Swallows that still exist, per file, AFTER the reviewed ones are subtracted. Shrink-only: a
-  # phase that converts a file lowers or deletes its row. Rows include class-b helpers that are
-  # correct as they are (fail-closed authz, seed probes, …) and have not yet been moved to
-  # `@reviewed` with a reason — see spec/evaluation-2026-11-13/reads-rescue-inventory.md.
-  @baseline %{
-    "driftwood/lib/driftwood/directory.ex" => 1,
-    "driftwood/lib/driftwood/operator_reveal.ex" => 1,
-    "driftwood/lib/driftwood/operator_seeds.ex" => 4,
-    "driftwood/lib/driftwood/reads.ex" => 6,
-    "driftwood/lib/driftwood/seeds.ex" => 5,
-    "driftwood/lib/driftwood_web/broker_live.ex" => 1,
-    "driftwood/lib/driftwood_web/operator_impersonation_live.ex" => 2,
-    "driftwood/lib/driftwood_web/page_controller.ex" => 1,
-    "pawchart/lib/pawchart/auth.ex" => 1,
-    "pawchart/lib/pawchart/directory.ex" => 1,
-    "pawchart/lib/pawchart/operator_seeds.ex" => 2,
-    "pawchart/lib/pawchart_web/clinic_reads.ex" => 5,
-    "pawchart/lib/pawchart_web/operator_impersonation_live.ex" => 3
-  }
+  # Swallows that still exist, per file, AFTER the reviewed ones are subtracted. EMPTY since WP6 phase 4: every
+  # swallow in the tree is either converted (Guard.run/page/write/report) or a `@reviewed` entry with its
+  # reason. The map and the shrink-only ratchet stay — a new bare `rescue _ -> []` in ANY file (a file absent
+  # here is allowed 0) fails the suite, and nothing may be added back to this map to make it pass.
+  @baseline %{}
 
   def roots, do: @roots
   def baseline, do: @baseline

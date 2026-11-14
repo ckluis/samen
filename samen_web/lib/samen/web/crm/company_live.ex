@@ -95,7 +95,7 @@ defmodule Samen.Web.CRM.CompanyLive do
         "org_id" => org_id
       })
 
-    case AshPhoenix.Form.submit(socket.assigns.activity_form, params: params) do
+    case Guard.submit_form(:crm_save_company_activity, socket.assigns[:org_id], socket.assigns.activity_form, params) do
       {:ok, _task} ->
         # The write succeeded; if re-reading the timeline fails, say so (and keep the entries
         # already on screen) rather than rendering the new activity as lost.
@@ -112,6 +112,9 @@ defmodule Samen.Web.CRM.CompanyLive do
            activities: activities,
            section_errors: Enum.uniq(Enum.reject(socket.assigns.section_errors, &(&1 == :activity)) ++ errors)
          )}
+
+      {:error, kind} when is_atom(kind) ->
+        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "save that activity"))}
 
       {:error, form} ->
         {:noreply, assign(socket, activity_form: form)}
@@ -136,10 +139,13 @@ defmodule Samen.Web.CRM.CompanyLive do
   end
 
   def handle_event("save_edit", %{"form" => params}, socket) do
-    case AshPhoenix.Form.submit(socket.assigns.edit_form, params: params) do
+    case Guard.submit_form(:crm_edit_company, socket.assigns[:org_id], socket.assigns.edit_form, params) do
       {:ok, _company} ->
         socket = assign(socket, show_edit: false)
         {:noreply, load(socket, socket.assigns.org_id, socket.assigns.company_id)}
+
+      {:error, kind} when is_atom(kind) ->
+        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "save that company"))}
 
       {:error, form} ->
         {:noreply, assign(socket, edit_form: form)}

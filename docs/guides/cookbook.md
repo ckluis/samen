@@ -414,7 +414,7 @@ patch IS the change now; the tree should go back to green). Prove it flips befor
 it — `scripts/sabotage.sh` does all five steps for every committed patch: SHA-256 the touched
 files, apply, run `TEST_FILES` and assert the `MUST_FAIL` names are among the failures, revert,
 and re-SHA to confirm a byte-exact restore. Run it locally against your new patch, then run the
-whole committed suite (<!--count:sabotages-->670<!--/count--> patches today; the number is generated) — both are opt-in (they deliberately
+whole committed suite (<!--count:sabotages-->685<!--/count--> patches today; the number is generated) — both are opt-in (they deliberately
 break the tree and re-run DB-backed suites), so they're run explicitly, not by the default
 `bash ci.sh`:
 
@@ -504,7 +504,7 @@ and keeps the real empty state for an honestly empty result.
 `samen_web/lib/samen/web/crm/reads.ex` (`contacts_for_company_result/3`, `get_contact_result/3`,
 `companies_page/3`), `samen_web/lib/samen/web/list_live.ex` (`reread/2`) and the screen proofs in
 `samen_web/test/samen/web/reads_honest_failure_test.exs`, `reads_honest_failure_p2_test.exs` (writes: `Guard.write/3`) and
-`reads_honest_failure_p3_test.exs` (the operator plane).
+`reads_honest_failure_p3_test.exs` (the operator plane) and, for the verticals, `driftwood/test/reads_honest_failure_p4_test.exs` / `pawchart/test/reads_honest_failure_p4_test.exs`.
 
 ```elixir
 # A detail/aggregate read: the tagged result is the real function; the legacy name is a shim.
@@ -614,8 +614,52 @@ it with a positive control that an empty result still renders the real empty sta
 
 **Ratchet.** `Samen.Web.Reads.SwallowLint` counts catch-all `rescue`/`catch` clauses that neither log, report
 nor re-raise, per file, and fails on any increase (and on a decrease that is not written into its
-baseline). Converting a file lowers its row; a swallow that is correct (an optional-scope probe, a
+baseline). Converting a file lowers its row (the baseline map is EMPTY since phase 4 and stays as the ratchet: a file not listed is allowed 0); a swallow that is correct (an optional-scope probe, a
 fail-closed authz lookup) goes into `@reviewed` with its reason.
+
+**In a host app (phase 4).** A vertical's read layer follows the same shape; nothing in the framework changed for it. Give each read a
+tagged `*_result` over `Guard.run` (`Driftwood.Reads.driver_roster_result/2`, `PawChartWeb.ClinicReads.owner_roster_result/1`) and keep the
+legacy name as `|> Guard.value([])`; cast the id first (`Ecto.UUID.cast/1`: a malformed id is `{:error, :not_found}`, no log); render each
+pane's `{value, error}` pair with `<.error_state retry_event=…>` so panes fail alone; wrap every write in `Guard.write/3` and give the
+`:unavailable` / `:forbidden` / refusal cases their own copy. A host does not re-implement what the framework already reports: a
+directory (`org_directory`) or membership (`authorized_orgs`) function should simply raise on a failed read, because
+`CurrentOrg.list_orgs/1` and `authorized_orgs/2` already catch it, deny, and report it by name. **A host test cannot use the fault
+seam** (it is compiled out of a vertical build): break the table for real inside the sandbox transaction (`ALTER TABLE … RENAME COLUMN`
+makes the read fail, `ADD CONSTRAINT … CHECK (false) NOT VALID` makes the insert fail; both roll back) and assert the error state, the
+absent empty-state copy and CTA, the retry, and a positive control. A seed probe ("already seeded?") must be allowed to raise: answering
+`true`/`false` on a failed read skips or repeats a step and still reports success; an idempotent seed matches "already exists"
+specifically and a real failure is a non-zero exit. **Seed units are atomic**: the "already seeded?" marker (an operator org or an
+account `Org` row) must commit in the SAME transaction as the rows it vouches for (`Repo.transaction/1` around the fresh path and around
+each account; a raise rolls the unit back and the task exits non-zero), otherwise one interrupted run is a permanent half-seed that
+reports `:ok` on every later run. Ash warns once per create with transaction hooks inside a surrounding transaction; a seed unit
+switches `:warn_on_transaction_hooks?` off for its span and restores it.
+
+**Shared helpers — do not re-write them per vertical (phase 4 review).** `Samen.Web.Reads.Guard` carries what each host LiveView was
+copying: `Guard.pane/2` (`{:ok, v} | {:error, kind}` → `{v, error}` for a pane), `Guard.error_body/1` and `Guard.retry_event/2` (the copy and
+the retry event for a failed pane; none for a denial), `Guard.write_copy/2` (value-free outage or denial copy for a failed write),
+`Guard.cast_id/1` and `Guard.first_or_not_found/1`. A pane renders with the kit component `<.read_error kind={@loads_error}
+retry="retry_panel" />` (outage copy + retry, denial copy and no retry for `:forbidden`; `body=` overrides the copy) — never a
+hand-rolled `<div class="error-state">`.
+
+**A form submit is a write.** Submit an `AshPhoenix.Form` through `Guard.submit_form(:name, org_id, form, params)`, never
+`AshPhoenix.Form.submit/2` directly: an outage reaches a form as an `Ash.Error.Unknown` on its changeset, which the field errors would
+render as a validation message. `{:ok, record}` saved · `{:error, form}` a real refusal (field errors, unchanged) ·
+`{:error, :unavailable}` → `put_flash(:error, Guard.write_copy(kind, "save that contact"))`, nothing saved, what the user typed kept ·
+`{:error, :forbidden}` → the same call prints denial copy. A database constraint Ash does not map arrives as `Unknown` too, and
+retrying never fixes it: map it (`references`/`identity`) so it is a field error — foreign keys on `belongs_to` are mapped by default
+(`driftwood/test/reads_honest_failure_p4_test.exs`, "form submit classification"). `samen_web/test/samen/web/form_submit_outage_test.exs`
+fails if any framework LiveView calls `AshPhoenix.Form.submit/2` directly.
+
+**Not "no org".** `Samen.Auth.OrgActor.authorized_org_ids_result/2` and `resolve_result/3` return `{:error, :unavailable}` for a failed
+User/Membership read (the legacy `authorized_org_ids/2` / `resolve/3` keep their shape, fail closed, and log the failure by name and
+exception module); a landing or gate that must tell the user uses the result (`DriftwoodWeb.PageController` answers 503).
+`CurrentOrg.list_orgs_result/1` is the directory's tagged form: `no_org_card/1` renders the kit error state, never "run the seed command",
+when the directory read failed. A console that polls (the reveal-window tick) re-probes an unknown state on a backoff
+(`windows_retry_at`), not every second, and refuses a reveal while the state is unknown (fail closed).
+
+**The ratchet has a positive control.** With an empty baseline nothing else proves `SwallowLint.scan/1` can ever return a count:
+`samen_web/test/fixtures/swallow_fixture.ex` (outside every lint root, never compiled) holds known swallows and
+`reads_swallow_lint_test.exs` asserts `scan([fixture])` counts them and `check/2` against the real baseline fails naming the file.
 
 ---
 

@@ -188,6 +188,7 @@ defmodule Samen.UI do
 
   # State (loading / error / notices — audit F04, F07)
   defdelegate error_state(assigns), to: Samen.UI.State
+  defdelegate read_error(assigns), to: Samen.UI.State
   defdelegate flash_group(assigns), to: Samen.UI.State
   defdelegate connection_banner(assigns), to: Samen.UI.State
 

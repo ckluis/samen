@@ -1,0 +1,20 @@
+# SABOTAGE: The no-org card ignores a failed org-directory read, so an outage renders 'run the seed 
+#   command' instead of the error state.
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/current_org_test.exs
+# MUST_FAIL: no_org_card/1: an unseeded directory shows the seed card
+diff --git a/samen_web/lib/samen/web/current_org.ex b/samen_web/lib/samen/web/current_org.ex
+index 2a672de7..65cab3f1 100644
+--- a/samen_web/lib/samen/web/current_org.ex
++++ b/samen_web/lib/samen/web/current_org.ex
+@@ -925,7 +925,7 @@ defmodule Samen.Web.CurrentOrg do
+       assigns
+       |> assign(:operator_label, operator_label(assigns[:mount]))
+       |> assign(:seed_command, seed_command(assigns[:mount]))
+-      |> assign(:directory_down, Guard.unavailable?(list_orgs_result(assigns[:mount])))
++      |> assign(:directory_down, false)
+ 
+     ~H"""
+     <div :if={@directory_down} class="wrap" id="no-org-unavailable">

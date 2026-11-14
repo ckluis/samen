@@ -1,0 +1,20 @@
+# SABOTAGE: An account seed is no longer one transaction, so its 'already seeded' marker survives a failure 
+#   of a later step and the next run reports success.
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/reads_honest_failure_p4_test.exs
+# MUST_FAIL: one account is ONE unit
+diff --git a/driftwood/lib/driftwood/operator_seeds.ex b/driftwood/lib/driftwood/operator_seeds.ex
+index e9e7d9ef..0cfed267 100644
+--- a/driftwood/lib/driftwood/operator_seeds.ex
++++ b/driftwood/lib/driftwood/operator_seeds.ex
+@@ -209,7 +209,7 @@ defmodule Driftwood.OperatorSeeds do
+   # One account is ONE transaction: its `Identity.Org` row is the "already seeded" marker `seed_missing_accounts/0`
+   # trusts, so it must commit only together with the admin, the billing and the tickets it vouches for.
+   @doc false
+-  def seed_account(account, agent), do: atomically(fn -> do_seed_account(account, agent) end)
++  def seed_account(account, agent), do: do_seed_account(account, agent)
+ 
+   defp do_seed_account(%{tenant_org_id: tid, name: name, mrr: mrr, admin: {af, al, ae}} = account, agent) do
+     health = Map.get(account, :health, :healthy)

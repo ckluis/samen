@@ -1,0 +1,23 @@
+# SABOTAGE: The clinic surface turns a failed patient or pet read into an empty list again, so an outage 
+#   renders 'No patients yet.' and 'No pets yet.'
+#
+# Flips the named test(s).
+# APP: pawchart
+# TEST_FILES: test/reads_honest_failure_p4_test.exs
+# MUST_FAIL: a failed patient roster is the error state with a retry
+# MUST_FAIL: a failed pet roster is the error state
+diff --git a/pawchart/lib/pawchart_web/clinic_live.ex b/pawchart/lib/pawchart_web/clinic_live.ex
+index c4a12b3a..382ccea4 100644
+--- a/pawchart/lib/pawchart_web/clinic_live.ex
++++ b/pawchart/lib/pawchart_web/clinic_live.ex
+@@ -102,8 +102,8 @@ defmodule PawChartWeb.ClinicLive do
+     scope = Mount.scope(socket.assigns.samen_mount, org_id)
+     # Each pane reads through its tagged `_result` and fails ALONE: a failed roster is the kit error state
+     # with a retry in that pane, never "No patients yet." (whose CTA would invite a duplicate patient).
+-    {owners, owners_error} = Guard.pane(Reads.owner_roster_result(scope), [])
+-    {pets, pets_error} = Guard.pane(Reads.pet_roster_result(scope), [])
++    {owners, owners_error} = {Guard.value(Reads.owner_roster_result(scope), []), nil}
++    {pets, pets_error} = {Guard.value(Reads.pet_roster_result(scope), []), nil}
+     patient = Map.get(params, "patient")
+     selected = select_owner(scope, patient)
+ 

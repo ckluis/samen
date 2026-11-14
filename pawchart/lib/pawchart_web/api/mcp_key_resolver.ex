@@ -71,7 +71,11 @@ defmodule PawChartWeb.Api.McpKeyResolver do
     |> case do
       {:ok, nil} -> :error
       {:ok, row} -> {:ok, row}
-      {:error, _} -> :error
+      # Fail CLOSED either way (no key row => no actor), but a lookup that FAILED is an outage, not "an invalid
+      # key": report it by name and exception module so it is not invisible.
+      {:error, error} ->
+        Samen.Web.Reads.Guard.report(:pawchart_mcp_key_lookup, nil, error)
+        :error
     end
   end
 

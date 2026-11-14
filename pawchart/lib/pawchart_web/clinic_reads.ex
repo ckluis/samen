@@ -37,6 +37,7 @@ defmodule PawChartWeb.ClinicReads do
   require Ash.Query
 
   alias PawChart.Clinic.{Patient, Pet}
+  alias Samen.Web.Reads.Guard
 
   # A3 read-bounding: every read on this surface carries an explicit hard cap.
   @limit 200
@@ -62,76 +63,106 @@ defmodule PawChartWeb.ClinicReads do
   @doc """
   This clinic's PATIENTS (the pet OWNERS), newest first, org-scoped + bounded. Vault
   fields resolve on the scope's plane (tenant CLEAR, operator-without-grant `%Masked{}`).
-  `[]` on any failure — an honest absence, never a fabricated row.
+  `[]` for ANY failure (legacy shape) — a screen uses `owner_roster_result/1`, which tells a failed
+  read from an honestly empty clinic.
   """
   @spec owner_roster(term()) :: [struct()]
-  def owner_roster(scope) do
-    Patient
-    |> Ash.Query.ensure_selected([:full_name, :emails, :phones, :marketing_opt_in, :inserted_at])
-    |> Ash.Query.sort(inserted_at: :desc)
-    |> Ash.Query.limit(@limit)
-    |> Ash.read!(scope: scope)
-    |> resolve_pii(Patient, scope)
-  rescue
-    _ -> []
+  def owner_roster(scope), do: scope |> owner_roster_result() |> Guard.value([])
+
+  @doc """
+  The tagged sibling of `owner_roster/1` (WP6 phase 4): `{:ok, owners}` (`{:ok, []}` is an HONEST
+  empty clinic), `{:error, :unavailable}` (the read raised: outage, decrypt failure, bug — reported by
+  name and exception module) or `{:error, :forbidden}` (a denial).
+  """
+  @spec owner_roster_result(term()) :: Guard.result([struct()])
+  def owner_roster_result(scope) do
+    Guard.run(:pawchart_owner_roster, scope, fn ->
+      Patient
+      |> Ash.Query.ensure_selected([:full_name, :emails, :phones, :marketing_opt_in, :inserted_at])
+      |> Ash.Query.sort(inserted_at: :desc)
+      |> Ash.Query.limit(@limit)
+      |> Ash.read!(scope: scope)
+      |> resolve_pii(Patient, scope)
+    end)
   end
 
   @doc """
   Fetch ONE patient (owner) by id for `scope`, PII-resolved on the same plane. The fetch
   is ORG-SCOPED, so a cross-org id (including one supplied via a `?patient=` param or a
   crafted `handle_event`) is INVISIBLE under OrgScope and yields `:error` (never a
-  cross-org read). `{:ok, owner}` or `:error`.
+  cross-org read). `{:ok, owner}` or `:error` (legacy shape: not found AND failure).
   """
   @spec get_owner(term(), binary()) :: {:ok, struct()} | :error
-  def get_owner(scope, id) when is_binary(id) do
-    Patient
-    |> Ash.Query.filter(id == ^id)
-    |> Ash.Query.ensure_selected([:full_name, :emails, :phones, :marketing_opt_in])
-    |> Ash.Query.limit(1)
-    |> Ash.read!(scope: scope)
-    |> resolve_pii(Patient, scope)
-    |> case do
-      [owner | _] -> {:ok, owner}
-      _ -> :error
+  def get_owner(scope, id) do
+    case get_owner_result(scope, id) do
+      {:ok, owner} -> {:ok, owner}
+      {:error, _kind} -> :error
     end
-  rescue
-    _ -> :error
   end
 
-  def get_owner(_scope, _id), do: :error
+  @doc """
+  The tagged sibling of `get_owner/2`: `{:ok, owner}`, `{:error, :not_found}` (no such patient in this
+  clinic, including a cross-org or MALFORMED id — the id is cast before it reaches a query, so a bad id is
+  a plain not-found with no error log), `{:error, :unavailable}` (the read failed: an outage is NOT "not
+  found") or `{:error, :forbidden}`.
+  """
+  @spec get_owner_result(term(), term()) :: {:ok, struct()} | {:error, :not_found | :unavailable | :forbidden}
+  def get_owner_result(scope, id) do
+    with {:ok, id} <- Guard.cast_id(id),
+         {:ok, rows} <-
+           Guard.run(:pawchart_get_owner, scope, fn ->
+             Patient
+             |> Ash.Query.filter(id == ^id)
+             |> Ash.Query.ensure_selected([:full_name, :emails, :phones, :marketing_opt_in])
+             |> Ash.Query.limit(1)
+             |> Ash.read!(scope: scope)
+             |> resolve_pii(Patient, scope)
+           end) do
+      Guard.first_or_not_found(rows)
+    end
+  end
 
   @doc """
   This clinic's PETS (the clinical records), newest first, org-scoped + bounded. The
-  scalar vault field `microchip` resolves on the scope's plane. `[]` on any failure.
+  scalar vault field `microchip` resolves on the scope's plane. `[]` for any failure (legacy shape);
+  see `pet_roster_result/1`.
   """
   @spec pet_roster(term()) :: [struct()]
-  def pet_roster(scope) do
-    Pet
-    |> Ash.Query.ensure_selected([
-      :name,
-      :species,
-      :breed,
-      :weight_kg,
-      :temperament,
-      :microchip,
-      :owner_id,
-      :inserted_at
-    ])
-    |> Ash.Query.sort(inserted_at: :desc)
-    |> Ash.Query.limit(@limit)
-    |> Ash.read!(scope: scope)
-    |> resolve_pii(Pet, scope)
-  rescue
-    _ -> []
+  def pet_roster(scope), do: scope |> pet_roster_result() |> Guard.value([])
+
+  @doc "The tagged sibling of `pet_roster/1` — same contract as `owner_roster_result/1`."
+  @spec pet_roster_result(term()) :: Guard.result([struct()])
+  def pet_roster_result(scope) do
+    Guard.run(:pawchart_pet_roster, scope, fn ->
+      Pet
+      |> Ash.Query.ensure_selected([
+        :name,
+        :species,
+        :breed,
+        :weight_kg,
+        :temperament,
+        :microchip,
+        :owner_id,
+        :inserted_at
+      ])
+      |> Ash.Query.sort(inserted_at: :desc)
+      |> Ash.Query.limit(@limit)
+      |> Ash.read!(scope: scope)
+      |> resolve_pii(Pet, scope)
+    end)
   end
 
   @doc "The pets belonging to `owner_id` (from this org's already-org-scoped, resolved roster)."
   @spec pets_for_owner(term(), binary()) :: [struct()]
-  def pets_for_owner(scope, owner_id) when is_binary(owner_id) do
-    scope |> pet_roster() |> Enum.filter(&(&1.owner_id == owner_id))
+  def pets_for_owner(scope, owner_id), do: scope |> pets_for_owner_result(owner_id) |> Guard.value([])
+
+  @doc "The tagged sibling of `pets_for_owner/2`: `{:ok, pets}` or `{:error, :unavailable | :forbidden}`."
+  @spec pets_for_owner_result(term(), term()) :: Guard.result([struct()])
+  def pets_for_owner_result(scope, owner_id) when is_binary(owner_id) do
+    with {:ok, pets} <- pet_roster_result(scope), do: {:ok, Enum.filter(pets, &(&1.owner_id == owner_id))}
   end
 
-  def pets_for_owner(_scope, _owner_id), do: []
+  def pets_for_owner_result(_scope, _owner_id), do: {:ok, []}
 
   # ---------------------------------------------------------------------------
   # Writes — the resources' REAL :create/:update actions on the tenant scope
@@ -146,11 +177,14 @@ defmodule PawChartWeb.ClinicReads do
   def create_owner(org_id, params) when is_binary(org_id) and is_map(params) do
     scope = tenant_scope(org_id)
 
-    Patient
-    |> Ash.Changeset.for_create(:create, owner_attrs(params, org_id), scope: scope)
-    |> Ash.create(scope: scope)
-  rescue
-    e -> {:error, e}
+    # WP6 phase 4: `Guard.write/3` — a raise or a RETURNED `Ash.Error.Unknown` is `{:error, :unavailable}`
+    # (reported by name), a real refusal (`Invalid`) passes through untouched, so the screen can tell a
+    # missing name from an outage.
+    Guard.write(:pawchart_create_owner, scope, fn ->
+      Patient
+      |> Ash.Changeset.for_create(:create, owner_attrs(params, org_id), scope: scope)
+      |> Ash.create(scope: scope)
+    end)
   end
 
   @doc """
@@ -163,25 +197,18 @@ defmodule PawChartWeb.ClinicReads do
   def update_owner(org_id, id, params) when is_binary(org_id) and is_binary(id) and is_map(params) do
     scope = tenant_scope(org_id)
 
-    case fetch(Patient, scope, id) do
-      nil ->
-        {:error, :not_found}
-
-      owner ->
-        # The form edits only the FIRST email/phone; merge it into the stored lists so the
-        # others are kept (F06). `existing` is the plane-resolved record.
-        existing =
-          case get_owner(scope, id) do
-            {:ok, resolved} -> resolved
-            _ -> %{}
-          end
-
+    # Both reads must SUCCEED before anything is written: the form edits only the FIRST email/phone and
+    # merges it into the stored lists (F06), so a failed read of the stored lists must never degrade into
+    # "no stored lists" (that would overwrite the owner's other emails/phones with just the one typed).
+    with {:ok, id} <- Guard.cast_id(id),
+         {:ok, owner} <- fetch_result(Patient, scope, id, :pawchart_fetch_owner),
+         {:ok, existing} <- get_owner_result(scope, id) do
+      Guard.write(:pawchart_update_owner, scope, fn ->
         owner
         |> Ash.Changeset.for_update(:update, owner_attrs(params, org_id, existing), scope: scope)
         |> Ash.update(scope: scope)
+      end)
     end
-  rescue
-    e -> {:error, e}
   end
 
   @doc """
@@ -192,11 +219,11 @@ defmodule PawChartWeb.ClinicReads do
   def create_pet(org_id, params) when is_binary(org_id) and is_map(params) do
     scope = tenant_scope(org_id)
 
-    Pet
-    |> Ash.Changeset.for_create(:create, pet_attrs(params, org_id), scope: scope)
-    |> Ash.create(scope: scope)
-  rescue
-    e -> {:error, e}
+    Guard.write(:pawchart_create_pet, scope, fn ->
+      Pet
+      |> Ash.Changeset.for_create(:create, pet_attrs(params, org_id), scope: scope)
+      |> Ash.create(scope: scope)
+    end)
   end
 
   @doc """
@@ -207,17 +234,14 @@ defmodule PawChartWeb.ClinicReads do
   def update_pet(org_id, id, params) when is_binary(org_id) and is_binary(id) and is_map(params) do
     scope = tenant_scope(org_id)
 
-    case fetch(Pet, scope, id) do
-      nil ->
-        {:error, :not_found}
-
-      pet ->
+    with {:ok, id} <- Guard.cast_id(id),
+         {:ok, pet} <- fetch_result(Pet, scope, id, :pawchart_fetch_pet) do
+      Guard.write(:pawchart_update_pet, scope, fn ->
         pet
         |> Ash.Changeset.for_update(:update, pet_attrs(params, org_id), scope: scope)
         |> Ash.update(scope: scope)
+      end)
     end
-  rescue
-    e -> {:error, e}
   end
 
   # ---------------------------------------------------------------------------
@@ -229,7 +253,11 @@ defmodule PawChartWeb.ClinicReads do
   defp resolve_pii(records, resource, scope) do
     Samen.Api.PiiResolution.resolve(records, resource, actor_of(scope), repo: PawChart.Repo)
   rescue
-    _ -> records
+    e ->
+      # Fail-CLOSED, not silent: the records stay masked, and the failure is reported by name and
+      # exception module (Guard.report/3) instead of vanishing.
+      Guard.report(:pawchart_resolve_pii, scope, e)
+      records
   end
 
   defp actor_of(%Samen.Scope{actor: actor}), do: actor
@@ -240,13 +268,18 @@ defmodule PawChartWeb.ClinicReads do
   # Attr builders + helpers (org-scoped fetch; blank normalization)
   # ---------------------------------------------------------------------------
 
-  defp fetch(resource, scope, id) do
-    resource
-    |> Ash.Query.filter(id == ^id)
-    |> Ash.Query.limit(1)
-    |> Ash.read_one!(scope: scope)
-  rescue
-    _ -> nil
+  # The raw org-scoped row for a write: `{:ok, row}`, `{:error, :not_found}` (also a cross-org id) or
+  # `{:error, :unavailable | :forbidden}` — an outage is never "not found".
+  defp fetch_result(resource, scope, id, name) do
+    with {:ok, row} <-
+           Guard.run(name, scope, fn ->
+             resource
+             |> Ash.Query.filter(id == ^id)
+             |> Ash.Query.limit(1)
+             |> Ash.read_one!(scope: scope)
+           end) do
+      Guard.first_or_not_found(List.wrap(row))
+    end
   end
 
   # `existing` is nil on create (the form value IS the list) and the plane-resolved patient on

@@ -35,6 +35,7 @@ defmodule Samen.Web.Marketing.CampaignsLive do
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
+  alias Samen.Web.Reads.Guard
   alias Samen.Web.Mount
 
   alias Samen.Web.Marketing.Reads
@@ -102,9 +103,12 @@ defmodule Samen.Web.Marketing.CampaignsLive do
   # `org_id` is the server-side fact, never client input. Campaign is non-PII; the
   # kernel's OrgScope + admin-role policies gate the write — this view adds no policy.
   def handle_event("save_new", %{"form" => params}, socket) do
-    case AshPhoenix.Form.submit(socket.assigns.new_form, params: with_org(params, socket)) do
+    case Guard.submit_form(:marketing_save_campaign, socket.assigns[:org_id], socket.assigns.new_form, with_org(params, socket)) do
       {:ok, _campaign} ->
         {:noreply, socket |> assign(show_new: false) |> load(socket.assigns.org_id)}
+
+      {:error, kind} when is_atom(kind) ->
+        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "save that campaign"))}
 
       {:error, form} ->
         {:noreply, assign(socket, new_form: form)}

@@ -64,6 +64,7 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
   import Samen.UI
 
   alias Driftwood.Reads
+  alias Samen.Web.Reads.Guard
 
   # H2/M1 — the framework impersonation GATE (authenticated principal + gate/3), replacing the
   # param-derived identity and the direct `Samen.Impersonation.scope/2` decision.
@@ -73,6 +74,8 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
   # per-second server tick (no JS — ADR-042 progressive enhancement). Only a connected
   # LiveView ticks; the first (static) mount and the render-only tests do not.
   @tick_ms 1000
+  # While the reveal-window lookup is failing, re-probe it this often (seconds) — not every tick.
+  @windows_retry_s 20
 
   @impl true
   def mount(params, session, socket) do
@@ -119,6 +122,12 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
         now = DateTime.utc_now()
         scope = OperatorGate.read_scope(actor)
 
+        # Each pane reads through its tagged `_result` and fails ALONE: a failed roster is an error state
+        # in the roster pane (the load board still renders), never "0 drivers".
+        {drivers, drivers_error} = Guard.pane(Reads.driver_roster_result(scope), [])
+        {loads, loads_error} = Guard.pane(Reads.load_board_result(scope), [])
+        {windows, windows_error} = windows(operator_id, now)
+
         assign(socket,
           impersonating: true,
           session_inactive: false,
@@ -128,11 +137,15 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
           org_id: org_id,
           org_name: org_name(org_id),
           open_error: nil,
-          drivers: Reads.driver_roster(scope),
-          loads: Reads.load_board(scope),
+          drivers: drivers,
+          drivers_error: drivers_error,
+          loads: loads,
+          loads_error: loads_error,
           revealed: %{},
           now: now,
-          reveal_windows: reveal_windows(operator_id, now),
+          reveal_windows: windows,
+          reveal_windows_error: windows_error,
+          windows_retry_at: windows_retry_at(windows_error, now),
           request_notice: socket.assigns[:request_notice],
           session_info: info
         )
@@ -163,10 +176,14 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
       org_name: org_name(org_id),
       open_error: nil,
       drivers: [],
+      drivers_error: nil,
       loads: [],
+      loads_error: nil,
       revealed: %{},
       now: DateTime.utc_now(),
       reveal_windows: [],
+      reveal_windows_error: nil,
+      windows_retry_at: nil,
       request_notice: socket.assigns[:request_notice],
       session_info: nil
     )
@@ -176,25 +193,37 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
   # directory), so the console names WHOSE house the operator is in rather than showing a
   # raw UUID. Fail-safe: an unresolvable id renders as itself.
   defp org_name(org_id) when is_binary(org_id) do
-    case List.keyfind(Driftwood.Directory.orgs(), org_id, 0) do
-      {_id, name} when is_binary(name) and name != "" -> name
+    # A failed directory read is reported by name (Guard.run) and the header shows the id it was given —
+    # never a name it could not look up.
+    with {:ok, orgs} <- Guard.run(:driftwood_org_name, nil, fn -> Driftwood.Directory.orgs() end),
+         {_id, name} when is_binary(name) and name != "" <- List.keyfind(orgs, org_id, 0) do
+      name
+    else
       _ -> org_id
     end
-  rescue
-    _ -> org_id
   end
 
   defp org_name(org_id), do: org_id
 
   # The ACTIVE reveal windows this operator holds — who approved, until when. Read-only
   # accountability projection over `Samen.Reveal.Grants` (does NOT change the reveal gate).
-  defp reveal_windows(operator_id, now) when is_binary(operator_id) do
-    Samen.Reveal.Grants.active_windows(operator_id, repo: Driftwood.Repo, now: now)
-  rescue
-    _ -> []
+  #
+  # `{windows, error}`: a failed lookup is NOT "no window is open" — the banner would then be absent while
+  # a grant may be live. The failure is reported by name and the console says the windows are unknown.
+  defp windows(operator_id, now) when is_binary(operator_id) do
+    case Guard.run(:driftwood_reveal_windows, nil, fn ->
+           Samen.Reveal.Grants.active_windows(operator_id, repo: Driftwood.Repo, now: now)
+         end) do
+      {:ok, list} -> {list, nil}
+      {:error, kind} -> {[], kind}
+    end
   end
 
-  defp reveal_windows(_operator_id, _now), do: []
+  defp windows(_operator_id, _now), do: {[], nil}
+
+  # When an "unknown" window state may be probed again: `nil` once the windows are known.
+  defp windows_retry_at(nil, _now), do: nil
+  defp windows_retry_at(_error, now), do: DateTime.add(now, @windows_retry_s, :second)
 
   defp schedule_tick, do: Process.send_after(self(), :tick, @tick_ms)
 
@@ -249,12 +278,12 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
             </.nav_group>
 
             <.nav_group label="Viewing as tenant">
-              <.nav_item label="Loads" count={length(@loads)}>
+              <.nav_item label="Loads" count={if @loads_error, do: nil, else: length(@loads)}>
                 <:icon>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h13l5 5v5H3z" /><circle cx="7.5" cy="17.5" r="1.5" /><circle cx="17.5" cy="17.5" r="1.5" /></svg>
                 </:icon>
               </.nav_item>
-              <.nav_item label="Drivers" active count={length(@drivers)}>
+              <.nav_item label="Drivers" active count={if @drivers_error, do: nil, else: length(@drivers)}>
                 <:icon>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.2" /><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6" /></svg>
                 </:icon>
@@ -291,13 +320,11 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
 
         <%= if @session_inactive and @gate_unavailable do %>
           <div class="wrap" id="gate-unavailable">
-            <div class="card error-state" role="alert" style="padding:22px 20px">
-              <div style="color:var(--red);font-weight:600">We couldn't check access right now.</div>
-              <p style="color:var(--muted);margin:10px 0 14px;font-size:13px">
-                Nothing was opened and nothing is shown. Nothing was lost — try again.
-              </p>
-              <button type="button" class="btn" phx-click="retry_gate">Try again</button>
-            </div>
+            <.error_state
+              title="We couldn't check access right now."
+              body="Nothing was opened and nothing is shown. Nothing was lost — try again."
+              retry_event="retry_gate"
+            />
           </div>
         <% end %>
         <%= if @session_inactive and not @gate_unavailable do %>
@@ -357,6 +384,12 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
             </ul>
           </div>
 
+          <div :if={@reveal_windows_error} id="reveal-windows-unknown" role="alert" class="reveal-windows-unknown"
+               style="margin:0 20px 14px;padding:12px 16px;border:1px solid #C9A227;border-radius:10px;background:#FFF8E1;color:#6B5200">
+            We couldn't check whether a reveal window is open right now, so none is shown.
+            <button type="button" class="btn" phx-click="retry_gate">Try again</button>
+          </div>
+
     <%!-- T149 B5: the outcome of a "Request reveal" — the REQUEST side of the existing
           reveal-grant lifecycle. It grants nothing; a DISTINCT second party must approve. --%>
           <div :if={@request_notice} id="reveal-request-notice" class="reveal-request-open"
@@ -366,11 +399,12 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
 
           <div class="wrap">
             <div class="gtitle">
-              <h3>Driver roster</h3><span class="n">{length(@drivers)}</span>
+              <h3>Driver roster</h3><span :if={is_nil(@drivers_error)} class="n">{length(@drivers)}</span>
               <span class="lane">· real tenant data, personal fields render ••••</span>
             </div>
 
-            <.data_table>
+            <.read_error :if={@drivers_error} kind={@drivers_error} body={Guard.message(@drivers_error)} retry="retry_gate" />
+            <.data_table :if={is_nil(@drivers_error)}>
               <:head>
                 <th style="width:26%">Driver</th>
                 <th style="width:16%">CDL #</th>
@@ -431,11 +465,12 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
             </.data_table>
 
             <div class="gtitle">
-              <h3>Load board</h3><span class="n">{length(@loads)}</span>
+              <h3>Load board</h3><span :if={is_nil(@loads_error)} class="n">{length(@loads)}</span>
               <span class="lane">· non-PII operational data</span>
             </div>
 
-            <.data_table>
+            <.read_error :if={@loads_error} kind={@loads_error} body={Guard.message(@loads_error)} retry="retry_gate" />
+            <.data_table :if={is_nil(@loads_error)}>
               <:head>
                 <th style="width:40%">Load</th>
                 <th style="width:24%">Lane</th>
@@ -478,7 +513,7 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
   def handle_event("open_session", %{"reason" => reason}, socket) do
     org_id = socket.assigns[:org_id]
 
-    case OperatorGate.open_from_socket(socket, org_id, reason) do
+    case Guard.write(:driftwood_open_session, nil, fn -> OperatorGate.open_from_socket(socket, org_id, reason) end) do
       {:ok, _session} ->
         {:noreply, load(socket, socket.assigns[:samen_operator_id], org_id)}
 
@@ -522,18 +557,29 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
     # in ANOTHER org could unmask it from a session opened over a DIFFERENT tenant — a reveal
     # executing outside the session that is supposed to frame it. The second-party grant gate
     # still applies downstream; this re-asserts the session/org scope on top of it.
-    if socket.assigns[:impersonating] and driver_in_scope?(socket, driver_id) do
-      case Driftwood.OperatorReveal.reveal_cdl(socket.assigns.operator_id, driver_id) do
-        {:ok, plaintext} ->
-          revealed = Map.put(socket.assigns.revealed, cast_id(socket, driver_id), plaintext)
-          {:noreply, assign(socket, revealed: revealed)}
+    cond do
+      # Fail CLOSED while the reveal windows are unknown: the console cannot show whether a grant is live, so a value
+      # revealed now would outlive an "unknown" state the banner cannot account for.
+      socket.assigns[:reveal_windows_error] != nil ->
+        {:noreply, put_flash(socket, :error, "Reveal windows are unknown right now. Nothing was revealed — try again once they load.")}
 
-        {:error, _reason} ->
-          {:noreply, put_flash(socket, :error, "reveal denied — no active second-party grant")}
-      end
-    else
-      {:noreply,
-       put_flash(socket, :error, "reveal denied — subject is not in this impersonation session's scope")}
+      socket.assigns[:impersonating] and driver_in_scope?(socket, driver_id) ->
+        case Driftwood.OperatorReveal.reveal_cdl(socket.assigns.operator_id, driver_id) do
+          {:ok, plaintext} ->
+            revealed = Map.put(socket.assigns.revealed, cast_id(socket, driver_id), plaintext)
+            {:noreply, assign(socket, revealed: revealed)}
+
+          # An outage is not a denial: fail CLOSED (nothing revealed) but say it was a failed check.
+          {:error, :unavailable} ->
+            {:noreply, put_flash(socket, :error, "Couldn't check the reveal grant right now. Nothing was revealed — try again.")}
+
+          {:error, _reason} ->
+            {:noreply, put_flash(socket, :error, "reveal denied — no active second-party grant")}
+        end
+
+      true ->
+        {:noreply,
+         put_flash(socket, :error, "reveal denied — subject is not in this impersonation session's scope")}
     end
   end
 
@@ -553,6 +599,9 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
 
       {:error, {:pii_shaped_reason, _}} ->
         {:noreply, assign(socket, request_notice: "The reveal reason must name the ticket, not the person.")}
+
+      {:error, :unavailable} ->
+        {:noreply, assign(socket, request_notice: "Couldn't file the reveal request right now. Nothing was requested — try again.")}
 
       {:error, _reason} ->
         {:noreply, assign(socket, request_notice: "Could not open a reveal request.")}
@@ -579,6 +628,7 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
   defp open_error_copy(:not_authorized), do: "Your operator role may not open an impersonation session."
   defp open_error_copy(:out_of_scope), do: "This account is not in your operator scope."
   defp open_error_copy({:pii_shaped_reason, _}), do: "The reason must name the ticket, not the person."
+  defp open_error_copy(:unavailable), do: "Couldn't open the session right now. Nothing was opened — try again."
   defp open_error_copy(_), do: "The impersonation session could not be opened."
 
   defp cast_id(socket, driver_id) do
@@ -610,17 +660,47 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
     case OperatorGate.gate_socket(socket, operator_id, org_id) do
       {:ok, _actor, _info} ->
         now = DateTime.utc_now()
-        windows = reveal_windows(operator_id, now)
 
-        if length(windows) < length(socket.assigns.reveal_windows) do
-          # A window just expired — full reload re-masks the roster + drops stale reveals.
-          load(socket, operator_id, org_id)
+        if probe_windows?(socket, now) do
+          reprobe(socket, operator_id, org_id, now)
         else
-          assign(socket, now: now, reveal_windows: windows)
+          # Windows unknown and the backoff has not elapsed: advance the clock only. No read, no log.
+          assign(socket, now: now)
         end
 
       _denied ->
         load(socket, operator_id, org_id)
+    end
+  end
+
+  # An unknown window state is re-probed on a backoff (`windows_retry_at`), not every tick: during an outage
+  # the lookup would otherwise log and emit telemetry once a second per open console.
+  defp probe_windows?(socket, now) do
+    case {socket.assigns[:reveal_windows_error], socket.assigns[:windows_retry_at]} do
+      {nil, _} -> true
+      {_, %DateTime{} = at} -> DateTime.compare(now, at) != :lt
+      {_, _} -> true
+    end
+  end
+
+  defp reprobe(socket, operator_id, org_id, now) do
+    {windows, windows_error} = windows(operator_id, now)
+    already_unknown? = socket.assigns[:reveal_windows_error] != nil
+
+    cond do
+      # Still unable to read the windows: keep the "unknown" notice, advance the clock, schedule the next probe;
+      # do not reload the whole console (and re-log) for the length of the outage.
+      windows_error != nil and already_unknown? ->
+        assign(socket, now: now, windows_retry_at: windows_retry_at(windows_error, now))
+
+      # A window lookup that has just FAILED (or has just recovered) reloads once, fail CLOSED: the reload
+      # re-resolves the roster on the impersonation scope and drops every revealed value, so none can linger on
+      # a console that cannot see its windows; a window that just expired re-masks the roster the same way.
+      windows_error != nil or already_unknown? or length(windows) < length(socket.assigns.reveal_windows) ->
+        load(socket, operator_id, org_id)
+
+      true ->
+        assign(socket, now: now, reveal_windows: windows)
     end
   end
 

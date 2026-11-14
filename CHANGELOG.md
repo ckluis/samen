@@ -138,6 +138,44 @@ directory and diff, or apply by hand:
   `desk_metrics_status`, `AnalyticsReads.analytics_status`, `RevenueReads.revenue_status`; `DeliverabilityReads.deliverability/4`
   and `ActivityReads.activity/3` return an extra `:failed` key. **Host action:** none. The swallow ratchet baseline fell from
   107 to 33 clauses (the remaining rows are driftwood/pawchart, phase 4). Sabotages 671-673 (plus 07 and 236 re-anchored).
+- **Honest reads, phase 4 (the vertical host apps; the swallow baseline is now empty).** Driftwood and PawChart no longer render
+  an outage as an empty list or "not found". `Driftwood.Reads` and `PawChartWeb.ClinicReads` gain tagged `*_result` siblings
+  (rosters, load board, settlements, `get_driver/settlement/load/owner`, `pets_for_owner`) over `Guard.run`, with the id cast
+  first (a malformed id is not-found, no error log); the legacy functions keep their shapes. The broker console (dashboard
+  rollup, loads, drivers, settlements), the clinic surface (patients, pets, patient detail) and both operator impersonation
+  consoles render the kit error state with a retry, one pane at a time, and never "No loads yet" / "No patients yet." with its
+  create CTA for a read that did not happen; a failed owner list also stops the pet form opening (it would save an ownerless
+  pet) and shows the pet's owner as unavailable, not "—". Writes tell the user: a load/driver/settlement/patient/pet save,
+  delete or reveal request that fails is outage copy (`Guard.write`), never "a load reference is required" / "a first and
+  last name are required" / "reveal denied"; a form submit whose changeset carries only an `Ash.Error.Unknown` is the same
+  outage. Gates fail closed and say so: a reveal whose grant lookup raises is "couldn't check the reveal grant" (nothing
+  revealed), a failed reveal-window lookup shows "unknown" (and reloads once, so a revealed value cannot linger) instead of
+  silently hiding the open-window banner, the landing controller answers 503 instead of sending a tenant to the operator
+  console when the session read OR the User/Membership read fails (`Samen.Auth.OrgActor.authorized_org_ids_result/2` and
+  `resolve_result/3` return `{:error, :unavailable}`; the legacy functions keep their shape, still fail closed, and now log the
+  failure by name and exception module), the "no org / run the seed command" card renders the error state when the org
+  directory read FAILED rather than was empty (`CurrentOrg.list_orgs_result/1`), a failed org-name lookup shows the id and is reported, and a failed API-key /
+  MCP-key lookup is reported by name while still setting no actor. `Driftwood.Directory` and `PawChart.Auth` now let a failing
+  read raise: the framework (`CurrentOrg.list_orgs/1`, `authorized_orgs/2`) already catches it, denies and reports it by name.
+  **Bugs fixed along the way:** the broker "Edit load" button crashed (it read a `__lane__` the raw row never had);
+  `ClinicReads.update_owner/3` treated a failed read of the stored emails/phones as "none stored" and would have overwritten
+  them; `PawChart.OperatorSeeds` / `Driftwood.OperatorSeeds` probes answered `true`/`false` on a failed read (skipping or
+  repeating a step and still reporting success), the operator-org create fell back to a fresh-id create that the next probe
+  could not find (a duplicate org per re-run), and a half-seeded operator org (accounts missing, desk agent gone) reported
+  success. A failed seed probe or step is now a failed seed (non-zero exit), and the operator seed units are atomic: the Driftwood
+  fresh path and each account it adds on a re-run are one transaction each (the account `Org` row is the "seeded" marker, so it commits
+  only with the admin, billing and tickets it vouches for), the leads converge on a re-run, and the PawChart operator seed is one
+  transaction (an interrupted run was a permanent half-seed that reported `:ok`); a seed interrupted BEFORE this change still needs a
+  database reset (the loud "interrupted" error stays). `mix driftwood.seed` stays re-runnable (verified twice against the dev database);
+  `mix pawchart.seed` does not call `PawChart.OperatorSeeds` (it seeds the tenant only), which was exercised directly. Also: a reveal-window outage is re-probed every 20 s instead of logging once a second per open console, and a reveal is refused while the
+  windows are unknown; a suspension-table outage on a reveal is outage copy (still denied), not "no active second-party grant"
+  (`Suspension.status/2`); every framework form submit (20 of them) and the broker console's go through `Guard.submit_form/4`, so an
+  outage is "couldn't save — nothing was saved", a denial is denial copy and validation errors are unchanged; `Guard.pane/2`,
+  `error_body/1`, `retry_event/2`, `write_copy/2`, `cast_id/1`, `first_or_not_found/1` and the `<.read_error>` component replace the
+  per-vertical copies. **Host action:** none. The swallow ratchet baseline fell from 33 to 0 (the map and
+  the shrink-only ratchet stay; nothing may be added back). Sabotages 678-681 (151, 172, 181, 182 regenerated onto the converted
+  reads; 666 names the non-vacuity test, since the baseline-equality test cannot flip on an empty baseline) and 682-692 (the live ratchet's
+  positive control; the landing 503, no-org error card, reveal-window backoff and refusal, suspension copy, seed atomicity and the form-submit classification).
 
 ### Security and correctness fixes
 

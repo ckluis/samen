@@ -1,0 +1,20 @@
+# SABOTAGE: The PawChart operator seed stops being one transaction, so an interrupted run leaves the 
+#   operator org marker without its accounts.
+#
+# Flips the named test(s).
+# APP: pawchart
+# TEST_FILES: test/reads_honest_failure_p4_test.exs
+# MUST_FAIL: a seed that fails on its LAST step leaves nothing behind
+diff --git a/pawchart/lib/pawchart/operator_seeds.ex b/pawchart/lib/pawchart/operator_seeds.ex
+index f5a34979..e45ed927 100644
+--- a/pawchart/lib/pawchart/operator_seeds.ex
++++ b/pawchart/lib/pawchart/operator_seeds.ex
+@@ -58,7 +58,7 @@ defmodule PawChart.OperatorSeeds do
+ 
+     try do
+       {:ok, :ok} =
+-        PawChart.Repo.transaction(fn ->
++        (fn f -> {:ok, f.()} end).(fn ->
+           fun.()
+           :ok
+         end)

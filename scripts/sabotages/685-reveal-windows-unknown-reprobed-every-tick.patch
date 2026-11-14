@@ -1,0 +1,20 @@
+# SABOTAGE: An unknown reveal-window state is re-read on every tick instead of on a backoff, so an outage 
+#   logs once a second per open console.
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/reads_honest_failure_p4_test.exs
+# MUST_FAIL: tick: a first failure reloads once
+diff --git a/driftwood/lib/driftwood_web/operator_impersonation_live.ex b/driftwood/lib/driftwood_web/operator_impersonation_live.ex
+index f5e27e50..a115fb00 100644
+--- a/driftwood/lib/driftwood_web/operator_impersonation_live.ex
++++ b/driftwood/lib/driftwood_web/operator_impersonation_live.ex
+@@ -678,7 +678,7 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
+   defp probe_windows?(socket, now) do
+     case {socket.assigns[:reveal_windows_error], socket.assigns[:windows_retry_at]} do
+       {nil, _} -> true
+-      {_, %DateTime{} = at} -> DateTime.compare(now, at) != :lt
++      {_, %DateTime{}} -> true
+       {_, _} -> true
+     end
+   end

@@ -11,7 +11,8 @@ defmodule PawChart.Directory do
   `org_directory: {PawChart.Directory, :orgs, []}` label in `PawChartWeb.Router`.
 
   Non-PII: `Org` carries only name/slug/plan (no vault fields), so this is a trusted framework
-  read of the operator org's own grouping rows. Fail-safe: any error → `[]` (the switcher hides).
+  read of the operator org's own grouping rows. A failing read RAISES: the framework (`Samen.Web.CurrentOrg.list_orgs/1`) hides the switcher and reports the
+  failure by name and exception module, and the operator console's name lookup reports it and shows the id.
   """
   require Ash.Query
 
@@ -33,7 +34,5 @@ defmodule PawChart.Directory do
         _ -> []
       end
     end)
-  rescue
-    _ -> []
   end
 end

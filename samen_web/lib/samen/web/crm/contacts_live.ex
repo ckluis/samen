@@ -45,6 +45,7 @@ defmodule Samen.Web.CRM.ContactsLive do
   import Samen.Web.ObjectRef.FieldValue, only: [opaque: 1]
 
   alias Samen.Web.CRM.Reads
+  alias Samen.Web.Reads.Guard
   alias Samen.Web.CurrentOrg
   alias Samen.Web.FirstRun
   alias Samen.Web.Mount
@@ -133,7 +134,7 @@ defmodule Samen.Web.CRM.ContactsLive do
     # `first_run.completed` alongside `record.created`. Best-effort — never affects the write.
     was_first_run? = FirstRun.first_run?(mount, org_id)
 
-    case AshPhoenix.Form.submit(socket.assigns.new_form, params: with_org(params, socket)) do
+    case Guard.submit_form(:crm_save_contact, socket.assigns[:org_id], socket.assigns.new_form, with_org(params, socket)) do
       {:ok, person} ->
         FirstRun.emit_record_created(mount, org_id, was_first_run?,
           resource: Person,
@@ -141,6 +142,9 @@ defmodule Samen.Web.CRM.ContactsLive do
         )
 
         {:noreply, socket |> assign(show_new: false) |> load(socket.assigns.org_id)}
+
+      {:error, kind} when is_atom(kind) ->
+        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "save that contact"))}
 
       {:error, form} ->
         {:noreply, assign(socket, new_form: form)}

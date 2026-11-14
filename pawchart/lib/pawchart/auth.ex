@@ -75,8 +75,9 @@ defmodule PawChart.Auth do
   `PawChart.Operator` (the identity spine `samen_auth_routes`/`samen_settings_routes` mount): every
   org the user holds a membership in. Read unscoped (`authorize?: false`) BY DESIGN — this function
   IS the authorization boundary that decides which orgs the principal may act on, exactly as
-  `Samen.Auth.OrgActor.authorized_org_ids/2` reads the spine directly. Unknown user / error → `[]`
-  (deny — fail closed).
+  `Samen.Auth.OrgActor.authorized_org_ids/2` reads the spine directly. Unknown user → `[]` (deny — fail closed). A read that FAILS raises: the framework
+  (`Samen.Web.CurrentOrg.authorized_orgs/2`) catches it, denies (no authorized orgs) and reports it by name
+  (`current_org_authorized_orgs`) — it does not read as "this user has no orgs" inside this function.
   """
   @spec authorized_org_ids(String.t() | nil) :: [String.t()]
   def authorized_org_ids(user_id) when is_binary(user_id) do
@@ -89,8 +90,6 @@ defmodule PawChart.Auth do
     |> Enum.map(& &1.org_id)
     |> Enum.filter(&is_binary/1)
     |> Enum.uniq()
-  rescue
-    _ -> []
   end
 
   def authorized_org_ids(_user_id), do: []

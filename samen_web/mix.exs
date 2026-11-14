@@ -29,6 +29,8 @@ defmodule SamenWeb.MixProject do
       version: "0.1.0",
       elixir: ">= 1.20.4",
       elixirc_paths: elixirc_paths(Mix.env()),
+      # test/fixtures/*.ex are DATA for tests (the swallow lint's positive control), never loaded or compiled.
+      test_ignore_filters: [~r{test/fixtures/}],
       consolidate_protocols: Mix.env() != :test,
       # Issue #96 D3: consolidates Ash.Signals listeners once per build, like protocols, so an
       # emit never searches the code path for them (`Mix.Tasks.Compile.AshSignals`).

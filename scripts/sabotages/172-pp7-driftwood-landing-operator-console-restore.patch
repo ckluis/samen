@@ -12,13 +12,13 @@
 # TEST_FILES: test/page_controller_test.exs
 # MUST_FAIL: GREEN: a fresh tenant (a real per-org User/Membership) lands on their own workspace
 diff --git a/driftwood/lib/driftwood_web/page_controller.ex b/driftwood/lib/driftwood_web/page_controller.ex
-index 741b55d..cfb22da 100644
+index 48dc381e..cfb22dae 100644
 --- a/driftwood/lib/driftwood_web/page_controller.ex
 +++ b/driftwood/lib/driftwood_web/page_controller.ex
 @@ -2,25 +2,9 @@ defmodule DriftwoodWeb.PageController do
    @moduledoc """
    The Driftwood landing + health endpoints.
-
+ 
 -  `/` routes a TENANT to their OWN workspace (`/broker?org=<their org>`); anyone else
 -  (an operator, or an anonymous visitor) still lands on the operator dashboard
 -  (`/operator/accounts`, ADR-013 §3 — zero params typed, sees all tenant accounts).
@@ -44,17 +44,21 @@ index 741b55d..cfb22da 100644
    `/healthz` returns `ok` (the LIVENESS probe the boot check curls). `/readyz` is the
    READINESS probe (WS-F1 / F1.2) — 200 only when Postgres, the KMS wrapped-DEK store, and
    Oban all answer (`Samen.Web.Readiness`), else 503; the deploy traffic gate rides it.
-@@ -29,40 +13,8 @@ defmodule DriftwoodWeb.PageController do
-
+@@ -29,63 +13,8 @@ defmodule DriftwoodWeb.PageController do
+ 
    import Plug.Conn
-
+ 
 -  alias Samen.Auth.OrgActor
 -  alias Samen.Web.Auth, as: WebAuth
+-  alias Samen.Web.Reads.Guard
 -
    def index(conn, _params) do
 -    case tenant_landing(conn) do
 -      {:ok, path} -> redirect(conn, to: path)
 -      :none -> redirect(conn, to: "/operator/accounts")
+-      # The membership lookup FAILED (outage): neither "you are a tenant" nor "you have no tenant" is known,
+-      # so a tenant must not be sent to the operator console as if they had no org. Honest 503, value-free.
+-      :unavailable -> send_resp(conn, 503, "We couldn't check your workspace right now. Try again in a moment.")
 -    end
 -  end
 -
@@ -63,26 +67,45 @@ index 741b55d..cfb22da 100644
 -  # one org is a tenant; their landing is that org's freight console. Anything else (no
 -  # session, an unresolvable/expired token, or a resolved principal with NO Membership
 -  # anywhere — the operator's own principal never has one under this namespace) → `:none`,
--  # preserving the pre-existing operator-console landing exactly. Never raises: an unreadable
--  # session or a DB hiccup degrades to `:none`, the SAME safe fallback as no session at all.
+-  # preserving the pre-existing operator-console landing exactly. Never raises: a lookup that FAILS — the
+-  # session read (`resolve_principal` raising) OR the User/Membership read (`authorized_org_ids_result/2`
+-  # answering `{:error, :unavailable}`) — is `:unavailable`, reported by name, and is not "no session" /
+-  # "no tenant". (A principal that resolves cleanly to a "no session" answer stays `:none`.)
 -  defp tenant_landing(conn) do
 -    conn = fetch_session(conn)
 -    session = get_session(conn)
 -
--    with {:ok, %{credential_id: credential_id}} <-
--           WebAuth.resolve_principal(session, %{session: Driftwood.Operator.Session}),
--         [org_id | _] <-
--           OrgActor.authorized_org_ids(
--             %{user: Driftwood.Operator.User, membership: Driftwood.Operator.Membership},
--             credential_id
--           ) do
--      {:ok, "/broker?org=#{org_id}"}
--    else
--      _ -> :none
+-    lookup =
+-      Guard.run(:driftwood_tenant_landing, nil, fn ->
+-        with {:ok, %{credential_id: credential_id}} <-
+-               WebAuth.resolve_principal(session, %{session: Driftwood.Operator.Session}) do
+-          mods = %{user: Driftwood.Operator.User, membership: Driftwood.Operator.Membership}
+-
+-          case OrgActor.authorized_org_ids_result(mods, credential_id) do
+-            {:ok, [org_id | _]} -> {:ok, "/broker?org=#{org_id}"}
+-            {:ok, []} -> :none
+-            {:error, :unavailable} -> :unavailable
+-          end
+-        else
+-          _ -> :none
+-        end
+-      end)
+-
+-    case lookup do
+-      {:ok, {:ok, path}} ->
+-        {:ok, path}
+-
+-      {:ok, :none} ->
+-        :none
+-
+-      {:ok, :unavailable} ->
+-        Guard.report(:driftwood_tenant_landing, nil, :unavailable)
+-        :unavailable
+-
+-      {:error, _kind} ->
+-        :unavailable
 -    end
--  rescue
--    _ -> :none
 +    redirect(conn, to: "/operator/accounts")
    end
-
+ 
    def healthz(conn, _params) do

@@ -41,8 +41,6 @@ defmodule DriftwoodWeb.BrokerLive do
   """
   use Phoenix.LiveView
 
-  require Ash.Query
-
   # ADR-009 — the component kit is now framework-level (`Samen.UI`), not driftwood-local.
   import Samen.UI
 
@@ -54,6 +52,7 @@ defmodule DriftwoodWeb.BrokerLive do
   import Samen.Web.CRM.Live, only: [full_name_field: 1]
 
   alias Driftwood.{BrokerRollup, Reads}
+  alias Samen.Web.Reads.Guard
 
   @impl true
   def mount(params, session, socket) do
@@ -112,9 +111,13 @@ defmodule DriftwoodWeb.BrokerLive do
     assign(socket,
       no_org: true,
       summary: nil,
+      summary_error: nil,
       loads: [],
+      loads_error: nil,
       drivers: [],
-      settlements: []
+      drivers_error: nil,
+      settlements: [],
+      settlements_error: nil
     )
   end
 
@@ -122,13 +125,41 @@ defmodule DriftwoodWeb.BrokerLive do
     scope = broker_scope(org_id)
     filter = Map.get(socket.assigns, :load_filter) || %{}
 
+    # Each pane reads through its tagged `_result`: a failed read is `*_error` (the kit error state with
+    # a retry), never an empty roster / board / settlement list. Only the active panel is read.
+    {summary, summary_error} = pane(panel == "dashboard", nil, fn -> summary_result(org_id, scope) end)
+    {loads, loads_error} = pane(panel == "loads", [], fn -> Reads.load_board_result(scope, filter) end)
+    {drivers, drivers_error} = pane(panel == "roster", [], fn -> Reads.driver_roster_result(scope) end)
+
+    {settlements, settlements_error} =
+      pane(panel == "settlements", [], fn -> Reads.settlements_result(scope) end)
+
     assign(socket,
       no_org: false,
-      summary: (if panel == "dashboard", do: BrokerRollup.summary(org_id), else: nil),
-      loads: (if panel == "loads", do: Reads.load_board(scope, filter), else: []),
-      drivers: (if panel == "roster", do: Reads.driver_roster(scope), else: []),
-      settlements: (if panel == "settlements", do: Reads.settlements(scope), else: [])
+      summary: summary,
+      summary_error: summary_error,
+      loads: loads,
+      loads_error: loads_error,
+      drivers: drivers,
+      drivers_error: drivers_error,
+      settlements: settlements,
+      settlements_error: settlements_error
     )
+  end
+
+  # `{value, error}` for one pane: the inactive panel is not read at all (`default`, no error); an active
+  # one is `{value, nil}` or `{default, :unavailable | :forbidden}`.
+  defp pane(false, default, _fun), do: {default, nil}
+
+  defp pane(true, default, fun), do: Guard.pane(fun.(), default)
+
+  # The dashboard rollup (`dbs_broker_summary`) through the same convention. A malformed org id (a
+  # dogfood `?org=` param) is cast first: it is "no rollup", never an error log.
+  defp summary_result(org_id, scope) do
+    case Ecto.UUID.cast(org_id) do
+      {:ok, uuid} -> Guard.run(:driftwood_broker_summary, scope, fn -> BrokerRollup.summary(uuid) end)
+      :error -> {:ok, nil}
+    end
   end
 
   # A tenant-member scope for the broker over their own org.
@@ -271,6 +302,10 @@ defmodule DriftwoodWeb.BrokerLive do
       |> Map.put_new(:edit_settlement_id, nil)
       |> Map.put_new(:edit_settlement_form, nil)
       |> Map.put_new(:settlement_error, nil)
+      |> Map.put_new(:summary_error, nil)
+      |> Map.put_new(:loads_error, nil)
+      |> Map.put_new(:drivers_error, nil)
+      |> Map.put_new(:settlements_error, nil)
 
     ~H"""
     <div id="broker-console">
@@ -384,7 +419,10 @@ defmodule DriftwoodWeb.BrokerLive do
 
           <%= if @panel == "dashboard" do %>
             {dashboard_metrics(assigns)}
-            <div class="wrap">
+            <div class="wrap" :if={@summary_error}>
+              <.read_error kind={@summary_error} retry="retry_panel" />
+            </div>
+            <div class="wrap" :if={is_nil(@summary_error)}>
               <div id="dashboard">
                 <div class="gtitle">
                   <h3>Loads by status</h3>
@@ -456,7 +494,7 @@ defmodule DriftwoodWeb.BrokerLive do
                 </form>
 
                 <div class="gtitle">
-                  <h3>Active loads</h3><span class="n" id="load-count">{length(@loads)}</span>
+                  <h3>Active loads</h3><span :if={is_nil(@loads_error)} class="n" id="load-count">{length(@loads)}</span>
                   <span class="lane">· your org — driver names in the clear</span>
                 </div>
                 <%!-- T148: a real empty state for a new/empty org (mirrors the framework CRM /
@@ -465,6 +503,8 @@ defmodule DriftwoodWeb.BrokerLive do
                       fabricated rows, and never conflated with the true zero-loads onboarding
                       state (the filter-empty state offers "clear filter", not "create a load"). --%>
                 <%= cond do %>
+                  <% @loads_error -> %>
+                    <.read_error kind={@loads_error} retry="retry_panel" />
                   <% @loads == [] and load_filter_active?(@load_filter) -> %>
                     <.empty_state
                       title="No loads match this filter"
@@ -522,10 +562,11 @@ defmodule DriftwoodWeb.BrokerLive do
                   {@driver_error}
                 </div>
                 <div class="gtitle">
-                  <h3>Driver roster</h3><span class="n">{length(@drivers)}</span>
+                  <h3>Driver roster</h3><span :if={is_nil(@drivers_error)} class="n">{length(@drivers)}</span>
                   <span class="lane">· your org — driver names in the clear</span>
                 </div>
-                <.data_table>
+                <.read_error :if={@drivers_error} id="drivers-error" kind={@drivers_error} retry="retry_panel" />
+                <.data_table :if={is_nil(@drivers_error)}>
                   <:head>
                     <th style="width:20%">Driver</th>
                     <th style="width:12%">CDL #</th>
@@ -582,10 +623,11 @@ defmodule DriftwoodWeb.BrokerLive do
                 <div class="split">
                   <div>
                     <div class="gtitle">
-                      <h3>Settlements</h3><span class="n">{length(@settlements)}</span>
+                      <h3>Settlements</h3><span :if={is_nil(@settlements_error)} class="n">{length(@settlements)}</span>
                       <span class="lane">· reshaped: linehaul − advances − factoring − claims</span>
                     </div>
-                    <div id="settlement-table">
+                    <.read_error :if={@settlements_error} id="settlements-error" kind={@settlements_error} retry="retry_panel" />
+                    <div :if={is_nil(@settlements_error)} id="settlement-table">
                       <.data_table>
                         <:head>
                           <th>Linehaul</th>
@@ -760,22 +802,22 @@ defmodule DriftwoodWeb.BrokerLive do
   defp dashboard_metrics(assigns) do
     ~H"""
     <div class="metrics">
-      <.metric label="Loads (rolled up)" value={dashboard_load_count(@summary)}>
+      <.metric label="Loads (rolled up)" value={dashboard_load_count(@summary)} error={@summary_error != nil}>
         <:icon>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h13l5 5v5H3z" /></svg>
         </:icon>
       </.metric>
-      <.metric label="Load statuses" value={length((@summary && @summary.by_status) || [])} sub="distinct status buckets">
+      <.metric label="Load statuses" value={length((@summary && @summary.by_status) || [])} sub="distinct status buckets" error={@summary_error != nil}>
         <:icon>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3a9 9 0 1 0 9 9" /><path d="M12 7v5l3 2" /></svg>
         </:icon>
       </.metric>
-      <.metric label="Gross (rolled up)" value={dollars(dashboard_gross(@summary))} sub="load value">
+      <.metric label="Gross (rolled up)" value={dollars(dashboard_gross(@summary))} sub="load value" error={@summary_error != nil}>
         <:icon>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
         </:icon>
       </.metric>
-      <.metric label="Net settlements" value={dashboard_net(@summary)} sub="after deductions">
+      <.metric label="Net settlements" value={dashboard_net(@summary)} sub="after deductions" error={@summary_error != nil}>
         <:icon>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 6L9 17l-5-5" /></svg>
         </:icon>
@@ -808,6 +850,8 @@ defmodule DriftwoodWeb.BrokerLive do
   def handle_event("dispatch", %{"driver" => driver_id}, socket) do
     case dispatch_decision(socket.assigns.org_id, driver_id) do
       {:error, :not_found} -> {:noreply, put_flash(socket, :error, "driver not found")}
+      {:error, :unavailable} -> {:noreply, put_flash(socket, :error, "Couldn't check that driver right now. Nothing was dispatched — try again.")}
+      {:error, :forbidden} -> {:noreply, put_flash(socket, :error, Guard.write_copy(:forbidden, "check that driver"))}
       {:error, :fmcsa_blocked} -> {:noreply, put_flash(socket, :error, "dispatch refused — driver is FMCSA-blocked")}
       {:ok, driver} ->
         name =
@@ -820,6 +864,11 @@ defmodule DriftwoodWeb.BrokerLive do
         # and this roster button carries no load — so it only reports eligibility, honestly.
         {:noreply, put_flash(socket, :info, "#{name} is eligible for dispatch (FMCSA clear). Assign them to a load to dispatch.")}
     end
+  end
+
+  # Retry the active panel's read after a failed one (the kit error state's "Try again").
+  def handle_event("retry_panel", _params, socket) do
+    {:noreply, load_panel(socket, socket.assigns.panel, socket.assigns.org_id)}
   end
 
   # T148 — the "New load" create-flow events (grouped with the other `handle_event/3` clauses;
@@ -850,6 +899,9 @@ defmodule DriftwoodWeb.BrokerLive do
           |> put_flash(:info, "Load created.")
 
         {:noreply, load_panel(socket, "loads", socket.assigns.org_id)}
+
+      {:error, kind} when kind in [:unavailable, :forbidden] ->
+        {:noreply, assign(socket, load_error: Guard.write_copy(kind, "create that load"), new_load_form: to_form(params, as: :load))}
 
       {:error, _changeset} ->
         {:noreply,
@@ -886,11 +938,14 @@ defmodule DriftwoodWeb.BrokerLive do
   def handle_event("edit_load", %{"id" => id}, socket) do
     scope = broker_scope(socket.assigns.org_id)
 
-    case fetch_load(scope, id) do
-      nil ->
+    case Reads.get_load_result(scope, id) do
+      {:error, :not_found} ->
         {:noreply, put_flash(socket, :error, "load not found")}
 
-      load ->
+      {:error, kind} ->
+        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "open that load"))}
+
+      {:ok, load} ->
         {:noreply,
          assign(socket,
            show_edit_load: true,
@@ -919,6 +974,12 @@ defmodule DriftwoodWeb.BrokerLive do
 
         {:noreply, load_panel(socket, "loads", socket.assigns.org_id)}
 
+      {:error, kind} when kind in [:unavailable, :forbidden] ->
+        {:noreply, assign(socket, edit_load_error: Guard.write_copy(kind, "save that load"), edit_load_form: to_form(params, as: :load))}
+
+      {:error, :not_found} ->
+        {:noreply, assign(socket, edit_load_error: "That load no longer exists.", edit_load_form: to_form(params, as: :load))}
+
       {:error, _changeset} ->
         {:noreply,
          assign(socket,
@@ -933,6 +994,9 @@ defmodule DriftwoodWeb.BrokerLive do
       {:ok, _load} ->
         socket = socket |> assign(delete_load_error: nil) |> put_flash(:info, "Load deleted.")
         {:noreply, load_panel(socket, "loads", socket.assigns.org_id)}
+
+      {:error, kind} when kind in [:unavailable, :forbidden] ->
+        {:noreply, assign(socket, delete_load_error: Guard.write_copy(kind, "delete that load"))}
 
       {:error, _reason} ->
         {:noreply, assign(socket, delete_load_error: "Could not delete this load.")}
@@ -961,7 +1025,7 @@ defmodule DriftwoodWeb.BrokerLive do
   end
 
   def handle_event("save_new_driver", %{"form" => params}, socket) do
-    case AshPhoenix.Form.submit(socket.assigns.new_driver_form, params: with_org(params, socket)) do
+    case Guard.submit_form(:driftwood_save_new_driver, broker_scope(socket.assigns.org_id), socket.assigns.new_driver_form, with_org(params, socket)) do
       {:ok, _driver} ->
         socket =
           socket
@@ -969,6 +1033,9 @@ defmodule DriftwoodWeb.BrokerLive do
           |> put_flash(:info, "Driver added.")
 
         {:noreply, load_panel(socket, "roster", socket.assigns.org_id)}
+
+      {:error, kind} when kind in [:unavailable, :forbidden] ->
+        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "save that driver"))}
 
       {:error, form} ->
         {:noreply, assign(socket, new_driver_form: form)}
@@ -982,7 +1049,7 @@ defmodule DriftwoodWeb.BrokerLive do
   def handle_event("edit_driver", %{"driver" => driver_id}, socket) do
     scope = broker_scope(socket.assigns.org_id)
 
-    case Reads.get_driver(scope, driver_id) do
+    case Reads.get_driver_result(scope, driver_id) do
       {:ok, driver} ->
         {:noreply,
          assign(socket,
@@ -992,8 +1059,11 @@ defmodule DriftwoodWeb.BrokerLive do
            edit_driver_form: edit_driver_form(driver, scope)
          )}
 
-      :error ->
+      {:error, :not_found} ->
         {:noreply, put_flash(socket, :error, "driver not found")}
+
+      {:error, kind} ->
+        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "open that driver"))}
     end
   end
 
@@ -1016,7 +1086,7 @@ defmodule DriftwoodWeb.BrokerLive do
   # runs — it can never skip the gate running. See
   # `test/driver_edit_no_fmcsa_bypass_test.exs` for the adversarial proof.
   def handle_event("save_edit_driver", %{"form" => params}, socket) do
-    case AshPhoenix.Form.submit(socket.assigns.edit_driver_form, params: params) do
+    case Guard.submit_form(:driftwood_save_edit_driver, broker_scope(socket.assigns.org_id), socket.assigns.edit_driver_form, params) do
       {:ok, _driver} ->
         socket =
           socket
@@ -1024,6 +1094,9 @@ defmodule DriftwoodWeb.BrokerLive do
           |> put_flash(:info, "Driver updated.")
 
         {:noreply, load_panel(socket, "roster", socket.assigns.org_id)}
+
+      {:error, kind} when kind in [:unavailable, :forbidden] ->
+        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "save that driver"))}
 
       {:error, form} ->
         {:noreply, assign(socket, edit_driver_form: form)}
@@ -1050,7 +1123,7 @@ defmodule DriftwoodWeb.BrokerLive do
   end
 
   def handle_event("save_new_settlement", %{"form" => params}, socket) do
-    case AshPhoenix.Form.submit(socket.assigns.new_settlement_form, params: with_org(params, socket)) do
+    case Guard.submit_form(:driftwood_save_new_settlement, broker_scope(socket.assigns.org_id), socket.assigns.new_settlement_form, with_org(params, socket)) do
       {:ok, _settlement} ->
         socket =
           socket
@@ -1058,6 +1131,9 @@ defmodule DriftwoodWeb.BrokerLive do
           |> put_flash(:info, "Settlement added.")
 
         {:noreply, load_panel(socket, "settlements", socket.assigns.org_id)}
+
+      {:error, kind} when kind in [:unavailable, :forbidden] ->
+        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "save that settlement"))}
 
       {:error, form} ->
         {:noreply, assign(socket, new_settlement_form: form)}
@@ -1067,7 +1143,7 @@ defmodule DriftwoodWeb.BrokerLive do
   def handle_event("edit_settlement", %{"settlement" => settlement_id}, socket) do
     scope = broker_scope(socket.assigns.org_id)
 
-    case Reads.get_settlement(scope, settlement_id) do
+    case Reads.get_settlement_result(scope, settlement_id) do
       {:ok, settlement} ->
         {:noreply,
          assign(socket,
@@ -1077,8 +1153,11 @@ defmodule DriftwoodWeb.BrokerLive do
            edit_settlement_form: edit_settlement_form(settlement, scope)
          )}
 
-      :error ->
+      {:error, :not_found} ->
         {:noreply, put_flash(socket, :error, "settlement not found")}
+
+      {:error, kind} ->
+        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "open that settlement"))}
     end
   end
 
@@ -1092,7 +1171,7 @@ defmodule DriftwoodWeb.BrokerLive do
   end
 
   def handle_event("save_edit_settlement", %{"form" => params}, socket) do
-    case AshPhoenix.Form.submit(socket.assigns.edit_settlement_form, params: params) do
+    case Guard.submit_form(:driftwood_save_edit_settlement, broker_scope(socket.assigns.org_id), socket.assigns.edit_settlement_form, params) do
       {:ok, _settlement} ->
         socket =
           socket
@@ -1100,6 +1179,9 @@ defmodule DriftwoodWeb.BrokerLive do
           |> put_flash(:info, "Settlement updated.")
 
         {:noreply, load_panel(socket, "settlements", socket.assigns.org_id)}
+
+      {:error, kind} when kind in [:unavailable, :forbidden] ->
+        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "save that settlement"))}
 
       {:error, form} ->
         {:noreply, assign(socket, edit_settlement_form: form)}
@@ -1113,19 +1195,20 @@ defmodule DriftwoodWeb.BrokerLive do
   (defence in depth over the disabled button).
   """
   @spec dispatch_decision(binary(), binary()) ::
-          {:ok, map()} | {:error, :not_found | :fmcsa_blocked}
+          {:ok, map()} | {:error, :not_found | :fmcsa_blocked | :unavailable | :forbidden}
   def dispatch_decision(org_id, driver_id) do
     scope = broker_scope(org_id)
 
     # ADR-045 §4.2 (O8): fetch the ONE driver by id via the BOUNDED `Reads.get_driver/2`
     # (limit 1, PII-resolved on the SAME tenant plane) rather than loading + decrypting the
     # ENTIRE org roster and `Enum.find`-ing it — the per-interaction unbounded-sweep amplifier.
-    case Reads.get_driver(scope, driver_id) do
+    case Reads.get_driver_result(scope, driver_id) do
       {:ok, driver} ->
         if Reads.dispatchable?(driver), do: {:ok, driver}, else: {:error, :fmcsa_blocked}
 
-      :error ->
-        {:error, :not_found}
+      # not_found / unavailable / forbidden pass through: an outage is NOT "driver not found".
+      {:error, _kind} = error ->
+        error
     end
   end
 
@@ -1157,11 +1240,17 @@ defmodule DriftwoodWeb.BrokerLive do
     # `tnt_field` definition exists for it. `Driftwood.Seeds.define_custom_fields/1` registers
     # "lane" for seeded orgs; ensure it (idempotently) here so a FRESH org's first load persists
     # its lane too — the exact `Samen.CustomFields.define_field/2` call the seeds use.
-    :ok = maybe_define_lane_field(org_id, attrs)
+    #
+    # WP6 phase 4: the whole write runs under `Guard.write/3`, so a raised lane-field definition or an
+    # outage (a RETURNED `Ash.Error.Unknown`) is `{:error, :unavailable}`, reported by name — never
+    # "a load reference is required". A real refusal (`Invalid`) passes through untouched.
+    Guard.write(:driftwood_create_load, scope, fn ->
+      :ok = maybe_define_lane_field(org_id, attrs)
 
-    Driftwood.Crm.Opportunity
-    |> Ash.Changeset.for_create(:create, attrs, scope: scope)
-    |> Ash.create(scope: scope)
+      Driftwood.Crm.Opportunity
+      |> Ash.Changeset.for_create(:create, attrs, scope: scope)
+      |> Ash.create(scope: scope)
+    end)
   end
 
   # ==========================================================================
@@ -1181,16 +1270,15 @@ defmodule DriftwoodWeb.BrokerLive do
   def update_load(org_id, load_id, raw_params) do
     scope = broker_scope(org_id)
     attrs = load_attrs(raw_params, org_id)
-    :ok = maybe_define_lane_field(org_id, attrs)
 
-    case fetch_load(scope, load_id) do
-      nil ->
-        {:error, :not_found}
+    with {:ok, load} <- Reads.get_load_result(scope, load_id) do
+      Guard.write(:driftwood_update_load, scope, fn ->
+        :ok = maybe_define_lane_field(org_id, attrs)
 
-      load ->
         load
         |> Ash.Changeset.for_update(:update, attrs, scope: scope)
         |> Ash.update(scope: scope)
+      end)
     end
   end
 
@@ -1204,21 +1292,11 @@ defmodule DriftwoodWeb.BrokerLive do
   def delete_load(org_id, load_id) do
     scope = broker_scope(org_id)
 
-    case fetch_load(scope, load_id) do
-      nil -> {:error, :not_found}
-      load -> Ash.destroy(load, scope: scope, return_destroyed?: true)
+    with {:ok, load} <- Reads.get_load_result(scope, load_id) do
+      Guard.write(:driftwood_delete_load, scope, fn ->
+        Ash.destroy(load, scope: scope, return_destroyed?: true)
+      end)
     end
-  rescue
-    e -> {:error, e}
-  end
-
-  defp fetch_load(scope, load_id) do
-    Driftwood.Crm.Opportunity
-    |> Ash.Query.filter(id == ^load_id)
-    |> Ash.Query.limit(1)
-    |> Ash.read_one!(scope: scope)
-  rescue
-    _ -> nil
   end
 
   # The edit form's initial values — the inverse of `load_attrs/2` (dollars string,
@@ -1227,7 +1305,7 @@ defmodule DriftwoodWeb.BrokerLive do
   defp edit_load_params(load) do
     %{
       "name" => load.name,
-      "lane" => (if load.__lane__ in [nil, "unknown"], do: "", else: load.__lane__),
+      "lane" => get_in(load.custom || %{}, ["lane"]) || "",
       "rate" => cents_to_dollars_string(Samen.Type.Money.cents(load.value)),
       "status" => to_string(load.status)
     }

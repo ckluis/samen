@@ -121,9 +121,12 @@ defmodule Samen.Web.Billing.PlansLive do
   # `org_id` is the server-side fact, never client input. Plans are non-PII config
   # rows; the kernel's OrgScope + admin role gate still apply — no LiveView policy.
   def handle_event("save_new", %{"form" => params}, socket) do
-    case AshPhoenix.Form.submit(socket.assigns.new_form, params: with_org(params, socket)) do
+    case Guard.submit_form(:billing_save_plan, socket.assigns[:org_id], socket.assigns.new_form, with_org(params, socket)) do
       {:ok, _plan} ->
         {:noreply, socket |> assign(show_new: false) |> load(socket.assigns.org_id)}
+
+      {:error, kind} when is_atom(kind) ->
+        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "save that plan"))}
 
       {:error, form} ->
         {:noreply, assign(socket, new_form: form)}
@@ -150,9 +153,12 @@ defmodule Samen.Web.Billing.PlansLive do
   end
 
   def handle_event("save_edit", %{"form" => params}, socket) do
-    case AshPhoenix.Form.submit(socket.assigns.edit_form, params: params) do
+    case Guard.submit_form(:billing_edit_plan, socket.assigns[:org_id], socket.assigns.edit_form, params) do
       {:ok, _plan} ->
         {:noreply, socket |> assign(show_edit: false, edit_plan_id: nil) |> load(socket.assigns.org_id)}
+
+      {:error, kind} when is_atom(kind) ->
+        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "save that plan"))}
 
       {:error, form} ->
         {:noreply, assign(socket, edit_form: form)}

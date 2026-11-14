@@ -77,7 +77,12 @@ defmodule Samen.Web.Reads.SwallowLintTest do
   describe "scan_source/2" do
     test "RED: flags a function-level `rescue _ -> []`, a `try` rescue and a catch-all catch" do
       swallows = SwallowLint.scan_source(@swallow)
-      assert Enum.map(swallows, & &1.fun) |> Enum.sort() == [:contacts, :contacts_tryblock, :contacts_tryblock]
+
+      assert Enum.map(swallows, & &1.fun) |> Enum.sort() == [
+               :contacts,
+               :contacts_tryblock,
+               :contacts_tryblock
+             ]
     end
 
     test "GREEN twin: logged, reported, handed-on, re-raised and typed clauses are not swallows" do
@@ -121,7 +126,9 @@ defmodule Samen.Web.Reads.SwallowLintTest do
       assert map_size(reviewed) > 0
 
       for {{file, fun}, reason} <- reviewed do
-        assert is_binary(reason) and reason != "", "#{file} #{fun}: a reviewed entry needs its reason"
+        assert is_binary(reason) and reason != "",
+               "#{file} #{fun}: a reviewed entry needs its reason"
+
         assert file in files, "#{file} is reviewed but is not in the scanned tree (stale entry)"
 
         found = root |> Path.join(file) |> File.read!() |> SwallowLint.scan_source(file)
@@ -151,6 +158,35 @@ defmodule Samen.Web.Reads.SwallowLintTest do
           ) do
         assert Map.get(counts, converted, 0) == 0, "#{converted} grew a swallowing rescue"
       end
+    end
+
+    # The live ratchet's positive control. `@baseline` is `%{}`, so over the real tree `scan/1` is always `%{}`
+    # and `check/0` always `:ok` — a `scan/1` that stopped counting would stay green. This runs the SAME
+    # `scan/1` and `check/2` over a file outside the lint roots that holds known swallows.
+    test "POSITIVE CONTROL: scan/1 counts a fixture's swallows and check/2 against the real baseline fails naming it" do
+      fixture = "samen_web/test/fixtures/swallow_fixture.ex"
+      refute fixture in SwallowLint.files()
+      refute Enum.any?(SwallowLint.roots(), &String.starts_with?(fixture, &1))
+
+      # four known swallows; `logged/1` and `typed/1` are not; `safe_count/1` shares a name with a reviewed
+      # function in ANOTHER file and is still counted (reviewed entries are keyed by {file, function}).
+      assert SwallowLint.scan([fixture]) == %{fixture => 4}
+      assert Enum.any?(SwallowLint.reviewed(), fn {{_file, fun}, _} -> fun == :safe_count end)
+
+      assert {:error, [msg]} =
+               SwallowLint.check(SwallowLint.scan([fixture]), SwallowLint.baseline())
+
+      assert msg =~ fixture
+      assert msg =~ "4 swallowing"
+
+      # the control is not a blanket failure: a clean file scans empty and passes.
+      assert SwallowLint.scan(["samen_web/lib/samen/web/reads/guard.ex"]) == %{}
+
+      assert :ok =
+               SwallowLint.check(
+                 SwallowLint.scan(["samen_web/lib/samen/web/reads/guard.ex"]),
+                 SwallowLint.baseline()
+               )
     end
 
     test "the tree matches the baseline exactly (no new swallow, no un-lowered row)" do

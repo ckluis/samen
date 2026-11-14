@@ -1,0 +1,20 @@
+# SABOTAGE: The live ratchet's scan/1 stops returning any file's swallow count, so a new bare 'rescue _ -> 
+#   []' in the tree passes the baseline check.
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/reads_swallow_lint_test.exs
+# MUST_FAIL: POSITIVE CONTROL: scan/1 counts a fixture
+diff --git a/samen_web/lib/samen/web/reads/swallow_lint.ex b/samen_web/lib/samen/web/reads/swallow_lint.ex
+index c413a6fe..0a5ad47b 100644
+--- a/samen_web/lib/samen/web/reads/swallow_lint.ex
++++ b/samen_web/lib/samen/web/reads/swallow_lint.ex
+@@ -170,7 +170,7 @@ defmodule Samen.Web.Reads.SwallowLint do
+ 
+       {rel, length(swallows)}
+     end)
+-    |> Enum.reject(fn {_rel, n} -> n == 0 end)
++    |> Enum.reject(fn {_rel, n} -> n >= 0 end)
+     |> Map.new()
+   end
+ 
