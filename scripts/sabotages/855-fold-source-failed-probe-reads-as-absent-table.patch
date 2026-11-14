@@ -1,0 +1,20 @@
+# SABOTAGE: a failed fold-source existence probe reads as an absent table: the erasure withdrawal and the 
+#   per-turn check answer nothing to withdraw
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/honest_reads_test.exs
+# MUST_FAIL: RAISE when the probe fails
+diff --git a/samen_core/lib/samen/ai/agent/fold_source.ex b/samen_core/lib/samen/ai/agent/fold_source.ex
+index c7f92fc3..c6c791c4 100644
+--- a/samen_core/lib/samen/ai/agent/fold_source.ex
++++ b/samen_core/lib/samen/ai/agent/fold_source.ex
+@@ -291,7 +291,7 @@ defmodule Samen.AI.Agent.FoldSource do
+       {:ok, %{rows: [[_]]}} -> true
+       # A probe that FAILED is not an absent table: reading it as `false` answered "no folds to withdraw" / "this
+       # host has no index" for an erasure walk and the per-turn withdrawal check.
+-      {:error, _reason} -> raise RuntimeError, "the fold-source index could not be probed: not an absent table"
++      {:error, _reason} -> false
+     end
+   end
+ end

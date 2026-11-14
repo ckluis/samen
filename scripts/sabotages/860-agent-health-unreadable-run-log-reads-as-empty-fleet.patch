@@ -1,0 +1,19 @@
+# SABOTAGE: an unreadable agent run log answers an empty fleet
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/honest_reads_test.exs
+# MUST_FAIL: a run / turn log that cannot be READ is {:error, :unavailable}
+diff --git a/samen_core/lib/samen/ai/agent/health.ex b/samen_core/lib/samen/ai/agent/health.ex
+index 4d1cb696..2a50a339 100644
+--- a/samen_core/lib/samen/ai/agent/health.ex
++++ b/samen_core/lib/samen/ai/agent/health.ex
+@@ -395,7 +395,7 @@ defmodule Samen.AI.Agent.Health do
+ 
+   defp unreadable(name, org_id, reason) do
+     Samen.Observability.Failure.report(name, org_id, reason)
+-    {:error, :unavailable}
++    {:ok, []}
+   end
+ 
+   defp maybe_filter_agent(query, nil), do: query
