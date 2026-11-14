@@ -52,3 +52,9 @@ samen_core/lib/samen/replay/resolver.ex	samen_core	test/replay/player_test.exs
 # --- replay player authorization (ADR-052 P3): watching is impersonating — the chokepoint every
 # --- list, open and frame batch re-checks; a silent weakening shows a replay to the wrong viewer
 samen_web/lib/samen/web/replay/access.ex	samen_web	test/samen/web/replay_player_test.exs
+# --- ARCH-26 security core (vault): the subject-key scanners that PROVE crypto-shred / PITR key absence / no
+# --- cross-subject decrypt. A scanner that silently reports clean certifies a shred that did not happen.
+samen_core/lib/samen/vault.ex	samen_core	test/red_path_vault_scan_test.exs test/vault_pitr_test.exs test/post_shred_oracle_test.exs test/shred_key_material_test.exs test/vault_key_column_scan_test.exs
+# --- the envelope-crypto core (ADR-001 §2): DEK wrap/unwrap, field AEAD, the DEK-derived pseudonym key. The
+# --- mutable sites are the HKDF loop bounds and the salt default (see ledger for the proven-equivalent ones).
+samen_core/lib/samen/kms/crypto.ex	samen_core	test/crypto_test.exs
