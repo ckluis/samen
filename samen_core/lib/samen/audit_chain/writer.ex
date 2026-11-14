@@ -91,25 +91,30 @@ defmodule Samen.AuditChain.Writer do
     end
   end
 
-  # Append the chain entry. If the aud_chain table is absent (host not yet migrated),
-  # skip gracefully — the aud_event row already landed. The existence CHECK happens
-  # BEFORE the insert (a cheap `to_regclass` probe) precisely because attempting an
-  # INSERT into a missing table inside the caller's transaction would ABORT the whole
-  # transaction (Postgres 25P02) — a rescue cannot un-poison it. Probing first keeps
-  # the graceful-skip real inside a multi.
+  # Append the chain entry. If the aud_chain table is ABSENT (host not yet migrated), skip gracefully — the
+  # aud_event row already landed. The existence CHECK happens BEFORE the insert (a cheap `to_regclass` probe)
+  # precisely because attempting an INSERT into a missing table inside the caller's transaction would ABORT the
+  # whole transaction (Postgres 25P02) — a rescue cannot un-poison it. Probing first keeps the graceful-skip real
+  # inside a multi.
+  #
+  # A probe that FAILED (an outage, a dropped connection) is NOT "absent": the old `rescue _ -> false` turned it
+  # into a silent skip, so an audit event landed with no chain entry and the write reported success. It is now an
+  # error the caller sees (reported by name + exception module), and the write fails.
   defp append_chain(repo, chain_attrs) do
-    if aud_chain_exists?(repo) do
-      AuditChain.append(chain_attrs, repo: repo)
-    else
-      {:skip, :aud_chain_absent}
+    case aud_chain_exists?(repo, get(chain_attrs, :org_id)) do
+      {:ok, true} -> AuditChain.append(chain_attrs, repo: repo)
+      {:ok, false} -> {:skip, :aud_chain_absent}
+      {:error, :unavailable} -> {:error, :audit_chain_unavailable}
     end
   end
 
-  defp aud_chain_exists?(repo) do
+  defp aud_chain_exists?(repo, org_id) do
     %{rows: [[reg]]} = repo.query!("SELECT to_regclass('public.aud_chain')")
-    reg != nil
+    {:ok, reg != nil}
   rescue
-    _ -> false
+    e ->
+      Samen.Observability.Failure.report(:audit_chain_probe, org_id, e)
+      {:error, :unavailable}
   end
 
   defp occurred_at(attrs) do

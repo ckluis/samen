@@ -1149,6 +1149,37 @@ defmodule Samen.AI.AgentWriteTest do
       assert pending_approvals(s.actor.org_id) == []
     end
 
+    test "RED: a run whose transcript was SHREDDED still has its approval withdrawn on expiry (it used to stay decidable)" do
+      {s, run, target, approval, _new_owner} = propose!()
+      lapse!(run)
+
+      # The run subject is erased while the proposal is parked: the sealed transcript (which names the pending
+      # approval) is no longer readable. `withdraw_pending_approval` used to read "unreadable" as "nothing pending".
+      assert {:ok, %{attestation: %{state: :shredded}}} =
+               Samen.Erasure.shred(run.id, repo: TestRepo, org_id: s.actor.org_id)
+
+      assert [%{id: id}] = pending_approvals(s.actor.org_id)
+      assert id == approval.id
+
+      assert {:ok, expired} = Agent.expire_parked(run.id)
+      assert expired.state == :expired
+
+      # The approval was found through the proposed turn row and withdrawn: not decidable, nothing executed.
+      assert pending_approvals(s.actor.org_id) == []
+      assert {:error, :not_pending} = Approvals.approve(approval.id, approver_id(approval.org_id))
+      assert reload_target!(target.id).owner_id == nil
+    end
+
+    test "withdrawal results: only a FAILED withdrawal is incomplete; already-terminal / absent / unwired are fine" do
+      for ok <- [:ok, {:ok, :x}, {:error, :not_pending}, {:error, :not_found}, {:error, :no_approvals_module}] do
+        refute Agent.__withdrawal_failed__?(ok)
+      end
+
+      for bad <- [{:error, :unavailable}, {:error, %RuntimeError{}}, :boom] do
+        assert Agent.__withdrawal_failed__?(bad)
+      end
+    end
+
     test "expiry is idempotent and only ever applies to a PARKED run" do
       {_s, run, _target, _approval, _new_owner} = propose!()
       lapse!(run)

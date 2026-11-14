@@ -233,11 +233,9 @@ defmodule Samen.Erasure.Completeness do
     end
   end
 
-  defp pii_fields(resource) do
-    Samen.Pii.Info.fields(resource)
-  rescue
-    _ -> []
-  end
+  # No rescue: a module whose PII declarations cannot be introspected must FAIL the completeness check, not drop
+  # out of discovery (`rescue _ -> []` made an un-introspectable resource look like one with nothing to erase).
+  defp pii_fields(resource), do: Samen.Pii.Info.fields(resource)
 
   # (f) DERIVED-SUMMARY segments (ADR-048 §7.3, batch C4) — the compaction fold ledger a
   # vault-routed transcript carries.
@@ -538,7 +536,10 @@ defmodule Samen.Erasure.Completeness do
       Samen.CustomFields.define_field(probe, __probe_repo__())
     )
   rescue
-    _ -> false
+    e ->
+      # closed: a probe that cannot run reads as "guard not enforced" -> a finding; reported so the cause is known
+      Samen.Observability.Failure.report(:erasure_define_guard_probe, nil, e)
+      false
   end
 
   # A non-nil placeholder repo so define_field does not call default_repo!/0; the guard
@@ -568,7 +569,9 @@ defmodule Samen.Erasure.Completeness do
       Samen.CustomFields.define_field(probe, __probe_repo__())
     )
   rescue
-    _ -> false
+    e ->
+      Samen.Observability.Failure.report(:erasure_define_object_guard_probe, nil, e)
+      false
   end
 
   # (e) vault-routed transcripts (ADR-047 §7.4) — each discovered transcript resource
@@ -678,11 +681,9 @@ defmodule Samen.Erasure.Completeness do
 
   # ---------------------------------------------------------------------------
 
-  defp attribute(resource, name) do
-    Ash.Resource.Info.attribute(resource, name)
-  rescue
-    _ -> nil
-  end
+  # No rescue (see `pii_fields/1`): `Ash.Resource.Info.attribute/2` returns nil for an absent attribute; it only
+  # RAISES for a module that is not a resource, which must fail the check rather than skip the module.
+  defp attribute(resource, name), do: Ash.Resource.Info.attribute(resource, name)
 
   defp table(resource), do: AshPostgres.DataLayer.Info.table(resource)
 end

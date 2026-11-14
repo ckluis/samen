@@ -78,7 +78,9 @@ defmodule Samen.Marketing.ConsentChange do
 
     :ok
   rescue
-    _ -> :ok
+    e ->
+      Samen.Observability.Failure.report(:consent_change_maybe_append, nil, e)
+      :ok
   catch
     _, _ -> :ok
   end
@@ -137,7 +139,9 @@ defmodule Samen.Marketing.ConsentChange do
 
     :ok
   rescue
-    _ -> :ok
+    e ->
+      Samen.Observability.Failure.report(:consent_change_append_row, nil, e)
+      :ok
   end
 
   # The erasure-surviving keyed pseudonym (trace-sink pattern). Derived while the

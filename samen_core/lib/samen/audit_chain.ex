@@ -133,7 +133,9 @@ defmodule Samen.AuditChain do
   rescue
     # A genuine READ failure (missing table, DB outage) is surfaced as a DISTINCT signal,
     # never masked as an empty ("clean") ledger — that masking is the O10 defect.
-    _ -> {:error, :unavailable}
+    e ->
+      Samen.Observability.Failure.report(:audit_chain_reveal_events, org_id, e)
+      {:error, :unavailable}
   end
 
   @doc """

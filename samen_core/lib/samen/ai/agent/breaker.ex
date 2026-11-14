@@ -216,7 +216,10 @@ defmodule Samen.AI.Agent.Breaker do
     |> case do
       {:ok, [row]} -> active_kill?(row)
       {:ok, []} -> false
-      {:error, _} -> true
+      {:error, error} ->
+        # closed: an unreadable kill row reads as KILLED (the definition does not run); reported so the cause is known
+        Samen.Observability.Failure.report(:breaker_definition_killed, org_id, error)
+        true
     end
   rescue
     e ->
@@ -351,7 +354,9 @@ defmodule Samen.AI.Agent.Breaker do
       _ -> {:error, :unavailable}
     end
   rescue
-    _ -> {:error, :unavailable}
+    e ->
+      Samen.Observability.Failure.report(:breaker_kills_status, nil, e)
+      {:error, :unavailable}
   end
 
   def kills_status(_org_id), do: {:error, :unavailable}
@@ -510,6 +515,8 @@ defmodule Samen.AI.Agent.Breaker do
 
     :ok
   rescue
-    _ -> :ok
+    e ->
+      Samen.Observability.Failure.report(:breaker_audit, nil, e)
+      :ok
   end
 end

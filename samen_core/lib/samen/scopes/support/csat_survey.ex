@@ -138,7 +138,9 @@ defmodule Samen.Scopes.Support.CsatSurvey do
       [] -> {:error, :invalid_token}
     end
   rescue
-    _ -> {:error, :invalid_token}
+    e ->
+      Samen.Observability.Failure.report(:csat_survey_preview, nil, e)
+      {:error, :invalid_token}
   end
 
   @doc """
@@ -183,7 +185,9 @@ defmodule Samen.Scopes.Support.CsatSurvey do
     # not burned, so the fail-closed `:invalid_token` is correct. A POST-consume
     # write failure never reaches this clause: `write_response/4` rescues its own
     # write and returns the DISTINCT `{:write_failed, _}` reason.
-    _ -> {:error, :invalid_token}
+    e ->
+      Samen.Observability.Failure.report(:csat_survey_respond, nil, e)
+      {:error, :invalid_token}
   end
 
   # ---------------------------------------------------------------------------

@@ -195,13 +195,19 @@ defmodule Samen.NoPlaintextPii.Tiers.PostShred.Replay do
     %{refs: reports} = Resolver.resolve(%{refs: refs}, scope)
     Enum.map(reports, & &1.outcome)
   rescue
-    _ -> [:unresolvable]
+    e ->
+      # closed: [:unresolvable] is never an erased outcome, so the tier reports a violation
+      Samen.Observability.Failure.report(:post_shred_replay_resolve, org, e)
+      [:unresolvable]
   end
 
   defp shredded?(sid) do
     match?({:ok, %{state: :shredded}}, Samen.Kms.adapter().attest(sid))
   rescue
-    _ -> false
+    e ->
+      # closed: "not shredded" turns :gone/:code_changed outcomes into violations
+      Samen.Observability.Failure.report(:post_shred_replay_attest, nil, e)
+      false
   end
 
   defp schema_violation(frame) do

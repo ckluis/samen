@@ -67,11 +67,17 @@ defmodule Samen.BreakGlass.ReconcileWorker do
     end
   end
 
+  # The residue signal is the ALERT that the honest window is open. A failure to emit it must never block the
+  # reconcile, but it must not be silent either: the worker would otherwise run on with the monitor blind.
   defp safe_signal do
     Reconciliation.emit_unanchored_signal()
   rescue
-    _ -> 0
+    e ->
+      Samen.Observability.Failure.report(:break_glass_unanchored_signal, nil, e)
+      0
   catch
-    _, _ -> 0
+    kind, _value ->
+      Samen.Observability.Failure.report(:break_glass_unanchored_signal, nil, kind)
+      0
   end
 end

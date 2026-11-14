@@ -180,8 +180,6 @@ defmodule Samen.Automation.Actions.FetchRecord do
 
   defp pii_names(resource) do
     resource |> Samen.Pii.Info.pii_attributes() |> Enum.map(& &1.name)
-  rescue
-    _ -> []
   end
 
   defp existing_atom(name) when is_binary(name) do

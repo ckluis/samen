@@ -155,7 +155,9 @@ defmodule Samen.Delivery.Deliverability do
     Samen.FeatureFlags.evaluate("delivery.open_click_tracking", %{org_id: org_id}, flag_opts).on
   rescue
     # Fail-SAFE, matching the engine's own posture: any evaluation hiccup is OFF.
-    _ -> false
+    e ->
+      Samen.Observability.Failure.report(:deliverability_flag_on, nil, e)
+      false
   end
 
   defp consented?(org_id, subscriber_id, opts) do
@@ -167,7 +169,9 @@ defmodule Samen.Delivery.Deliverability do
         try do
           mod.consented?(org_id, subscriber_id) == true
         rescue
-          _ -> false
+          e ->
+            Samen.Observability.Failure.report(:deliverability_consented, nil, e)
+            false
         end
     end
   end

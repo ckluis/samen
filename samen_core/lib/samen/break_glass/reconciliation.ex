@@ -159,7 +159,10 @@ defmodule Samen.BreakGlass.Reconciliation do
   defp already_anchored?(r, local_hash) do
     r.exists?(from(a in AnchorRow, where: a.local_hash == ^local_hash))
   rescue
-    _ -> false
+    e ->
+      # closed: an unknown anchor state re-attempts the (idempotent, hash-keyed) anchor rather than skipping it
+      Samen.Observability.Failure.report(:break_glass_already_anchored, nil, e)
+      false
   end
 
   # ==========================================================================
@@ -185,7 +188,11 @@ defmodule Samen.BreakGlass.Reconciliation do
   defp anchored_count(r) do
     r.one(from(a in AnchorRow, select: count(a.id))) || 0
   rescue
-    _ -> 0
+    e ->
+      # closed: an unreadable anchor count makes `unanchored_count/1` report every local entry as unanchored (the
+      # alarm direction), never zero
+      Samen.Observability.Failure.report(:break_glass_anchored_count, nil, e)
+      0
   end
 
   @doc """

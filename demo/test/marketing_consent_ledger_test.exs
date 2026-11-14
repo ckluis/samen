@@ -95,6 +95,37 @@ defmodule Demo.MarketingConsentLedgerTest do
     assert Consent.state(@event_resource, org.id, sub.id) == :withdrawn
   end
 
+  test "state_result/3 tells an UNREADABLE ledger from 'no consent on file' (a gate must not treat it as :none)" do
+    org = mk_org("consent-state-result")
+
+    {:ok, sub} =
+      Subscriber
+      |> Ash.Changeset.for_create(:create, %{
+        org_id: org.id,
+        email: "sr@marketing.example",
+        status: :active,
+        consent_at: DateTime.utc_now()
+      })
+      |> Ash.create(authorize?: false)
+
+    {:ok, _} =
+      sub |> Ash.Changeset.for_update(:update, %{status: :unsubscribed}) |> Ash.update(authorize?: false)
+
+    # POSITIVE CONTROL: a readable ledger answers, tagged
+    assert {:ok, :withdrawn} = Consent.state_result(@event_resource, org.id, sub.id)
+    assert {:ok, :none} = Consent.state_result(@event_resource, org.id, Ecto.UUID.generate())
+
+    # RED: an unreadable ledger (a module that is not a mounted event resource) is an outage, not :none
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, :unavailable} = Consent.state_result(String, org.id, sub.id)
+        # the legacy shape keeps its documented fallback (and reports it)
+        assert Consent.state(String, org.id, sub.id) == :none
+      end)
+
+    assert log =~ "read=marketing_consent_state"
+  end
+
   test "the ledger row carries NO plaintext PII (subject_hash is a one-way handle)" do
     org = mk_org("consent-nopii")
     email = "nopii@marketing.example"

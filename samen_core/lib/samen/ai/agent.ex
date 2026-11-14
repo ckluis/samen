@@ -2807,7 +2807,7 @@ defmodule Samen.AI.Agent do
   def expire_parked(_run), do: {:error, :not_found}
 
   @doc false
-  @spec on_proposal_expired(Ash.Resource.Record.t()) :: :ok
+  @spec on_proposal_expired(Ash.Resource.Record.t()) :: :ok | {:error, :expiry_incomplete}
   def on_proposal_expired(%Run{} = updated) do
     # Re-read the row so the vault-routed transcript is a `%Samen.Masked{}` this path can
     # reveal: the record an update hands back carries the just-written attributes, not
@@ -2819,11 +2819,15 @@ defmodule Samen.AI.Agent do
       end
 
     # 1. Withdraw the pending approval FIRST — the lapsed proposal must stop being
-    #    decidable in the same transaction that terminates the run.
-    _ = withdraw_pending_approval(run)
+    #    decidable in the same transaction that terminates the run. A withdrawal that FAILED (not one that was
+    #    already unnecessary) must roll that transaction back: `:expired` with the approval still decidable is
+    #    exactly the state this hook exists to make impossible (it used to be `_ =` / `rescue _ -> :ok`).
+    withdrawn = withdraw_pending_approval(run)
 
     # 2. Finalize the still-:proposed turn row honestly (token-only, bounded kind).
-    case pending_turn(run) do
+    turn = pending_turn(run)
+
+    case turn do
       {:ok, turn_row} ->
         finalize_turn!(turn_row, %{
           status: :failed,
@@ -2851,12 +2855,31 @@ defmodule Samen.AI.Agent do
         :ok
     end
 
-    log_terminal(run)
-    :ok
+    if withdrawal_failed?(withdrawn) or turn == {:error, :unavailable} do
+      Samen.Observability.Failure.report(:agent_on_proposal_expired, run.org_id, :approval_withdrawal_failed)
+      {:error, :expiry_incomplete}
+    else
+      log_terminal(run)
+      :ok
+    end
   rescue
-    _ -> :ok
+    e ->
+      Samen.Observability.Failure.report(:agent_on_proposal_expired, nil, e)
+      {:error, :expiry_incomplete}
   end
 
+  # Nothing to withdraw (`:ok`), withdrawn (`{:ok, _}`), or already terminal / absent / engine not wired are fine;
+  # any other error leaves the approval decidable.
+  @doc false
+  def __withdrawal_failed__?(result), do: withdrawal_failed?(result)
+
+  defp withdrawal_failed?(:ok), do: false
+  defp withdrawal_failed?({:ok, _}), do: false
+  defp withdrawal_failed?({:error, reason}) when reason in [:not_pending, :not_found, :no_approvals_module], do: false
+  defp withdrawal_failed?(_other), do: true
+
+  # `{:ok, turn}` | `{:error, :turn_not_found}` (no proposed turn) | `{:error, :unavailable}` (the read FAILED — it used
+  # to be reported as `:turn_not_found`, i.e. "nothing proposed").
   defp pending_turn(%Run{} = run) do
     require Ash.Query
 
@@ -2866,11 +2889,20 @@ defmodule Samen.AI.Agent do
     |> Ash.Query.limit(1)
     |> Ash.read(authorize?: false)
     |> case do
-      {:ok, [turn]} -> {:ok, turn}
-      _ -> {:error, :turn_not_found}
+      {:ok, [turn]} ->
+        {:ok, turn}
+
+      {:ok, []} ->
+        {:error, :turn_not_found}
+
+      {:error, error} ->
+        Samen.Observability.Failure.report(:agent_pending_turn, run.org_id, error)
+        {:error, :unavailable}
     end
   rescue
-    _ -> {:error, :turn_not_found}
+    e ->
+      Samen.Observability.Failure.report(:agent_pending_turn, nil, e)
+      {:error, :unavailable}
   end
 
   defp pending_kind(%Run{} = run) do
@@ -2931,7 +2963,9 @@ defmodule Samen.AI.Agent do
   defp load_approval(id) do
     Samen.Approvals.get(id)
   rescue
-    _ -> {:error, :approval_not_found}
+    e ->
+      Samen.Observability.Failure.report(:agent_load_approval, nil, e)
+      {:error, :approval_not_found}
   end
 
   defp approval_id_of(%{id: id}) when is_binary(id), do: id
@@ -3078,7 +3112,9 @@ defmodule Samen.AI.Agent do
       _ -> {:error, :turn_not_found}
     end
   rescue
-    _ -> {:error, :turn_not_found}
+    e ->
+      Samen.Observability.Failure.report(:agent_fetch_turn, nil, e)
+      {:error, :turn_not_found}
   end
 
   defp fetch_turn(_turn_id), do: {:error, :turn_not_found}
@@ -3102,12 +3138,35 @@ defmodule Samen.AI.Agent do
   end
 
   defp withdraw_pending_approval(%Run{} = run) do
-    with {:ok, {_goal, _lines, pending}} <- transcript_state(run),
-         true <- is_map(pending),
-         approval_id when is_binary(approval_id) <- Map.get(pending, "approval_id") do
-      Samen.Approvals.cancel(approval_id, WriteProposal.requester_principal_id())
+    case transcript_state(run) do
+      {:ok, {_goal, _lines, pending}} ->
+        with true <- is_map(pending),
+             approval_id when is_binary(approval_id) <- Map.get(pending, "approval_id") do
+          Samen.Approvals.cancel(approval_id, WriteProposal.requester_principal_id())
+        else
+          _ -> :ok
+        end
+
+      {:error, :transcript_unavailable} ->
+        # The sealed transcript names the pending approval, but it CANNOT be read (a shredded or corrupt run key).
+        # That is not "nothing pending": the old `else _ -> :ok` let the run expire with its approval still
+        # decidable. Find the approval through the still-`:proposed` turn row instead (its subject_ref names the turn).
+        withdraw_by_turn(run)
+    end
+  end
+
+  # Cancel every pending write-proposal approval of `run`'s org whose subject is the run's pending turn.
+  defp withdraw_by_turn(%Run{} = run) do
+    with {:ok, turn} <- pending_turn(run),
+         {:ok, approvals} <- Samen.Approvals.list_pending(run.org_id, WriteProposal.kind()) do
+      approvals
+      |> Enum.filter(fn approval -> WriteProposal.parse_subject_ref(approval.subject_ref) == {:ok, turn.id} end)
+      |> Enum.map(&Samen.Approvals.cancel(&1.id, WriteProposal.requester_principal_id()))
+      |> Enum.find(:ok, &withdrawal_failed?/1)
     else
-      _ -> :ok
+      # no proposed turn row: nothing was parked behind an approval
+      {:error, :turn_not_found} -> :ok
+      {:error, _} = error -> error
     end
   end
 
@@ -3242,7 +3301,9 @@ defmodule Samen.AI.Agent do
   defp refuse_vt_args(args) do
     if vt_free?(args), do: :ok, else: {:error, :invalid_args}
   rescue
-    _ -> {:error, :invalid_args}
+    e ->
+      Samen.Observability.Failure.report(:agent_refuse_vt_args, nil, e)
+      {:error, :invalid_args}
   end
 
   defp vt_free?(value) when is_binary(value), do: not String.contains?(value, @vt_sentinel)
@@ -3268,7 +3329,9 @@ defmodule Samen.AI.Agent do
       _ -> {:error, :invalid_args}
     end
   rescue
-    _ -> {:error, :invalid_args}
+    e ->
+      Samen.Observability.Failure.report(:agent_validate_args, nil, e)
+      {:error, :invalid_args}
   end
 
   defp validate_args(_module, _args), do: {:error, :invalid_args}
@@ -3292,7 +3355,9 @@ defmodule Samen.AI.Agent do
       end
     end)
   rescue
-    _ -> {:error, :tool_failed}
+    e ->
+      Samen.Observability.Failure.report(:agent_run_tool, nil, e)
+      {:error, :tool_failed}
   end
 
   # The tool DECISION stamp (ADR-047 §4.1 checkpoint 1, tool half): tool_kind + arg key

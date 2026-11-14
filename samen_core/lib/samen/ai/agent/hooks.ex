@@ -118,9 +118,13 @@ defmodule Samen.AI.Agent.Hooks do
   defp safe_call(hook, point, ctx) do
     hook.call(point, ctx)
   rescue
-    _ -> :__hook_error__
+    e ->
+      Samen.Observability.Failure.report(:hooks_safe_call, nil, e)
+      :__hook_error__
   catch
-    _kind, _value -> :__hook_error__
+    kind, _value ->
+      Samen.Observability.Failure.report(:hooks_safe_call, nil, kind)
+      :__hook_error__
   end
 
   defp interpret(point, _ctx, {:block, reason}) do

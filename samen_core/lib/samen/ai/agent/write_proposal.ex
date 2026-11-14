@@ -234,6 +234,8 @@ defmodule Samen.AI.Agent.WriteProposal do
       _ -> {:error, :turn_not_found}
     end
   rescue
-    _ -> {:error, :turn_not_found}
+    e ->
+      Samen.Observability.Failure.report(:write_proposal_fetch_turn, nil, e)
+      {:error, :turn_not_found}
   end
 end

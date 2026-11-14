@@ -353,8 +353,18 @@ defmodule Samen.Vault do
   @spec scan_pitr_key_absent(String.t(), Ecto.Repo.t()) ::
           {:ok, :key_absent} | {:leaks, [String.t()]}
   def scan_pitr_key_absent(subject_id, repo) do
-    key_columns = key_shaped_columns(repo, "pii_vault")
+    case key_shaped_columns(repo, "pii_vault") do
+      {:ok, key_columns} ->
+        scan_pitr_key_absent(subject_id, repo, key_columns)
 
+      {:error, :unavailable} ->
+        # A failed column probe is NOT "no key-shaped column": the old `rescue _ -> []` made this verifier answer
+        # `{:ok, :key_absent}` (erasure proven) because the probe could not run. It fails closed instead.
+        {:leaks, ["pii_vault key-material column probe FAILED — cannot prove the key is absent (fail closed)"]}
+    end
+  end
+
+  defp scan_pitr_key_absent(subject_id, repo, key_columns) do
     decryptable =
       repo.all(from(r in VaultRow, where: r.subject_id == ^subject_id, select: r.token))
       |> Enum.filter(fn token -> match?({:ok, _}, reveal_token(token, repo)) end)
@@ -390,8 +400,11 @@ defmodule Samen.Vault do
       String.contains?(n, "wrapped_dek") or n == "dek" or String.ends_with?(n, "_dek") or
         String.contains?(n, "master_key") or String.contains?(n, "key_material")
     end)
+    |> then(&{:ok, &1})
   rescue
-    _ -> []
+    e ->
+      Samen.Observability.Failure.report(:vault_key_column_probe, nil, e)
+      {:error, :unavailable}
   end
 
   @doc """

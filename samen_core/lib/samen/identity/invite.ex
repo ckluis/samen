@@ -416,7 +416,9 @@ defmodule Samen.Identity.Invite do
       )
     end)
   rescue
-    _ -> :ok
+    e ->
+      Samen.Observability.Failure.report(:invite_notify_accept, nil, e)
+      :ok
   end
 
   defp joined(invitation, credential, user, membership) do
@@ -470,7 +472,9 @@ defmodule Samen.Identity.Invite do
       _ -> :error
     end
   rescue
-    _ -> :error
+    e ->
+      Samen.Observability.Failure.report(:invite_reveal_invitation_email, nil, e)
+      :error
   end
 
   defp decode_email(<<c, _::binary>> = json) when c in [?{, ?[] do
