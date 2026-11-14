@@ -1,0 +1,19 @@
+# SABOTAGE: a lock and variable left on a server session the lease no longer owns are read as its own
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_lease_test.exs
+# MUST_FAIL: a lock + variable left on a session the lease no longer owns
+diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
+index edeca69e..7acd792d 100644
+--- a/samen_core/lib/samen/single_node/lease.ex
++++ b/samen_core/lib/samen/single_node/lease.ex
+@@ -252,7 +252,7 @@ defmodule Samen.SingleNode.Lease do
+   @spec interpret(term(), map()) :: {:view, [map()]} | {:unknown, atom()}
+   def interpret({:ok, %Postgrex.Result{rows: [[me, var | _] | _] = rows}}, ctx) do
+     cond do
+-      var in [nil, ""] or var != ctx.token or me != ctx.pid ->
++      var in [nil, ""] or var != ctx.token ->
+         {:unknown, :connection_pooler}
+ 
+       true ->

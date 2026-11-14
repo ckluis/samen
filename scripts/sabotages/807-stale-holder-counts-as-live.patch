@@ -1,0 +1,19 @@
+# SABOTAGE: a holder whose beat stopped still counts as a second instance
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_lease_test.exs
+# MUST_FAIL: a DIRECT instance facing a leftover from a pooled one
+diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
+index edeca69e..9495f912 100644
+--- a/samen_core/lib/samen/single_node/lease.ex
++++ b/samen_core/lib/samen/single_node/lease.ex
+@@ -324,7 +324,7 @@ defmodule Samen.SingleNode.Lease do
+         end
+       end)
+ 
+-    {live, _stale} = Enum.split_with(others, fn o -> now - elem(Map.fetch!(seen2, o.pid), 1) < stale_ms end)
++    {live, _stale} = {others, []}
+ 
+     verdict =
+       cond do

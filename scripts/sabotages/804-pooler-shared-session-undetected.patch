@@ -1,0 +1,19 @@
+# SABOTAGE: two instances on one pooled server session see no other holder: both read single
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_lease_test.exs
+# MUST_FAIL: TWO instances sharing ONE server session are UNKNOWN
+diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
+index edeca69e..c0e23ec5 100644
+--- a/samen_core/lib/samen/single_node/lease.ex
++++ b/samen_core/lib/samen/single_node/lease.ex
+@@ -302,7 +302,7 @@ defmodule Samen.SingleNode.Lease do
+ 
+   # My own session must carry exactly my epoch and one beat; anything else means another lease also ran its
+   # statements on this server connection (a pooler), so "no other holder" would be a lie.
+-  defp shared_session?(mine, ctx), do: mine.epoch != ctx.epoch or length(mine.beats) != 1
++  defp shared_session?(_mine, _ctx), do: false
+ 
+   @doc """
+   Turn the other holders into a verdict, remembering what each one's beat looked like and since when
