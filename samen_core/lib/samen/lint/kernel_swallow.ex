@@ -35,6 +35,9 @@ defmodule Samen.Lint.KernelSwallow do
     {"samen_core/lib/samen/ai.ex", :resolved_env} =>
       {1, "6e5f8d3527e06c4e",
        "fail-SECURE: an environment that cannot be resolved reads as :prod, the posture that refuses simulated providers and unconfigured adapters — never the permissive :dev/:test"},
+    {"samen_core/lib/samen/automation/actions/support.ex", :safe_atom} =>
+      {1, "d2422b22143b5a61",
+       "String.to_existing_atom/1 raises ArgumentError only for a name that is not an existing atom; nil (no such key or module) is the exact, total answer and never mints an atom from row or model data — the one shared helper the automation actions and the run worker use"},
     {"samen_core/lib/samen/kms.ex", :resolved_env} =>
       {1, "4f80883edc8535bc",
        "fail-SECURE: an environment that cannot be resolved reads as :prod, the posture that refuses an unimplemented skeleton adapter — never the permissive :dev/:test"},
@@ -60,39 +63,12 @@ defmodule Samen.Lint.KernelSwallow do
     "samen_core/lib/samen/adapter_conformance_case.ex" => 6,
     "samen_core/lib/samen/aggregate/extension.ex" => 2,
     "samen_core/lib/samen/aggregate/query_budget.ex" => 1,
-    "samen_core/lib/samen/ai.ex" => 1,
-    "samen_core/lib/samen/ai/agent.ex" => 2,
-    "samen_core/lib/samen/ai/agent/health.ex" => 4,
-    "samen_core/lib/samen/ai/catalog.ex" => 5,
-    "samen_core/lib/samen/ai/crm.ex" => 1,
-    "samen_core/lib/samen/ai/embeddings.ex" => 3,
-    "samen_core/lib/samen/ai/mcp.ex" => 3,
-    "samen_core/lib/samen/ai/support_operator.ex" => 1,
-    "samen_core/lib/samen/ai/tool_surface.ex" => 1,
     "samen_core/lib/samen/analytics.ex" => 1,
     "samen_core/lib/samen/analytics/sources.ex" => 1,
     "samen_core/lib/samen/api/pii_resolution.ex" => 4,
     "samen_core/lib/samen/api_contract.ex" => 3,
     "samen_core/lib/samen/approvals.ex" => 1,
     "samen_core/lib/samen/auth/org_actor.ex" => 2,
-    "samen_core/lib/samen/automation/action.ex" => 2,
-    "samen_core/lib/samen/automation/actions/assign_record_owner.ex" => 3,
-    "samen_core/lib/samen/automation/actions/fetch_record.ex" => 3,
-    "samen_core/lib/samen/automation/actions/search_records.ex" => 2,
-    "samen_core/lib/samen/automation/actions/support.ex" => 2,
-    "samen_core/lib/samen/automation/actions/webhook.ex" => 1,
-    "samen_core/lib/samen/automation/compile.ex" => 1,
-    "samen_core/lib/samen/automation/dispatch_worker.ex" => 1,
-    "samen_core/lib/samen/automation/escalate.ex" => 1,
-    "samen_core/lib/samen/automation/escalation_advance.ex" => 1,
-    "samen_core/lib/samen/automation/event_capture.ex" => 2,
-    "samen_core/lib/samen/automation/health.ex" => 3,
-    "samen_core/lib/samen/automation/non_pii_predicates.ex" => 1,
-    "samen_core/lib/samen/automation/remind.ex" => 1,
-    "samen_core/lib/samen/automation/reminder_fire.ex" => 1,
-    "samen_core/lib/samen/automation/run_record.ex" => 2,
-    "samen_core/lib/samen/automation/run_worker.ex" => 2,
-    "samen_core/lib/samen/automation/schedule_advance.ex" => 1,
     "samen_core/lib/samen/backup/verification.ex" => 1,
     "samen_core/lib/samen/billing/ash_checkout_mirror.ex" => 1,
     "samen_core/lib/samen/billing/dunning.ex" => 3,
@@ -169,12 +145,7 @@ defmodule Samen.Lint.KernelSwallow do
   }
 
   @error_arm_baseline %{
-    "samen_core/lib/samen/ai/agent.ex" => 1,
-    "samen_core/lib/samen/ai/agent/breaker.ex" => 1,
-    "samen_core/lib/samen/ai/agent/fold_source.ex" => 1,
-    "samen_core/lib/samen/ai/embeddings.ex" => 2,
     "samen_core/lib/samen/approvals.ex" => 1,
-    "samen_core/lib/samen/automation/actions/record_family.ex" => 1,
     "samen_core/lib/samen/billing/subscription_movement.ex" => 1,
     "samen_core/lib/samen/custom_objects.ex" => 1,
     "samen_core/lib/samen/fleet/registry.ex" => 3,
@@ -193,8 +164,8 @@ defmodule Samen.Lint.KernelSwallow do
   # has to raise this number too (and `SwallowLintTest` compares it with the merge base, so it can only go down). Lower
   # it together with the baseline when a swallow is converted; never raise it.
   @ceilings %{
-    rescue: %{"samen_core/lib" => 227},
-    error_arm: %{"samen_core/lib" => 26}
+    rescue: %{"samen_core/lib" => 176},
+    error_arm: %{"samen_core/lib" => 20}
   }
 
   def roots, do: @roots
