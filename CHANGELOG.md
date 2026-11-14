@@ -30,6 +30,18 @@ All notable changes to Samen are recorded here. The format follows
   campaign send gate refuses on it.
 - Closed-but-silent security sites (AI egress chokepoint, agent approver/breaker/hooks, fleet resolution/authz, identity, operator plane,
   break-glass anchoring) keep their closed answers and now report by name.
+- **AI / agent and automation areas** (`samen/ai/**`, `samen/automation/**`; kernel ceilings rescue 227 -> 176, error-arm 26 -> 20). Fail-open
+  sites fixed, each with a red test, a positive control and a sabotage (855-869): a failed `FoldSource` existence probe raises instead of
+  reading as an absent index (the erasure withdrawal walk and the per-turn withdrawal check answered "nothing to withdraw");
+  `Embeddings` reads an introspection failure as vault-routed (fail closed), its nearest-neighbour and stale reads are
+  `{:error, :unavailable}` and `reembed_stale/1` no longer claims `{:ok, 0 re-embedded}` (`stale_rows/3` raises, `stale_rows_result/3` is the
+  tagged form); `Agent.reject_proposal/3` rolls back when the turn or run cannot be READ; the agent Health `summary/runs/turns`, the automation
+  Health `summary/runs` and `Breaker.kills/1` answer an outage, not an empty fleet or "no kills"; `RunWorker` skips a run (`internal_error`)
+  whose subject cannot be READ, because an empty subject passes every `neq` / `not_in` / `is_nil` gate; `DispatchWorker` no longer reads an
+  unknown event as `:created`; `ReminderFire` and `EscalationAdvance` fail the change when their reload fails; `MutateRecord.undo/3` reports a
+  compensation that did not happen. The fail-closed tool, capability, catalogue and surface probes stay non-fatal and now report by name; the
+  four `String.to_existing_atom` rescues collapse into one reviewed `Support.safe_atom/1`. Web LiveViews that map `{:error, _}` to `[]`
+  (operator agent / automation health) are the web phase's.
 
 ### Kernel review fixes (samen_core, samen_web, demo, driftwood, pawchart)
 
