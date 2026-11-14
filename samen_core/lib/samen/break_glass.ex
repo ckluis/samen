@@ -119,6 +119,8 @@ defmodule Samen.BreakGlass do
     * `{:error, :reason_required}`  — no who/what/why (clause (a) red path);
     * `{:error, :not_authorized}`   — actor lacks the break-glass role;
     * `{:error, :operator_suspended}` — the operator is suspended (clause (d));
+    * `{:error, :suspension_failed}` — this reveal is over the budget but the auto-suspension could not be written
+      (reported); the reveal is refused — fail closed;
     * `{:error, :budget_exceeded}`  — this reveal tripped the breadth budget →
       operator auto-suspended (clause (d));
     * `{:error, {:local_audit_failed, reason}}` — the local audit could not be
@@ -181,10 +183,12 @@ defmodule Samen.BreakGlass do
            subject_id: req.subject_id,
            break_glass: true,
            org_id: org_id(req),
-           repo: repo(req)
+           repo: repo(req),
+           local_audit_path: Map.get(req, :local_audit_path)
          }) do
       {:ok, _count} -> :ok
       {:suspended, _count} -> {:error, :budget_exceeded}
+      {:error, :suspend_failed} -> {:error, :suspension_failed}
     end
   end
 

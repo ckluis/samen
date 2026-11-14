@@ -94,9 +94,12 @@ defmodule Samen.BreakGlass.Budget do
   Returns:
     * `{:ok, distinct_count}` — within budget; the reveal may proceed;
     * `{:suspended, distinct_count}` — the reveal that tripped the budget: the
-      operator was auto-suspended and THIS reveal (plus all subsequent) must deny.
+      operator was auto-suspended and THIS reveal (plus all subsequent) must deny;
+    * `{:error, :suspend_failed}` — over budget but the suspension could not be written; reported, and the reveal
+      in progress must deny (fail closed).
   """
-  @spec record_and_check(map()) :: {:ok, non_neg_integer()} | {:suspended, non_neg_integer()}
+  @spec record_and_check(map()) ::
+          {:ok, non_neg_integer()} | {:suspended, non_neg_integer()} | {:error, :suspend_failed}
   def record_and_check(attrs) do
     r = Map.get(attrs, :repo, repo())
     operator_id = fetch!(attrs, :operator_id)
@@ -112,17 +115,27 @@ defmodule Samen.BreakGlass.Budget do
 
     # 3. Trip the budget → auto-suspend + deny.
     if count > budget() do
-      {:ok, _} =
+      suspend_result =
         Suspension.suspend(%{
           operator_id: operator_id,
           reason:
             "breadth budget exceeded: #{count} distinct subjects in #{window_seconds()}s window " <>
               "(budget #{budget()})",
           org_id: Map.get(attrs, :org_id) || Samen.AuditChain.global_org(),
-          repo: r
+          repo: r,
+          local_audit_path: Map.get(attrs, :local_audit_path)
         })
 
-      {:suspended, count}
+      # Fail closed, never crash: `{:ok, _}` means the operator IS suspended (the audit may be deferred); an error
+      # means the suspension did NOT land, so THIS reveal is denied anyway and the failure is reported.
+      case suspend_result do
+        {:ok, _row} ->
+          {:suspended, count}
+
+        {:error, reason} ->
+          Samen.Observability.Failure.report(:budget_auto_suspend, nil, reason)
+          {:error, :suspend_failed}
+      end
     else
       {:ok, count}
     end

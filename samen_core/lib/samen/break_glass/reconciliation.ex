@@ -105,17 +105,7 @@ defmodule Samen.BreakGlass.Reconciliation do
     result =
       r.transaction(fn ->
         write_result =
-          AuditChain.Writer.write(r, %{
-            org_id: entry.org_id,
-            event_type: "break_glass",
-            subject_id: entry.subject_id,
-            actor_id: entry.actor_id,
-            correlation_id: entry.correlation_id,
-            detail:
-              "event=break_glass_reveal deferred-anchor local_seq=#{entry.seq} " <>
-                "reason=#{entry.reason}",
-            occurred_at: parse_dt(entry.occurred_at)
-          })
+          AuditChain.Writer.write(r, central_event(entry))
 
         case write_result do
           {:ok, _} ->
@@ -154,6 +144,35 @@ defmodule Samen.BreakGlass.Reconciliation do
       {:ok, :anchored} -> :ok
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  # A deferred operator suspension (`Samen.OperatorPlane.Suspension.suspend/1` parks it here when the chain write
+  # failed) anchors as the `operator_suspension` event the live path would have written; everything else on the
+  # local chain is a break-glass reveal.
+  defp central_event(%{action: "operator_suspended"} = entry) do
+    %{
+      org_id: entry.org_id,
+      event_type: "operator_suspension",
+      subject_id: entry.subject_id,
+      actor_id: entry.actor_id,
+      correlation_id: entry.correlation_id,
+      detail: "event=operator_suspended deferred-anchor local_seq=#{entry.seq} #{entry.reason}",
+      occurred_at: parse_dt(entry.occurred_at)
+    }
+  end
+
+  defp central_event(entry) do
+    %{
+      org_id: entry.org_id,
+      event_type: "break_glass",
+      subject_id: entry.subject_id,
+      actor_id: entry.actor_id,
+      correlation_id: entry.correlation_id,
+      detail:
+        "event=break_glass_reveal deferred-anchor local_seq=#{entry.seq} " <>
+          "reason=#{entry.reason}",
+      occurred_at: parse_dt(entry.occurred_at)
+    }
   end
 
   defp already_anchored?(r, local_hash) do

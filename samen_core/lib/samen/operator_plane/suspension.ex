@@ -19,6 +19,11 @@ defmodule Samen.OperatorPlane.SuspensionRow do
     field(:cleared_at, :utc_datetime_usec, source: :osp_cleared_at)
     field(:inserted_at, :utc_datetime_usec, source: :osp_inserted_at)
     field(:updated_at, :utc_datetime_usec, source: :osp_updated_at)
+
+    # Not a column (no migration): how the suspension's audit entry stands on the row `suspend/1` returns.
+    # `:written` (in the chain), `:pending` (the chain write failed; a durable local entry awaits the reconciler)
+    # or `:lost` (the chain write AND the local entry both failed; reported, but nothing durable remains).
+    field(:audit, Ecto.Enum, values: [:written, :pending, :lost], default: :written, virtual: true)
   end
 end
 
@@ -72,11 +77,14 @@ defmodule Samen.OperatorPlane.Suspension do
   Auto-suspend an operator (T4.4 clause (d)). Idempotent: a second suspend of an
   already-suspended operator is a no-op returning the existing row. Writes an
   `operator_suspended` audit event (token-only) into the append-only tier + the
-  T4.3 chain.
+  T4.3 chain (or, if that write fails, defers it durably; see below).
 
   `attrs`: `:operator_id` (required), `:reason` (required), optional `:org_id`
   (the chain partition; defaults to `"__global__"` — a platform-scope event),
-  `:repo`.
+  `:repo`, `:local_audit_path` (where a deferred audit entry is parked).
+
+  The suspension commits FIRST, whatever happens to the audit. `{:ok, row}` always means the operator IS suspended;
+  `row.audit` is `:written`, `:pending` or `:lost` (see `SuspensionRow`). `{:error, _}` means it was NOT suspended.
   """
   @spec suspend(map()) :: {:ok, SuspensionRow.t()} | {:error, term}
   def suspend(attrs) do
@@ -107,23 +115,85 @@ defmodule Samen.OperatorPlane.Suspension do
           )
           |> Ecto.Changeset.validate_required([:operator_id, :reason, :suspended_at])
 
-        # Atomic with its audit entry: a suspension the tamper-evident chain never saw is an unaudited privilege
-        # change, so a failed audit write rolls the suspension back and the caller sees the error (it used to be
-        # swallowed: `emit_audit` was `rescue _ -> :ok` and ignored a returned `{:error, _}`).
+        # ASYMMETRIC with `clear/2`. Suspending REMOVES privilege, so it must never wait on (or be undone by) the
+        # audit tables: the suspension row commits on its own first. A failed audit write is reported and made
+        # durable locally (`Samen.BreakGlass.LocalAudit`, the break-glass deferred-anchor precedent), to be
+        # anchored into the chain later by `Samen.BreakGlass.Reconciliation`; the returned row says which.
+        # `clear/2` RESTORES privilege and stays atomic with its audit entry (fail closed).
+        case insert_suspension(r, row) do
+          {:ok, inserted} -> {:ok, audit_after_commit(r, inserted, attrs, reason)}
+          {:error, _} = error -> error
+        end
+    end
+  end
+
+  defp insert_suspension(r, row) do
+    case r.insert(row) do
+      {:ok, inserted} ->
+        {:ok, inserted}
+
+      {:error, failure} ->
+        Samen.Observability.Failure.report(:suspension_insert, nil, failure)
+        {:error, :unavailable}
+    end
+  rescue
+    e ->
+      Samen.Observability.Failure.report(:suspension_insert, nil, e)
+      {:error, :unavailable}
+  end
+
+  defp audit_after_commit(r, inserted, attrs, reason) do
+    operator_id = inserted.operator_id
+    org_id = Map.get(attrs, :org_id) || Samen.AuditChain.global_org()
+
+    audited =
+      try do
         r.transaction(fn ->
-          with {:ok, inserted} <- r.insert(row),
-               {:ok, _} <-
-                 emit_audit(r, %{
-                   event: "operator_suspended",
-                   operator_id: operator_id,
-                   org_id: Map.get(attrs, :org_id) || Samen.AuditChain.global_org(),
-                   detail: "reason=#{reason}"
-                 }) do
-            inserted
-          else
+          case emit_audit(r, %{
+                 event: "operator_suspended",
+                 operator_id: operator_id,
+                 org_id: org_id,
+                 detail: "reason=#{reason}"
+               }) do
+            {:ok, _} -> :ok
             {:error, failure} -> r.rollback(failure)
           end
         end)
+      rescue
+        e ->
+          Samen.Observability.Failure.report(:suspension_audit, org_id, e)
+          {:error, :audit_unavailable}
+      end
+
+    case audited do
+      {:ok, :ok} -> inserted
+      {:error, _} -> %{inserted | audit: defer_audit(attrs, operator_id, org_id, reason)}
+    end
+  end
+
+  # The chain write failed (already reported by `emit_audit`). Park the entry on the local hash chain so the
+  # reconciler can anchor it; `:lost` only when even that fails, and that is reported by name.
+  defp defer_audit(attrs, operator_id, org_id, reason) do
+    opts = if path = Map.get(attrs, :local_audit_path), do: [path: path], else: []
+
+    case Samen.BreakGlass.LocalAudit.append(
+           %{
+             org_id: org_id,
+             subject_id: operator_id,
+             actor_id: operator_id,
+             reason: "reason=#{reason}",
+             resource: "operator_suspension",
+             action: "operator_suspended",
+             correlation_id: uuid_or_nil(operator_id)
+           },
+           opts
+         ) do
+      {:ok, _entry} ->
+        :pending
+
+      {:error, failure} ->
+        Samen.Observability.Failure.report(:suspension_audit_deferral, org_id, failure)
+        :lost
     end
   end
 
