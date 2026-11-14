@@ -24,6 +24,9 @@ defmodule DriftwoodWeb.PageController do
   `/healthz` returns `ok` (the LIVENESS probe the boot check curls). `/readyz` is the
   READINESS probe (WS-F1 / F1.2) — 200 only when Postgres, the KMS wrapped-DEK store, and
   Oban all answer (`Samen.Web.Readiness`), else 503; the deploy traffic gate rides it.
+  The body also carries the non-gating advisories (audit-partition runway: `partitions: WARN|CRITICAL|UNKNOWN …`; a
+  second instance on this database: `single_node: CRITICAL|UNKNOWN …`, ADR-054), which never change the status unless
+  `Samen.SingleNode` is `strict` (and then only for a proven late instance, never on UNKNOWN).
   """
   use Phoenix.Controller, formats: [:html]
 
