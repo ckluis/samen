@@ -345,11 +345,14 @@ defmodule Samen.AuditEvent.PartitionManager do
   # only if what exists really IS this month's partition of `aud_event` with these bounds; an unrelated table of that
   # name, or a partition of another range, stays an error.
   defp create_failed(repo, name, from_ts, to_ts, %Postgrex.Error{postgres: %{code: :duplicate_table}} = e) do
-    if expected_partition?(repo, name, from_ts, to_ts) do
-      invalidate_bounds(repo)
-      {:ok, name}
-    else
-      {:error, e}
+    case expected_partition?(repo, name, from_ts, to_ts) do
+      {:ok, true} ->
+        invalidate_bounds(repo)
+        {:ok, name}
+
+      # not this month's partition, or the check itself failed: the original error stands
+      _ ->
+        {:error, e}
     end
   end
 
@@ -369,8 +372,9 @@ defmodule Samen.AuditEvent.PartitionManager do
     """
 
     case repo.query(sql, [name, from_ts, to_ts]) do
-      {:ok, %{rows: [[true]]}} -> true
-      _ -> false
+      {:ok, %{rows: [[true]]}} -> {:ok, true}
+      {:ok, _} -> {:ok, false}
+      {:error, reason} -> {:error, reason}
     end
   end
 

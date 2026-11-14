@@ -5,7 +5,7 @@
 # TEST_FILES: test/aud_event_default_partition_test.exs
 # MUST_FAIL: two concurrent creators of the SAME month both succeed
 diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
-index c608d8cf..2df1a0b0 100644
+index b6197bc2..de79113b 100644
 --- a/samen_core/lib/samen/audit_event/partition_manager.ex
 +++ b/samen_core/lib/samen/audit_event/partition_manager.ex
 @@ -344,7 +344,7 @@ defmodule Samen.AuditEvent.PartitionManager do
@@ -14,6 +14,6 @@ index c608d8cf..2df1a0b0 100644
    # name, or a partition of another range, stays an error.
 -  defp create_failed(repo, name, from_ts, to_ts, %Postgrex.Error{postgres: %{code: :duplicate_table}} = e) do
 +  defp create_failed(repo, name, from_ts, to_ts, %Postgrex.Error{postgres: %{code: :never_duplicate_table}} = e) do
-     if expected_partition?(repo, name, from_ts, to_ts) do
-       invalidate_bounds(repo)
-       {:ok, name}
+     case expected_partition?(repo, name, from_ts, to_ts) do
+       {:ok, true} ->
+         invalidate_bounds(repo)

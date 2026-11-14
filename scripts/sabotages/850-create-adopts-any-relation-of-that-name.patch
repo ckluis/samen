@@ -5,15 +5,15 @@
 # TEST_FILES: test/aud_event_default_partition_test.exs
 # MUST_FAIL: a duplicate_table that is NOT this month's partition stays an error
 diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
-index c608d8cf..e004c910 100644
+index b6197bc2..bf87ec67 100644
 --- a/samen_core/lib/samen/audit_event/partition_manager.ex
 +++ b/samen_core/lib/samen/audit_event/partition_manager.ex
-@@ -370,7 +370,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+@@ -373,7 +373,7 @@ defmodule Samen.AuditEvent.PartitionManager do
  
      case repo.query(sql, [name, from_ts, to_ts]) do
-       {:ok, %{rows: [[true]]}} -> true
--      _ -> false
-+      _ -> true
+       {:ok, %{rows: [[true]]}} -> {:ok, true}
+-      {:ok, _} -> {:ok, false}
++      {:ok, _} -> {:ok, true}
+       {:error, reason} -> {:error, reason}
      end
    end
- 
