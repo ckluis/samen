@@ -1,0 +1,17 @@
+# SABOTAGE: the published timestamp is the start of the check: a slow database reads as lease_stale
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_lease_test.exs
+# MUST_FAIL: is the time of PUBLISHING, not of the start of the check
+diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
+index 068c893e..2db6c2b4 100644
+--- a/samen_core/lib/samen/single_node/lease.ex
++++ b/samen_core/lib/samen/single_node/lease.ex
+@@ -636,5 +636,5 @@ defmodule Samen.SingleNode.Lease do
+   end
+ 
+   # `at` is the time of publishing (read now), not the start of the check: a slow database must not make a fresh state read stale.
+-  defp publish(state, _checked_at, raw), do: :ets.insert(state.table, {:status, Map.merge(raw, %{at: state.clock.(), stale_ms: state.stale_ms})})
++  defp publish(state, checked_at, raw), do: :ets.insert(state.table, {:status, Map.merge(raw, %{at: checked_at, stale_ms: state.stale_ms})})
+ end

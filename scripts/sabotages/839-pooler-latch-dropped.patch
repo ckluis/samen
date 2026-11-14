@@ -1,0 +1,20 @@
+# SABOTAGE: the pooler latch is dropped: a pooled lease that lands back on its own server connection reads 
+#   single again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_lease_test.exs
+# MUST_FAIL: a route X -> Z -> X stays UNKNOWN
+diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
+index 068c893e..2590e79a 100644
+--- a/samen_core/lib/samen/single_node/lease.ex
++++ b/samen_core/lib/samen/single_node/lease.ex
+@@ -499,7 +499,7 @@ defmodule Samen.SingleNode.Lease do
+     result = state.q.query(state.conn, state.sql, [], timeout: state.query_timeout_ms)
+     # Read AFTER the statement: a reconnect while it waited for the pool updates the recorded pid.
+     ctx = %{token: state.token, pid: :atomics.get(state.ref, @a_pid), pid_before: pid_before, epoch: :atomics.get(state.ref, @a_epoch)}
+-    state = if not state.pooled? and pooler_proof?(result, ctx), do: latch_pooler(state), else: state
++    state = if false and pooler_proof?(result, ctx), do: latch_pooler(state), else: state
+ 
+     if state.pooled? do
+       # Latched for the life of this lease process: even a check that happens to land on its own server connection

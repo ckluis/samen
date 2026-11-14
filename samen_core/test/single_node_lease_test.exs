@@ -22,6 +22,17 @@ defmodule Samen.SingleNodeLeaseTest.PoolDouble do
   def query!(%{route: route}, sql, params), do: Postgrex.query!(route.(), sql, params)
 end
 
+defmodule Samen.SingleNodeLeaseTest.SlowPostgrex do
+  @moduledoc "Postgrex whose `query/4` takes 5 000 ms of a test clock (an `Agent` named in the app env)."
+  defdelegate start_link(opts), to: Postgrex
+  defdelegate query!(conn, sql, params), to: Postgrex
+
+  def query(conn, sql, params, opts) do
+    Agent.update(Application.fetch_env!(:samen_core, :sn_slow_clock), &(&1 + 5_000))
+    Postgrex.query(conn, sql, params, opts)
+  end
+end
+
 defmodule Samen.SingleNodeLeaseTest.DynRepo do
   @moduledoc "A repo whose config resolves its credentials at CONNECT time (`:configure`), like an IAM-token host."
   def config do
@@ -688,6 +699,24 @@ defmodule Samen.SingleNodeLeaseTest do
         )
 
       assert %{state: :unknown, reason: :connection_down} = Lease.check_now(control.name)
+    end
+  end
+
+  describe "the published time" do
+    test "is the time of PUBLISHING, not of the start of the check (a slow database must not read as lease_stale)", ctx do
+      {:ok, clock} = Agent.start_link(fn -> 0 end)
+      Application.put_env(:samen_core, :sn_slow_clock, clock)
+      on_exit(fn -> Application.delete_env(:samen_core, :sn_slow_clock) end)
+      tick = fn -> Agent.get_and_update(clock, fn t -> {t + 1, t + 1} end) end
+
+      # every check and beat statement takes 5 000 ms of (test) clock
+      a = start_lease(ctx, clock: tick, query_mod: Samen.SingleNodeLeaseTest.SlowPostgrex)
+      started = Agent.get(clock, & &1)
+      assert %{state: :single} = Lease.check_now(a.name)
+      [{:status, %{at: at}}] = :ets.lookup(a.table, :status)
+
+      # the check statement and the beat statement both ran before the state was published
+      assert at >= started + 10_000
     end
   end
 
