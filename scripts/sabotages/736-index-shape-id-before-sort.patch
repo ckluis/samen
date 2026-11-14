@@ -1,0 +1,20 @@
+# SABOTAGE: the tenant index is built (org_id, id, sort): it cannot serve ORDER BY sort, id, so the EXPLAIN 
+#   of the real page must show a Sort
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_index_plan_test.exs
+# MUST_FAIL: person — the first page and the page after a cursor are ordered index scans (ASC, forward)
+diff --git a/samen_core/lib/samen/indexing.ex b/samen_core/lib/samen/indexing.ex
+index 42b02559..935b2819 100644
+--- a/samen_core/lib/samen/indexing.ex
++++ b/samen_core/lib/samen/indexing.ex
+@@ -109,7 +109,7 @@ defmodule Samen.Indexing do
+          schema: AshPostgres.DataLayer.Info.schema(resource) || "public",
+          table: table,
+          name: "#{table}_org_keyset_idx",
+-         columns: [org] ++ sort_cols ++ [id],
++         columns: [org] ++ [id] ++ sort_cols,
+          logical: [:org_id] ++ List.wrap(sort) ++ [:id]
+        }}
+     else
