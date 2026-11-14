@@ -1,0 +1,20 @@
+# SABOTAGE: verify_approval stops checking the approval's own deadline_at, so a lapsed proposal whose 
+#   expiry job failed can still be approved into execution.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_write_test.exs
+# MUST_FAIL: an approval past its deadline_at is refused at execution although the run was never expired
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 31216daa..9ae3e621 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -2946,7 +2946,7 @@ defmodule Samen.AI.Agent do
+           # A LAPSED proposal is never executable. Fail-closed must not depend on the expiry job having run (it
+           # rolls back, and re-enqueues, while the approval cannot be withdrawn): the approval's own deadline is
+           # checked here, from the row, at execution time.
+-          deadline_lapsed?(loaded) ->
++          false and deadline_lapsed?(loaded) ->
+             {:error, :proposal_expired}
+ 
+           not is_binary(loaded.decided_by) or loaded.decided_by == "" ->

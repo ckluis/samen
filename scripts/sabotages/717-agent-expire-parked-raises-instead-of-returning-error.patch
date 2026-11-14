@@ -1,0 +1,21 @@
+# SABOTAGE: expire_parked uses Ash.update! again, so a failed expiry raises against its own spec on every 
+#   cron tick instead of returning an error value.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_write_test.exs
+# MUST_FAIL: withdrawal down: expire_parked is an {:error, :expiry_incomplete}
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 31216daa..eb4f9241 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -2799,7 +2799,8 @@ defmodule Samen.AI.Agent do
+       # an `{:error, _}` per this function's spec, reported by name and value-free — not a stacktrace per cron tick.
+       case run
+            |> Ash.Changeset.for_update(:expire_due, %{})
+-           |> Ash.update(authorize?: false) do
++           |> Ash.update!(authorize?: false)
++           |> then(&{:ok, &1}) do
+         {:ok, expired} ->
+           {:ok, expired}
+ 
