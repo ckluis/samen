@@ -1,0 +1,19 @@
+# SABOTAGE: an unreadable moment restarts the overlap clock
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_lease_test.exs
+# MUST_FAIL: an unreadable moment does not restart the overlap clock
+diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
+index edeca69e..4a646ca6 100644
+--- a/samen_core/lib/samen/single_node/lease.ex
++++ b/samen_core/lib/samen/single_node/lease.ex
+@@ -551,7 +551,7 @@ defmodule Samen.SingleNode.Lease do
+ 
+     emit(0, 1, 0)
+     publish(state, now, %{state: :unknown, reason: reason, strict: state.strict})
+-    %{state | kind: :unknown, last_reason: reason}
++    %{state | kind: :unknown, last_reason: reason, since: nil, reported?: false}
+   end
+ 
+   defp report_overlap(peers, state) do
