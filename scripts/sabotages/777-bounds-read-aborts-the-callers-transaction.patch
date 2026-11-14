@@ -1,0 +1,20 @@
+# SABOTAGE: the bounds read is not a savepoint, so a failing read poisons the audited write transaction 
+#   (25P02)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: a failing bounds read is reported and the transaction
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index e0afe242..655c9983 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -562,7 +562,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+   end
+ 
+   defp load_bounds(repo) do
+-    case repo.query(@bounds_sql, [], mode: :savepoint) do
++    case repo.query(@bounds_sql, []) do
+       {:ok, %{rows: rows}} ->
+         if Enum.all?(rows, fn [lo, hi] -> lo != nil and hi != nil end),
+           do: {:ok, Enum.map(rows, fn [lo, hi] -> {lo, hi} end)},

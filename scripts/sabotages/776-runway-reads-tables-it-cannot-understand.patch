@@ -1,0 +1,19 @@
+# SABOTAGE: the runway reads integer- and MAXVALUE-bounded tables, which makes it permanently UNKNOWN
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: an integer-partitioned table is ignored
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index e0afe242..010e05bd 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -645,7 +645,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+     'FROM \\(''([^'']+)''\\) TO \\(''([^'']+)''\\)') AS m ON true
+   WHERE pt.partstrat = 'r'
+     AND pt.partnatts = 1
+-    AND k.atttypid IN ('timestamptz'::regtype, 'timestamp'::regtype, 'date'::regtype)
++    AND true
+   ORDER BY p.relname, c.relname
+   """
+ 

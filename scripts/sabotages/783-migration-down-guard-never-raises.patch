@@ -1,0 +1,19 @@
+# SABOTAGE: the migration down drops the DEFAULT partition and the audit rows in it
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: the guard RAISES while the DEFAULT partition holds rows
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index e0afe242..bde6b6d6 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -615,7 +615,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+     DO $$
+     BEGIN
+       IF to_regclass('#{@default_partition}') IS NOT NULL THEN
+-        IF EXISTS (SELECT 1 FROM ONLY #{@default_partition}) THEN
++        IF false AND EXISTS (SELECT 1 FROM ONLY #{@default_partition}) THEN
+           RAISE EXCEPTION '#{@default_partition} holds audit rows that are in no monthly partition; dropping it would destroy them. Create the missing months first (Samen.AuditEvent.PartitionManager.ensure_partition/2 moves the rows in), then roll back again.';
+         END IF;
+       END IF;

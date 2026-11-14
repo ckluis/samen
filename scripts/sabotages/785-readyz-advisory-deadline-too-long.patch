@@ -1,0 +1,19 @@
+# SABOTAGE: a stuck partition probe holds /readyz far past the check budget
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/readiness_test.exs
+# MUST_FAIL: a read that never returns is UNKNOWN within the deadline
+diff --git a/samen_web/lib/samen/web/readiness.ex b/samen_web/lib/samen/web/readiness.ex
+index eb667b30..3ab31d91 100644
+--- a/samen_web/lib/samen/web/readiness.ex
++++ b/samen_web/lib/samen/web/readiness.ex
+@@ -88,7 +88,7 @@ defmodule Samen.Web.Readiness do
+   #     recent it was an hour ago: a stale `:ok` past its TTL is exactly the false health this advisory exists
+   #     to prevent. Only a successful read is cached; UNKNOWN is not, so the next probe tries again.
+   @advisory_ttl_ms 60_000
+-  @advisory_deadline_ms 500
++  @advisory_deadline_ms 5_000
+   @advisory_lock_ms 300
+ 
+   defp partitions_advisory(repo) do

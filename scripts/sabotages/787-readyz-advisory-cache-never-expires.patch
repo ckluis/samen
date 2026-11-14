@@ -1,0 +1,19 @@
+# SABOTAGE: a stale :ok is served as current past its TTL
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/readiness_test.exs
+# MUST_FAIL: past the TTL a failed refresh is UNKNOWN
+diff --git a/samen_web/lib/samen/web/readiness.ex b/samen_web/lib/samen/web/readiness.ex
+index eb667b30..af73b10e 100644
+--- a/samen_web/lib/samen/web/readiness.ex
++++ b/samen_web/lib/samen/web/readiness.ex
+@@ -96,7 +96,7 @@ defmodule Samen.Web.Readiness do
+     now_ms = System.monotonic_time(:millisecond)
+ 
+     case :persistent_term.get(key, nil) do
+-      {read_at, advisory} when now_ms - read_at < @advisory_ttl_ms ->
++      {read_at, advisory} when is_integer(read_at) ->
+         advisory
+ 
+       _expired_or_missing ->

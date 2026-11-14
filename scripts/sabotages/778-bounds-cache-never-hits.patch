@@ -1,0 +1,19 @@
+# SABOTAGE: every audited write queries the catalog again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: while the bounds are fresh a write issues no catalog query
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index e0afe242..ba99f369 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -550,7 +550,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+     now_ms = System.monotonic_time(:millisecond)
+ 
+     case :persistent_term.get(key, nil) do
+-      {read_at, ranges} when now_ms - read_at < ttl ->
++      {read_at, ranges} when now_ms - read_at < 0 ->
+         {:ok, ranges}
+ 
+       _expired_or_missing ->

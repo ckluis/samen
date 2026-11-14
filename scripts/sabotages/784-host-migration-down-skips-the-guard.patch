@@ -1,0 +1,18 @@
+# SABOTAGE: a host migration drops the DEFAULT partition without the guard
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: every host migration's down runs the guard before the DROP
+diff --git a/driftwood/priv/repo/migrations/20261114120000_aud_event_default_partition.exs b/driftwood/priv/repo/migrations/20261114120000_aud_event_default_partition.exs
+index 9fa59150..8a0886c0 100644
+--- a/driftwood/priv/repo/migrations/20261114120000_aud_event_default_partition.exs
++++ b/driftwood/priv/repo/migrations/20261114120000_aud_event_default_partition.exs
+@@ -22,7 +22,6 @@ defmodule Driftwood.Repo.Migrations.AudEventDefaultPartition do
+ 
+   def down do
+     # refuses (raises) while the DEFAULT partition holds rows; the SQL is the framework's, shared by every host
+-    execute Samen.AuditEvent.PartitionManager.default_partition_down_guard_sql()
+ 
+     execute "DROP TABLE IF EXISTS aud_event_default"
+   end

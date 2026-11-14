@@ -1,0 +1,19 @@
+# SABOTAGE: a direct AuditEvent.insert caller can make a far-future time the partition key
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: a far-future occurred_at passed straight to insert/2 is clamped
+diff --git a/samen_core/lib/samen/audit_event/schema.ex b/samen_core/lib/samen/audit_event/schema.ex
+index 709101d6..e89c429c 100644
+--- a/samen_core/lib/samen/audit_event/schema.ex
++++ b/samen_core/lib/samen/audit_event/schema.ex
+@@ -116,7 +116,7 @@ defmodule Samen.AuditEvent do
+ 
+     # The chokepoint: whoever calls (the Writer, which has already clamped for the chain's sake, or a direct
+     # caller), a future `occurred_at` never becomes the partition key.
+-    {occurred_at, detail, clamped?} = clamp_future(claimed, detail)
++    {occurred_at, detail, clamped?} = {claimed, detail, false}
+ 
+     attrs = Map.put(attrs, :occurred_at, occurred_at)
+     attrs = if clamped?, do: Map.put(attrs, :detail, detail), else: attrs

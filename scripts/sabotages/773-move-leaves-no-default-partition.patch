@@ -1,0 +1,19 @@
+# SABOTAGE: the move drops the old DEFAULT and never attaches the replacement
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: rows of the new month move into it
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index e0afe242..cf743f67 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -384,7 +384,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+           q!(repo, "ALTER TABLE aud_event ATTACH PARTITION #{name} FOR VALUES FROM ('#{from_ts}') TO ('#{to_ts}')", window_ms)
+           q!(repo, "DROP TABLE #{@default_partition}", window_ms)
+           q!(repo, "ALTER TABLE #{@staged_default} RENAME TO #{@default_partition}", window_ms)
+-          q!(repo, "ALTER TABLE aud_event ATTACH PARTITION #{@default_partition} DEFAULT", window_ms)
++          :ok
+           name
+         end,
+         timeout: staging_ms + 4 * window_ms

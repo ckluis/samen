@@ -1,0 +1,19 @@
+# SABOTAGE: no partitioned table found is an empty ok instead of UNKNOWN
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: no time-partitioned table at all is UNKNOWN
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index e0afe242..97ed52e6 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -689,7 +689,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+     end)
+   end
+ 
+-  defp some_table(tables) when map_size(tables) == 0, do: {:error, :no_partitioned_table}
++  defp some_table(tables) when map_size(tables) == -1, do: {:error, :no_partitioned_table}
+   defp some_table(_tables), do: :ok
+ 
+   defp with_lock_timeout(repo, opts, fun) do
