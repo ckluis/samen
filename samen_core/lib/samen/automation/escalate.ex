@@ -153,7 +153,9 @@ defmodule Samen.Automation.Escalate do
   defp res_repo(res) do
     AshPostgres.DataLayer.Info.repo(res)
   rescue
-    _ -> nil
+    e ->
+      Samen.Observability.Failure.report(:automation_res_repo, nil, e)
+      nil
   end
 
   defp opt(opts, key) do

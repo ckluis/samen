@@ -207,7 +207,9 @@ defmodule Samen.Automation.Action do
       :not_a_tool
     end
   rescue
-    _ -> :not_a_tool
+    e ->
+      Samen.Observability.Failure.report(:action_tool_schema, nil, e)
+      :not_a_tool
   end
 
   def tool_schema_for(_), do: :not_a_tool
@@ -227,7 +229,9 @@ defmodule Samen.Automation.Action do
       :write
     end
   rescue
-    _ -> :write
+    e ->
+      Samen.Observability.Failure.report(:action_effect, nil, e)
+      :write
   end
 
   def effect_for(_), do: :write

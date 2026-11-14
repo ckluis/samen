@@ -101,15 +101,32 @@ defmodule Samen.Automation.Actions.MutateRecord do
       })
       when is_binary(record_id) and is_binary(resource_key) do
     with {:ok, resource} <- Support.resolve_resource(resource_key),
-         {:ok, record} <- Ash.get(resource, record_id, actor: actor) do
-      record |> Ash.Changeset.for_destroy(:destroy, %{}, actor: actor) |> Ash.destroy()
+         {:ok, record} when not is_nil(record) <- Ash.get(resource, record_id, actor: actor, not_found_error?: false),
+         :ok <- destroy_created(record, actor) do
       :ok
     else
-      _ -> :ok
+      # Nothing to undo: the resource is gone from the registry, or the record it created is already gone.
+      :error -> :ok
+      {:ok, nil} -> :ok
+      {:error, reason} -> undo_failed(reason)
     end
   end
 
   def undo(_config, _meta, _ctx), do: :ok
+
+  defp destroy_created(record, actor) do
+    case record |> Ash.Changeset.for_destroy(:destroy, %{}, actor: actor) |> Ash.destroy() do
+      :ok -> :ok
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # A compensation that did not happen is on record and tagged, never an `:ok` for a record left behind.
+  defp undo_failed(reason) do
+    Samen.Observability.Failure.report(:record_family_undo, nil, reason)
+    {:error, :undo_failed}
+  end
 
   defp to_map(m) when is_map(m), do: m
   defp to_map(_), do: %{}

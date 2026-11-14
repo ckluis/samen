@@ -168,6 +168,36 @@ defmodule Samen.Automation.EscalationTest do
     assert error_mentions?(error, "NoMatchingTransition") or error_mentions?(error, "transition")
   end
 
+  test "RED: when the reload that feeds the step FAILS the :advance_step fails (it advanced nothing and said nothing); the readable escalation advances (control)" do
+    org = Ash.UUID.generate()
+    past = DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.truncate(:second)
+
+    {:ok, escalation} =
+      Escalate.open(%{
+        org_id: org,
+        kind: "test.honest",
+        dedupe_key: "honest-1",
+        subject_ref: "samen:crm.opportunity:honest-1",
+        deadline_at: past,
+        chain: [%{"recipient_id" => Ash.UUID.generate()}]
+      })
+
+    unreadable = Ash.Changeset.new(%{escalation | id: "not-a-uuid"})
+
+    result =
+      try do
+        {:built, Samen.Automation.EscalationAdvance.change(unreadable, [], %{})}
+      rescue
+        e -> {:raised, e}
+      end
+
+    # it used to return the changeset UNCHANGED (a step that never advanced, silently)
+    assert {:raised, _} = result
+
+    assert {:ok, advanced} = escalation |> Ash.Changeset.for_update(:advance_step, %{}) |> Ash.update(authorize?: false)
+    assert advanced.current_step == 1
+  end
+
   test "the LEGAL twin: advance_step on an :open escalation succeeds (the control proving the red is refutable)" do
     org = Ash.UUID.generate()
     past = DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.truncate(:second)

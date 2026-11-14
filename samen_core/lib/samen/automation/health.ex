@@ -65,7 +65,7 @@ defmodule Samen.Automation.Health do
   @spec summary(Actor.t() | term(), String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
   def summary(operator, org_id, opts \\ []) do
     if may_view?(operator) do
-      {:ok, build_summary(org_id, opts)}
+      build_summary(org_id, opts)
     else
       {:error, :not_authorized}
     end
@@ -79,7 +79,7 @@ defmodule Samen.Automation.Health do
   @spec runs(Actor.t() | term(), String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
   def runs(operator, org_id, opts \\ []) do
     if may_view?(operator) do
-      {:ok, list_runs(org_id, opts)}
+      list_runs(org_id, opts)
     else
       {:error, :not_authorized}
     end
@@ -190,20 +190,36 @@ defmodule Samen.Automation.Health do
   defp operator_id(%{id: id}), do: id
   defp operator_id(_), do: nil
 
+  # `{:ok, rows}` | `{:error, :unavailable}`: a workflow or run table that could not be READ is an outage, never a
+  # tenant with no workflows or a workflow with no runs. An unwired engine is an honest `{:ok, []}`.
   defp build_summary(org_id, opts) do
     with wf_mod when not is_nil(wf_mod) <- Automation.workflow_module(opts),
-         run_mod when not is_nil(run_mod) <- Automation.run_module(opts) do
-      wf_mod
-      |> safe_read_by_org(org_id)
-      |> Enum.map(&workflow_health(&1, run_mod, org_id))
+         run_mod when not is_nil(run_mod) <- Automation.run_module(opts),
+         {:ok, workflows} <- read_by_org(wf_mod, org_id) do
+      workflows
+      |> Enum.reduce_while({:ok, []}, fn wf, {:ok, acc} ->
+        case workflow_health(wf, run_mod, org_id) do
+          {:ok, health} -> {:cont, {:ok, [health | acc]}}
+          {:error, _} = error -> {:halt, error}
+        end
+      end)
+      |> case do
+        {:ok, rows} -> {:ok, Enum.reverse(rows)}
+        {:error, _} = error -> error
+      end
     else
-      _ -> []
+      {:error, _} = error -> error
+      nil -> {:ok, []}
     end
   end
 
   defp workflow_health(wf, run_mod, org_id) do
-    runs = safe_runs_for_workflow(run_mod, org_id, wf.id, 500)
+    with {:ok, runs} <- runs_for_workflow(run_mod, org_id, wf.id, 500) do
+      {:ok, workflow_summary(wf, runs)}
+    end
+  end
 
+  defp workflow_summary(wf, runs) do
     by_state =
       runs
       |> Enum.map(& &1.state)
@@ -245,7 +261,7 @@ defmodule Samen.Automation.Health do
 
     case Automation.run_module(opts) do
       nil ->
-        []
+        {:ok, []}
 
       run_mod ->
         run_mod
@@ -254,30 +270,38 @@ defmodule Samen.Automation.Health do
         |> Ash.Query.sort(inserted_at: :desc)
         |> Ash.Query.limit(limit)
         |> Ash.read!(authorize?: false)
+        |> then(&{:ok, &1})
     end
   rescue
-    _ -> []
+    e -> unreadable(:health_list_runs, org_id, e)
   end
 
   defp maybe_filter_workflow(query, nil), do: query
   defp maybe_filter_workflow(query, workflow_id), do: filter(query, workflow_id == ^workflow_id)
 
-  defp safe_runs_for_workflow(run_mod, org_id, workflow_id, limit) do
+  defp runs_for_workflow(run_mod, org_id, workflow_id, limit) do
     run_mod
     |> filter(org_id == ^org_id)
     |> filter(workflow_id == ^workflow_id)
     |> Ash.Query.sort(inserted_at: :desc)
     |> Ash.Query.limit(limit)
     |> Ash.read!(authorize?: false)
+    |> then(&{:ok, &1})
   rescue
-    _ -> []
+    e -> unreadable(:health_runs_for_workflow, org_id, e)
   end
 
-  defp safe_read_by_org(resource, org_id) do
+  defp read_by_org(resource, org_id) do
     resource
     |> filter(org_id == ^org_id)
     |> Ash.read!(authorize?: false)
+    |> then(&{:ok, &1})
   rescue
-    _ -> []
+    e -> unreadable(:health_read_by_org, org_id, e)
+  end
+
+  defp unreadable(name, org_id, reason) do
+    Samen.Observability.Failure.report(name, org_id, reason)
+    {:error, :unavailable}
   end
 end

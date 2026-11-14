@@ -97,14 +97,8 @@ defmodule Samen.Automation.Actions.Support do
   defp forbidden_error?(%{errors: errors}) when is_list(errors),
     do: Enum.any?(errors, &forbidden_error?/1)
 
-  defp forbidden_error?(error) do
-    case Map.get(error, :class) do
-      :forbidden -> true
-      _ -> false
-    end
-  rescue
-    _ -> false
-  end
+  defp forbidden_error?(error) when is_map(error), do: Map.get(error, :class) == :forbidden
+  defp forbidden_error?(_other), do: false
 
   @doc """
   Substitute every `{{subject.<attr>}}` in `value` against `ctx.subject`
