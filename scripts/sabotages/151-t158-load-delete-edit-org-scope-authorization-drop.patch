@@ -12,25 +12,29 @@
 # TEST_FILES: test/broker_edit_delete_load_test.exs
 # MUST_FAIL: RED: deleting another org's load id is a genuine :not_found — nothing destroyed
 # MUST_FAIL: RED: editing another org's load id is a genuine :not_found (org-scope pin)
+diff --git a/driftwood/lib/driftwood/reads.ex b/driftwood/lib/driftwood/reads.ex
+index dcea1f21..ed748aad 100644
+--- a/driftwood/lib/driftwood/reads.ex
++++ b/driftwood/lib/driftwood/reads.ex
+@@ -199,7 +199,7 @@ defmodule Driftwood.Reads do
+              Driftwood.Crm.Opportunity
+              |> Ash.Query.filter(id == ^id)
+              |> Ash.Query.limit(1)
+-             |> Ash.read_one!(scope: scope)
++             |> Ash.read_one!(authorize?: false)
+            end) do
+       first_or_not_found(List.wrap(row))
+     end
 diff --git a/driftwood/lib/driftwood_web/broker_live.ex b/driftwood/lib/driftwood_web/broker_live.ex
-index 03e7f8c..dc2ffdb 100644
+index cbccaaf4..9bfa0ae0 100644
 --- a/driftwood/lib/driftwood_web/broker_live.ex
 +++ b/driftwood/lib/driftwood_web/broker_live.ex
-@@ -1138,7 +1138,7 @@ defmodule DriftwoodWeb.BrokerLive do
+@@ -1308,7 +1308,7 @@ defmodule DriftwoodWeb.BrokerLive do
  
-     case fetch_load(scope, load_id) do
-       nil -> {:error, :not_found}
--      load -> Ash.destroy(load, scope: scope, return_destroyed?: true)
-+      load -> Ash.destroy(load, authorize?: false, return_destroyed?: true)
+     with {:ok, load} <- Reads.get_load_result(scope, load_id) do
+       Guard.write(:driftwood_delete_load, scope, fn ->
+-        Ash.destroy(load, scope: scope, return_destroyed?: true)
++        Ash.destroy(load, authorize?: false, return_destroyed?: true)
+       end)
      end
-   rescue
-     e -> {:error, e}
-@@ -1148,7 +1148,7 @@ defmodule DriftwoodWeb.BrokerLive do
-     Driftwood.Crm.Opportunity
-     |> Ash.Query.filter(id == ^load_id)
-     |> Ash.Query.limit(1)
--    |> Ash.read_one!(scope: scope)
-+    |> Ash.read_one!(authorize?: false)
-   rescue
-     _ -> nil
    end
