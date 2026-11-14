@@ -117,6 +117,54 @@ defmodule Samen.IndexingTest.SortableDomain do
   end
 end
 
+defmodule Samen.IndexingTest.Ranked do
+  @moduledoc "Org-scoped; `rank` says it can never be nil, whatever the live column says."
+  use Ash.Resource,
+    domain: Samen.IndexingTest.RankedDomain,
+    data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer]
+
+  postgres do
+    table("ix_ranked")
+    repo(SamenCore.TestRepo)
+  end
+
+  attributes do
+    uuid_primary_key(:id)
+    attribute(:org_id, :uuid, allow_nil?: false, public?: true)
+    attribute(:rank, :integer, allow_nil?: false, public?: true)
+  end
+
+  actions do
+    defaults([:read])
+  end
+
+  policies do
+    policy action_type(:read) do
+      authorize_if(Samen.Policy.OrgScope)
+    end
+  end
+end
+
+defmodule Samen.IndexingTest.RankedDomain do
+  @moduledoc false
+  use Ash.Domain, validate_config_inclusion?: false
+
+  resources do
+    resource(Samen.IndexingTest.Ranked)
+  end
+end
+
+defmodule Samen.IndexingTest.DropOnlyMigration do
+  @moduledoc "Calls the shared helper the retrofit migrations call, and nothing else."
+  use Samen.Migration, phase: :expand
+  @disable_ddl_transaction true
+  @disable_migration_lock true
+
+  def up, do: Samen.Migration.ExpandContract.drop_invalid_index("ix_slow", "ix_slow_idx")
+  def down, do: :ok
+end
+
 defmodule Samen.IndexingTest.InvalidLeftoverMigration do
   @moduledoc "A literal retrofit migration over a table whose same-named index build once failed."
   use Samen.Migration, phase: :expand
@@ -640,6 +688,108 @@ defmodule Samen.IndexingTest do
 
       assert :ok = Ecto.Migrator.up(@repo, version, Samen.IndexingTest.InvalidLeftoverMigration, log: false)
       assert [[true, ^oid_before, 3]] = index_state(name)
+    end
+  end
+
+  describe "a sort attribute that says non-nil over a nullable column (WP12)" do
+    alias Samen.IndexingTest.{Ranked, RankedDomain}
+
+    @ranked %{Ranked => :rank}
+
+    setup do
+      @repo.query!("CREATE TABLE ix_ranked (id uuid PRIMARY KEY, org_id uuid NOT NULL, rank integer)")
+      @repo.query!("CREATE INDEX i ON ix_ranked (org_id, rank, id)")
+      :ok
+    end
+
+    test "the verifier names it; making the column NOT NULL clears it" do
+      assert [violation] = Indexes.violations(domains: [RankedDomain], keyset_sorts: @ranked)
+      assert violation =~ "Samen.IndexingTest.Ranked (ix_ranked): attribute :rank is `allow_nil? false`"
+      assert violation =~ "database column is nullable"
+
+      @repo.query!("ALTER TABLE ix_ranked ALTER COLUMN rank SET NOT NULL")
+      assert Indexes.violations(domains: [RankedDomain], keyset_sorts: @ranked) == []
+    end
+  end
+
+  describe "an in-progress concurrent build is not dropped as 'invalid' (WP12)" do
+    setup do
+      Samen.TestSandbox.auto!(@repo)
+
+      for sql <- [
+            "DROP TABLE IF EXISTS ix_slow",
+            "DROP FUNCTION IF EXISTS ix_slow_fn(int)",
+            "CREATE TABLE ix_slow (id int)",
+            "INSERT INTO ix_slow SELECT generate_series(1, 60)",
+            # an IMMUTABLE lie, so a concurrent build over it takes seconds: a genuinely in-flight build
+            "CREATE FUNCTION ix_slow_fn(i int) RETURNS int LANGUAGE sql IMMUTABLE AS " <>
+              "'SELECT pg_sleep(0.03); SELECT i'"
+          ],
+          do: @repo.query!(sql)
+
+      on_exit(fn ->
+        @repo.query!("DROP TABLE IF EXISTS ix_slow")
+        @repo.query!("DROP FUNCTION IF EXISTS ix_slow_fn(int)")
+        @repo.query!("DELETE FROM schema_migrations WHERE version = 29990101000020")
+      end)
+
+      :ok
+    end
+
+    defp slow_index_state, do: index_state("ix_slow_idx")
+
+    defp wait_for_build(deadline \\ 100) do
+      case @repo.query!(
+             "SELECT count(*) FROM pg_stat_progress_create_index WHERE relid = 'ix_slow'::regclass"
+           ).rows do
+        [[1]] ->
+          :ok
+
+        _ when deadline > 0 ->
+          Process.sleep(50)
+          wait_for_build(deadline - 1)
+
+        _ ->
+          flunk("the second session's CREATE INDEX CONCURRENTLY never showed up in progress")
+      end
+    end
+
+    test "a second migrator waits for the build and leaves the finished index in place" do
+      {:ok, other} = Postgrex.start_link(Keyword.take(@repo.config(), [:hostname, :port, :username, :password, :database, :socket_dir, :socket]))
+
+      builder =
+        Task.async(fn ->
+          Postgrex.query!(other, "CREATE INDEX CONCURRENTLY ix_slow_idx ON ix_slow (ix_slow_fn(id))", [], timeout: 60_000)
+        end)
+
+      wait_for_build()
+      # mid-build: the name exists and is INVALID — exactly what the old helper dropped
+      assert [[false, oid, _]] = slow_index_state()
+
+      assert [_] =
+               Ecto.Migrator.run(@repo, [{29_990_101_000_020, Samen.IndexingTest.DropOnlyMigration}], :up,
+                 all: true,
+                 log: false,
+                 migration_lock: false
+               )
+
+      # the build was not killed, and its index (same relation) is the finished, VALID one
+      assert %Postgrex.Result{} = Task.await(builder, 60_000)
+      assert [[true, ^oid, _]] = slow_index_state()
+    end
+
+    test "positive control: a genuinely abandoned invalid index is still dropped" do
+      assert {:error, _} = @repo.query("CREATE UNIQUE INDEX CONCURRENTLY ix_slow_idx ON ix_slow ((id / 1000))")
+      assert [[false, _, _]] = slow_index_state()
+
+      assert [_] =
+               Ecto.Migrator.run(@repo, [{29_990_101_000_020, Samen.IndexingTest.DropOnlyMigration}], :up,
+                 all: true,
+                 log: false,
+                 migration_lock: false
+               )
+
+      assert slow_index_state() == []
     end
   end
 

@@ -276,6 +276,71 @@ defmodule Samen.Indexing do
   end
 
   @doc """
+  Is the DATABASE column behind `attr` of `resource` declared `NOT NULL` (`pg_attribute.attnotnull`)?
+  `{:ok, boolean}`, or `:unknown` when the repo, table or column cannot be read.
+
+  This, not the Ash attribute's `allow_nil?`, is what decides whether a keyset page may bound an
+  ascending cursor with `field >= value`: that bound drops every NULL row, so it is sound only
+  where the column cannot hold one. The two disagree after a hand migration or before a pending
+  one. Pass `repo:` to override the resource's read repo (tests only).
+  """
+  @spec column_not_null(module(), atom(), keyword()) :: {:ok, boolean()} | :unknown
+  def column_not_null(resource, attr, opts \\ []) do
+    with %{} = attribute <- Ash.Resource.Info.attribute(resource, attr),
+         table when is_binary(table) <- AshPostgres.DataLayer.Info.table(resource),
+         repo when not is_nil(repo) <-
+           Keyword.get_lazy(opts, :repo, fn -> AshPostgres.DataLayer.Info.repo(resource, :read) end),
+         schema = AshPostgres.DataLayer.Info.schema(resource) || "public",
+         column = to_string(attribute.source || attribute.name),
+         {:ok, %{rows: [[notnull]]}} <-
+           repo.query(
+             "SELECT a.attnotnull FROM pg_attribute a WHERE a.attrelid = to_regclass($1) " <>
+               "AND a.attname = $2 AND NOT a.attisdropped",
+             [~s("#{schema}"."#{table}"), column]
+           ) do
+      {:ok, notnull}
+    else
+      _ -> :unknown
+    end
+  rescue
+    _ -> :unknown
+  end
+
+  @doc """
+  `true` only when the live column behind `attr` is `NOT NULL`. Resolved once per resource/attribute
+  and cached in `:persistent_term`, so a page read never pays a catalog query; an undeterminable
+  answer is `false` (do not bound) and is NOT cached, so a transient failure heals on the next read.
+  A column relaxed to nullable after the first read is only seen after a restart or
+  `reset_not_null_cache/0`.
+  """
+  @spec column_not_null?(module(), atom()) :: boolean()
+  def column_not_null?(resource, attr) do
+    key = {__MODULE__, :not_null, resource, attr}
+
+    case :persistent_term.get(key, :unset) do
+      :unset ->
+        case column_not_null(resource, attr) do
+          {:ok, value} ->
+            :persistent_term.put(key, value)
+            value
+
+          :unknown ->
+            false
+        end
+
+      value ->
+        value
+    end
+  end
+
+  @doc "Forget every cached `column_not_null?/2` answer (tests, and after changing a column's nullability)."
+  @spec reset_not_null_cache() :: :ok
+  def reset_not_null_cache do
+    for {{__MODULE__, :not_null, _, _} = key, _} <- :persistent_term.get(), do: :persistent_term.erase(key)
+    :ok
+  end
+
+  @doc """
   Does `index` serve `spec`? A plain, valid, ready, non-partial btree whose leading key
   columns are exactly `spec.columns` (extra trailing columns are fine), with the sort and
   `id` columns in ONE direction (the helpers order both the same way, and a backward scan

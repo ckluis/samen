@@ -130,13 +130,28 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
          true <- repo != nil or {:error, "#{inspect(resource)} declares no repo"},
          :ok <- ensure_repo_started(repo),
          {:ok, indexes} <- Samen.Indexing.live_indexes(repo, spec.schema, spec.table) do
-      if Enum.any?(indexes, &Samen.Indexing.serves?(&1, spec)) do
-        []
-      else
-        [missing(spec, indexes)]
-      end
+      nullable_sort(spec, repo) ++
+        if Enum.any?(indexes, &Samen.Indexing.serves?(&1, spec)) do
+          []
+        else
+          [missing(spec, indexes)]
+        end
     else
       {:error, reason} -> ["cannot inspect #{inspect(resource)}: #{reason}"]
+    end
+  end
+
+  # An attribute that says "never nil" over a column that still accepts NULL: the ascending cursor
+  # bound is decided from the column (see `Samen.Indexing.column_not_null/3`), so the page is
+  # still correct, but it loses the seek and the schema no longer says what the resource does.
+  defp nullable_sort(spec, repo) do
+    for attr <- spec.logical -- [:org_id, :id],
+        %{allow_nil?: false} <- [Ash.Resource.Info.attribute(spec.resource, attr)],
+        Samen.Indexing.column_not_null(spec.resource, attr, repo: repo) == {:ok, false} do
+      "#{inspect(spec.resource)} (#{spec.table}): attribute #{inspect(attr)} is `allow_nil? false` but the " <>
+        "database column is nullable — the ascending keyset cursor cannot use its index bound. " <>
+        "Next: write a migration that backfills the NULLs and sets the column NOT NULL " <>
+        "(or make the attribute `allow_nil? true` if NULLs are legitimate)."
     end
   end
 
