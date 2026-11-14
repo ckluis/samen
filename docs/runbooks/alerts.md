@@ -157,10 +157,23 @@ retries (5 attempts); nothing is lost. Find the holder (`SELECT pid, state, xact
 
 **DEFAULT too large to move** (`audit_partition_move` in the log with `default_too_large_to_move`): the roll-forward job lapsed for long
 enough that `aud_event_default` holds more than `:partition_move_max_default_rows` (500 000) rows. An automated move would pass over all of
-them under the exclusive lock, so it refuses. Raise the cap for ONE run you supervise (`Application.put_env(:samen_core,
-:partition_move_max_default_rows, n)` in a remote shell, then `ensure_partition/2` for the month, in a quiet period), or run the move off-peak
-with the same cap; do not leave it raised. A move that stops with `partition_move_window_exceeded` or `query_canceled` is the same condition
-one step later: the DEFAULT is too big for the window budget (`:partition_move_window_budget_ms`, 15 s); drain it in a quiet period.
+them under the exclusive lock, so it refuses. Raising only the row cap is not enough: a DEFAULT that large then trips the window budget
+(`:partition_move_window_budget_ms`, 15 s; `partition_move_window_exceeded` or `query_canceled`). Off-peak does not change the answer (the cap is a
+row count). Drain it with ONE supervised run that raises BOTH, in a remote shell on the node that runs the job:
+
+```elixir
+Application.put_env(:samen_core, :partition_move_max_default_rows, 5_000_000)   # above the DEFAULT's row count
+Application.put_env(:samen_core, :partition_move_window_budget_ms, 120_000)     # the longest write stall you accept
+Samen.AuditEvent.PartitionManager.ensure_partition(YourApp.Repo, ~D[YYYY-MM-01])  # for the month the rows belong to
+# then, always (also if it failed):
+Application.delete_env(:samen_core, :partition_move_max_default_rows)
+Application.delete_env(:samen_core, :partition_move_window_budget_ms)
+```
+
+Audited writes STALL, for up to the raised budget, while the move holds its exclusive lock (plus the lock wait, `:partition_move_lock_timeout_ms`,
+5 s), so pick a quiet period and a budget you can live with. `Application.put_env` is node-wide: the daily job on that node sees the raised values
+until you delete them, so do not leave them set. A move that is refused or rolled back loses nothing; read `DEFAULT too large` /
+`partition_move_window_exceeded` again after raising and retry with a larger budget only if you accept the longer stall.
 
 **Permanent WARN (rows older than every partition).** `default_rows` > 0 that never falls: those rows are older than the first
 partition (a backdated import, a replayed anchor), so no month the job creates will take them. They are not lost — `aud_event`

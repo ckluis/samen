@@ -272,6 +272,12 @@ defmodule Samen.AudEventDefaultPartitionTest do
         send(pid, {:stmt, sql, scans, timeout})
       end
 
+      # A known part of the window budget is "used up" right after the DETACH, through the clock the budget is
+      # measured with (no sleep): every LATER statement must then run under what is left, not under the full budget.
+      if (consume = Process.get(:consume_after_detach)) && String.starts_with?(sql, "ALTER TABLE aud_event DETACH PARTITION") do
+        Process.put(:clock_offset, consume)
+      end
+
       result
     end
   end
@@ -371,10 +377,21 @@ defmodule Samen.AudEventDefaultPartitionTest do
     test "every statement of the window runs under the budget LEFT (a TOTAL bound), never the staging allowance" do
       tag = System.unique_integer([:positive])
       seed_for_move!(tag)
-      Application.put_env(:samen_core, :partition_move_window_budget_ms, 13_579)
-      on_exit(fn -> Application.delete_env(:samen_core, :partition_move_window_budget_ms) end)
+      budget = 13_579
+      consumed = 5_000
+      Application.put_env(:samen_core, :partition_move_window_budget_ms, budget)
+      # the window's clock: real time plus whatever the tracing repo "consumes" after the DETACH (no sleep)
+      Application.put_env(:samen_core, :partition_move_clock, fn -> System.monotonic_time(:millisecond) + (Process.get(:clock_offset) || 0) end)
 
+      on_exit(fn ->
+        Application.delete_env(:samen_core, :partition_move_window_budget_ms)
+        Application.delete_env(:samen_core, :partition_move_clock)
+      end)
+
+      Process.put(:consume_after_detach, consumed)
       capture_log(fn -> send(self(), {:traced, trace_move(~D[1994-03-01])}) end)
+      Process.delete(:consume_after_detach)
+      Process.delete(:clock_offset)
       assert_received {:traced, {result, trace}}
       assert {:ok, _} = result
 
@@ -383,7 +400,17 @@ defmodule Samen.AudEventDefaultPartitionTest do
       assert length(window) >= 8
 
       for {sql, _, timeout} <- window do
-        assert timeout <= 13_579 and timeout > 0, "#{sql} ran with statement_timeout=#{timeout}ms"
+        assert timeout <= budget and timeout > 0, "#{sql} ran with statement_timeout=#{timeout}ms"
+      end
+
+      # a TOTAL bound: once `consumed` ms are gone (right after the DETACH), nothing later may run with more than what
+      # is left. A per-statement bound (the full budget every time) fails here.
+      detach_at = Enum.find_index(window, fn {sql, _, _} -> String.starts_with?(sql, "ALTER TABLE aud_event DETACH PARTITION") end)
+      after_detach = Enum.drop(window, detach_at + 1)
+      assert length(after_detach) >= 6
+
+      for {sql, _, timeout} <- after_detach do
+        assert timeout <= budget - consumed and timeout > 0, "#{sql} ran with statement_timeout=#{timeout}ms, budget left #{budget - consumed}ms"
       end
 
       # the staging allowance is larger, so the assertion above can tell the two apart
@@ -399,6 +426,7 @@ defmodule Samen.AudEventDefaultPartitionTest do
       seed_for_move!(tag)
       name = PartitionManager.partition_name(~D[1994-03-01])
       Application.put_env(:samen_core, :partition_move_window_budget_ms, 0)
+      on_exit(fn -> Application.delete_env(:samen_core, :partition_move_window_budget_ms) end)
 
       log = capture_log(fn -> assert {:error, {:partition_move_window_exceeded, 0}} = PartitionManager.ensure_partition(Repo, ~D[1994-03-01]) end)
       assert log =~ "audit_partition_move"
@@ -429,6 +457,55 @@ defmodule Samen.AudEventDefaultPartitionTest do
       Application.put_env(:samen_core, :partition_move_max_default_rows, 6)
       capture_log(fn -> assert {:ok, ^name} = PartitionManager.ensure_partition(Repo, ~D[1994-03-01]) end)
       assert in_partition(name, "win-#{tag}-m1") == 1
+    end
+
+    test "a zero (or non-integer) lock_timeout is REFUSED by both paths: it would mean 'no limit' to Postgres; nothing is created" do
+      tag = System.unique_integer([:positive])
+      seed_for_move!(tag)
+      on_exit(fn -> Application.delete_env(:samen_core, :partition_move_lock_timeout_ms) end)
+      move_name = PartitionManager.partition_name(~D[1994-03-01])
+      create_name = PartitionManager.partition_name(~D[1994-10-01])
+
+      for bad <- [0, -5, "5000", nil] do
+        Application.put_env(:samen_core, :partition_move_lock_timeout_ms, bad)
+
+        capture_log(fn ->
+          assert {:error, {:invalid_partition_config, :partition_move_lock_timeout_ms, ^bad}} = PartitionManager.ensure_partition(Repo, ~D[1994-03-01])
+          assert {:error, {:invalid_partition_config, :partition_move_lock_timeout_ms, ^bad}} = PartitionManager.ensure_partition(Repo, ~D[1994-10-01])
+        end)
+      end
+
+      assert Repo.query!("SELECT to_regclass($1) IS NULL AND to_regclass($2) IS NULL AND to_regclass('aud_event_move_month') IS NULL", ["public." <> move_name, "public." <> create_name]).rows == [[true]]
+
+      # positive control: a positive value works
+      Application.put_env(:samen_core, :partition_move_lock_timeout_ms, 5_000)
+      capture_log(fn -> assert {:ok, ^move_name} = PartitionManager.ensure_partition(Repo, ~D[1994-03-01]) end)
+      assert {:ok, ^create_name} = PartitionManager.ensure_partition(Repo, ~D[1994-10-01])
+    end
+
+    test "a zero window budget on a plain create is the named refusal, not 'statement_timeout = 0' (no limit)" do
+      Application.put_env(:samen_core, :partition_move_window_budget_ms, 0)
+      on_exit(fn -> Application.delete_env(:samen_core, :partition_move_window_budget_ms) end)
+      name = PartitionManager.partition_name(~D[1994-11-01])
+
+      assert {:error, {:partition_move_window_exceeded, 0}} = PartitionManager.ensure_partition(Repo, ~D[1994-11-01])
+      assert Repo.query!("SELECT to_regclass($1) IS NULL", ["public." <> name]).rows == [[true]]
+
+      Application.delete_env(:samen_core, :partition_move_window_budget_ms)
+      assert {:ok, ^name} = PartitionManager.ensure_partition(Repo, ~D[1994-11-01])
+    end
+
+    test "a sibling partition whose bound cannot be read falls back to the scanning ATTACH: the move still completes, loses nothing" do
+      tag = System.unique_integer([:positive])
+      seed_for_move!(tag)
+      name = PartitionManager.partition_name(~D[1994-03-01])
+
+      # a sibling bounded by MAXVALUE: the bounds regexp reads NULL for it (rolled back with the test's sandbox)
+      Repo.query!("CREATE TABLE tmp_maxvalue_sibling PARTITION OF aud_event FOR VALUES FROM ('2090-01-01') TO (MAXVALUE)")
+
+      capture_log(fn -> assert {:ok, ^name} = PartitionManager.ensure_partition(Repo, ~D[1994-03-01]) end)
+      assert in_partition(name, "win-#{tag}-m1") == 1
+      assert in_default("win-#{tag}-o1") == 1
     end
 
     test "a moved row, and one in the recreated DEFAULT, still refuse UPDATE and DELETE (append-only survives the swap)" do
@@ -519,6 +596,133 @@ defmodule Samen.AudEventDefaultPartitionTest do
         System.monotonic_time(:millisecond) > deadline -> flunk("the move never reached its exclusive window")
         true -> Process.sleep(5) && wait_for_exclusive_waiter(deadline)
       end
+    end
+
+    # Like the above, but counts them: `n` backends each wait (ungranted) for an ACCESS EXCLUSIVE lock on aud_event.
+    defp wait_for_exclusive_waiters(n, deadline \\ System.monotonic_time(:millisecond) + 15_000) do
+      %{rows: [[waiting]]} =
+        Repo.query!(
+          "SELECT count(*)::int FROM pg_locks WHERE locktype = 'relation' AND relation = 'aud_event'::regclass " <>
+            "AND mode = 'AccessExclusiveLock' AND NOT granted"
+        )
+
+      cond do
+        waiting >= n -> :ok
+        System.monotonic_time(:millisecond) > deadline -> flunk("expected #{n} creators waiting for the parent lock, saw #{waiting}")
+        true -> Process.sleep(5) && wait_for_exclusive_waiters(n, deadline)
+      end
+    end
+
+    # Wait (on the observed state) until some backend is blocked on a relation lock of aud_event or its DEFAULT.
+    defp wait_for_blocked_writer(deadline \\ System.monotonic_time(:millisecond) + 15_000) do
+      %{rows: [[blocked?]]} =
+        Repo.query!(
+          "SELECT EXISTS (SELECT 1 FROM pg_locks l JOIN pg_class c ON c.oid = l.relation " <>
+            "WHERE l.locktype = 'relation' AND NOT l.granted AND c.relname IN ('aud_event', 'aud_event_default'))"
+        )
+
+      cond do
+        blocked? -> :ok
+        System.monotonic_time(:millisecond) > deadline -> flunk("the audited write never blocked behind the migration")
+        true -> Process.sleep(5) && wait_for_blocked_writer(deadline)
+      end
+    end
+
+    # Holds ACCESS EXCLUSIVE on `aud_event` ITSELF (not its partitions: the manager's catalog and DEFAULT reads go on),
+    # so a `CREATE … PARTITION OF` queues behind it AFTER passing its `IF NOT EXISTS` check. Released by a message.
+    defp hold_parent_lock do
+      test = self()
+
+      task =
+        Task.async(fn ->
+          Repo.transaction(fn ->
+            Repo.query!("LOCK TABLE ONLY aud_event IN ACCESS EXCLUSIVE MODE")
+            send(test, :parent_locked)
+
+            receive do
+              :release -> :ok
+            end
+          end)
+        end)
+
+      assert_receive :parent_locked, 10_000
+      task
+    end
+
+    test "the down guard + DROP never deadlock with a concurrent audited write: the WRITER is not the victim" do
+      # the migration's down committed the DROP: put the DEFAULT back for the tests that follow
+      on_exit(fn -> Repo.query!(PartitionManager.default_partition_sql()) end)
+      test = self()
+
+      migration =
+        Task.async(fn ->
+          Repo.transaction(fn ->
+            Repo.query!("SET LOCAL lock_timeout = '10s'")
+            Repo.query!(PartitionManager.default_partition_down_guard_sql())
+            send(test, :guarded)
+
+            receive do
+              :drop -> Repo.query!("DROP TABLE IF EXISTS aud_event_default")
+            end
+          end)
+        end)
+
+      # the guard passed (empty DEFAULT) and holds its locks; now an audited write with a past date arrives
+      assert_receive :guarded, 10_000
+
+      writer =
+        Task.async(fn ->
+          try do
+            {:ok, insert!("dl-#{System.unique_integer([:positive])}", ~U[1988-04-04 04:00:00Z])}
+          rescue
+            e -> {:error, e}
+          end
+        end)
+
+      wait_for_blocked_writer()
+      send(migration.pid, :drop)
+
+      # the migration is never the victim either, and its DROP commits
+      assert {:ok, _} = Task.await(migration, 30_000)
+      result = Task.await(writer, 30_000)
+
+      refute match?({:error, %Postgrex.Error{postgres: %{code: :deadlock_detected}}}, result),
+             "the audited write was chosen as the deadlock victim: #{inspect(result)}"
+    end
+
+    test "two concurrent creators of the SAME month both succeed (CREATE … IF NOT EXISTS is not race-safe: the loser gets 42P07)" do
+      date = ~D[1993-05-01]
+      name = PartitionManager.partition_name(date)
+      cleanup_months!([date])
+      holder = hold_parent_lock()
+
+      creators = for _ <- 1..2, do: Task.async(fn -> PartitionManager.ensure_partition(Repo, date) end)
+      wait_for_exclusive_waiters(2)
+      send(holder.pid, :release)
+      assert {:ok, :ok} = Task.await(holder)
+
+      assert [{:ok, ^name}, {:ok, ^name}] = Enum.map(creators, &Task.await(&1, 30_000))
+      assert Repo.query!("SELECT count(*) FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid WHERE c.relname = $1", [name]).rows == [[1]]
+      # the bounds cache was dropped by the loser too: the new month is known
+      assert {:ok, false} = PartitionManager.lands_in_default?(Repo, ~U[1993-05-10 00:00:00Z])
+    end
+
+    test "a duplicate_table that is NOT this month's partition stays an error (an unrelated table of that name)" do
+      date = ~D[1993-06-01]
+      name = PartitionManager.partition_name(date)
+      on_exit(fn -> Repo.query("DROP TABLE IF EXISTS #{name}") end)
+      holder = hold_parent_lock()
+
+      creator = Task.async(fn -> PartitionManager.ensure_partition(Repo, date) end)
+      wait_for_exclusive_waiters(1)
+      # the name is taken by an unrelated table AFTER the creator passed its existence check
+      Repo.query!("CREATE TABLE #{name} (x int)")
+      send(holder.pid, :release)
+      assert {:ok, :ok} = Task.await(holder)
+
+      assert {:error, %Postgrex.Error{postgres: %{code: :duplicate_table}}} = Task.await(creator, 30_000)
+      # it was not adopted: still the unrelated table, still not a partition
+      assert Repo.query!("SELECT count(*) FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid WHERE c.relname = $1", [name]).rows == [[0]]
     end
 
     test "a write OUTSIDE any transaction, with a cold cache, still reports its DEFAULT landing (the bounds read works there)" do
@@ -995,6 +1199,24 @@ defmodule Samen.AudEventDefaultPartitionTest do
         drop = :binary.match(down, "DROP TABLE IF EXISTS aud_event_default")
         assert guard != :nomatch and drop != :nomatch and elem(guard, 0) < elem(drop, 0), f
       end
+    end
+
+    test "every host migration's down takes a lock_timeout BEFORE the guard locks anything" do
+      files = Path.wildcard(Path.expand("../..", __DIR__) <> "/*/priv/*/migrations/20261114120000_aud_event_default_partition.exs")
+      assert length(files) >= 5
+
+      for f <- files do
+        [_up, down] = String.split(File.read!(f), "def down do")
+        timeout = :binary.match(down, "SET LOCAL lock_timeout")
+        guard = :binary.match(down, "default_partition_down_guard_sql()")
+        assert timeout != :nomatch and guard != :nomatch and elem(timeout, 0) < elem(guard, 0), f
+      end
+    end
+
+    test "the guard locks the PARENT (a writer's lock order), not only the DEFAULT partition" do
+      sql = PartitionManager.default_partition_down_guard_sql()
+      assert sql =~ "LOCK TABLE aud_event IN ACCESS EXCLUSIVE MODE"
+      refute sql =~ "LOCK TABLE aud_event_default"
     end
 
     test "every host migration's up takes its lock under a lock_timeout, before it creates the partition" do

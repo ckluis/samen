@@ -276,7 +276,7 @@ Amended:
   the month's CHECK, the rest into a standalone replacement DEFAULT carrying `NOT (month) AND NOT (each sibling)` as a
   CHECK (what a DEFAULT's partition constraint amounts to). *Window* (`LOCK TABLE aud_event IN ACCESS EXCLUSIVE` after at
   most `:partition_move_lock_timeout_ms`, default 5 s, of waiting): rows that reached the old DEFAULT since staging are
-  topped up (one pass over the old DEFAULT), the old DEFAULT is detached and dropped, and the two staged tables are
+  topped up (up to two passes over the old DEFAULT: two anti-joins, the in-range one can use the BRIN index, the other is a full scan), the old DEFAULT is detached and dropped, and the two staged tables are
   ATTACHed. Verified on Postgres 16: `ATTACH PARTITION` scans the table ("verifying table") unless a validated CHECK on it
   implies the bound ("partition constraint … is implied by existing constraints"), so the month's CHECK is kept through
   the ATTACH and dropped after it (dropping it first made the ATTACH a full scan of the month under the lock), and the
@@ -288,7 +288,7 @@ Amended:
   What bounds the window: `lock_timeout` bounds only the wait for the lock, so the window has its own TOTAL budget
   (`:partition_move_window_budget_ms`, default 15 s): `statement_timeout` is set to what is left before every statement,
   and a window that has used it rolls back with `{:partition_move_window_exceeded, budget}`. What remains proportional to
-  a table size is the top-up's pass over the old DEFAULT, so an automated move REFUSES a DEFAULT of more than
+  a table size is the top-up's passes over the old DEFAULT, so an automated move REFUSES a DEFAULT of more than
   `:partition_move_max_default_rows` (default 500 000) rows with `{:default_too_large_to_move, cap}` and the runbook
   (alerts.md, "DEFAULT too large to move") says how to drain it. Audited writes queue behind the lock for at most the lock
   wait plus the window budget; they are not free during it. A failed move (lock, budget, cap) fails the roll-forward job,

@@ -110,6 +110,15 @@ All notable changes to Samen are recorded here. The format follows
   raises while the DEFAULT partition holds rows. Existing tests changed: rows meant to land in DEFAULT use past dates (1995-1999) because
   `insert/2` now clamps future ones; the fake repos in `readiness_test.exs` gained `transaction/2`. Sabotages 764, 768, 769 re-built for the
   moved clamp and landing test, 771-788 added.
+- **Review fixes (ARCH-9 round 3).** The DEFAULT-row move keeps the month's CHECK through the ATTACH (it used to drop it first, so Postgres scanned the
+  whole month under `ACCESS EXCLUSIVE`) and gives the replacement DEFAULT its own CHECK so that re-ATTACH is scan-free too; the two `count(*)`
+  statements under the lock are gone; the window has a TOTAL budget (`:partition_move_window_budget_ms`, replaces the per-statement
+  `:partition_move_statement_timeout_ms`) and an automated move refuses a DEFAULT over `:partition_move_max_default_rows` (500 000). The daily
+  `CREATE … PARTITION OF` runs under `lock_timeout` + the budget. The bounds read uses a savepoint only inside a transaction (outside one a
+  DEFAULT landing was never classified). `/readyz` emits `runway_unknown` when its refresh misses its deadline. The migration `up` has a
+  `lock_timeout`; its `down` guard locks the PARENT `aud_event` (a writer's lock order; locking the partition first deadlocked with a write and aborted the writer) under a `lock_timeout` in every host's `down`. Existing tests changed: the `:force` detach test is back on
+  2099 with a without-force refusal as its control; `FaultRepo`/`CountingRepo`/`ToggleRepo` delegate `in_transaction?/0`; the February-bounds test
+  asserts the row's partition. A creator that loses the race for a month (`duplicate_table`) is a success once the existing relation is verified to be that month's partition with those bounds; an unreadable (MINVALUE/MAXVALUE) sibling bound falls back to the scanning ATTACH instead of failing the move; a zero or non-integer `:partition_move_lock_timeout_ms` / a zero budget on a plain create is refused (never Postgres's "no limit"); `:partition_move_clock` (a 0-arity ms function) lets a test consume part of the window budget without sleeping. The runbook's "DEFAULT too large to move" remedy raises both knobs. Existing tests changed: the total-budget test now consumes a known part of the budget after the DETACH and asserts every later statement's timeout is at most what is left; the budget-0 test restores its config on failure. Sabotages 824-838, 847-854.
 
 ### Host action required (existing hosts and generated apps)
 
@@ -584,12 +593,3 @@ First tagged release — the public snapshot of the Samen foundry.
   is **host-owned** — Samen governs the identity and billing you bring.
 
 [0.1.0]: https://github.com/ckluis/samen/releases/tag/v0.1.0
-- **Review fixes (ARCH-9 round 3).** The DEFAULT-row move keeps the month's CHECK through the ATTACH (it used to drop it first, so Postgres scanned the
-  whole month under `ACCESS EXCLUSIVE`) and gives the replacement DEFAULT its own CHECK so that re-ATTACH is scan-free too; the two `count(*)`
-  statements under the lock are gone; the window has a TOTAL budget (`:partition_move_window_budget_ms`, replaces the per-statement
-  `:partition_move_statement_timeout_ms`) and an automated move refuses a DEFAULT over `:partition_move_max_default_rows` (500 000). The daily
-  `CREATE … PARTITION OF` runs under `lock_timeout` + the budget. The bounds read uses a savepoint only inside a transaction (outside one a
-  DEFAULT landing was never classified). `/readyz` emits `runway_unknown` when its refresh misses its deadline. The migration `up` has a
-  `lock_timeout`; its `down` guard locks the DEFAULT partition before checking it. Existing tests changed: the `:force` detach test is back on
-  2099 with a without-force refusal as its control; `FaultRepo`/`CountingRepo`/`ToggleRepo` delegate `in_transaction?/0`; the February-bounds test
-  asserts the row's partition. Sabotages 824-838.

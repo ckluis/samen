@@ -25,6 +25,10 @@ defmodule PawChart.Repo.Migrations.AudEventDefaultPartition do
   end
 
   def down do
+    # The guard locks the PARENT first (the order an audited write takes: parent, then partition), so it cannot
+    # deadlock with a writer, and gives up instead of queueing every audited write behind it. Transaction-scoped.
+    execute "SET LOCAL lock_timeout = '5s'"
+
     # refuses (raises) while the DEFAULT partition holds rows; the SQL is the framework's, shared by every host
     execute Samen.AuditEvent.PartitionManager.default_partition_down_guard_sql()
 
