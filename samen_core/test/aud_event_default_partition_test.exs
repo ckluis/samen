@@ -566,6 +566,25 @@ defmodule Samen.AudEventDefaultPartitionTest do
       assert message =~ "holds audit rows"
     end
 
+    test "creating a month (nothing to move) behind a held conflicting lock fails FAST with lock_not_available, nothing created" do
+      cleanup_months!([~D[1994-09-01]])
+      Application.put_env(:samen_core, :partition_move_lock_timeout_ms, 300)
+      on_exit(fn -> Application.delete_env(:samen_core, :partition_move_lock_timeout_ms) end)
+      tag = System.unique_integer([:positive])
+      {holder, _} = hold_uncommitted_writer("cr-#{tag}", ~U[1995-11-11 10:00:00Z])
+      name = PartitionManager.partition_name(~D[1994-09-01])
+
+      started = System.monotonic_time(:millisecond)
+      assert {:error, %Postgrex.Error{postgres: %{code: :lock_not_available}}} = PartitionManager.ensure_partition(Repo, ~D[1994-09-01])
+      assert System.monotonic_time(:millisecond) - started < 5_000
+      assert Repo.query!("SELECT to_regclass($1) IS NULL", ["public." <> name]).rows == [[true]]
+
+      # positive control: once the writer is gone the same call creates it
+      send(holder.pid, :release)
+      assert {:ok, _} = Task.await(holder)
+      assert {:ok, ^name} = PartitionManager.ensure_partition(Repo, ~D[1994-09-01])
+    end
+
     test "a row committed AFTER the staging copy is taken by the top-up under the lock: nothing lost, none duplicated" do
       cleanup_months!([~D[1995-02-01]])
       tag = System.unique_integer([:positive])
