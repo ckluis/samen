@@ -1,0 +1,19 @@
+# SABOTAGE: the index verifier no longer reports a non-nil sort attribute over a nullable column
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/indexing_test.exs
+# MUST_FAIL: the verifier names it; making the column NOT NULL clears it
+diff --git a/samen_core/lib/mix/tasks/samen.verify.indexes.ex b/samen_core/lib/mix/tasks/samen.verify.indexes.ex
+index 8c516c3d..e4920924 100644
+--- a/samen_core/lib/mix/tasks/samen.verify.indexes.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.indexes.ex
+@@ -130,7 +130,7 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
+          true <- repo != nil or {:error, "#{inspect(resource)} declares no repo"},
+          :ok <- ensure_repo_started(repo),
+          {:ok, indexes} <- Samen.Indexing.live_indexes(repo, spec.schema, spec.table) do
+-      nullable_sort(spec, repo) ++
++      []++
+         if Enum.any?(indexes, &Samen.Indexing.serves?(&1, spec)) do
+           []
+         else

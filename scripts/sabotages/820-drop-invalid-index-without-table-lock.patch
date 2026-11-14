@@ -1,0 +1,19 @@
+# SABOTAGE: drop_invalid_index looks without taking the table lock, so it drops another session's in-flight 
+#   concurrent build
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/indexing_test.exs
+# MUST_FAIL: a second migrator waits for the build and leaves the finished index in place
+diff --git a/samen_core/lib/samen/migration/expand_contract.ex b/samen_core/lib/samen/migration/expand_contract.ex
+index bf59840f..83d673cc 100644
+--- a/samen_core/lib/samen/migration/expand_contract.ex
++++ b/samen_core/lib/samen/migration/expand_contract.ex
+@@ -285,7 +285,6 @@ defmodule Samen.Migration.ExpandContract do
+           repo.transaction(
+             fn ->
+               if repo.query!("SELECT to_regclass($1)::text", [q_ident(tname)]).rows != [[nil]] do
+-                repo.query!("LOCK TABLE #{q_ident(tname)} IN SHARE UPDATE EXCLUSIVE MODE")
+ 
+                 %{rows: rows} =
+                   repo.query!(

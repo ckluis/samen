@@ -1,0 +1,19 @@
+# SABOTAGE: drop_invalid_index never drops anything, so an abandoned invalid index is skipped forever
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/indexing_test.exs
+# MUST_FAIL: positive control: a genuinely abandoned invalid index is still dropped
+diff --git a/samen_core/lib/samen/migration/expand_contract.ex b/samen_core/lib/samen/migration/expand_contract.ex
+index bf59840f..326977a9 100644
+--- a/samen_core/lib/samen/migration/expand_contract.ex
++++ b/samen_core/lib/samen/migration/expand_contract.ex
+@@ -301,7 +301,7 @@ defmodule Samen.Migration.ExpandContract do
+ 
+                 if rows != [], do: repo.query!("SET LOCAL lock_timeout = '10s'")
+ 
+-                for [schema] <- rows do
++                for [schema] <- [] ++ Enum.take(rows, 0) do
+                   repo.query!("DROP INDEX #{q_ident(schema)}.#{q_ident(iname)}")
+                 end
+               end

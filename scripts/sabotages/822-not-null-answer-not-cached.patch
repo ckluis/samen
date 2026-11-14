@@ -1,0 +1,18 @@
+# SABOTAGE: the column nullability answer is never cached, so every page read pays a catalog query
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/reads_cursor_bound_test.exs
+# MUST_FAIL: the answer is cached per resource: no catalog query on the second page read
+diff --git a/samen_core/lib/samen/indexing.ex b/samen_core/lib/samen/indexing.ex
+index 7d1b5895..6ee76d6d 100644
+--- a/samen_core/lib/samen/indexing.ex
++++ b/samen_core/lib/samen/indexing.ex
+@@ -321,7 +321,6 @@ defmodule Samen.Indexing do
+       :unset ->
+         case column_not_null(resource, attr) do
+           {:ok, value} ->
+-            :persistent_term.put(key, value)
+             value
+ 
+           :unknown ->
