@@ -89,7 +89,23 @@ All notable changes to Samen are recorded here. The format follows
 - Tests: `Samen.IndexingTest`, `Samen.Web.TenantIndexPlanTest` (EXPLAIN of the real page query, with a drop-the-index control),
   `Samen.Web.CrmRefsIndexPlanTest`, `Samen.Web.KeysetSortParityTest`, `Samen.Web.ReadsCursorBoundTest`. Recorded in ADR-016 §9. Sabotages 745-762 (745-750 the original six, re-anchored; 751-762 the review fixes).
 
+### Audit partition hardening (ARCH-9)
+
+- **`aud_event_default`**: a DEFAULT partition, so a row outside every month lands there instead of failing the (audit-or-refuse) write.
+  The roll-forward moves DEFAULT rows into a month it creates (Postgres refuses otherwise), transactionally, losing none. A landing is
+  reported (`Failure` + `[:samen,:audit,:partition,:default_landing]`).
+- **Runway**: `PartitionManager.runway/2` per partitioned table; gauges `samen.audit.partition.runway_days` / `.default_rows`; `/readyz`
+  gains a non-gating `partitions:` advisory (WARN < 31 days or rows in DEFAULT, CRITICAL <= 0, UNKNOWN when unreadable); `Readiness.report/1`
+  replaces the controllers' hand-rolled body; alerts.md §7. The roll-forward job now fails when a month cannot be created.
+- **`occurred_at`**: a time more than 300 s ahead is clamped to the write time (claim kept in `detail`); past times are kept. Recorded in ADR-002 §7.
+- Existing tests changed: the T128 baseline in `aud_event_test.exs` now drops the DEFAULT partition first (it proves the mechanism, which the
+  default now hides).
+
 ### Host action required (existing hosts and generated apps)
+
+0. **Run the migration `20261114120000_aud_event_default_partition`** (ARCH-9; copy the reference in `driftwood/priv/repo/migrations/`; a
+   generated app made after this change has it in its `aud_event` migration). Replace a hand-written `readyz` with
+   `Samen.Web.Readiness.report(repo: MyApp.Repo)`.
 
 A generated app is a copy, so these do **not** reach an app generated before the change. Re-generate into a scratch
 directory and diff, or apply by hand:

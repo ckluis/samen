@@ -101,6 +101,17 @@ defmodule Samen.AuditEvent.PartitionManager do
      whose time window still feeds an erasure-relevant rollup (the
      *erasure-window gate*).
 
+  3. **DEFAULT partition + runway** (ARCH-9; ADR-002 amendment) — `aud_event_default`
+     catches any row whose `aud_occurred_at` falls outside every monthly partition
+     (backdated or future-dated, or a missed roll-forward), so an audited write is never
+     refused for want of a partition. It is a safety net, not a destination: a row there is
+     reported LOUDLY (`report_default_landing/1`, `[:samen, :audit, :partition, :default_landing]`)
+     and counted (`runway/2` → `default_rows`). Creating a monthly partition whose range
+     already holds DEFAULT rows is refused by Postgres, so `ensure_partition/2` first moves
+     those rows into the new partition, in one transaction (see there). `runway/2` reports,
+     per partitioned table, how far ahead partitions exist; `Samen.Web.Readiness` and the
+     daily job read it.
+
   ## Erasure-window gate (T2.2 (c) spec)
 
   The doc states: "a partition still feeding a rebuildable rollup is retained."
@@ -152,6 +163,13 @@ defmodule Samen.AuditEvent.PartitionManager do
 
   require Logger
 
+  @default_partition "aud_event_default"
+
+  # Below this many days of partitions ahead, the runway is a WARNING (one month; the daily job keeps two
+  # ahead, so a healthy table never gets near it). At zero or less it is CRITICAL. Override with
+  # `config :samen_core, :partition_runway_warn_days, n`.
+  @runway_warn_days 31
+
   # ---------------------------------------------------------------------------
   # Oban.Worker callback
   # ---------------------------------------------------------------------------
@@ -169,7 +187,42 @@ defmodule Samen.AuditEvent.PartitionManager do
         "(months_ahead=#{months_ahead})"
     )
 
-    :ok
+    # A roll-forward that failed is a failed job (Oban retries, then the discard is visible), never `:ok`: the
+    # old `:ok` regardless turned a month that could not be created into a silent runway shrink.
+    failed = for {:error, reason} <- results, do: reason
+
+    case failed do
+      [] ->
+        observe_runway(repo)
+        :ok
+
+      [first | _] ->
+        Samen.Observability.Failure.report(:write, :audit_partition_roll_forward, nil, first, [])
+        observe_runway(repo)
+        {:error, {:partition_roll_forward_failed, length(failed)}}
+    end
+  end
+
+  @doc """
+  Read `runway/2`, emit it as telemetry (`emit_runway/1`) and report anything not healthy. Returns the runway result.
+  A runway that cannot be read is reported (`:audit_partition_runway`) and emitted as unknown — never as fine.
+  """
+  @spec observe_runway(module()) :: {:ok, [map()]} | {:error, term()}
+  def observe_runway(repo) do
+    result = runway(repo)
+    emit_runway(result)
+
+    case result do
+      {:ok, rows} ->
+        for %{status: status, reasons: reasons} <- rows, status != :ok do
+          Samen.Observability.Failure.report(:write, :audit_partition_runway, nil, hd(reasons), [])
+        end
+
+      {:error, reason} ->
+        Samen.Observability.Failure.report(:audit_partition_runway, nil, reason)
+    end
+
+    result
   end
 
   # ---------------------------------------------------------------------------
@@ -179,25 +232,123 @@ defmodule Samen.AuditEvent.PartitionManager do
   @doc """
   Ensure the monthly `aud_event` partition for `date` exists.
 
-  Idempotent — uses `CREATE TABLE IF NOT EXISTS ... PARTITION OF`.
-  Returns `{:ok, partition_name}`.
+  Idempotent. Returns `{:ok, partition_name}`.
+
+  Postgres refuses to attach a range that the DEFAULT partition already holds rows for ("updated partition
+  constraint for default partition would be violated by some row"), and a row lands in DEFAULT exactly when its
+  month had no partition yet (a backdated import, a missed roll-forward). So when `aud_event_default` holds
+  rows in the new month's range they are MOVED, in the one transaction that creates the partition:
+
+    1. detach the DEFAULT partition and set it aside under another name;
+    2. create a fresh, empty DEFAULT and the monthly partition;
+    3. re-insert every row of the old DEFAULT through the parent (each is routed to its month, or back to
+       DEFAULT), refusing the whole transaction unless the counts match;
+    4. drop the old table.
+
+  Nothing is `DELETE`d (the append-only trigger would refuse it) and the rows keep their ids and timestamps.
+  A row inserted between the range check and the `CREATE` makes Postgres refuse it; that is returned as an
+  error and the job's retry finds the rows and takes the move path.
   """
   @spec ensure_partition(module(), Date.t()) :: {:ok, String.t()} | {:error, term()}
   def ensure_partition(repo, %Date{} = date) do
     {name, from_ts, to_ts} = partition_spec(date)
-    sql = create_partition_sql(name, from_ts, to_ts)
+
+    with {:ok, {exists?, default?}} <- partition_state(repo, name) do
+      cond do
+        exists? ->
+          {:ok, name}
+
+        default? ->
+          case default_rows_in_range?(repo, from_ts, to_ts) do
+            {:ok, true} -> move_default_rows(repo, name, from_ts, to_ts)
+            {:ok, false} -> create_partition(repo, name, from_ts, to_ts)
+            {:error, reason} -> {:error, reason}
+          end
+
+        true ->
+          create_partition(repo, name, from_ts, to_ts)
+      end
+    end
+  end
+
+  defp create_partition(repo, name, from_ts, to_ts) do
+    case repo.query(create_partition_sql(name, from_ts, to_ts)) do
+      {:ok, _} -> {:ok, name}
+      # Already exists — idempotent (a concurrent creator won).
+      {:error, %Postgrex.Error{postgres: %{code: :duplicate_table}}} -> {:ok, name}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # {the monthly partition exists?, the DEFAULT partition exists?} — one catalog round trip.
+  defp partition_state(repo, name) do
+    case repo.query("SELECT to_regclass($1) IS NOT NULL, to_regclass($2) IS NOT NULL", [
+           "public." <> name,
+           "public." <> @default_partition
+         ]) do
+      {:ok, %{rows: [[exists?, default?]]}} -> {:ok, {exists?, default?}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp default_rows_in_range?(repo, from_ts, to_ts) do
+    # `from_ts`/`to_ts` are `partition_spec/1`'s own date literals, never caller input.
+    sql =
+      "SELECT EXISTS (SELECT 1 FROM ONLY #{@default_partition} " <>
+        "WHERE aud_occurred_at >= '#{from_ts}'::timestamptz AND aud_occurred_at < '#{to_ts}'::timestamptz)"
 
     case repo.query(sql) do
-      {:ok, _} ->
-        {:ok, name}
+      {:ok, %{rows: [[found?]]}} -> {:ok, found?}
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
-      {:error, %Postgrex.Error{postgres: %{code: :duplicate_table}}} ->
-        # Already exists — idempotent.
+  @aside "aud_event_default_moving"
+  @cols "aud_id, aud_event_type, aud_subject_id, aud_actor_id, aud_correlation_id, aud_detail, aud_occurred_at"
+
+  defp move_default_rows(repo, name, from_ts, to_ts) do
+    result =
+      repo.transaction(fn ->
+        count_before = scalar!(repo, "SELECT count(*) FROM ONLY #{@default_partition}")
+
+        repo.query!("ALTER TABLE aud_event DETACH PARTITION #{@default_partition}")
+        repo.query!("ALTER TABLE #{@default_partition} RENAME TO #{@aside}")
+        repo.query!(default_partition_sql())
+        repo.query!(create_partition_sql(name, from_ts, to_ts))
+        repo.query!("INSERT INTO aud_event (#{@cols}) SELECT #{@cols} FROM #{@aside}")
+
+        # Every row is somewhere under the parent again, or this transaction does not commit.
+        moved = scalar!(repo, "SELECT count(*) FROM #{@aside} a WHERE EXISTS (SELECT 1 FROM aud_event e WHERE e.aud_id = a.aud_id AND e.aud_occurred_at = a.aud_occurred_at)")
+
+        if moved != count_before do
+          repo.rollback({:default_move_count_mismatch, count_before, moved})
+        end
+
+        repo.query!("DROP TABLE #{@aside}")
+        name
+      end)
+
+    case result do
+      {:ok, ^name} ->
+        Logger.warning(
+          "[PartitionManager] moved rows out of #{@default_partition} into #{name} " <>
+            "(they had landed in DEFAULT before their month had a partition)"
+        )
+
         {:ok, name}
 
       {:error, reason} ->
         {:error, reason}
     end
+  rescue
+    e ->
+      Samen.Observability.Failure.report(:audit_partition_move, nil, e)
+      {:error, e}
+  end
+
+  defp scalar!(repo, sql) do
+    %{rows: [[n]]} = repo.query!(sql)
+    n
   end
 
   @doc """
@@ -291,6 +442,217 @@ defmodule Samen.AuditEvent.PartitionManager do
     do: [Date.new!(String.to_integer(y), String.to_integer(m), 1)]
 
   defp partition_month(_other), do: []
+
+  # ---------------------------------------------------------------------------
+  # DEFAULT partition, runway, and the loud signal (ARCH-9)
+  # ---------------------------------------------------------------------------
+
+  @doc "The DEFAULT partition's table name (`\"aud_event_default\"`)."
+  @spec default_partition_name() :: String.t()
+  def default_partition_name, do: @default_partition
+
+  @doc """
+  The statement that creates the DEFAULT partition of `aud_event` (idempotent), for a migration to `execute`
+  and for the move in `ensure_partition/2`. A row whose `aud_occurred_at` is in no monthly partition lands
+  here instead of failing the (audited, hence blocking) write.
+  """
+  @spec default_partition_sql() :: String.t()
+  def default_partition_sql, do: "CREATE TABLE IF NOT EXISTS #{@default_partition} PARTITION OF aud_event DEFAULT"
+
+  @doc "Days of partitions ahead below which the runway is a warning (config `:partition_runway_warn_days`, default 31)."
+  @spec runway_warn_days() :: pos_integer()
+  def runway_warn_days, do: Application.get_env(:samen_core, :partition_runway_warn_days, @runway_warn_days)
+
+  @runway_sql """
+  SELECT p.relname::text,
+         c.relname::text,
+         COALESCE(pg_get_expr(c.relpartbound, c.oid) = 'DEFAULT', false),
+         (m)[1]::timestamptz,
+         (m)[2]::timestamptz
+  FROM pg_partitioned_table pt
+  JOIN pg_class p ON p.oid = pt.partrelid
+  JOIN pg_namespace n ON n.oid = p.relnamespace AND n.nspname = 'public'
+  LEFT JOIN pg_inherits i ON i.inhparent = p.oid
+  LEFT JOIN pg_class c ON c.oid = i.inhrelid
+  LEFT JOIN LATERAL regexp_match(
+    pg_get_expr(c.relpartbound, c.oid),
+    'FROM \\(''([^'']+)''\\) TO \\(''([^'']+)''\\)') AS m ON true
+  WHERE pt.partstrat = 'r'
+  ORDER BY p.relname, c.relname
+  """
+
+  @doc """
+  How far ahead partitions exist, for EVERY range-partitioned table in `public` (read from the catalog, so a
+  future partitioned table is covered without a code change). `{:ok, rows}`; one map per table:
+
+    * `:table`, `:runway_days` — whole days from now to the end of the contiguous run of partitions that
+      starts at the one covering now. `0` when no partition covers now but a later one exists; negative
+      (days since the last partition ended) when every partition is in the past.
+    * `:covered_until` — that end, a `DateTime`.
+    * `:default_partition?`, `:default_rows` — whether a DEFAULT partition exists and how many rows it holds.
+    * `:status` — `:ok | :warn | :critical`, and `:reasons` (non-empty unless `:ok`): `:runway_critical`
+      (runway <= 0), `:runway_low` (< `runway_warn_days/0`), `:default_rows` (rows are in DEFAULT: they landed
+      outside every window), `:no_default_partition` (the safety net is missing).
+
+  `{:error, reason}` when the catalog cannot be read or a bound cannot be understood. That is UNKNOWN, and every
+  consumer (`observe_runway/1`, `Samen.Web.Readiness`) reports it as unknown — never as healthy.
+
+  Options: `:now` (a `DateTime`, for tests).
+  """
+  @spec runway(module(), keyword()) :: {:ok, [map()]} | {:error, term()}
+  def runway(repo, opts \\ []) do
+    now = Keyword.get(opts, :now) || DateTime.utc_now()
+
+    with {:ok, %{rows: rows}} <- repo.query(@runway_sql),
+         {:ok, tables} <- group_runway_rows(rows),
+         {:ok, built} <- build_runway(repo, tables, now) do
+      {:ok, built}
+    end
+  end
+
+  # Rows → %{table => %{ranges: [{lo, hi}], default: name | nil}}; an unreadable bound is an error, not a gap.
+  defp group_runway_rows(rows) do
+    Enum.reduce_while(rows, {:ok, %{}}, fn [table, child, default?, lo, hi], {:ok, acc} ->
+      entry = Map.get(acc, table, %{ranges: [], default: nil})
+
+      cond do
+        child == nil ->
+          {:cont, {:ok, Map.put(acc, table, entry)}}
+
+        default? ->
+          {:cont, {:ok, Map.put(acc, table, %{entry | default: child})}}
+
+        lo != nil and hi != nil ->
+          {:cont, {:ok, Map.put(acc, table, %{entry | ranges: [{lo, hi} | entry.ranges]})}}
+
+        true ->
+          {:halt, {:error, {:unreadable_partition_bound, table}}}
+      end
+    end)
+  end
+
+  defp build_runway(repo, tables, now) do
+    tables
+    |> Enum.sort()
+    |> Enum.reduce_while({:ok, []}, fn {table, %{ranges: ranges, default: default}}, {:ok, acc} ->
+      case default_row_count(repo, default) do
+        {:ok, default_rows} ->
+          {:cont, {:ok, [runway_row(table, ranges, default, default_rows, now) | acc]}}
+
+        {:error, reason} ->
+          {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, rows} -> {:ok, Enum.reverse(rows)}
+      error -> error
+    end
+  end
+
+  defp default_row_count(_repo, nil), do: {:ok, 0}
+
+  defp default_row_count(repo, default) do
+    case repo.query("SELECT count(*) FROM ONLY \"#{String.replace(default, "\"", "\"\"")}\"") do
+      {:ok, %{rows: [[n]]}} -> {:ok, n}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp runway_row(table, ranges, default, default_rows, now) do
+    covered_until = covered_until(Enum.sort(ranges), now)
+    runway_days = div(DateTime.diff(covered_until, now, :second), 86_400)
+    warn_days = runway_warn_days()
+
+    reasons =
+      Enum.reject(
+        [
+          if(runway_days <= 0, do: :runway_critical),
+          if(runway_days > 0 and runway_days < warn_days, do: :runway_low),
+          if(default_rows > 0, do: :default_rows),
+          if(default == nil, do: :no_default_partition)
+        ],
+        &is_nil/1
+      )
+
+    status =
+      cond do
+        :runway_critical in reasons -> :critical
+        reasons == [] -> :ok
+        true -> :warn
+      end
+
+    %{
+      table: table,
+      runway_days: runway_days,
+      covered_until: covered_until,
+      default_partition?: default != nil,
+      default_rows: default_rows,
+      status: status,
+      reasons: reasons
+    }
+  end
+
+  # The end of the contiguous run of ranges that starts at the one covering `now`. When none covers now: `now`
+  # itself if a later range exists (a hole at now), else the latest range end (already past, so a negative runway).
+  defp covered_until(ranges, now) do
+    case Enum.find(ranges, fn {lo, hi} -> DateTime.compare(lo, now) != :gt and DateTime.compare(now, hi) == :lt end) do
+      nil ->
+        case ranges do
+          [] -> now
+          _ -> ranges |> Enum.map(&elem(&1, 1)) |> Enum.max(DateTime) |> min_dt(now)
+        end
+
+      {_lo, hi} ->
+        extend(ranges, hi)
+    end
+  end
+
+  # Latest end, unless a range starts after now (a hole at now, not a lapse): then runway is exactly zero.
+  defp min_dt(latest_hi, now), do: if(DateTime.compare(latest_hi, now) == :gt, do: now, else: latest_hi)
+
+  defp extend(ranges, edge) do
+    case Enum.find(ranges, fn {lo, _hi} -> DateTime.compare(lo, edge) == :eq end) do
+      nil -> edge
+      {_lo, hi} -> extend(ranges, hi)
+    end
+  end
+
+  @doc """
+  Emit `runway/2`'s result as telemetry: `[:samen, :audit, :partition, :runway]` per table (measurements
+  `runway_days`, `default_rows`; metadata `table`, `status`) — or `[:samen, :audit, :partition, :runway_unknown]`
+  (count 1) when the runway could not be read, so an unreadable catalog is a series of its own, never a
+  missing point that looks like silence. Returns `:ok`.
+  """
+  @spec emit_runway({:ok, [map()]} | {:error, term()}) :: :ok
+  def emit_runway({:ok, rows}) do
+    for %{table: table, status: status, runway_days: days, default_rows: default_rows} <- rows do
+      :telemetry.execute(
+        [:samen, :audit, :partition, :runway],
+        %{runway_days: days, default_rows: default_rows},
+        %{table: table, status: status}
+      )
+    end
+
+    :ok
+  end
+
+  def emit_runway({:error, _reason}) do
+    :telemetry.execute([:samen, :audit, :partition, :runway_unknown], %{count: 1}, %{})
+    :ok
+  end
+
+  @doc """
+  The loud signal for a row that landed in the DEFAULT partition: one `Logger.error` line and a value-free
+  `Samen.Observability.Failure` write report (`[:samen, :core, :write, :error]`, name
+  `audit_event_in_default_partition`), plus `[:samen, :audit, :partition, :default_landing]` (the series behind
+  `samen.audit.partition.default_landing.count`). Carries no row value, no org, no timestamp. Returns `:ok`.
+  """
+  @spec report_default_landing(String.t()) :: :ok
+  def report_default_landing(table \\ "aud_event") do
+    Samen.Observability.Failure.report(:write, :audit_event_in_default_partition, nil, :default_partition, [])
+    :telemetry.execute([:samen, :audit, :partition, :default_landing], %{count: 1}, %{table: table})
+    :ok
+  end
 
   # ---------------------------------------------------------------------------
   # Detach-for-archival (with erasure-window gate)

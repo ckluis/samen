@@ -81,4 +81,58 @@ defmodule Samen.Web.ReadinessTest do
       assert checks[:kms] == :ok
     end
   end
+
+  # A repo whose catalog cannot be read.
+  defmodule BlindRepo do
+    def query(_sql, _params \\ []), do: {:error, %DBConnection.ConnectionError{message: "down"}}
+  end
+
+  describe "advisories: the audit-partition runway (ARCH-9) never takes the node out of rotation" do
+    test "healthy: :ok, and the body is exactly `ready`", %{oban: oban} do
+      Repo.query!("TRUNCATE aud_event_default")
+      assert [partitions: :ok] = Readiness.advisories(repo: Repo)
+      assert {200, "ready"} = Readiness.report(repo: Repo, oban: oban)
+    end
+
+    test "rows in DEFAULT: a WARNING line in a 200 body (not a 503); positive control above", %{oban: oban} do
+      Repo.query!("TRUNCATE aud_event_default")
+      {:ok, _} = Samen.AuditEvent.insert(Repo, %{event_type: "system", occurred_at: ~U[2099-01-01 00:00:00Z]})
+
+      assert [partitions: {:warn, detail}] = Readiness.advisories(repo: Repo)
+      assert detail =~ "default_rows=1"
+
+      assert {200, body} = Readiness.report(repo: Repo, oban: oban)
+      assert body =~ "ready\npartitions: WARN aud_event: runway_days="
+    end
+
+    test "no partition covers now: CRITICAL, still a 200", %{oban: oban} do
+      # every partition dropped but the DEFAULT: runway is behind us
+      %{rows: rows} =
+        Repo.query!(
+          "SELECT c.relname FROM pg_inherits i JOIN pg_class p ON p.oid = i.inhparent " <>
+            "JOIN pg_class c ON c.oid = i.inhrelid WHERE p.relname = 'aud_event' AND c.relname <> 'aud_event_default'"
+        )
+
+      for [name] <- rows, do: Repo.query!("DROP TABLE #{name}")
+
+      assert [partitions: {:critical, detail}] = Readiness.advisories(repo: Repo)
+      assert detail =~ "runway_critical"
+      assert {200, body} = Readiness.report(repo: Repo, oban: oban)
+      assert body =~ "partitions: CRITICAL"
+    end
+
+    test "unreadable runway is UNKNOWN, never :ok (and an unreachable catalog does not crash the probe)" do
+      assert [partitions: {:unknown, detail}] = Readiness.advisories(repo: BlindRepo)
+      assert detail =~ "DBConnection.ConnectionError"
+      refute detail =~ "down"
+
+      assert [partitions: {:unknown, _}] = Readiness.advisories(repo: Samen.Web.ReadinessTest.PhantomRepo)
+    end
+
+    test "a dependency failure is still a 503, advisory lines appended", %{oban: _oban} do
+      assert {503, body} = Readiness.report(repo: Repo, oban: :samen_readiness_no_such_oban)
+      assert body =~ "not ready\n"
+      assert body =~ "oban: FAIL"
+    end
+  end
 end

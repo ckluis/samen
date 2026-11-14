@@ -234,12 +234,15 @@ defmodule Samen.AuditEventTest do
   end
 
   describe "PartitionManager forward-roll (T128 production audit-write safety)" do
-    test "BASELINE: an audit write to a month with NO partition FAILS (the silent prod defect)" do
+    test "BASELINE: an audit write to a month with NO partition and NO DEFAULT partition FAILS (the prod defect)" do
       # A far-future month whose partition does not exist. This is exactly what happens
-      # in production once the clock passes the last migration-seeded partition.
+      # in production once the clock passes the last migration-seeded partition — on a database
+      # without the DEFAULT partition (ARCH-9 added it; `aud_event_default_partition_test.exs` proves the
+      # write then succeeds). Dropped here (inside the sandbox) to keep the mechanism itself under test.
       future = ~U[2099-11-15 09:00:00Z]
       name = PartitionManager.partition_name(DateTime.to_date(future))
       Repo.query("DROP TABLE IF EXISTS #{name}")
+      Repo.query!("DROP TABLE IF EXISTS #{PartitionManager.default_partition_name()}")
       refute aud_partition_exists?(name)
 
       # No partition to hold the row -> Postgres refuses the insert. Audit trail lost.

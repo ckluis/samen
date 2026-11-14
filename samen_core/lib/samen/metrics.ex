@@ -172,6 +172,12 @@ defmodule Samen.Metrics do
       (WS-F5 F5.2), no per-row tags; emitted by `Samen.Search.query/3`
     - `samen.csv.export.row_count` — histogram of rows in a CSV export (WS-F5 F5.2),
       tagged by `result`; emitted by `Samen.Web.Csv.export/3`
+    - `samen.audit.partition.runway_days` / `.default_rows` — last-value gauges per partitioned table (ARCH-9):
+      days of partitions ahead, and rows sitting in the DEFAULT partition; emitted by
+      `Samen.AuditEvent.PartitionManager.emit_runway/1` (the daily job and `/readyz`)
+    - `samen.audit.partition.default_landing.count` — an audit row landed in the DEFAULT partition (it was
+      outside every monthly window); `samen.audit.partition.runway_unknown.count` — the runway could not be read
+    - `samen.audit.occurred_at.clamped.count` — a future-dated `occurred_at` was clamped at the Writer
     - `samen.replay.session.count` — counter of finished replay capture sessions by
       `result` (`persisted | discarded | failed | dropped`; ADR-052 §2.4.1); emitted by
       `Samen.Replay.Monitor`
@@ -268,6 +274,38 @@ defmodule Samen.Metrics do
         tags: [:result],
         description:
           "Replay capture sessions by outcome — a failed or dropped persist is a series, not a log line"
+      ),
+
+      # ARCH-9 — audit-partition runway. Bounded tag: table (the partitioned tables, a handful).
+      last_value(
+        "samen.audit.partition.runway_days",
+        event_name: [:samen, :audit, :partition, :runway],
+        measurement: :runway_days,
+        tags: [:table],
+        description: "Days of partitions ahead of now (<=0 is critical, < 31 warns)"
+      ),
+      last_value(
+        "samen.audit.partition.default_rows",
+        event_name: [:samen, :audit, :partition, :runway],
+        measurement: :default_rows,
+        tags: [:table],
+        description: "Rows in the DEFAULT partition (rows outside every monthly window)"
+      ),
+      counter(
+        "samen.audit.partition.default_landing.count",
+        event_name: [:samen, :audit, :partition, :default_landing],
+        tags: [:table],
+        description: "An audit row landed in the DEFAULT partition"
+      ),
+      counter(
+        "samen.audit.partition.runway_unknown.count",
+        event_name: [:samen, :audit, :partition, :runway_unknown],
+        description: "The partition runway could not be read — unknown, never healthy"
+      ),
+      counter(
+        "samen.audit.occurred_at.clamped.count",
+        event_name: [:samen, :audit, :occurred_at, :clamped],
+        description: "A future-dated audit occurred_at was clamped to the write time"
       ),
 
       # CSV export row count — bounded tag: result. Emitted by Samen.Web.Csv.export/3.

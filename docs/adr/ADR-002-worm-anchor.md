@@ -246,3 +246,40 @@ this window (the same "detection-latency RPO" honesty the plan states for bad co
 - Break-glass deferred-anchor (T4.4) builds directly on this: the operator-node local chain
   is anchored into this same WORM chain on reconnect, and the gap/tamper detection reuses
   `verify_chain`.
+
+## 7 · Amendment (2026-11-14, ARCH-9) — the partition time-bomb class
+
+§2.2 left `aud_event` RANGE-partitioned by `occurred_at`. #119 fixed one instance (the roll-forward counted 31-day
+steps); the CLASS stayed open: a row whose time is in no partition hard-failed the write, audited writes are
+audit-or-refuse, so a missing partition blocked the business action it audited. `aud_event` is the only partitioned
+table in the framework and the four hosts (found by catalog: `pg_partitioned_table`; `PartitionManager.runway/2`
+reads the catalog, so a later one is covered). Partitions are created by the daily `PartitionManager` job (cron
+`0 1 * * *`, and once at Oban boot), two months ahead, and by the `aud_event` migration (the migration month + 2).
+Amended:
+
+- **DEFAULT partition `aud_event_default`** (migration `20261114120000` per host and test repo; the generated
+  `m_aud_event.eex` creates it with the table). A row outside every month lands there instead of failing.
+  `aud_chain` is not partitioned and is not touched. Nothing else enumerates partitions: chain verification walks
+  `aud_chain`, rollups and DSAR read the parent, and `detach_partition/3` takes a month, so it cannot detach DEFAULT
+  — so no verification, rollup or archival path skips rows in DEFAULT (they read the parent), and none can archive it.
+- **DEFAULT is loud, never silent.** `AuditEvent.insert/2` asks the row where it landed (a primary-key lookup) and
+  `PartitionManager.report_default_landing/1` emits a value-free `Failure` write report
+  (`audit_event_in_default_partition`) and `[:samen, :audit, :partition, :default_landing]`; the daily job and
+  `/readyz` report rows sitting there (`default_rows`).
+- **Attach over DEFAULT rows.** Postgres refuses to create a month whose range DEFAULT already holds rows for.
+  `ensure_partition/2` detects them and, in one transaction, sets DEFAULT aside, creates a fresh DEFAULT and the month,
+  re-inserts the old rows through the parent (no `DELETE`: the append-only trigger forbids it), checks the counts, and
+  drops the old table. A row racing in between is refused by Postgres and retried by Oban.
+- **Runway.** `PartitionManager.runway/2`: days from now to the end of the contiguous partitions covering now.
+  Telemetry gauge `samen.audit.partition.runway_days`; `/readyz` reports it as an ADVISORY (`Samen.Web.Readiness.advisories/1`),
+  WARN below 31 days (`:partition_runway_warn_days`) or with rows in DEFAULT, CRITICAL at zero or less, UNKNOWN when the
+  catalog cannot be read (never "ok"). Advisories never change the HTTP status: every node shares the database, so a 503
+  would drain the fleet over something a restart cannot fix, while writes still succeed through DEFAULT. The roll-forward job
+  now FAILS when a month cannot be created (it returned `:ok` before).
+- **`occurred_at` is clamped, not rejected.** `Writer` keeps a past time as given (the break-glass reconciler, replays and
+  imports carry the real time; older than every partition it lands in DEFAULT, reported; the true write time is
+  `aud_chain.inserted_at`). A time more than `:audit_future_skew_seconds` (300) ahead is replaced by the write time, the claim is appended
+  to `detail` as `occurred_at_claimed=<iso>`, and the chain commits the clamped time and that detail. Rejecting was the
+  alternative: it would let a timestamp make an audited privileged action fail, and the reconciler's node-local clock
+  would then never anchor its entry.
+

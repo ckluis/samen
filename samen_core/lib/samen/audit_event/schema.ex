@@ -5,7 +5,9 @@ defmodule Samen.AuditEvent do
   ## Schema
 
   `aud_event` is a PostgreSQL table PARTITIONED BY RANGE on `aud_occurred_at`
-  (monthly RANGE partitions created ahead of time by `Samen.AuditEvent.PartitionManager`).
+  (monthly RANGE partitions created ahead of time by `Samen.AuditEvent.PartitionManager`, plus an
+  `aud_event_default` partition that catches a row whose time is in no month so the write never fails — and
+  `insert/2` reports such a row loudly).
   A BRIN index on the time column gives sub-KB index overhead over huge append-only tables.
 
   ## Append-only enforcement (belt and braces)
@@ -119,7 +121,33 @@ defmodule Samen.AuditEvent do
       )
       |> Ecto.Changeset.validate_required([:event_type, :occurred_at])
 
-    repo.insert(cs)
+    case repo.insert(cs) do
+      {:ok, row} ->
+        note_default_landing(repo, row)
+        {:ok, row}
+
+      other ->
+        other
+    end
+  end
+
+  # A row whose time is in no monthly partition lands in `aud_event_default` instead of failing the write (ARCH-9).
+  # That is the safety net doing its job, and it must not be silent: ask the row where it is (a primary-key
+  # lookup, one round trip) and report it. A probe that FAILS is reported too and does not undo the insert.
+  defp note_default_landing(repo, row) do
+    %{rows: rows} =
+      repo.query!(
+        "SELECT tableoid = to_regclass('public.#{Samen.AuditEvent.PartitionManager.default_partition_name()}') " <>
+          "FROM aud_event WHERE aud_id = $1 AND aud_occurred_at = $2",
+        [Ecto.UUID.dump!(row.id), row.occurred_at]
+      )
+
+    if rows == [[true]], do: Samen.AuditEvent.PartitionManager.report_default_landing("aud_event")
+    :ok
+  rescue
+    e ->
+      Samen.Observability.Failure.report(:audit_default_landing_probe, nil, e)
+      :ok
   end
 
   # ---------------------------------------------------------------------------

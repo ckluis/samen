@@ -42,6 +42,14 @@ defmodule Samen.AuditChain.Writer do
 
   Each maps its own attrs to the token-only shape above.
 
+  ## `occurred_at` is the partition key — and caller-supplied
+
+  A past `occurred_at` is kept as given (a deferred break-glass anchor, a replay or an import legitimately
+  carries the time the thing happened); older than every partition, it lands in the DEFAULT partition and is
+  reported. One further ahead than `:audit_future_skew_seconds` (default 300) is CLAMPED to the write time, the
+  claimed time is appended to `detail` (`occurred_at_claimed=…`), and the clamp is reported — never rejected,
+  because rejecting would let a timestamp make an audited privileged action fail. See ADR-002 amendment.
+
   ## `detail` is a non-shreddable plaintext channel (F4.3)
 
   The `detail` field is operator-authored plaintext, hash-committed into the chain and
@@ -93,13 +101,15 @@ defmodule Samen.AuditChain.Writer do
   # (Sessions.open/1, Grants.request/1) already gate the reason component upstream — this
   # is the last-line belt at the shared chain write boundary, also covering direct callers.
   defp do_write(repo, attrs) do
+    {occurred_at, detail, clamped?} = occurred_at_and_detail(attrs)
+
     aud_attrs = %{
       event_type: to_string(get(attrs, :event_type) || "system"),
       subject_id: str(get(attrs, :subject_id)),
       actor_id: str(get(attrs, :actor_id)),
       correlation_id: get(attrs, :correlation_id),
-      detail: get(attrs, :detail),
-      occurred_at: occurred_at(attrs)
+      detail: detail,
+      occurred_at: occurred_at
     }
 
     with {:ok, chain_present?} <- aud_chain_exists?(repo, get(attrs, :org_id)),
@@ -108,6 +118,7 @@ defmodule Samen.AuditChain.Writer do
         attrs
         |> Map.put(:aud_id, aud.id)
         |> Map.put_new(:occurred_at, aud.occurred_at)
+        |> commit_clamped(clamped?, aud)
 
       case append_chain(repo, chain_attrs, chain_present?) do
         {:ok, entry} -> {:ok, %{aud_event: aud, chain: entry}}
@@ -137,12 +148,58 @@ defmodule Samen.AuditChain.Writer do
       {:error, :audit_chain_unavailable}
   end
 
-  defp occurred_at(attrs) do
+  # The chain commits what the `aud_event` row says. Normally the caller's own `occurred_at` (untouched, so hashes
+  # of existing writers do not move); when the value was clamped, the clamped time and the detail that records the
+  # claim — never the future value the caller supplied.
+  defp commit_clamped(chain_attrs, false, _aud), do: chain_attrs
+
+  defp commit_clamped(chain_attrs, true, aud) do
+    chain_attrs
+    |> Map.delete("occurred_at")
+    |> Map.delete("detail")
+    |> Map.put(:occurred_at, aud.occurred_at)
+    |> Map.put(:detail, aud.detail)
+  end
+
+  # `occurred_at` is caller-supplied and is the PARTITION KEY of `aud_event`. The rule (ARCH-9; ADR-002 amendment):
+  #
+  #   * absent / not a DateTime  -> now (as before);
+  #   * in the past, any distance -> kept. Break-glass anchoring, replays and imports legitimately carry the time
+  #     the thing happened, hours or days ago; a row older than every partition lands in the DEFAULT partition
+  #     (reported). The actual write time is `aud_chain.inserted_at`.
+  #   * further ahead than `:audit_future_skew_seconds` (default 300) -> CLAMPED to now, with the claimed time
+  #     appended to `detail`, and reported. NOT rejected: the writers that supply a time include the break-glass
+  #     reconciler, which carries a node-local clock; rejecting would make an audited privileged action fail
+  #     (or its deferred anchor never land) because of a timestamp. A clamp loses nothing the chain needs
+  #     (`seq` orders it) and keeps the claim in the committed `detail`. The skew exists so a clock a few
+  #     seconds ahead is not an event.
+  defp occurred_at_and_detail(attrs) do
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+    detail = get(attrs, :detail)
+
     case get(attrs, :occurred_at) do
-      %DateTime{} = dt -> DateTime.truncate(dt, :microsecond)
-      _ -> DateTime.utc_now() |> DateTime.truncate(:microsecond)
+      %DateTime{} = dt ->
+        dt = DateTime.truncate(dt, :microsecond)
+
+        if DateTime.diff(dt, now, :second) > future_skew_seconds() do
+          Samen.Observability.Failure.report(:write, :audit_occurred_at_clamped, nil, :future_occurred_at, [])
+          :telemetry.execute([:samen, :audit, :occurred_at, :clamped], %{count: 1}, %{})
+          {now, clamp_note(detail, dt), true}
+        else
+          {dt, detail, false}
+        end
+
+      _ ->
+        {now, detail, false}
     end
   end
+
+  defp clamp_note(detail, claimed) do
+    note = "occurred_at_claimed=#{DateTime.to_iso8601(claimed)}"
+    if is_binary(detail) and detail != "", do: detail <> " " <> note, else: note
+  end
+
+  defp future_skew_seconds, do: Application.get_env(:samen_core, :audit_future_skew_seconds, 300)
 
   defp get(attrs, key), do: Map.get(attrs, key) || Map.get(attrs, to_string(key))
   defp str(nil), do: nil

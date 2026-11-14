@@ -93,18 +93,7 @@ defmodule DriftwoodWeb.PageController do
   end
 
   def readyz(conn, _params) do
-    case Samen.Web.Readiness.check(repo: Driftwood.Repo) do
-      {:ok, _checks} ->
-        send_resp(conn, 200, "ready")
-
-      {:error, checks} ->
-        body =
-          Enum.map_join(checks, "\n", fn
-            {component, :ok} -> "#{component}: ok"
-            {component, {:error, _reason}} -> "#{component}: FAIL"
-          end)
-
-        send_resp(conn, 503, "not ready\n" <> body)
-    end
+    {status, body} = Samen.Web.Readiness.report(repo: Driftwood.Repo)
+    send_resp(conn, status, body)
   end
 end

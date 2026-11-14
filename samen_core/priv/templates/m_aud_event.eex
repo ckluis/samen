@@ -79,6 +79,10 @@ defmodule <%= module %>.Repo.Migrations.AudEvent do
       execute sql
     end
 
+    # The DEFAULT partition (ARCH-9): a row whose time is in no monthly partition lands here, reported by the
+    # partition manager, instead of failing the audited write. Dropping the table drops it with it.
+    execute Samen.AuditEvent.PartitionManager.default_partition_sql()
+
     execute """
     CREATE INDEX aud_event_brin_occurred_at
     ON aud_event USING BRIN (aud_occurred_at)

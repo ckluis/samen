@@ -5,7 +5,8 @@ defmodule PawChartWeb.PageController do
   `/` renders a plain HTML index linking the CRM/Billing/Support inherited modules
   and the clinical vertical pages. `/healthz` returns `ok` (the LIVENESS probe).
   `/readyz` is the READINESS probe (WS-F1 / F1.2) — 200 only when Postgres, the KMS
-  wrapped-DEK store, and Oban all answer (`Samen.Web.Readiness`), else 503.
+  wrapped-DEK store, and Oban all answer (`Samen.Web.Readiness`), else 503. The body also carries the non-gating
+  advisories (audit-partition runway: `partitions: WARN|CRITICAL|UNKNOWN …`), which never change the status.
   """
   use Phoenix.Controller, formats: [:html]
 
@@ -47,18 +48,7 @@ defmodule PawChartWeb.PageController do
   end
 
   def readyz(conn, _params) do
-    case Samen.Web.Readiness.check(repo: PawChart.Repo) do
-      {:ok, _checks} ->
-        send_resp(conn, 200, "ready")
-
-      {:error, checks} ->
-        body =
-          Enum.map_join(checks, "\n", fn
-            {component, :ok} -> "#{component}: ok"
-            {component, {:error, _reason}} -> "#{component}: FAIL"
-          end)
-
-        send_resp(conn, 503, "not ready\n" <> body)
-    end
+    {status, body} = Samen.Web.Readiness.report(repo: PawChart.Repo)
+    send_resp(conn, status, body)
   end
 end
