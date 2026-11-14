@@ -1,0 +1,20 @@
+# SABOTAGE: A re-run no longer restores missing operator leads, so a seed interrupted before them stays 
+#   without them while reporting success.
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/reads_honest_failure_p4_test.exs
+# MUST_FAIL: a re-run restores the operator leads when they are missing
+diff --git a/driftwood/lib/driftwood/operator_seeds.ex b/driftwood/lib/driftwood/operator_seeds.ex
+index e9e7d9ef..a01319ef 100644
+--- a/driftwood/lib/driftwood/operator_seeds.ex
++++ b/driftwood/lib/driftwood/operator_seeds.ex
+@@ -131,7 +131,7 @@ defmodule Driftwood.OperatorSeeds do
+     for account <- missing, do: seed_account(account, agent)
+ 
+     # The leads ride the same convergence: an operator org seeded before they were atomic with it may lack them.
+-    unless leads_seeded?(), do: atomically(&seed_leads/0)
++    unless leads_seeded?() or true, do: atomically(&seed_leads/0)
+ 
+     :ok
+   end

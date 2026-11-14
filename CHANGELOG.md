@@ -174,8 +174,8 @@ directory and diff, or apply by hand:
   `error_body/1`, `retry_event/2`, `write_copy/2`, `cast_id/1`, `first_or_not_found/1` and the `<.read_error>` component replace the
   per-vertical copies. **Host action:** none. The swallow ratchet baseline fell from 33 to 0 (the map and
   the shrink-only ratchet stay; nothing may be added back). Sabotages 678-681 (151, 172, 181, 182 regenerated onto the converted
-  reads; 666 names the non-vacuity test, since the baseline-equality test cannot flip on an empty baseline) and 682 onward (the live ratchet's
-  positive control: `scan/1` counts a fixture's swallows).
+  reads; 666 names the non-vacuity test, since the baseline-equality test cannot flip on an empty baseline) and 682-692 (the live ratchet's
+  positive control; the landing 503, no-org error card, reveal-window backoff and refusal, suspension copy, seed atomicity and the form-submit classification).
 
 ### Security and correctness fixes
 

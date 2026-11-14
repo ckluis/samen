@@ -1,0 +1,20 @@
+# SABOTAGE: A reveal click is honoured while the reveal-window state is unknown, so a value can outlive a 
+#   state the banner cannot account for.
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/reads_honest_failure_p4_test.exs
+# MUST_FAIL: a reveal while the windows are unknown is refused
+diff --git a/driftwood/lib/driftwood_web/operator_impersonation_live.ex b/driftwood/lib/driftwood_web/operator_impersonation_live.ex
+index f5e27e50..4ee82d34 100644
+--- a/driftwood/lib/driftwood_web/operator_impersonation_live.ex
++++ b/driftwood/lib/driftwood_web/operator_impersonation_live.ex
+@@ -560,7 +560,7 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
+     cond do
+       # Fail CLOSED while the reveal windows are unknown: the console cannot show whether a grant is live, so a value
+       # revealed now would outlive an "unknown" state the banner cannot account for.
+-      socket.assigns[:reveal_windows_error] != nil ->
++      socket.assigns[:reveal_windows_error] == :never ->
+         {:noreply, put_flash(socket, :error, "Reveal windows are unknown right now. Nothing was revealed — try again once they load.")}
+ 
+       socket.assigns[:impersonating] and driver_in_scope?(socket, driver_id) ->

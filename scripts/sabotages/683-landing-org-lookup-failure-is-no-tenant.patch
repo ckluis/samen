@@ -1,0 +1,20 @@
+# SABOTAGE: The landing controller reads a failed User/Membership lookup as 'this principal holds no org', 
+#   so a logged-in tenant is redirected to the operator console instead of getting a 503.
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/reads_honest_failure_p4_test.exs
+# MUST_FAIL: a User/Membership read that fails (the session reads fine) is a 503
+diff --git a/driftwood/lib/driftwood_web/page_controller.ex b/driftwood/lib/driftwood_web/page_controller.ex
+index 48dc381e..622e404e 100644
+--- a/driftwood/lib/driftwood_web/page_controller.ex
++++ b/driftwood/lib/driftwood_web/page_controller.ex
+@@ -65,7 +65,7 @@ defmodule DriftwoodWeb.PageController do
+           case OrgActor.authorized_org_ids_result(mods, credential_id) do
+             {:ok, [org_id | _]} -> {:ok, "/broker?org=#{org_id}"}
+             {:ok, []} -> :none
+-            {:error, :unavailable} -> :unavailable
++            {:error, :unavailable} -> :none
+           end
+         else
+           _ -> :none

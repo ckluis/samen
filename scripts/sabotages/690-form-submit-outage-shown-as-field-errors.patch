@@ -1,0 +1,21 @@
+# SABOTAGE: A form submit whose write failed in the data layer comes back as the form with its 
+#   (manufactured) field errors, so an outage reads as a validation message.
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/form_submit_outage_test.exs
+# MUST_FAIL: a write that fails in the data layer is {:error, :unavailable}
+# MUST_FAIL: an outage on the write is a flash
+diff --git a/samen_web/lib/samen/web/reads/guard.ex b/samen_web/lib/samen/web/reads/guard.ex
+index 0cd238c9..cbd688da 100644
+--- a/samen_web/lib/samen/web/reads/guard.ex
++++ b/samen_web/lib/samen/web/reads/guard.ex
+@@ -168,8 +168,6 @@ defmodule Samen.Web.Reads.Guard do
+       case AshPhoenix.Form.submit(form, params: params) do
+         {:error, failed} = error ->
+           case form_failure_class(failed) do
+-            %Ash.Error.Unknown{} = class -> {:error, class}
+-            %Ash.Error.Framework{} = class -> {:error, class}
+             %Ash.Error.Forbidden{} -> {:error, :forbidden}
+             _ -> error
+           end

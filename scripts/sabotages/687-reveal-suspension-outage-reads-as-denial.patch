@@ -1,0 +1,20 @@
+# SABOTAGE: A failed suspension-table read is not surfaced, so the fail-closed reveal gate reports 'no 
+#   active second-party grant' for an outage.
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/reads_honest_failure_p4_test.exs
+# MUST_FAIL: a reveal whose SUSPENSION check fails is outage copy
+diff --git a/driftwood/lib/driftwood/operator_reveal.ex b/driftwood/lib/driftwood/operator_reveal.ex
+index dfbc48ee..606ad390 100644
+--- a/driftwood/lib/driftwood/operator_reveal.ex
++++ b/driftwood/lib/driftwood/operator_reveal.ex
+@@ -52,7 +52,7 @@ defmodule Driftwood.OperatorReveal do
+ 
+       {:error, :unavailable} ->
+         Guard.report(:driftwood_reveal_suspension, nil, :unavailable)
+-        {:error, :unavailable}
++        :ok
+     end
+   end
+ 
