@@ -7,8 +7,8 @@ defmodule Samen.Policy.OrgScopeTest do
     * `reject/3` — the negation, with the NULL-org row INCLUDED (postgres `!=` is NULL for NULL); an org-less actor
       is rejected from EVERYTHING (`true`)
 
-  Both are exercised as expressions evaluated per row (positive control = the actor's own row; the red side = a
-  foreign row, a NULL-org row, an org-less actor, a non-map actor) AND end to end through a real Ash read.
+  Each filter is pinned structurally AND applied to real rows (positive control = the actor's own row; the red
+  side = a foreign row, an org-less actor, a non-map actor), then exercised end to end through a real Ash read.
   """
   use ExUnit.Case, async: false
 
@@ -22,63 +22,77 @@ defmodule Samen.Policy.OrgScopeTest do
     :ok
   end
 
-  defp matches?(expr, org_id) do
-    case Ash.Expr.eval(expr, record: %{org_id: org_id}) do
-      {:ok, v} -> v
-      other -> flunk("expression did not evaluate: #{inspect(other)}")
-    end
+  require Ash.Expr
+  require Ash.Query
+
+  # The expression a FilterCheck returns, applied as a real filter to real rows: the ids it keeps.
+  defp kept(expr, ids) do
+    Core.Ctx.Activity
+    |> Ash.Query.filter(id in ^ids)
+    |> Ash.Query.filter(^expr)
+    |> Ash.read!(authorize?: false)
+    |> Enum.map(& &1.id)
+    |> Enum.sort()
+  end
+
+  defp activity!(org_id) do
+    Core.Ctx.Activity
+    |> Ash.Changeset.for_create(:create, %{org_id: org_id, kind: :visit}, authorize?: false)
+    |> Ash.create!()
   end
 
   describe "filter/3 — which rows the actor MAY see" do
-    test "an actor sees its own org's rows and no other org's, nor NULL-org rows" do
-      expr = OrgScope.filter(%{org_id: @org}, nil, [])
+    test "an org-bearing actor keeps ITS org's rows and no other org's" do
+      mine = activity!(@org)
+      theirs = activity!(@other)
+      ids = Enum.sort([mine.id, theirs.id])
 
-      assert matches?(expr, @org) == true
-      assert matches?(expr, @other) == false
-      refute matches?(expr, nil) == true
+      assert kept(OrgScope.filter(%{org_id: @org}, nil, []), ids) == [mine.id]
+      assert kept(OrgScope.filter(%{org_id: @other}, nil, []), ids) == [theirs.id]
+      assert OrgScope.filter(%{org_id: @org}, nil, []) == Ash.Expr.expr(org_id == ^@org)
     end
 
     test "an actor with no org sees NOTHING (fail closed), not everything" do
+      mine = activity!(@org)
+
       for actor <- [%{org_id: nil}, %{}, nil, "not-a-map", :anon] do
-        expr = OrgScope.filter(actor, nil, [])
-        assert expr == false or matches?(expr, @org) == false, "actor #{inspect(actor)} must see no rows"
-        refute matches?(expr, @org) == true
-        refute matches?(expr, nil) == true
+        assert kept(OrgScope.filter(actor, nil, []), [mine.id]) == [], "actor #{inspect(actor)} must see no rows"
+        assert OrgScope.filter(actor, nil, []) == false
       end
     end
   end
 
   describe "reject/3 — which rows the actor may NOT touch" do
-    test "a foreign-org row AND a NULL-org row are rejected; the actor's own row is not" do
-      expr = OrgScope.reject(%{org_id: @org}, nil, [])
+    test "a foreign-org row is rejected and the actor's own row is not (NULL-org rows are rejected too)" do
+      mine = activity!(@org)
+      theirs = activity!(@other)
+      ids = Enum.sort([mine.id, theirs.id])
 
-      assert matches?(expr, @org) == false
-      assert matches?(expr, @other) == true
-      assert matches?(expr, nil) == true
+      assert kept(OrgScope.reject(%{org_id: @org}, nil, []), ids) == [theirs.id]
+      assert OrgScope.reject(%{org_id: @org}, nil, []) == Ash.Expr.expr(org_id != ^@org or is_nil(org_id))
     end
 
     test "an actor with no org is rejected from EVERY row" do
+      mine = activity!(@org)
+
       for actor <- [%{org_id: nil}, %{}, nil, "not-a-map"] do
-        expr = OrgScope.reject(actor, nil, [])
-        assert expr == true or matches?(expr, @org) == true, "actor #{inspect(actor)} must be rejected from all rows"
-        assert matches?(expr, @org) == true
-        assert matches?(expr, nil) == true
+        assert kept(OrgScope.reject(actor, nil, []), [mine.id]) == [mine.id], "actor #{inspect(actor)} rejected from all"
+        assert OrgScope.reject(actor, nil, []) == true
       end
     end
 
-    test "filter and reject are exact complements for an org-bearing actor" do
+    test "filter and reject partition the rows for an org-bearing actor" do
+      mine = activity!(@org)
+      theirs = activity!(@other)
+      ids = Enum.sort([mine.id, theirs.id])
       actor = %{org_id: @org}
-      f = OrgScope.filter(actor, nil, [])
-      r = OrgScope.reject(actor, nil, [])
 
-      for row_org <- [@org, @other, nil] do
-        assert matches?(f, row_org) == true != (matches?(r, row_org) == true)
-      end
+      assert Enum.sort(kept(OrgScope.filter(actor, nil, []), ids) ++ kept(OrgScope.reject(actor, nil, []), ids)) == ids
     end
   end
 
   describe "end to end through a real Ash read" do
-    test "own org reads its row; a foreign org and an org-less actor read nothing" do
+    test "own org reads its row; a foreign org reads nothing and an org-less actor is forbidden" do
       act =
         Core.Ctx.Activity
         |> Ash.Changeset.for_create(:create, %{org_id: @org, kind: :visit}, authorize?: false)
@@ -88,7 +102,9 @@ defmodule Samen.Policy.OrgScopeTest do
 
       assert act.id in read.(%{id: "u1", org_id: @org, role: :owner})
       refute act.id in read.(%{id: "u2", org_id: @other, role: :owner})
-      assert read.(%{id: "u3", org_id: nil, role: :owner}) == []
+      # No org → the filter is `false`: Ash refuses the read outright, it never returns a tenant row.
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Ash.read(Core.Ctx.Activity, actor: %{id: "u3", org_id: nil, role: :owner})
     end
   end
 end

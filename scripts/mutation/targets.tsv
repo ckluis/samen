@@ -61,3 +61,6 @@ samen_core/lib/samen/kms/crypto.ex	samen_core	test/crypto_test.exs
 # --- plane-aware masking (CLAUDE.md "Per-plane masking"): the ONE resolver every read goes through. A weakened
 # --- branch is a plaintext leak to the operator plane or a token in the DOM (derived: sabotage TEST_FILES 24/225/480; 23 lives in pawchart)
 samen_core/lib/samen/api/pii_resolution.ex	samen_core	test/impersonation_masking_test.exs test/custom_fields_masking_test.exs test/ai/ai_prompt_masking_test.exs test/replay/resolver_batch_test.exs test/pii_resolution_planes_test.exs test/pii_resolution_bag_planes_test.exs
+# --- org scoping of reads (CLAUDE.md "Reads: org-scoped"): the FilterCheck every tenant-plane resource authorizes
+# --- reads through. `filter` is the allow side, `reject` the deny side; an org-less actor must be fail-closed on both.
+samen_core/lib/samen/policy/org_scope.ex	samen_core	test/policy/org_scope_test.exs
