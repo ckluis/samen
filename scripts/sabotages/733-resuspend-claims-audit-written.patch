@@ -1,0 +1,19 @@
+# SABOTAGE: resuspend claims audit written
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/suspension_asymmetry_test.exs
+# MUST_FAIL: idempotent re-suspend reports audit :unknown
+diff --git a/samen_core/lib/samen/operator_plane/suspension.ex b/samen_core/lib/samen/operator_plane/suspension.ex
+index a96a3304..f0e9a4f5 100644
+--- a/samen_core/lib/samen/operator_plane/suspension.ex
++++ b/samen_core/lib/samen/operator_plane/suspension.ex
+@@ -25,7 +25,7 @@ defmodule Samen.OperatorPlane.SuspensionRow do
+     # or `:lost` (the chain write AND the local entry both failed; reported, but nothing durable remains).
+     # `:unknown` is a row this call did not write the audit for (a loaded or already-suspended row): it must not claim
+     # `:written`.
+-    field(:audit, Ecto.Enum, values: [:written, :pending, :lost, :unknown], default: :unknown, virtual: true)
++    field(:audit, Ecto.Enum, values: [:written, :pending, :lost, :unknown], default: :written, virtual: true)
+   end
+ end
+ 

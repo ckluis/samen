@@ -23,7 +23,9 @@ defmodule Samen.OperatorPlane.SuspensionRow do
     # Not a column (no migration): how the suspension's audit entry stands on the row `suspend/1` returns.
     # `:written` (in the chain), `:pending` (the chain write failed; a durable local entry awaits the reconciler)
     # or `:lost` (the chain write AND the local entry both failed; reported, but nothing durable remains).
-    field(:audit, Ecto.Enum, values: [:written, :pending, :lost], default: :written, virtual: true)
+    # `:unknown` is a row this call did not write the audit for (a loaded or already-suspended row): it must not claim
+    # `:written`.
+    field(:audit, Ecto.Enum, values: [:written, :pending, :lost, :unknown], default: :unknown, virtual: true)
   end
 end
 
@@ -84,7 +86,8 @@ defmodule Samen.OperatorPlane.Suspension do
   `:repo`, `:local_audit_path` (where a deferred audit entry is parked).
 
   The suspension commits FIRST, whatever happens to the audit. `{:ok, row}` always means the operator IS suspended;
-  `row.audit` is `:written`, `:pending` or `:lost` (see `SuspensionRow`). `{:error, _}` means it was NOT suspended.
+  `row.audit` is `:written`, `:pending` or `:lost` (see `SuspensionRow`); an idempotent re-suspend returns the existing
+  row with `:unknown` (this call wrote no audit, and cannot say how the earlier one stands). `{:error, _}` means it was NOT suspended.
   """
   @spec suspend(map()) :: {:ok, SuspensionRow.t()} | {:error, term}
   def suspend(attrs) do
@@ -166,7 +169,7 @@ defmodule Samen.OperatorPlane.Suspension do
       end
 
     case audited do
-      {:ok, :ok} -> inserted
+      {:ok, :ok} -> %{inserted | audit: :written}
       {:error, _} -> %{inserted | audit: defer_audit(attrs, operator_id, org_id, reason)}
     end
   end
@@ -184,6 +187,7 @@ defmodule Samen.OperatorPlane.Suspension do
              reason: "reason=#{reason}",
              resource: "operator_suspension",
              action: "operator_suspended",
+             kind: "operator_suspension",
              correlation_id: uuid_or_nil(operator_id)
            },
            opts

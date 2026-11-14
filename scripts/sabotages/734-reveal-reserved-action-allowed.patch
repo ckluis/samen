@@ -1,0 +1,23 @@
+# SABOTAGE: reveal reserved action allowed
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/suspension_asymmetry_test.exs
+# MUST_FAIL: BreakGlass.reveal/1 refuses the reserved action name
+diff --git a/samen_core/lib/samen/break_glass.ex b/samen_core/lib/samen/break_glass.ex
+index 0724afb8..906db85a 100644
+--- a/samen_core/lib/samen/break_glass.ex
++++ b/samen_core/lib/samen/break_glass.ex
+@@ -163,10 +163,8 @@ defmodule Samen.BreakGlass do
+   # `operator_suspended` is the action name `Samen.OperatorPlane.Suspension` files its deferred audit under; a reveal
+   # may not claim it (the reconciler keys on an internal `kind`, but the name stays reserved so the local trail is
+   # never ambiguous to a human reader).
+-  defp require_unreserved_action(req) do
+-    if to_string(Map.get(req, :action)) == "operator_suspended",
+-      do: {:error, :reserved_action},
+-      else: :ok
++  defp require_unreserved_action(_req) do
++    :ok
+   end
+ 
+   # role gate — the single break-glass role.

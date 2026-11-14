@@ -131,6 +131,7 @@ defmodule Samen.BreakGlass do
   @spec reveal(request()) :: {:ok, map()} | {:error, term}
   def reveal(req) when is_map(req) do
     with :ok <- require_reason(req),
+         :ok <- require_unreserved_action(req),
          :ok <- require_authorized(req),
          :ok <- require_not_suspended(req),
          :ok <- require_within_budget(req),
@@ -157,6 +158,15 @@ defmodule Samen.BreakGlass do
       r when is_binary(r) and byte_size(r) > 0 -> :ok
       _ -> {:error, :reason_required}
     end
+  end
+
+  # `operator_suspended` is the action name `Samen.OperatorPlane.Suspension` files its deferred audit under; a reveal
+  # may not claim it (the reconciler keys on an internal `kind`, but the name stays reserved so the local trail is
+  # never ambiguous to a human reader).
+  defp require_unreserved_action(req) do
+    if to_string(Map.get(req, :action)) == "operator_suspended",
+      do: {:error, :reserved_action},
+      else: :ok
   end
 
   # role gate — the single break-glass role.

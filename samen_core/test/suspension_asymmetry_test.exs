@@ -214,4 +214,62 @@ defmodule Samen.SuspensionAsymmetryTest do
       refute_received :vault_reached
     end
   end
+
+  describe "reveal vs suspension filing" do
+    test "a reveal-shaped entry named operator_suspended anchors as break_glass, a real one as operator_suspension",
+         %{path: path} do
+      op = op_id()
+      org = "org-#{System.unique_integer([:positive])}"
+
+      assert {:ok, _} =
+               LocalAudit.append(
+                 %{org_id: org, subject_id: op, actor_id: op, reason: "reveal", resource: "r", action: "operator_suspended"},
+                 path: path
+               )
+
+      assert {:ok, %{anchored: 1}} = Reconciliation.reconcile(repo: @repo, path: path)
+      assert [%{event_type: "break_glass"}] = events_for(op)
+
+      # positive control: the genuine deferred suspension is still filed as the suspension event
+      FaultRepo.fail([:probe])
+      op2 = op_id()
+      assert {:ok, %{audit: :pending}} = Suspension.suspend(%{operator_id: op2, reason: "x", repo: FaultRepo, local_audit_path: path})
+      FaultRepo.heal()
+      assert {:ok, %{anchored: 1}} = Reconciliation.reconcile(repo: @repo, path: path)
+      assert [%{event_type: "operator_suspension"}] = events_for(op2)
+    end
+
+    test "BreakGlass.reveal/1 refuses the reserved action name", %{path: path} do
+      req = %{reveal_req_for(op_id(), @repo, path) | action: :operator_suspended}
+      assert {:error, :reserved_action} = BreakGlass.reveal(req)
+      refute_received :vault_reached
+    end
+
+    test "idempotent re-suspend reports audit :unknown, not :written", %{path: path} do
+      op = op_id()
+      FaultRepo.fail([:probe])
+      assert {:ok, %{audit: :pending}} = Suspension.suspend(%{operator_id: op, reason: "x", repo: FaultRepo, local_audit_path: path})
+      FaultRepo.heal()
+      assert {:ok, %{audit: :unknown}} = Suspension.suspend(%{operator_id: op, reason: "x", repo: @repo, local_audit_path: path})
+    end
+  end
+
+  defp events_for(subject_id) do
+    @repo.all(from(e in Samen.AuditEvent, where: e.subject_id == ^subject_id, select: %{event_type: e.event_type}))
+  end
+
+  defp reveal_req_for(op, repo, path) do
+    %{
+      operator: Actor.new(op, :operator_break_glass),
+      subject_id: "subj-#{System.unique_integer([:positive])}",
+      reason: "PagerDuty INC-42: locked-out user support escalation",
+      masked: Samen.Masked.new("vt_unused", :emails),
+      action: :reveal_email,
+      resource: SamenCore.Support.RevealDomain.RevealPerson,
+      org_id: "org-#{System.unique_integer([:positive])}",
+      repo: repo,
+      vault: TripwireVault,
+      local_audit_path: path
+    }
+  end
 end

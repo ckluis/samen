@@ -148,8 +148,9 @@ defmodule Samen.BreakGlass.Reconciliation do
 
   # A deferred operator suspension (`Samen.OperatorPlane.Suspension.suspend/1` parks it here when the chain write
   # failed) anchors as the `operator_suspension` event the live path would have written; everything else on the
-  # local chain is a break-glass reveal.
-  defp central_event(%{action: "operator_suspended"} = entry) do
+  # local chain is a break-glass reveal. Keyed on `kind`, a field only `Suspension` writes: a reveal's `action` is
+  # caller-supplied, so it must never decide the event type.
+  defp central_event(%{kind: "operator_suspension"} = entry) do
     %{
       org_id: entry.org_id,
       event_type: "operator_suspension",
