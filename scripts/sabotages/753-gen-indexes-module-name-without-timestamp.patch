@@ -1,0 +1,19 @@
+# SABOTAGE: a generator re-run reuses the module name, so Ecto refuses the second migration
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/indexing_test.exs
+# MUST_FAIL: a re-run (another timestamp) is a different module AND file name
+diff --git a/samen_core/lib/mix/tasks/samen.gen.indexes.ex b/samen_core/lib/mix/tasks/samen.gen.indexes.ex
+index a034c5bb..ec4d48ae 100644
+--- a/samen_core/lib/mix/tasks/samen.gen.indexes.ex
++++ b/samen_core/lib/mix/tasks/samen.gen.indexes.ex
+@@ -96,7 +96,7 @@ defmodule Mix.Tasks.Samen.Gen.Indexes do
+       end)
+ 
+     """
+-    defmodule #{inspect(repo)}.Migrations.OrgKeysetIndexes#{timestamp} do
++    defmodule #{inspect(repo)}.Migrations.OrgKeysetIndexes do
+       @moduledoc \"\"\"
+       ARCH-4 — the tenant keyset index `(org_id, <keyset sort>, id)` on every org-scoped table, so an
+       `org_id = $1 ORDER BY <sort>, id LIMIT n` page (`Samen.Web.Reads`) is an index scan, not a
