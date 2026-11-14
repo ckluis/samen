@@ -200,6 +200,12 @@ defmodule Samen.Approvals do
         approval.state != :pending ->
           {:error, :not_pending}
 
+        # An approval past its `deadline_at` can no longer be APPROVED (every kind: Gate, handler, reveal). Rejecting a
+        # late request stays possible. The one chokepoint: nothing reaches a handler or a gated action through here
+        # after the deadline.
+        decision == :approve and past_deadline?(approval) ->
+          {:error, :expired}
+
         # POLICY LAYER (§4.2 layer 1): refuse self-decision before touching the DB, write
         # a refusal audit, leave the approval pending. The DB CHECK (layer 2) is the twin.
         decided_by == to_actor_id(approval.requested_by) ->
@@ -212,18 +218,27 @@ defmodule Samen.Approvals do
     end
   end
 
+  defp past_deadline?(%{deadline_at: %DateTime{} = deadline}),
+    do: DateTime.compare(DateTime.utc_now(), deadline) == :gt
+
+  defp past_deadline?(_), do: false
+
   defp blank_actor?(nil), do: true
   defp blank_actor?(""), do: true
   defp blank_actor?(id) when is_binary(id), do: String.trim(id) == ""
   defp blank_actor?(_), do: false
 
-  # The decision transaction (§4.3): transition (machine-guarded) → handler in-tx → audit.
+  # The decision transaction (§4.3): transition (machine-guarded) → audit → handler in-tx (the audit first, so an outage
+  # of the chain refuses the decision before the handler's irreversible work).
   defp run_decision(repo, _res, approval, decided_by, decision, handler, opts) do
     result =
       repo.transaction(fn ->
         with {:ok, decided} <- transition(approval, decision, %{decided_by: decided_by}, opts),
+             # The audit entry goes BEFORE the handler: a handler may do work no rollback can undo (`ReplyHandler` sends an
+             # email), so the chain write must have succeeded first. A chain outage then refuses the decision with
+             # nothing delivered, instead of delivering and rolling the approval back for a re-approve to deliver again.
+             :ok <- audit!(repo, decided, event_for(decision), decided_by),
              {:ok, meta} <- run_handler(handler, decided, decided_by, decision, repo, opts) do
-          audit!(repo, decided, event_for(decision), decided_by)
           {decided, meta}
         else
           {:error, reason} -> repo.rollback(reason)

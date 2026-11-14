@@ -1,0 +1,19 @@
+# SABOTAGE: approval deadline unchecked
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/approvals/engine_test.exs
+# MUST_FAIL: a Gate-kind approval past its deadline is refused
+diff --git a/samen_core/lib/samen/approvals.ex b/samen_core/lib/samen/approvals.ex
+index 93ccbe3d..64ef2a36 100644
+--- a/samen_core/lib/samen/approvals.ex
++++ b/samen_core/lib/samen/approvals.ex
+@@ -203,7 +203,7 @@ defmodule Samen.Approvals do
+         # An approval past its `deadline_at` can no longer be APPROVED (every kind: Gate, handler, reveal). Rejecting a
+         # late request stays possible. The one chokepoint: nothing reaches a handler or a gated action through here
+         # after the deadline.
+-        decision == :approve and past_deadline?(approval) ->
++        false and past_deadline?(approval) ->
+           {:error, :expired}
+ 
+         # POLICY LAYER (§4.2 layer 1): refuse self-decision before touching the DB, write

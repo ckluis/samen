@@ -5,9 +5,10 @@ defmodule Samen.Approvals.Handler do
 
   A handler runs **inside the decision transaction** (§4.3): `Samen.Approvals.approve/3`
   transitions the `Approval` `pending → approved` (machine-guarded — the exactly-once
-  mechanism), then invokes `on_approve/2` in the SAME transaction, then writes the
-  governance audit. If `on_approve/2` returns `{:error, _}` the whole transaction rolls
-  back: the approval stays `pending`, no audit lands, and — for a client like reveal —
+  mechanism), writes the governance audit, THEN invokes `on_approve/2` in the SAME transaction
+  (the audit first: a handler may do work a rollback cannot undo, such as sending an email, so
+  an audit-chain outage must refuse the decision before it runs). If either returns
+  `{:error, _}` the whole transaction rolls back: the approval stays `pending`, no audit lands, and — for a client like reveal —
   the grant insert + auto-revoke enqueue that `on_approve/2` performed roll back with it.
   This is what preserves the reveal same-tx guarantee when reveal becomes a client.
 

@@ -21,6 +21,8 @@ defmodule Samen.AI.SupportOperatorTest do
   """
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureLog
+
   alias Samen.AI.{Provider, SupportOperator, SupportReplyDraft}
   alias Samen.AI.SupportOperator.ReplyHandler
   alias Samen.Approvals
@@ -36,6 +38,7 @@ defmodule Samen.AI.SupportOperatorTest do
 
   setup do
     Samen.TestSandbox.shared!(TestRepo)
+    Samen.FaultRepo.heal()
     Provider.Fake.reset()
     FakeProvider.reset()
     :ok
@@ -314,5 +317,50 @@ defmodule Samen.AI.SupportOperatorTest do
       # so a stored keyless/deterministic draft can be badged. In-memory threading alone cannot.
       assert reload(result.draft).simulated == true
     end
+  end
+
+  describe "chain outage at approve time (audit before the irreversible send)" do
+    test "chain down: nothing is delivered and nothing commits; chain up: exactly one delivery and one audit entry" do
+      org = Ash.UUID.generate()
+
+      {:ok, result} =
+        SupportOperator.draft_reply(
+          scope(org),
+          %{to_subscriber_id: Ash.UUID.generate(), instruction: "a reply"},
+          wiring()
+        )
+
+      human_id = Ash.UUID.generate()
+
+      opts = [delivery_env: :test, fallback_adapter: FakeProvider, fallback_config: %{configured: true}]
+      Samen.FaultRepo.fail([:probe])
+
+      capture_log(fn ->
+        assert {:error, {:audit_failed, _}} =
+                 Approvals.approve(result.approval_id, human_id, Keyword.put(wiring(), :repo, Samen.FaultRepo) ++ opts)
+      end)
+
+      Samen.FaultRepo.heal()
+      assert FakeProvider.calls() == []
+      assert reload(result.draft).status == :draft
+      {:ok, pending} = Approvals.get(result.approval_id, wiring())
+      assert pending.state == :pending
+      assert approved_audits(result.approval_id) == 0
+
+      # chain up: re-approving delivers exactly once and audits exactly once
+      assert {:ok, _approval, %{sent: true}} = Approvals.approve(result.approval_id, human_id, wiring() ++ opts)
+      assert [{:deliver, _}] = FakeProvider.calls()
+      assert reload(result.draft).status == :sent
+      assert approved_audits(result.approval_id) == 1
+    end
+  end
+
+  defp approved_audits(approval_id) do
+    import Ecto.Query, only: [from: 2]
+
+    TestRepo.aggregate(
+      from(a in Samen.AuditEvent, where: a.correlation_id == ^approval_id and a.event_type == "approval_approved"),
+      :count
+    )
   end
 end

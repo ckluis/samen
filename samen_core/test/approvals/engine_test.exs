@@ -561,4 +561,55 @@ defmodule Samen.Approvals.EngineTest do
     assert trigger.queue == :automation_timers
     assert trigger.worker_read_action == :scan_expired
   end
+
+  # ==========================================================================
+  # Deadline — an approval past `deadline_at` is refused at the ONE decision chokepoint, every kind.
+  # ==========================================================================
+
+  describe "approve after deadline_at" do
+    test "a handler-kind approval past its deadline is refused :expired (nothing runs); a future deadline still approves" do
+      o = org()
+      past = DateTime.utc_now() |> DateTime.add(-3600, :second) |> DateTime.truncate(:microsecond)
+      future = DateTime.utc_now() |> DateTime.add(3600, :second) |> DateTime.truncate(:microsecond)
+
+      req = fn deadline ->
+        {:ok, a} =
+          Approvals.request(%{
+            org_id: o,
+            kind: "test:note",
+            subject_ref: "samen:apd:#{document(o).id}",
+            requested_by: Ecto.UUID.generate(),
+            deadline_at: deadline
+          })
+
+        a
+      end
+
+      late = req.(past)
+      assert {:error, :expired} = Approvals.approve(late.id, Ecto.UUID.generate())
+      {:ok, still} = Approvals.get(late.id)
+      assert still.state == :pending
+      assert audit_events(late.id, "approval_approved") == []
+
+      # positive control: the same kind with a future deadline approves
+      ok = req.(future)
+      assert {:ok, %{state: :approved}, _} = Approvals.approve(ok.id, Ecto.UUID.generate())
+    end
+
+    test "a Gate-kind approval past its deadline is refused :expired and the gated action does NOT run; reject still works" do
+      o = org()
+      requester = actor(o, :member)
+      doc = document(o, title: "Late")
+      assert {:approval_required, approval_id} = gated(doc, :publish, requester)
+
+      @repo.query!("UPDATE apv_approval SET apv_deadline_at = now() - interval '1 hour' WHERE apv_id = $1", [
+        Ecto.UUID.dump!(approval_id)
+      ])
+
+      assert {:error, :expired} = Approvals.approve(approval_id, Ecto.UUID.generate())
+      assert reload(doc).status == :draft
+
+      assert {:ok, %{state: :rejected}} = Approvals.reject(approval_id, Ecto.UUID.generate())
+    end
+  end
 end
