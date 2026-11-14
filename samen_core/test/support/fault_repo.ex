@@ -81,6 +81,16 @@ defmodule Samen.FaultRepo do
     Real.query!(sql, params)
   end
 
+  # `repo.query/2` is the non-raising callback (`{:ok, result} | {:error, exception}`): a failed one answers the
+  # `DBConnection.ConnectionError` an outage produces, as a tagged error, for `fail([:query])` or `{:sql, fragment}`.
+  def query(sql, params \\ []) do
+    if :query in Process.get(@key, []) or Enum.any?(Process.get(@key, []), &match?({:sql, f} when is_binary(f), &1) and String.contains?(sql, elem(&1, 1))) do
+      {:error, %DBConnection.ConnectionError{message: "connection not available (Samen.FaultRepo query)"}}
+    else
+      Real.query(sql, params)
+    end
+  end
+
   def all(q, opts \\ []) do
     check!(:all)
     Real.all(q, opts)

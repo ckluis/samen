@@ -153,7 +153,9 @@ defmodule Samen.AI.Agent.Health do
     Code.ensure_loaded?(repo) and function_exported?(repo, :__adapter__, 0) and
       is_pid(Process.whereis(repo))
   rescue
-    _ -> false
+    e ->
+      Samen.Observability.Failure.report(:agent_health_repo_running, nil, e)
+      false
   end
 
   defp repo_running?(_repo), do: false
@@ -174,11 +176,17 @@ defmodule Samen.AI.Agent.Health do
     |> Ash.Query.limit(1)
     |> Ash.read(authorize?: false)
     |> case do
-      {:ok, _rows} -> :available
-      _ -> :unavailable
+      {:ok, _rows} ->
+        :available
+
+      {:error, reason} ->
+        Samen.Observability.Failure.report(:agent_health_probe, nil, reason)
+        :unavailable
     end
   rescue
-    _ -> :unavailable
+    e ->
+      Samen.Observability.Failure.report(:agent_health_probe, nil, e)
+      :unavailable
   end
 
   # ---------------------------------------------------------------------------
@@ -197,7 +205,7 @@ defmodule Samen.AI.Agent.Health do
     cond do
       not may_view?(operator) -> {:error, :not_authorized}
       availability() == :unavailable -> {:error, :unavailable}
-      true -> {:ok, build_summary(org_id, opts)}
+      true -> build_summary(org_id, opts)
     end
   end
 
@@ -210,7 +218,7 @@ defmodule Samen.AI.Agent.Health do
     cond do
       not may_view?(operator) -> {:error, :not_authorized}
       availability() == :unavailable -> {:error, :unavailable}
-      true -> {:ok, list_runs(org_id, opts)}
+      true -> list_runs(org_id, opts)
     end
   end
 
@@ -225,7 +233,7 @@ defmodule Samen.AI.Agent.Health do
     cond do
       not may_view?(operator) -> {:error, :not_authorized}
       availability() == :unavailable -> {:error, :unavailable}
-      true -> {:ok, list_turns(org_id, run_id, opts)}
+      true -> list_turns(org_id, run_id, opts)
     end
   end
 
@@ -279,9 +287,15 @@ defmodule Samen.AI.Agent.Health do
   defp operator_id(%{id: id}) when is_binary(id), do: id
   defp operator_id(_), do: nil
 
+  # `{:ok, rows}` | `{:error, :unavailable}`: a run log that could not be READ is an outage, never an agent fleet with
+  # no runs.
   defp build_summary(org_id, opts) do
-    runs = list_runs(org_id, Keyword.put_new(opts, :limit, 500))
+    with {:ok, runs} <- list_runs(org_id, Keyword.put_new(opts, :limit, 500)) do
+      {:ok, summarize(runs, org_id)}
+    end
+  end
 
+  defp summarize(runs, org_id) do
     # A6 (R-A5-4, first half): an UNREADABLE kill table is `:unknown`, never "active".
     # The gate already fails CLOSED on this read (`Breaker.definition_killed?/2` answers
     # true), so rendering `active` here was the display contradicting the engine.
@@ -370,14 +384,19 @@ defmodule Samen.AI.Agent.Health do
     |> Ash.Query.ensure_selected(@run_fields)
     |> Ash.read(authorize?: false)
     |> case do
-      {:ok, rows} -> Enum.map(rows, &Map.take(&1, @run_fields))
-      _ -> []
+      {:ok, rows} -> {:ok, Enum.map(rows, &Map.take(&1, @run_fields))}
+      {:error, reason} -> unreadable(:agent_health_list_runs, org_id, reason)
     end
   rescue
-    _ -> []
+    e -> unreadable(:agent_health_list_runs, org_id, e)
   end
 
-  defp list_runs(_org_id, _opts), do: []
+  defp list_runs(_org_id, _opts), do: {:ok, []}
+
+  defp unreadable(name, org_id, reason) do
+    Samen.Observability.Failure.report(name, org_id, reason)
+    {:error, :unavailable}
+  end
 
   defp maybe_filter_agent(query, nil), do: query
   defp maybe_filter_agent(query, agent), do: Ash.Query.filter(query, agent == ^agent)
@@ -392,12 +411,12 @@ defmodule Samen.AI.Agent.Health do
     |> Ash.Query.ensure_selected(@turn_fields)
     |> Ash.read(authorize?: false)
     |> case do
-      {:ok, rows} -> Enum.map(rows, &Map.take(&1, @turn_fields))
-      _ -> []
+      {:ok, rows} -> {:ok, Enum.map(rows, &Map.take(&1, @turn_fields))}
+      {:error, reason} -> unreadable(:agent_health_list_turns, org_id, reason)
     end
   rescue
-    _ -> []
+    e -> unreadable(:agent_health_list_turns, org_id, e)
   end
 
-  defp list_turns(_org_id, _run_id, _opts), do: []
+  defp list_turns(_org_id, _run_id, _opts), do: {:ok, []}
 end

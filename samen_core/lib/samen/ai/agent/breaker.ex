@@ -350,8 +350,12 @@ defmodule Samen.AI.Agent.Breaker do
     |> Ash.Query.limit(200)
     |> Ash.read(authorize?: false)
     |> case do
-      {:ok, rows} -> {:ok, rows}
-      _ -> {:error, :unavailable}
+      {:ok, rows} ->
+        {:ok, rows}
+
+      {:error, reason} ->
+        Samen.Observability.Failure.report(:breaker_kills_status, org_id, reason)
+        {:error, :unavailable}
     end
   rescue
     e ->
@@ -361,15 +365,18 @@ defmodule Samen.AI.Agent.Breaker do
 
   def kills_status(_org_id), do: {:error, :unavailable}
 
-  @doc "Every durable kill row for one org (token-only). `[]` also means 'unreadable' —
-  use `kills_status/1` when the difference matters (it does on any DISPLAY surface)."
-  @spec kills(String.t()) :: [map()]
-  def kills(org_id) do
+  @doc "Every durable kill row for one org (token-only). `[]` means no kill rows (or no org); an org whose kill
+  table cannot be READ raises (it used to read as `[]`, 'no kills') — a surface that can render an outage uses
+  `kills_status/1`."
+  @spec kills(String.t() | nil) :: [map()]
+  def kills(org_id) when is_binary(org_id) do
     case kills_status(org_id) do
       {:ok, rows} -> rows
-      _ -> []
+      {:error, reason} -> raise RuntimeError, "the agent kill rows could not be read (#{inspect(reason)}): not an empty list"
     end
   end
+
+  def kills(_org_id), do: []
 
   defp bounded_reason(reason) when reason in [:operator, :rate_tripped, :provider_tripped],
     do: to_string(reason)
