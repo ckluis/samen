@@ -1,0 +1,20 @@
+# SABOTAGE: A reveal whose grant lookup fails is reported as a plain denial again, so the operator console 
+#   says 'no active second-party grant' for an outage
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/reads_honest_failure_p4_test.exs
+# MUST_FAIL: a reveal that cannot check its grant fails CLOSED with outage copy
+diff --git a/driftwood/lib/driftwood/operator_reveal.ex b/driftwood/lib/driftwood/operator_reveal.ex
+index 858e38ef..c53aa624 100644
+--- a/driftwood/lib/driftwood/operator_reveal.ex
++++ b/driftwood/lib/driftwood/operator_reveal.ex
+@@ -56,7 +56,7 @@ defmodule Driftwood.OperatorReveal do
+ 
+         case reveal do
+           {:ok, result} -> result
+-          {:error, kind} -> {:error, kind}
++          {:error, _kind} -> {:error, :denied}
+         end
+ 
+       {:error, _} = err ->
