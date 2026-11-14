@@ -117,16 +117,9 @@ defmodule Samen.Web.Reads.SwallowLint do
   # correct as they are (fail-closed authz, seed probes, …) and have not yet been moved to
   # `@reviewed` with a reason — see spec/evaluation-2026-11-13/reads-rescue-inventory.md.
   @baseline %{
-    "driftwood/lib/driftwood/directory.ex" => 1,
-    "driftwood/lib/driftwood/operator_reveal.ex" => 1,
     "driftwood/lib/driftwood/operator_seeds.ex" => 4,
-    "driftwood/lib/driftwood/reads.ex" => 6,
     "driftwood/lib/driftwood/seeds.ex" => 5,
-    "driftwood/lib/driftwood_web/broker_live.ex" => 1,
-    "driftwood/lib/driftwood_web/operator_impersonation_live.ex" => 2,
-    "driftwood/lib/driftwood_web/page_controller.ex" => 1,
     "pawchart/lib/pawchart/auth.ex" => 1,
-    "pawchart/lib/pawchart/directory.ex" => 1,
     "pawchart/lib/pawchart/operator_seeds.ex" => 2,
     "pawchart/lib/pawchart_web/clinic_reads.ex" => 5,
     "pawchart/lib/pawchart_web/operator_impersonation_live.ex" => 3

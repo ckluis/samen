@@ -27,6 +27,8 @@ defmodule Driftwood.OperatorReveal do
 
   require Ash.Query
 
+  alias Samen.Web.Reads.Guard
+
   @doc """
   Attempt to reveal the CDL plaintext for `driver_id` on behalf of `operator_id`.
   Returns `{:ok, plaintext}` only under an active second-party grant; otherwise
@@ -37,36 +39,59 @@ defmodule Driftwood.OperatorReveal do
   def reveal_cdl(operator_id, driver_id) do
     case masked_cdl(driver_id) do
       {:ok, masked} ->
-        Samen.Reveal.reveal(
-          operator_id,
-          masked,
-          :reveal_driver,
-          Driftwood.Freight.Driver,
-          subject_id: to_string(driver_id),
-          repo: Driftwood.Repo
-        )
+        # WP6 phase 4: a reveal that RAISES (decrypt/KMS/DB outage) is `{:error, :unavailable}`, reported by
+        # name and exception module — fail CLOSED (nothing is revealed) and distinguishable from a real
+        # denial, so the console never says "no active grant" for an outage.
+        reveal =
+          Guard.run(:driftwood_reveal_cdl, nil, fn ->
+            Samen.Reveal.reveal(
+              operator_id,
+              masked,
+              :reveal_driver,
+              Driftwood.Freight.Driver,
+              subject_id: to_string(driver_id),
+              repo: Driftwood.Repo
+            )
+          end)
+
+        case reveal do
+          {:ok, result} -> result
+          {:error, kind} -> {:error, kind}
+        end
 
       {:error, _} = err ->
         err
     end
   end
 
-  # Load the driver's masked CDL value (a %Samen.Masked{}) — the token to decrypt.
+  # Load the driver's masked CDL value (a %Samen.Masked{}) — the token to decrypt. The id is cast
+  # first (a malformed id is `:not_found`, no error log); a read that RAISES is `:unavailable`, never
+  # `:not_found`.
   defp masked_cdl(driver_id) do
-    driver =
-      Driftwood.Freight.Driver
-      |> Ash.Query.filter(id == ^driver_id)
-      |> Ash.Query.ensure_selected([:cdl_number])
-      |> Ash.read_one!(authorize?: false)
-
-    case driver do
-      nil -> {:error, :not_found}
-      %{cdl_number: %Samen.Masked{} = masked} -> {:ok, masked}
-      _ -> {:error, :no_masked_value}
+    with {:ok, id} <- cast_id(driver_id),
+         {:ok, driver} <-
+           Guard.run(:driftwood_masked_cdl, nil, fn ->
+             Driftwood.Freight.Driver
+             |> Ash.Query.filter(id == ^id)
+             |> Ash.Query.ensure_selected([:cdl_number])
+             |> Ash.read_one!(authorize?: false)
+           end) do
+      case driver do
+        nil -> {:error, :not_found}
+        %{cdl_number: %Samen.Masked{} = masked} -> {:ok, masked}
+        _ -> {:error, :no_masked_value}
+      end
     end
-  rescue
-    _ -> {:error, :not_found}
   end
+
+  defp cast_id(id) when is_binary(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> {:ok, uuid}
+      :error -> {:error, :not_found}
+    end
+  end
+
+  defp cast_id(_), do: {:error, :not_found}
 
   @doc """
   REQUEST a second-party reveal grant for a driver (T149 B5 — the missing entry point). This
@@ -93,15 +118,19 @@ defmodule Driftwood.OperatorReveal do
 
   def request_reveal(operator_id, driver_id, reason, org_id)
       when is_binary(operator_id) and is_binary(driver_id) and is_binary(reason) do
-    Samen.Reveal.Grants.request(%{
-      subject_id: to_string(driver_id),
-      requestor_id: to_string(operator_id),
-      reason: reason,
-      resource: Driftwood.Freight.Driver,
-      action: :reveal_driver,
-      org_id: org_id,
-      repo: Driftwood.Repo
-    })
+    # WP6 phase 4: `Guard.write/3` — an outage is `{:error, :unavailable}` (reported by name), a real refusal
+    # (`{:pii_shaped_reason, _}`, a changeset error) passes through untouched.
+    Guard.write(:driftwood_request_reveal, org_id, fn ->
+      Samen.Reveal.Grants.request(%{
+        subject_id: to_string(driver_id),
+        requestor_id: to_string(operator_id),
+        reason: reason,
+        resource: Driftwood.Freight.Driver,
+        action: :reveal_driver,
+        org_id: org_id,
+        repo: Driftwood.Repo
+      })
+    end)
   end
 
   def request_reveal(_operator_id, _driver_id, _reason, _org_id), do: {:error, :invalid_request}

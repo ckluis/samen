@@ -31,11 +31,15 @@ defmodule DriftwoodWeb.PageController do
 
   alias Samen.Auth.OrgActor
   alias Samen.Web.Auth, as: WebAuth
+  alias Samen.Web.Reads.Guard
 
   def index(conn, _params) do
     case tenant_landing(conn) do
       {:ok, path} -> redirect(conn, to: path)
       :none -> redirect(conn, to: "/operator/accounts")
+      # The membership lookup FAILED (outage): neither "you are a tenant" nor "you have no tenant" is known,
+      # so a tenant must not be sent to the operator console as if they had no org. Honest 503, value-free.
+      :unavailable -> send_resp(conn, 503, "We couldn't check your workspace right now. Try again in a moment.")
     end
   end
 
@@ -44,25 +48,31 @@ defmodule DriftwoodWeb.PageController do
   # one org is a tenant; their landing is that org's freight console. Anything else (no
   # session, an unresolvable/expired token, or a resolved principal with NO Membership
   # anywhere — the operator's own principal never has one under this namespace) → `:none`,
-  # preserving the pre-existing operator-console landing exactly. Never raises: an unreadable
-  # session or a DB hiccup degrades to `:none`, the SAME safe fallback as no session at all.
+  # preserving the pre-existing operator-console landing exactly. Never raises: a lookup that FAILS
+  # (a DB hiccup) is `:unavailable`, reported by name and exception module — it is not "no session".
   defp tenant_landing(conn) do
     conn = fetch_session(conn)
     session = get_session(conn)
 
-    with {:ok, %{credential_id: credential_id}} <-
-           WebAuth.resolve_principal(session, %{session: Driftwood.Operator.Session}),
-         [org_id | _] <-
-           OrgActor.authorized_org_ids(
-             %{user: Driftwood.Operator.User, membership: Driftwood.Operator.Membership},
-             credential_id
-           ) do
-      {:ok, "/broker?org=#{org_id}"}
-    else
-      _ -> :none
+    lookup =
+      Guard.run(:driftwood_tenant_landing, nil, fn ->
+        with {:ok, %{credential_id: credential_id}} <-
+               WebAuth.resolve_principal(session, %{session: Driftwood.Operator.Session}),
+             [org_id | _] <-
+               OrgActor.authorized_org_ids(
+                 %{user: Driftwood.Operator.User, membership: Driftwood.Operator.Membership},
+                 credential_id
+               ) do
+          {:ok, "/broker?org=#{org_id}"}
+        else
+          _ -> :none
+        end
+      end)
+
+    case lookup do
+      {:ok, landing} -> landing
+      {:error, _kind} -> :unavailable
     end
-  rescue
-    _ -> :none
   end
 
   def healthz(conn, _params) do
