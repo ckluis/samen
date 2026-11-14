@@ -5,15 +5,15 @@
 # TEST_FILES: test/single_node_test.exs
 # MUST_FAIL: single is ok; unknown carries its reason and is never ok
 diff --git a/samen_core/lib/samen/single_node.ex b/samen_core/lib/samen/single_node.ex
-index 74f4dfe1..00940600 100644
+index 83ec314..f750a63 100644
 --- a/samen_core/lib/samen/single_node.ex
 +++ b/samen_core/lib/samen/single_node.ex
-@@ -237,7 +237,7 @@ defmodule Samen.SingleNode do
+@@ -271,7 +271,7 @@ defmodule Samen.SingleNode do
      case status(opts) do
        :disarmed -> :ok
        %{state: :single} -> :ok
 -      %{state: :unknown, reason: reason} -> {:unknown, "single-node state unreadable (#{reason}); see #{@adr}"}
 +      %{state: :unknown, reason: _reason} -> :ok
        %{state: :overlap, exceeded?: false} -> :ok
-       %{state: :overlap} = s ->
-         {:critical,
+ 
+       %{state: :overlap, verified?: false} ->

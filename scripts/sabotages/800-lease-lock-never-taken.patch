@@ -6,15 +6,15 @@
 # TEST_FILES: test/single_node_lease_test.exs
 # MUST_FAIL: a second instance is detected by BOTH
 diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
-index 405ed0bb..4a858e16 100644
+index edeca69e..5f13c6a6 100644
 --- a/samen_core/lib/samen/single_node/lease.ex
 +++ b/samen_core/lib/samen/single_node/lease.ex
-@@ -96,7 +96,7 @@ defmodule Samen.SingleNode.Lease do
-   @doc false
-   # Runs inside the connection process on EVERY new session (see the moduledoc).
-   def after_connect(conn, k1, k2) do
--    Postgrex.query!(conn, "SELECT pg_advisory_lock_shared(#{k1}, #{k2})", [])
-+    Postgrex.query!(conn, "SELECT #{k1} + #{k2}", [])
-     Postgrex.query!(conn, "SELECT set_config('#{@guc}', 'on', false)", [])
-     :ok
-   end
+@@ -212,7 +212,7 @@ defmodule Samen.SingleNode.Lease do
+     %{rows: [[pid | _]]} =
+       q.query!(
+         conn,
+-        "SELECT pg_backend_pid(), pg_advisory_lock_shared($1::int, $2::int), pg_advisory_lock_shared($3::int, $4::int), " <>
++        "SELECT pg_backend_pid(), $1::int + $2::int, pg_advisory_lock_shared($3::int, $4::int), " <>
+           "pg_advisory_lock_shared($5::int, $6::int), pg_advisory_lock_shared($7::int, 0), set_config('#{@guc}', $8, false), " <>
+           "set_config('tcp_keepalives_idle', '10', false), set_config('tcp_keepalives_interval', '5', false), " <>
+           "set_config('tcp_keepalives_count', '3', false)" <> idle_sql,

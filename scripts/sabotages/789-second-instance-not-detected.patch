@@ -6,15 +6,16 @@
 # TEST_FILES: test/single_node_lease_test.exs
 # MUST_FAIL: a second instance is detected by BOTH
 diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
-index 405ed0bb..2749e718 100644
+index edeca69e..be6e9835 100644
 --- a/samen_core/lib/samen/single_node/lease.ex
 +++ b/samen_core/lib/samen/single_node/lease.ex
-@@ -126,7 +126,7 @@ defmodule Samen.SingleNode.Lease do
+@@ -336,7 +336,8 @@ defmodule Samen.SingleNode.Lease do
  
-         case others do
-           [] -> :single
--          _ -> {:overlap, length(others), late?(mine, others)}
-+          _ -> :single
-         end
-     end
-   end
+         true ->
+           verified? = Enum.any?(live, fn o -> elem(Map.fetch!(seen2, o.pid), 2) end)
+-          {:overlap, live |> Enum.map(& &1.identities) |> Enum.sum(), late?(live, my_epoch, my_pid), verified?}
++          _ = verified?
++          :single
+       end
+ 
+     {verdict, seen2}
