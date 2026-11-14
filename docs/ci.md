@@ -296,7 +296,7 @@ one of the target's modules — aliases expanded, exact names, never a submodule
 (repeating one is an error, different ones intersect):
 `--app`, `--file`, `--family`, `--changed [<ref>]`, `--shard i/n`, `--list`, `--list-targets`, `--corpus`
 (targets derived from sabotage headers: a soak, not a gate step), `--emit-patches <dir>`, `--targets`,
-`--ledger`. Ends `MUTATION GATE: ALL PASSED`. Full watch-list ≈ 15 min: use the driver (`mutation_changed`
+`--ledger`. Ends `MUTATION GATE: ALL PASSED`. Full watch-list ≈ 47 min serial (401 mutants / 23 modules, measured after ARCH-26; was ≈ 15 min at 166): use the driver (`mutation_changed`
 in `pr`, six slices nightly) or `--shard`/`--file` chunks.
 
 Never weaken it: (1) baseline green before scoring; (2) a kill is a NAMED test failure — a non-zero exit
