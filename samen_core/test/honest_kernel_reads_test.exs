@@ -177,6 +177,10 @@ defmodule Samen.HonestKernelReadsTest do
   end
 
   describe "NoPlaintextPii log_telemetry tier — an unlistable handler set is a violation, not 'no handlers'" do
+    test "the lister override seam is a TEST-ONLY compile-time seam (a prod build never reads the application env)" do
+      assert Samen.NoPlaintextPii.Tiers.LogTelemetry.lister_seam?() == (Mix.env() == :test)
+    end
+
     test "RED: listing the :telemetry handlers fails -> a live-handler violation" do
       Application.put_env(:samen_core, :telemetry_handler_lister, fn _prefix -> raise "telemetry table gone" end)
       on_exit(fn -> Application.delete_env(:samen_core, :telemetry_handler_lister) end)

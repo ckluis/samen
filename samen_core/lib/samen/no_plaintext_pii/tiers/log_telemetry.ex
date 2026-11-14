@@ -170,9 +170,21 @@ defmodule Samen.NoPlaintextPii.Tiers.LogTelemetry do
       {:error, :unavailable}
   end
 
-  # The handler lister: `:telemetry.list_handlers/1`. Overridable with `config :samen_core, :telemetry_handler_lister`
-  # (a 1-arity function) ONLY so a test can make the listing fail for real and prove the tier fails closed.
-  defp lister, do: Application.get_env(:samen_core, :telemetry_handler_lister, &:telemetry.list_handlers/1)
+  # The handler lister: `:telemetry.list_handlers/1`. A test can replace it with `config :samen_core,
+  # :telemetry_handler_lister` (a 1-arity function) to make the listing fail for real and prove the tier fails
+  # closed. That seam is compiled in ONLY under `Mix.env() == :test`: in any other build the application
+  # environment is never read, so a production config cannot silence the live-handler check with `fn _ -> [] end`.
+  @lister_seam? Mix.env() == :test
+
+  @doc false
+  @spec lister_seam?() :: boolean()
+  def lister_seam?, do: @lister_seam?
+
+  if @lister_seam? do
+    defp lister, do: Application.get_env(:samen_core, :telemetry_handler_lister, &:telemetry.list_handlers/1)
+  else
+    defp lister, do: &:telemetry.list_handlers/1
+  end
 
   # Check a single handler's config for db_statement safety.
   defp check_handler_config(handler) do
