@@ -35,6 +35,8 @@ defmodule Samen.SoftDeleteTest do
   """
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureLog
+
   import Samen.MaskingCase,
     only: [resolve_on_plane: 4, assert_plane_masked!: 1, assert_leak_detected!: 2]
 
@@ -56,6 +58,7 @@ defmodule Samen.SoftDeleteTest do
     Samen.Kms.FileBacked.simulate_outage(false)
     Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
     on_exit(fn -> Samen.Kms.FileBacked.simulate_outage(false) end)
+    Samen.FaultRepo.heal()
     org = Ash.UUID.generate()
     {:ok, org: org, scope: tenant_scope(org)}
   end
@@ -301,6 +304,46 @@ defmodule Samen.SoftDeleteTest do
       assert aud_count("record_archived", w.id) == 1
 
       {:ok, _} = Archival.restore(archived_widget(scope, w.id), scope: scope)
+      assert aud_count("record_restored", w.id) == 1
+    end
+  end
+
+  describe "c4 — the audit is strict: a chain outage refuses the archive/restore" do
+    test "archive: chain down ⇒ {:error, _}, the widget stays live and nothing is audited; chain up ⇒ archived + one event",
+         %{org: org, scope: scope} do
+      w = new_widget(scope, org, "strict-a")
+      Samen.FaultRepo.fail([:probe])
+
+      capture_log(fn ->
+        assert {:error, _} = Archival.archive(w, scope: scope, context: %{samen_audit_repo: Samen.FaultRepo})
+      end)
+
+      Samen.FaultRepo.heal()
+      assert MapSet.member?(live_ids(scope), w.id)
+      assert aud_count("record_archived", w.id) == 0
+
+      assert {:ok, _} = Archival.archive(w, scope: scope, context: %{samen_audit_repo: Samen.FaultRepo})
+      refute MapSet.member?(live_ids(scope), w.id)
+      assert aud_count("record_archived", w.id) == 1
+    end
+
+    test "restore: chain down ⇒ {:error, _}, the widget stays archived; chain up ⇒ restored + one event",
+         %{org: org, scope: scope} do
+      w = new_widget(scope, org, "strict-r")
+      {:ok, _} = Archival.archive(w, scope: scope)
+      archived = archived_widget(scope, w.id)
+      Samen.FaultRepo.fail([:probe])
+
+      capture_log(fn ->
+        assert {:error, _} = Archival.restore(archived, scope: scope, context: %{samen_audit_repo: Samen.FaultRepo})
+      end)
+
+      Samen.FaultRepo.heal()
+      refute MapSet.member?(live_ids(scope), w.id)
+      assert aud_count("record_restored", w.id) == 0
+
+      assert {:ok, _} = Archival.restore(archived, scope: scope, context: %{samen_audit_repo: Samen.FaultRepo})
+      assert MapSet.member?(live_ids(scope), w.id)
       assert aud_count("record_restored", w.id) == 1
     end
   end

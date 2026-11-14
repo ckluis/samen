@@ -1,0 +1,19 @@
+# SABOTAGE: erasure 4a tolerant
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/erasure_retry_after_rollback_test.exs
+# MUST_FAIL: STEP 4a is strict
+diff --git a/samen_core/lib/samen/erasure.ex b/samen_core/lib/samen/erasure.ex
+index 872c1e28..243ffdc4 100644
+--- a/samen_core/lib/samen/erasure.ex
++++ b/samen_core/lib/samen/erasure.ex
+@@ -498,7 +498,7 @@ defmodule Samen.Erasure do
+             "outcome=#{outcome} attestation_id=#{attestation[:attestation_id] || "none"} " <>
+               "vault_sealed=#{sealed} non_pii_redacted=#{redacted} " <>
+               "derived_summary_invalidation=#{derived_summary_invalidation(disposition)}"
+-        }, strict: true)
++        })
+       end)
+       # STEP 4b — append-only event tier row (T2.2: erasure events mirror to
+       # aud_event carrying tokens only, never plaintext PII).

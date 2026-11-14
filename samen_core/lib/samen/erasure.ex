@@ -485,6 +485,8 @@ defmodule Samen.Erasure do
         %{count: redacted} = changes.redact_non_pii
         outcome = changes.report.outcome
 
+        # `strict: true`: the erasure record is the point of this step, so a failed chain write aborts the erasure
+        # transaction (the retry is idempotent) instead of leaving a lifecycle row the chain never saw.
         Grants.write_audit(repo, %{
           event: "erased",
           subject_id: subject_id,
@@ -496,7 +498,7 @@ defmodule Samen.Erasure do
             "outcome=#{outcome} attestation_id=#{attestation[:attestation_id] || "none"} " <>
               "vault_sealed=#{sealed} non_pii_redacted=#{redacted} " <>
               "derived_summary_invalidation=#{derived_summary_invalidation(disposition)}"
-        })
+        }, strict: true)
       end)
       # STEP 4b — append-only event tier row (T2.2: erasure events mirror to
       # aud_event carrying tokens only, never plaintext PII).

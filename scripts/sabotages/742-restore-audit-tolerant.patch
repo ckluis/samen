@@ -1,0 +1,20 @@
+# SABOTAGE: restore audit tolerant
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/soft_delete_test.exs
+# MUST_FAIL: restore: chain down
+diff --git a/samen_core/lib/samen/archival/restore.ex b/samen_core/lib/samen/archival/restore.ex
+index 20b24c72..445b3597 100644
+--- a/samen_core/lib/samen/archival/restore.ex
++++ b/samen_core/lib/samen/archival/restore.ex
+@@ -29,7 +29,8 @@ defmodule Samen.Archival.Restore do
+       changeset
+       |> Ash.Changeset.force_change_attribute(:archived_at, nil)
+       |> Ash.Changeset.after_action(fn cs, record ->
+-        with :ok <- Samen.Archival.Audit.write(cs, record, "record_restored"), do: {:ok, record}
++        Samen.Archival.Audit.write(cs, record, "record_restored")
++        {:ok, record}
+       end)
+     end
+   end

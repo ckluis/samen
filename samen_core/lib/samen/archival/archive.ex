@@ -30,8 +30,7 @@ defmodule Samen.Archival.Archive do
       _ ->
         # live → archiving: ash_archival sets the timestamp; we audit once it commits.
         Ash.Changeset.after_action(changeset, fn cs, record ->
-          Samen.Archival.Audit.write(cs, record, "record_archived")
-          {:ok, record}
+          with :ok <- Samen.Archival.Audit.write(cs, record, "record_archived"), do: {:ok, record}
         end)
     end
   end

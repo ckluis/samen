@@ -71,4 +71,33 @@ defmodule Samen.ErasureRetryAfterRollbackTest do
     assert {:ok, %{report: report}} = Erasure.shred(subject, repo: @repo)
     refute report.tiers["derived_summaries"]["reason"] == "pseudonym_shredded"
   end
+
+  test "STEP 4a is strict: when only the lifecycle audit's chain write fails, the erasure aborts instead of committing without it" do
+    FaultRepo.register_as_repo!()
+    # how many chain writes (existence probes) a healthy erasure makes; 4a is the second to last, 4b the last
+    healthy = "audit-healthy-#{System.unique_integer([:positive])}"
+    {:ok, _} = Vault.store_field(healthy, :pii_email, :emails, "healthy@example.com", @repo)
+    assert {:ok, _} = Erasure.shred(healthy, repo: FaultRepo)
+    probes = FaultRepo.probe_count()
+    assert probes >= 2
+    FaultRepo.heal()
+
+    subject = "audit-strict-#{System.unique_integer([:positive])}"
+    {:ok, _} = Vault.store_field(subject, :pii_email, :emails, "strict@example.com", @repo)
+    FaultRepo.fail([{:probe_nth, probes - 1}])
+
+    capture_log(fn ->
+      assert {:error, {:erasure_tx_failed, _}} = Erasure.shred(subject, repo: FaultRepo)
+    end)
+
+    FaultRepo.heal()
+    # nothing of the seal transaction committed: no report, no lifecycle row, vault rows still active
+    refute Erasure.erased?(subject, repo: @repo)
+    assert Samen.Reveal.Grants.audit_for(subject, repo: @repo) == []
+    assert Enum.all?(@repo.all(from(v in VaultRow, where: v.subject_id == ^subject)), &(&1.state == "active"))
+
+    # the retry (chain healthy) completes, with the lifecycle row
+    assert {:ok, _} = Erasure.shred(subject, repo: @repo)
+    assert Enum.any?(Samen.Reveal.Grants.audit_for(subject, repo: @repo), &(&1.event == "erased"))
+  end
 end

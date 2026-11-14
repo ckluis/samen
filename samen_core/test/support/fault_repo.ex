@@ -11,6 +11,7 @@ defmodule Samen.FaultRepo do
   alias SamenCore.TestRepo, as: Real
 
   @key {__MODULE__, :fail}
+  @probes {__MODULE__, :probes}
 
   def fail(ops) when is_list(ops) do
     Process.put(@key, ops)
@@ -18,8 +19,31 @@ defmodule Samen.FaultRepo do
   end
   def heal do
     Process.delete(@key)
+    Process.delete(@probes)
     :ok
   end
+
+  @doc """
+  Make this module resolvable by `Ecto.Adapters.SQL.query!(repo, …)` (and anything else that looks a repo up by name
+  in `Ecto.Repo.Registry`): it registers a stand-in process under this module's name that carries the real repo's
+  adapter meta, so those calls use the SAME pool (and sandbox connection) as `SamenCore.TestRepo`. Idempotent. Call it
+  from a test that runs a code path with raw SQL helpers under `repo: Samen.FaultRepo` (e.g. `Samen.Erasure.shred/2`).
+  """
+  def register_as_repo! do
+    if GenServer.whereis(__MODULE__) == nil do
+      {:ok, pid} = Agent.start(fn -> :ok end, name: __MODULE__)
+      :ok = Ecto.Repo.Registry.associate(pid, __MODULE__, Ecto.Repo.Registry.lookup(Real))
+    end
+
+    :ok
+  end
+
+  @doc """
+  How many `to_regclass` existence probes (one per `Samen.AuditChain.Writer.write/2`) this process has issued through
+  this repo since the last `heal/0`. `fail([{:probe_nth, k}])` fails exactly the k-th of them, to take down ONE audit
+  write among several in a transaction.
+  """
+  def probe_count, do: Process.get(@probes, 0)
 
   # `fail([{:sql, "FROM oban_jobs"}])` fails only the queries whose text contains the fragment.
   defp check_sql!(sql) do
@@ -39,7 +63,14 @@ defmodule Samen.FaultRepo do
   def query!(sql, params \\ [])
 
   def query!("SELECT to_regclass" <> _ = sql, params) do
+    n = probe_count() + 1
+    Process.put(@probes, n)
     check!(:probe)
+
+    for {:probe_nth, k} <- Process.get(@key, []), k == n do
+      raise DBConnection.ConnectionError, "connection not available (Samen.FaultRepo probe ##{n})"
+    end
+
     check_sql!(sql)
     Real.query!(sql, params)
   end
@@ -73,6 +104,22 @@ defmodule Samen.FaultRepo do
   def insert!(cs, opts \\ []) do
     check!(:insert!)
     Real.insert!(cs, opts)
+  end
+  def update_all(q, updates, opts \\ []) do
+    check!(:update_all)
+    Real.update_all(q, updates, opts)
+  end
+  def aggregate(q, kind, opts \\ []) when is_atom(kind) do
+    check!(:aggregate)
+    Real.aggregate(q, kind, opts)
+  end
+  def aggregate(q, kind, field, opts) do
+    check!(:aggregate)
+    Real.aggregate(q, kind, field, opts)
+  end
+  def delete_all(q, opts \\ []) do
+    check!(:delete_all)
+    Real.delete_all(q, opts)
   end
   def update(cs, opts \\ []) do
     check!(:update)
