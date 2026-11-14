@@ -311,13 +311,13 @@ defmodule Samen.Indexing do
   them so the operator can drop them in a follow-up migration once the new index is built.
   """
   @spec superseded([map()], spec()) :: [map()]
-  def superseded(indexes, %{columns: [org | _] = columns, name: name}) do
+  def superseded(indexes, %{columns: [org | _] = columns, name: name} = spec) do
     id = List.last(columns)
 
     Enum.filter(indexes, fn index ->
       index.name != name and index.method == "btree" and Enum.at(index.keys, 0) == org and
         length(index.keys) >= 2 and id in index.keys and
-        not serves?(index, %{columns: columns})
+        not serves?(index, spec)
     end)
   end
 end
