@@ -80,6 +80,6 @@ samen_core/lib/samen/erasure.ex	samen_core	test/erasure_test.exs test/erasure_br
 # --- the audit hash chain (ADR-002 §2): `verify` / `verify_page` decide valid vs tampered, `append` links the chain,
 # --- the Writer is the one path that seals an aud_event into it, and Canonical is what gets hashed. A weakened branch
 # --- reads a tampered chain as intact. (derived: sabotage TEST_FILES 207/209/650/696/710)
-samen_core/lib/samen/audit_chain.ex	samen_core	test/audit_chain_test.exs test/audit_chain_bounded_verify_test.exs test/audit_chain_concurrency_test.exs test/audit_chain_oracle_test.exs test/audit_chain_verify_sweep_test.exs test/reveal_ledger_read_signal_test.exs
+samen_core/lib/samen/audit_chain.ex	samen_core	test/audit_chain_branches_test.exs test/audit_chain_test.exs test/audit_chain_bounded_verify_test.exs test/audit_chain_concurrency_test.exs test/audit_chain_oracle_test.exs test/audit_chain_verify_sweep_test.exs test/reveal_ledger_read_signal_test.exs
 samen_core/lib/samen/audit_chain/writer.ex	samen_core	test/audit_chain_writer_test.exs test/audit_writer_callers_test.exs test/audit_chain_test.exs test/honest_kernel_reads_test.exs
 samen_core/lib/samen/audit_chain/canonical.ex	samen_core	test/audit_chain_canonical_test.exs test/audit_chain_test.exs
