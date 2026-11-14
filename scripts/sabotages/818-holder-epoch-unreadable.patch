@@ -1,0 +1,19 @@
+# SABOTAGE: the boot epoch of the other holder is not read, so nobody is ever late
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_lease_test.exs
+# MUST_FAIL: ordering works across roles
+diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
+index edeca69e..6b79ec76 100644
+--- a/samen_core/lib/samen/single_node/lease.ex
++++ b/samen_core/lib/samen/single_node/lease.ex
+@@ -293,7 +293,7 @@ defmodule Samen.SingleNode.Lease do
+ 
+     epoch =
+       case {secs, usec} do
+-        {[s], [u]} -> s * 1_000_000 + u
++        {[_s], [_u]} -> nil
+         _ -> nil
+       end
+ 

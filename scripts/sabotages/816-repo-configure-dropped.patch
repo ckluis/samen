@@ -1,0 +1,18 @@
+# SABOTAGE: the lease drops the repo :configure function, so dynamic credentials never reach it
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_lease_test.exs
+# MUST_FAIL: a `:configure` function (dynamic credentials) applies to the lease
+diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
+index edeca69e..f7f86e20 100644
+--- a/samen_core/lib/samen/single_node/lease.ex
++++ b/samen_core/lib/samen/single_node/lease.ex
+@@ -131,6 +131,7 @@ defmodule Samen.SingleNode.Lease do
+     :timeout,
+     :loggers,
+     :queue_target,
++    :configure,
+     :queue_interval,
+     :ownership_timeout,
+     :migration_source,

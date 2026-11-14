@@ -1,0 +1,19 @@
+# SABOTAGE: a node that arms the guard but whose lease died reads as having no guard
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_test.exs
+# MUST_FAIL: armed + no lease table is UNKNOWN
+diff --git a/samen_core/lib/samen/single_node.ex b/samen_core/lib/samen/single_node.ex
+index 83ec314b..bd109ce4 100644
+--- a/samen_core/lib/samen/single_node.ex
++++ b/samen_core/lib/samen/single_node.ex
+@@ -162,7 +162,7 @@ defmodule Samen.SingleNode do
+   @doc false
+   def disarm(table \\ Lease.default_table()), do: :persistent_term.erase({__MODULE__, :armed, table})
+ 
+-  defp armed?(table), do: :persistent_term.get({__MODULE__, :armed, table}, false)
++  defp armed?(_table), do: false
+ 
+   # ---------------------------------------------------------------------------
+   # Half 1 — distributed Erlang
