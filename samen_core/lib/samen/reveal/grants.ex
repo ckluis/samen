@@ -385,13 +385,14 @@ defmodule Samen.Reveal.Grants do
 
   Returns a list of maps `%{approval_id, request_id, org_id, subject_id, requestor_id,
   reason, resource, action, requested_at}`, oldest-first. Honest-empty (`[]`) on an unwired
-  host or any read error — never a fake row.
+  host; a FAILED read raises (it used to read as `[]`, "nothing awaiting approval"). Surfaces that can
+  render an outage use `pending_for_org_result/2`.
   """
   @spec pending_for_org(String.t(), keyword()) :: [map()]
   def pending_for_org(org_id, opts \\ []) do
     case pending_for_org_result(org_id, opts) do
       {:ok, rows} -> rows
-      {:error, _} -> []
+      {:error, reason} -> raise RuntimeError, "the pending reveal requests could not be read (#{inspect(reason)}): not an empty list"
     end
   end
 

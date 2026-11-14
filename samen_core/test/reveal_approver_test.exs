@@ -56,6 +56,24 @@ defmodule Samen.Reveal.ApproverTest do
       assert is_binary(row.approval_id)
     end
 
+    test "RED: a failed pending read RAISES instead of answering [] (nothing awaiting approval); healthy, the same call answers" do
+      org_a = org()
+      s = subj()
+
+      {:ok, _req} =
+        Grants.request(%{subject_id: s, requestor_id: actor(), reason: "ticket 89: pending read", org_id: org_a})
+
+      Samen.FaultRepo.fail([:get])
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, :unavailable} = Grants.pending_for_org_result(org_a, repo: Samen.FaultRepo)
+        assert_raise RuntimeError, ~r/could not be read/, fn -> Grants.pending_for_org(org_a, repo: Samen.FaultRepo) end
+      end)
+
+      Samen.FaultRepo.heal()
+      assert [_] = Grants.pending_for_org(org_a, repo: Samen.FaultRepo)
+    end
+
     test "MASKING: the pending row carries ONLY metadata — no vault value, no vt_* token" do
       org_a = org()
 

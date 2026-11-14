@@ -66,11 +66,12 @@ defmodule Samen.RevealLedgerReadSignalTest do
       assert {:ok, []} = AuditChain.reveal_events_result(org, repo: Repo)
     end
 
-    test "the back-compat list form degrades error → [] (documented; non-surface callers only)",
+    test "the list form RAISES on a failed read instead of answering [] (a failed read is not an empty ledger)",
          %{org: org} do
-      # The list projection intentionally collapses the distinction — which is exactly why
-      # tenant TRUST surfaces must use reveal_events_result/2 (the honest one) instead.
-      assert [] = AuditChain.reveal_events_for_org(org, repo: RaisingRepo)
+      assert_raise RuntimeError, ~r/could not be read/, fn -> AuditChain.reveal_events_for_org(org, repo: RaisingRepo) end
+
+      # POSITIVE CONTROL: through a working repo the same call answers
+      assert [] = AuditChain.reveal_events_for_org(org, repo: Repo)
     end
   end
 end

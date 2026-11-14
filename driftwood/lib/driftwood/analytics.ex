@@ -62,23 +62,27 @@ defmodule Driftwood.Analytics.NonPiiSetup do
        "subject identity data (PII-shaped values refused at capture). WS-B B9/AC-X1."}
   ]
 
-  @doc "Register the Analytics scope non-PII columns. Idempotent."
-  def register_all do
-    Enum.each(@non_pii_columns, fn {table, column, reason} ->
-      case Samen.NonPii.register(%{
-             table_name: table,
-             column_name: column,
-             cleared_by: "WS-B-B9-scope-author",
-             reviewed_by: "WS-B-B9-gate-reviewer",
-             reason: reason,
-             subject_column: "fae_org_id",
-             redaction: "[REDACTED]"
-           }) do
-        {:ok, _} -> :ok
-        {:error, _} -> :ok
+  @doc "Register the Analytics scope non-PII columns. Idempotent; returns `:ok` or `{:error, reason}`."
+  def register_all(opts \\ []) do
+    repo_opts = if repo = Keyword.get(opts, :repo), do: %{repo: repo}, else: %{}
+
+    # A registration that fails leaves a plaintext column OUT of the erasure redaction carve-out, so it is an
+    # error the caller sees (it used to be `{:error, _} -> :ok`), like `Driftwood.NonPiiSetup.register_all/0`.
+    Enum.reduce_while(@non_pii_columns, :ok, fn {table, column, reason}, _acc ->
+      case Samen.NonPii.register(
+             Map.merge(repo_opts, %{
+               table_name: table,
+               column_name: column,
+               cleared_by: "WS-B-B9-scope-author",
+               reviewed_by: "WS-B-B9-gate-reviewer",
+               reason: reason,
+               subject_column: "fae_org_id",
+               redaction: "[REDACTED]"
+             })
+           ) do
+        {:ok, _} -> {:cont, :ok}
+        {:error, failure} -> {:halt, {:error, failure}}
       end
     end)
-
-    :ok
   end
 end
