@@ -1,0 +1,19 @@
+# SABOTAGE: /readyz drops the strict single_node component: the late instance answers 200
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/readiness_test.exs
+# MUST_FAIL: strict: the LATE instance past grace is a 503
+diff --git a/samen_web/lib/samen/web/readiness.ex b/samen_web/lib/samen/web/readiness.ex
+index 267d4b96..9bbc8353 100644
+--- a/samen_web/lib/samen/web/readiness.ex
++++ b/samen_web/lib/samen/web/readiness.ex
+@@ -95,7 +95,7 @@ defmodule Samen.Web.Readiness do
+   defp strict_single_node do
+     case Samen.SingleNode.strict_check() do
+       :not_armed -> []
+-      status -> [single_node: status]
++      _status -> []
+     end
+   end
+ 

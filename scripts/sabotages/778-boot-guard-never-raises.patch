@@ -1,0 +1,20 @@
+# SABOTAGE: the boot guard finds the clustering configuration and boots anyway
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_test.exs
+# MUST_FAIL: a configured libcluster topology fails boot and names the ADR
+diff --git a/samen_core/lib/samen/single_node.ex b/samen_core/lib/samen/single_node.ex
+index 74f4dfe1..9b9f0c9e 100644
+--- a/samen_core/lib/samen/single_node.ex
++++ b/samen_core/lib/samen/single_node.ex
+@@ -175,6 +175,9 @@ defmodule Samen.SingleNode do
+       [] ->
+         :ok
+ 
++      _findings when true ->
++        :ok
++
+       findings ->
+         raise ClusteredError,
+               "Samen runs as ONE application instance per database (#{@adr}); refusing to boot clustered: " <>

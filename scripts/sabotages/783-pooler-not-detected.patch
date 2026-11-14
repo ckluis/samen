@@ -1,0 +1,20 @@
+# SABOTAGE: a statement from a session that never ran after_connect is trusted: a transaction pooler yields 
+#   a false single
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_lease_test.exs
+# MUST_FAIL: a statement served by a session that never ran after_connect
+diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
+index 405ed0bb..3222156f 100644
+--- a/samen_core/lib/samen/single_node/lease.ex
++++ b/samen_core/lib/samen/single_node/lease.ex
+@@ -114,7 +114,7 @@ defmodule Samen.SingleNode.Lease do
+     holders = rows |> Enum.reject(fn [_, pid, _, _] -> is_nil(pid) end) |> Enum.uniq_by(fn [_, pid, _, _] -> pid end)
+ 
+     cond do
+-      flag in [nil, ""] ->
++      false ->
+         {:unknown, :connection_pooler}
+ 
+       not Enum.any?(holders, fn [_, pid, _, _] -> pid == me end) ->

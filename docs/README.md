@@ -49,7 +49,7 @@ record, not as instructions.
 
 ## ADRs (`docs/adr/`)
 
-<!--count:adrs-->54<!--/count--> architecture decisions (each with its status), indexed in [adr/README.md](adr/README.md) — grouped by
+<!--count:adrs-->55<!--/count--> architecture decisions (each with its status), indexed in [adr/README.md](adr/README.md) — grouped by
 concern (vault/crypto-shred, scope packaging, the operator plane, then per-workstream:
 WS-A/B/D/E, launch). Read the ADR itself before touching anything it governs.
 

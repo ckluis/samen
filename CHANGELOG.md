@@ -132,7 +132,7 @@ All notable changes to Samen are recorded here. The format follows
   session advisory lock on a dedicated connection and counts the other holders: a second instance on the same database is reported in
   `/readyz` as `single_node: CRITICAL` after a 5-minute grace period (a rolling deploy overlaps on purpose), `strict: true` makes the late
   instance answer 503, an unreadable state is `UNKNOWN` (never single; PgBouncer transaction mode is detected as `connection_pooler`, fix
-  with `lease_url`). Metrics `samen.single_node.*`; alerts.md §8. Sabotages 771-776.
+  with `lease_url`). Metrics `samen.single_node.*`; alerts.md §8. Sabotages 771-785.
 - Existing tests changed: none (the `single_node:` advisory line exists only where a lease runs).
 
 ### Host action required (existing hosts and generated apps)
