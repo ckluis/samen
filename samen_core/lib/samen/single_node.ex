@@ -131,7 +131,7 @@ defmodule Samen.SingleNode do
   `[]` for anything that is not serving. Raises `Samen.SingleNode.ClusteredError` at boot when the instance
   is clustered. Called by `Samen.Observability.child_specs/2`, so every host gets it with no host code.
   """
-  @spec child_specs(atom(), keyword()) :: [Supervisor.child_spec()]
+  @spec child_specs(atom(), keyword()) :: [{module(), term()}]
   def child_specs(otp_app, opts \\ []) when is_atom(otp_app) do
     if serving?(otp_app, opts) do
       assert_standalone!(otp_app)
