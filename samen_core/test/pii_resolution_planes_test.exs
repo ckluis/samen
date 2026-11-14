@@ -61,9 +61,14 @@ defmodule Samen.PiiResolutionPlanesTest do
   end
 
   setup do
+    prior_vault_repo = Application.get_env(:samen_core, :vault_repo)
+
     on_exit(fn ->
       Application.delete_env(:samen_core, :__pii_planes_verdict)
-      Application.delete_env(:samen_core, :vault_repo)
+
+      if prior_vault_repo == nil,
+        do: Application.delete_env(:samen_core, :vault_repo),
+        else: Application.put_env(:samen_core, :vault_repo, prior_vault_repo)
     end)
 
     :ok
