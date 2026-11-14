@@ -16,17 +16,20 @@
 # MUST_FAIL: the keyless :test-only deterministic fallback self-declares simulated
 # MUST_FAIL: an explicit Deterministic override also reports simulated: true (provider self-declares, not env-gated)
 diff --git a/samen_core/lib/samen/ai/embeddings.ex b/samen_core/lib/samen/ai/embeddings.ex
+index 49139ac4..f440fe59 100644
 --- a/samen_core/lib/samen/ai/embeddings.ex
 +++ b/samen_core/lib/samen/ai/embeddings.ex
-@@ -186,10 +186,7 @@
+@@ -376,12 +376,7 @@ defmodule Samen.AI.Embeddings do
    # real provider is simulated, never claim a keyless one is real). Wrapped so a provider whose
    # `simulated?/0` raises can never crash the caller.
    defp simulated_provider?(provider) do
 -    Code.ensure_loaded?(provider) and function_exported?(provider, :simulated?, 0) and
 -      provider.simulated?() == true
 -  rescue
--    _ -> false
+-    e ->
+-      Samen.Observability.Failure.report(:embeddings_simulated_provider, nil, e)
+-      false
 +    false
    end
-
+ 
    # --- deny-by-default allowlist ------------------------------------------------------------
