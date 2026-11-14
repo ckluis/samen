@@ -1,0 +1,21 @@
+# SABOTAGE: Any failed reveal, including a KMS outage, is read as 'not decryptable', so erasure is proven 
+#   while the KMS is down.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault_erasure_probe_outage_test.exs
+# MUST_FAIL: a KMS outage is NOT proof that the key is absent
+# MUST_FAIL: a KMS outage is NOT 'no plaintext'
+diff --git a/samen_core/lib/samen/vault.ex b/samen_core/lib/samen/vault.ex
+index 92f4dc64..9d4f5155 100644
+--- a/samen_core/lib/samen/vault.ex
++++ b/samen_core/lib/samen/vault.ex
+@@ -402,7 +402,7 @@ defmodule Samen.Vault do
+       {:ok, _plaintext} ->
+         :decryptable
+ 
+-      {:error, reason} when reason in @clean_reveal_reasons ->
++      {:error, _reason} ->
+         :clean
+ 
+       {:error, reason} ->
