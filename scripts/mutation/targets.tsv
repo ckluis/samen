@@ -74,3 +74,6 @@ samen_core/lib/samen/reveal.ex	samen_core	test/reveal_test.exs test/reveal_fleet
 # --- break-glass (T4.4): the budgeted, time-boxed emergency path that can unlock plaintext without a prior grant.
 # --- (derived: sabotage TEST_FILES 734)
 samen_core/lib/samen/break_glass.ex	samen_core	test/break_glass_test.exs test/suspension_asymmetry_test.exs
+# --- erasure / crypto-shred (ADR-002, ADR-001): the orchestration whose REPORT is the proof a subject is gone. A
+# --- weakened branch reports a tier erased that was not, or marks a failed shred done. (derived: sabotage TEST_FILES 740)
+samen_core/lib/samen/erasure.ex	samen_core	test/erasure_test.exs test/erasure_branches_test.exs test/erasure_retry_after_rollback_test.exs test/post_shred_oracle_test.exs
