@@ -1,0 +1,20 @@
+# SABOTAGE: the verifier does not name the index a changed keyset_sort left behind, so the operator is not 
+#   told what to drop
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/indexing_test.exs
+# MUST_FAIL: the old literal migration builds the old index; a new sort is red with the concrete next step; the re-run builds it
+diff --git a/samen_core/lib/samen/indexing.ex b/samen_core/lib/samen/indexing.ex
+index caf88369..5258f61c 100644
+--- a/samen_core/lib/samen/indexing.ex
++++ b/samen_core/lib/samen/indexing.ex
+@@ -315,7 +315,7 @@ defmodule Samen.Indexing do
+     id = List.last(columns)
+ 
+     Enum.filter(indexes, fn index ->
+-      index.name != name and index.method == "btree" and Enum.at(index.keys, 0) == org and
++      false and index.name != name and index.method == "btree" and Enum.at(index.keys, 0) == org and
+         length(index.keys) >= 2 and id in index.keys and
+         not serves?(index, %{columns: columns})
+     end)
