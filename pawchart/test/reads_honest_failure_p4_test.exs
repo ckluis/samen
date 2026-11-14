@@ -460,4 +460,26 @@ defmodule PawChart.ReadsHonestFailureP4Test do
       assert_raise Ash.Error.Unknown, fn -> PawChart.Auth.authorized_org_ids(user.id) end
     end
   end
+
+  # ===========================================================================
+  # Seeds: a failed probe is a failed seed, not a repeated one
+  # ===========================================================================
+
+  describe "operator seeds" do
+    test "seed/0 is re-runnable: a second run on a seeded database adds nothing" do
+      assert :ok = PawChart.OperatorSeeds.seed()
+      before = PawChart.Repo.aggregate(PawChart.Operator.Org, :count)
+      assert before > 1
+
+      assert :ok = PawChart.OperatorSeeds.seed()
+      assert PawChart.Repo.aggregate(PawChart.Operator.Org, :count) == before
+    end
+
+    test "a failing 'operator org already seeded?' probe raises instead of answering 'no, seed it again'" do
+      assert :ok = PawChart.OperatorSeeds.seed()
+      break_select!("poo_org", "poo_id")
+
+      assert_raise Ash.Error.Unknown, fn -> PawChart.OperatorSeeds.seed() end
+    end
+  end
 end

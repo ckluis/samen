@@ -49,12 +49,11 @@ defmodule PawChart.OperatorSeeds do
     end
   end
 
+  # A plain read, allowed to RAISE: answering `false` on a failed read would re-run a seed that already ran.
   defp operator_org_seeded? do
     Op.Org
     |> Ash.Query.filter(id == ^@operator_org_id)
     |> Ash.exists?(authorize?: false)
-  rescue
-    _ -> false
   end
 
   defp seed_operator_org do
@@ -66,11 +65,6 @@ defmodule PawChart.OperatorSeeds do
     )
     |> Ash.Changeset.force_change_attribute(:id, @operator_org_id)
     |> Ash.create!()
-  rescue
-    _ ->
-      Op.Org
-      |> Ash.Changeset.for_create(:create, %{name: "PawChart, Inc.", plan: "operator"}, authorize?: false)
-      |> Ash.create!()
   end
 
   defp seed_agent do

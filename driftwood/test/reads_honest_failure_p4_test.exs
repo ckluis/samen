@@ -629,4 +629,45 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
       assert log =~ "driftwood_tenant_landing"
     end
   end
+
+  # ===========================================================================
+  # Seeds: a failed probe or step is a failed seed, not a skipped or repeated one
+  # ===========================================================================
+
+  describe "seeds" do
+    test "OperatorSeeds.seed/0 is re-runnable: a second run on a seeded database adds nothing" do
+      assert :ok = Driftwood.OperatorSeeds.seed()
+      before = Driftwood.Repo.aggregate(Driftwood.Operator.Org, :count)
+      assert before > 1
+
+      assert :ok = Driftwood.OperatorSeeds.seed()
+      assert Driftwood.Repo.aggregate(Driftwood.Operator.Org, :count) == before
+    end
+
+    test "a failing 'account already seeded?' probe raises instead of answering 'yes, skip it'" do
+      assert :ok = Driftwood.OperatorSeeds.seed()
+      break_select!("doo_org", "doo_slug")
+
+      assert_raise Ash.Error.Unknown, fn -> Driftwood.OperatorSeeds.seed() end
+    end
+
+    test "an interrupted earlier run (accounts missing, desk agent gone) is an error, not a silent 'nothing to do'" do
+      assert :ok = Driftwood.OperatorSeeds.seed()
+      ddl!("UPDATE dqg_agent SET dqg_handle = 'renamed-by-test' WHERE dqg_handle = 'pnakamura'")
+      ddl!("DELETE FROM doo_org WHERE doo_slug = 'b1112d00-0000-4000-8000-000000000001'")
+
+      error = assert_raise RuntimeError, fn -> Driftwood.OperatorSeeds.seed() end
+      assert error.message =~ "desk agent"
+      assert error.message =~ "interrupted"
+    end
+
+    test "demo_all: a failing 'marketing already seeded?' probe raises instead of re-seeding or skipping" do
+      org = Ecto.UUID.generate()
+      :ok = Driftwood.Seeds.run(org)
+      assert ^org = Driftwood.Seeds.demo_all(org)
+
+      break_select!("fmc_campaign", "fmc_org_id")
+      assert_raise Ash.Error.Unknown, fn -> Driftwood.Seeds.demo_all(org) end
+    end
+  end
 end

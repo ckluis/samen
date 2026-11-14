@@ -981,8 +981,6 @@ defmodule Driftwood.Seeds do
     |> Ash.Query.for_read(:read, %{}, actor: actor, authorize?: false)
     |> Ash.Query.filter(org_id == ^org_id)
     |> Ash.exists?(actor: actor, authorize?: false)
-  rescue
-    _ -> false
   end
 
   defp do_seed_marketing(org_id, spec) do
@@ -1118,8 +1116,6 @@ defmodule Driftwood.Seeds do
     |> Ash.Query.for_read(:read, %{}, actor: actor, authorize?: false)
     |> Ash.Query.filter(org_id == ^org_id)
     |> Ash.exists?(actor: actor, authorize?: false)
-  rescue
-    _ -> false
   end
 
   defp do_seed_chat(org_id, spec) do
@@ -1273,8 +1269,6 @@ defmodule Driftwood.Seeds do
     Driftwood.Primitives.Notification
     |> Ash.Query.filter(org_id == ^org_id and event_type == "chat.mention")
     |> Ash.exists?(authorize?: false)
-  rescue
-    _ -> false
   end
 
   defp do_seed_notifications(org_id, spec) do
@@ -1353,8 +1347,6 @@ defmodule Driftwood.Seeds do
     |> Ash.Query.limit(1)
     |> Ash.read!(authorize?: false)
     |> List.first()
-  rescue
-    _ -> nil
   end
 
   defp first_driver(org_id) do
@@ -1364,7 +1356,5 @@ defmodule Driftwood.Seeds do
     |> Ash.Query.limit(1)
     |> Ash.read!(authorize?: false)
     |> List.first()
-  rescue
-    _ -> nil
   end
 end

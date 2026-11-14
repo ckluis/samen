@@ -87,29 +87,33 @@ defmodule Driftwood.OperatorSeeds do
       |> Ash.read!(authorize?: false)
       |> List.first()
 
-    for account <- @accounts, agent != nil, not account_seeded?(account.tenant_org_id) do
-      seed_account(account, agent)
+    missing = Enum.reject(@accounts, &account_seeded?(&1.tenant_org_id))
+
+    # Accounts to add but no desk agent to attach them to means an earlier seed run stopped half-way. Say so:
+    # "nothing to do" would report success for accounts that were never seeded.
+    if missing != [] and agent == nil do
+      raise "Driftwood.OperatorSeeds: the operator org exists but its desk agent (handle pnakamura) does not, " <>
+              "so #{length(missing)} account(s) cannot be seeded — an earlier seed run was interrupted; reset the dev database"
     end
 
+    for account <- missing, do: seed_account(account, agent)
+
     :ok
-  rescue
-    _ -> :ok
   end
 
+  # The "already there" probes are plain reads and are allowed to RAISE: a probe that answers `true` /
+  # `false` on a failed read makes a seed either skip a step it never did (and report success) or repeat
+  # one that already ran. A failure surfaces as the task's non-zero exit.
   defp account_seeded?(tenant_org_id) do
     Op.Org
     |> Ash.Query.filter(org_id == ^@operator_org_id and slug == ^tenant_org_id)
     |> Ash.exists?(authorize?: false)
-  rescue
-    _ -> true
   end
 
   defp operator_org_seeded? do
     Op.Org
     |> Ash.Query.filter(id == ^@operator_org_id)
     |> Ash.exists?(authorize?: false)
-  rescue
-    _ -> false
   end
 
   defp seed_operator_org do
@@ -121,14 +125,6 @@ defmodule Driftwood.OperatorSeeds do
     )
     |> Ash.Changeset.force_change_attribute(:id, @operator_org_id)
     |> Ash.create!()
-  rescue
-    # `force_change_attribute` on a non-writable attribute may be rejected by some Ash
-    # versions; fall back to a plain create (a fresh generated id) + config resolution
-    # by the single-row fallback in Samen.Web.Operator.org_id/1.
-    _ ->
-      Op.Org
-      |> Ash.Changeset.for_create(:create, %{name: "Samen SaaS, Inc.", plan: "operator"}, authorize?: false)
-      |> Ash.create!()
   end
 
   defp seed_agent do
