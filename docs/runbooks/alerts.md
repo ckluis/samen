@@ -198,17 +198,21 @@ strict: true`. Alert on the metrics or the body line.
   strict does not 503 on UNKNOWN). `connection_down` / `query_failed`: the database or the dedicated connection is failing (§5 will
   usually be failing too). **`connection_pooler`: the lease connection goes through a transaction pooler (PgBouncer, Neon's
   `-pooler` host), where session locks do not work. The lease LATCHES this reading at the first check that proves it and logs
-  one error; a pooled lease reads UNKNOWN only from then on (until it does, and after the pooler recycles its server
+  one error, and only a restart of the lease process clears it (redeploy with `DATABASE_DIRECT_URL` set; if the URL is already direct,
+  restart the instance and report it). A pooled lease reads UNKNOWN only from then on (until it does, and after the pooler recycles its server
   connection, an instance sharing the database can read `single` while it serves), so treat any `connection_pooler` as a real
   fault; `lease_url` (generated apps: `DATABASE_DIRECT_URL`) must be a DIRECT, unpooled URL.** Two instances whose statements
-  share one server connection (also a pooler) read the same. `query_failed` can also be a pooler: behind a transaction pooler
-  without prepared-statement support the lease's named prepares fail with `prepared statement ... does not exist`. `lease_lost`: the lock vanished under a live session (`pg_advisory_unlock_all()`, a pooler `DISCARD ALL`);
+  share one server connection (also a pooler) read the same. `lease_lost`: the lock vanished under a live session (`pg_advisory_unlock_all()`, a pooler `DISCARD ALL`);
   the lease re-takes it only on a new session, restart the instance. `stale_holder`: a lock whose owner stopped beating (a crashed
-  machine whose session Postgres has not dropped yet, or a lock left on a pooler's server connection); it clears when the session
+  machine whose session Postgres has not dropped yet, a lock left on a pooler's server connection, or a LIVE instance connected
+  through a pooler: it latched `connection_pooler`, no longer beats, and looks exactly like a ghost lock to a direct peer). BEFORE you
+  terminate anything, check the holder's `client_addr` / `application_name` in `pg_stat_activity` (step 3 below): if `client_addr` is your
+  pooler, find the instance that reports `connection_pooler` first, because terminating the pooler's server connection makes this
+  instance read `single` while that one keeps serving. It clears when the session
   ends (15 s after the owner went silent on Postgres 14+, else when TCP keepalive drops it, which behind a proxy or session pooler can take hours; or `SELECT pg_terminate_backend(pid)` for
   the pid in step 3 below). `lease_not_running` / `lease_stale`: this instance's lease process died or hung; its supervisor restarts it,
   a persistent line means it keeps failing (look for `Samen.SingleNode.Lease` in the log). `not confirmed alive`: another holder
-  exists but its beat has not changed yet; it resolves to CRITICAL or `stale_holder` within one to three check intervals.
+  exists and an overlap clock already runs from an earlier confirmed episode (or `grace_ms` is 0), but its beat has not changed yet; a first-seen holder that is not yet confirmed starts no clock and `/readyz` stays clean. It resolves to CRITICAL or `stale_holder` within one to three check intervals.
 - The gauge `samen.single_node.unknown` is emitted by a RUNNING lease only: `lease_not_running` and `lease_stale` leave it at its
   last value, so alert on the `/readyz` body line as well as on the metric.
 - `samen.single_node.peer_refused.count` rising — something connects a VISIBLE Erlang node (a clustering library, or an operator

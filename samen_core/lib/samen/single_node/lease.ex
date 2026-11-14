@@ -85,9 +85,10 @@ defmodule Samen.SingleNode.Lease do
   it then runs with. It is a misconfiguration to be fixed, not a mode to run in.
 
   The same leftover is visible to a DIRECT instance sharing the database as a holder it cannot verify: it never
-  beats, so after `stale_ms` it is `:stale_holder` (UNKNOWN: not overlap, not a strict 503). A pooled instance that
-  does beat (its statements happen to land on one server twice in a row) is a second instance to a direct one, but
-  mostly an unconfirmed one. The beat statement checks pid and token IN SQL before it takes anything, so a pooled
+  beats, so after `stale_ms` it is `:stale_holder` (UNKNOWN: not overlap, not a strict 503). A LIVE pooled instance
+  looks exactly the same: once latched it never beats again, so to a direct instance it is `:stale_holder` while it
+  keeps serving. Before it latches, a pooled instance whose statements happen to land on one server twice in a row
+  does beat, and is a second instance to a direct one, but mostly an unconfirmed one. The beat statement checks pid and token IN SQL before it takes anything, so a pooled
   lease cannot leak a lock per check; what it cannot avoid is the lock `after_connect` takes when it connects.
 
   The fix is operational: `lease_url` must be a DIRECT (unpooled) URL for this one connection (with Neon, the
@@ -530,7 +531,9 @@ defmodule Samen.SingleNode.Lease do
       reconnect (the statement ran on the old session, `after_connect` has since re-recorded), not evidence.
 
   A session that merely carries two epochs or two beats is NOT proof (`interpret/2` reads it as UNKNOWN for that one
-  check): it can follow a recorded-pid race and heals on its own.
+  check, without latching). That does not heal by itself: a `pg_cancel_backend` landing between a beat's lock and its
+  unlock leaves two beats on the session, `own_beat/1` then returns nil, no beat runs, and the check reads
+  `connection_pooler` until the session is replaced by a reconnect.
   """
   @spec pooler_proof?(term(), map()) :: boolean()
   def pooler_proof?({:ok, %Postgrex.Result{rows: [[me, var | _] | _]}}, ctx) do
