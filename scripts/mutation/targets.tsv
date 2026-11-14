@@ -77,3 +77,9 @@ samen_core/lib/samen/break_glass.ex	samen_core	test/break_glass_test.exs test/su
 # --- erasure / crypto-shred (ADR-002, ADR-001): the orchestration whose REPORT is the proof a subject is gone. A
 # --- weakened branch reports a tier erased that was not, or marks a failed shred done. (derived: sabotage TEST_FILES 740)
 samen_core/lib/samen/erasure.ex	samen_core	test/erasure_test.exs test/erasure_branches_test.exs test/erasure_retry_after_rollback_test.exs test/post_shred_oracle_test.exs
+# --- the audit hash chain (ADR-002 §2): `verify` / `verify_page` decide valid vs tampered, `append` links the chain,
+# --- the Writer is the one path that seals an aud_event into it, and Canonical is what gets hashed. A weakened branch
+# --- reads a tampered chain as intact. (derived: sabotage TEST_FILES 207/209/650/696/710)
+samen_core/lib/samen/audit_chain.ex	samen_core	test/audit_chain_test.exs test/audit_chain_bounded_verify_test.exs test/audit_chain_concurrency_test.exs test/audit_chain_oracle_test.exs test/audit_chain_verify_sweep_test.exs test/reveal_ledger_read_signal_test.exs
+samen_core/lib/samen/audit_chain/writer.ex	samen_core	test/audit_chain_writer_test.exs test/audit_writer_callers_test.exs test/audit_chain_test.exs test/honest_kernel_reads_test.exs
+samen_core/lib/samen/audit_chain/canonical.ex	samen_core	test/audit_chain_canonical_test.exs test/audit_chain_test.exs
