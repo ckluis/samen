@@ -99,7 +99,7 @@ defmodule Samen.Lint.Swallow do
           {node, acc}
       end)
 
-    acc |> Enum.reverse() |> Enum.uniq()
+    acc |> Enum.reverse() |> Enum.uniq() |> Enum.sort_by(&(&1.line || 0))
   end
 
   @doc """

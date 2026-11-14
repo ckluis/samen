@@ -67,7 +67,23 @@ defmodule Samen.Lint.SwallowLintTest do
       def e(scope) do
         Ash.read!(Person, scope: scope)
       rescue
-        ArgumentError -> []
+        ArgumentError -> {:error, :bad_argument}
+      end
+
+      def f(scope) do
+        Ash.read!(Person, scope: scope)
+      rescue
+        e in ArgumentError ->
+          Logger.error("bad argument: #{inspect(e.__struct__)}")
+          []
+      end
+
+      def g(scope) do
+        Ash.read!(Person, scope: scope)
+      rescue
+        e ->
+          msg = Exception.message(e)
+          {:error, msg}
       end
     end
     """
@@ -77,7 +93,7 @@ defmodule Samen.Lint.SwallowLintTest do
                [:contacts, :contacts_tryblock, :contacts_tryblock]
     end
 
-    test "GREEN twin: logged, Failure.report-ed, handed-on, re-raised and typed clauses are not swallows" do
+    test "GREEN twin: logged, Failure.report-ed, handed-on (also via a derived variable), re-raised and typed clauses that return a tagged value are not swallows" do
       assert Swallow.scan_source(@handled) == []
     end
   end
@@ -85,11 +101,11 @@ defmodule Samen.Lint.SwallowLintTest do
   describe "scan_source/3 — the non-rescue `{:error, _} -> literal` class" do
     test "RED: an Ash read, a repo write and an Ash count whose error arm is a literal are flagged" do
       sites = Swallow.scan_source(File.read!(Path.join(fixture_root(), @fixture)), @fixture, :error_arm)
-      assert Enum.map(sites, & &1.fun) == [:arm_read, :arm_write, :arm_count]
+      assert Enum.map(sites, & &1.fun) == [:arm_read, :arm_write, :arm_count, :arm_wrapper]
       assert Enum.all?(sites, &(&1.kind == :error_arm))
     end
 
-    test "GREEN twin: tagged, used-error, no-read wrapper and non-error arms are not flagged" do
+    test "GREEN twin: tagged, used-error, wrapper over a helper that does no I/O, error-signal atoms and non-error arms are not flagged" do
       src = """
       defmodule Fixture.Arms do
         def tagged(s) do
@@ -99,12 +115,14 @@ defmodule Samen.Lint.SwallowLintTest do
           end
         end
 
-        def wrapper(s) do
-          case tagged(s) do
+        def pure_wrapper(s) do
+          case helper(s) do
             {:ok, r} -> r
             {:error, _} -> []
           end
         end
+
+        defp helper(s), do: {:ok, s}
 
         def ok_arm(s) do
           case Ash.read(P, scope: s) do
@@ -136,38 +154,424 @@ defmodule Samen.Lint.SwallowLintTest do
     end
   end
 
+  describe "S5 widened detections — each with a positive AND a negative case" do
+    defp arm_funs(src), do: src |> Swallow.scan_source("x.ex", :error_arm) |> Enum.map(& &1.fun)
+    defp rescue_funs(src), do: src |> Swallow.scan_source("x.ex", :rescue) |> Enum.map(& &1.fun)
+
+    defp arm_src(arm) do
+      "defmodule F do\n def f(s) do\n case Ash.read(P, scope: s) do\n {:ok, r} -> r\n #{arm}\n end\n end\n end\n"
+    end
+
+    test "(a) RED: {:ok, <literal>}, a bare non-error atom and MapSet.new() are swallowed by an error arm" do
+      for arm <- [
+            "{:error, _} -> {:ok, []}",
+            "{:error, _} -> {:ok, %{}}",
+            "{:error, _} -> {:ok, nil}",
+            "{:error, _} -> :none",
+            "{:error, _} -> :not_found",
+            "{:error, _} -> MapSet.new()",
+            "{:error, _} -> MapSet.new([])"
+          ] do
+        assert [:f] == arm_funs(arm_src(arm)), arm
+      end
+    end
+
+    test "(a) GREEN twin: another error atom, an error tuple, a computed value and {:ok, computed} are not swallows" do
+      for arm <- [
+            "{:error, _} -> :error",
+            "{:error, _} -> :unavailable",
+            "{:error, _} -> :timeout",
+            "{:error, _} -> {:error, :unavailable}",
+            "{:error, _} -> {:ok, compute()}",
+            "{:error, _} -> MapSet.new(compute())",
+            "{:error, e} -> {:error, e}"
+          ] do
+        assert [] == arm_funs(arm_src(arm)), arm
+      end
+    end
+
+    test "(a) a `_ ->` arm is a swallow when the case scrutinee is I/O, and a `with … else _ ->` likewise" do
+      assert [:f] == arm_funs(arm_src("_ -> []"))
+      assert [:f] == arm_funs(arm_src("_other -> nil"))
+
+      with_src = "defmodule F do\n def f(r) do\n with {:ok, x} <- r.insert(r) do\n x\n else\n _ -> []\n end\n end\n end\n"
+      assert [:f] == arm_funs(with_src)
+    end
+
+    test "(a) GREEN twin: a `_ ->` arm over a scrutinee that is not I/O is not flagged, even in a function that does I/O" do
+      src = """
+      defmodule F do
+        def f(s, flag) do
+          rows = Ash.read!(P, scope: s)
+          case flag do
+            true -> rows
+            _ -> []
+          end
+        end
+      end
+      """
+
+      assert [] == arm_funs(src)
+    end
+
+    test "(a) io_call? is transitive over local defs, and a helper that does no I/O does not make a wrapper one" do
+      src = """
+      defmodule F do
+        defp load(s), do: Ash.read(P, scope: s)
+        defp load_twice(s), do: load(s)
+
+        def deep(s) do
+          case load_twice(s) do
+            {:ok, r} -> r
+            {:error, _} -> []
+          end
+        end
+
+        defp pure(s), do: {:ok, s}
+
+        def shallow(s) do
+          case pure(s) do
+            {:ok, r} -> r
+            {:error, _} -> []
+          end
+        end
+      end
+      """
+
+      assert [:deep] == arm_funs(src)
+    end
+
+    test "(b) RED: `e -> _ = e; []` is a swallow — mentioning the variable is not handling it" do
+      src = """
+      defmodule F do
+        def f(s) do
+          Ash.read!(P, scope: s)
+        rescue
+          e ->
+            _ = e
+            []
+        end
+
+        def g(s) do
+          Ash.read!(P, scope: s)
+        rescue
+          e ->
+            notify(e)
+            []
+        end
+      end
+      """
+
+      assert [:f, :g] == rescue_funs(src)
+    end
+
+    test "(b) GREEN twin: the variable reaching the final expression (directly or via an assignment) is handling" do
+      src = """
+      defmodule F do
+        def f(s) do
+          Ash.read!(P, scope: s)
+        rescue
+          e -> {:error, e}
+        end
+
+        def g(s) do
+          Ash.read!(P, scope: s)
+        rescue
+          e ->
+            reason = Exception.message(e)
+            {:error, {:failed, reason}}
+        end
+      end
+      """
+
+      assert [] == rescue_funs(src)
+    end
+
+    test "(c) RED: a broad typed list that returns a swallow literal counts" do
+      src = """
+      defmodule F do
+        def f(s) do
+          Ash.read!(P, scope: s)
+        rescue
+          _ in [Postgrex.Error, DBConnection.ConnectionError, Ash.Error.Unknown] -> []
+        end
+
+        def g(s) do
+          Ash.read!(P, scope: s)
+        rescue
+          e in [ArgumentError] -> nil
+        end
+      end
+      """
+
+      assert [:f, :g] == rescue_funs(src)
+    end
+
+    test "(c) GREEN twin: a typed list that reports, re-raises or returns a tagged value is not a swallow" do
+      src = """
+      defmodule F do
+        def f(s) do
+          Ash.read!(P, scope: s)
+        rescue
+          e in [Postgrex.Error, DBConnection.ConnectionError] ->
+            Samen.Observability.Failure.report(:f, s, e)
+            []
+        end
+
+        def g(s) do
+          Ash.read!(P, scope: s)
+        rescue
+          _ in [Postgrex.Error] -> {:error, :unavailable}
+        end
+
+        def h(s) do
+          Ash.read!(P, scope: s)
+        rescue
+          e in [ArgumentError] -> reraise e, __STACKTRACE__
+        end
+      end
+      """
+
+      assert [] == rescue_funs(src)
+    end
+
+    test "(d) RED: defmacro bodies and module-body nodes (Ash DSL `change fn`) are scanned under their own names" do
+      src = """
+      defmodule F do
+        defmacro build(x) do
+          quote do
+            try do
+              Ash.read!(unquote(x))
+            rescue
+              _ -> []
+            end
+          end
+        end
+
+        change fn changeset, _ctx ->
+          try do
+            Ash.read!(P)
+          rescue
+            _ -> nil
+          end
+        end
+
+        def plain(s) do
+          Ash.read!(P, scope: s)
+        rescue
+          _ -> []
+        end
+      end
+      """
+
+      assert [:build, :__module__, :plain] == rescue_funs(src)
+
+      arms = "defmodule F do\n  after_action fn cs, r ->\n    case Ash.read(P) do\n      {:error, _} -> []\n      {:ok, x} -> x\n    end\n  end\nend\n"
+      assert [:__module__] == arm_funs(arms)
+    end
+
+    test "(d) GREEN twin: a def inside the module body is counted once, under its own name; clean macros and DSL nodes are clean" do
+      src = """
+      defmodule F do
+        use Something
+        attribute :name, :string
+
+        def f(s) do
+          Ash.read!(P, scope: s)
+        rescue
+          _ -> []
+        end
+
+        defmacro clean(x), do: quote(do: Ash.read!(unquote(x)))
+      end
+      """
+
+      assert [:f] == rescue_funs(src)
+    end
+  end
+
+  describe "S5 (e) reviewed entries pin {count, hash} of the clauses' normalised source" do
+    @src_a """
+    defmodule F do
+      def f(s) do
+        Ash.read!(P, scope: s)
+      rescue
+        _ -> []
+      end
+    end
+    """
+
+    # same clause count, DIFFERENT clause (returns %{} and is reformatted over more lines)
+    @src_b """
+    defmodule F do
+      def f(s) do
+        Ash.read!(P, scope: s)
+      rescue
+        _ ->
+          %{}
+      end
+    end
+    """
+
+    # same clause as @src_a, reformatted and moved down the file
+    @src_a_moved """
+    # a comment
+
+    defmodule F do
+      def other, do: 1
+
+
+      def f(s) do
+        Ash.read!(P, scope: s)
+      rescue
+        _ ->
+          []
+      end
+    end
+    """
+
+    defp hash_for(src) do
+      [site] = Swallow.scan_source(src, "x.ex", :rescue)
+      :crypto.hash(:sha256, site.norm) |> Base.encode16(case: :lower) |> binary_part(0, 16)
+    end
+
+    @tag :tmp_dir
+    test "RED: a REPLACED clause (same count) is no longer covered by the pin; the hash is stable across formatting", %{tmp_dir: dir} do
+      File.mkdir_p!(Path.join(dir, "lib"))
+      path = "lib/f.ex"
+      File.write!(Path.join(dir, path), @src_a)
+      hash = Swallow.reviewed_hash(dir, path, :f, 1)
+      reviewed = %{{path, :f} => {1, hash, "a reason"}}
+
+      assert %{} == Swallow.scan(dir, [path], reviewed)
+      assert [] == Swallow.reviewed_problems(dir, [path], reviewed)
+
+      # reformatted + moved: still covered
+      File.write!(Path.join(dir, path), @src_a_moved)
+      assert hash == Swallow.reviewed_hash(dir, path, :f, 1)
+      assert %{} == Swallow.scan(dir, [path], reviewed)
+
+      # replaced (`[]` became `%{}`): the count is still 1, but the pin covers nothing and the problem is named
+      File.write!(Path.join(dir, path), @src_b)
+      assert %{^path => 1} = Swallow.scan(dir, [path], reviewed)
+      assert [msg] = Swallow.reviewed_problems(dir, [path], reviewed)
+      assert msg =~ "REPLACED"
+    end
+
+    test "the hash is independent of line numbers and whitespace (pure function of the clause)" do
+      assert hash_for(@src_a) == hash_for(String.replace(@src_a, "_ -> []", "_ ->\n      []"))
+      refute hash_for(@src_a) == hash_for(@src_b)
+    end
+
+    test "an entry without a hash is reported" do
+      assert [msg] = Swallow.reviewed_problems(fixture_root(), [@fixture], %{{@fixture, :pinned} => {2, "", "r"}})
+      assert msg =~ "hash"
+    end
+  end
+
+  describe "S5 (g) the hard ceiling" do
+    test "RED: a baseline row raised without raising the ceiling fails; a lowered baseline needs the ceiling lowered" do
+      roots = ["a/lib"]
+      assert :ok = Swallow.check_ceiling(%{"a/lib/x.ex" => 2, "a/lib/y.ex" => 1}, %{"a/lib" => 3}, roots)
+
+      assert {:error, [msg]} = Swallow.check_ceiling(%{"a/lib/x.ex" => 3, "a/lib/y.ex" => 1}, %{"a/lib" => 3}, roots)
+      assert msg =~ "ceiling only goes down"
+
+      assert {:error, [msg]} = Swallow.check_ceiling(%{"a/lib/x.ex" => 1}, %{"a/lib" => 3}, roots)
+      assert msg =~ "lower the ceiling to 1"
+
+      assert {:error, [msg]} = Swallow.check_ceiling(%{"b/lib/z.ex" => 1}, %{"a/lib" => 0}, roots)
+      assert msg =~ "outside every ceiling root"
+    end
+
+    test "the live baselines sum to their committed ceilings" do
+      assert :ok = KernelSwallow.check_ceilings()
+    end
+
+    test "the merge-base reader parses the committed @ceilings shape (so the comparison below cannot silently skip)" do
+      src = File.read!(Path.join(fixture_root(), "samen_core/lib/samen/lint/kernel_swallow.ex"))
+
+      for {class, roots} <- KernelSwallow.ceilings(), {root, total} <- roots do
+        assert base_ceiling(src, class, root) == total
+      end
+
+      assert base_ceiling("@ceilings %{\n    rescue: %{\"a\" => 7}\n  }", :rescue, "b") == nil
+    end
+
+    test "a ceiling can only go down: it is no higher than the one on the merge base" do
+      for {label, rel, fun} <- [
+            {"kernel", "samen_core/lib/samen/lint/kernel_swallow.ex", &KernelSwallow.ceilings/0}
+          ] do
+        case merge_base_source(rel) do
+          nil ->
+            :skip
+
+          base_src ->
+            for {class, roots} <- fun.(), {root, total} <- roots do
+              case base_ceiling(base_src, class, root) do
+                nil -> :new_root
+                base_total -> assert total <= base_total, "#{label} #{class} ceiling for #{root} rose: #{base_total} -> #{total}"
+              end
+            end
+        end
+      end
+    end
+
+    defp merge_base_source(rel) do
+      with {base, 0} <- System.cmd("git", ["merge-base", "HEAD", "origin/main"], cd: fixture_root(), stderr_to_stdout: true),
+           {src, 0} <- System.cmd("git", ["show", "#{String.trim(base)}:#{rel}"], cd: fixture_root(), stderr_to_stdout: true) do
+        src
+      else
+        _ -> nil
+      end
+    end
+
+    # The ceiling literal as committed: `@ceilings %{rescue: %{"root" => n}, error_arm: %{"root" => n}}`.
+    defp base_ceiling(src, class, root) do
+      with [_, block] <- Regex.run(~r/@ceilings %\{(.*?)\n  \}/s, src),
+           [_, inner] <- Regex.run(~r/#{class}: %\{(.*?)\}/s, block),
+           [_, n] <- Regex.run(~r/"#{Regex.escape(root)}" => (\d+)/, inner) do
+        String.to_integer(n)
+      else
+        _ -> nil
+      end
+    end
+  end
+
   describe "reviewed entries are pinned to a count" do
+    defp pin_hash(n), do: Swallow.reviewed_hash(fixture_root(), @fixture, :pinned, n)
+
     test "RED: a clause ADDED to an already-reviewed function counts as an unreviewed swallow" do
       # `pinned/1` holds two swallowing clauses (a rescue and a catch); the entry pins ONE.
-      reviewed = %{{@fixture, :pinned} => {1, "reviewed total helper"}}
-      assert Swallow.scan(fixture_root(), [@fixture], reviewed, :rescue)[@fixture] == 4
-      # no pin at all: five rescue-class sites in the fixture, and a pin of 2 covers `pinned/1` fully.
-      assert Swallow.scan(fixture_root(), [@fixture], %{}, :rescue)[@fixture] == 5
+      reviewed = %{{@fixture, :pinned} => {1, pin_hash(1), "reviewed total helper"}}
+      assert Swallow.scan(fixture_root(), [@fixture], reviewed, :rescue)[@fixture] == 5
+      # no pin at all: six rescue-class sites in the fixture, and a pin of 2 covers `pinned/1` fully.
+      assert Swallow.scan(fixture_root(), [@fixture], %{}, :rescue)[@fixture] == 6
 
-      assert Swallow.scan(fixture_root(), [@fixture], %{{@fixture, :pinned} => {2, "both clauses"}}, :rescue)[@fixture] == 3
+      assert Swallow.scan(fixture_root(), [@fixture], %{{@fixture, :pinned} => {2, pin_hash(2), "both clauses"}}, :rescue)[@fixture] == 4
     end
 
     test "a pin that overstates the count is a stale pin; the exact pin is clean" do
       assert [msg] =
-               Swallow.reviewed_problems(fixture_root(), [@fixture], %{{@fixture, :pinned} => {3, "r"}}, :rescue)
+               Swallow.reviewed_problems(fixture_root(), [@fixture], %{{@fixture, :pinned} => {3, pin_hash(2), "r"}}, :rescue)
 
       assert msg =~ "pins 3"
-      assert [] == Swallow.reviewed_problems(fixture_root(), [@fixture], %{{@fixture, :pinned} => {2, "r"}}, :rescue)
+      assert [] == Swallow.reviewed_problems(fixture_root(), [@fixture], %{{@fixture, :pinned} => {2, pin_hash(2), "r"}}, :rescue)
     end
 
     test "a pin that understates the count is reported too, naming the added clause" do
       assert [msg] =
-               Swallow.reviewed_problems(fixture_root(), [@fixture], %{{@fixture, :pinned} => {1, "r"}}, :rescue)
+               Swallow.reviewed_problems(fixture_root(), [@fixture], %{{@fixture, :pinned} => {1, pin_hash(1), "r"}}, :rescue)
 
       assert msg =~ "new clause was added"
     end
 
     test "an entry without a reason, with a zero count, or for an unscanned file is reported" do
       files = [@fixture]
-      assert [_] = Swallow.reviewed_problems(fixture_root(), files, %{{@fixture, :pinned} => {2, ""}})
-      assert [_] = Swallow.reviewed_problems(fixture_root(), files, %{{@fixture, :pinned} => {0, "r"}})
-      assert [_] = Swallow.reviewed_problems(fixture_root(), files, %{{"nope.ex", :pinned} => {1, "r"}})
-      assert [_] = Swallow.reviewed_problems(fixture_root(), files, %{{@fixture, :missing_fun} => {1, "r"}})
+      assert [_] = Swallow.reviewed_problems(fixture_root(), files, %{{@fixture, :pinned} => {2, pin_hash(2), ""}})
+      assert [_] = Swallow.reviewed_problems(fixture_root(), files, %{{@fixture, :pinned} => {0, pin_hash(2), "r"}})
+      assert [_] = Swallow.reviewed_problems(fixture_root(), files, %{{"nope.ex", :pinned} => {1, "h", "r"}})
+      assert [_] = Swallow.reviewed_problems(fixture_root(), files, %{{@fixture, :missing_fun} => {1, "h", "r"}})
     end
   end
 
@@ -212,18 +616,18 @@ defmodule Samen.Lint.SwallowLintTest do
       refute @fixture in KernelSwallow.files()
       refute Enum.any?(KernelSwallow.roots(), &String.starts_with?(@fixture, &1))
 
-      assert KernelSwallow.scan([@fixture]) == %{@fixture => 5}
-      assert KernelSwallow.scan_error_arms([@fixture]) == %{@fixture => 3}
+      assert KernelSwallow.scan([@fixture]) == %{@fixture => 6}
+      assert KernelSwallow.scan_error_arms([@fixture]) == %{@fixture => 4}
 
       assert {:error, [msg]} = KernelSwallow.check(KernelSwallow.scan([@fixture]), Map.take(KernelSwallow.baseline(), [@fixture]))
       assert msg =~ @fixture
-      assert msg =~ "5 swallowing"
+      assert msg =~ "6 swallowing"
 
       assert {:error, [msg]} =
                KernelSwallow.check_error_arms(KernelSwallow.scan_error_arms([@fixture]), Map.take(KernelSwallow.error_arm_baseline(), [@fixture]))
 
       assert msg =~ @fixture
-      assert msg =~ "3 swallowing"
+      assert msg =~ "4 swallowing"
 
       # not a blanket failure: a clean kernel file scans empty and passes.
       clean = "samen_core/lib/samen/observability/failure.ex"
@@ -234,6 +638,7 @@ defmodule Samen.Lint.SwallowLintTest do
     test "the kernel tree matches both baselines exactly (no new swallow, no un-lowered row)" do
       assert :ok = KernelSwallow.check()
       assert :ok = KernelSwallow.check_error_arms()
+      assert :ok = KernelSwallow.check_ceilings()
     end
   end
 end

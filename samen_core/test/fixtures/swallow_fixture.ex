@@ -1,7 +1,9 @@
 # NOT compiled into any app: it lives under test/fixtures, outside every elixirc_paths entry and every
 # lint root. SwallowLintTest scans it by path as the live ratchets' positive control — it holds exactly
-# FOUR known rescue-class swallows and exactly THREE known non-rescue (`{:error, _} -> literal`) sites
-# (the counts the test pins), plus look-alikes the scanners must NOT flag.
+# SIX known rescue-class swallows (the five sites of RESCUE 1-4 below, `tryblock/1` and `pinned/1` holding two each,
+# plus the typed RESCUE 5 `rescue ArgumentError -> []`) and exactly FOUR known non-rescue (`{:error, _} -> literal`) sites (the three ARMs and the wrapper over a
+# tagged sibling, which the transitive io check now sees) — the counts the test pins — plus look-alikes the scanners
+# must NOT flag.
 defmodule Fixture.KernelSwallow do
   require Logger
 
@@ -48,6 +50,7 @@ defmodule Fixture.KernelSwallow do
     e -> Samen.Observability.Failure.report(:reported, scope, e)
   end
 
+  # RESCUE 5 (typed, returns a swallow literal): a typed rescue that answers `[]` is the same lie as a catch-all.
   def typed(scope) do
     Ash.read!(Person, scope: scope)
   rescue
@@ -97,7 +100,8 @@ defmodule Fixture.KernelSwallow do
     end
   end
 
-  # a legacy-shape wrapper over a tagged sibling: no read in THIS function, so the literal is the documented shape
+  # ERROR ARM 4: a legacy-shape wrapper over a tagged sibling. The io check is transitive over local defs, so the
+  # read inside `arm_tagged/1` makes this function an I/O function too: the literal is a swallow.
   def arm_wrapper(scope) do
     case arm_tagged(scope) do
       {:ok, rows} -> rows
