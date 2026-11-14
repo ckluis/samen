@@ -1,0 +1,20 @@
+# SABOTAGE: after_connect does not re-record the backend pid: a genuine reconnect is indistinguishable from 
+#   a pooler and latches
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_lease_test.exs
+# MUST_FAIL: a genuine reconnect on a direct connection is NOT a pooler
+diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
+index 068c893e..cb2df6ef 100644
+--- a/samen_core/lib/samen/single_node/lease.ex
++++ b/samen_core/lib/samen/single_node/lease.ex
+@@ -244,7 +244,7 @@ defmodule Samen.SingleNode.Lease do
+       )
+     end
+ 
+-    :atomics.put(ref, @a_pid, pid)
++    if :atomics.get(ref, @a_pid) == 0, do: :atomics.put(ref, @a_pid, pid)
+ 
+     :telemetry.execute(
+       [:samen, :single_node, :session],

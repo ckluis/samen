@@ -1,0 +1,18 @@
+# SABOTAGE: the alerts runbook's lock-holder query names constants that are not the lease's key
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_lease_test.exs
+# MUST_FAIL: the step-3 query filters on Lease.key/0
+diff --git a/docs/runbooks/alerts.md b/docs/runbooks/alerts.md
+index f9f930f0..c67048af 100644
+--- a/docs/runbooks/alerts.md
++++ b/docs/runbooks/alerts.md
+@@ -205,6 +205,6 @@ First response to CRITICAL:
+ 1. `fly status` / `fly machines list`: how many machines run this app? Expect one.
+ 2. Stop the extra one (`fly machines stop <id>` then `fly scale count 1`). The line clears on the next check (5 s).
+ 3. If only one machine exists, look for a second deployment pointing at the same `DATABASE_URL` (a staging app, a preview, a laptop with the production URL):
+-   `SELECT pid, application_name, client_addr, backend_start FROM pg_stat_activity WHERE pid IN (SELECT pid FROM pg_locks WHERE locktype='advisory' AND classid=1396788549 AND objid=1313817669 AND objsubid=2);`
++   `SELECT pid, application_name, client_addr, backend_start FROM pg_stat_activity WHERE pid IN (SELECT pid FROM pg_locks WHERE locktype='advisory' AND classid=1397244229 AND objid=1313096773 AND objsubid=2);`
+    (`client_addr`, `backend_start` and `application_name` read NULL for another role's session: run it as the database owner, a superuser or a `pg_read_all_stats` member.)
+ 4. Meanwhile treat the node-local state as unreliable (ADR-054 §1.1): re-check the AI kill switch on BOTH instances if it was thrown, and review fleet heartbeat rejections.
