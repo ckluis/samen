@@ -43,6 +43,7 @@ defmodule PawChartWeb.OperatorImpersonationLive do
   # PRINCIPAL and the access is decided by `gate/3`, NOT by a client-supplied param plus a
   # direct `Samen.Impersonation.scope/2` call.
   alias Samen.Web.Operator.Impersonation, as: OperatorGate
+  alias Samen.Web.Reads.Guard
 
   @impl true
   def mount(params, session, socket) do
@@ -77,6 +78,14 @@ defmodule PawChartWeb.OperatorImpersonationLive do
     # point, no direct `Samen.Impersonation.scope/2` call that could admit where the gate denies.
     case OperatorGate.gate_socket(socket, operator_id, org_id) do
       {:ok, actor, info} ->
+        # The roster reads through its tagged result: a failed read is an error state with a retry, never an
+        # empty patient table under a live "masked impersonation" banner.
+        {patients, patients_error} =
+          case patient_roster_result(OperatorGate.read_scope(actor)) do
+            {:ok, rows} -> {rows, nil}
+            {:error, kind} -> {[], kind}
+          end
+
         assign(socket,
           impersonating: true,
           session_inactive: false,
@@ -86,7 +95,8 @@ defmodule PawChartWeb.OperatorImpersonationLive do
           org_id: org_id,
           org_name: org_name(org_id),
           open_error: nil,
-          patients: patient_roster(OperatorGate.read_scope(actor)),
+          patients: patients,
+          patients_error: patients_error,
           session_info: info
         )
 
@@ -115,6 +125,7 @@ defmodule PawChartWeb.OperatorImpersonationLive do
       org_name: org_name(org_id),
       open_error: nil,
       patients: [],
+      patients_error: nil,
       session_info: nil
     )
   end
@@ -124,14 +135,18 @@ defmodule PawChartWeb.OperatorImpersonationLive do
   # two-key-classes rule keyed on the scope's actor — on the operator plane it KEEPS the owner's
   # name/emails/phones %Masked{} (••••). A count of pets (non-PII) rides along for support context.
   @doc false
-  def patient_roster(scope) do
-    PawChart.Clinic.Patient
-    |> Ash.Query.ensure_selected([:full_name, :emails, :phones, :marketing_opt_in])
-    |> Ash.Query.sort(inserted_at: :asc)
-    |> Ash.read!(scope: scope)
-    |> resolve_pii(scope)
-  rescue
-    _ -> []
+  def patient_roster(scope), do: scope |> patient_roster_result() |> Guard.value([])
+
+  @doc false
+  @spec patient_roster_result(term()) :: Guard.result([struct()])
+  def patient_roster_result(scope) do
+    Guard.run(:pawchart_patient_roster, scope, fn ->
+      PawChart.Clinic.Patient
+      |> Ash.Query.ensure_selected([:full_name, :emails, :phones, :marketing_opt_in])
+      |> Ash.Query.sort(inserted_at: :asc)
+      |> Ash.read!(scope: scope)
+      |> resolve_pii(scope)
+    end)
   end
 
   defp resolve_pii(records, scope) do
@@ -142,7 +157,10 @@ defmodule PawChartWeb.OperatorImpersonationLive do
       repo: PawChart.Repo
     )
   rescue
-    _ -> records
+    # Fail CLOSED (the records stay masked) and reported by name + exception module, never swallowed.
+    e ->
+      Guard.report(:pawchart_resolve_pii, scope, e)
+      records
   end
 
   defp actor_of(%Samen.Scope{actor: actor}), do: actor
@@ -150,12 +168,13 @@ defmodule PawChartWeb.OperatorImpersonationLive do
   defp actor_of(_), do: %{}
 
   defp org_name(org_id) when is_binary(org_id) do
-    case List.keyfind(PawChart.Directory.orgs(), org_id, 0) do
-      {_id, name} when is_binary(name) and name != "" -> name
+    # A failed directory read is reported by name (Guard.run) and the header shows the id it was given.
+    with {:ok, orgs} <- Guard.run(:pawchart_org_name, nil, fn -> PawChart.Directory.orgs() end),
+         {_id, name} when is_binary(name) and name != "" <- List.keyfind(orgs, org_id, 0) do
+      name
+    else
       _ -> org_id
     end
-  rescue
-    _ -> org_id
   end
 
   defp org_name(org_id), do: org_id
@@ -178,7 +197,7 @@ defmodule PawChartWeb.OperatorImpersonationLive do
   def handle_event("open_session", %{"reason" => reason}, socket) do
     org_id = socket.assigns[:org_id]
 
-    case OperatorGate.open_from_socket(socket, org_id, reason) do
+    case Guard.write(:pawchart_open_session, nil, fn -> OperatorGate.open_from_socket(socket, org_id, reason) end) do
       {:ok, _session} ->
         {:noreply, load(socket, socket.assigns[:samen_operator_id], org_id)}
 
@@ -191,6 +210,7 @@ defmodule PawChartWeb.OperatorImpersonationLive do
   defp open_error_copy(:not_authorized), do: "Your operator role may not open an impersonation session."
   defp open_error_copy(:out_of_scope), do: "This account is not in your operator scope."
   defp open_error_copy({:pii_shaped_reason, _}), do: "The reason must name the ticket, not the person."
+  defp open_error_copy(:unavailable), do: "Couldn't open the session right now. Nothing was opened — try again."
   defp open_error_copy(_), do: "The impersonation session could not be opened."
 
   @impl true
@@ -231,7 +251,14 @@ defmodule PawChartWeb.OperatorImpersonationLive do
           <span :if={@session_info} id="session-expiry">Session expires: {@session_info.expires_at}</span>
         </div>
 
-        <table>
+        <div :if={@patients_error} id="patients-error" role="alert" class="error-state">
+          <div style="color:#B42318;font-weight:600">
+            {if @patients_error == :forbidden, do: Guard.message(:forbidden), else: "We couldn't load this right now."}
+          </div>
+          <p :if={@patients_error != :forbidden}>Nothing was lost — try again.</p>
+          <button :if={@patients_error != :forbidden} type="button" phx-click="retry_gate">Try again</button>
+        </div>
+        <table :if={is_nil(@patients_error)}>
           <thead>
             <tr><th>Owner</th><th>Emails</th><th>Phones</th><th>Marketing</th></tr>
           </thead>

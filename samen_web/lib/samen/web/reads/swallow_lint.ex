@@ -119,10 +119,7 @@ defmodule Samen.Web.Reads.SwallowLint do
   @baseline %{
     "driftwood/lib/driftwood/operator_seeds.ex" => 4,
     "driftwood/lib/driftwood/seeds.ex" => 5,
-    "pawchart/lib/pawchart/auth.ex" => 1,
-    "pawchart/lib/pawchart/operator_seeds.ex" => 2,
-    "pawchart/lib/pawchart_web/clinic_reads.ex" => 5,
-    "pawchart/lib/pawchart_web/operator_impersonation_live.ex" => 3
+    "pawchart/lib/pawchart/operator_seeds.ex" => 2
   }
 
   def roots, do: @roots
