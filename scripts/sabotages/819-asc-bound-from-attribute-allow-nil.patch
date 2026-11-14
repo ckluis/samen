@@ -1,0 +1,20 @@
+# SABOTAGE: the ASC cursor bound is decided from the Ash attribute's allow_nil? instead of the database 
+#   column, so a nullable column loses its NULL tail
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/reads_cursor_bound_test.exs
+# MUST_FAIL: an allow_nil? false attribute over a NULLABLE column gets no bound and keeps its NULL tail
+diff --git a/samen_web/lib/samen/web/reads.ex b/samen_web/lib/samen/web/reads.ex
+index 6505d52a..fb68b9b7 100644
+--- a/samen_web/lib/samen/web/reads.ex
++++ b/samen_web/lib/samen/web/reads.ex
+@@ -1756,7 +1756,7 @@ defmodule Samen.Web.Reads do
+     # Decided from the DATABASE column (`attnotnull`), never the Ash attribute's `allow_nil?`: the
+     # bound is sound only where the column cannot hold a NULL, and the two can disagree. Cached per
+     # resource/attribute; when nullability cannot be determined the bound is simply not added.
+-    if Samen.Indexing.column_not_null?(resource, field),
++    if match?(%{allow_nil?: false}, Ash.Resource.Info.attribute(resource, field)),
+       do: expr(^ref(field) >= ^value and ^chain),
+       else: chain
+   end

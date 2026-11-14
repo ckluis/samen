@@ -5,15 +5,15 @@
 # TEST_FILES: test/samen/web/tenant_index_plan_test.exs
 # MUST_FAIL: message — a DEEP ASC page seeks on inserted_at (NOT NULL column): the Index Cond names it
 diff --git a/samen_web/lib/samen/web/reads.ex b/samen_web/lib/samen/web/reads.ex
-index 51a98afa..2bf7e6fe 100644
+index 6505d52a..f42f07ea 100644
 --- a/samen_web/lib/samen/web/reads.ex
 +++ b/samen_web/lib/samen/web/reads.ex
-@@ -1754,7 +1754,7 @@ defmodule Samen.Web.Reads do
- 
-   defp bound_asc(%Ash.Query{resource: resource}, field, value, chain) do
-     case Ash.Resource.Info.attribute(resource, field) do
--      %{allow_nil?: false} -> expr(^ref(field) >= ^value and ^chain)
-+      %{allow_nil?: false} -> chain
-       _ -> chain
-     end
+@@ -1757,7 +1757,7 @@ defmodule Samen.Web.Reads do
+     # bound is sound only where the column cannot hold a NULL, and the two can disagree. Cached per
+     # resource/attribute; when nullability cannot be determined the bound is simply not added.
+     if Samen.Indexing.column_not_null?(resource, field),
+-      do: expr(^ref(field) >= ^value and ^chain),
++      do: chain,
+       else: chain
    end
+ 

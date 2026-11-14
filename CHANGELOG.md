@@ -76,6 +76,11 @@ All notable changes to Samen are recorded here. The format follows
   `mix samen.verify.indexes` against production after the migration: it counts only a valid, ready index.
 - `Samen.Web.Reads` ANDs a redundant bound onto the keyset cursor (`f <= v` for DESC; `f >= v` for ASC only on a column that
   cannot be NULL) so a deep page seeks in the index instead of filtering from the start of the org's range; the result set is unchanged.
+- The ASC cursor bound is decided from the DATABASE column (`pg_attribute.attnotnull`, resolved once per resource and cached in
+  `:persistent_term`; unknown means no bound), not from the Ash attribute's `allow_nil?` — the two can disagree after a hand or pending
+  migration, and the bound drops the NULL tail. `mix samen.verify.indexes` also reports a sort attribute that says non-nil over a
+  nullable column. `drop_invalid_index` takes the table's `SHARE UPDATE EXCLUSIVE` lock before looking, so it waits for another
+  session's in-flight concurrent build (also `indisvalid = false`) instead of dropping it; only an abandoned invalid index goes. Sabotages 819-823.
 - The retrofit migration builds the replay tables' indexes if missing but its `down` never drops them (`Samen.Replay.Migration` owns them for a fresh database).
 - `activities_for_person` / `activities_for_company` filter `get_path(custom, ["crm_refs", …])`; two partial expression
   indexes on the exact expression Ash emits now let Postgres `BitmapOr` it with the `(subject_key, subject_id)` index.

@@ -91,4 +91,60 @@ defmodule Samen.Web.ReadsCursorBoundTest do
     assert last[List.last(ids)] == nil
     assert Enum.count(ids, &(last[&1] == nil)) == div(@rows, 4)
   end
+
+  describe "the ASC bound follows the DATABASE column, not the attribute's allow_nil? (WP12)" do
+    setup do
+      Samen.Indexing.reset_not_null_cache()
+      on_exit(&Samen.Indexing.reset_not_null_cache/0)
+      :ok
+    end
+
+    test "positive control: a NOT NULL column gets the bound (and still pages exactly)", %{scope: scope} do
+      assert {:ok, true} = Samen.Indexing.column_not_null(Person, :inserted_at)
+      assert Samen.Indexing.column_not_null?(Person, :inserted_at)
+      assert paged(scope, :inserted_at, :asc, 10) == unpaged(scope, :inserted_at, :asc)
+    end
+
+    test "an allow_nil? false attribute over a NULLABLE column gets no bound and keeps its NULL tail", %{
+      org: org,
+      scope: scope
+    } do
+      assert %{allow_nil?: false} = Ash.Resource.Info.attribute(Person, :inserted_at)
+
+      # a hand migration the resource never heard of (rolled back with the test's sandbox transaction)
+      Repo.query!("ALTER TABLE swp_person ALTER COLUMN swp_inserted_at DROP NOT NULL")
+
+      Repo.query!(
+        "INSERT INTO swp_person (swp_org_id, swp_display_name, swp_inserted_at, swp_updated_at) " <>
+          "SELECT $1::uuid, 'null-' || i, NULL, now() FROM generate_series(1, 9) AS i",
+        [Ecto.UUID.dump!(org)]
+      )
+
+      assert {:ok, false} = Samen.Indexing.column_not_null(Person, :inserted_at)
+      refute Samen.Indexing.column_not_null?(Person, :inserted_at)
+
+      expected = unpaged(scope, :inserted_at, :asc)
+      assert length(expected) == @rows + 9
+
+      # a deep ASC page: every NULL-sorted row is still reached
+      for size <- [7, 10, 50] do
+        assert paged(scope, :inserted_at, :asc, size) == expected
+      end
+    end
+
+    test "an undeterminable column is `unknown` and gets no bound (and is not cached)" do
+      assert :unknown = Samen.Indexing.column_not_null(Person, :no_such_attribute)
+      assert :unknown = Samen.Indexing.column_not_null(Person, :inserted_at, repo: Samen.NoSuchRepo)
+    end
+
+    test "the answer is cached per resource: no catalog query on the second page read", %{scope: scope} do
+      assert Samen.Indexing.column_not_null?(Person, :inserted_at)
+      # the column is relaxed behind the cache's back: the cached answer stands until reset
+      Repo.query!("ALTER TABLE swp_person ALTER COLUMN swp_inserted_at DROP NOT NULL")
+      assert Samen.Indexing.column_not_null?(Person, :inserted_at)
+      Samen.Indexing.reset_not_null_cache()
+      refute Samen.Indexing.column_not_null?(Person, :inserted_at)
+      assert paged(scope, :inserted_at, :asc, 10) == unpaged(scope, :inserted_at, :asc)
+    end
+  end
 end

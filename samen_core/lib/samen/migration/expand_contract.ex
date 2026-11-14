@@ -260,9 +260,12 @@ defmodule Samen.Migration.ExpandContract do
   A concurrent build that fails (a duplicate under `UNIQUE`, a deadlock, a cancel) leaves the
   index behind with `pg_index.indisvalid = false`; `IF NOT EXISTS` then sees the name and skips,
   so the migration "succeeds" and the table has no usable index — forever. This queues, ahead
-  of the build, a step that looks the name up in the catalog and drops it
-  (`DROP INDEX CONCURRENTLY`) only if it is invalid. A VALID index of that name is never
-  touched. Call it from a migration that disabled the DDL transaction; it is a no-op on `down`.
+  of the build, a step that drops the name if it is invalid and ABANDONED. A VALID index of that
+  name is never touched, and neither is one another session is building right now (that build is
+  `indisvalid = false` too): the step first takes the table's `SHARE UPDATE EXCLUSIVE` lock, which
+  a running `CREATE INDEX CONCURRENTLY` holds for its whole duration, so it WAITS for the build to
+  finish and then sees it valid. Call it from a migration that disabled the DDL transaction; it is
+  a no-op on `down`.
   """
   def drop_invalid_index(table, name) do
     tname = table_name(table)
@@ -272,21 +275,41 @@ defmodule Samen.Migration.ExpandContract do
       fn ->
         repo = Ecto.Migration.repo()
 
-        %{rows: rows} =
-          repo.query!(
-            """
-            SELECT n.nspname::text
-              FROM pg_index i
-              JOIN pg_class c ON c.oid = i.indexrelid
-              JOIN pg_namespace n ON n.oid = c.relnamespace
-             WHERE c.relname = $1 AND i.indrelid = to_regclass($2) AND NOT i.indisvalid
-            """,
-            [iname, q_ident(tname)]
-          )
+        # Lock FIRST, then look: a check-then-drop without the lock is a race (the build can start,
+        # or finish, between the look and the drop). Holding SHARE UPDATE EXCLUSIVE excludes every
+        # concurrent build on the table, so an index invalid under it is genuinely abandoned. The
+        # drop is therefore a plain DROP INDEX inside this transaction (the CONCURRENTLY form
+        # cannot run in one and would release the lock first); its brief ACCESS EXCLUSIVE upgrade
+        # is bounded by lock_timeout and fails loudly rather than queueing every reader behind it.
+        {:ok, :ok} =
+          repo.transaction(
+            fn ->
+              if repo.query!("SELECT to_regclass($1)::text", [q_ident(tname)]).rows != [[nil]] do
+                repo.query!("LOCK TABLE #{q_ident(tname)} IN SHARE UPDATE EXCLUSIVE MODE")
 
-        for [schema] <- rows do
-          repo.query!("DROP INDEX CONCURRENTLY #{q_ident(schema)}.#{q_ident(iname)}")
-        end
+                %{rows: rows} =
+                  repo.query!(
+                    """
+                    SELECT n.nspname::text
+                      FROM pg_index i
+                      JOIN pg_class c ON c.oid = i.indexrelid
+                      JOIN pg_namespace n ON n.oid = c.relnamespace
+                     WHERE c.relname = $1 AND i.indrelid = to_regclass($2) AND NOT i.indisvalid
+                    """,
+                    [iname, q_ident(tname)]
+                  )
+
+                if rows != [], do: repo.query!("SET LOCAL lock_timeout = '10s'")
+
+                for [schema] <- rows do
+                  repo.query!("DROP INDEX #{q_ident(schema)}.#{q_ident(iname)}")
+                end
+              end
+
+              :ok
+            end,
+            timeout: :infinity
+          )
 
         :ok
       end,

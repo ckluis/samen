@@ -1736,7 +1736,7 @@ defmodule Samen.Web.Reads do
     # The OR-chain alone is only a filter; the redundant bound `field >= value` is what the
     # (org_id, field, id) index can seek on (ARCH-4). It is implied by the chain for every
     # non-null row, but it would drop the nulls-last tail, so it is added only when the
-    # attribute cannot be null.
+    # database column cannot be null.
     Ash.Query.do_filter(query, bound_asc(query, field, value, chain))
   end
 
@@ -1753,10 +1753,12 @@ defmodule Samen.Web.Reads do
   end
 
   defp bound_asc(%Ash.Query{resource: resource}, field, value, chain) do
-    case Ash.Resource.Info.attribute(resource, field) do
-      %{allow_nil?: false} -> expr(^ref(field) >= ^value and ^chain)
-      _ -> chain
-    end
+    # Decided from the DATABASE column (`attnotnull`), never the Ash attribute's `allow_nil?`: the
+    # bound is sound only where the column cannot hold a NULL, and the two can disagree. Cached per
+    # resource/attribute; when nullability cannot be determined the bound is simply not added.
+    if Samen.Indexing.column_not_null?(resource, field),
+      do: expr(^ref(field) >= ^value and ^chain),
+      else: chain
   end
 
   defp id_after(id, :asc), do: expr(id > ^id)

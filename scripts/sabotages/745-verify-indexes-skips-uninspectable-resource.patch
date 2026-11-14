@@ -5,10 +5,10 @@
 # TEST_FILES: test/indexing_test.exs
 # MUST_FAIL: a resource whose table is absent is a violation (cannot inspect), never a silent pass
 diff --git a/samen_core/lib/mix/tasks/samen.verify.indexes.ex b/samen_core/lib/mix/tasks/samen.verify.indexes.ex
-index c700dd3d..26d2ab8d 100644
+index d040f11..75ee445 100644
 --- a/samen_core/lib/mix/tasks/samen.verify.indexes.ex
 +++ b/samen_core/lib/mix/tasks/samen.verify.indexes.ex
-@@ -98,7 +98,7 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
+@@ -140,7 +140,7 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
          [missing(spec, indexes)]
        end
      else
