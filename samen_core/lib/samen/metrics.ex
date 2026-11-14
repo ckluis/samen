@@ -66,9 +66,12 @@ defmodule Samen.Metrics do
 
   Returns the list of tag keys that are safe to use as Prometheus label dimensions.
   Any key NOT in this set must not be used as a metric tag.
+
+  `:table` (ARCH-9) is bounded by the schema: only the range-partitioned tables (today `aud_event`) carry it,
+  and a table name is never a request value.
   """
   @spec bounded_tag_keys() :: [atom()]
-  def bounded_tag_keys, do: [:action, :route, :result, :tenant_tier]
+  def bounded_tag_keys, do: [:action, :route, :result, :tenant_tier, :table]
 
   @doc """
   The forbidden label set — raw identifiers that must never appear as metric tags.
