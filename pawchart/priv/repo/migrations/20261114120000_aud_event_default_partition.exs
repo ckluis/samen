@@ -8,9 +8,10 @@ defmodule PawChart.Repo.Migrations.AudEventDefaultPartition do
   lands in it and moves it into the month's partition once that exists. See ADR-002 (amendment, ARCH-9).
 
   Idempotent (`IF NOT EXISTS`). The SQL is the framework's own (`default_partition_sql/0`), shared with the
-  partition manager and the generated `aud_event` migration. `down` drops the default partition; it refuses
-  (Postgres FK-free `DROP`) nothing, so run it only when the default holds no rows you need — rows in it are
-  rows in no monthly partition, and are gone with it.
+  partition manager and the generated `aud_event` migration. `down` drops the default partition, and RAISES (rolling the migration back) when it holds
+  any row: those rows are in no monthly partition, so dropping the table would destroy audit events nothing else
+  holds. Move them first (create the missing months with `Samen.AuditEvent.PartitionManager.ensure_partition/2`,
+  which moves the rows in) and run the rollback again.
   """
   use Ecto.Migration
 
@@ -20,6 +21,9 @@ defmodule PawChart.Repo.Migrations.AudEventDefaultPartition do
   end
 
   def down do
+    # refuses (raises) while the DEFAULT partition holds rows; the SQL is the framework's, shared by every host
+    execute Samen.AuditEvent.PartitionManager.default_partition_down_guard_sql()
+
     execute "DROP TABLE IF EXISTS aud_event_default"
   end
 end

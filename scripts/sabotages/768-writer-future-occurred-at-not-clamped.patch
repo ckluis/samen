@@ -4,11 +4,11 @@
 # APP: samen_core
 # TEST_FILES: test/aud_event_default_partition_test.exs
 # MUST_FAIL: a far-future occurred_at is CLAMPED
-diff --git a/samen_core/lib/samen/audit_chain/writer.ex b/samen_core/lib/samen/audit_chain/writer.ex
-index 1c8eddaf..1df2e6dc 100644
---- a/samen_core/lib/samen/audit_chain/writer.ex
-+++ b/samen_core/lib/samen/audit_chain/writer.ex
-@@ -181,7 +181,7 @@ defmodule Samen.AuditChain.Writer do
+diff --git a/samen_core/lib/samen/audit_event/schema.ex b/samen_core/lib/samen/audit_event/schema.ex
+index 709101d6..a4360a43 100644
+--- a/samen_core/lib/samen/audit_event/schema.ex
++++ b/samen_core/lib/samen/audit_event/schema.ex
+@@ -162,7 +162,7 @@ defmodule Samen.AuditEvent do
        %DateTime{} = dt ->
          dt = DateTime.truncate(dt, :microsecond)
  

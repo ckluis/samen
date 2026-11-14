@@ -77,8 +77,59 @@ defmodule Samen.Web.Readiness do
     [partitions: partitions_advisory(repo)]
   end
 
+  # The probe must never block or slow `/readyz` (Fly's check has a 2 s budget, and every machine runs it):
+  #
+  #   * the advisory is CACHED for `@advisory_ttl_ms` (60 s) in `:persistent_term` under `{Readiness, :partitions, repo}`
+  #     as `{read_at_ms, advisory}` — per node, not shared, and gone on restart;
+  #   * past the TTL it is recomputed in a Task with a hard deadline (`@advisory_deadline_ms`, 500 ms), the query
+  #     itself carrying `lock_timeout` (`@advisory_lock_ms`, 300 ms) so a partition move holding the exclusive lock
+  #     fails the read fast instead of parking it;
+  #   * a recompute that fails or misses its deadline is `{:unknown, _}` — NEVER the old cached value, however
+  #     recent it was an hour ago: a stale `:ok` past its TTL is exactly the false health this advisory exists
+  #     to prevent. Only a successful read is cached; UNKNOWN is not, so the next probe tries again.
+  @advisory_ttl_ms 60_000
+  @advisory_deadline_ms 500
+  @advisory_lock_ms 300
+
   defp partitions_advisory(repo) do
-    result = PartitionManager.runway(repo)
+    key = {__MODULE__, :partitions, repo}
+    now_ms = System.monotonic_time(:millisecond)
+
+    case :persistent_term.get(key, nil) do
+      {read_at, advisory} when now_ms - read_at < @advisory_ttl_ms ->
+        advisory
+
+      _expired_or_missing ->
+        case read_partitions(repo) do
+          {:unknown, _} = unknown ->
+            unknown
+
+          advisory ->
+            :persistent_term.put(key, {now_ms, advisory})
+            advisory
+        end
+    end
+  end
+
+  @doc "Forget the cached partition advisory of `repo` (tests; a deploy that wants the next probe to read)."
+  @spec reset_advisory_cache(module()) :: :ok
+  def reset_advisory_cache(repo) do
+    :persistent_term.erase({__MODULE__, :partitions, repo})
+    :ok
+  end
+
+  defp read_partitions(repo) do
+    task = Task.async(fn -> compute_partitions(repo) end)
+
+    case Task.yield(task, @advisory_deadline_ms) || Task.shutdown(task, :brutal_kill) do
+      {:ok, advisory} -> advisory
+      {:exit, _reason} -> {:unknown, "runway unreadable (task_exit)"}
+      nil -> {:unknown, "runway unreadable (deadline_exceeded)"}
+    end
+  end
+
+  defp compute_partitions(repo) do
+    result = PartitionManager.runway(repo, lock_timeout_ms: @advisory_lock_ms)
     PartitionManager.emit_runway(result)
 
     case result do
@@ -93,6 +144,8 @@ defmodule Samen.Web.Readiness do
 
   # Value-free: module names only, never a message (a Postgres error can quote a value).
   defp unknown_detail(%{__struct__: module}), do: "runway unreadable (#{inspect(module)})"
+  # A table NAME is not a row value, and "which table" is what an operator needs.
+  defp unknown_detail({tag, table}) when is_atom(tag) and is_binary(table), do: "runway unreadable (#{tag} #{table})"
   defp unknown_detail({tag, _}) when is_atom(tag), do: "runway unreadable (#{tag})"
   defp unknown_detail(tag) when is_atom(tag), do: "runway unreadable (#{tag})"
   defp unknown_detail(_), do: "runway unreadable"

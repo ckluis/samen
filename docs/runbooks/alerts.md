@@ -150,3 +150,15 @@ First response:
 4. Rows in DEFAULT for a month that already has a partition cannot occur; rows for months not yet created are moved when the job creates them. Rows older than the first partition stay in DEFAULT by design: they are still read through `aud_event`.
 5. Confirm `runway_days` > 31 and `default_rows` is falling to the rows you accept before closing.
 
+**A move that fails** (job error `partition_roll_forward_failed`, `audit_partition_move` in the log, Postgres `lock_not_available`):
+something held a lock on `aud_event` for longer than `:partition_move_lock_timeout_ms` (5 s). The move rolled back whole and Oban
+retries (5 attempts); nothing is lost. Find the holder (`SELECT pid, state, xact_start, query FROM pg_stat_activity WHERE state <> 'idle' ORDER BY xact_start`)
+— usually a long transaction that wrote audit rows — and end it, or raise the timeout for the retry.
+
+**Permanent WARN (rows older than every partition).** `default_rows` > 0 that never falls: those rows are older than the first
+partition (a backdated import, a replayed anchor), so no month the job creates will take them. They are not lost — `aud_event`
+reads include them. Remediation: create the missing months (`Samen.AuditEvent.PartitionManager.ensure_partition(Repo, ~D[YYYY-MM-01])`
+for each month they belong to; the move puts the rows in), or, if they are accepted as they are, record the decision in the incident
+log and silence the `default_rows` alert for this table (the `default_landing` counter must still alert: it tells you a NEW row fell out).
+`partitions: UNKNOWN` names the table it could not read (integer or MAXVALUE-bounded tables are not read at all).
+

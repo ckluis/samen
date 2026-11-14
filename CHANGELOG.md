@@ -100,6 +100,16 @@ All notable changes to Samen are recorded here. The format follows
 - **`occurred_at`**: a time more than 300 s ahead is clamped to the write time (claim kept in `detail`); past times are kept. Recorded in ADR-002 §7. Sabotages 763-770.
 - Existing tests changed: the T128 baseline in `aud_event_test.exs` now drops the DEFAULT partition first (it proves the mechanism, which the
   default now hides).
+- **Review fixes (ARCH-9 round 2).** The DEFAULT-row move no longer holds an exclusive lock across a copy of everything: it stages the month's
+  rows and a replacement DEFAULT in standalone tables with no lock, then takes `ACCESS EXCLUSIVE` under `lock_timeout`
+  (`:partition_move_lock_timeout_ms`, 5 s) for a top-up, a count taken under the lock, and the detach/ATTACH swap; a lock it cannot get fails the
+  move (Oban retries). `/readyz`'s partition advisory is cached 60 s per node, bounded by a 500 ms deadline and a 300 ms `lock_timeout`, and is
+  UNKNOWN (never a stale `:ok`) when a refresh fails; no partitioned table is UNKNOWN, an unreadable table is named, and only time-partitioned
+  tables are read. The default-landing test compares `occurred_at` with in-memory partition bounds (no query per write; the re-read is a
+  SAVEPOINT, so it cannot abort the caller's transaction). `AuditEvent.insert/2` clamps a future `occurred_at` too. The host migration `down`
+  raises while the DEFAULT partition holds rows. Existing tests changed: rows meant to land in DEFAULT use past dates (1995-1999) because
+  `insert/2` now clamps future ones; the fake repos in `readiness_test.exs` gained `transaction/2`. Sabotages 764, 768, 769 re-built for the
+  moved clamp and landing test, 771-788 added.
 
 ### Host action required (existing hosts and generated apps)
 
