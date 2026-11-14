@@ -5,7 +5,7 @@
 # APP: samen_web
 # TEST_FILES: test/samen/web/reads_swallow_lint_test.exs
 # MUST_FAIL: RED: flags a function-level
-# MUST_FAIL: the tree matches the baseline exactly
+# MUST_FAIL: non-vacuity: the scanner sees the tree
 diff --git a/samen_web/lib/samen/web/reads/swallow_lint.ex b/samen_web/lib/samen/web/reads/swallow_lint.ex
 index 25e3f536..ce0a90d3 100644
 --- a/samen_web/lib/samen/web/reads/swallow_lint.ex
