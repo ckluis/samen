@@ -32,6 +32,14 @@ defmodule PawChart.ReadsHonestFailureP4Test do
   defp break_writes!(table), do: ddl!("ALTER TABLE #{table} ADD CONSTRAINT zz_p4_broken CHECK (false) NOT VALID")
   defp quiet(fun), do: fun |> with_log() |> elem(0)
 
+  defp raised_with_stack(fun) do
+    fun.()
+    flunk("expected a raise")
+  rescue
+    e in ExUnit.AssertionError -> reraise e, __STACKTRACE__
+    e -> {e, __STACKTRACE__}
+  end
+
   defp mount do
     Samen.Web.Mount.new(:crm, PawChart.Crm, PawChart.Repo,
       plane: Samen.Web.Plane.tenant(),
@@ -479,7 +487,43 @@ defmodule PawChart.ReadsHonestFailureP4Test do
       assert :ok = PawChart.OperatorSeeds.seed()
       break_select!("poo_org", "poo_id")
 
-      assert_raise Ash.Error.Unknown, fn -> PawChart.OperatorSeeds.seed() end
+      # Every statement on `poo_org` fails with this fault, the fallback create included, so the exception alone
+      # cannot tell the probe's failure from the old 'probe said false, create failed' one. The raising frame can:
+      # the probe is where it must come from, and nothing past it ran.
+      {error, stacktrace} = raised_with_stack(fn -> PawChart.OperatorSeeds.seed() end)
+
+      assert %Ash.Error.Unknown{} = error
+      formatted = Exception.format_stacktrace(stacktrace)
+      assert formatted =~ "Ash.exists?"
+      refute formatted =~ "Ash.create"
+      refute formatted =~ "seed_operator_org"
+    end
+
+    # Real DDL fault that ONLY the seed's last per-account step hits: the support ticket carries the tenant org id in
+    # its custom bag, and nothing else in the seed writes `pqk_ticket`.
+    @last_tenant "c1112d00-0000-4000-8000-000000000003"
+
+    test "a seed that fails on its LAST step leaves nothing behind (no marker without its rows), and the re-run completes it" do
+      orgs = PawChart.Repo.aggregate(PawChart.Operator.Org, :count)
+
+      ddl!(
+        "ALTER TABLE pqk_ticket ADD CONSTRAINT zz_seed_fault CHECK ((pqk_custom->>'requester_org_id') IS DISTINCT FROM '#{@last_tenant}') NOT VALID"
+      )
+
+      {error, _stack} = quiet(fn -> raised_with_stack(fn -> PawChart.OperatorSeeds.seed() end) end)
+      assert is_exception(error)
+      # Old behaviour: the operator org and two whole accounts stayed, and every later run answered :ok "seeded".
+      assert PawChart.Repo.aggregate(PawChart.Operator.Org, :count) == orgs
+
+      # POSITIVE CONTROL: with the fault lifted the same call completes the whole book.
+      ddl!("ALTER TABLE pqk_ticket DROP CONSTRAINT zz_seed_fault")
+      assert :ok = PawChart.OperatorSeeds.seed()
+      assert PawChart.Repo.aggregate(PawChart.Operator.Org, :count) == orgs + 4
+
+      %{rows: [[tickets]]} =
+        Ecto.Adapters.SQL.query!(PawChart.Repo, "SELECT count(*) FROM pqk_ticket WHERE pqk_custom->>'requester_org_id' = '#{@last_tenant}'", [])
+
+      assert tickets == 1
     end
   end
 

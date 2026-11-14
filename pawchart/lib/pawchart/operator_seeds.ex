@@ -13,7 +13,9 @@ defmodule PawChart.OperatorSeeds do
       TO the SaaS; one invoice PAST-DUE for the at-risk account's dunning surface),
     * a desk `Support.Ticket` the clinic filed WITH the SaaS.
 
-  Idempotent: guarded by an existence check on the operator org.
+  Atomic: the whole seed (operator org + agent + custom fields + every account) is ONE transaction, and the operator
+  org row is the "already seeded" marker, so a failure part-way leaves nothing behind and the marker can never vouch
+  for a half-seeded book. Re-runs are a no-op.
   """
   require Ash.Query
 
@@ -32,20 +34,41 @@ defmodule PawChart.OperatorSeeds do
   @doc "The well-known operator org id."
   def operator_org_id, do: @operator_org_id
 
-  @doc "Seed the operator book of business (idempotent on the operator org existence)."
+  @doc "Seed the operator book of business (atomic; a no-op once the operator org exists)."
   def seed do
     if operator_org_seeded?() do
       :ok
     else
-      seed_operator_org()
-      agent = seed_agent()
-      define_custom_fields()
+      atomically(fn ->
+        seed_operator_org()
+        agent = seed_agent()
+        define_custom_fields()
+        Enum.each(@accounts, &seed_account(&1, agent))
+      end)
+    end
+  end
 
-      for account <- @accounts do
-        seed_account(account, agent)
-      end
+  # One transaction for the whole seed: a raise anywhere inside rolls it back and re-raises (the task exits non-zero and
+  # the next run starts from nothing). Ash warns once per create that carries transaction hooks when it runs inside a
+  # surrounding transaction; here the surrounding transaction IS the design, so the warning is switched off for the span
+  # of the unit and restored after.
+  defp atomically(fun) do
+    previous = Application.fetch_env(:ash, :warn_on_transaction_hooks?)
+    Application.put_env(:ash, :warn_on_transaction_hooks?, false)
+
+    try do
+      {:ok, :ok} =
+        PawChart.Repo.transaction(fn ->
+          fun.()
+          :ok
+        end)
 
       :ok
+    after
+      case previous do
+        {:ok, value} -> Application.put_env(:ash, :warn_on_transaction_hooks?, value)
+        :error -> Application.delete_env(:ash, :warn_on_transaction_hooks?)
+      end
     end
   end
 

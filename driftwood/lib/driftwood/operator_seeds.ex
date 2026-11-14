@@ -12,7 +12,11 @@ defmodule Driftwood.OperatorSeeds do
       TO the SaaS; one invoice PAST-DUE for the dunning surface),
     * 2 desk `Support.Ticket`s the tenant filed WITH the SaaS (requester = the tenant-admin).
 
-  Idempotent-ish: guarded by an existence check on the operator org.
+  Atomic and convergent: the fresh path (operator org + agent + custom fields + every account + the leads) is ONE
+  transaction, and so is each account added on a re-run, so a failure part-way leaves NOTHING behind and the
+  existence markers (the operator org row, an account's `Identity.Org` row) cannot outlive the rows they vouch for.
+  A re-run seeds only what is missing; an interrupted run from before this change (marker present, agent or
+  accounts missing) is still refused loudly rather than reported as success.
   """
   require Ash.Query
 
@@ -47,6 +51,8 @@ defmodule Driftwood.OperatorSeeds do
     {"Anchor Point Logistics", "Terrence", "Iyer", "terrence.iyer@anchorpoint.example", "lead"}
   ]
 
+  @leads_company "Prospect brokerages"
+
   @agent {"Priya", "Nakamura", "priya.nakamura@samen.example"}
 
   @doc "The well-known operator org id."
@@ -63,17 +69,43 @@ defmodule Driftwood.OperatorSeeds do
     if operator_org_seeded?() do
       seed_missing_accounts()
     else
-      seed_operator_org()
-      agent = seed_agent()
-      define_custom_fields()
+      atomically(fn ->
+        seed_operator_org()
+        agent = seed_agent()
+        define_custom_fields()
 
-      for account <- @accounts do
-        seed_account(account, agent)
-      end
+        for account <- @accounts do
+          seed_account(account, agent)
+        end
 
-      seed_leads()
+        seed_leads()
+      end)
+    end
+  end
+
+  # One transaction for a unit of seeding: a raise anywhere inside rolls the whole unit back and re-raises, so the
+  # task exits non-zero and the next run starts that unit from nothing.
+  #
+  # Ash warns once per create that carries transaction hooks when it runs inside a surrounding transaction. Here the
+  # surrounding transaction IS the design (the unit must commit or vanish whole), so the warning is switched off for
+  # the span of the unit and restored after.
+  defp atomically(fun) do
+    previous = Application.fetch_env(:ash, :warn_on_transaction_hooks?)
+    Application.put_env(:ash, :warn_on_transaction_hooks?, false)
+
+    try do
+      {:ok, :ok} =
+        Driftwood.Repo.transaction(fn ->
+          fun.()
+          :ok
+        end)
 
       :ok
+    after
+      case previous do
+        {:ok, value} -> Application.put_env(:ash, :warn_on_transaction_hooks?, value)
+        :error -> Application.delete_env(:ash, :warn_on_transaction_hooks?)
+      end
     end
   end
 
@@ -98,7 +130,16 @@ defmodule Driftwood.OperatorSeeds do
 
     for account <- missing, do: seed_account(account, agent)
 
+    # The leads ride the same convergence: an operator org seeded before they were atomic with it may lack them.
+    unless leads_seeded?(), do: atomically(&seed_leads/0)
+
     :ok
+  end
+
+  defp leads_seeded? do
+    Driftwood.Crm.Company
+    |> Ash.Query.filter(org_id == ^@operator_org_id and name == ^@leads_company)
+    |> Ash.exists?(authorize?: false)
   end
 
   # The "already there" probes are plain reads and are allowed to RAISE: a probe that answers `true` /
@@ -165,7 +206,12 @@ defmodule Driftwood.OperatorSeeds do
     :ok
   end
 
-  defp seed_account(%{tenant_org_id: tid, name: name, mrr: mrr, admin: {af, al, ae}} = account, agent) do
+  # One account is ONE transaction: its `Identity.Org` row is the "already seeded" marker `seed_missing_accounts/0`
+  # trusts, so it must commit only together with the admin, the billing and the tickets it vouches for.
+  @doc false
+  def seed_account(account, agent), do: atomically(fn -> do_seed_account(account, agent) end)
+
+  defp do_seed_account(%{tenant_org_id: tid, name: name, mrr: mrr, admin: {af, al, ae}} = account, agent) do
     health = Map.get(account, :health, :healthy)
 
     _account_org =
@@ -304,7 +350,7 @@ defmodule Driftwood.OperatorSeeds do
   # as `Driftwood.Crm.Person` rows under the OPERATOR org id (tenant plane, clear — the SaaS owns
   # these prospect contacts), with an early-funnel `lifecycle_stage`, so the operator Leads lens
   # (`/marketing/leads?org=<operator_org_id>`, the framework LeadsLive) is populated. Idempotent
-  # via the account existence guard (`seed/0` short-circuits a re-run).
+  # via the `@leads_company` existence guard (`seed_missing_accounts/0`) and atomic with the fresh path.
   defp seed_leads do
     # The Tier-1 custom fields these operator-org CRM rows write (a custom-bag value is rejected
     # unless a `tnt_field` definition exists for THIS org). `company_role` rides the Company bag;
@@ -322,7 +368,7 @@ defmodule Driftwood.OperatorSeeds do
       Driftwood.Crm.Company
       |> Ash.Changeset.for_create(
         :create,
-        %{org_id: @operator_org_id, name: "Prospect brokerages", custom: %{"company_role" => "prospect"}},
+        %{org_id: @operator_org_id, name: @leads_company, custom: %{"company_role" => "prospect"}},
         authorize?: false
       )
       |> Ash.create!()

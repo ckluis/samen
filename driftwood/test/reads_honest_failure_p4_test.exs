@@ -16,6 +16,8 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
   """
   use Driftwood.DataCase, async: false
 
+  require Ash.Query
+
   import ExUnit.CaptureLog
   import Plug.Conn
   import Plug.Test
@@ -856,6 +858,81 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
 
       assert :ok = Driftwood.OperatorSeeds.seed()
       assert Driftwood.Repo.aggregate(Driftwood.Operator.Org, :count) == before
+    end
+
+    # Real DDL fault that ONLY the seed's last per-account step hits: the support ticket carries the tenant org id in its
+    # custom bag, and nothing else in the seed writes `dqk_ticket`.
+    @fault_tenant "b1112d00-0000-4000-8000-000000000006"
+    defp fault_ticket_for!(tenant),
+      do: ddl!("ALTER TABLE dqk_ticket ADD CONSTRAINT zz_seed_fault CHECK ((dqk_custom->>'requester_org_id') IS DISTINCT FROM '#{tenant}') NOT VALID")
+
+    defp lift_fault!, do: ddl!("ALTER TABLE dqk_ticket DROP CONSTRAINT zz_seed_fault")
+
+    defp count!(sql) do
+      %{rows: [[n]]} = Ecto.Adapters.SQL.query!(Driftwood.Repo, sql, [])
+      n
+    end
+
+    defp raised(fun) do
+      fun.()
+      flunk("expected the seed to raise")
+    rescue
+      e in ExUnit.AssertionError -> reraise e, __STACKTRACE__
+      e -> e
+    end
+
+    test "a fresh seed that fails on its LAST step leaves nothing behind (no marker without its rows), and the re-run completes it" do
+      orgs = count!("SELECT count(*) FROM doo_org")
+      fault_ticket_for!(@fault_tenant)
+
+      assert quiet(fn -> raised(fn -> Driftwood.OperatorSeeds.seed() end) end)
+      # Old behaviour: the operator org, the agent and five whole accounts stayed, and a re-run called that seeded.
+      assert count!("SELECT count(*) FROM doo_org") == orgs
+      assert count!("SELECT count(*) FROM dqg_agent WHERE dqg_handle = 'pnakamura'") == 0
+
+      # POSITIVE CONTROL: with the fault lifted the same call completes the whole book, leads included.
+      lift_fault!()
+      assert :ok = Driftwood.OperatorSeeds.seed()
+      assert count!("SELECT count(*) FROM doo_org") == orgs + 7
+      assert count!("SELECT count(*) FROM doo_org WHERE doo_slug = '#{@fault_tenant}'") == 1
+      assert count!("SELECT count(*) FROM fcm_company WHERE fcm_name = 'Prospect brokerages'") == 1
+      assert count!("SELECT count(*) FROM fpr_person WHERE fpr_company_id IN (SELECT fcm_id FROM fcm_company WHERE fcm_name = 'Prospect brokerages')") == 4
+    end
+
+    test "one account is ONE unit: a failure on its last step does not leave the 'already seeded' marker, and the re-run completes it" do
+      assert :ok = Driftwood.OperatorSeeds.seed()
+      agent = Driftwood.Operator.Agent |> Ash.Query.filter(handle == "pnakamura") |> Ash.read!(authorize?: false) |> hd()
+      extra_tenant = Ecto.UUID.generate()
+
+      extra = %{tenant_org_id: extra_tenant, name: "Extra Freight", mrr: 90_000, health: :healthy, admin: {"Eve", "Extra", "eve.extra@extra.example"}}
+      users = count!("SELECT count(*) FROM dou_user")
+      fault_ticket_for!(extra_tenant)
+
+      assert quiet(fn -> raised(fn -> Driftwood.OperatorSeeds.seed_account(extra, agent) end) end)
+      # Old behaviour: the account Org (the marker `seed/0` trusts), its admin and its billing stayed.
+      assert count!("SELECT count(*) FROM doo_org WHERE doo_slug = '#{extra_tenant}'") == 0
+      assert count!("SELECT count(*) FROM dou_user") == users
+
+      lift_fault!()
+      Driftwood.OperatorSeeds.seed_account(extra, agent)
+      assert count!("SELECT count(*) FROM doo_org WHERE doo_slug = '#{extra_tenant}'") == 1
+      assert count!("SELECT count(*) FROM dou_user") == users + 1
+      assert count!("SELECT count(*) FROM dqk_ticket WHERE dqk_custom->>'requester_org_id' = '#{extra_tenant}'") == 2
+    end
+
+    test "a re-run restores the operator leads when they are missing (seed_leads is no longer fresh-path only)" do
+      assert :ok = Driftwood.OperatorSeeds.seed()
+      ddl!("DELETE FROM fpr_person WHERE fpr_company_id IN (SELECT fcm_id FROM fcm_company WHERE fcm_name = 'Prospect brokerages')")
+      ddl!("DELETE FROM fcm_company WHERE fcm_name = 'Prospect brokerages'")
+      assert count!("SELECT count(*) FROM fcm_company WHERE fcm_name = 'Prospect brokerages'") == 0
+
+      assert :ok = Driftwood.OperatorSeeds.seed()
+      assert count!("SELECT count(*) FROM fcm_company WHERE fcm_name = 'Prospect brokerages'") == 1
+      assert count!("SELECT count(*) FROM fpr_person WHERE fpr_company_id IN (SELECT fcm_id FROM fcm_company WHERE fcm_name = 'Prospect brokerages')") == 4
+
+      # ...and a third run adds nothing.
+      assert :ok = Driftwood.OperatorSeeds.seed()
+      assert count!("SELECT count(*) FROM fcm_company WHERE fcm_name = 'Prospect brokerages'") == 1
     end
 
     test "a failing 'account already seeded?' probe raises instead of answering 'yes, skip it'" do
