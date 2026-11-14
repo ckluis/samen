@@ -1,0 +1,20 @@
+# SABOTAGE: An action tool whose schema cannot be read is read as an empty param list, so the identity 
+#   check passes it.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/tool_actor_identity_verifier_test.exs
+# MUST_FAIL: a tool whose tool_schema/0 raises is a NAMED violation, not a pass
+diff --git a/samen_core/lib/mix/tasks/samen.verify.tool_actor_identity.ex b/samen_core/lib/mix/tasks/samen.verify.tool_actor_identity.ex
+index b106e539..06fb507d 100644
+--- a/samen_core/lib/mix/tasks/samen.verify.tool_actor_identity.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.tool_actor_identity.ex
+@@ -171,7 +171,7 @@ defmodule Mix.Tasks.Samen.Verify.ToolActorIdentity do
+ 
+   # `{:ok, names}` (possibly none: a tool with no params is legitimate) or `:unreadable`.
+   defp action_param_names(mod) do
+-    case safe(fn -> mod.tool_schema() end, :unreadable) do
++    case safe(fn -> mod.tool_schema() end, %{}) do
+       schema when is_map(schema) and not is_struct(schema) ->
+         case Map.get(schema, :params) || Map.get(schema, "params") do
+           params when is_list(params) ->
