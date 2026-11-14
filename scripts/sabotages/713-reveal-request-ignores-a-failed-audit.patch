@@ -1,0 +1,19 @@
+# SABOTAGE: A reveal request is recorded although its audit entry could not be written.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/audit_writer_callers_test.exs
+# MUST_FAIL: request: audit down → no request row
+diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+index 3abb46f1..31b051dc 100644
+--- a/samen_core/lib/samen/reveal/grants.ex
++++ b/samen_core/lib/samen/reveal/grants.ex
+@@ -152,7 +152,7 @@ defmodule Samen.Reveal.Grants do
+                 # pre-PP-11 behavior for callers that have not threaded the target org.
+                 org_id: attrs[:org_id]
+               },
+-                strict: true
++                strict: false
+               )  do
+           req
+         else
