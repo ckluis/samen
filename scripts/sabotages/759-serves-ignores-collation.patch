@@ -1,0 +1,19 @@
+# SABOTAGE: serves? ignores collation, so a COLLATE "C" key counts as serving
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/indexing_test.exs
+# MUST_FAIL: a non-default collation is rejected
+diff --git a/samen_core/lib/samen/indexing.ex b/samen_core/lib/samen/indexing.ex
+index caf88369..df60b248 100644
+--- a/samen_core/lib/samen/indexing.ex
++++ b/samen_core/lib/samen/indexing.ex
+@@ -292,7 +292,7 @@ defmodule Samen.Indexing do
+       length(index.keys) >= n and Enum.take(index.keys, n) == columns and
+       same_direction?(Enum.take(index.desc, n)) and
+       default_nulls?(Enum.take(index.desc, n), Enum.take(index.nulls_first, n)) and
+-      Enum.all?(Enum.take(index.default_collation, n)) and
++      true and
+       Enum.all?(Enum.take(index.default_opclass, n))
+   end
+ 

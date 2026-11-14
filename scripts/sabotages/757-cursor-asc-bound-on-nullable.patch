@@ -1,0 +1,20 @@
+# SABOTAGE: the ASC lower bound is applied to a nullable column too, dropping the NULLS-LAST tail from 
+#   every page after a cursor
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_index_plan_test.exs
+# MUST_FAIL: person — an ASC page on a NULLABLE column gets NO lower bound (it would drop the NULLS-LAST tail)
+diff --git a/samen_web/lib/samen/web/reads.ex b/samen_web/lib/samen/web/reads.ex
+index 51a98afa..202bf476 100644
+--- a/samen_web/lib/samen/web/reads.ex
++++ b/samen_web/lib/samen/web/reads.ex
+@@ -1755,7 +1755,7 @@ defmodule Samen.Web.Reads do
+   defp bound_asc(%Ash.Query{resource: resource}, field, value, chain) do
+     case Ash.Resource.Info.attribute(resource, field) do
+       %{allow_nil?: false} -> expr(^ref(field) >= ^value and ^chain)
+-      _ -> chain
++      _ -> expr(^ref(field) >= ^value and ^chain)
+     end
+   end
+ 

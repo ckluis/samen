@@ -838,11 +838,14 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
 
     create(index(:aqt_csat_survey_token, [:aqt_token_digest], name: "aqt_csat_survey_token_digest_idx"))
 
+    # ARCH-4: the tenant keyset index (org_id, <keyset sort>, id) on every org-scoped table above.
+    create_org_keyset_indexes(@resources)
     catalog_sync(@resources)
   end
 
   def down do
     catalog_sync_down(@resources)
+    drop_org_keyset_indexes(@resources)
 
     # --- Support (reverse FK order) ---
     drop(index(:aqt_csat_survey_token, [:aqt_token_digest], name: "aqt_csat_survey_token_digest_idx"))

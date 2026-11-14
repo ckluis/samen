@@ -1,0 +1,23 @@
+# SABOTAGE: the DESC cursor carries no index-usable bound, so a deep page filters from the start of the org 
+#   range
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_index_plan_test.exs
+# MUST_FAIL: message — a DEEP DESC page seeks on inserted_at too
+diff --git a/samen_web/lib/samen/web/reads.ex b/samen_web/lib/samen/web/reads.ex
+index 51a98afa..1eeb88f3 100644
+--- a/samen_web/lib/samen/web/reads.ex
++++ b/samen_web/lib/samen/web/reads.ex
+@@ -1745,10 +1745,7 @@ defmodule Samen.Web.Reads do
+     # non-null cursor) and is the bound the index seeks on; always safe (ARCH-4).
+     Ash.Query.do_filter(
+       query,
+-      expr(
+-        ^ref(field) <= ^value and
+-          (^ref(field) < ^value or (^ref(field) == ^value and ^id_after(id, :desc)))
+-      )
++      expr(^ref(field) < ^value or (^ref(field) == ^value and ^id_after(id, :desc)))
+     )
+   end
+ 

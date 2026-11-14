@@ -1,0 +1,20 @@
+# SABOTAGE: the contract asks for (org_id, id, sort): the migrated index (org_id, sort, id) no longer serves it,
+#   so the live-catalog check goes red
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/indexing_test.exs
+# MUST_FAIL: the migrated fixture table carries the index the contract names
+diff --git a/samen_core/lib/samen/indexing.ex b/samen_core/lib/samen/indexing.ex
+index caf88369..76c2ea03 100644
+--- a/samen_core/lib/samen/indexing.ex
++++ b/samen_core/lib/samen/indexing.ex
+@@ -130,7 +130,7 @@ defmodule Samen.Indexing do
+          schema: AshPostgres.DataLayer.Info.schema(resource) || "public",
+          table: table,
+          name: name,
+-         columns: [org] ++ sort_cols ++ [id],
++         columns: [org] ++ [id] ++ sort_cols,
+          logical: [:org_id] ++ List.wrap(sort) ++ [:id]
+        }}
+     else

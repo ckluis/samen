@@ -244,11 +244,53 @@ defmodule Samen.Migration.ExpandContract do
     unique = if Keyword.get(opts, :unique, false), do: "UNIQUE ", else: ""
     cols_sql = cols |> Enum.map(&q_ident/1) |> Enum.join(", ")
 
+    drop_invalid_index(tname, name)
+
     Ecto.Migration.execute(
       "CREATE #{unique}INDEX CONCURRENTLY IF NOT EXISTS #{q_ident(name)} " <>
         "ON #{q_ident(tname)} (#{cols_sql})",
       # DROP INDEX CONCURRENTLY is also non-transactional — matches the disabled tx.
       "DROP INDEX CONCURRENTLY IF EXISTS #{q_ident(name)}"
+    )
+  end
+
+  @doc """
+  Drop a same-named INVALID index on `table` before a `CREATE INDEX CONCURRENTLY IF NOT EXISTS`.
+
+  A concurrent build that fails (a duplicate under `UNIQUE`, a deadlock, a cancel) leaves the
+  index behind with `pg_index.indisvalid = false`; `IF NOT EXISTS` then sees the name and skips,
+  so the migration "succeeds" and the table has no usable index — forever. This queues, ahead
+  of the build, a step that looks the name up in the catalog and drops it
+  (`DROP INDEX CONCURRENTLY`) only if it is invalid. A VALID index of that name is never
+  touched. Call it from a migration that disabled the DDL transaction; it is a no-op on `down`.
+  """
+  def drop_invalid_index(table, name) do
+    tname = table_name(table)
+    iname = to_string(name)
+
+    Ecto.Migration.execute(
+      fn ->
+        repo = Ecto.Migration.repo()
+
+        %{rows: rows} =
+          repo.query!(
+            """
+            SELECT n.nspname::text
+              FROM pg_index i
+              JOIN pg_class c ON c.oid = i.indexrelid
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+             WHERE c.relname = $1 AND i.indrelid = to_regclass($2) AND NOT i.indisvalid
+            """,
+            [iname, q_ident(tname)]
+          )
+
+        for [schema] <- rows do
+          repo.query!("DROP INDEX CONCURRENTLY #{q_ident(schema)}.#{q_ident(iname)}")
+        end
+
+        :ok
+      end,
+      fn -> :ok end
     )
   end
 

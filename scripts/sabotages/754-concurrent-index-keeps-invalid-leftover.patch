@@ -1,0 +1,20 @@
+# SABOTAGE: concurrent_index does not drop a same-named INVALID index, so IF NOT EXISTS skips the leftover 
+#   and the table keeps no usable index
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/indexing_test.exs
+# MUST_FAIL: a failed CONCURRENTLY build leaves an invalid index; the migration drops it and builds the real one
+diff --git a/samen_core/lib/samen/migration/expand_contract.ex b/samen_core/lib/samen/migration/expand_contract.ex
+index c9d46a90..89f9402d 100644
+--- a/samen_core/lib/samen/migration/expand_contract.ex
++++ b/samen_core/lib/samen/migration/expand_contract.ex
+@@ -244,8 +244,6 @@ defmodule Samen.Migration.ExpandContract do
+     unique = if Keyword.get(opts, :unique, false), do: "UNIQUE ", else: ""
+     cols_sql = cols |> Enum.map(&q_ident/1) |> Enum.join(", ")
+ 
+-    drop_invalid_index(tname, name)
+-
+     Ecto.Migration.execute(
+       "CREATE #{unique}INDEX CONCURRENTLY IF NOT EXISTS #{q_ident(name)} " <>
+         "ON #{q_ident(tname)} (#{cols_sql})",

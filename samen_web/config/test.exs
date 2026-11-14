@@ -62,8 +62,31 @@ config :samen_web,
     Samen.WebTest.Operator,
     Samen.WebTest.Primitives,
     Samen.WebTest.RichTypes,
-    Samen.WebTest.Automation
+    Samen.WebTest.Automation,
+    # Every other domain the test host mounts, so `mix samen.verify.indexes` (which reads
+    # this list) inspects their tables too instead of silently skipping them.
+    Samen.WebTest.Mailbox,
+    Samen.WebTest.Chat,
+    Samen.WebTest.Views,
+    Samen.WebTest.Analytics,
+    Samen.WebTest.Fleet,
+    Samen.WebTest.Tags,
+    Samen.WebTest.Docs,
+    Samen.WebTest.Outreach,
+    Samen.WebTest.Cms,
+    # The framework-owned domains whose tables the host migrates (AI agent loop + replay).
+    Samen.AI.Domain,
+    Samen.Replay.Domain
   ]
+
+# The test host mounts `Samen.AI.Domain` for the agent-loop tables (`ai_agent_*`) but deliberately
+# migrates neither the Prompt nor the support-draft table. `mix samen.verify.indexes` prints these
+# as NOT inspected, and fails if an entry goes stale (its table appears).
+config :samen_web, :index_unmounted, %{
+  Samen.AI.Prompt => "the samen_web test host does not migrate ai_prompt (no prompt registry under test)",
+  Samen.AI.SupportReplyDraft =>
+    "the samen_web test host does not migrate ai_support_reply_draft (draft rendering is tested in memory)"
+}
 
 # T84b / P8 (phase6-punchlist) — `mix samen.verify.fleet_wire`'s closed-catalog
 # MEMBERSHIP check (Samen.Fleet.Report.Catalogs, Samen.Fleet.Report.Schema.validate/2)

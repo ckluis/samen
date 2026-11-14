@@ -35,7 +35,12 @@ defmodule PawChart.AgentPlaneUnwiredTest do
   end
 
   test "the agent-plane repo seams are DELIBERATELY unwired on this host" do
-    for key <- [:samen_ai_agent_run_repo, :samen_ai_agent_turn_repo, :samen_ai_agent_kill_repo] do
+    for key <- [
+          :samen_ai_agent_run_repo,
+          :samen_ai_agent_turn_repo,
+          :samen_ai_agent_kill_repo,
+          :samen_ai_agent_fold_source_repo
+        ] do
       refute Application.get_env(:samen_core, key) == PawChart.Repo,
              "#{key} is wired — pawchart is the deliberately-unwired host in this pair"
     end
