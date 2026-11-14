@@ -84,8 +84,8 @@ The Stripe mirror schema is real; `SyncAdapter.Stub` returns `{:ok, %{stub: true
 - [ ] Run **one** instance per database ([ADR-054](adr/ADR-054-single-instance-per-database.md)):
       `fly deploy --ha=false`, `fly scale count 1`. Fly's default is two machines, and a second
       instance weakens the replay-nonce cache, the AI kill switch and the rate limiter. If `DATABASE_URL`
-      goes through PgBouncer in transaction mode, set `Samen.SingleNode`'s `lease_url` to a direct URL.
-      `/readyz` shows `single_node:` if you get this wrong.
+      goes through a transaction pooler (PgBouncer, Neon's `-pooler` host), also set `DATABASE_DIRECT_URL` to the DIRECT
+      connection string (`Samen.SingleNode`'s `lease_url`): a pooled lease can only ever read `single_node: UNKNOWN`.
 
 ## 6 · Production drills **[DRILL]**
 
