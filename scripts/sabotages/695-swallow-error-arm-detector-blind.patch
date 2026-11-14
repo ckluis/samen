@@ -7,10 +7,10 @@
 # MUST_FAIL: RED: an Ash read, a repo write and an Ash count whose error arm is a literal are flagged
 # MUST_FAIL: every literal the detector names is flagged
 diff --git a/samen_core/lib/samen/lint/swallow.ex b/samen_core/lib/samen/lint/swallow.ex
-index b741eaaf..aa9058e2 100644
+index 8a05ab6..712bcf0 100644
 --- a/samen_core/lib/samen/lint/swallow.ex
 +++ b/samen_core/lib/samen/lint/swallow.ex
-@@ -289,7 +289,7 @@ defmodule Samen.Lint.Swallow do
+@@ -547,7 +547,7 @@ defmodule Samen.Lint.Swallow do
  
    # `{:error, _}` / `{:error, _reason}` (the error is discarded). A bound-and-used reason cannot reach a
    # literal-only body, so only discarded errors qualify.
@@ -18,4 +18,4 @@ index b741eaaf..aa9058e2 100644
 +  defp error_pattern?({:error, {name, _, ctx}}) when is_atom(name) and is_atom(ctx), do: underscored?(name) and name == :never
    defp error_pattern?(_), do: false
  
-   defp literal?({:__block__, _, [only]}), do: literal?(only)
+   defp swallow_literal?({:__block__, _, [only]}), do: swallow_literal?(only)

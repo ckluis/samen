@@ -11,17 +11,26 @@
 # MUST_FAIL: a LAPSED proposal is expired, its approval withdrawn, and it can never execute
 # MUST_FAIL: expiry is idempotent and only ever applies to a PARKED run
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index e46c98f2..eb0034a3 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -1296,15 +1296,9 @@
+@@ -2798,23 +2798,9 @@ defmodule Samen.AI.Agent do
    def expire_parked(%Run{} = run), do: expire_parked(run.id)
  
    def expire_parked(run_id) when is_binary(run_id) do
 -    with {:ok, %Run{state: :awaiting_approval} = run} <- fetch_run(run_id) do
--      {:ok,
--       run
--       |> Ash.Changeset.for_update(:expire_due, %{})
--       |> Ash.update!(authorize?: false)}
+-      # `Ash.update`, not `update!`: a failed expiry (the approval could not be withdrawn rolls the action back) is
+-      # an `{:error, _}` per this function's spec, reported by name and value-free — not a stacktrace per cron tick.
+-      case run
+-           |> Ash.Changeset.for_update(:expire_due, %{})
+-           |> Ash.update(authorize?: false) do
+-        {:ok, expired} ->
+-          {:ok, expired}
+-
+-        {:error, error} ->
+-          Samen.Observability.Failure.report(:agent_expire_parked, run.org_id, error)
+-          {:error, :expiry_incomplete}
+-      end
 -    else
 -      {:ok, %Run{}} -> {:error, :run_not_parked}
 -      other -> other

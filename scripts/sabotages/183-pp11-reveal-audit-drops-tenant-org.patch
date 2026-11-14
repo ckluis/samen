@@ -13,14 +13,15 @@
 # TEST_FILES: test/reveal_grants_test.exs
 # MUST_FAIL: visible on THAT tenant's reveal ledger
 diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+index 774a20a7..964396a5 100644
 --- a/samen_core/lib/samen/reveal/grants.ex
 +++ b/samen_core/lib/samen/reveal/grants.ex
-@@ -144,7 +144,7 @@ defmodule Samen.Reveal.Grants do
-         # THAT tenant's `Settings.SecurityLive` ledger. Absent an org_id it falls to the
-         # reserved `__global__` operator chain (`write_audit/2` / ADR-002 §2.1) — the
-         # pre-PP-11 behavior for callers that have not threaded the target org.
--        org_id: attrs[:org_id]
-+        org_id: nil
-       })
-
-       # T35 §4.7: additionally open a `pii_reveal` Approval through the T34 engine —
+@@ -150,7 +150,7 @@ defmodule Samen.Reveal.Grants do
+                 # THAT tenant's `Settings.SecurityLive` ledger. Absent an org_id it falls to the
+                 # reserved `__global__` operator chain (`write_audit/2` / ADR-002 §2.1) — the
+                 # pre-PP-11 behavior for callers that have not threaded the target org.
+-                org_id: attrs[:org_id]
++                org_id: nil
+               },
+                 strict: true
+               )  do

@@ -6,15 +6,17 @@
 # TEST_FILES: test/swallow_lint_test.exs
 # MUST_FAIL: RED: a clause ADDED to an already-reviewed function counts
 diff --git a/samen_core/lib/samen/lint/swallow.ex b/samen_core/lib/samen/lint/swallow.ex
-index b741eaaf..1b3ea51f 100644
+index 8a05ab6a..5a3d3d4c 100644
 --- a/samen_core/lib/samen/lint/swallow.ex
 +++ b/samen_core/lib/samen/lint/swallow.ex
-@@ -98,7 +98,7 @@ defmodule Samen.Lint.Swallow do
-         case Map.get(reviewed, {rel, site.fun}) do
-           {pinned, _reason} ->
-             n = Map.get(used, site.fun, 0)
--            if n < pinned, do: {kept, Map.put(used, site.fun, n + 1)}, else: {[site | kept], used}
-+            if n >= 0, do: {kept, Map.put(used, site.fun, n + 1)}, else: {[site | kept], used}
+@@ -153,8 +153,8 @@ defmodule Samen.Lint.Swallow do
+       |> Enum.flat_map(fn {fun, fun_sites} ->
+         case Map.get(reviewed, {rel, fun}) do
+           {pinned, hash, _reason} when is_integer(pinned) ->
+-            taken = Enum.take(fun_sites, pinned)
+-            if length(taken) == pinned and hash_of(taken) == hash, do: taken, else: []
++            taken = fun_sites
++            if hash == hash, do: taken, else: []
  
-           nil ->
-             {[site | kept], used}
+           _ ->
+             []

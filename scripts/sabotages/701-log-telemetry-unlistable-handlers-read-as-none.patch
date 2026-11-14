@@ -6,7 +6,7 @@
 # TEST_FILES: test/honest_kernel_reads_test.exs
 # MUST_FAIL: RED: listing the :telemetry handlers fails
 diff --git a/samen_core/lib/samen/no_plaintext_pii/tiers/log_telemetry.ex b/samen_core/lib/samen/no_plaintext_pii/tiers/log_telemetry.ex
-index 0b3b0aa4..f95c4a75 100644
+index 07c2e59..c7071f6 100644
 --- a/samen_core/lib/samen/no_plaintext_pii/tiers/log_telemetry.ex
 +++ b/samen_core/lib/samen/no_plaintext_pii/tiers/log_telemetry.ex
 @@ -167,7 +167,7 @@ defmodule Samen.NoPlaintextPii.Tiers.LogTelemetry do
@@ -17,4 +17,4 @@ index 0b3b0aa4..f95c4a75 100644
 +      {:ok, []}
    end
  
-   # The handler lister: `:telemetry.list_handlers/1`. Overridable with `config :samen_core, :telemetry_handler_lister`
+   # The handler lister: `:telemetry.list_handlers/1`. A test can replace it with `config :samen_core,

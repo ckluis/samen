@@ -10,11 +10,25 @@
 # TEST_FILES: test/reveal_approver_test.exs
 # MUST_FAIL: a self-approval is refused with :self_approval
 # APPLY: git apply scripts/sabotages/187-pp13-reveal-approver-distinct-party-self-approval-policy-drop.patch
+diff --git a/samen_core/lib/samen/approvals.ex b/samen_core/lib/samen/approvals.ex
+index a64ee3cb..5473b96e 100644
+--- a/samen_core/lib/samen/approvals.ex
++++ b/samen_core/lib/samen/approvals.ex
+@@ -202,7 +202,7 @@ defmodule Samen.Approvals do
+ 
+         # POLICY LAYER (§4.2 layer 1): refuse self-decision before touching the DB, write
+         # a refusal audit, leave the approval pending. The DB CHECK (layer 2) is the twin.
+-        decided_by == to_actor_id(approval.requested_by) ->
++        decided_by == to_actor_id(approval.requested_by) and false ->
+           _ = audit(repo, approval, "approval_self_decide_refused", decided_by)
+           {:error, :self_approval}
+ 
 diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+index 774a20a7..cc624210 100644
 --- a/samen_core/lib/samen/reveal/grants.ex
 +++ b/samen_core/lib/samen/reveal/grants.ex
-@@ -208,7 +208,7 @@
-
+@@ -222,7 +222,7 @@ defmodule Samen.Reveal.Grants do
+ 
      # POLICY-LAYER distinct-party check (clause (b), layer 1). The DB CHECK is
      # layer 2 and would also reject a self-approval insert.
 -    if granted_by == req.requestor_id do
@@ -22,16 +36,3 @@ diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal
        write_audit(r, %{
          event: "denied",
          subject_id: req.subject_id,
-diff --git a/samen_core/lib/samen/approvals.ex b/samen_core/lib/samen/approvals.ex
---- a/samen_core/lib/samen/approvals.ex
-+++ b/samen_core/lib/samen/approvals.ex
-@@ -200,7 +200,7 @@
-           {:error, :not_pending}
-
-         # POLICY LAYER (§4.2 layer 1): refuse self-decision before touching the DB, write
-         # a refusal audit, leave the approval pending. The DB CHECK (layer 2) is the twin.
--        decided_by == to_actor_id(approval.requested_by) ->
-+        decided_by == to_actor_id(approval.requested_by) and false ->
-           audit(repo, approval, "approval_self_decide_refused", decided_by)
-           {:error, :self_approval}
-

@@ -6,15 +6,15 @@
 # TEST_FILES: test/honest_kernel_reads_test.exs
 # MUST_FAIL: RED: the probe fails -> the write fails
 diff --git a/samen_core/lib/samen/audit_chain/writer.ex b/samen_core/lib/samen/audit_chain/writer.ex
-index 516b6f46..e0a9de91 100644
+index c0efaf04..e02d4e7f 100644
 --- a/samen_core/lib/samen/audit_chain/writer.ex
 +++ b/samen_core/lib/samen/audit_chain/writer.ex
-@@ -104,7 +104,7 @@ defmodule Samen.AuditChain.Writer do
-     case aud_chain_exists?(repo, get(chain_attrs, :org_id)) do
-       {:ok, true} -> AuditChain.append(chain_attrs, repo: repo)
-       {:ok, false} -> {:skip, :aud_chain_absent}
--      {:error, :unavailable} -> {:error, :audit_chain_unavailable}
-+      {:error, :unavailable} -> {:skip, :aud_chain_absent}
-     end
+@@ -134,7 +134,7 @@ defmodule Samen.AuditChain.Writer do
+   rescue
+     e ->
+       Samen.Observability.Failure.report(:audit_chain_probe, org_id, e)
+-      {:error, :audit_chain_unavailable}
++      {:ok, false}
    end
  
+   defp occurred_at(attrs) do
