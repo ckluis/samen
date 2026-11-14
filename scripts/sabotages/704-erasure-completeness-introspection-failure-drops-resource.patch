@@ -5,6 +5,19 @@
 # APP: samen_core
 # TEST_FILES: test/honest_kernel_reads_test.exs
 # MUST_FAIL: RED: discovery over a non-resource raises
+diff --git a/samen_core/lib/samen/derived_linkable.ex b/samen_core/lib/samen/derived_linkable.ex
+index 03811539..ce9d20a0 100644
+--- a/samen_core/lib/samen/derived_linkable.ex
++++ b/samen_core/lib/samen/derived_linkable.ex
+@@ -122,6 +122,8 @@ defmodule Samen.DerivedLinkable do
+     |> Enum.filter(fn attr ->
+       attr.type in [:string, :ci_string, Ash.Type.String, Ash.Type.CiString]
+     end)
++  rescue
++    _ -> []
+   end
+ 
+   defp table(resource), do: AshPostgres.DataLayer.Info.table(resource)
 diff --git a/samen_core/lib/samen/erasure/completeness.ex b/samen_core/lib/samen/erasure/completeness.ex
 index 2c3ceb48..746f2aff 100644
 --- a/samen_core/lib/samen/erasure/completeness.ex
