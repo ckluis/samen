@@ -176,6 +176,32 @@ defmodule Demo.MarketingConsentLedgerTest do
     end
   end
 
+  describe "a withdrawal that the ledger layer rejects before the database (an unusable event resource)" do
+    # Postgres already aborts a transaction whose ledger INSERT failed, so that case fails regardless of what
+    # `ConsentChange` returns. This is the case it alone decides: the append raises before reaching the database.
+    defp unsubscribe_with(sub, event_resource) do
+      cs = Ash.Changeset.for_update(sub, :update, %{status: :unsubscribed})
+      cs = Samen.Marketing.ConsentChange.change(cs, [event_resource: event_resource], %{})
+      Ash.update(cs, authorize?: false)
+    end
+
+    test "RED: a :withdrawn append that cannot be built refuses the unsubscribe (nothing commits)" do
+      org = mk_org("consent-withdraw-unusable")
+
+      {:ok, sub} =
+        Subscriber
+        |> Ash.Changeset.for_create(:create, %{org_id: org.id, email: "wd-unusable@marketing.example", status: :active, consent_at: DateTime.utc_now()})
+        |> Ash.create(authorize?: false)
+
+      log = ExUnit.CaptureLog.capture_log(fn -> assert {:error, _} = unsubscribe_with(sub, String) end)
+      assert log =~ "read=consent_change_"
+      assert %{status: :active} = Ash.get!(Subscriber, sub.id, authorize?: false)
+
+      # POSITIVE CONTROL: with a usable event resource the same update lands
+      assert {:ok, %{status: :unsubscribed}} = unsubscribe_with(sub, @event_resource)
+    end
+  end
+
   test "the ledger row carries NO plaintext PII (subject_hash is a one-way handle)" do
     org = mk_org("consent-nopii")
     email = "nopii@marketing.example"
