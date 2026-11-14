@@ -650,8 +650,10 @@ defmodule Samen.AudEventDefaultPartitionTest do
     end
 
     test "the down guard + DROP never deadlock with a concurrent audited write: the WRITER is not the victim" do
-      # the migration's down committed the DROP: put the DEFAULT back for the tests that follow
-      on_exit(fn -> Repo.query!(PartitionManager.default_partition_sql()) end)
+      # the migration's down commits the DROP: put the DEFAULT back for the tests that follow, but only if the
+      # database HAD one (a sabotaged migration that never created it must stay without, whatever order tests run in)
+      had_default? = Repo.query!("SELECT to_regclass('aud_event_default') IS NOT NULL").rows == [[true]]
+      on_exit(fn -> if had_default?, do: Repo.query!(PartitionManager.default_partition_sql()) end)
       test = self()
 
       migration =
