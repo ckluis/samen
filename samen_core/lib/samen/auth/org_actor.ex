@@ -149,7 +149,7 @@ defmodule Samen.Auth.OrgActor do
     |> Ash.Query.filter(credential_id == ^credential_id and org_id == ^org_id)
     |> Ash.Query.ensure_selected([:id, :org_id])
     |> Ash.Query.limit(1)
-    |> read_result()
+    |> Ash.read(authorize?: false)
   end
 
   defp find_membership(mods, user_id, org_id) do
@@ -157,13 +157,6 @@ defmodule Samen.Auth.OrgActor do
     |> Ash.Query.filter(user_id == ^user_id and org_id == ^org_id)
     |> Ash.Query.ensure_selected([:id, :role])
     |> Ash.Query.limit(1)
-    |> read_result()
-  end
-
-  defp read_result(query) do
-    case Ash.read(query, authorize?: false) do
-      {:ok, rows} -> {:ok, rows}
-      {:error, reason} -> {:error, reason}
-    end
+    |> Ash.read(authorize?: false)
   end
 end

@@ -75,13 +75,14 @@ defmodule Samen.UI.State do
   attr :retry_event, :string, default: nil
   attr :retry_label, :string, default: "Try again"
   attr :class, :any, default: nil
+  attr :rest, :global
 
   def error_state(assigns) do
     assigns =
       assign(assigns, :class_attr, Enum.join(["card", "error-state"] ++ List.wrap(assigns.class), " "))
 
     ~H"""
-    <div class={@class_attr} role="alert">
+    <div class={@class_attr} role="alert" {@rest}>
       <div class="error-icon" aria-hidden="true">!</div>
       <h3 class="error-title">{@title}</h3>
       <p :if={@body} class="error-body">{@body}</p>
@@ -91,6 +92,29 @@ defmodule Samen.UI.State do
         </button>
       </div>
     </div>
+    """
+  end
+
+  @doc """
+  The error state for a failed READ pane (`Samen.Web.Reads.Guard` kind `:unavailable | :forbidden`): outage copy with a
+  retry button, or denial copy and NO retry for `:forbidden` (retrying will not help). `retry` is the LiveView event the
+  button fires; `body` overrides the copy. Replaces the per-vertical `error_body/1` + `retry_for/1` pair
+  (cookbook Recipe 11).
+  """
+  attr :kind, :any, required: true
+  attr :retry, :string, default: nil
+  attr :body, :string, default: nil
+  attr :title, :string, default: "Something went wrong"
+  attr :rest, :global
+
+  def read_error(assigns) do
+    assigns =
+      assigns
+      |> assign(:copy, assigns.body || Samen.Web.Reads.Guard.error_body(assigns.kind))
+      |> assign(:retry_event, assigns.retry && Samen.Web.Reads.Guard.retry_event(assigns.kind, assigns.retry))
+
+    ~H"""
+    <.error_state title={@title} body={@copy} retry_event={@retry_event} {@rest} />
     """
   end
 

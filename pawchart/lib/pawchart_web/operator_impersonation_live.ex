@@ -45,6 +45,8 @@ defmodule PawChartWeb.OperatorImpersonationLive do
   alias Samen.Web.Operator.Impersonation, as: OperatorGate
   alias Samen.Web.Reads.Guard
 
+  import Samen.UI, only: [error_state: 1, read_error: 1]
+
   @impl true
   def mount(params, session, socket) do
     # ADOPT the framework identity path (do not fork it): `assign_mount/2` rebuilds the
@@ -80,11 +82,7 @@ defmodule PawChartWeb.OperatorImpersonationLive do
       {:ok, actor, info} ->
         # The roster reads through its tagged result: a failed read is an error state with a retry, never an
         # empty patient table under a live "masked impersonation" banner.
-        {patients, patients_error} =
-          case patient_roster_result(OperatorGate.read_scope(actor)) do
-            {:ok, rows} -> {rows, nil}
-            {:error, kind} -> {[], kind}
-          end
+        {patients, patients_error} = Guard.pane(patient_roster_result(OperatorGate.read_scope(actor)), [])
 
         assign(socket,
           impersonating: true,
@@ -220,10 +218,12 @@ defmodule PawChartWeb.OperatorImpersonationLive do
       <h1>PawChart Ops · masked impersonation</h1>
 
       <%= if @session_inactive and @gate_unavailable do %>
-        <div id="gate-unavailable" role="alert">
-          <div style="color:#B42318;font-weight:600">We couldn't check access right now.</div>
-          <p>Nothing was opened and nothing is shown. Nothing was lost — try again.</p>
-          <button type="button" phx-click="retry_gate">Try again</button>
+        <div id="gate-unavailable">
+          <.error_state
+            title="We couldn't check access right now."
+            body="Nothing was opened and nothing is shown. Nothing was lost — try again."
+            retry_event="retry_gate"
+          />
         </div>
       <% end %>
       <%= if @session_inactive and not @gate_unavailable do %>
@@ -251,13 +251,7 @@ defmodule PawChartWeb.OperatorImpersonationLive do
           <span :if={@session_info} id="session-expiry">Session expires: {@session_info.expires_at}</span>
         </div>
 
-        <div :if={@patients_error} id="patients-error" role="alert" class="error-state">
-          <div style="color:#B42318;font-weight:600">
-            {if @patients_error == :forbidden, do: Guard.message(:forbidden), else: "We couldn't load this right now."}
-          </div>
-          <p :if={@patients_error != :forbidden}>Nothing was lost — try again.</p>
-          <button :if={@patients_error != :forbidden} type="button" phx-click="retry_gate">Try again</button>
-        </div>
+        <.read_error :if={@patients_error} id="patients-error" kind={@patients_error} body={Guard.message(@patients_error)} retry="retry_gate" />
         <table :if={is_nil(@patients_error)}>
           <thead>
             <tr><th>Owner</th><th>Emails</th><th>Phones</th><th>Marketing</th></tr>

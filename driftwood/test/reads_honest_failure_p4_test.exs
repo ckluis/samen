@@ -451,6 +451,53 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
   end
 
   # ===========================================================================
+  # Form submits: a constraint the DB refuses is a field error, not an outage
+  # ===========================================================================
+
+  describe "form submit classification" do
+    # SameOrgFk already refuses a carrier/load that is missing or cross-org BEFORE the insert, so these swap the real
+    # foreign key for one that refuses every row (same constraint NAME, NOT VALID so existing rows are untouched): a
+    # carrier that passes the same-org check and is then refused by the DATABASE. If Ash did not map the FK it would
+    # arrive as an `Ash.Error.Unknown`, which `Guard.submit_form/4` (rightly) calls an outage that retrying never fixes.
+    defp refuse_fk!(table, column, constraint) do
+      ddl!("CREATE TABLE zz_fk_empty_#{column} (id uuid PRIMARY KEY)")
+      ddl!("ALTER TABLE #{table} DROP CONSTRAINT #{constraint}")
+      ddl!("ALTER TABLE #{table} ADD CONSTRAINT #{constraint} FOREIGN KEY (#{column}) REFERENCES zz_fk_empty_#{column}(id) NOT VALID")
+    end
+
+    defp submit(resource, params) do
+      scope = BrokerLive.broker_scope(@org)
+
+      resource
+      |> AshPhoenix.Form.for_create(:create, scope: scope)
+      |> then(&Samen.Web.Reads.Guard.submit_form(:p4_fk_probe, scope, &1, Map.put(params, "org_id", @org)))
+    end
+
+    test "drv_driver.carrier_id: the DB's foreign-key refusal is a validation error on the form (and a valid one saves)" do
+      {:ok, carrier} = Driftwood.Crm.Company |> Ash.Changeset.for_create(:create, %{org_id: @org, name: "FK Carrier"}, scope: BrokerLive.broker_scope(@org)) |> Ash.create(scope: BrokerLive.broker_scope(@org))
+      params = %{"full_name" => %{"first" => "Fk", "last" => "Driver"}, "cdl_number" => "CDL-FK-1", "cdl_state" => "TX", "status" => "available", "carrier_id" => carrier.id}
+
+      # POSITIVE CONTROL: the real FK accepts a real carrier
+      assert {:ok, _} = submit(Driftwood.Freight.Driver, params)
+
+      refuse_fk!("drv_driver", "drv_carrier_id", "drv_driver_drv_carrier_id_fkey")
+      assert {:error, %AshPhoenix.Form{} = form} = submit(Driftwood.Freight.Driver, params)
+      assert [%Ash.Error.Changes.InvalidAttribute{field: :carrier_id}] = form.source.errors
+    end
+
+    test "stl_settlement.load_id: the DB's foreign-key refusal is a validation error on the form (and a valid one saves)" do
+      load = seeded_load()
+      params = %{"load_id" => load.id}
+
+      assert {:ok, _} = submit(Driftwood.Freight.Settlement, params)
+
+      refuse_fk!("stl_settlement", "stl_load_id", "stl_settlement_stl_load_id_fkey")
+      assert {:error, %AshPhoenix.Form{} = form} = submit(Driftwood.Freight.Settlement, params)
+      assert [%Ash.Error.Changes.InvalidAttribute{field: :load_id}] = form.source.errors
+    end
+  end
+
+  # ===========================================================================
   # Operator impersonation console: panes fail alone, the gate and the reveal fail closed
   # ===========================================================================
 

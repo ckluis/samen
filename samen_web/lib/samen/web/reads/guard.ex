@@ -146,6 +146,91 @@ defmodule Samen.Web.Reads.Guard do
     end
   end
 
+  @doc """
+  Submit an `AshPhoenix.Form` as the write called `name` (cookbook Recipe 11) and classify the outcome:
+
+    * `{:ok, record}` — saved;
+    * `{:error, form}` — a REAL refusal (validation / policy changeset errors): the form re-renders with its field
+      errors, unchanged from calling `AshPhoenix.Form.submit/2` directly;
+    * `{:error, :unavailable}` — the write itself failed. A data-layer outage reaches a form as an
+      `Ash.Error.Unknown` / `Ash.Error.Framework` on its changeset, which the field errors would render as a validation
+      message ("is invalid") — it is an outage (logged by name and exception module, nothing saved), so the screen
+      says "couldn't save — nothing was saved, try again" via `write_copy/2`;
+    * `{:error, :forbidden}` — an `Ash.Error.Forbidden`: denial copy, not field errors.
+
+  A DB constraint the resource does not map (a foreign key, a unique index) also arrives as an `Ash.Error.Unknown`: that
+  is a refusal retrying never fixes, so declare the constraint on the resource (`references`/`identity` with an
+  `error_message`) and it surfaces as a field error instead of this outage.
+  """
+  @spec submit_form(atom(), term(), term(), map()) :: {:ok, term()} | {:error, term()}
+  def submit_form(name, scope, form, params) when is_atom(name) do
+    write(name, scope, fn ->
+      case AshPhoenix.Form.submit(form, params: params) do
+        {:error, failed} = error ->
+          case form_failure_class(failed) do
+            %Ash.Error.Unknown{} = class -> {:error, class}
+            %Ash.Error.Framework{} = class -> {:error, class}
+            %Ash.Error.Forbidden{} -> {:error, :forbidden}
+            _ -> error
+          end
+
+        other ->
+          other
+      end
+    end)
+  end
+
+  defp form_failure_class(%Phoenix.HTML.Form{source: source}), do: form_failure_class(source)
+
+  defp form_failure_class(%AshPhoenix.Form{source: %{errors: errors}}) when errors != [],
+    do: Ash.Error.to_error_class(errors)
+
+  defp form_failure_class(_), do: nil
+
+  @doc """
+  Split a `result/1` into `{value, error}` for one pane: `{value, nil}`, or `{default, :unavailable | :forbidden}`.
+  """
+  @spec pane(result(t), t) :: {t, failure() | nil} when t: term()
+  def pane({:ok, value}, _default), do: {value, nil}
+  def pane({:error, kind}, default), do: {default, kind}
+
+  @doc "Value-free copy for a failed pane read: outage copy, or denial copy for `:forbidden`."
+  @spec error_body(failure() | true) :: String.t()
+  def error_body(:forbidden), do: "You don't have access to view this."
+  def error_body(_kind), do: message()
+
+  @doc "The retry event for a failed pane read: none for a denial (retrying will not help)."
+  @spec retry_event(failure() | true, String.t()) :: String.t() | nil
+  def retry_event(:forbidden, _event), do: nil
+  def retry_event(_kind, event), do: event
+
+  @doc """
+  Value-free copy for a failed WRITE of kind `kind` (`write/3` / `submit_form/4`): "Couldn't <what> right now.
+  Nothing was changed — try again." for an outage, "You don't have permission to <what>." for a denial.
+  """
+  @spec write_copy(failure() | true, String.t()) :: String.t()
+  def write_copy(:forbidden, what), do: "You don't have permission to #{what}."
+  def write_copy(_kind, what), do: "Couldn't #{what} right now. Nothing was changed — try again."
+
+  @doc """
+  Cast a client-supplied id to a canonical UUID: `{:ok, uuid}` or `{:error, :not_found}` — a malformed id is "not
+  found" (no query, no error log), never an outage.
+  """
+  @spec cast_id(term()) :: {:ok, String.t()} | {:error, :not_found}
+  def cast_id(id) when is_binary(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> {:ok, uuid}
+      :error -> {:error, :not_found}
+    end
+  end
+
+  def cast_id(_), do: {:error, :not_found}
+
+  @doc "The first row of a successful read as `{:ok, row}`, or `{:error, :not_found}` — an honest absence."
+  @spec first_or_not_found([t]) :: {:ok, t} | {:error, :not_found} when t: term()
+  def first_or_not_found([row | _]), do: {:ok, row}
+  def first_or_not_found(_), do: {:error, :not_found}
+
   @doc "The empty page a failed read returns (`error: :unavailable` unless it was a denial)."
   @spec failed_page(map(), failure()) :: Page.t()
   def failed_page(state, kind) do

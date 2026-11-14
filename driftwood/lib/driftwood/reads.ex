@@ -119,7 +119,7 @@ defmodule Driftwood.Reads do
   @spec get_driver_result(term(), term()) ::
           {:ok, struct()} | {:error, :not_found | :unavailable | :forbidden}
   def get_driver_result(scope, id) do
-    with {:ok, id} <- cast_id(id),
+    with {:ok, id} <- Guard.cast_id(id),
          {:ok, rows} <-
            Guard.run(:driftwood_get_driver, scope, fn ->
              Driftwood.Freight.Driver
@@ -137,21 +137,9 @@ defmodule Driftwood.Reads do
              |> Ash.read!(scope: scope)
              |> resolve_pii(scope)
            end) do
-      first_or_not_found(rows)
+      Guard.first_or_not_found(rows)
     end
   end
-
-  defp cast_id(id) when is_binary(id) do
-    case Ecto.UUID.cast(id) do
-      {:ok, uuid} -> {:ok, uuid}
-      :error -> {:error, :not_found}
-    end
-  end
-
-  defp cast_id(_), do: {:error, :not_found}
-
-  defp first_or_not_found([row | _]), do: {:ok, row}
-  defp first_or_not_found(_), do: {:error, :not_found}
 
   @doc """
   T158 — fetch ONE settlement by id for `scope`, the RAW (un-reshaped) resource —
@@ -173,7 +161,7 @@ defmodule Driftwood.Reads do
   @spec get_settlement_result(term(), term()) ::
           {:ok, struct()} | {:error, :not_found | :unavailable | :forbidden}
   def get_settlement_result(scope, id) do
-    with {:ok, id} <- cast_id(id),
+    with {:ok, id} <- Guard.cast_id(id),
          {:ok, row} <-
            Guard.run(:driftwood_get_settlement, scope, fn ->
              Driftwood.Freight.Settlement
@@ -181,7 +169,7 @@ defmodule Driftwood.Reads do
              |> Ash.Query.limit(1)
              |> Ash.read_one!(scope: scope)
            end) do
-      first_or_not_found(List.wrap(row))
+      Guard.first_or_not_found(List.wrap(row))
     end
   end
 
@@ -193,7 +181,7 @@ defmodule Driftwood.Reads do
   @spec get_load_result(term(), term()) ::
           {:ok, struct()} | {:error, :not_found | :unavailable | :forbidden}
   def get_load_result(scope, id) do
-    with {:ok, id} <- cast_id(id),
+    with {:ok, id} <- Guard.cast_id(id),
          {:ok, row} <-
            Guard.run(:driftwood_get_load, scope, fn ->
              Driftwood.Crm.Opportunity
@@ -201,7 +189,7 @@ defmodule Driftwood.Reads do
              |> Ash.Query.limit(1)
              |> Ash.read_one!(scope: scope)
            end) do
-      first_or_not_found(List.wrap(row))
+      Guard.first_or_not_found(List.wrap(row))
     end
   end
 

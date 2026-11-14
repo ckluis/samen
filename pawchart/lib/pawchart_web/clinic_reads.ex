@@ -108,7 +108,7 @@ defmodule PawChartWeb.ClinicReads do
   """
   @spec get_owner_result(term(), term()) :: {:ok, struct()} | {:error, :not_found | :unavailable | :forbidden}
   def get_owner_result(scope, id) do
-    with {:ok, id} <- cast_id(id),
+    with {:ok, id} <- Guard.cast_id(id),
          {:ok, rows} <-
            Guard.run(:pawchart_get_owner, scope, fn ->
              Patient
@@ -118,7 +118,7 @@ defmodule PawChartWeb.ClinicReads do
              |> Ash.read!(scope: scope)
              |> resolve_pii(Patient, scope)
            end) do
-      first_or_not_found(rows)
+      Guard.first_or_not_found(rows)
     end
   end
 
@@ -200,7 +200,7 @@ defmodule PawChartWeb.ClinicReads do
     # Both reads must SUCCEED before anything is written: the form edits only the FIRST email/phone and
     # merges it into the stored lists (F06), so a failed read of the stored lists must never degrade into
     # "no stored lists" (that would overwrite the owner's other emails/phones with just the one typed).
-    with {:ok, id} <- cast_id(id),
+    with {:ok, id} <- Guard.cast_id(id),
          {:ok, owner} <- fetch_result(Patient, scope, id, :pawchart_fetch_owner),
          {:ok, existing} <- get_owner_result(scope, id) do
       Guard.write(:pawchart_update_owner, scope, fn ->
@@ -234,7 +234,7 @@ defmodule PawChartWeb.ClinicReads do
   def update_pet(org_id, id, params) when is_binary(org_id) and is_binary(id) and is_map(params) do
     scope = tenant_scope(org_id)
 
-    with {:ok, id} <- cast_id(id),
+    with {:ok, id} <- Guard.cast_id(id),
          {:ok, pet} <- fetch_result(Pet, scope, id, :pawchart_fetch_pet) do
       Guard.write(:pawchart_update_pet, scope, fn ->
         pet
@@ -278,21 +278,9 @@ defmodule PawChartWeb.ClinicReads do
              |> Ash.Query.limit(1)
              |> Ash.read_one!(scope: scope)
            end) do
-      first_or_not_found(List.wrap(row))
+      Guard.first_or_not_found(List.wrap(row))
     end
   end
-
-  defp cast_id(id) when is_binary(id) do
-    case Ecto.UUID.cast(id) do
-      {:ok, uuid} -> {:ok, uuid}
-      :error -> {:error, :not_found}
-    end
-  end
-
-  defp cast_id(_), do: {:error, :not_found}
-
-  defp first_or_not_found([row | _]), do: {:ok, row}
-  defp first_or_not_found(_), do: {:error, :not_found}
 
   # `existing` is nil on create (the form value IS the list) and the plane-resolved patient on
   # update (the form value replaces the first entry, the tail is kept). When the stored list is

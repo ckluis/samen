@@ -49,6 +49,7 @@ defmodule PawChartWeb.ClinicLive do
   alias PawChartWeb.ClinicReads, as: Reads
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   # PP-4 (Batch 5b) — the `:host_nav_extra` mount-label DATA (`Samen.UI.host_nav_extra/1`,
   # wired at `@current_org_labels` in the router) so the "Clinic" group renders on EVERY
@@ -101,8 +102,8 @@ defmodule PawChartWeb.ClinicLive do
     scope = Mount.scope(socket.assigns.samen_mount, org_id)
     # Each pane reads through its tagged `_result` and fails ALONE: a failed roster is the kit error state
     # with a retry in that pane, never "No patients yet." (whose CTA would invite a duplicate patient).
-    {owners, owners_error} = pane(Reads.owner_roster_result(scope))
-    {pets, pets_error} = pane(Reads.pet_roster_result(scope))
+    {owners, owners_error} = Guard.pane(Reads.owner_roster_result(scope), [])
+    {pets, pets_error} = Guard.pane(Reads.pet_roster_result(scope), [])
     patient = Map.get(params, "patient")
     selected = select_owner(scope, patient)
 
@@ -123,18 +124,6 @@ defmodule PawChartWeb.ClinicLive do
     )
   end
 
-  defp pane({:ok, value}), do: {value, nil}
-  defp pane({:error, kind}), do: {[], kind}
-
-  defp error_body(:forbidden), do: "You don't have access to view this."
-  defp error_body(_kind), do: Samen.Web.Reads.Guard.message()
-
-  defp retry_for(:forbidden), do: nil
-  defp retry_for(_kind), do: "retry_load"
-
-  defp write_copy(:forbidden, what), do: "You don't have permission to #{what}."
-  defp write_copy(_kind, what), do: "Couldn't #{what} right now. Nothing was changed — try again."
-
   # An org-scoped fetch — a cross-org id is INVISIBLE under OrgScope, so it resolves to the
   # honest "not found" (nil selection), never another clinic's patient.
   @no_selection %{owner: nil, error: nil, pets: [], pets_error: nil}
@@ -145,7 +134,7 @@ defmodule PawChartWeb.ClinicLive do
   defp select_owner(scope, owner_id) do
     case Reads.get_owner_result(scope, owner_id) do
       {:ok, owner} ->
-        {pets, pets_error} = pane(Reads.pets_for_owner_result(scope, owner_id))
+        {pets, pets_error} = Guard.pane(Reads.pets_for_owner_result(scope, owner_id), [])
         %{owner: owner, error: nil, pets: pets, pets_error: pets_error}
 
       # A patient that is not in this clinic (cross-org, deleted, malformed id) is the honest "nothing selected".
@@ -198,7 +187,7 @@ defmodule PawChartWeb.ClinicLive do
         {:noreply, assign(socket, owner_error: "Patient not found in this clinic.")}
 
       {:error, kind} ->
-        {:noreply, put_flash(socket, :error, write_copy(kind, "open that patient"))}
+        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "open that patient"))}
     end
   end
 
@@ -230,7 +219,7 @@ defmodule PawChartWeb.ClinicLive do
 
       # An outage / denial is NOT "a first and last name are required" — and the typed values stay in the form.
       {:error, kind} when kind in [:unavailable, :forbidden] ->
-        {:noreply, assign(socket, owner_error: write_copy(kind, "save that patient"), owner_form: params)}
+        {:noreply, assign(socket, owner_error: Guard.write_copy(kind, "save that patient"), owner_form: params)}
 
       {:error, :not_found} ->
         {:noreply, assign(socket, owner_error: "Patient not found in this clinic.", owner_form: params)}
@@ -247,7 +236,7 @@ defmodule PawChartWeb.ClinicLive do
   # The pet form's owner picker is the patient list: with that list unavailable the form would offer only
   # "— unassigned —" and save an ownerless pet, so it does not open until the list loads.
   def handle_event("new_pet", _params, %{assigns: %{owners_error: kind}} = socket) when kind != nil do
-    {:noreply, put_flash(socket, :error, write_copy(kind, "open the pet form (the patient list did not load)"))}
+    {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "open the pet form (the patient list did not load)"))}
   end
 
   def handle_event("new_pet", params, socket) do
@@ -256,7 +245,7 @@ defmodule PawChartWeb.ClinicLive do
   end
 
   def handle_event("edit_pet", _params, %{assigns: %{owners_error: kind}} = socket) when kind != nil do
-    {:noreply, put_flash(socket, :error, write_copy(kind, "open the pet form (the patient list did not load)"))}
+    {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "open the pet form (the patient list did not load)"))}
   end
 
   def handle_event("edit_pet", %{"id" => id}, socket) do
@@ -293,7 +282,7 @@ defmodule PawChartWeb.ClinicLive do
          |> reload()}
 
       {:error, kind} when kind in [:unavailable, :forbidden] ->
-        {:noreply, assign(socket, pet_error: write_copy(kind, "save that pet"), pet_form: params)}
+        {:noreply, assign(socket, pet_error: Guard.write_copy(kind, "save that pet"), pet_form: params)}
 
       {:error, :not_found} ->
         {:noreply, assign(socket, pet_error: "Pet not found in this clinic.", pet_form: params)}
@@ -334,7 +323,7 @@ defmodule PawChartWeb.ClinicLive do
             </p>
 
             <%!-- Selected patient detail (via ?patient=<id>): a FAILED read of it is an error, not "no selection" --%>
-            <.error_state :if={@selected_error} title="This patient didn't load" body={error_body(@selected_error)} retry_event={retry_for(@selected_error)} />
+            <.read_error :if={@selected_error} title="This patient didn't load" kind={@selected_error} retry="retry_load" />
             <section :if={@selected_owner} id="patient-detail" class="card" style="padding:16px 18px;display:flex;flex-direction:column;gap:12px">
               <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
                 <h3 style="margin:0;font-size:14px;font-weight:650" class="owner-detail-name">{owner_name(@selected_owner)}</h3>
@@ -355,7 +344,7 @@ defmodule PawChartWeb.ClinicLive do
               </div>
               <%= cond do %>
               <% @selected_pets_error -> %>
-                <.error_state body={error_body(@selected_pets_error)} retry_event={retry_for(@selected_pets_error)} />
+                <.read_error kind={@selected_pets_error} retry="retry_load" />
               <% @selected_pets == [] -> %>
                 <.empty_state class="owner-pets-empty" icon="🐾" title="No pets on file for this patient yet." />
               <% true -> %>
@@ -386,7 +375,7 @@ defmodule PawChartWeb.ClinicLive do
               </div>
               <%= cond do %>
               <% @owners_error -> %>
-                <.error_state body={error_body(@owners_error)} retry_event={retry_for(@owners_error)} />
+                <.read_error kind={@owners_error} retry="retry_load" />
               <% @owners == [] -> %>
                 <.empty_state
                   class="patients-empty"
@@ -426,7 +415,7 @@ defmodule PawChartWeb.ClinicLive do
               </div>
               <%= cond do %>
               <% @pets_error -> %>
-                <.error_state body={error_body(@pets_error)} retry_event={retry_for(@pets_error)} />
+                <.read_error kind={@pets_error} retry="retry_load" />
               <% @pets == [] -> %>
                 <.empty_state
                   class="pets-empty"

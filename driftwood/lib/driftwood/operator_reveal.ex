@@ -82,7 +82,7 @@ defmodule Driftwood.OperatorReveal do
   # first (a malformed id is `:not_found`, no error log); a read that RAISES is `:unavailable`, never
   # `:not_found`.
   defp masked_cdl(driver_id) do
-    with {:ok, id} <- cast_id(driver_id),
+    with {:ok, id} <- Guard.cast_id(driver_id),
          {:ok, driver} <-
            Guard.run(:driftwood_masked_cdl, nil, fn ->
              Driftwood.Freight.Driver
@@ -97,15 +97,6 @@ defmodule Driftwood.OperatorReveal do
       end
     end
   end
-
-  defp cast_id(id) when is_binary(id) do
-    case Ecto.UUID.cast(id) do
-      {:ok, uuid} -> {:ok, uuid}
-      :error -> {:error, :not_found}
-    end
-  end
-
-  defp cast_id(_), do: {:error, :not_found}
 
   @doc """
   REQUEST a second-party reveal grant for a driver (T149 B5 — the missing entry point). This

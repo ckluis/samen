@@ -124,8 +124,8 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
 
         # Each pane reads through its tagged `_result` and fails ALONE: a failed roster is an error state
         # in the roster pane (the load board still renders), never "0 drivers".
-        {drivers, drivers_error} = pane(Reads.driver_roster_result(scope))
-        {loads, loads_error} = pane(Reads.load_board_result(scope))
+        {drivers, drivers_error} = Guard.pane(Reads.driver_roster_result(scope), [])
+        {loads, loads_error} = Guard.pane(Reads.load_board_result(scope), [])
         {windows, windows_error} = windows(operator_id, now)
 
         assign(socket,
@@ -225,15 +225,6 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
   defp windows_retry_at(nil, _now), do: nil
   defp windows_retry_at(_error, now), do: DateTime.add(now, @windows_retry_s, :second)
 
-  defp pane({:ok, value}), do: {value, nil}
-  defp pane({:error, kind}), do: {[], kind}
-
-  defp pane_body(:forbidden), do: Guard.message(:forbidden)
-  defp pane_body(_kind), do: Guard.message()
-
-  defp pane_retry(:forbidden), do: nil
-  defp pane_retry(_kind), do: "retry_gate"
-
   defp schedule_tick, do: Process.send_after(self(), :tick, @tick_ms)
 
   defp fetch(params, session, key), do: Map.get(params, key) || Map.get(session, key)
@@ -329,13 +320,11 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
 
         <%= if @session_inactive and @gate_unavailable do %>
           <div class="wrap" id="gate-unavailable">
-            <div class="card error-state" role="alert" style="padding:22px 20px">
-              <div style="color:var(--red);font-weight:600">We couldn't check access right now.</div>
-              <p style="color:var(--muted);margin:10px 0 14px;font-size:13px">
-                Nothing was opened and nothing is shown. Nothing was lost — try again.
-              </p>
-              <button type="button" class="btn" phx-click="retry_gate">Try again</button>
-            </div>
+            <.error_state
+              title="We couldn't check access right now."
+              body="Nothing was opened and nothing is shown. Nothing was lost — try again."
+              retry_event="retry_gate"
+            />
           </div>
         <% end %>
         <%= if @session_inactive and not @gate_unavailable do %>
@@ -414,7 +403,7 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
               <span class="lane">· real tenant data, personal fields render ••••</span>
             </div>
 
-            <.error_state :if={@drivers_error} body={pane_body(@drivers_error)} retry_event={pane_retry(@drivers_error)} />
+            <.read_error :if={@drivers_error} kind={@drivers_error} body={Guard.message(@drivers_error)} retry="retry_gate" />
             <.data_table :if={is_nil(@drivers_error)}>
               <:head>
                 <th style="width:26%">Driver</th>
@@ -480,7 +469,7 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
               <span class="lane">· non-PII operational data</span>
             </div>
 
-            <.error_state :if={@loads_error} body={pane_body(@loads_error)} retry_event={pane_retry(@loads_error)} />
+            <.read_error :if={@loads_error} kind={@loads_error} body={Guard.message(@loads_error)} retry="retry_gate" />
             <.data_table :if={is_nil(@loads_error)}>
               <:head>
                 <th style="width:40%">Load</th>
