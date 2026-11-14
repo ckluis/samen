@@ -384,14 +384,37 @@ defmodule Samen.Web.CurrentOrg do
   defp spine_credential_id(_mount, _session), do: :error
 
   defp spine_authorized_org_ids(%Mount{} = mount, credential_id) do
+    case spine_authorized_org_ids_result(mount, credential_id) do
+      {:ok, ids} -> ids
+      # Fail-CLOSED (no authorized orgs ⇒ deny); already reported by name and exception module.
+      {:error, :unavailable} -> []
+    end
+  end
+
+  @doc """
+  The spine's authorized org ids for `credential_id` as a tagged result: `{:ok, ids}` or `{:error, :unavailable}`
+  when the User/Membership read FAILED (reported by `Guard`, by name and exception module) — an outage is not
+  "this credential holds no org". A tenant landing uses it to answer 503 instead of redirecting a logged-in
+  tenant to the operator console.
+  """
+  @spec spine_authorized_org_ids_result(Mount.t() | nil, String.t()) :: Guard.result([String.t()])
+  def spine_authorized_org_ids_result(%Mount{} = mount, credential_id) do
     mount = identity_ns_mount(mount)
     mods = %{user: Mount.resource(mount, User), membership: Mount.resource(mount, Membership)}
-    Samen.Auth.OrgActor.authorized_org_ids(mods, credential_id)
-  rescue
-    e ->
-      # Fail-CLOSED (no authorized orgs ⇒ deny), reported by name and exception module.
-      Guard.report(:current_org_spine_authorized_orgs, nil, e)
-      []
+
+    case Guard.run(:current_org_spine_authorized_orgs, nil, fn ->
+           Samen.Auth.OrgActor.authorized_org_ids_result(mods, credential_id)
+         end) do
+      {:ok, {:ok, ids}} ->
+        {:ok, ids}
+
+      {:ok, {:error, :unavailable}} ->
+        Guard.report(:current_org_spine_authorized_orgs, nil, :unavailable)
+        {:error, :unavailable}
+
+      {:error, _kind} ->
+        {:error, :unavailable}
+    end
   end
 
   @doc """
@@ -468,29 +491,31 @@ defmodule Samen.Web.CurrentOrg do
   Returns `[]` when neither is available (the switcher then hides). Never raises.
   """
   @spec list_orgs(Mount.t() | nil) :: [{String.t(), String.t()}]
-  def list_orgs(%Mount{} = mount) do
+  def list_orgs(mount), do: mount |> list_orgs_result() |> Guard.value([])
+
+  @doc """
+  `list_orgs/1` as a tagged result: `{:ok, orgs}` (an empty list is an honest, unseeded directory) or
+  `{:error, :unavailable}` when the directory read FAILED (reported by `Guard`, by name and exception module).
+  `no_org_card/1` uses it so an outage is never presented as the seed-state card.
+  """
+  @spec list_orgs_result(Mount.t() | nil) :: Guard.result([{String.t(), String.t()}])
+  def list_orgs_result(%Mount{} = mount) do
     case directory_mfa(mount) do
       {mod, fun, args} when is_atom(mod) and is_atom(fun) and is_list(args) ->
-        invoke_directory(mod, fun, args)
+        # The org switcher is navigation chrome: a failing host directory hides it, but the failure is
+        # reported by name and exception module and is distinguishable from an empty directory.
+        Guard.run(:current_org_directory, nil, fn ->
+          apply(mod, fun, args) |> normalize_directory()
+        end)
 
       _ ->
-        operator_directory(mount)
+        Guard.run(:current_org_operator_directory, nil, fn -> operator_directory(mount) end)
     end
   end
 
-  def list_orgs(_), do: []
+  def list_orgs_result(_), do: {:ok, []}
 
   defp directory_mfa(%Mount{} = mount), do: Mount.label(mount, :org_directory, nil)
-
-  defp invoke_directory(mod, fun, args) do
-    apply(mod, fun, args) |> normalize_directory()
-  rescue
-    e ->
-      # The org switcher is navigation chrome: a raising host directory hides it (documented
-      # "never raises"), but the failure is reported by name and exception module.
-      Guard.report(:current_org_directory, nil, e)
-      []
-  end
 
   # An operator/aggregate mount can read its own accounts (each an org row) directly.
   defp operator_directory(%Mount{} = mount) do
@@ -507,10 +532,6 @@ defmodule Samen.Web.CurrentOrg do
         |> then(&Samen.Web.Operator.Reads.account_names(mount, &1))
         |> normalize_directory()
     end
-  rescue
-    e ->
-      Guard.report(:current_org_operator_directory, nil, e)
-      []
   end
 
   defp normalize_directory(list) when is_list(list) do
@@ -904,9 +925,13 @@ defmodule Samen.Web.CurrentOrg do
       assigns
       |> assign(:operator_label, operator_label(assigns[:mount]))
       |> assign(:seed_command, seed_command(assigns[:mount]))
+      |> assign(:directory_down, Guard.unavailable?(list_orgs_result(assigns[:mount])))
 
     ~H"""
-    <div class="wrap">
+    <div :if={@directory_down} class="wrap" id="no-org-unavailable">
+      <Samen.UI.State.error_state title="We couldn't load your workspaces" body={Guard.message()} />
+    </div>
+    <div :if={not @directory_down} class="wrap">
       <div class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
         <div style="font-weight:600;color:#2a2b35;margin-bottom:6px">No tenant accounts yet</div>
         <p style="margin:0 0 10px">

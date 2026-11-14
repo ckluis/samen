@@ -23,6 +23,7 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
   alias Driftwood.Reads
   alias DriftwoodWeb.BrokerLive
   alias DriftwoodWeb.OperatorImpersonationLive, as: OpLive
+  alias Samen.Auth.OrgActor
   alias Samen.Impersonation
   alias Samen.OperatorPlane.Actor
   alias Samen.Reveal.Grants
@@ -595,10 +596,15 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
       |> Samen.Web.Auth.put_session_token(raw_token)
     end
 
-    test "a membership lookup that fails is a 503, not a redirect to the operator console; the healthy path still lands" do
+    defp register_tenant! do
       prev = Application.get_env(:samen_core, :delivery_env)
       Application.put_env(:samen_core, :delivery_env, :test)
-      on_exit(fn -> if prev, do: Application.put_env(:samen_core, :delivery_env, prev), else: Application.delete_env(:samen_core, :delivery_env) end)
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:samen_core, :delivery_env, prev),
+          else: Application.delete_env(:samen_core, :delivery_env)
+      end)
 
       {:ok, tenant} =
         Register.register(
@@ -609,10 +615,37 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
             email: "p4-landing-#{System.unique_integer([:positive])}@example.test",
             password: "correct horse battery staple"
           },
-          %{org: Org, credential: Credential, user: User, membership: Membership, auth_token: AuthToken, repo: Driftwood.Repo}
+          %{
+            org: Org,
+            credential: Credential,
+            user: User,
+            membership: Membership,
+            auth_token: AuthToken,
+            repo: Driftwood.Repo
+          }
         )
 
-      {:ok, _session, raw} = SessionCreate.create(%{session: Session, org: Org, membership: Membership, user: User}, tenant.credential.id)
+      {:ok, _session, raw} =
+        SessionCreate.create(
+          %{session: Session, org: Org, membership: Membership, user: User},
+          tenant.credential.id
+        )
+
+      {tenant, raw}
+    end
+
+    defp landing(raw) do
+      log =
+        capture_log(fn ->
+          send(self(), {:conn, DriftwoodWeb.PageController.index(landing_conn(raw), %{})})
+        end)
+
+      assert_received {:conn, conn}
+      {conn, log}
+    end
+
+    test "a SESSION read that fails is a 503, not a redirect to the operator console; the healthy path still lands" do
+      {tenant, raw} = register_tenant!()
 
       # POSITIVE CONTROL: healthy lookup lands on the tenant's workspace
       ok = DriftwoodWeb.PageController.index(landing_conn(raw), %{})
@@ -620,13 +653,84 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
       assert get_resp_header(ok, "location") == ["/broker?org=#{tenant.org.id}"]
 
       break_select!("dos_session", "dos_token_digest")
-      log = capture_log(fn -> send(self(), {:conn, DriftwoodWeb.PageController.index(landing_conn(raw), %{})}) end)
-      assert_received {:conn, conn}
+      {conn, log} = landing(raw)
 
       assert conn.status == 503
       assert conn.resp_body =~ "couldn't check your workspace"
       assert get_resp_header(conn, "location") == []
       assert log =~ "driftwood_tenant_landing"
+    end
+
+    test "a User/Membership read that fails (the session reads fine) is a 503 and is reported, not the operator console then /login" do
+      {tenant, raw} = register_tenant!()
+
+      # POSITIVE CONTROL: with the User table healthy the same session lands on the tenant's workspace.
+      ok = DriftwoodWeb.PageController.index(landing_conn(raw), %{})
+      assert get_resp_header(ok, "location") == ["/broker?org=#{tenant.org.id}"]
+
+      # Only the org lookup (`authorized_org_ids_result/2` filters on the credential id) needs this column; the
+      # session read behind `resolve_principal/2` does not touch it.
+      break_select!("dou_user", "dou_credential_id")
+      {conn, log} = landing(raw)
+
+      assert conn.status == 503
+      assert get_resp_header(conn, "location") == []
+      assert log =~ "driftwood_tenant_landing"
+    end
+
+    test "OrgActor: a failed org lookup is {:error, :unavailable} (tagged), the legacy shape fails closed AND reports; an unknown credential is an honest {:ok, []}" do
+      {tenant, _raw} = register_tenant!()
+      mods = %{user: User, membership: Membership}
+      credential_id = tenant.credential.id
+      org_id = tenant.org.id
+
+      # POSITIVE CONTROLS
+      assert {:ok, [^org_id]} = OrgActor.authorized_org_ids_result(mods, credential_id)
+      assert [^org_id] = OrgActor.authorized_org_ids(mods, credential_id)
+      assert {:ok, []} = OrgActor.authorized_org_ids_result(mods, Ecto.UUID.generate())
+
+      assert {:ok, %{org_id: ^org_id, role: _}} =
+               OrgActor.resolve_result(mods, credential_id, org_id)
+
+      assert :error = OrgActor.resolve_result(mods, Ecto.UUID.generate(), org_id)
+
+      break_select!("dou_user", "dou_credential_id")
+
+      assert {:error, :unavailable} =
+               quiet(fn -> OrgActor.authorized_org_ids_result(mods, credential_id) end)
+
+      log =
+        capture_log(fn ->
+          send(self(), {:ids, OrgActor.authorized_org_ids(mods, credential_id)})
+        end)
+
+      assert_received {:ids, []}
+      assert log =~ "Samen.Auth.OrgActor"
+      assert log =~ "authorized_org_ids"
+      assert log =~ "Ash.Error"
+      refute log =~ tenant.credential.id
+
+      assert {:error, :unavailable} =
+               quiet(fn -> OrgActor.resolve_result(mods, credential_id, org_id) end)
+
+      log =
+        capture_log(fn ->
+          send(self(), {:resolve, OrgActor.resolve(mods, credential_id, org_id)})
+        end)
+
+      assert_received {:resolve, :error}
+      assert log =~ "read=resolve"
+    end
+
+    test "OrgActor.resolve_result: a failed MEMBERSHIP read is an outage, not a denial" do
+      {tenant, _raw} = register_tenant!()
+      mods = %{user: User, membership: Membership}
+      org_id = tenant.org.id
+
+      break_select!("dom_membership", "dom_role")
+
+      assert {:error, :unavailable} =
+               quiet(fn -> OrgActor.resolve_result(mods, tenant.credential.id, org_id) end)
     end
   end
 

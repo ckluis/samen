@@ -151,7 +151,10 @@ directory and diff, or apply by hand:
   outage. Gates fail closed and say so: a reveal whose grant lookup raises is "couldn't check the reveal grant" (nothing
   revealed), a failed reveal-window lookup shows "unknown" (and reloads once, so a revealed value cannot linger) instead of
   silently hiding the open-window banner, the landing controller answers 503 instead of sending a tenant to the operator
-  console when the membership lookup raises, a failed org-name lookup shows the id and is reported, and a failed API-key /
+  console when the session read OR the User/Membership read fails (`Samen.Auth.OrgActor.authorized_org_ids_result/2` and
+  `resolve_result/3` return `{:error, :unavailable}`; the legacy functions keep their shape, still fail closed, and now log the
+  failure by name and exception module), the "no org / run the seed command" card renders the error state when the org
+  directory read FAILED rather than was empty (`CurrentOrg.list_orgs_result/1`), a failed org-name lookup shows the id and is reported, and a failed API-key /
   MCP-key lookup is reported by name while still setting no actor. `Driftwood.Directory` and `PawChart.Auth` now let a failing
   read raise: the framework (`CurrentOrg.list_orgs/1`, `authorized_orgs/2`) already catches it, denies and reports it by name.
   **Bugs fixed along the way:** the broker "Edit load" button crashed (it read a `__lane__` the raw row never had);

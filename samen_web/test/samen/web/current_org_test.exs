@@ -20,6 +20,9 @@ defmodule Samen.Web.CurrentOrgTest do
     ]
   end
 
+  def dir_empty, do: []
+  def dir_raises, do: raise(RuntimeError, "directory down: secret-row-value")
+
   defp crm_mount(labels) do
     Mount.new(:crm, Samen.WebTest.Crm, Samen.WebTest.Repo, plane: Samen.Web.Plane.tenant(), labels: labels)
   end
@@ -102,6 +105,63 @@ defmodule Samen.Web.CurrentOrgTest do
   test "no_org?/2: true only when no org AND the directory is empty (unseeded)" do
     assert CurrentOrg.no_org?(crm_mount(nil), nil)
     refute CurrentOrg.no_org?(crm_mount(%{org_directory: {__MODULE__, :dir_fixture, []}}), nil)
+  end
+
+  test "list_orgs_result/1: an empty directory is {:ok, []}; a FAILING directory is {:error, :unavailable} (and list_orgs/1 still answers [])" do
+    assert {:ok, []} =
+             CurrentOrg.list_orgs_result(
+               crm_mount(%{org_directory: {__MODULE__, :dir_empty, []}})
+             )
+
+    assert {:ok, [_, _]} =
+             CurrentOrg.list_orgs_result(
+               crm_mount(%{org_directory: {__MODULE__, :dir_fixture, []}})
+             )
+
+    down = crm_mount(%{org_directory: {__MODULE__, :dir_raises, []}})
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        send(self(), {:res, CurrentOrg.list_orgs_result(down)})
+      end)
+
+    assert_received {:res, {:error, :unavailable}}
+    assert log =~ "current_org_directory"
+    refute log =~ "secret-row-value"
+    assert CurrentOrg.list_orgs(down) == []
+  end
+
+  test "no_org_card/1: an unseeded directory shows the seed card; a directory OUTAGE shows the error state, never 'seed the demo'" do
+    card = fn mount ->
+      Phoenix.LiveViewTest.rendered_to_string(
+        CurrentOrg.no_org_card(%{mount: mount, __changed__: nil})
+      )
+    end
+
+    seeded_empty =
+      card.(crm_mount(%{org_directory: {__MODULE__, :dir_empty, []}, seed_command: "mix x.seed"}))
+
+    assert seeded_empty =~ ~s(id="no-org")
+    assert seeded_empty =~ "mix x.seed"
+    refute seeded_empty =~ "error-state"
+
+    down =
+      ExUnit.CaptureLog.with_log(fn ->
+        card.(
+          crm_mount(%{org_directory: {__MODULE__, :dir_raises, []}, seed_command: "mix x.seed"})
+        )
+      end)
+      |> elem(0)
+
+    assert down =~ "error-state"
+    assert down =~ ~s(role="alert")
+
+    assert down =~ "We couldn&#39;t load your workspaces" or
+             down =~ "We couldn't load your workspaces"
+
+    refute down =~ ~s(id="no-org")
+    refute down =~ "Seed the demo"
+    refute down =~ "mix x.seed"
   end
 
   # ==========================================================================
