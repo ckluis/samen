@@ -41,7 +41,7 @@ defmodule Samen.Web.Replay.Access do
         }
 
   @type reason ::
-          :no_org | :no_plane | :no_session | :out_of_scope | :operator_plane | :cross_org | :not_admin
+          :no_org | :no_plane | :no_session | :unavailable | :out_of_scope | :operator_plane | :cross_org | :not_admin
 
   @doc """
   Authorize the socket's viewer for replays of `org_id`. `principal` is the tenant viewer's
@@ -87,6 +87,10 @@ defmodule Samen.Web.Replay.Access do
 
       :out_of_scope ->
         {:error, :out_of_scope}
+
+      # The gate's lookup raised: an outage, NOT "no session" (that would offer the open-session form).
+      :unavailable ->
+        {:error, :unavailable}
 
       _ ->
         {:error, :no_session}

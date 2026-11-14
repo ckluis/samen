@@ -4,13 +4,17 @@ defmodule Samen.Web.Csv.Report do
   fail-closed PER ROW: a row that fails its governed create is recorded here and
   written nowhere — the report is the honest account of what was and wasn't imported.
   """
-  defstruct total: 0, created: 0, errors: []
+  defstruct total: 0, created: 0, errors: [], stopped: nil
 
   @type t :: %__MODULE__{
           total: non_neg_integer(),
           created: non_neg_integer(),
           # [%{row: 1-based CSV data-row number, error: String.t()}]
-          errors: list(map())
+          errors: list(map()),
+          # `nil`, or `%{reason: :unavailable, at_row: n}`: the data layer was unavailable at row `n`, so the
+          # import STOPPED there — rows `n..total` were not attempted, rows before it were imported (`created`
+          # minus nothing: `created` is the number imported before it stopped).
+          stopped: nil | %{reason: :unavailable, at_row: pos_integer()}
         }
 end
 
@@ -172,8 +176,12 @@ defmodule Samen.Web.Csv do
         report =
         rows
         |> Enum.with_index(1)
-        |> Enum.reduce(%Report{total: length(rows)}, fn {row, n}, acc ->
-          import_row(resource, action, scope, cols, row, n, acc)
+        |> Enum.reduce_while(%Report{total: length(rows)}, fn {row, n}, acc ->
+          case import_row(resource, action, scope, cols, row, n, acc) do
+            # An outage is not the row's fault and the next row will hit it too: stop, say where.
+            :unavailable -> {:halt, %Report{acc | stopped: %{reason: :unavailable, at_row: n}}}
+            %Report{} = next -> {:cont, next}
+          end
         end)
 
       {:ok, %Report{report | errors: Enum.reverse(report.errors)}}
@@ -362,12 +370,33 @@ defmodule Samen.Web.Csv do
         %Report{report | created: report.created + 1}
 
       {:error, error} ->
-        %Report{report | errors: [%{row: n, error: error_message(error)} | report.errors]}
+        if outage?(error) do
+          Samen.Web.Reads.Guard.report(:csv_import_row, scope, error)
+          :unavailable
+        else
+          %Report{report | errors: [%{row: n, error: error_message(error)} | report.errors]}
+        end
     end
   rescue
-    # A cast/validation raise is that ROW's failure, not the import's.
-    e -> %Report{report | errors: [%{row: n, error: Exception.message(e)} | report.errors]}
+    # A cast/validation raise is that ROW's failure, not the import's. The report is rendered to
+    # the user, so it carries FIXED copy only (`Exception.message/1` of an Ash/Ecto error can
+    # interpolate the very cell values being imported); the exception is logged by name and
+    # exception module.
+    e ->
+      Samen.Web.Reads.Guard.report(:csv_import_row, scope, e)
+
+      if outage?(e),
+        do: :unavailable,
+        else: %Report{report | errors: [%{row: n, error: "could not be imported"} | report.errors]}
   end
+
+  # A data-layer outage: Ash's returned/raised `Unknown`/`Framework` classes (how a non-bang create reports a
+  # driver failure) or a raised connection/driver error. Anything else is that ROW's failure.
+  defp outage?(%Ash.Error.Unknown{}), do: true
+  defp outage?(%Ash.Error.Framework{}), do: true
+  defp outage?(%DBConnection.ConnectionError{}), do: true
+  defp outage?(%Postgrex.Error{}), do: true
+  defp outage?(_), do: false
 
   # A cell that parses as a JSON object/array is a composite value (the export
   # form of FullName/Emails/Phones/custom maps); anything else stays a string for
@@ -381,12 +410,23 @@ defmodule Samen.Web.Csv do
 
   defp decode_cell(value), do: value
 
-  defp error_message(%{errors: errors}) when is_list(errors) do
-    Enum.map_join(errors, "; ", &error_message/1)
+  # The row error shown in the import report is VALUE-FREE: the failing field (a column name the
+  # uploader already supplied) and the KIND of failure — never `Exception.message/1` or `inspect/1`
+  # of the error, which interpolate the cell value that was rejected.
+  defp error_message(%Ash.Error.Forbidden{}), do: "forbidden"
+
+  # (A data-layer outage never reaches here: `import/3` STOPS on one — see `Report.stopped`.) An Ash error
+  # class that merely CONTAINS an outage error among others keeps the retry copy.
+  defp error_message(%Ash.Error.Unknown{}), do: "could not be saved right now — try again"
+  defp error_message(%Ash.Error.Framework{}), do: "could not be saved right now — try again"
+
+  defp error_message(%{errors: errors}) when is_list(errors) and errors != [] do
+    errors |> Enum.map(&error_message/1) |> Enum.uniq() |> Enum.join("; ")
   end
 
-  defp error_message(error) when is_exception(error), do: Exception.message(error)
-  defp error_message(error), do: inspect(error)
+  defp error_message(%Ash.Error.Changes.Required{field: field}) when is_atom(field), do: "#{field} is required"
+  defp error_message(%{field: field} = error) when is_atom(field) and not is_nil(field) and is_exception(error), do: "#{field} is invalid"
+  defp error_message(_error), do: "could not be imported"
 
   # -- RFC 4180 (ship note: hand-rolled, no dependency) ------------------------
 

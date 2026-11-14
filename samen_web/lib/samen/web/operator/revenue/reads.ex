@@ -42,6 +42,7 @@ defmodule Samen.Web.Operator.RevenueReads do
 
   alias Samen.Revenue.Metrics
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.{Adoption, Guard}
 
   # The raw rollup table (ADR-018; identical name in every host DB — the rol precedent).
   @rollup_table "mrr_revenue_rollup"
@@ -63,23 +64,41 @@ defmodule Samen.Web.Operator.RevenueReads do
         cohorts: Metrics.cohort_retention/1 grid over the mov timeline
       }
 
-  On any read error the surface is EMPTY (`empty/0`), never partial garbage.
+  A pane whose read failed is EMPTY in this legacy shape; `revenue_status/2` names it.
   """
   def revenue(mount, scope) do
+    {data, _failed} = revenue_status(mount, scope)
+    data
+  end
+
+  @doc """
+  `revenue/2` plus the panes that could not be read: `{data, failed}` with `failed` a subset of
+  `[:rollup, :cohorts]`. `:rollup` covers the four headline tiles AND the waterfall (one read);
+  `:cohorts` the cohort grid (a separate read). The two fail alone: a failed waterfall must not
+  blank the cohort grid, and neither may render as `$0` / "No revenue movements yet".
+  """
+  def revenue_status(mount, scope) do
     operator_org_id = Samen.Web.Operator.org_id(mount)
 
-    periods =
-      mount
-      |> rollup_rows(operator_org_id)
-      |> periods()
+    rollup =
+      Guard.run(:operator_revenue_rollup, scope, fn ->
+        mount |> rollup_rows(operator_org_id) |> periods()
+      end)
 
-    %{
+    cohorts =
+      Guard.run(:operator_revenue_cohorts, scope, fn ->
+        Metrics.cohort_retention(movement_timeline(mount, scope))
+      end)
+
+    periods = Guard.value(rollup, [])
+
+    data = %{
       periods: periods,
       latest: List.last(periods),
-      cohorts: Metrics.cohort_retention(movement_timeline(mount, scope))
+      cohorts: Guard.value(cohorts, empty().cohorts)
     }
-  rescue
-    _ -> empty()
+
+    {data, for({key, result} <- [rollup: rollup, cohorts: cohorts], Guard.unavailable?(result), do: key)}
   end
 
   @doc "The empty surface shape (no org / read error)."
@@ -109,11 +128,18 @@ defmodule Samen.Web.Operator.RevenueReads do
         %{period_month: month, kind: kind, delta_cents: delta, count: count}
       end)
     else
-      _ -> []
+      {:error, error} ->
+        # The rollup table is a host migration nothing in `mix samen.gen.app` creates: a host that never
+        # adopted it is the honest empty (logged once), decided structurally. Anything else is a failure.
+        if Adoption.absent_after_failure?(repo, @rollup_table), do: [], else: raise_query_error(error)
+
+      _ ->
+        raise ArgumentError, "revenue rollup query failed"
     end
-  rescue
-    _ -> []
   end
+
+  defp raise_query_error(error) when is_exception(error), do: raise(error)
+  defp raise_query_error(_error), do: raise(RuntimeError, "revenue rollup query failed")
 
   # -- period chaining (kernel-documented caller threading) -----------------------
 
@@ -174,7 +200,5 @@ defmodule Samen.Web.Operator.RevenueReads do
     |> Ash.Query.sort(occurred_at: :asc, id: :asc)
     |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
-  rescue
-    _ -> []
   end
 end

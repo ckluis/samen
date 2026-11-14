@@ -29,6 +29,7 @@ defmodule Samen.Web.Operator.AggregateLive do
   import Samen.Web.Live, only: [assign_mount: 2]
 
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   @impl true
   def mount(_params, session, socket) do
@@ -38,9 +39,18 @@ defmodule Samen.Web.Operator.AggregateLive do
 
   @doc false
   def load(socket) do
-    data = load_aggregate(socket.assigns[:samen_mount])
+    {data, load_error} =
+      case load_aggregate(socket.assigns[:samen_mount]) do
+        {:ok, data} -> {data, false}
+        # A loader that RAISES is a failed read ("couldn't load" + retry), not the unwired empty state.
+        {:error, _} -> {%{}, true}
+      end
 
     assign(socket,
+      load_error: load_error,
+      # WIRED = the host mounted an `aggregate_loader`. A wired loader that returns no groups is an honest
+      # empty projection, not an unwired one.
+      wired: wired?(socket.assigns[:samen_mount]),
       title: title(socket.assigns[:samen_mount]),
       metrics: Map.get(data, :metrics, []),
       groups: Map.get(data, :groups, []),
@@ -53,19 +63,18 @@ defmodule Samen.Web.Operator.AggregateLive do
   # a bare mount) the surface renders empty but structurally correct — proving the plane.
   defp load_aggregate(%Mount{} = mount) do
     case Mount.label(mount, :aggregate_loader, nil) do
-      {mod, fun, args} ->
-        try do
-          apply(mod, fun, args) || %{}
-        rescue
-          _ -> %{}
-        end
-
-      _ ->
-        %{}
+      {mod, fun, args} -> Guard.run(:operator_aggregate_loader, nil, fn -> apply(mod, fun, args) || %{} end)
+      _ -> {:ok, %{}}
     end
   end
 
-  defp load_aggregate(_), do: %{}
+  defp load_aggregate(_), do: {:ok, %{}}
+
+  defp wired?(%Mount{} = mount), do: match?({_, _, _}, Mount.label(mount, :aggregate_loader, nil))
+  defp wired?(_), do: false
+
+  @impl true
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket)}
 
   defp title(%Mount{} = mount), do: Mount.label(mount, :operator_title, "Portfolio")
   defp title(_), do: "Portfolio"
@@ -141,8 +150,17 @@ defmodule Samen.Web.Operator.AggregateLive do
             </.data_table>
           </div>
 
+          <.error_state :if={@load_error} class="aggregate-error" body={Guard.message()} retry_event="retry_load" />
+
           <.empty_state
-            :if={@groups == []}
+            :if={@groups == [] and not @load_error and @wired}
+            class="aggregate-empty-wired"
+            icon="⊘"
+            title="No aggregate groups yet."
+            body="The host's aggregate projection is wired and returned no groups."
+          />
+          <.empty_state
+            :if={@groups == [] and not @load_error and not @wired}
             class="aggregate-empty"
             icon="⊘"
             title="No aggregate projection wired."

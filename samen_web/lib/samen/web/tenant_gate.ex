@@ -42,8 +42,9 @@ defmodule Samen.Web.TenantGate do
   @doc """
   Whether the tenant-auth gate is ARMED for `otp_app`. See the moduledoc: explicit config is
   honoured; UNSET falls to the env-aware default (`:prod` ⇒ armed, dev/test ⇒ disarmed). A `nil`
-  otp_app (a synthetic/unit-test mount with no host) is DISARMED, matching the pre-existing
-  `CurrentOrg.param_trust_disarmed?/1` treatment of a mountless socket. `env_reader` is a test-only
+  otp_app is "no host to arm": this predicate says `false`, but the two callers that GRANT trust on it
+  (`CurrentOrg.param_trust_disarmed?/1`, `Impersonation.auth_disarmed?/1`) resolve `nil` to ARMED themselves —
+  an unresolvable otp_app must never open a gate. `env_reader` is a test-only
   seam (default `&Mix.env/0`) so a suite can prove the prod default inside a `:test` run.
   """
   @spec armed?(atom() | nil, (-> atom())) :: boolean()

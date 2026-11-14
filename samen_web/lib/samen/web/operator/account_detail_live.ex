@@ -54,13 +54,23 @@ defmodule Samen.Web.Operator.AccountDetailLive do
     mount = socket.assigns[:samen_mount]
     operator_org_id = mount && Operator.org_id(mount)
 
-    detail =
+    {detail, load_error} =
       if operator_org_id && account_id do
-        Reads.account_detail(mount, Operator.scope(mount), operator_org_id, account_id, opts)
+        case Reads.account_detail_result(mount, Operator.scope(mount), operator_org_id, account_id, opts) do
+          {:ok, detail} -> {detail, false}
+          # A failed read is NOT "Account not found": the page says it could not load, with a retry.
+          {:error, :forbidden} -> {nil, :forbidden}
+          {:error, _} -> {nil, true}
+        end
+      else
+        {nil, false}
       end
 
-    assign(socket, account_id: account_id, no_org: is_nil(operator_org_id), detail: detail)
+    assign(socket, account_id: account_id, no_org: is_nil(operator_org_id), detail: detail, load_error: load_error)
   end
+
+  @impl true
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.account_id)}
 
   @impl true
   def render(assigns) do
@@ -129,6 +139,14 @@ defmodule Samen.Web.Operator.AccountDetailLive do
               <div class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
                 No operator org resolved.
               </div>
+            </div>
+          <% @load_error -> %>
+            <div class="wrap" id="account-load-error">
+              <.error_state
+                title={if @load_error == :forbidden, do: "Not permitted"}
+                body={Samen.Web.Reads.Guard.message(@load_error)}
+                retry_event={if @load_error != :forbidden, do: "retry_load"}
+              />
             </div>
           <% is_nil(@detail) -> %>
             <div class="wrap">

@@ -90,6 +90,24 @@ defmodule Samen.Web.Reads.SwallowLint do
       "fail-safe probe: a failed existence check answers 'has records' so the first-run sample-data offer is NOT shown (never offers sample data into a possibly populated org)",
     {"samen_web/lib/samen/web/reads.ex", :safe_count} =>
       "an exact-total aggregate that fails is nil = 'total unknown'; the CRM pipeline column header prints no number for it, and the three board totals that sum group counts (Work timeline, CRM pipeline, CRM calendar) become nil — an em dash — when any group count is nil, never a fabricated count or the loaded row count",
+    {"samen_web/lib/samen/web/operator/activity_reads.ex", :mask_value} =>
+      "fail-CLOSED masking: a vault-routed diff value that cannot be cast renders the literal mask \"••••\", never the stored value",
+    {"samen_web/lib/samen/ui/form.ex", :opt_to_string} =>
+      "guards rendering of a validation-message interpolation OPTION (a bound or count carried in the error tuple, not a database read): a value whose to_string raises falls back to its inspect text inside the message",
+    {"samen_web/lib/samen/ui/gantt.ex", :frac} =>
+      "guards rendering of one bar position: a point incomparable with the timeline range (mixed or malformed temporal types) is placed at the left edge (0.0) instead of crashing the render of every other bar — presentation of caller-supplied points, no read",
+    {"samen_web/lib/samen/ui/overlay.ex", :safe_call} =>
+      "guards a host-supplied hit-path function: a raising one yields nil, which same_origin_path drops, so the hit renders without a link instead of crashing the overlay",
+    {"samen_web/lib/samen/web/auth/totp_pending.ex", :fetch_or_create} =>
+      "documented degrade (moduledoc): when the pending-secret process is down the enrolment page gets a fresh unstored secret, which the live holds in its own assigns and confirms against — the pre-F14 behaviour; nothing is read or shown as empty",
+    {"samen_web/lib/samen/web/auth/totp_pending.ex", :drop} =>
+      "best-effort cleanup after a confirm/disable: a pending secret that is not dropped expires on its own 15-minute TTL and is never written anywhere; nothing is shown to the user",
+    {"samen_web/lib/samen/web/tenant_gate.ex", :resolved_env} =>
+      "fail-SECURE: an environment that cannot be resolved is :prod, which ARMS the tenant-auth gate — the strictest posture, never an open one",
+    {"samen_web/lib/samen/web/csv.ex", :emit_export_telemetry} =>
+      "best-effort telemetry (documented 'never fails an export'): observability must not break the export it observes; the export result is untouched",
+    {"samen_web/lib/samen/web/live.ex", :peer_data} =>
+      "get_connect_info raises outside the mount lifecycle and returns nil on a dead render: either way the caller uses the 'unknown' peer, which is a stricter global per-IP rate-limit bucket — fail-closed on the limiter, nothing shown as empty",
     {"samen_web/lib/samen/web/onboarding/wizard_controller.ex", :verified?} =>
       "fail-CLOSED capability probe (ADR-035 §5 A2): an unresolvable principal is unverified on an armed host, never an elevated default"
   }
@@ -111,33 +129,7 @@ defmodule Samen.Web.Reads.SwallowLint do
     "pawchart/lib/pawchart/directory.ex" => 1,
     "pawchart/lib/pawchart/operator_seeds.ex" => 2,
     "pawchart/lib/pawchart_web/clinic_reads.ex" => 5,
-    "pawchart/lib/pawchart_web/operator_impersonation_live.ex" => 3,
-    "samen_web/lib/samen/ui/form.ex" => 1,
-    "samen_web/lib/samen/ui/gantt.ex" => 1,
-    "samen_web/lib/samen/ui/nav.ex" => 1,
-    "samen_web/lib/samen/ui/overlay.ex" => 1,
-    "samen_web/lib/samen/web/auth/totp_enroll_controller.ex" => 1,
-    "samen_web/lib/samen/web/auth/totp_pending.ex" => 2,
-    "samen_web/lib/samen/web/auth_gate.ex" => 1,
-    "samen_web/lib/samen/web/csv.ex" => 1,
-    "samen_web/lib/samen/web/current_org.ex" => 6,
-    "samen_web/lib/samen/web/live.ex" => 1,
-    "samen_web/lib/samen/web/metrics_controller.ex" => 2,
-    "samen_web/lib/samen/web/operator.ex" => 2,
-    "samen_web/lib/samen/web/operator/activity_reads.ex" => 7,
-    "samen_web/lib/samen/web/operator/aggregate_live.ex" => 1,
-    "samen_web/lib/samen/web/operator/analytics/reads.ex" => 3,
-    "samen_web/lib/samen/web/operator/analytics_live.ex" => 1,
-    "samen_web/lib/samen/web/operator/authz.ex" => 1,
-    "samen_web/lib/samen/web/operator/deliverability_reads.ex" => 3,
-    "samen_web/lib/samen/web/operator/desk_detail_live.ex" => 1,
-    "samen_web/lib/samen/web/operator/fleet_live.ex" => 1,
-    "samen_web/lib/samen/web/operator/impersonation.ex" => 2,
-    "samen_web/lib/samen/web/operator/reads.ex" => 26,
-    "samen_web/lib/samen/web/operator/revenue/reads.ex" => 3,
-    "samen_web/lib/samen/web/operator/revenue_live.ex" => 1,
-    "samen_web/lib/samen/web/operator/webhook_dlq_live.ex" => 3,
-    "samen_web/lib/samen/web/tenant_gate.ex" => 1
+    "pawchart/lib/pawchart_web/operator_impersonation_live.ex" => 3
   }
 
   def roots, do: @roots

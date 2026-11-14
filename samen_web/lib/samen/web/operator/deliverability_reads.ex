@@ -36,6 +36,7 @@ defmodule Samen.Web.Operator.DeliverabilityReads do
 
   alias Samen.Delivery.{EmailEvent, Suppression}
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   @lookup_limit 200
 
@@ -46,32 +47,43 @@ defmodule Samen.Web.Operator.DeliverabilityReads do
   or `nil` when the subscriber_id does not resolve to a known `Identity.User`).
   `suppressed_subscriber_ids` is a `MapSet` of every currently-suppressed
   subscriber, so a delivery-timeline row can flag itself "suppressed" without a
-  second read. Any read error degrades to the all-empty shape — fail-honest,
-  never a crash, never partial-with-a-lie.
+  second read. A pane whose read FAILED is empty in the map but named in the additive `:failed` key
+  (a subset of `[:events, :suppressions]`): the two panes are read — and fail — independently, so the
+  screen can say "couldn't load" for one without blanking the other, and never prints "No delivery
+  events" for an outage. When `:suppressions` failed the per-event "suppressed" flag is unknown.
   """
   @spec deliverability(Mount.t(), map(), String.t(), keyword()) :: map()
   def deliverability(mount, actor, org_id, opts \\ []) do
     events =
-      mount.repo
-      |> EmailEvent.list_for_org(org_id, limit: @lookup_limit)
-      |> Enum.map(&with_recipient(&1, mount, actor, opts))
+      Guard.run(:operator_deliverability_events, org_id, fn ->
+        mount.repo
+        |> EmailEvent.list_for_org(org_id, limit: @lookup_limit)
+        |> Enum.map(&with_recipient(&1, mount, actor, opts))
+      end)
 
     suppressions =
-      mount.repo
-      |> Suppression.list_for_org(org_id, limit: @lookup_limit)
-      |> Enum.map(&with_recipient(&1, mount, actor, opts))
+      Guard.run(:operator_deliverability_suppressions, org_id, fn ->
+        mount.repo
+        |> Suppression.list_for_org(org_id, limit: @lookup_limit)
+        |> Enum.map(&with_recipient(&1, mount, actor, opts))
+      end)
+
+    suppressions_list = Guard.value(suppressions, [])
 
     %{
-      events: events,
-      suppressions: suppressions,
-      suppressed_subscriber_ids: MapSet.new(suppressions, & &1.subscriber_id)
+      events: Guard.value(events, []),
+      suppressions: suppressions_list,
+      suppressed_subscriber_ids: MapSet.new(suppressions_list, & &1.subscriber_id),
+      failed: for({key, result} <- [events: events, suppressions: suppressions], Guard.unavailable?(result), do: key)
     }
-  rescue
-    _ -> %{events: [], suppressions: [], suppressed_subscriber_ids: MapSet.new()}
   end
 
   defp with_recipient(row, mount, actor, opts) do
-    Map.put(row, :__recipient__, resolve_recipient(mount, actor, row.org_id, row.subscriber_id, opts))
+    case resolve_recipient_result(mount, actor, row.org_id, row.subscriber_id, opts) do
+      {:ok, recipient} -> row |> Map.put(:__recipient__, recipient) |> Map.put(:__recipient_failed__, false)
+      # A failed lookup is NOT an unknown recipient: the row says "couldn't load" (not "unknown").
+      {:error, :unavailable} -> row |> Map.put(:__recipient__, nil) |> Map.put(:__recipient_failed__, true)
+    end
   end
 
   @doc """
@@ -85,12 +97,26 @@ defmodule Samen.Web.Operator.DeliverabilityReads do
   `Samen.Reveal` grant checker decides); tests inject a grant stub.
   """
   @spec resolve_recipient(Mount.t(), map(), String.t(), String.t() | nil, keyword()) :: map() | nil
-  def resolve_recipient(_mount, _actor, _org_id, nil, _opts), do: nil
-
   def resolve_recipient(mount, actor, org_id, subscriber_id, opts) do
+    case resolve_recipient_result(mount, actor, org_id, subscriber_id, opts) do
+      {:ok, recipient} -> recipient
+      {:error, :unavailable} -> nil
+    end
+  end
+
+  @doc """
+  `resolve_recipient/5` with the failure kept apart from "unknown": `{:ok, nil}` is an honest unresolvable
+  recipient (no such user), `{:error, :unavailable}` is a lookup that FAILED (reported by name and
+  exception module). Fail-CLOSED either way: never plaintext, never a guessed identity.
+  """
+  @spec resolve_recipient_result(Mount.t(), map(), String.t(), String.t() | nil, keyword()) ::
+          {:ok, map() | nil} | {:error, :unavailable}
+  def resolve_recipient_result(_mount, _actor, _org_id, nil, _opts), do: {:ok, nil}
+
+  def resolve_recipient_result(mount, actor, org_id, subscriber_id, opts) do
     case find_user(mount, org_id, subscriber_id) do
       nil ->
-        nil
+        {:ok, nil}
 
       user ->
         [resolved] =
@@ -101,10 +127,15 @@ defmodule Samen.Web.Operator.DeliverabilityReads do
             Keyword.put_new(opts, :repo, mount.repo)
           )
 
-        %{name: resolved.full_name, email: resolved.emails}
+        {:ok, %{name: resolved.full_name, email: resolved.emails}}
     end
   rescue
-    _ -> nil
+    e ->
+      # Per-row enrichment, fail-CLOSED: an unresolvable recipient renders as unresolved ("—"),
+      # never as plaintext and never as a guessed identity. The failure is reported by name and
+      # exception module (the row itself — the delivery fact — still renders).
+      Guard.report(:operator_deliverability_recipient, org_id, e)
+      {:error, :unavailable}
   end
 
   defp find_user(mount, org_id, subscriber_id) do
@@ -114,7 +145,5 @@ defmodule Samen.Web.Operator.DeliverabilityReads do
     |> Ash.Query.limit(1)
     |> Ash.read!(authorize?: false)
     |> List.first()
-  rescue
-    _ -> nil
   end
 end

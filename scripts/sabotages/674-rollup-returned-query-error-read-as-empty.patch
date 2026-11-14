@@ -1,0 +1,51 @@
+# SABOTAGE: Operator revenue and analytics rollup reads turn a RETURNED query error into the empty list 
+#   instead of failing the read, so a broken adopted table renders as no data
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/reads_honest_failure_p3_test.exs
+# MUST_FAIL: revenue: a renamed column on an EXISTING table
+# MUST_FAIL: analytics: a renamed column is the error pane
+diff --git a/samen_web/lib/samen/web/operator/analytics/reads.ex b/samen_web/lib/samen/web/operator/analytics/reads.ex
+index 20a5a050..463681db 100644
+--- a/samen_web/lib/samen/web/operator/analytics/reads.ex
++++ b/samen_web/lib/samen/web/operator/analytics/reads.ex
+@@ -157,8 +157,8 @@ defmodule Samen.Web.Operator.AnalyticsReads do
+         {:ok, floored} = Privacy.apply(stage_rows, @funnel_spec, floor_opts(opts))
+         floored
+ 
+-      {:error, error} ->
+-        if Adoption.absent_after_failure?(repo, @rollup_table), do: [], else: raise_query_error(error)
++      {:error, _error} ->
++        []
+     end
+   end
+ 
+@@ -189,8 +189,8 @@ defmodule Samen.Web.Operator.AnalyticsReads do
+         {:ok, floored} = Privacy.apply(cohort_rows, @retention_spec, floor_opts(opts))
+         floored
+ 
+-      {:error, error} ->
+-        if Adoption.absent_after_failure?(repo, @rollup_table), do: [], else: raise_query_error(error)
++      {:error, _error} ->
++        []
+     end
+   end
+ 
+diff --git a/samen_web/lib/samen/web/operator/revenue/reads.ex b/samen_web/lib/samen/web/operator/revenue/reads.ex
+index 503b979a..c9e456ed 100644
+--- a/samen_web/lib/samen/web/operator/revenue/reads.ex
++++ b/samen_web/lib/samen/web/operator/revenue/reads.ex
+@@ -128,10 +128,8 @@ defmodule Samen.Web.Operator.RevenueReads do
+         %{period_month: month, kind: kind, delta_cents: delta, count: count}
+       end)
+     else
+-      {:error, error} ->
+-        # The rollup table is a host migration nothing in `mix samen.gen.app` creates: a host that never
+-        # adopted it is the honest empty (logged once), decided structurally. Anything else is a failure.
+-        if Adoption.absent_after_failure?(repo, @rollup_table), do: [], else: raise_query_error(error)
++      {:error, _error} ->
++        []
+ 
+       _ ->
+         raise ArgumentError, "revenue rollup query failed"

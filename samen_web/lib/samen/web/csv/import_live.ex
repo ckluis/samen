@@ -165,6 +165,15 @@ defmodule Samen.Web.Csv.ImportLive do
                   <p id="csv-import-created" style="color:#15803D">
                     Imported <strong>{@report.created}</strong> of {@report.total} row(s).
                   </p>
+                  <%= if @report.stopped do %>
+                    <p id="csv-import-stopped" role="alert" style="color:#B91C1C;margin-top:8px">
+                      The import stopped at row {@report.stopped.at_row} because we couldn't save right now.
+                      {@report.created} of {@report.total} row(s) were imported before it stopped; row
+                      {@report.stopped.at_row} and the rows after it were not attempted. Try again with
+                      only those rows — re-uploading the whole file would import the first
+                      {@report.created} again.
+                    </p>
+                  <% end %>
                   <%= if @report.errors != [] do %>
                     <table id="csv-import-errors" class="tbl" style="margin-top:8px">
                       <thead>

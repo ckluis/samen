@@ -70,6 +70,25 @@ defmodule Samen.Web.Reads.Adoption do
   end
 
   @doc """
+  After a RETURNED query error on an optional raw table: is the table simply not there on this host
+  (`:table_missing`, or the repo is never configured: `:not_adopted`)? Then the honest empty applies, logged
+  once by table name (`log_not_adopted_once/1`) — not once per page load. Any other state (`:ready` — the table
+  exists and the query still failed, e.g. a renamed column —, `:repo_down`, `:unknown`) is a failure and the
+  caller keeps raising. Decided from structural facts (`probe/3`), never from the error text.
+  """
+  @spec absent_after_failure?(module() | nil, String.t()) :: boolean()
+  def absent_after_failure?(repo, table) when is_binary(table) do
+    case probe(repo, table) do
+      state when state in [:table_missing, :not_adopted] ->
+        log_not_adopted_once(String.to_atom(table))
+        true
+
+      _ ->
+        false
+    end
+  end
+
+  @doc """
   Log, ONCE per node per resource, that a feature reads as not adopted (so an operator who expected
   it can see why a screen is empty). Idempotent and cheap; carries the resource name only.
   """

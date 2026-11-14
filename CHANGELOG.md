@@ -101,6 +101,43 @@ directory and diff, or apply by hand:
   `list_view` of a `ListLive` view needs no change; a host that calls `Billing.Reads`/`Marketing.Reads`/… read helpers
   keeps every legacy return shape (new `*_result` siblings are additive). The swallow ratchet baseline shrank from 226 to 107
   clauses; the reviewed helpers carry their reason in `Samen.Web.Reads.SwallowLint`.
+- **Honest reads, phase 3 review fixes.** Apps made by `mix samen.gen.app` mount `/operator/revenue` and `/operator/analytics` but
+  nothing creates `mrr_revenue_rollup` / `paf_product_event_rollup`: a returned query error on a table that is not there
+  (`Samen.Web.Reads.Adoption.probe/3`, structural) is now the honest empty, logged once as "feature not adopted", while a renamed
+  column on an existing table is still the error pane. A fleet cockpit with no `fleet_namespace` (or one naming a domain with no
+  fleet resources) shows the configuration copy, not an outage. **Webhook DLQ replay is atomic:** `Samen.Webhook.Event.replay/3`
+  resets the envelope and inserts its `IngestWorker` job in one `Ecto.Multi` transaction (Oban's `oban_jobs` is on the host repo in
+  every in-tree host: `config :samen_core, Oban, repo: …`); a failed enqueue rolls the reset back and the envelope stays "dead" and
+  replayable. A host whose Oban repo differs from the envelope repo gets `{:error, :queue_repo_mismatch}` and nothing changes.
+  An unresolvable `otp_app` can no longer disarm anything: `Samen.Web.Operator.otp_app/1` no longer rescues a raising repo config
+  (the request crashes: fail closed) and `CurrentOrg.param_trust_disarmed?/1` / `Impersonation.auth_disarmed?/1` treat a nil
+  otp_app as ARMED. The impersonation gate casts the `org_id` first (malformed: `:denied`, no log) and a raising lookup returns
+  the new `:unavailable`, which every framework drill-in renders as a retryable error instead of the open-session-with-reason
+  form; `Guard` logs only a canonical-UUID org id (else `invalid`). A forbidden read on account/ticket detail, platform billing and
+  the account tiles shows denial copy, not the outage pane; the org switcher reads the Org rows alone; deliverability tells a
+  failed recipient lookup ("couldn't load recipient") from an unknown one; a CSV import stops on a data-layer outage and reports
+  how many rows were imported (`Csv.Report.stopped`); the aggregate screen tells a wired-but-empty loader from an unwired one; a
+  raising metrics reporter or host nav resolver is reported by name. **Host action:** a host with its OWN caller of
+  `Samen.Web.Operator.Impersonation.gate/3` or `gate_socket/3` (driftwood, pawchart and the framework drill-ins are updated) must
+  handle the new `:unavailable` value: render a retryable error, never the open-session form. A host that relied on a mount with no
+  resolvable `otp_app` being "disarmed" must set the `:otp_app` label.
+- **Honest reads, phase 3 (operator plane + framework gates).** The operator console no longer renders an outage as an empty
+  book, a zero or a healthy default. Accounts, desk and platform billing show "couldn't load" per header tile (each count is
+  its own read, so one failed queue count is one tile) and the kit error state with a retry for the list/detail; a failed
+  ticket or account detail is no longer "not found" (a malformed id still is, without an error log). Revenue (tiles +
+  waterfall, cohort grid, plan table), analytics (funnel, retention), deliverability (events, suppressions — a failed
+  suppressions read makes the per-event "suppressed?" flag *unknown*), the activity feed (four sub-queries, each named when it
+  failed), the aggregate loader and the fleet cockpit fail one pane at a time. A fleet registry outage is an error state, not
+  "Fleet not configured" / "No products registered yet" / "Nothing needs attention", and a malformed `activity_counts` entry
+  from one product no longer blanks every product's merged counts. Webhook DLQ: a failed read is not "No webhook envelopes",
+  and replay/resolve now say when they were refused or failed (they were silently discarded). Desk delete, ticket reply and
+  the AI draft button use outage copy for an outage; the draft and analytics-ask paths no longer print `inspect(reason)`, and
+  "not adopted / not configured" is decided structurally. Gates keep failing **closed** and now say so in the log by name
+  (operator authority, impersonation gate, current-org membership seams, TOTP credential lookup). CSV import row messages
+  are value-free. New additive siblings: `Operator.Reads.{accounts,account_metrics,platform_billing,desk,ticket_detail,account_detail}_result`,
+  `desk_metrics_status`, `AnalyticsReads.analytics_status`, `RevenueReads.revenue_status`; `DeliverabilityReads.deliverability/4`
+  and `ActivityReads.activity/3` return an extra `:failed` key. **Host action:** none. The swallow ratchet baseline fell from
+  107 to 33 clauses (the remaining rows are driftwood/pawchart, phase 4). Sabotages 671-673 (plus 07 and 236 re-anchored).
 
 ### Security and correctness fixes
 

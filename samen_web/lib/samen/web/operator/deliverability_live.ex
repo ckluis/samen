@@ -78,6 +78,9 @@ defmodule Samen.Web.Operator.DeliverabilityLive do
     end
   end
 
+  # A failed pane's "Try again": re-run the gated load (the session gate decides again).
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns[:org_id])}
+
   defp open_error_copy(:reason_required), do: "A reason for access is required."
   defp open_error_copy(:not_authorized), do: "Your operator role may not open an impersonation session."
   defp open_error_copy({:pii_shaped_reason, _}), do: "The reason must name the ticket, not the person (no email/SSN/phone)."
@@ -117,6 +120,9 @@ defmodule Samen.Web.Operator.DeliverabilityLive do
 
           :denied ->
             assign(socket, org_id: org_id, detail: nil, impersonation: :denied, session_info: nil, open_error: nil)
+
+          :unavailable ->
+            assign(socket, org_id: org_id, detail: nil, impersonation: :unavailable, session_info: nil, open_error: nil)
         end
     end
   end
@@ -137,6 +143,10 @@ defmodule Samen.Web.Operator.DeliverabilityLive do
         </.topbar>
 
         <%= cond do %>
+          <% @impersonation == :unavailable -> %>
+            <div class="wrap" id="gate-unavailable">
+              <.error_state class="gate-unavailable" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
+            </div>
           <% @impersonation == :out_of_scope -> %>
             <div class="wrap">
               <div class="card" id="out-of-scope" style="padding:22px 20px">
@@ -208,8 +218,14 @@ defmodule Samen.Web.Operator.DeliverabilityLive do
                   <span class="lane">· dlv_suppression · refused BEFORE the provider ever sees the send</span>
                 </div>
 
+                <.error_state
+                  :if={:suppressions in @detail.failed}
+                  class="suppressions-error"
+                  body={Samen.Web.Reads.Guard.message()}
+                  retry_event="retry_load"
+                />
                 <.empty_state
-                  :if={@detail.suppressions == []}
+                  :if={@detail.suppressions == [] and :suppressions not in @detail.failed}
                   class="suppressions-empty"
                   icon="✓"
                   title="No suppressions."
@@ -229,7 +245,12 @@ defmodule Samen.Web.Operator.DeliverabilityLive do
                         <div>{render_email(s.__recipient__.email)}</div>
                         <div style="font-size:11px;color:var(--muted)">{render_name(s.__recipient__.name)}</div>
                       <% else %>
-                        <span class="mono" style="color:var(--muted)">subscriber {short_id(s.subscriber_id)}</span>
+                        <span :if={Map.get(s, :__recipient_failed__, false)} class="recipient-unavailable" style="color:var(--muted)">
+                          couldn't load recipient
+                        </span>
+                        <span :if={!Map.get(s, :__recipient_failed__, false)} class="mono" style="color:var(--muted)">
+                          subscriber {short_id(s.subscriber_id)} · unknown
+                        </span>
                       <% end %>
                     </td>
                     <td class="s-reason"><.pill variant={reason_variant(s.reason)}>{s.reason}</.pill></td>
@@ -246,8 +267,14 @@ defmodule Samen.Web.Operator.DeliverabilityLive do
                   <span class="lane">· dlv_email_event · delivered / bounce / complaint / open / click</span>
                 </div>
 
+                <.error_state
+                  :if={:events in @detail.failed}
+                  class="events-error"
+                  body={Samen.Web.Reads.Guard.message()}
+                  retry_event="retry_load"
+                />
                 <.empty_state
-                  :if={@detail.events == []}
+                  :if={@detail.events == [] and :events not in @detail.failed}
                   class="events-empty"
                   icon="✉"
                   title="No delivery events."
@@ -269,15 +296,23 @@ defmodule Samen.Web.Operator.DeliverabilityLive do
                         <div>{render_email(e.__recipient__.email)}</div>
                         <div style="font-size:11px;color:var(--muted)">{render_name(e.__recipient__.name)}</div>
                       <% else %>
-                        <span class="mono" style="color:var(--muted)">subscriber {short_id(e.subscriber_id)}</span>
+                        <span :if={Map.get(e, :__recipient_failed__, false)} class="recipient-unavailable" style="color:var(--muted)">
+                          couldn't load recipient
+                        </span>
+                        <span :if={!Map.get(e, :__recipient_failed__, false)} class="mono" style="color:var(--muted)">
+                          subscriber {short_id(e.subscriber_id)} · unknown
+                        </span>
                       <% end %>
                     </td>
                     <td class="e-provider" style="color:var(--muted)">{e.provider}</td>
                     <td class="e-suppressed">
-                      <span :if={MapSet.member?(@detail.suppressed_subscriber_ids, e.subscriber_id)} class="pill pill-bad">
+                      <span :if={:suppressions in @detail.failed} class="suppressed-unknown" style="color:var(--muted)">
+                        unknown
+                      </span>
+                      <span :if={:suppressions not in @detail.failed and MapSet.member?(@detail.suppressed_subscriber_ids, e.subscriber_id)} class="pill pill-bad">
                         suppressed
                       </span>
-                      <span :if={!MapSet.member?(@detail.suppressed_subscriber_ids, e.subscriber_id)} style="color:var(--muted)">
+                      <span :if={:suppressions not in @detail.failed and !MapSet.member?(@detail.suppressed_subscriber_ids, e.subscriber_id)} style="color:var(--muted)">
                         —
                       </span>
                     </td>

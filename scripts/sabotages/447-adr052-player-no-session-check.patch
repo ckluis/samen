@@ -7,12 +7,12 @@
 # MUST_FAIL: no active impersonation session: denied
 # MUST_FAIL: a session that ends mid-playback stops the next batch
 diff --git a/samen_web/lib/samen/web/replay/access.ex b/samen_web/lib/samen/web/replay/access.ex
-index ee8985e..23de229 100644
+index 1d388504..66b3a109 100644
 --- a/samen_web/lib/samen/web/replay/access.ex
 +++ b/samen_web/lib/samen/web/replay/access.ex
-@@ -88,8 +88,18 @@ defmodule Samen.Web.Replay.Access do
-       :out_of_scope ->
-         {:error, :out_of_scope}
+@@ -92,8 +92,18 @@ defmodule Samen.Web.Replay.Access do
+       :unavailable ->
+         {:error, :unavailable}
  
 +      # SABOTAGE (ADR-052 §2.3 / R9): no session is no obstacle.
        _ ->

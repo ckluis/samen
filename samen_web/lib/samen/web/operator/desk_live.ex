@@ -53,19 +53,21 @@ defmodule Samen.Web.Operator.DeskLive do
     case operator_org_id do
       nil ->
         socket
-        |> assign(no_org: true, operator_org_id: nil, metrics: nil)
+        |> assign(no_org: true, operator_org_id: nil, metrics: nil, metric_errors: [])
         |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
         |> assign(show_new: false, new_form: nil)
         |> assign_new(:delete_error, fn -> nil end)
 
       org_id ->
         scope = Operator.scope(mount)
+        {metrics, metric_errors} = Reads.desk_metrics_status(mount, scope)
 
         socket
         |> assign(
           no_org: false,
           operator_org_id: org_id,
-          metrics: Reads.desk_metrics(mount, scope)
+          metrics: metrics,
+          metric_errors: metric_errors
         )
         |> assign_new(:show_new, fn -> false end)
         |> assign_new(:delete_error, fn -> nil end)
@@ -77,6 +79,9 @@ defmodule Samen.Web.Operator.DeskLive do
   # -- A3 CRUD events (list events belong to the ListLive hook) -----------------
 
   @impl true
+  # The failed tiles' "Try again": re-run the whole load (header counts + the list).
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket)}
+
   def handle_event("new_ticket", _params, socket) do
     mount = socket.assigns.samen_mount
     {:noreply, assign(socket, show_new: true, new_form: new_ticket_form(mount, Operator.scope(mount)))}
@@ -117,6 +122,9 @@ defmodule Samen.Web.Operator.DeskLive do
     case Reads.delete_ticket(mount, scope, id) do
       :ok ->
         {:noreply, load(assign(socket, delete_error: nil))}
+
+      {:error, :unavailable} ->
+        {:noreply, assign(socket, delete_error: "We couldn't reach the desk — the ticket was not deleted. Try again.")}
 
       {:error, _reason} ->
         {:noreply, assign(socket, delete_error: "Could not delete this ticket.")}
@@ -166,22 +174,29 @@ defmodule Samen.Web.Operator.DeskLive do
             </div>
           </div>
 
+          <div :if={@metric_errors != []} class="wrap" id="metrics-error" style="margin-bottom:0">
+            <div class="card" style="padding:10px 14px;font-size:12px" role="alert">
+              {Samen.Web.Reads.Guard.message()}
+              <.button type="button" phx-click="retry_load" id="metrics-retry">Try again</.button>
+            </div>
+          </div>
+
           <div class="metrics">
-            <.metric label="Open tickets" value={(@metrics && @metrics.open) || 0} sub="filed by tenants">
+            <.metric label="Open tickets" value={(@metrics && @metrics.open) || 0} sub="filed by tenants" error={:open in @metric_errors}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Breaching SLA" value={(@metrics && @metrics.breaching) || 0} sub="past the deadline">
+            <.metric label="Breaching SLA" value={(@metrics && @metrics.breaching) || 0} sub="past the deadline" error={:breaching in @metric_errors}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Urgent / high" value={(@metrics && @metrics.high) || 0} sub="priority">
+            <.metric label="Urgent / high" value={(@metrics && @metrics.high) || 0} sub="priority" error={:high in @metric_errors}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />

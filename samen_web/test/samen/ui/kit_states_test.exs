@@ -624,6 +624,26 @@ defmodule Samen.UI.KitStatesTest do
     end
   end
 
+  describe "host_nav_extra with a RAISING resolver" do
+    def raising_nav(_org), do: raise("resolver down")
+
+    test "omits the group but reports the failure by name; a working resolver logs nothing" do
+      mount = Samen.Web.Mount.new(:crm, __MODULE__, Samen.WebTest.Repo, labels: %{host_nav_extra: {__MODULE__, :raising_nav, []}})
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          html = render_component(&Samen.UI.host_nav_extra/1, %{mount: mount, org_id: "O1"})
+          refute html =~ "Ops"
+        end)
+
+      assert log =~ "host_nav_extra"
+      assert log =~ "RuntimeError"
+
+      ok = Samen.Web.Mount.new(:crm, __MODULE__, Samen.WebTest.Repo, labels: %{host_nav_extra: {__MODULE__, :mixed_items, []}})
+      assert ExUnit.CaptureLog.capture_log(fn -> render_component(&Samen.UI.host_nav_extra/1, %{mount: ok, org_id: "O1"}) end) == ""
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # flash_group / connection banner (F07)
   # ---------------------------------------------------------------------------

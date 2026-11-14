@@ -123,6 +123,9 @@ defmodule Samen.Web.Operator.AgentHealthLive do
 
           :denied ->
             assign(socket, Keyword.put(base, :impersonation, :denied))
+
+          :unavailable ->
+            assign(socket, Keyword.put(base, :impersonation, :unavailable))
         end
     end
   end
@@ -137,6 +140,8 @@ defmodule Samen.Web.Operator.AgentHealthLive do
     end
   end
 
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns[:target_org_id])}
+
   def handle_event("select_run", %{"id" => run_id}, socket),
     do: {:noreply, load(socket, socket.assigns[:target_org_id], selected_run: run_id)}
 
@@ -150,7 +155,7 @@ defmodule Samen.Web.Operator.AgentHealthLive do
     target_org_id = socket.assigns[:target_org_id]
 
     case Impersonation.gate_socket(socket, socket.assigns[:samen_operator_id], target_org_id) do
-      denied when denied in [:denied, :out_of_scope] ->
+      denied when denied in [:denied, :out_of_scope, :unavailable] ->
         {:noreply, load(socket, target_org_id)}
 
       {:ok, _actor, _info} ->
@@ -239,6 +244,10 @@ defmodule Samen.Web.Operator.AgentHealthLive do
               <div class="card" id="no-target-org" style="padding:22px 20px;color:var(--muted)">
                 Open an account (Operator plane → Accounts) and follow "Agent health →" to inspect a
                 tenant's agent runs.
+              </div>
+            <% @impersonation == :unavailable -> %>
+              <div id="gate-unavailable">
+                <.error_state class="gate-unavailable" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
               </div>
             <% @impersonation == :out_of_scope -> %>
               <div class="card" id="out-of-scope" style="padding:22px 20px">

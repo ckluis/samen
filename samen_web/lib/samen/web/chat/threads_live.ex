@@ -80,6 +80,13 @@ defmodule Samen.Web.Chat.ThreadsLive do
         |> assign(no_org: false, org_id: org_id, threads: [], expose_identity: false, section_errors: [])
         |> assign(impersonation: :denied, session_info: nil, open_error: nil)
 
+      :unavailable ->
+        socket
+        |> ensure_flash()
+        |> ensure_return_to()
+        |> assign(no_org: false, org_id: org_id, threads: [], expose_identity: false, section_errors: [])
+        |> assign(impersonation: :unavailable, session_info: nil, open_error: nil)
+
       {:ok, session_info} ->
         scope = Mount.scope(mount, org_id)
 
@@ -114,6 +121,7 @@ defmodule Samen.Web.Chat.ThreadsLive do
         {:ok, _actor, info} -> {:ok, info}
         :out_of_scope -> :out_of_scope
         :denied -> :denied
+        :unavailable -> :unavailable
       end
     else
       {:ok, nil}
@@ -248,6 +256,10 @@ defmodule Samen.Web.Chat.ThreadsLive do
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
         <%= cond do %>
+          <% @impersonation == :unavailable -> %>
+            <div class="wrap" id="gate-unavailable">
+              <.error_state class="gate-unavailable" body={Guard.message()} retry_event="retry_load" />
+            </div>
           <% @impersonation == :out_of_scope -> %>
             <div class="wrap">
               <div class="card" id="out-of-scope" style="padding:22px 20px">

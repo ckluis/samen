@@ -50,6 +50,7 @@ defmodule Samen.Web.Operator.AnalyticsReads do
 
   alias Samen.Aggregate.{CohortSpec, Privacy}
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.{Adoption, Guard}
 
   # The raw rollup table (ADR-021; identical name in every host DB — the mrr precedent).
   @rollup_table "paf_product_event_rollup"
@@ -89,13 +90,29 @@ defmodule Samen.Web.Operator.AnalyticsReads do
 
   `funnel` is `[]` only when the rollup has NO funnel rows at all (the empty state);
   otherwise all three stages appear in funnel order (an unreached stage is a 0-org
-  cohort — below any floor, suppressed). On any read error the surface is EMPTY
-  (`empty/0`), never partial garbage.
+  cohort — below any floor, suppressed). `analytics/2` degrades a failed pane to `[]` for
+  legacy callers; `analytics_status/2` names the failed panes so the screen can say so.
   """
   def analytics(mount, opts \\ []) do
-    %{funnel: funnel(mount, opts), retention: retention(mount, opts)}
-  rescue
-    _ -> empty()
+    {data, _failed} = analytics_status(mount, opts)
+    data
+  end
+
+  @doc """
+  `analytics/2` plus the panes that could not be read: `{%{funnel:, retention:}, failed}` where
+  `failed` is a subset of `[:funnel, :retention]`. A failed pane is `[]` in the map (the legacy
+  value) but is NAMED in `failed`, so the screen renders "couldn't load" for that pane instead of
+  "No product events yet" — and the other pane, read on its own, still renders. A rollup that is
+  genuinely empty is `{:ok, []}`: the honest empty state.
+  """
+  def analytics_status(mount, opts \\ []) do
+    parts = [
+      funnel: Guard.run(:operator_analytics_funnel, nil, fn -> funnel(mount, opts) end),
+      retention: Guard.run(:operator_analytics_retention, nil, fn -> retention(mount, opts) end)
+    ]
+
+    {Map.new(parts, fn {key, result} -> {key, Guard.value(result, [])} end),
+     for({key, result} <- parts, Guard.unavailable?(result), do: key)}
   end
 
   @doc "The empty surface shape (no mount / read error)."
@@ -140,11 +157,9 @@ defmodule Samen.Web.Operator.AnalyticsReads do
         {:ok, floored} = Privacy.apply(stage_rows, @funnel_spec, floor_opts(opts))
         floored
 
-      _ ->
-        []
+      {:error, error} ->
+        if Adoption.absent_after_failure?(repo, @rollup_table), do: [], else: raise_query_error(error)
     end
-  rescue
-    _ -> []
   end
 
   defp funnel(_, _opts), do: []
@@ -174,14 +189,18 @@ defmodule Samen.Web.Operator.AnalyticsReads do
         {:ok, floored} = Privacy.apply(cohort_rows, @retention_spec, floor_opts(opts))
         floored
 
-      _ ->
-        []
+      {:error, error} ->
+        if Adoption.absent_after_failure?(repo, @rollup_table), do: [], else: raise_query_error(error)
     end
-  rescue
-    _ -> []
   end
 
   defp retention(_, _opts), do: []
+
+  # A query error is a FAILED read (raised into `Guard.run`, logged by exception module only),
+  # never an empty rollup — except on a host that never adopted the rollup table (`Adoption`, decided
+  # structurally above), which is the honest empty.
+  defp raise_query_error(error) when is_exception(error), do: raise(error)
+  defp raise_query_error(_error), do: raise(RuntimeError, "rollup query failed")
 
   # One cohort row: size = the offset-0 distinct-actor count (0 when absent — a
   # sizeless cohort fail-closes at the floor); weeks = the retained curve with

@@ -135,6 +135,7 @@ defmodule Samen.Web.Replay.Live do
   end
 
   defp denied_title(:no_session), do: "Access denied — no active impersonation session for this tenant."
+  defp denied_title(:unavailable), do: "We couldn't check access right now."
   defp denied_title(:out_of_scope), do: "This account is not in your scope."
   defp denied_title(:not_admin), do: "Replays are visible to org admins only."
   defp denied_title(:cross_org), do: "Replays are visible only within your own org."
@@ -147,6 +148,9 @@ defmodule Samen.Web.Replay.Live do
       "Watching a replay is impersonating: it requires a short-TTL, reason-required " <>
         "impersonation session for this org, recorded in the tenant's ledger. Referenced " <>
         "personal data still shows •••• unless a separate reveal grant covers the subject."
+
+  defp denied_body(:unavailable),
+    do: "Nothing was opened and nothing is shown. Reload this page to try again."
 
   defp denied_body(:out_of_scope),
     do: "Your operator assignment does not cover this tenant; no session can be opened for it."

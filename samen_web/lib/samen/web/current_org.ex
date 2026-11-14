@@ -45,6 +45,7 @@ defmodule Samen.Web.CurrentOrg do
   use Phoenix.Component
 
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   @session_key "samen_current_org"
 
@@ -287,9 +288,10 @@ defmodule Samen.Web.CurrentOrg do
   # An ARMED host (`config otp_app, auth_required?: true`, or prod-by-default) fails closed here EVEN
   # WHEN the mount carries no `:authn` label — so a vertical that never adopted the tenant-auth
   # seam (pawchart) can no longer serve a caller-supplied `?org=` as identity once deployed for
-  # prod. A mount with NO resolvable otp_app (a synthetic/unit-test mount that carries no repo
-  # config) counts as disarmed, exactly as the impersonation param-leg treats a mountless socket —
-  # every framework route populates a real otp_app, so every armed deploy is covered.
+  # prod. A mount with NO resolvable otp_app (no mount, or a repo that exposes none) counts as ARMED —
+  # fail closed, exactly as `Impersonation.auth_disarmed?/1` treats a mountless socket: every framework
+  # route populates a real otp_app, so only a synthetic mount is affected, and it must set the label.
+  # (A repo whose config RAISES crashes `Operator.otp_app/1` rather than reading as "no host".)
   @doc """
   Whether this mount's host is in the DISARMED (dev/dogfood) posture — the ONLY posture in which
   a client-supplied `?org=`/`?user=` is trusted as identity. Public since B-SEC so the sibling
@@ -299,7 +301,7 @@ defmodule Samen.Web.CurrentOrg do
   @spec param_trust_disarmed?(Mount.t() | nil) :: boolean()
   def param_trust_disarmed?(mount) do
     case Samen.Web.Operator.otp_app(mount) do
-      nil -> true
+      nil -> false
       otp_app -> not Samen.Web.TenantGate.armed?(otp_app)
     end
   end
@@ -343,7 +345,11 @@ defmodule Samen.Web.CurrentOrg do
         []
     end
   rescue
-    _ -> []
+    e ->
+      # Fail-CLOSED (no authorized orgs ⇒ deny), reported by name and exception module so a
+      # raising membership seam is visible instead of reading as "this user has no orgs".
+      Guard.report(:current_org_authorized_orgs, nil, e)
+      []
   end
 
   # ADR-045 §4.4 — the sibling mount carrying the Identity spine (`Session`/`User`/`Membership`).
@@ -369,7 +375,10 @@ defmodule Samen.Web.CurrentOrg do
       _ -> :error
     end
   rescue
-    _ -> :error
+    e ->
+      # Fail-CLOSED (no credential ⇒ no acting org), reported by name and exception module.
+      Guard.report(:current_org_spine_credential, nil, e)
+      :error
   end
 
   defp spine_credential_id(_mount, _session), do: :error
@@ -379,7 +388,10 @@ defmodule Samen.Web.CurrentOrg do
     mods = %{user: Mount.resource(mount, User), membership: Mount.resource(mount, Membership)}
     Samen.Auth.OrgActor.authorized_org_ids(mods, credential_id)
   rescue
-    _ -> []
+    e ->
+      # Fail-CLOSED (no authorized orgs ⇒ deny), reported by name and exception module.
+      Guard.report(:current_org_spine_authorized_orgs, nil, e)
+      []
   end
 
   @doc """
@@ -405,7 +417,10 @@ defmodule Samen.Web.CurrentOrg do
         nil
     end
   rescue
-    _ -> nil
+    e ->
+      # Fail-CLOSED (no actor ⇒ no access to the org), reported by name and exception module.
+      Guard.report(:current_org_resolve_actor, org_id, e)
+      nil
   end
 
   def resolve_actor(_mount, _credential_id, _org_id), do: nil
@@ -470,7 +485,11 @@ defmodule Samen.Web.CurrentOrg do
   defp invoke_directory(mod, fun, args) do
     apply(mod, fun, args) |> normalize_directory()
   rescue
-    _ -> []
+    e ->
+      # The org switcher is navigation chrome: a raising host directory hides it (documented
+      # "never raises"), but the failure is reported by name and exception module.
+      Guard.report(:current_org_directory, nil, e)
+      []
   end
 
   # An operator/aggregate mount can read its own accounts (each an org row) directly.
@@ -482,14 +501,16 @@ defmodule Samen.Web.CurrentOrg do
         []
 
       org_id ->
-        scope = Samen.Web.Operator.scope(mount)
-
-        Samen.Web.Operator.Reads.accounts(mount, scope, org_id)
-        |> Enum.map(fn a -> {a.tenant_org_id, a.name} end)
+        # The switcher needs only org NAMES: read the Org rows alone, so a failed billing/desk/activity
+        # join (which `accounts/3` assembles for scoring) cannot hide it.
+        org_id
+        |> then(&Samen.Web.Operator.Reads.account_names(mount, &1))
         |> normalize_directory()
     end
   rescue
-    _ -> []
+    e ->
+      Guard.report(:current_org_operator_directory, nil, e)
+      []
   end
 
   defp normalize_directory(list) when is_list(list) do

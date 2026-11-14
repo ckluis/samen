@@ -28,7 +28,7 @@ diff --git a/samen_web/lib/samen/web/current_org.ex b/samen_web/lib/samen/web/cu
 @@ -300,6 +300,6 @@
    def param_trust_disarmed?(mount) do
      case Samen.Web.Operator.otp_app(mount) do
-       nil -> true
+       nil -> false
 -      otp_app -> not Samen.Web.TenantGate.armed?(otp_app)
 +      _otp_app -> true
      end

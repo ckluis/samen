@@ -171,6 +171,15 @@ defmodule Samen.Web.Reads.Guard do
   @spec message() :: String.t()
   def message, do: "We couldn't load this right now. Nothing was lost — try again."
 
+  @doc """
+  The copy for a failed read of kind `kind` (`:unavailable` / `true` / anything else is the outage copy;
+  `:forbidden` is DENIAL copy — a denial is not an outage, retrying will not help, and the screen must not
+  say "Nothing was lost — try again").
+  """
+  @spec message(failure() | true) :: String.t()
+  def message(:forbidden), do: "Your operator role may not view this."
+  def message(_kind), do: message()
+
   # -- failure handling ----------------------------------------------------------
 
   defp failed(_name, _scope, %Ash.Error.Forbidden{}), do: {:error, :forbidden}
@@ -215,10 +224,22 @@ defmodule Samen.Web.Reads.Guard do
   defp module_name(module) when is_atom(module), do: inspect(module)
   defp module_name(_), do: "unknown"
 
-  defp org_of(%{actor: %{org_id: org_id}}) when is_binary(org_id), do: org_id
-  defp org_of(%{org_id: org_id}) when is_binary(org_id), do: org_id
-  defp org_of(org_id) when is_binary(org_id), do: org_id
+  defp org_of(%{actor: %{org_id: org_id}}) when is_binary(org_id), do: safe_org(org_id)
+  defp org_of(%{org_id: org_id}) when is_binary(org_id), do: safe_org(org_id)
+  defp org_of(org_id) when is_binary(org_id), do: safe_org(org_id)
   defp org_of(_), do: "unknown"
+
+  # The org id may come straight from a URL or param (a drill-in's `:org_id`): only a canonical UUID reaches
+  # the log line, anything else (newlines, `cause=` forgeries, megabytes) is a fixed placeholder, so a caller
+  # cannot inject a fake log line. (`Ecto.UUID.cast/1` alone also accepts a raw 16-byte binary.)
+  defp safe_org(org_id) when byte_size(org_id) == 36 do
+    case Ecto.UUID.cast(org_id) do
+      {:ok, uuid} -> uuid
+      :error -> "invalid"
+    end
+  end
+
+  defp safe_org(_), do: "invalid"
 
   # Reads keep `[:samen, :web, :read, :error]` (`read`, `cause`); a failed write has its own
   # `[:samen, :web, :write, :error]` (`write`, `cause`) so an outage dashboard never mixes the two.
