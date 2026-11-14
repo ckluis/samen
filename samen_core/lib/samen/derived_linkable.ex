@@ -122,8 +122,6 @@ defmodule Samen.DerivedLinkable do
     |> Enum.filter(fn attr ->
       attr.type in [:string, :ci_string, Ash.Type.String, Ash.Type.CiString]
     end)
-  rescue
-    _ -> []
   end
 
   defp table(resource), do: AshPostgres.DataLayer.Info.table(resource)

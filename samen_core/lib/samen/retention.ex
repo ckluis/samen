@@ -360,8 +360,6 @@ defmodule Samen.Retention do
   @spec blob_backed?(module()) :: boolean()
   def blob_backed?(resource) do
     Ash.Resource.Info.attribute(resource, :storage_key) != nil
-  rescue
-    _ -> false
   end
 
   # Rows whose retention timestamp is at/before the wall — the expired set. The field

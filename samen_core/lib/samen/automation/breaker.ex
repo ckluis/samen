@@ -99,6 +99,8 @@ defmodule Samen.Automation.Breaker do
       })
     end
   rescue
-    _ -> :ok
+    e ->
+      Samen.Observability.Failure.report(:breaker_audit_trip, nil, e)
+      :ok
   end
 end
