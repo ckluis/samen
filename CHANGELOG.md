@@ -162,10 +162,20 @@ directory and diff, or apply by hand:
   them; `PawChart.OperatorSeeds` / `Driftwood.OperatorSeeds` probes answered `true`/`false` on a failed read (skipping or
   repeating a step and still reporting success), the operator-org create fell back to a fresh-id create that the next probe
   could not find (a duplicate org per re-run), and a half-seeded operator org (accounts missing, desk agent gone) reported
-  success. A failed seed probe or step is now a failed seed (non-zero exit); `mix driftwood.seed` stays re-runnable
-  (verified twice against the dev database). **Host action:** none. The swallow ratchet baseline fell from 33 to 0 (the map and
+  success. A failed seed probe or step is now a failed seed (non-zero exit), and the operator seed units are atomic: the Driftwood
+  fresh path and each account it adds on a re-run are one transaction each (the account `Org` row is the "seeded" marker, so it commits
+  only with the admin, billing and tickets it vouches for), the leads converge on a re-run, and the PawChart operator seed is one
+  transaction (an interrupted run was a permanent half-seed that reported `:ok`); a seed interrupted BEFORE this change still needs a
+  database reset (the loud "interrupted" error stays). `mix driftwood.seed` stays re-runnable (verified twice against the dev database);
+  `mix pawchart.seed` does not call `PawChart.OperatorSeeds` (it seeds the tenant only), which was exercised directly. Also: a reveal-window outage is re-probed every 20 s instead of logging once a second per open console, and a reveal is refused while the
+  windows are unknown; a suspension-table outage on a reveal is outage copy (still denied), not "no active second-party grant"
+  (`Suspension.status/2`); every framework form submit (20 of them) and the broker console's go through `Guard.submit_form/4`, so an
+  outage is "couldn't save — nothing was saved", a denial is denial copy and validation errors are unchanged; `Guard.pane/2`,
+  `error_body/1`, `retry_event/2`, `write_copy/2`, `cast_id/1`, `first_or_not_found/1` and the `<.read_error>` component replace the
+  per-vertical copies. **Host action:** none. The swallow ratchet baseline fell from 33 to 0 (the map and
   the shrink-only ratchet stay; nothing may be added back). Sabotages 678-681 (151, 172, 181, 182 regenerated onto the converted
-  reads; 666 names the non-vacuity test, since the baseline-equality test cannot flip on an empty baseline).
+  reads; 666 names the non-vacuity test, since the baseline-equality test cannot flip on an empty baseline) and 682 onward (the live ratchet's
+  positive control: `scan/1` counts a fixture's swallows).
 
 ### Security and correctness fixes
 

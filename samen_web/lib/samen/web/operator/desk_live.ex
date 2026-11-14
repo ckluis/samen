@@ -29,6 +29,7 @@ defmodule Samen.Web.Operator.DeskLive do
   import Samen.Web.Operator.Live
 
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
   alias Samen.Web.Operator
   alias Samen.Web.Operator.Reads
 
@@ -100,9 +101,12 @@ defmodule Samen.Web.Operator.DeskLive do
   # the server-side fact, never client input. The ticket header is non-PII; the kernel's
   # OrgScope + RoleAtLeast(:member) gate the write — no LiveView policy.
   def handle_event("save_new", %{"form" => params}, socket) do
-    case AshPhoenix.Form.submit(socket.assigns.new_form, params: with_org(params, socket)) do
+    case Guard.submit_form(:operator_desk_save_ticket, socket.assigns[:org_id], socket.assigns.new_form, with_org(params, socket)) do
       {:ok, _ticket} ->
         {:noreply, socket |> assign(show_new: false) |> load()}
+
+      {:error, kind} when is_atom(kind) ->
+        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "save that ticket"))}
 
       {:error, form} ->
         {:noreply, assign(socket, new_form: form)}

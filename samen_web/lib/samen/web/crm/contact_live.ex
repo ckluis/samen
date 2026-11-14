@@ -120,7 +120,7 @@ defmodule Samen.Web.CRM.ContactLive do
         "org_id" => org_id
       })
 
-    case AshPhoenix.Form.submit(socket.assigns.activity_form, params: params) do
+    case Guard.submit_form(:crm_save_contact_activity, socket.assigns[:org_id], socket.assigns.activity_form, params) do
       {:ok, _task} ->
         # The write succeeded; if re-reading the timeline fails, say so (and keep the entries
         # already on screen) rather than rendering the new activity as lost.
@@ -137,6 +137,9 @@ defmodule Samen.Web.CRM.ContactLive do
            activities: activities,
            section_errors: Enum.uniq(Enum.reject(socket.assigns.section_errors, &(&1 == :activity)) ++ errors)
          )}
+
+      {:error, kind} when is_atom(kind) ->
+        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "save that activity"))}
 
       {:error, form} ->
         {:noreply, assign(socket, activity_form: form)}
@@ -165,10 +168,13 @@ defmodule Samen.Web.CRM.ContactLive do
   # write is REJECTED at the Ash write path by `Samen.Pii.WriteGuard` (MC-1) and renders
   # as a form error — the DB is unchanged. Tenant writes route through the vault (MC-2).
   def handle_event("save_edit", %{"form" => params}, socket) do
-    case AshPhoenix.Form.submit(socket.assigns.edit_form, params: params) do
+    case Guard.submit_form(:crm_edit_contact, socket.assigns[:org_id], socket.assigns.edit_form, params) do
       {:ok, _person} ->
         socket = assign(socket, show_edit: false)
         {:noreply, load(socket, socket.assigns.org_id, socket.assigns.contact_id)}
+
+      {:error, kind} when is_atom(kind) ->
+        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "save that contact"))}
 
       {:error, form} ->
         {:noreply, assign(socket, edit_form: form)}

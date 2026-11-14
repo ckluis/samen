@@ -31,6 +31,7 @@ defmodule Samen.Web.Billing.InvoicesLive do
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
+  alias Samen.Web.Reads.Guard
   alias Samen.Web.Mount
 
   alias Samen.Web.Billing.Reads
@@ -111,9 +112,12 @@ defmodule Samen.Web.Billing.InvoicesLive do
   # `org_id` is the server-side fact, never client input. Invoices are non-PII; the
   # kernel's OrgScope + admin role gate + SameOrgFk still apply — no LiveView policy.
   def handle_event("save_new", %{"form" => params}, socket) do
-    case AshPhoenix.Form.submit(socket.assigns.new_form, params: with_org(params, socket)) do
+    case Guard.submit_form(:billing_save_invoice, socket.assigns[:org_id], socket.assigns.new_form, with_org(params, socket)) do
       {:ok, _invoice} ->
         {:noreply, socket |> assign(show_new: false) |> load(socket.assigns.org_id)}
+
+      {:error, kind} when is_atom(kind) ->
+        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "save that invoice"))}
 
       {:error, form} ->
         {:noreply, assign(socket, new_form: form)}

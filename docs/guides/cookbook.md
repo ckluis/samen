@@ -628,7 +628,38 @@ seam** (it is compiled out of a vertical build): break the table for real inside
 makes the read fail, `ADD CONSTRAINT … CHECK (false) NOT VALID` makes the insert fail; both roll back) and assert the error state, the
 absent empty-state copy and CTA, the retry, and a positive control. A seed probe ("already seeded?") must be allowed to raise: answering
 `true`/`false` on a failed read skips or repeats a step and still reports success; an idempotent seed matches "already exists"
-specifically and a real failure is a non-zero exit.
+specifically and a real failure is a non-zero exit. **Seed units are atomic**: the "already seeded?" marker (an operator org or an
+account `Org` row) must commit in the SAME transaction as the rows it vouches for (`Repo.transaction/1` around the fresh path and around
+each account; a raise rolls the unit back and the task exits non-zero), otherwise one interrupted run is a permanent half-seed that
+reports `:ok` on every later run. Ash warns once per create with transaction hooks inside a surrounding transaction; a seed unit
+switches `:warn_on_transaction_hooks?` off for its span and restores it.
+
+**Shared helpers — do not re-write them per vertical (phase 4 review).** `Samen.Web.Reads.Guard` carries what each host LiveView was
+copying: `Guard.pane/2` (`{:ok, v} | {:error, kind}` → `{v, error}` for a pane), `Guard.error_body/1` and `Guard.retry_event/2` (the copy and
+the retry event for a failed pane; none for a denial), `Guard.write_copy/2` (value-free outage or denial copy for a failed write),
+`Guard.cast_id/1` and `Guard.first_or_not_found/1`. A pane renders with the kit component `<.read_error kind={@loads_error}
+retry="retry_panel" />` (outage copy + retry, denial copy and no retry for `:forbidden`; `body=` overrides the copy) — never a
+hand-rolled `<div class="error-state">`.
+
+**A form submit is a write.** Submit an `AshPhoenix.Form` through `Guard.submit_form(:name, org_id, form, params)`, never
+`AshPhoenix.Form.submit/2` directly: an outage reaches a form as an `Ash.Error.Unknown` on its changeset, which the field errors would
+render as a validation message. `{:ok, record}` saved · `{:error, form}` a real refusal (field errors, unchanged) ·
+`{:error, :unavailable}` → `put_flash(:error, Guard.write_copy(kind, "save that contact"))`, nothing saved, what the user typed kept ·
+`{:error, :forbidden}` → the same call prints denial copy. A database constraint Ash does not map arrives as `Unknown` too, and
+retrying never fixes it: map it (`references`/`identity`) so it is a field error — foreign keys on `belongs_to` are mapped by default
+(`driftwood/test/reads_honest_failure_p4_test.exs`, "form submit classification"). `samen_web/test/samen/web/form_submit_outage_test.exs`
+fails if any framework LiveView calls `AshPhoenix.Form.submit/2` directly.
+
+**Not "no org".** `Samen.Auth.OrgActor.authorized_org_ids_result/2` and `resolve_result/3` return `{:error, :unavailable}` for a failed
+User/Membership read (the legacy `authorized_org_ids/2` / `resolve/3` keep their shape, fail closed, and log the failure by name and
+exception module); a landing or gate that must tell the user uses the result (`DriftwoodWeb.PageController` answers 503).
+`CurrentOrg.list_orgs_result/1` is the directory's tagged form: `no_org_card/1` renders the kit error state, never "run the seed command",
+when the directory read failed. A console that polls (the reveal-window tick) re-probes an unknown state on a backoff
+(`windows_retry_at`), not every second, and refuses a reveal while the state is unknown (fail closed).
+
+**The ratchet has a positive control.** With an empty baseline nothing else proves `SwallowLint.scan/1` can ever return a count:
+`samen_web/test/fixtures/swallow_fixture.ex` (outside every lint root, never compiled) holds known swallows and
+`reads_swallow_lint_test.exs` asserts `scan([fixture])` counts them and `check/2` against the real baseline fails naming the file.
 
 ---
 

@@ -129,9 +129,12 @@ defmodule Samen.Web.Support.TicketLive do
   # `Samen.Pii.WriteGuard` REJECTS the plaintext at the Ash write path (MC-1) and
   # the error renders inline — this LiveView adds no policy of its own.
   def handle_event("save_reply", %{"form" => params}, socket) do
-    case AshPhoenix.Form.submit(socket.assigns.reply_form, params: reply_params(params, socket)) do
+    case Guard.submit_form(:support_save_reply, socket.assigns[:org_id], socket.assigns.reply_form, reply_params(params, socket)) do
       {:ok, _message} ->
         {:noreply, load(socket, socket.assigns.org_id, socket.assigns.ticket_id)}
+
+      {:error, kind} when is_atom(kind) ->
+        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "send that reply"))}
 
       {:error, form} ->
         {:noreply, assign(socket, reply_form: form)}
