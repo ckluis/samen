@@ -14,6 +14,7 @@ matches) until egress is enabled.
 | KMS error rate | wrap/unwrap failure rate on `Samen.Kms.AwsKmsDynamo`; `/readyz` `:kms` check | any failures, non-sustained | ANY sustained KMS failure > 1m | this file, §4 |
 | `/readyz` failing | `GET /readyz` 503 (`Samen.Web.Readiness.check/1`) | single flaky 503 | 503 sustained > 2m OR any machine failing Fly's health check | this file, §5 |
 | Audit partition runway | `samen.audit.partition.runway_days`, `.default_rows`, `.default_landing.count`, `.runway_unknown.count`; `/readyz` body line `partitions:` | runway < 31 days, OR any `default_rows` > 0, OR no DEFAULT partition, OR any `runway_unknown` | runway <= 0 (`partitions: CRITICAL`), OR `runway_unknown` for > 1h, OR `default_landing` still rising after the roll-forward ran | this file, §7 |
+| Second instance on the database | `samen.single_node.peers`, `.overlap_seconds`, `.unknown`, `.overlap.count`, `.unknown.count`, `.peer_refused.count`; `/readyz` body line `single_node:` | `peers` > 0 (a rolling deploy does this for up to the 5-minute grace period; do not page on it), OR `peer_refused.count` rising | `single_node: CRITICAL` (overlap past the grace period), OR `single_node: UNKNOWN` sustained > 15m, OR `overlap.count` > 0 outside a deploy | this file, §8 |
 | Pool saturation | `samen.pool.saturation.events` (event `[:samen,:pool,:saturation]`, default threshold 50ms checkout wait) | events present, low rate | sustained rate increase over baseline | this file, §6 |
 
 ---
@@ -182,3 +183,26 @@ for each month they belong to; the move puts the rows in), or, if they are accep
 log and silence the `default_rows` alert for this table (the `default_landing` counter must still alert: it tells you a NEW row fell out).
 `partitions: UNKNOWN` names the table it could not read (integer or MAXVALUE-bounded tables are not read at all).
 
+## 8. Second instance on the database (ADR-054)
+
+Samen runs as ONE instance per database. Each serving instance holds a session advisory lock on a dedicated connection and counts
+the other holders (`Samen.SingleNode.Lease`). `/readyz` adds a `single_node:` line to its **200** body (it is an advisory like §7:
+draining a machine would not cure it), or answers **503** on the LATE instance when `config :samen_core, Samen.SingleNode,
+strict: true`. Alert on the metrics or the body line.
+
+- `single_node: CRITICAL N other instance(s) share this database for Ns` — another instance has been on this database longer
+  than `grace_ms` (default 300 s). A rolling deploy produces `samen.single_node.peers` = 1 for a few minutes and no line; the line
+  means the old instance was not stopped, or someone scaled the app.
+- `single_node: UNKNOWN … (reason)` — the lease cannot say. `connection_down` / `query_failed`: the database or the dedicated
+  connection is failing (§5 will usually be failing too). `connection_pooler`: the lease connection goes through PgBouncer in
+  transaction mode, where session locks do not work; set `lease_url` to a direct URL. `lease_lost`: the lock vanished under a live
+  session (`pg_advisory_unlock_all()`, a pooler `DISCARD ALL`); the lease re-takes it only on a new session, restart the instance.
+- `samen.single_node.peer_refused.count` rising — something connects a VISIBLE Erlang node (a clustering library, or an operator
+  starting `iex`/`:observer` without `--hidden`). It is disconnected each time. Use `bin/app remote` or `iex --hidden --remsh`.
+
+First response to CRITICAL:
+1. `fly status` / `fly machines list`: how many machines run this app? Expect one.
+2. Stop the extra one (`fly machines stop <id>` then `fly scale count 1`). The line clears on the next check (5 s).
+3. If only one machine exists, look for a second deployment pointing at the same `DATABASE_URL` (a staging app, a preview, a laptop with the production URL):
+   `SELECT pid, application_name, client_addr, backend_start FROM pg_stat_activity WHERE pid IN (SELECT pid FROM pg_locks WHERE locktype='advisory' AND classid=1397244229 AND objid=1313096773);`
+4. Meanwhile treat the node-local state as unreliable (ADR-054 §1.1): re-check the AI kill switch on BOTH instances if it was thrown, and review fleet heartbeat rejections.

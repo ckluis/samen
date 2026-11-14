@@ -25,6 +25,23 @@ Docker build therefore needs the **monorepo root** (the dir containing `samen_co
 
 run from the monorepo root (`.`).
 
+## ONE instance per database (ADR-054)
+
+Run exactly **one** Fly machine for this app: `fly deploy --ha=false`, then `fly scale count 1`. Fly's default is two
+machines. The replay-nonce cache, the AI kill switch, the rate limiter, the feature-flag invalidation, chat presence and
+the local-disk adapters are per-instance; with two instances behind the load balancer a replayed fleet nonce is accepted
+by the second one and a kill switch thrown on one leaves agents running on the other. The app checks for this itself:
+
+- `/readyz` stays `ready` while a rolling deploy overlaps two instances for up to 5 minutes (`grace_ms`), then adds
+  `single_node: CRITICAL N other instance(s) share this database ...` to its 200 body. Page on that line (see
+  `docs/runbooks/alerts.md` of the Samen repo, "Second instance on the database").
+- `single_node: UNKNOWN ... (connection_pooler)` means the lease connection goes through a PgBouncer in transaction mode;
+  set `config :samen_core, Samen.SingleNode, lease_url: "<direct, unpooled DATABASE_URL>"`.
+- `config :samen_core, Samen.SingleNode, strict: true` makes the LATE instance answer 503 instead (use it only with a
+  deploy that stops the old machine inside the grace period).
+- The app refuses to boot with `dns_cluster` / `libcluster` configured, and disconnects any visible Erlang peer. Operator
+  consoles are unaffected: `bin/<%= otp_app %> remote` and `rpc` connect as hidden nodes.
+
 ## Neon per-product database (branch-per-env)
 
 Provision ONE Neon project per product, and use Neon **branches** for environments so
