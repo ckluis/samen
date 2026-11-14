@@ -13,23 +13,23 @@
 # MUST_FAIL: RED: deleting another org's load id is a genuine :not_found — nothing destroyed
 # MUST_FAIL: RED: editing another org's load id is a genuine :not_found (org-scope pin)
 diff --git a/driftwood/lib/driftwood/reads.ex b/driftwood/lib/driftwood/reads.ex
-index dcea1f21..ed748aad 100644
+index 15718e7..61dcbc5 100644
 --- a/driftwood/lib/driftwood/reads.ex
 +++ b/driftwood/lib/driftwood/reads.ex
-@@ -199,7 +199,7 @@ defmodule Driftwood.Reads do
+@@ -187,7 +187,7 @@ defmodule Driftwood.Reads do
               Driftwood.Crm.Opportunity
               |> Ash.Query.filter(id == ^id)
               |> Ash.Query.limit(1)
 -             |> Ash.read_one!(scope: scope)
 +             |> Ash.read_one!(authorize?: false)
             end) do
-       first_or_not_found(List.wrap(row))
+       Guard.first_or_not_found(List.wrap(row))
      end
 diff --git a/driftwood/lib/driftwood_web/broker_live.ex b/driftwood/lib/driftwood_web/broker_live.ex
-index cbccaaf4..9bfa0ae0 100644
+index 901f655..675a502 100644
 --- a/driftwood/lib/driftwood_web/broker_live.ex
 +++ b/driftwood/lib/driftwood_web/broker_live.ex
-@@ -1308,7 +1308,7 @@ defmodule DriftwoodWeb.BrokerLive do
+@@ -1294,7 +1294,7 @@ defmodule DriftwoodWeb.BrokerLive do
  
      with {:ok, load} <- Reads.get_load_result(scope, load_id) do
        Guard.write(:driftwood_delete_load, scope, fn ->

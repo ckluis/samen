@@ -7,15 +7,20 @@
 # MUST_FAIL: a failed load board is the error state with a retry
 # MUST_FAIL: a failed roster is the error state, not an empty roster
 diff --git a/driftwood/lib/driftwood_web/broker_live.ex b/driftwood/lib/driftwood_web/broker_live.ex
-index cbccaaf4..ea126c6c 100644
+index 901f6559..93f1ff51 100644
 --- a/driftwood/lib/driftwood_web/broker_live.ex
 +++ b/driftwood/lib/driftwood_web/broker_live.ex
-@@ -154,7 +154,7 @@ defmodule DriftwoodWeb.BrokerLive do
-   defp pane(true, default, fun) do
-     case fun.() do
-       {:ok, value} -> {value, nil}
--      {:error, kind} -> {default, kind}
-+      {:error, _kind} -> {default, nil}
-     end
-   end
+@@ -151,7 +151,12 @@ defmodule DriftwoodWeb.BrokerLive do
+   # one is `{value, nil}` or `{default, :unavailable | :forbidden}`.
+   defp pane(false, default, _fun), do: {default, nil}
  
+-  defp pane(true, default, fun), do: Guard.pane(fun.(), default)
++  defp pane(true, default, fun) do
++    case fun.() do
++      {:ok, value} -> {value, nil}
++      {:error, _kind} -> {default, nil}
++    end
++  end
+ 
+   # The dashboard rollup (`dbs_broker_summary`) through the same convention. A malformed org id (a
+   # dogfood `?org=` param) is cast first: it is "no rollup", never an error log.
