@@ -44,7 +44,7 @@ defmodule Samen.AI.VerbsTest do
     * **keyless / fail-honest** — an unconfigured provider outside `:test` returns
       `{:error, :not_configured}`, never a faked `{:ok, _}`;
     * **chokepoint routing, explicitly per verb module** — the RP-AI-1 AST probe
-      (`Samen.AI.ChokepointAntiBypassProbeTest.offenders_in_source/2`) finds ZERO
+      (`Samen.AI.MaskedPayloadScan.offenders_in_source/2`) finds ZERO
       `%Samen.AI.MaskedPayload{}` constructions in any of the six verb source files.
 
   Sabotage-refutable: `scripts/sabotages/49-t68-ai-prompt-vt-scan-weaken.patch` targets the
@@ -277,7 +277,7 @@ defmodule Samen.AI.VerbsTest do
         for rel <- @verb_files,
             path = Path.join(repo_root, rel),
             offender <-
-              Samen.AI.ChokepointAntiBypassProbeTest.offenders_in_source(File.read!(path), rel) do
+              Samen.AI.MaskedPayloadScan.offenders_in_source(File.read!(path), rel) do
           offender
         end
 

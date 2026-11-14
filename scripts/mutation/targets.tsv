@@ -68,3 +68,6 @@ samen_core/lib/samen/policy/org_scope.ex	samen_core	test/policy/org_scope_test.e
 # --- `active_windows` are the deny-on-read gate (requestor-bound, distinct-party, unrevoked, expires_at > now) and
 # --- `granted?`/`granted_many` are the seam the resolver consults. A silent weakening is a plaintext unlock.
 samen_core/lib/samen/reveal/grants.ex	samen_core	test/reveal_grants_test.exs test/reveal_grants_windows_test.exs test/reveal_grant_seam_test.exs test/reveal_grant_db_check_test.exs test/reveal_grant_property_test.exs test/reveal_grant_same_tx_test.exs test/reveal_auto_revoke_test.exs test/reveal_approver_test.exs test/suspension_asymmetry_test.exs
+# --- the reveal seam (T1.5/T1.6/T4.2): the ONE gate before the vault decrypt — aggregate / fleet actors never cross
+# --- it, only a declared reveal action can, and the default checker denies. (derived: sabotage TEST_FILES 734)
+samen_core/lib/samen/reveal.ex	samen_core	test/reveal_test.exs test/reveal_fleet_refusal_test.exs test/reveal_grant_seam_test.exs test/aggregate_mutual_exclusion_test.exs
