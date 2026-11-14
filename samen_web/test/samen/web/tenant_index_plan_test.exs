@@ -267,4 +267,75 @@ defmodule Samen.Web.TenantIndexPlanTest do
       page(Ash.Query.ensure_selected(Person, [:org_id]), scope, %ListState{sort: {:display_name, :asc}, page_size: 50})
     assert items != [] and Enum.all?(items, &(&1.org_id == org))
   end
+
+  # -- the cursor's redundant index bound (S4) --------------------------------------------------
+  #
+  # The cursor OR-chain `(f > v OR (f = v AND id > c) OR f IS NULL)` is only a FILTER: the planner
+  # cannot seek on it, so a deep page would walk the index from the start of the org and discard
+  # rows. `Reads` ANDs a redundant bound the index can seek on (`f <= v` DESC always, `f >= v` ASC
+  # only for a column that cannot be NULL — a NULL tail follows an ASC cursor). The proof is the
+  # EXPLAIN of a DEEP page: the Index Cond must name the sort column, not just `org_id`.
+
+  # Page forward `pages` times at the largest page size and return the state sitting on the page after.
+  defp deep_state(resource, scope, %ListState{} = state, pages) do
+    Enum.reduce(1..pages, state, fn _, st ->
+      %{next_cursor: cursor} = Reads.page!(resource, st, scope: scope)
+      assert cursor != nil, "the seed ran out of rows before the page was deep enough"
+      %{st | cursor: cursor}
+    end)
+  end
+
+  defp index_conds(nodes, index), do: for(n <- nodes, n["Index Name"] == index, do: n["Index Cond"])
+
+  @tag seed: :message
+  test "message — a DEEP ASC page seeks on inserted_at (NOT NULL column): the Index Cond names it", %{scope: scope} do
+    index = index_of(Message)
+    state = deep_state(Message, scope, %ListState{sort: {:inserted_at, :asc}, page_size: 200}, 25)
+    assert state.cursor != nil
+
+    {%{items: items}, sql} = page(Message, scope, state)
+    assert items != []
+    nodes = explain(sql)
+
+    assert_index_page!(nodes, "wsm_message", index, "Forward")
+    assert Enum.any?(index_conds(nodes, index), &(&1 =~ "wsm_inserted_at")),
+           "the deep page does not seek on the sort column: #{inspect(index_conds(nodes, index))}"
+  end
+
+  @tag seed: :message
+  test "message — a DEEP DESC page seeks on inserted_at too", %{scope: scope} do
+    index = index_of(Message)
+    state = deep_state(Message, scope, %ListState{sort: {:inserted_at, :desc}, page_size: 200}, 25)
+
+    {_page, sql} = page(Message, scope, state)
+    nodes = explain(sql)
+
+    assert_index_page!(nodes, "wsm_message", index, "Backward")
+    assert Enum.any?(index_conds(nodes, index), &(&1 =~ "wsm_inserted_at")),
+           "the deep page does not seek on the sort column: #{inspect(index_conds(nodes, index))}"
+  end
+
+  @tag seed: :person
+  test "person — a DEEP DESC page on the nullable display_name seeks on it", %{scope: scope} do
+    index = index_of(Person)
+    state = deep_state(Person, scope, %ListState{sort: {:display_name, :desc}, page_size: 200}, 25)
+
+    {_page, sql} = page(Person, scope, state)
+    nodes = explain(sql)
+
+    assert_index_page!(nodes, "swp_person", index, "Backward")
+    assert Enum.any?(index_conds(nodes, index), &(&1 =~ "swp_display_name")),
+           "the deep page does not seek on the sort column: #{inspect(index_conds(nodes, index))}"
+  end
+
+  @tag seed: :person
+  test "person — an ASC page on a NULLABLE column gets NO lower bound (it would drop the NULLS-LAST tail)",
+       %{scope: scope} do
+    index = index_of(Person)
+    state = deep_state(Person, scope, %ListState{sort: {:display_name, :asc}, page_size: 200}, 25)
+
+    {_page, {text, _params} = sql} = page(Person, scope, state)
+    refute String.contains?(text, ">= $"), "an ASC cursor on a nullable column must not carry `>=`: #{text}"
+    refute Enum.any?(index_conds(explain(sql), index), &(&1 =~ "swp_display_name"))
+  end
 end

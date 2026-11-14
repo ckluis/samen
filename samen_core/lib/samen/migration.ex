@@ -431,14 +431,24 @@ defmodule Samen.Migration do
   end
 
   @doc """
-  Create the tenant keyset index `(org_id, <keyset_sort>, id)` (ARCH-4, `Samen.Indexing`) for
-  every org-scoped resource in `resources`; a listed resource that is not org-scoped is
-  skipped, one that cannot be inspected RAISES (never a silent skip).
+  Create the tenant keyset index `(org_id, <keyset_sort>, id)` (ARCH-4, `Samen.Indexing`).
+  Each entry of `indexes` is either
+
+    * an Ash resource module — the index is DERIVED from the resource as it is now (a listed
+      resource that is not org-scoped is skipped, one that cannot be inspected RAISES, never a
+      silent skip). Use this in the migration that CREATES the table (the template and
+      `gen.resource` migrations): the table is new, so the current shape is the right one; or
+    * a literal `{table, columns, name}` — what `mix samen.gen.indexes` writes. The migration
+      then states table, columns and index name itself, so it never changes meaning when a
+      resource's `keyset_sort` (or any other code) changes later; a new shape gets a new name
+      and a new migration.
 
   Inside the DDL transaction by default (the table was just created in this migration, so
   the build is instant). On a table that already holds rows pass `concurrently: true` in a
   migration that declares `@disable_ddl_transaction true` (the `concurrent_index/3` carve-out):
-  the build then takes no write lock. Both forms are idempotent (`IF NOT EXISTS`).
+  the build then takes no write lock, and a same-named INVALID index (the leftover of a
+  `CONCURRENTLY` build that failed or was cancelled) is dropped first — `IF NOT EXISTS` would
+  otherwise skip it forever. Both forms are idempotent (`IF NOT EXISTS`).
   """
   defmacro create_org_keyset_indexes(resources, opts \\ []) do
     caller_module = __CALLER__.module
@@ -468,10 +478,10 @@ defmodule Samen.Migration do
   end
 
   @doc false
-  def __org_keyset_indexes__(direction, caller_module, resources, opts) do
+  def __org_keyset_indexes__(direction, caller_module, indexes, opts) do
     concurrently? = Keyword.get(opts, :concurrently, false)
 
-    for resource <- List.wrap(resources), spec <- org_keyset_spec!(resource) do
+    for entry <- List.wrap(indexes), spec <- org_keyset_spec!(entry) do
       quoted_cols = Enum.map_join(spec.columns, ", ", &quote_ident/1)
 
       case {direction, concurrently?} do
@@ -496,6 +506,11 @@ defmodule Samen.Migration do
     end
 
     :ok
+  end
+
+  defp org_keyset_spec!({table, columns, name})
+       when is_binary(table) and is_list(columns) and is_binary(name) do
+    [%{table: table, columns: columns, name: name}]
   end
 
   defp org_keyset_spec!(resource) do
@@ -573,6 +588,7 @@ defmodule Samen.Migration do
     case {direction, concurrently?} do
       {:up, true} ->
         Samen.Migration.ExpandContract.__require_disabled_ddl_transaction__!(caller_module)
+        Samen.Migration.ExpandContract.drop_invalid_index(table, name)
 
         Ecto.Migration.execute(
           "CREATE INDEX CONCURRENTLY IF NOT EXISTS #{quote_ident(name)} " <>

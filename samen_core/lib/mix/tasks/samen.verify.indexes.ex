@@ -18,7 +18,18 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
   index exists that no migration ever created. The planner only uses indexes the database has, so
   the verifier reads `pg_index` after the host's migrations ran (the host `ci.sh` bootstrap) —
   the same convention as `catalog_parity` / `prefixes` / `pii_reads`. A partial, invalid,
-  not-yet-ready, expression-led, non-btree, or mixed-direction index does NOT count.
+  not-yet-ready, expression-led, non-btree, or mixed-direction index does NOT count — nor one
+  whose NULLS ordering is not the default for its direction, whose collation is not the
+  column's own, or whose operator class is not the type's default (each orders differently
+  from the `ORDER BY` the page sends).
+
+  ## A changed `keyset_sort`
+
+  The index name carries the sort column (`<table>_org_<sort>_id_idx`). Change a resource's
+  `keyset_sort` and this verifier goes red against a database holding the old index, and the
+  message says what to do: run `mix samen.gen.indexes` (it writes a NEW migration that builds the
+  new index; an applied migration is never edited) and, once green, drop the old index in a
+  follow-up migration.
 
   ## Fail-honest
 
@@ -32,6 +43,16 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
   `@exempt` below maps a resource module to the reason it needs no index. Each reason must be
   literally true; an entry whose resource is no longer org-scoped, or does have the index, is
   itself reported (a stale exemption is a violation), so the list cannot rot. It is empty.
+
+  ## Declared unmounted (a host that mounts a domain but not all its tables)
+
+  A host may mount a domain without migrating every one of its resources (samen_web's test host
+  mounts `Samen.AI.Domain` for the agent-loop tables but not `Prompt` / `SupportReplyDraft`).
+  Such a resource is named, with the literal reason, in the host's
+  `config :<app>, :index_unmounted, %{Resource => "reason"}`. It is then NOT checked, and `run/1`
+  PRINTS every one of them (`NOT inspected …`) — never a silent skip. The map cannot rot: an
+  entry whose resource is not an org-scoped resource of the configured domains, or whose table
+  DOES exist in the live database, is itself a violation.
 
   ## Usage
 
@@ -53,17 +74,33 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
 
     {opts, _rest, _} = OptionParser.parse(args, strict: [domain: :keep])
 
-    Samen.Verifier.halt_if_violations(@task_name, violations(domains: domains(opts)))
+    unmounted = unmounted()
+
+    for {resource, reason} <- Enum.sort(unmounted) do
+      Mix.shell().info("#{@task_name}: NOT inspected (declared unmounted on this host): #{inspect(resource)} — #{reason}")
+    end
+
+    Samen.Verifier.halt_if_violations(
+      @task_name,
+      violations(domains: domains(opts), unmounted: unmounted)
+    )
+  end
+
+  defp unmounted do
+    Mix.Project.config()[:app] |> Application.get_env(:index_unmounted, %{}) |> Map.new()
   end
 
   @doc """
   The violation strings for `opts[:domains]`. Separated from `run/1` so tests can assert on it
-  without halting the VM. `opts[:exempt]` overrides the exemption map (tests only).
+  without halting the VM. `opts[:exempt]` overrides the exemption map and `opts[:keyset_sorts]`
+  the declared sorts (see `Samen.Indexing.spec/2`) — both tests only.
   """
   @spec violations(keyword()) :: [String.t()]
   def violations(opts) do
     domains = Keyword.get(opts, :domains, [])
     exempt = Keyword.get(opts, :exempt, @exempt)
+    spec_opts = Keyword.take(opts, [:keyset_sorts])
+    unmounted = Keyword.get(opts, :unmounted, %{})
 
     if domains == [] do
       ["no Ash domains are configured — nothing was inspected, so nothing is proven"]
@@ -77,17 +114,18 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
 
       empty ++
         Enum.map(unclassified, fn {_resource, reason} -> "cannot inspect: #{reason}" end) ++
-        Enum.flat_map(resources, &check(&1, exempt)) ++
-        stale_exemptions(exempt, resources)
+        Enum.flat_map(resources, &check(&1, Map.merge(exempt, unmounted), spec_opts)) ++
+        stale_exemptions(exempt, resources) ++
+        stale_unmounted(unmounted, resources, spec_opts)
     end
   end
 
-  defp check(resource, exempt) do
-    if Map.has_key?(exempt, resource), do: [], else: check_one(resource)
+  defp check(resource, exempt, spec_opts) do
+    if Map.has_key?(exempt, resource), do: [], else: check_one(resource, spec_opts)
   end
 
-  defp check_one(resource) do
-    with {:ok, spec} <- Samen.Indexing.spec(resource),
+  defp check_one(resource, spec_opts) do
+    with {:ok, spec} <- Samen.Indexing.spec(resource, spec_opts),
          repo = repo(resource),
          true <- repo != nil or {:error, "#{inspect(resource)} declares no repo"},
          :ok <- ensure_repo_started(repo),
@@ -127,8 +165,23 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
       end
 
     "#{inspect(spec.resource)} (#{spec.table}): no index serves the org-scoped keyset page — " <>
-      "need btree (#{Enum.join(spec.columns, ", ")}); #{have}. " <>
-      "Generate the migration with `mix samen.gen.indexes`."
+      "need btree (#{Enum.join(spec.columns, ", ")}) named #{spec.name}; #{have}. " <>
+      next_step(spec, Samen.Indexing.superseded(indexes, spec))
+  end
+
+  defp next_step(spec, []) do
+    "Next: run `mix samen.gen.indexes` and deploy the migration it writes " <>
+      "(it builds #{spec.name} CONCURRENTLY)."
+  end
+
+  defp next_step(spec, superseded) do
+    old = Enum.map_join(superseded, ", ", & &1.name)
+
+    "The shape changed (the keyset sort is part of the index name): #{old} was built for " <>
+      "another shape and is no longer what the page walks. Next: run `mix samen.gen.indexes` " <>
+      "and deploy the migration it writes — it builds the NEW index #{spec.name} CONCURRENTLY " <>
+      "(never edit an applied migration). Once this verifier is green, drop #{old} in a " <>
+      "follow-up migration (`DROP INDEX CONCURRENTLY`)."
   end
 
   defp describe(index), do: "#{index.name}(#{Enum.map_join(index.keys, ", ", &to_string/1)})"
@@ -137,6 +190,28 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
     for {resource, _reason} <- exempt, resource not in resources do
       "stale exemption: #{inspect(resource)} is exempt but is not an org-scoped resource of the " <>
         "configured domains — delete the entry"
+    end
+  end
+
+  # An unmounted entry must name an org-scoped resource of the configured domains whose table is
+  # genuinely absent from the live database; otherwise it excuses nothing and must be deleted.
+  defp stale_unmounted(unmounted, resources, spec_opts) do
+    for {resource, _reason} <- unmounted, reason = stale_unmounted_reason(resource, resources, spec_opts) do
+      "stale unmounted entry: #{inspect(resource)} #{reason} — delete it from `:index_unmounted`"
+    end
+  end
+
+  defp stale_unmounted_reason(resource, resources, spec_opts) do
+    with true <- resource in resources || "is not an org-scoped resource of the configured domains",
+         {:ok, spec} <- Samen.Indexing.spec(resource, spec_opts),
+         repo when repo != nil <- repo(resource),
+         :ok <- ensure_repo_started(repo),
+         {:error, _} <- Samen.Indexing.live_indexes(repo, spec.schema, spec.table) do
+      nil
+    else
+      msg when is_binary(msg) -> msg
+      {:ok, _} -> "has its table in the live database (it is mounted)"
+      _ -> "cannot be inspected at all"
     end
   end
 

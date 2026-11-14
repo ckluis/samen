@@ -433,7 +433,12 @@ no Ash domains are configured — nothing was inspected, so nothing is proven
 `Samen.Web.Reads` keyset page is a sequential scan that slows as the table grows (ARCH-4, ADR-016 §9). A resource the check
 cannot inspect (absent table, unreadable policies, a `keyset_sort` that is not a stored attribute) and a run that inspected
 nothing are violations too: a silent pass would prove nothing. A partial, invalid, expression-led or mixed-direction index does
-not count. The check reads the migrated database, so run it after `mix ecto.migrate`.
+not count; nor does one whose NULLS ordering, collation or operator class differs from what the page's ORDER BY needs. The check
+reads the migrated database, so run it after `mix ecto.migrate` (and against production after the index migration: a failed
+`CONCURRENTLY` build leaves an INVALID index, which counts as missing).
+**Changed `keyset_sort`:** the index name carries the sort column, so the message then reads "The shape changed … <old> was built
+for another shape". Run `mix samen.gen.indexes` (a NEW migration builds the new index; never edit an applied one), and once green
+drop the old index in a follow-up migration (`DROP INDEX CONCURRENTLY`).
 **Fix:** `mix samen.gen.indexes` writes the `CREATE INDEX CONCURRENTLY` migration; for a resource added with
 `mix samen.gen.resource` the index is already in its migration. Set `keyset_sort:` on the resource to the field its list view
 sorts by (`default_sort`).

@@ -59,15 +59,31 @@ All notable changes to Samen are recorded here. The format follows
   `org_id` tables in driftwood, 17 of 82 in pawchart, 14 of 74 in demo), so `WHERE org_id = $1 ORDER BY <sort>, id LIMIT n`
   was a sequential scan. `Samen.Indexing` defines the contract, `(org_id, <keyset_sort>, id)`; a resource declares the sort
   with `use Samen.Resource, keyset_sort: :name` (the scope blueprints do it for the resources that have a list view).
+- **The index name carries the sort column** — `<table>_org_<sort>_id_idx` (`<table>_org_id_idx` with no `keyset_sort`) — so a
+  changed `keyset_sort` is a different index, not a silently skipped `IF NOT EXISTS`. `mix samen.gen.indexes` and the committed
+  retrofit migrations spell table, columns and name as LITERAL `{table, columns, name}` tuples, never resource modules: an
+  applied migration cannot change meaning when code later does. Every generator run writes a new file whose module name
+  carries its timestamp (a re-run no longer collides). After a shape change `mix samen.verify.indexes` names the old index,
+  says to re-run the generator for a migration that builds the new one, and to drop the old one in a follow-up.
 - **`mix samen.verify.indexes`** (new; reads the live catalog, fails on anything it cannot inspect, no exemptions) runs as a
-  step per app in `ci/steps.conf` and as step 13b of a generated app's `ci.sh`. **`mix samen.gen.indexes`** writes the retrofit
-  migration. `Samen.Migration` gains `create_org_keyset_indexes/2` and `create_jsonb_path_index/4` (plus their `drop_` pairs).
+  step per app in `ci/steps.conf` (each on a database rebuilt from scratch) and as step 13b of a generated app's `ci.sh`. It also
+  rejects an index whose NULLS ordering, collation or operator class is not what the page's ORDER BY needs. A host that mounts a
+  domain but not all its tables lists the others in `config :<app>, :index_unmounted` — printed as NOT inspected on every run,
+  and a stale entry fails. **`mix samen.gen.indexes`** writes the retrofit migration. `Samen.Migration` gains
+  `create_org_keyset_indexes/2` and `create_jsonb_path_index/4` (plus their `drop_` pairs).
+- A `CREATE INDEX CONCURRENTLY` that failed leaves an INVALID index that `IF NOT EXISTS` skipped forever; `concurrent_index/3`
+  and the concurrent jsonb-path index now drop a same-named invalid index first (a valid one is never touched). Run
+  `mix samen.verify.indexes` against production after the migration: it counts only a valid, ready index.
+- `Samen.Web.Reads` ANDs a redundant bound onto the keyset cursor (`f <= v` for DESC; `f >= v` for ASC only on a column that
+  cannot be NULL) so a deep page seeks in the index instead of filtering from the start of the org's range; the result set is unchanged.
+- `Samen.Replay.Migration` no longer builds the keyset indexes itself (a host whose replay tables exist never re-runs it); the
+  retrofit migration owns them, so rolling it back drops only what it built.
 - `activities_for_person` / `activities_for_company` filter `get_path(custom, ["crm_refs", …])`; two partial expression
   indexes on the exact expression Ash emits now let Postgres `BitmapOr` it with the `(subject_key, subject_id)` index.
 - Fixed on the way: `Samen.AI.Agent.FoldSource` had a table in driftwood but no repo wiring (it defaulted to `SamenCore.TestRepo`);
   `config :samen_core, :samen_ai_agent_fold_source_repo, Driftwood.Repo` added. A host that runs the agent loop needs the same line.
 - Tests: `Samen.IndexingTest`, `Samen.Web.TenantIndexPlanTest` (EXPLAIN of the real page query, with a drop-the-index control),
-  `Samen.Web.CrmRefsIndexPlanTest`, `Samen.Web.KeysetSortParityTest`. Recorded in ADR-016 §9. Sabotages 745-750.
+  `Samen.Web.CrmRefsIndexPlanTest`, `Samen.Web.KeysetSortParityTest`, `Samen.Web.ReadsCursorBoundTest`. Recorded in ADR-016 §9. Sabotages 745-750.
 
 ### Host action required (existing hosts and generated apps)
 
@@ -81,7 +97,7 @@ directory and diff, or apply by hand:
    `20261005100000` entitlement usage limit · `20261006100000` agent cached-input bucket (hosts running the agent loop) ·
    `20261009100000` `samen_replay` (also register `Samen.Replay.Domain` in **both** `:ash_domains` lists) ·
    `20261114100000` the tenant keyset indexes (**ARCH-4** — run `mix samen.gen.indexes` in the host; it writes a
-   `CREATE INDEX CONCURRENTLY` migration over every org-scoped resource, safe on populated tables, no write lock; copy the
+   `CREATE INDEX CONCURRENTLY` migration of literal `{table, columns, name}` tuples over every org-scoped resource, safe on populated tables, no write lock; copy the
    `driftwood/priv/repo/migrations/` file as the reference) · `20261114110000` the Work `Task` `crm_refs` expression indexes
    (hosts that mount the Work scope: copy the reference migration, same `CONCURRENTLY` form). Then add
    `mix samen.verify.indexes` to the host gate; a host with large tables should run the two migrations in a quiet

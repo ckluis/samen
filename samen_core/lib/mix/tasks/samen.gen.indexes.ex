@@ -4,13 +4,20 @@ defmodule Mix.Tasks.Samen.Gen.Indexes do
   @moduledoc """
   `mix samen.gen.indexes` — generate the retrofit migration for the tenant-index contract
   (ARCH-4, `Samen.Indexing`). Run it inside a host app (or an existing generated app) whose
-  tables predate the contract: it lists every org-scoped resource of the app's `:ash_domains`
-  as a LITERAL `@resources` list (so the migration never changes meaning when a resource is
-  added later) and writes one migration that builds each index with `CREATE INDEX CONCURRENTLY
-  IF NOT EXISTS` — the repo's non-blocking carve-out (`Samen.Migration.concurrent_index/3`),
-  safe on a table that already holds tenant data. Re-running it is harmless (the indexes are
-  idempotent) but writes a new file; a resource added later is covered by `mix samen.gen.resource`
-  or by running this task again.
+  tables predate the contract, OR whose resources changed `keyset_sort` since the last run: it
+  lists the index every org-scoped resource of the app's `:ash_domains` needs as a LITERAL
+  `{table, columns, index name}` tuple — never a resource module — so an applied migration
+  never changes meaning when a resource changes later. The index name carries the sort column,
+  so a changed `keyset_sort` is a NEW name and this migration builds the new index
+  (`CREATE INDEX CONCURRENTLY IF NOT EXISTS`, the repo's non-blocking carve-out
+  `Samen.Migration.concurrent_index/3`, safe on a table that already holds tenant data; a
+  same-named INVALID leftover of a failed build is dropped first). The old index is NOT dropped
+  here: once the verifier is green, drop it in a follow-up (contract-phase) migration.
+
+  Every run writes a new file whose module name carries its timestamp, so re-running never
+  collides with an earlier migration (Ecto refuses two migrations with one module or version).
+  The indexes are idempotent, so a re-run only builds what is missing. A rollback of this
+  migration drops every index it lists.
 
   A freshly generated app does not need this: `mix samen.gen.app` creates the indexes inside
   the table-creating migrations (`create_org_keyset_indexes/1`).
@@ -19,8 +26,9 @@ defmodule Mix.Tasks.Samen.Gen.Indexes do
 
       mix samen.gen.indexes [--out path] [--timestamp 20261114100000] [--domain MyApp.Crm …]
 
-  `--domain` (repeatable) replaces the app's `:ash_domains` (a test-fixture app, or one scope). `--out` defaults to the repo's migrations path; `--timestamp` pins the file name (tests, and the
-  committed host migrations).
+  `--domain` (repeatable) replaces the app's `:ash_domains` (a test-fixture app, or one scope).
+  `--out` defaults to the repo's migrations path; `--timestamp` pins the file name and module
+  (tests, and the committed host migrations).
   """
   use Mix.Task
 
@@ -40,6 +48,15 @@ defmodule Mix.Tasks.Samen.Gen.Indexes do
 
     {resources, unclassified} = Samen.Indexing.org_scoped(domains)
 
+    # Resources the host declared unmounted (`config :<app>, :index_unmounted`) have no table to index.
+    unmounted = otp_app |> Application.get_env(:index_unmounted, %{}) |> Map.new()
+
+    for {resource, reason} <- Enum.sort(unmounted), resource in resources do
+      Mix.shell().info("samen.gen.indexes: skipping #{inspect(resource)} — declared unmounted: #{reason}")
+    end
+
+    resources = Enum.reject(resources, &Map.has_key?(unmounted, &1))
+
     if unclassified != [] do
       Mix.raise(
         "mix samen.gen.indexes: cannot inspect " <>
@@ -55,40 +72,54 @@ defmodule Mix.Tasks.Samen.Gen.Indexes do
     path = Path.join(out_dir, "#{timestamp}_org_keyset_indexes.exs")
 
     File.mkdir_p!(out_dir)
-    File.write!(path, render(repo, resources))
+    File.write!(path, render(repo, resources, timestamp))
     Mix.shell().info("samen.gen.indexes: wrote #{path} (#{length(resources)} resources)")
     path
   end
 
-  @doc "The migration source for `resources` on `repo` (pure; the test pins its shape)."
-  @spec render(module(), [module()]) :: String.t()
-  def render(repo, resources) do
+  @doc """
+  The migration source for `resources` on `repo` at `timestamp` (pure; the test pins its shape).
+  Raises when a resource's index cannot be derived. `opts[:keyset_sorts]`: see
+  `Samen.Indexing.spec/2` (tests only).
+  """
+  @spec render(module(), [module()], String.t(), keyword()) :: String.t()
+  def render(repo, resources, timestamp, opts \\ []) do
     list =
       resources
-      |> Enum.map(&inspect/1)
+      |> Enum.map(fn resource ->
+        {:ok, spec} = Samen.Indexing.spec(resource, Keyword.take(opts, [:keyset_sorts]))
+        {inspect(resource), spec}
+      end)
       |> Enum.sort()
-      |> Enum.map_join(",\n", &"    #{&1}")
+      |> Enum.map_join(",\n", fn {name, spec} ->
+        "    # #{name}\n    {#{inspect(spec.table)}, #{inspect(spec.columns)}, #{inspect(spec.name)}}"
+      end)
 
     """
-    defmodule #{inspect(repo)}.Migrations.OrgKeysetIndexes do
+    defmodule #{inspect(repo)}.Migrations.OrgKeysetIndexes#{timestamp} do
       @moduledoc \"\"\"
       ARCH-4 — the tenant keyset index `(org_id, <keyset sort>, id)` on every org-scoped table, so an
       `org_id = $1 ORDER BY <sort>, id LIMIT n` page (`Samen.Web.Reads`) is an index scan, not a
       sequential scan. Generated by `mix samen.gen.indexes`; the shape is `Samen.Indexing`'s.
 
+      The table, columns and index name are LITERAL: this migration means the same thing forever. A
+      later change of a resource's `keyset_sort` is a new index name — run `mix samen.gen.indexes`
+      again for a new migration, and drop the old index in a follow-up migration.
+
       Built `CONCURRENTLY` (no write lock on a populated table, hence `@disable_ddl_transaction true`
-      and no `catalog_sync` — an index is not a catalogued object). Idempotent (`IF NOT EXISTS`).
+      and no `catalog_sync` — an index is not a catalogued object). Idempotent (`IF NOT EXISTS`); an
+      INVALID leftover of the same name is dropped before the build.
       \"\"\"
       use Samen.Migration, phase: :expand
       @disable_ddl_transaction true
       @disable_migration_lock true
 
-      @resources [
+      @indexes [
     #{list}
       ]
 
-      def up, do: create_org_keyset_indexes(@resources, concurrently: true)
-      def down, do: drop_org_keyset_indexes(@resources, concurrently: true)
+      def up, do: create_org_keyset_indexes(@indexes, concurrently: true)
+      def down, do: drop_org_keyset_indexes(@indexes, concurrently: true)
     end
     """
   end

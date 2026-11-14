@@ -92,7 +92,17 @@ slowed with the table. Of 99 / 82 / 74 tables carrying `org_id` in driftwood / p
   the `OrgScope` filter. A btree on `(org_id, <sort>, id)` is walked forward for ASC and backward for DESC
   (NULLS included: the defaults Ash emits are exactly a forward / backward scan) and stops at the LIMIT with no
   sort node. The cursor OR-chain is a filter on that walk; a page after a cursor reads from the start of the
-  org's range, bounded by one org, not by the table.
+  org's range, bounded by one org, not by the table. To make the walk a seek, `Reads` ANDs a redundant bound the
+  index can use onto the OR-chain: `f <= v` for DESC always, `f >= v` for ASC only when the attribute is
+  `allow_nil? false` (an ASC cursor is followed by the NULLS-LAST tail, which `>=` would drop). The result set is
+  identical; `Samen.Web.ReadsCursorBoundTest` pages whole orgs over NULLs/duplicates against an unpaged read, and
+  `TenantIndexPlanTest` asserts the Index Cond of a deep page names the sort column.
+- **The index name carries the sort column** (`<table>_org_<sort>_id_idx`), and the retrofit migrations the
+  generator writes are LITERAL `{table, columns, name}` tuples. A changed `keyset_sort` is therefore a new name:
+  the verifier goes red naming the old index, a generator re-run builds the new one (each run is a new
+  timestamped file/module), and the old index is dropped by a follow-up migration. A concurrent build first drops a
+  same-named INVALID leftover. The verifier also requires the default NULLS ordering, the column's collation and the
+  type's default operator class.
 - **The sort is declared on the resource**: `use Samen.Resource, keyset_sort: :name` (the `samen` section;
   `Samen.Info.keyset_sort/1`), `nil` meaning `(org_id, id)`. It must equal the list view's `default_sort`
   (`Samen.Web.KeysetSortParityTest` pins the pair). A user who clicks another column header sorts a column the

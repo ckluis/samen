@@ -50,6 +50,19 @@ defmodule Samen.Web.KeysetSortParityTest do
   defp expected_sort({:id, _dir}), do: nil
   defp expected_sort({field, _dir}), do: field
 
+  # The comparison itself: nil when the declared `keyset_sort` is the one the view pages by, else
+  # the message naming the drift. `declared` is a parameter so the refutability test can run a
+  # WRONG declaration through exactly this function.
+  defp mismatch(view, config, resource, declared) do
+    if declared == expected_sort(config.default_sort) do
+      nil
+    else
+      "#{inspect(view)} sorts by #{inspect(config.default_sort)} but #{inspect(resource)} declares " <>
+        "keyset_sort #{inspect(declared)}: the index (org_id, <sort>, id) would not " <>
+        "serve the page. Change `keyset_sort:` in the scope blueprint or the view's `default_sort`."
+    end
+  end
+
   test "the known list views are discovered (the sweep is not vacuous)" do
     names = views() |> Enum.map(&Module.split/1) |> Enum.map(&List.last/1)
     assert "ContactsLive" in names and "TicketsLive" in names and "TasksLive" in names
@@ -66,21 +79,25 @@ defmodule Samen.Web.KeysetSortParityTest do
                "org-scoped resource — the index contract cannot be checked for it"
 
       for resource <- candidates do
-        assert Samen.Info.keyset_sort(resource) == expected_sort(config.default_sort),
-               "#{inspect(view)} sorts by #{inspect(config.default_sort)} but #{inspect(resource)} declares " <>
-                 "keyset_sort #{inspect(Samen.Info.keyset_sort(resource))}: the index (org_id, <sort>, id) would not " <>
-                 "serve the page. Change `keyset_sort:` in the scope blueprint or the view's `default_sort`."
+        assert mismatch(view, config, resource, Samen.Info.keyset_sort(resource)) == nil
       end
     end
   end
 
-  test "the comparison is refutable: a wrong declaration is caught" do
-    config = Samen.Web.CRM.ContactsLive.__list_config__()
+  test "the comparison is refutable: a wrong declaration is caught, the right one is not" do
+    view = Samen.Web.CRM.ContactsLive
+    config = view.__list_config__()
     [person | _] = org_scoped_candidates(config.resource)
 
-    assert Samen.Info.keyset_sort(person) == expected_sort(config.default_sort)
-    refute :job_title == expected_sort(config.default_sort)
-    refute Samen.Info.keyset_sort(person) == :job_title
+    right = Samen.Info.keyset_sort(person)
+    assert mismatch(view, config, person, right) == nil
+
+    for wrong <- [:job_title, nil] do
+      message = mismatch(view, config, person, wrong)
+      assert is_binary(message)
+      assert message =~ "would not serve the page"
+      assert message =~ "declares keyset_sort #{inspect(wrong)}"
+    end
   end
 
   test "the newest-first message window (`Reads.newest_window/3`, inserted_at DESC, id DESC) matches Message's keyset_sort" do

@@ -20,7 +20,18 @@ defmodule Samen.Indexing do
   (including NULLS: a forward scan is `NULLS LAST`, a backward one `NULLS FIRST`, which are
   the defaults Ash emits for `:asc` and `:desc`) and stops after `LIMIT` rows with no sort
   node. A page sorted by `id` alone (the `ListState` default when a view names no sort) is
-  served by the prefix `(org_id, id)` only when the resource declares no `keyset_sort`.
+  served by `(org_id, id)`, which is the index of a resource that declares no `keyset_sort`;
+  a resource WITH a `keyset_sort` has no index for an id-only page (it sorts the org's rows).
+
+  ## The index name carries the sort column
+
+  `<table>_org_<sort>_id_idx` (`<table>_org_id_idx` when there is no `keyset_sort`). The name
+  is the identity of the SHAPE: change a resource's `keyset_sort` and the contract names a
+  different index, so `mix samen.verify.indexes` goes red against a database still holding the
+  old one, and `mix samen.gen.indexes` writes a migration that builds the new one (a
+  same-named `IF NOT EXISTS` would silently skip). The migrations the generator writes spell
+  table, columns and name as LITERALS, so an applied migration never changes meaning when the
+  code later does. The old index is dropped by a follow-up (contract-phase) migration.
 
   The sort field is the resource's `samen do keyset_sort ... end` (`use Samen.Resource,
   keyset_sort: :name`) and must equal the `default_sort` of the list view that reads it
@@ -93,28 +104,55 @@ defmodule Samen.Indexing do
   @doc """
   The index `resource` must carry, derived from its attributes and its
   `keyset_sort` declaration. `{:error, reason}` when the declaration is unusable.
+
+  `opts[:keyset_sorts]` (a `%{resource => sort}` map; tests only) replaces the DECLARED sort
+  of the resources it names — the way a test asks "what would the contract require if this
+  resource's `keyset_sort` changed", without needing a second compiled resource.
   """
-  @spec spec(module()) :: {:ok, spec()} | {:error, String.t()}
-  def spec(resource) do
+  @spec spec(module(), keyword()) :: {:ok, spec()} | {:error, String.t()}
+  def spec(resource, opts \\ []) do
     table = AshPostgres.DataLayer.Info.table(resource)
-    sort = Samen.Info.keyset_sort(resource)
+
+    sort =
+      case Map.fetch(Keyword.get(opts, :keyset_sorts, %{}), resource) do
+        {:ok, override} -> override
+        :error -> Samen.Info.keyset_sort(resource)
+      end
 
     with {:table, true} <- {:table, is_binary(table) and table != ""},
          {:ok, org} <- column(resource, :org_id),
          {:ok, id} <- column(resource, :id),
-         {:ok, sort_cols} <- sort_columns(resource, sort) do
+         {:ok, sort_cols} <- sort_columns(resource, sort),
+         {:ok, name} <- index_name(resource, table, sort) do
       {:ok,
        %{
          resource: resource,
          schema: AshPostgres.DataLayer.Info.schema(resource) || "public",
          table: table,
-         name: "#{table}_org_keyset_idx",
+         name: name,
          columns: [org] ++ sort_cols ++ [id],
          logical: [:org_id] ++ List.wrap(sort) ++ [:id]
        }}
     else
       {:table, false} -> {:error, "#{inspect(resource)} declares no Postgres table"}
       {:error, _} = error -> error
+    end
+  end
+
+  # Postgres silently truncates an identifier at 63 bytes, which would make two shapes share a
+  # name — refuse instead of truncating.
+  @max_name_bytes 63
+
+  defp index_name(resource, table, sort) do
+    name = "#{table}_org_#{if sort, do: "#{sort}_"}id_idx"
+
+    if byte_size(name) <= @max_name_bytes do
+      {:ok, name}
+    else
+      {:error,
+       "#{inspect(resource)}: the index name #{name} is #{byte_size(name)} bytes; Postgres allows " <>
+         "#{@max_name_bytes} (it would truncate it and two shapes could share a name) — " <>
+         "shorten the table name or the keyset_sort attribute name"}
     end
   end
 
@@ -176,7 +214,21 @@ defmodule Samen.Indexing do
          ARRAY(SELECT (o.v & 1) = 1
                  FROM unnest(string_to_array(i.indoption::text, ' ')::int2[]) WITH ORDINALITY AS o(v, ord)
                 WHERE o.ord <= i.indnkeyatts
-                ORDER BY o.ord)
+                ORDER BY o.ord),
+         ARRAY(SELECT (o.v & 2) = 2
+                 FROM unnest(string_to_array(i.indoption::text, ' ')::int2[]) WITH ORDINALITY AS o(v, ord)
+                WHERE o.ord <= i.indnkeyatts
+                ORDER BY o.ord),
+         ARRAY(SELECT coalesce(a.attcollation = c.v, true)
+                 FROM unnest(string_to_array(i.indcollation::text, ' ')::oid[]) WITH ORDINALITY AS c(v, ord)
+                 LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = i.indkey[c.ord - 1]
+                WHERE c.ord <= i.indnkeyatts
+                ORDER BY c.ord),
+         ARRAY(SELECT coalesce(oc.opcdefault, false)
+                 FROM unnest(string_to_array(i.indclass::text, ' ')::oid[]) WITH ORDINALITY AS k(v, ord)
+                 LEFT JOIN pg_opclass oc ON oc.oid = k.v
+                WHERE k.ord <= i.indnkeyatts
+                ORDER BY k.ord)
     FROM pg_index i
     JOIN pg_class ic ON ic.oid = i.indexrelid
     JOIN pg_am am ON am.oid = ic.relam
@@ -185,8 +237,11 @@ defmodule Samen.Indexing do
 
   @doc """
   The indexes the live database declares on `schema.table`, as maps
-  `%{name, valid, ready, partial, method, keys, desc}` (`keys` holds `nil` for an
-  expression column; `desc` is per key column). `{:error, reason}` when the table is absent
+  `%{name, valid, ready, partial, method, keys, desc, nulls_first, default_collation,
+  default_opclass}` (`keys` holds `nil` for an expression column; the rest are per key column:
+  `desc` / `nulls_first` are the `indoption` bits, `default_collation` is "the index key uses
+  the column's own collation", `default_opclass` is "the key uses the type's default btree
+  operator class"). `{:error, reason}` when the table is absent
   or the catalog cannot be read.
   """
   @spec live_indexes(module(), String.t(), String.t()) :: {:ok, [map()]} | {:error, String.t()}
@@ -197,8 +252,19 @@ defmodule Samen.Indexing do
          true <- found != nil,
          {:ok, %{rows: rows}} <- repo.query(@index_sql, [qualified]) do
       {:ok,
-       Enum.map(rows, fn [name, valid, ready, partial, method, keys, desc] ->
-         %{name: name, valid: valid, ready: ready, partial: partial, method: method, keys: keys, desc: desc}
+       Enum.map(rows, fn [name, valid, ready, partial, method, keys, desc, nulls_first, default_collation, default_opclass] ->
+         %{
+           name: name,
+           valid: valid,
+           ready: ready,
+           partial: partial,
+           method: method,
+           keys: keys,
+           desc: desc,
+           nulls_first: nulls_first,
+           default_collation: default_collation,
+           default_opclass: default_opclass
+         }
        end)}
     else
       false -> {:error, "table #{qualified} does not exist in the live database"}
@@ -213,18 +279,45 @@ defmodule Samen.Indexing do
   Does `index` serve `spec`? A plain, valid, ready, non-partial btree whose leading key
   columns are exactly `spec.columns` (extra trailing columns are fine), with the sort and
   `id` columns in ONE direction (the helpers order both the same way, and a backward scan
-  serves the all-descending case).
+  serves the all-descending case), with the NULLS ordering Ash emits for that direction
+  (`NULLS LAST` ascending, `NULLS FIRST` descending — a different bit cannot deliver the
+  ORDER BY), the column's own collation and the type's default operator class (a `text_pattern_ops`
+  or other-collation key orders differently from the `ORDER BY` the page sends).
   """
   @spec serves?(map(), spec()) :: boolean()
   def serves?(index, %{columns: columns}) do
     n = length(columns)
 
     index.valid and index.ready and not index.partial and index.method == "btree" and
-      Enum.take(index.keys, n) == columns and length(index.keys) >= n and
-        same_direction?(Enum.take(index.desc, n))
+      length(index.keys) >= n and Enum.take(index.keys, n) == columns and
+      same_direction?(Enum.take(index.desc, n)) and
+      default_nulls?(Enum.take(index.desc, n), Enum.take(index.nulls_first, n)) and
+      Enum.all?(Enum.take(index.default_collation, n)) and
+      Enum.all?(Enum.take(index.default_opclass, n))
   end
 
   # org_id is an equality column, so its own direction is irrelevant; the ORDER BY columns
   # after it must agree.
   defp same_direction?([_org | order]), do: Enum.uniq(order) |> length() <= 1
+
+  # Ash emits `NULLS LAST` for :asc and `NULLS FIRST` for :desc (the Postgres defaults), so an
+  # ORDER BY column serves only when its index NULLS bit equals its DESC bit.
+  defp default_nulls?([_org | desc], [_org_nulls | nulls_first]), do: desc == nulls_first
+
+  @doc """
+  The indexes of `indexes` that look like a keyset index of ANOTHER shape for `spec`: led by
+  the same `org_id` column, running on to the `id` column, but neither named like the contract's
+  index nor serving it. These are what a changed `keyset_sort` leaves behind; the verifier names
+  them so the operator can drop them in a follow-up migration once the new index is built.
+  """
+  @spec superseded([map()], spec()) :: [map()]
+  def superseded(indexes, %{columns: [org | _] = columns, name: name}) do
+    id = List.last(columns)
+
+    Enum.filter(indexes, fn index ->
+      index.name != name and index.method == "btree" and Enum.at(index.keys, 0) == org and
+        length(index.keys) >= 2 and id in index.keys and
+        not serves?(index, %{columns: columns})
+    end)
+  end
 end
