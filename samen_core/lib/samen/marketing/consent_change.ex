@@ -34,12 +34,14 @@ defmodule Samen.Marketing.ConsentChange do
   pseudonym cannot be derived (subject already shredded, KMS hiccup), `subject_hash` is
   left nil — the `event`/`subscriber_id`/`occurred_at` still record the transition.
 
-  ## Best-effort by contract (the A4 emit pattern)
+  ## Asymmetric by contract: a lost GRANT is reported, a lost WITHDRAWAL aborts
 
-  BEST-EFFORT, exactly like `SubscriptionMovement` / `StatusChange`: an append failure
-  (event resource unwired, DB hiccup, unresolvable org) NEVER aborts the primary
-  subscriber write. The subscriber state is the load-bearing fact; the consent row
-  rides alongside. All work is wrapped so nothing here can raise into the transaction.
+  A `:granted` append that fails (event resource unwired, DB hiccup) is reported by name and NEVER aborts the primary
+  subscriber write — the subscriber state is the load-bearing fact; the consent row rides alongside, and a missing
+  grant only means no contact is made. A `:withdrawn` append is the do-not-contact fact the ledger exists to keep
+  (it outlives erasure and is read by the send gate): if it cannot be written the action FAILS CLOSED
+  (`{:error, :consent_ledger_unavailable}`, the transaction rolls back) rather than commit an opt-out the ledger never
+  saw. Every failure — including an unresolvable org — is reported through `Samen.Observability.Failure`.
 
   ## PII discipline
 
@@ -56,33 +58,47 @@ defmodule Samen.Marketing.ConsentChange do
   @impl true
   def change(changeset, opts, _context) do
     Ash.Changeset.after_action(changeset, fn changeset, record ->
-      maybe_append(changeset, record, opts)
-      {:ok, record}
+      case maybe_append(changeset, record, opts) do
+        :ok -> {:ok, record}
+        {:error, _} = error -> error
+      end
     end)
   end
 
-  # Best-effort append. Nothing here may abort the primary write.
+  # `:ok`, or `{:error, :consent_ledger_unavailable}` for a lost WITHDRAWAL (see the moduledoc). A lost grant, or an
+  # org that cannot be resolved, is reported and does not abort the primary write.
   defp maybe_append(changeset, record, opts) do
     event_resource = Keyword.fetch!(opts, :event_resource)
     org_id = org_id_of(changeset, record)
 
-    if is_binary(org_id) do
-      case classify(changeset, record) do
-        {:ok, event} ->
-          append_row(event_resource, org_id, record, event)
+    cond do
+      not is_binary(org_id) ->
+        Samen.Observability.Failure.report(:consent_change_org_unresolved, nil, :org_unresolved)
+        fail_closed_for(changeset, record)
 
-        :noop ->
-          :ok
-      end
+      true ->
+        case classify(changeset, record) do
+          {:ok, event} -> append_row(event_resource, org_id, record, event)
+          :noop -> :ok
+        end
     end
-
-    :ok
   rescue
     e ->
       Samen.Observability.Failure.report(:consent_change_maybe_append, nil, e)
-      :ok
+      fail_closed_for(changeset, record)
   catch
-    _, _ -> :ok
+    kind, reason ->
+      Samen.Observability.Failure.report(:consent_change_maybe_append, nil, {kind, reason})
+      fail_closed_for(changeset, record)
+  end
+
+  # Could this write be a withdrawal? Then a ledger we cannot write must refuse it.
+  defp fail_closed_for(changeset, record) do
+    withdrawal? =
+      Map.get(record, :status) in @withdrawn_statuses or
+        (changeset.action_type != :create and is_nil(Map.get(record, :consent_at)))
+
+    if withdrawal?, do: {:error, :consent_ledger_unavailable}, else: :ok
   end
 
   # Derive the consent transition (if any) from the post-action record + the changeset.
@@ -141,7 +157,7 @@ defmodule Samen.Marketing.ConsentChange do
   rescue
     e ->
       Samen.Observability.Failure.report(:consent_change_append_row, nil, e)
-      :ok
+      if event == :withdrawn, do: {:error, :consent_ledger_unavailable}, else: :ok
   end
 
   # The erasure-surviving keyed pseudonym (trace-sink pattern). Derived while the

@@ -135,6 +135,47 @@ defmodule Demo.MarketingConsentLedgerTest do
     assert log =~ "read=marketing_consent_state"
   end
 
+  describe "a ledger that cannot be written" do
+    # The ledger table is really gone (renamed inside the sandbox transaction).
+    defp ledger_down! do
+      table = AshPostgres.DataLayer.Info.table(ConsentEvent)
+      Demo.Repo.query!(~s(ALTER TABLE "#{table}" RENAME TO "#{table}_outage"))
+      fn -> Demo.Repo.query!(~s(ALTER TABLE "#{table}_outage" RENAME TO "#{table}")) end
+    end
+
+    defp active_subscriber!(org, email) do
+      {:ok, sub} =
+        Subscriber
+        |> Ash.Changeset.for_create(:create, %{org_id: org.id, email: email, status: :active, consent_at: DateTime.utc_now()})
+        |> Ash.create(authorize?: false)
+
+      sub
+    end
+
+    test "RED: an unsubscribe is REFUSED (and rolled back) when its :withdrawn row cannot be written; healed, it lands" do
+      org = mk_org("consent-withdraw-down")
+      sub = active_subscriber!(org, "wd-down@marketing.example")
+      heal = ledger_down!()
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, _} =
+                   sub |> Ash.Changeset.for_update(:update, %{status: :unsubscribed}) |> Ash.update(authorize?: false)
+        end)
+
+      assert log =~ "read=consent_change_"
+      heal.()
+
+      # the opt-out did not commit without its ledger entry
+      assert %{status: :active} = Ash.get!(Subscriber, sub.id, authorize?: false)
+      assert {:ok, :granted} = Consent.state_result(@event_resource, org.id, sub.id)
+
+      # POSITIVE CONTROL: the same update with the ledger readable lands, and is on the ledger
+      assert {:ok, _} = sub |> Ash.Changeset.for_update(:update, %{status: :unsubscribed}) |> Ash.update(authorize?: false)
+      assert {:ok, :withdrawn} = Consent.state_result(@event_resource, org.id, sub.id)
+    end
+  end
+
   test "the ledger row carries NO plaintext PII (subject_hash is a one-way handle)" do
     org = mk_org("consent-nopii")
     email = "nopii@marketing.example"
