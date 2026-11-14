@@ -414,6 +414,9 @@ defmodule Samen.AuditEventTest do
                  occurred_at: ~U[1998-02-28 23:59:59Z]
                })
 
+      # (the DEFAULT partition would accept that write too, so assert WHERE it landed)
+      assert Repo.query!("SELECT count(*) FROM #{PartitionManager.partition_name(~D[1998-02-01])} WHERE aud_subject_id = 'feb-28'").rows == [[1]]
+
       # A migration re-run (IF NOT EXISTS) is a no-op, not an error.
       Enum.each(statements, &({:ok, _} = Repo.query(&1)))
     end
@@ -498,15 +501,20 @@ defmodule Samen.AuditEventTest do
     end
 
     test "detach with :force bypasses the erasure window gate (operator override)" do
-      # :force=true detaches despite the erasure window.
-      # We use a far-future partition so we can safely create+detach it.
-      date = Date.new!(1998, 3, 1)
+      # A partition INSIDE the erasure window (a far-future month, so it can be created and detached safely). It
+      # holds no row, so the insert clamp is not involved. WITHOUT :force the gate refuses (the control that makes
+      # this test unable to pass when :force is ignored); WITH it the detach goes through.
+      date = Date.new!(2099, 3, 1)
       name = PartitionManager.partition_name(date)
       Repo.query("DROP TABLE IF EXISTS #{name}")
 
       {:ok, _} = PartitionManager.ensure_partition(Repo, date)
 
+      assert {:error, :erasure_window_active, _detail} = PartitionManager.detach_partition(Repo, date)
+      assert aud_partition_exists?(name)
+
       assert {:ok, ^name} = PartitionManager.detach_partition(Repo, date, force: true)
+      refute aud_partition_exists?(name)
 
       # Cleanup.
       Repo.query("DROP TABLE IF EXISTS #{name}")

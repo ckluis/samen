@@ -16,6 +16,10 @@ defmodule Driftwood.Repo.Migrations.AudEventDefaultPartition do
   use Ecto.Migration
 
   def up do
+    # CREATE … PARTITION OF takes ACCESS EXCLUSIVE on aud_event: give up (the deploy fails, nothing queues) rather
+    # than park every audited write behind one long reader. Transaction-scoped; same bound as expand_contract.
+    execute "SET LOCAL lock_timeout = '5s'"
+
     execute Samen.AuditEvent.PartitionManager.default_partition_sql(),
             "DROP TABLE IF EXISTS aud_event_default"
   end

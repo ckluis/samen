@@ -90,6 +90,8 @@ defmodule Samen.Web.Readiness do
   @advisory_ttl_ms 60_000
   @advisory_deadline_ms 500
   @advisory_lock_ms 300
+  # a little under the deadline: the server stops a read the task was killed for
+  @advisory_statement_ms 400
 
   defp partitions_advisory(repo) do
     key = {__MODULE__, :partitions, repo}
@@ -123,13 +125,20 @@ defmodule Samen.Web.Readiness do
 
     case Task.yield(task, @advisory_deadline_ms) || Task.shutdown(task, :brutal_kill) do
       {:ok, advisory} -> advisory
-      {:exit, _reason} -> {:unknown, "runway unreadable (task_exit)"}
-      nil -> {:unknown, "runway unreadable (deadline_exceeded)"}
+      # The refresh that emits the runway series was killed or crashed: the series would keep its last good value and
+      # the `runway_unknown` alert would stay silent while /readyz says UNKNOWN. Say it on the metrics side too.
+      {:exit, _reason} ->
+        PartitionManager.emit_runway({:error, :task_exit})
+        {:unknown, "runway unreadable (task_exit)"}
+
+      nil ->
+        PartitionManager.emit_runway({:error, :deadline_exceeded})
+        {:unknown, "runway unreadable (deadline_exceeded)"}
     end
   end
 
   defp compute_partitions(repo) do
-    result = PartitionManager.runway(repo, lock_timeout_ms: @advisory_lock_ms)
+    result = PartitionManager.runway(repo, lock_timeout_ms: @advisory_lock_ms, statement_timeout_ms: @advisory_statement_ms)
     PartitionManager.emit_runway(result)
 
     case result do

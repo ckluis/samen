@@ -161,10 +161,17 @@ defmodule Samen.Web.ReadinessTest do
       :ok
     end
 
-    test "a read that never returns is UNKNOWN within the deadline (not a hung probe)" do
+    test "a read that never returns is UNKNOWN within the deadline (not a hung probe) and emits runway_unknown" do
+      me = self()
+      id = {__MODULE__, make_ref()}
+      :telemetry.attach(id, [:samen, :audit, :partition, :runway_unknown], fn _, meas, _, _ -> send(me, {:unknown_signal, meas}) end, nil)
+      on_exit(fn -> :telemetry.detach(id) end)
+
       started = System.monotonic_time(:millisecond)
       assert [partitions: {:unknown, detail}] = Readiness.advisories(repo: HangRepo)
       assert detail =~ "deadline_exceeded"
+      # the metrics side says it too (the alert pages on `runway_unknown`, not on the probe body)
+      assert_received {:unknown_signal, %{count: 1}}
       assert System.monotonic_time(:millisecond) - started < 1_500
       # UNKNOWN is not cached: positive control that nothing was stored
       assert :persistent_term.get({Samen.Web.Readiness, :partitions, HangRepo}, nil) == nil

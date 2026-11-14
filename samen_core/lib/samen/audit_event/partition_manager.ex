@@ -176,6 +176,26 @@ defmodule Samen.AuditEvent.PartitionManager do
   # How long the in-memory partition bounds (`partition_bounds/1`) are trusted.
   @bounds_ttl_ms 60_000
 
+  @cols "aud_id, aud_event_type, aud_subject_id, aud_actor_id, aud_correlation_id, aud_detail, aud_occurred_at"
+  @staged_month "aud_event_move_month"
+  @staged_default "aud_event_move_default"
+  @move_lock_ms 5_000
+  @move_window_budget_ms 15_000
+  @move_staging_statement_ms 120_000
+  @move_max_default_rows 500_000
+
+  @bounds_sql """
+  SELECT (m)[1]::timestamptz, (m)[2]::timestamptz
+  FROM pg_inherits i
+  JOIN pg_class p ON p.oid = i.inhparent AND p.relname = 'aud_event'
+  JOIN pg_namespace n ON n.oid = p.relnamespace AND n.nspname = 'public'
+  JOIN pg_class c ON c.oid = i.inhrelid
+  LEFT JOIN LATERAL regexp_match(
+    pg_get_expr(c.relpartbound, c.oid),
+    'FROM \\(''([^'']+)''\\) TO \\(''([^'']+)''\\)') AS m ON true
+  WHERE COALESCE(pg_get_expr(c.relpartbound, c.oid), '') <> 'DEFAULT'
+  """
+
   # ---------------------------------------------------------------------------
   # Oban.Worker callback
   # ---------------------------------------------------------------------------
@@ -246,17 +266,26 @@ defmodule Samen.AuditEvent.PartitionManager do
   rows in the new month's range they are MOVED, in one transaction, in two phases (see `move_default_rows/4`):
 
     1. STAGING, with no lock on `aud_event` (writers keep going): the in-range rows are copied into a standalone
-       table carrying the month's CHECK, the rest into a standalone replacement DEFAULT;
-    2. a short ACCESS EXCLUSIVE window (`SET LOCAL lock_timeout`, a statement timeout): rows that landed in the old
-       DEFAULT since the staging copy are topped up, the counts are compared UNDER THE LOCK (so a concurrent writer
-       can never make them disagree), the old DEFAULT is detached and dropped, and the two staged tables are
-       ATTACHed as the month and as the new DEFAULT.
+       table carrying the month's CHECK, the rest into a standalone replacement DEFAULT carrying the CHECK that
+       DEFAULT's partition constraint amounts to;
+    2. an ACCESS EXCLUSIVE window with a TOTAL budget (`:partition_move_window_budget_ms`, default 15 000, enforced
+       by setting `statement_timeout` to what is left before every statement): rows that landed in the old DEFAULT
+       since the staging copy are topped up, the old DEFAULT is detached and dropped, and the two staged tables are
+       ATTACHed as the month and as the new DEFAULT. Both ATTACHes skip Postgres's validation scan because the
+       table carries a validated CHECK that implies the partition constraint (the CHECKs are dropped AFTER).
+
+  What still costs time under the lock is one pass over the old DEFAULT (the top-up's anti-join). That is why an
+  automated move REFUSES a DEFAULT of more than `:partition_move_max_default_rows` rows (default 500 000) with
+  `{:error, {:default_too_large_to_move, cap}}`: past that, the operator drains it (see
+  `docs/runbooks/alerts.md`, "Permanent WARN" / "DEFAULT too large to move").
 
   Nothing is `DELETE`d (the append-only trigger would refuse it) and the rows keep their ids and timestamps. If the
   lock cannot be had within `:partition_move_lock_timeout_ms` (default 5000) the move FAILS with Postgres's
-  `lock_not_available` (rolled back whole, nothing queued behind it any longer); the roll-forward job reports it
+  `lock_not_available`, and if the window outlives its budget with `query_canceled` or
+  `{:partition_move_window_exceeded, budget_ms}` (rolled back whole either way); the roll-forward job reports it
   and Oban retries — it never reports success. A row inserted between the range check and the move is not a
-  problem: the top-up under the lock takes it.
+  problem: the top-up under the lock takes it. Audited writers queue for the lock wait (`lock_timeout`) and then
+  for the window (its budget) at most.
   """
   @spec ensure_partition(module(), Date.t()) :: {:ok, String.t()} | {:error, term()}
   def ensure_partition(repo, %Date{} = date) do
@@ -280,20 +309,33 @@ defmodule Samen.AuditEvent.PartitionManager do
     end
   end
 
+  # `CREATE TABLE … PARTITION OF` takes ACCESS EXCLUSIVE on `aud_event` and, with a DEFAULT attached, scans the
+  # DEFAULT for rows of the new range. Both are bounded: `lock_timeout` for getting the lock (instead of queueing
+  # every audited write behind a long reader) and a `statement_timeout` for the scan. A failure is returned (the
+  # roll-forward job reports it and Oban retries), never swallowed.
   defp create_partition(repo, name, from_ts, to_ts) do
-    case repo.query(create_partition_sql(name, from_ts, to_ts)) do
-      {:ok, _} ->
-        invalidate_bounds(repo)
-        {:ok, name}
+    lock_ms = Application.get_env(:samen_core, :partition_move_lock_timeout_ms, @move_lock_ms)
+    budget_ms = Application.get_env(:samen_core, :partition_move_window_budget_ms, @move_window_budget_ms)
 
-      # Already exists — idempotent (a concurrent creator won).
-      {:error, %Postgrex.Error{postgres: %{code: :duplicate_table}}} ->
+    result =
+      repo.transaction(fn ->
+        q!(repo, "SET LOCAL lock_timeout = #{lock_ms}", budget_ms)
+        q!(repo, "SET LOCAL statement_timeout = #{budget_ms}", budget_ms)
+        q!(repo, create_partition_sql(name, from_ts, to_ts), budget_ms + 5_000)
+        name
+      end)
+
+    case result do
+      {:ok, ^name} ->
         invalidate_bounds(repo)
         {:ok, name}
 
       {:error, reason} ->
         {:error, reason}
     end
+  rescue
+    # `repo.transaction` + `query!` raise the Postgres error; the job wants it as a value
+    e in [Postgrex.Error, DBConnection.ConnectionError] -> {:error, e}
   end
 
   # {the monthly partition exists?, the DEFAULT partition exists?} — one catalog round trip.
@@ -319,29 +361,55 @@ defmodule Samen.AuditEvent.PartitionManager do
     end
   end
 
-  @cols "aud_id, aud_event_type, aud_subject_id, aud_actor_id, aud_correlation_id, aud_detail, aud_occurred_at"
-  @staged_month "aud_event_move_month"
-  @staged_default "aud_event_move_default"
-  @move_lock_ms 5_000
-  @move_window_statement_ms 15_000
-  @move_staging_statement_ms 120_000
-
-  # The move, proven against Postgres (see test/aud_event_default_partition_test.exs):
+  # The move, proven against Postgres 16 (see test/aud_event_default_partition_test.exs):
   #
   #   * a plain `CREATE … PARTITION OF` / `ATTACH` over rows the DEFAULT holds is refused (check_violation);
   #   * `DELETE` is refused by the append-only trigger, so rows cannot be taken out of the old DEFAULT: the only way
   #     to empty a range of it is to build a replacement DEFAULT and swap;
-  #   * `ATTACH PARTITION` skips its validation scan when the table carries a validated CHECK that implies the
-  #     bound (so the month's rows are not re-read under the lock) — the CHECK is dropped after;
+  #   * `ATTACH PARTITION` scans the table to validate the bound ("verifying table") UNLESS a validated CHECK on it
+  #     already implies the bound ("partition constraint … is implied by existing constraints"). So the month's
+  #     CHECK must be KEPT through the ATTACH and dropped after it. The same holds for ATTACHing a table as the
+  #     DEFAULT: its constraint is "no sibling's range", so the replacement DEFAULT carries
+  #     `NOT (<month>) AND NOT (<each sibling>)` as a CHECK, built while staging, and is not re-scanned either. (A
+  #     sibling created between staging and the window just makes that ATTACH scan: slower, still correct.);
   #   * `LOCK TABLE aud_event` takes the partitions too, and `SET LOCAL lock_timeout` turns a wait into a
-  #     `lock_not_available` error instead of a queue of blocked audited writes.
+  #     `lock_not_available` error instead of a queue of blocked audited writes;
+  #   * `lock_timeout` bounds only the wait for a lock. Once the lock is held it is `statement_timeout` that bounds
+  #     the work, per statement, so the window's budget is enforced here: `statement_timeout` is set to what is LEFT
+  #     before every statement of the window.
   #
-  # Phase 1 (no lock on `aud_event`): copy. Phase 2 (ACCESS EXCLUSIVE, bounded): top up, count, swap. The counts and
-  # the top-up are taken under the lock, so a writer committing during phase 1 cannot make them disagree.
+  # Phase 1 (no lock on `aud_event`): copy. Phase 2 (ACCESS EXCLUSIVE, bounded): top up, swap. There is no row count
+  # under the lock: after the top-up every old-DEFAULT row is in one of the two staged tables (the anti-join) and a
+  # staged table holds nothing else (it is only ever filled from the old DEFAULT).
   defp move_default_rows(repo, name, from_ts, to_ts) do
     lock_ms = Application.get_env(:samen_core, :partition_move_lock_timeout_ms, @move_lock_ms)
-    window_ms = Application.get_env(:samen_core, :partition_move_statement_timeout_ms, @move_window_statement_ms)
+    budget_ms = Application.get_env(:samen_core, :partition_move_window_budget_ms, @move_window_budget_ms)
+    cap = Application.get_env(:samen_core, :partition_move_max_default_rows, @move_max_default_rows)
     staging_ms = @move_staging_statement_ms
+
+    with :ok <- default_small_enough(repo, cap) do
+      do_move_default_rows(repo, name, from_ts, to_ts, lock_ms, budget_ms, staging_ms)
+    else
+      {:error, reason} ->
+        Samen.Observability.Failure.report(:audit_partition_move, nil, reason)
+        {:error, reason}
+    end
+  rescue
+    e ->
+      Samen.Observability.Failure.report(:audit_partition_move, nil, e)
+      {:error, e}
+  end
+
+  # Counts up to `cap + 1` rows (a bounded read, outside any lock), so the answer costs at most `cap + 1` rows.
+  defp default_small_enough(repo, cap) do
+    case repo.query("SELECT count(*) FROM (SELECT 1 FROM ONLY #{@default_partition} LIMIT #{cap + 1}) s") do
+      {:ok, %{rows: [[n]]}} when n > cap -> {:error, {:default_too_large_to_move, cap}}
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp do_move_default_rows(repo, name, from_ts, to_ts, lock_ms, budget_ms, staging_ms) do
     check = "aud_event_move_range_check"
     in_range = "aud_occurred_at >= '#{from_ts}'::timestamptz AND aud_occurred_at < '#{to_ts}'::timestamptz"
 
@@ -359,35 +427,40 @@ defmodule Samen.AuditEvent.PartitionManager do
           q!(repo, "SELECT pg_advisory_xact_lock(hashtext('samen:aud_event:partition_move'))", staging_ms)
 
           # ---- phase 1: stage, no lock on aud_event ----
+          default_check = default_check_sql(repo, in_range, staging_ms)
           q!(repo, "CREATE TABLE #{@staged_month} (LIKE aud_event INCLUDING DEFAULTS INCLUDING INDEXES)", staging_ms)
           q!(repo, "CREATE TABLE #{@staged_default} (LIKE aud_event INCLUDING DEFAULTS INCLUDING INDEXES)", staging_ms)
+          # the CHECKs go on the EMPTY tables (no scan to add them) and are what lets each ATTACH skip its scan
           q!(repo, "ALTER TABLE #{@staged_month} ADD CONSTRAINT #{check} CHECK (#{in_range})", staging_ms)
+          q!(repo, "ALTER TABLE #{@staged_default} ADD CONSTRAINT #{check} CHECK (#{default_check})", staging_ms)
           q!(repo, missing.(@staged_month, in_range), staging_ms)
           q!(repo, missing.(@staged_default, "NOT (#{in_range})"), staging_ms)
 
-          # ---- phase 2: the bounded exclusive window ----
-          q!(repo, "SET LOCAL statement_timeout = #{window_ms}", window_ms)
-          q!(repo, "LOCK TABLE aud_event IN ACCESS EXCLUSIVE MODE", window_ms)
-          q!(repo, missing.(@staged_month, in_range), window_ms)
-          q!(repo, missing.(@staged_default, "NOT (#{in_range})"), window_ms)
+          # ---- phase 2: the exclusive window, with a TOTAL budget ----
+          # the wait for the lock is bounded by lock_timeout; the budget starts when it is GRANTED
+          q!(repo, "LOCK TABLE aud_event IN ACCESS EXCLUSIVE MODE", staging_ms)
+          started = System.monotonic_time(:millisecond)
 
-          before = scalar!(repo, "SELECT count(*) FROM ONLY #{@default_partition}", window_ms)
+          window! = fn sql ->
+            left = budget_ms - (System.monotonic_time(:millisecond) - started)
+            if left <= 0, do: repo.rollback({:partition_move_window_exceeded, budget_ms})
+            q!(repo, "SET LOCAL statement_timeout = #{left}", left + 5_000)
+            q!(repo, sql, left + 5_000)
+          end
 
-          staged =
-            scalar!(repo, "SELECT (SELECT count(*) FROM #{@staged_month}) + (SELECT count(*) FROM #{@staged_default})", window_ms)
-
-          if before != staged, do: repo.rollback({:default_move_count_mismatch, before, staged})
-
-          q!(repo, "ALTER TABLE aud_event DETACH PARTITION #{@default_partition}", window_ms)
-          q!(repo, "ALTER TABLE #{@staged_month} RENAME TO #{name}", window_ms)
-          q!(repo, "ALTER TABLE #{name} DROP CONSTRAINT #{check}", window_ms)
-          q!(repo, "ALTER TABLE aud_event ATTACH PARTITION #{name} FOR VALUES FROM ('#{from_ts}') TO ('#{to_ts}')", window_ms)
-          q!(repo, "DROP TABLE #{@default_partition}", window_ms)
-          q!(repo, "ALTER TABLE #{@staged_default} RENAME TO #{@default_partition}", window_ms)
-          q!(repo, "ALTER TABLE aud_event ATTACH PARTITION #{@default_partition} DEFAULT", window_ms)
+          window!.(missing.(@staged_month, in_range))
+          window!.(missing.(@staged_default, "NOT (#{in_range})"))
+          window!.("ALTER TABLE aud_event DETACH PARTITION #{@default_partition}")
+          window!.("ALTER TABLE #{@staged_month} RENAME TO #{name}")
+          window!.("ALTER TABLE aud_event ATTACH PARTITION #{name} FOR VALUES FROM ('#{from_ts}') TO ('#{to_ts}')")
+          window!.("ALTER TABLE #{name} DROP CONSTRAINT #{check}")
+          window!.("DROP TABLE #{@default_partition}")
+          window!.("ALTER TABLE #{@staged_default} RENAME TO #{@default_partition}")
+          window!.("ALTER TABLE aud_event ATTACH PARTITION #{@default_partition} DEFAULT")
+          window!.("ALTER TABLE #{@default_partition} DROP CONSTRAINT #{check}")
           name
         end,
-        timeout: staging_ms + 4 * window_ms
+        timeout: staging_ms + budget_ms + 30_000
       )
 
     case result do
@@ -405,18 +478,22 @@ defmodule Samen.AuditEvent.PartitionManager do
         Samen.Observability.Failure.report(:audit_partition_move, nil, reason)
         {:error, reason}
     end
-  rescue
-    e ->
-      Samen.Observability.Failure.report(:audit_partition_move, nil, e)
-      {:error, e}
+  end
+
+  # What a DEFAULT partition's constraint amounts to: no row of any sibling's range. For the replacement it is also
+  # outside the new month. Built from the catalog as it is NOW (inside the staging transaction).
+  defp default_check_sql(repo, in_range, timeout_ms) do
+    %{rows: rows} = q!(repo, @bounds_sql, timeout_ms)
+
+    siblings =
+      for [lo, hi] <- rows do
+        " AND NOT (aud_occurred_at >= '#{DateTime.to_iso8601(lo)}'::timestamptz AND aud_occurred_at < '#{DateTime.to_iso8601(hi)}'::timestamptz)"
+      end
+
+    "NOT (#{in_range})" <> Enum.join(siblings)
   end
 
   defp q!(repo, sql, timeout_ms), do: repo.query!(sql, [], timeout: timeout_ms)
-
-  defp scalar!(repo, sql, timeout_ms) do
-    %{rows: [[n]]} = q!(repo, sql, timeout_ms)
-    n
-  end
 
   @doc """
   Ensure partitions exist for the month of `anchor` and each of the next `months_ahead`
@@ -518,18 +595,6 @@ defmodule Samen.AuditEvent.PartitionManager do
   # Partition bounds in memory — the default-landing test without a round trip per write
   # ---------------------------------------------------------------------------
 
-  @bounds_sql """
-  SELECT (m)[1]::timestamptz, (m)[2]::timestamptz
-  FROM pg_inherits i
-  JOIN pg_class p ON p.oid = i.inhparent AND p.relname = 'aud_event'
-  JOIN pg_namespace n ON n.oid = p.relnamespace AND n.nspname = 'public'
-  JOIN pg_class c ON c.oid = i.inhrelid
-  LEFT JOIN LATERAL regexp_match(
-    pg_get_expr(c.relpartbound, c.oid),
-    'FROM \\(''([^'']+)''\\) TO \\(''([^'']+)''\\)') AS m ON true
-  WHERE COALESCE(pg_get_expr(c.relpartbound, c.oid), '') <> 'DEFAULT'
-  """
-
   @doc """
   The `[lo, hi)` ranges of the attached monthly `aud_event` partitions, `{:ok, [{lo, hi}]}`, from memory.
 
@@ -537,8 +602,8 @@ defmodule Samen.AuditEvent.PartitionManager do
   for `:partition_bounds_ttl_ms` (default 60 000 ms) and are dropped whenever this module creates or moves a
   partition (`invalidate_bounds/1`) or detaches one. Past the TTL they are READ AGAIN; if that read fails the answer is
   `{:error, reason}` — a stale range is never served as current, so a missing partition cannot hide behind an old
-  cache. The read is a catalog query run as a SAVEPOINT (`mode: :savepoint`), so a failure of it cannot abort the
-  caller's transaction (Postgres 25P02): `Samen.AuditEvent.insert/2` calls this from inside audited writes.
+  cache. The read is a catalog query run as a SAVEPOINT (`mode: :savepoint`) when the caller is in a transaction, so a
+  failure of it cannot abort that transaction (Postgres 25P02): `Samen.AuditEvent.insert/2` calls this from inside audited writes.
 
   The window in which another node's `DETACH` goes unseen is the TTL; the runway/`default_rows` series
   (read from the database) are not cached by this and stay the authority.
@@ -562,7 +627,12 @@ defmodule Samen.AuditEvent.PartitionManager do
   end
 
   defp load_bounds(repo) do
-    case repo.query(@bounds_sql, [], mode: :savepoint) do
+    # A SAVEPOINT inside a transaction (a failing read must not abort the caller's transaction: 25P02); outside one
+    # Postgrex refuses `mode: :savepoint` ("transaction is not started") without contacting the server, so there the
+    # plain query is the whole story (a failure aborts nothing).
+    opts = if repo.in_transaction?(), do: [mode: :savepoint], else: []
+
+    case repo.query(@bounds_sql, [], opts) do
       {:ok, %{rows: rows}} ->
         if Enum.all?(rows, fn [lo, hi] -> lo != nil and hi != nil end),
           do: {:ok, Enum.map(rows, fn [lo, hi] -> {lo, hi} end)},
@@ -604,7 +674,8 @@ defmodule Samen.AuditEvent.PartitionManager do
   def default_partition_sql, do: "CREATE TABLE IF NOT EXISTS #{@default_partition} PARTITION OF aud_event DEFAULT"
 
   @doc """
-  The statement a migration's `down` runs BEFORE dropping the DEFAULT partition: it RAISES when the partition holds
+  The statement a migration's `down` runs BEFORE dropping the DEFAULT partition: it LOCKS the partition (ACCESS
+  EXCLUSIVE, held to the migration's end, so no row can commit between the check and the DROP) and RAISES when it holds
   any row. Those rows are in no monthly partition, so dropping the table would destroy audit events nothing else
   holds (and the append-only trigger exists to prevent exactly that). Nested `IF`s: plpgsql plans a combined
   condition as one expression, which would fail on a database where the table is already absent.
@@ -615,6 +686,9 @@ defmodule Samen.AuditEvent.PartitionManager do
     DO $$
     BEGIN
       IF to_regclass('#{@default_partition}') IS NOT NULL THEN
+        -- Held to the end of the migration: a writer cannot commit a row between this check and the DROP (the DROP
+        -- would wait for it and then destroy its row). Waits at most the migration's lock_timeout.
+        LOCK TABLE #{@default_partition} IN ACCESS EXCLUSIVE MODE;
         IF EXISTS (SELECT 1 FROM ONLY #{@default_partition}) THEN
           RAISE EXCEPTION '#{@default_partition} holds audit rows that are in no monthly partition; dropping it would destroy them. Create the missing months first (Samen.AuditEvent.PartitionManager.ensure_partition/2 moves the rows in), then roll back again.';
         END IF;
@@ -672,7 +746,8 @@ defmodule Samen.AuditEvent.PartitionManager do
 
   Options: `:now` (a `DateTime`, for tests); `:lock_timeout_ms` — read the DEFAULT partitions inside a
   transaction with `SET LOCAL lock_timeout`, so a probe behind a partition move's exclusive lock fails fast
-  (`lock_not_available`) instead of waiting (the `/readyz` path).
+  (`lock_not_available`) instead of waiting (the `/readyz` path); `:statement_timeout_ms` — in that transaction, also
+  `SET LOCAL statement_timeout`, so the server stops a read its caller has given up on.
   """
   @spec runway(module(), keyword()) :: {:ok, [map()]} | {:error, term()}
   def runway(repo, opts \\ []) do
@@ -697,6 +772,13 @@ defmodule Samen.AuditEvent.PartitionManager do
       ms when is_integer(ms) and ms > 0 ->
         repo.transaction(fn ->
           repo.query!("SET LOCAL lock_timeout = #{ms}")
+
+          # a probe killed at its deadline leaves its backend running until it next writes to the socket; this
+          # makes the server stop it too
+          case Keyword.get(opts, :statement_timeout_ms) do
+            st when is_integer(st) and st > 0 -> repo.query!("SET LOCAL statement_timeout = #{st}")
+            _ -> :ok
+          end
 
           case fun.() do
             {:ok, value} -> value

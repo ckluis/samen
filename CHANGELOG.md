@@ -584,3 +584,12 @@ First tagged release — the public snapshot of the Samen foundry.
   is **host-owned** — Samen governs the identity and billing you bring.
 
 [0.1.0]: https://github.com/ckluis/samen/releases/tag/v0.1.0
+- **Review fixes (ARCH-9 round 3).** The DEFAULT-row move keeps the month's CHECK through the ATTACH (it used to drop it first, so Postgres scanned the
+  whole month under `ACCESS EXCLUSIVE`) and gives the replacement DEFAULT its own CHECK so that re-ATTACH is scan-free too; the two `count(*)`
+  statements under the lock are gone; the window has a TOTAL budget (`:partition_move_window_budget_ms`, replaces the per-statement
+  `:partition_move_statement_timeout_ms`) and an automated move refuses a DEFAULT over `:partition_move_max_default_rows` (500 000). The daily
+  `CREATE … PARTITION OF` runs under `lock_timeout` + the budget. The bounds read uses a savepoint only inside a transaction (outside one a
+  DEFAULT landing was never classified). `/readyz` emits `runway_unknown` when its refresh misses its deadline. The migration `up` has a
+  `lock_timeout`; its `down` guard locks the DEFAULT partition before checking it. Existing tests changed: the `:force` detach test is back on
+  2099 with a without-force refusal as its control; `FaultRepo`/`CountingRepo`/`ToggleRepo` delegate `in_transaction?/0`; the February-bounds test
+  asserts the row's partition. Sabotages 824-840.
