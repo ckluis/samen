@@ -123,7 +123,7 @@ defmodule Samen.Approvals do
             # even when the canceller is the requester). The canceller is recorded in audit.
             case transition(approval, :cancel, %{}, opts) do
               {:ok, cancelled} ->
-                audit(repo, cancelled, "approval_cancelled", actor)
+                audit!(repo, cancelled, "approval_cancelled", actor)
                 cancelled
 
               {:error, reason} ->
@@ -203,7 +203,7 @@ defmodule Samen.Approvals do
         # POLICY LAYER (§4.2 layer 1): refuse self-decision before touching the DB, write
         # a refusal audit, leave the approval pending. The DB CHECK (layer 2) is the twin.
         decided_by == to_actor_id(approval.requested_by) ->
-          audit(repo, approval, "approval_self_decide_refused", decided_by)
+          _ = audit(repo, approval, "approval_self_decide_refused", decided_by)
           {:error, :self_approval}
 
         true ->
@@ -223,7 +223,7 @@ defmodule Samen.Approvals do
       repo.transaction(fn ->
         with {:ok, decided} <- transition(approval, decision, %{decided_by: decided_by}, opts),
              {:ok, meta} <- run_handler(handler, decided, decided_by, decision, repo, opts) do
-          audit(repo, decided, event_for(decision), decided_by)
+          audit!(repo, decided, event_for(decision), decided_by)
           {decided, meta}
         else
           {:error, reason} -> repo.rollback(reason)
@@ -299,7 +299,7 @@ defmodule Samen.Approvals do
              |> Ash.Changeset.for_create(:open, create_attrs, authorize?: false)
              |> Ash.create() do
           {:ok, approval} ->
-            audit(repo, approval, "approval_requested", create_attrs.requested_by)
+            audit!(repo, approval, "approval_requested", create_attrs.requested_by)
             approval
 
           # Lost an idempotency race — the partial unique index rejected a duplicate
@@ -363,6 +363,21 @@ defmodule Samen.Approvals do
   # ==========================================================================
   # Audit — governance chain, token/id-only detail (§4.3). `reason` NEVER enters detail.
   # ==========================================================================
+
+  # Approving, cancelling and opening an approval are state changes the tamper-evident chain must see: the audit
+  # entry is part of the same transaction, so a failed write rolls the whole step back (`Writer.write/2` returns
+  # `{:error, _}` and never commits a chainless event). The refusal audit (`approval_self_decide_refused`) is a
+  # DENIAL and stays best-effort: it is not required for the denial to stand.
+  defp audit!(repo, approval, event_type, actor_id) do
+    case audit(repo, approval, event_type, actor_id) do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason} ->
+        Samen.Observability.Failure.report(:approval_audit, approval.org_id, reason)
+        repo.rollback({:audit_failed, reason})
+    end
+  end
 
   defp audit(repo, approval, event_type, actor_id) do
     Samen.AuditChain.Writer.write(repo, %{

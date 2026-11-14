@@ -23,17 +23,21 @@ defmodule Samen.Archival.Audit do
   def write(changeset, record, event_type) do
     repo = AshPostgres.DataLayer.Info.repo(changeset.resource, :mutate)
 
-    _ =
-      Samen.AuditChain.Writer.write(repo, %{
-        org_id: org_id(changeset, record),
-        event_type: event_type,
-        subject_id: stringify(real(Map.get(record, :id))),
-        actor_id: actor_id(changeset),
-        detail: "resource=#{inspect(changeset.resource)} action=#{action_name(changeset)}",
-        occurred_at: now()
-      })
+    org = org_id(changeset, record)
 
-    :ok
+    # Documented best-effort (see the moduledoc): archiving does not wait on the audit. A failed write is NOT
+    # silent any more: it is reported by name (value-free), and the Writer never commits a chainless event.
+    case Samen.AuditChain.Writer.write(repo, %{
+           org_id: org,
+           event_type: event_type,
+           subject_id: stringify(real(Map.get(record, :id))),
+           actor_id: actor_id(changeset),
+           detail: "resource=#{inspect(changeset.resource)} action=#{action_name(changeset)}",
+           occurred_at: now()
+         }) do
+      {:ok, _} -> :ok
+      {:error, reason} -> Samen.Observability.Failure.report(:archival_audit, org, reason)
+    end
   end
 
   # The destroyed/updated record often has only `id` + changed attrs loaded, so

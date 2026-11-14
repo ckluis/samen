@@ -44,6 +44,9 @@ defmodule Samen.HonestKernelReadsTest do
       defmodule AbsentRepo do
         def query!("SELECT to_regclass" <> _), do: %{rows: [[nil]]}
         def insert(cs, opts \\ []), do: SamenCore.TestRepo.insert(cs, opts)
+        def in_transaction?, do: SamenCore.TestRepo.in_transaction?()
+        def transaction(fun, opts \\ []), do: SamenCore.TestRepo.transaction(fun, opts)
+        def rollback(v), do: SamenCore.TestRepo.rollback(v)
       end
 
       assert {:ok, %{chain: :skipped}} = Writer.write(AbsentRepo, attrs(org))

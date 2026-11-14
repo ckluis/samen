@@ -132,21 +132,35 @@ defmodule Samen.Reveal.Grants do
       )
       |> Ecto.Changeset.validate_required([:subject_id, :requestor_id, :reason])
 
-    with {:ok, req} <- r.insert(changeset) do
-      write_audit(r, %{
-        event: "requested",
-        subject_id: req.subject_id,
-        actor_id: req.requestor_id,
-        request_id: req.id,
-        detail: req.reason,
-        # PP-11 (T150): ride the SUBJECT'S TENANT org chain when the caller supplies
-        # `org_id`, so the "who requested to unmask what, when, why" event is visible on
-        # THAT tenant's `Settings.SecurityLive` ledger. Absent an org_id it falls to the
-        # reserved `__global__` operator chain (`write_audit/2` / ADR-002 §2.1) — the
-        # pre-PP-11 behavior for callers that have not threaded the target org.
-        org_id: attrs[:org_id]
-      })
+    # Atomic with its audit entry: a request the chain never saw is not recorded (the audit is `strict`).
+    persisted =
+      r.transaction(fn ->
+        with {:ok, req} <- r.insert(changeset),
+             {:ok, _} <-
+               write_audit(
+                r,
+                %{
+                event: "requested",
+                subject_id: req.subject_id,
+                actor_id: req.requestor_id,
+                request_id: req.id,
+                detail: req.reason,
+                # PP-11 (T150): ride the SUBJECT'S TENANT org chain when the caller supplies
+                # `org_id`, so the "who requested to unmask what, when, why" event is visible on
+                # THAT tenant's `Settings.SecurityLive` ledger. Absent an org_id it falls to the
+                # reserved `__global__` operator chain (`write_audit/2` / ADR-002 §2.1) — the
+                # pre-PP-11 behavior for callers that have not threaded the target org.
+                org_id: attrs[:org_id]
+              },
+                strict: true
+              )  do
+          req
+        else
+          {:error, reason} -> r.rollback(reason)
+        end
+      end)
 
+    with {:ok, req} <- persisted do
       # T35 §4.7: additionally open a `pii_reveal` Approval through the T34 engine —
       # dual truth, per the ADR. The `RevealRequest` row (just written above) STAYS the
       # domain intent record; this is a best-effort parallel governance record so an
@@ -328,15 +342,19 @@ defmodule Samen.Reveal.Grants do
       # Still in the SAME transaction (a `Multi.run` on the multi's repo), so the same-tx
       # + rollback guarantee (clause (d)) is preserved: a chain-write error aborts the grant.
       |> Ecto.Multi.run(:audit, fn multi_repo, _changes ->
-        write_audit(multi_repo, %{
-          event: "granted",
-          subject_id: req.subject_id,
-          actor_id: granted_by,
-          request_id: req.id,
-          grant_id: grant_id,
-          org_id: Map.get(opts, :org_id),
-          detail: "expires_at=#{DateTime.to_iso8601(expires_at)}"
-        })
+        write_audit(
+          multi_repo,
+          %{
+            event: "granted",
+            subject_id: req.subject_id,
+            actor_id: granted_by,
+            request_id: req.id,
+            grant_id: grant_id,
+            org_id: Map.get(opts, :org_id),
+            detail: "expires_at=#{DateTime.to_iso8601(expires_at)}"
+          },
+          strict: true
+        )
       end)
       |> Oban.insert(:auto_revoke, AutoRevokeWorker.new(%{grant_id: grant_id},
         scheduled_at: expires_at
@@ -742,8 +760,8 @@ defmodule Samen.Reveal.Grants do
     * `correlation_id` — the request or grant UUID
     * `detail`     — operator-authored lifecycle metadata (event name, outcome token)
   """
-  @spec write_audit(module(), map()) :: {:ok, RevealAudit.t()} | {:error, term}
-  def write_audit(r, attrs) do
+  @spec write_audit(module(), map(), keyword()) :: {:ok, RevealAudit.t()} | {:error, term}
+  def write_audit(r, attrs, opts \\ []) do
     result = r.insert(audit_changeset(attrs))
 
     # Also emit to the aud_event tier AND the T4.3 hash chain (grant lifecycle events
@@ -751,7 +769,8 @@ defmodule Samen.Reveal.Grants do
     # into the tamper-evident, tenant-readable chain the operator cannot edit — ADR-002).
     # The T2.2/T4.3 migrations ensure the tables exist before this code runs; the writer
     # degrades gracefully (aud_event lands, chain skipped) if aud_chain is not deployed.
-    Samen.AuditChain.Writer.write(r, %{
+    chain =
+      Samen.AuditChain.Writer.write(r, %{
       # Reveal/grant events ride the subject's org chain when the caller supplies an
       # org_id; otherwise the reserved "__global__" operator chain (ADR-002 §2.1).
       org_id: attrs[:org_id] || attrs["org_id"] || Samen.AuditChain.global_org(),
@@ -764,10 +783,19 @@ defmodule Samen.Reveal.Grants do
         "event=#{attrs[:event] || attrs["event"]} " <>
           "#{(attrs[:detail] || attrs["detail"] || "") |> String.trim()}",
       occurred_at: DateTime.utc_now() |> DateTime.truncate(:microsecond)
-    })
+      })
 
-    # The return value is always the primary rvl_reveal_audit result.
-    result
+    # A chain write that failed is never silent. Callers that GRANT or open access pass `strict: true` and get
+    # the error back (their transaction rolls back); callers that REMOVE access (revoke, expiry, denial) or
+    # whose own contract is the erasure record keep the primary result so they never depend on the chain.
+    case chain do
+      {:ok, _} ->
+        result
+
+      {:error, reason} ->
+        Samen.Observability.Failure.report(:reveal_audit_chain, attrs[:org_id] || attrs["org_id"], reason)
+        if Keyword.get(opts, :strict, false), do: {:error, reason}, else: result
+    end
   end
 
   @doc "List audit rows for a subject, newest first (for tests / operator UI)."

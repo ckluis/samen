@@ -172,15 +172,18 @@ defmodule Samen.Impersonation.Sessions do
       Ecto.Multi.new()
       |> Ecto.Multi.insert(:session, session_changeset(session_attrs))
       |> Ecto.Multi.run(:audit, fn r2, _changes ->
-        emit_event(r2, "open", %{
-          org_id: org_id,
-          operator_id: operator_id,
-          session_id: session_id,
-          reason: reason,
-          detail: "expires_at=#{DateTime.to_iso8601(expires_at)}"
-        })
-
-        {:ok, :audited}
+        # Opening an impersonation session GRANTS access, so its audit entry is part of the transaction: a failed
+        # audit write aborts the open (nothing is committed, no session, no expiry job).
+        case emit_event(r2, "open", %{
+               org_id: org_id,
+               operator_id: operator_id,
+               session_id: session_id,
+               reason: reason,
+               detail: "expires_at=#{DateTime.to_iso8601(expires_at)}"
+             }) do
+          {:ok, _} -> {:ok, :audited}
+          {:error, _} -> {:error, :audit_unavailable}
+        end
       end)
       |> Oban.insert(:auto_expire, ExpireWorker.new(%{session_id: session_id},
         scheduled_at: expires_at
@@ -373,18 +376,26 @@ defmodule Samen.Impersonation.Sessions do
     # hash chain (ADR-002). The impersonation event rides the TARGET ORG's chain, so a
     # tenant reading their own chain sees who impersonated them and when — the doc's
     # tenant-visible accountability, now tamper-evident. Tokens only.
-    Samen.AuditChain.Writer.write(r, %{
-      org_id: (attrs[:org_id] && to_string(attrs[:org_id])) || Samen.AuditChain.global_org(),
-      event_type: "impersonation",
-      # The target ORG is the subject of an impersonation event — a bounded UUID.
-      subject_id: attrs[:org_id] && to_string(attrs[:org_id]),
-      actor_id: attrs[:operator_id] && to_string(attrs[:operator_id]),
-      correlation_id: attrs[:session_id],
-      detail:
-        "event=#{lifecycle} reason=#{sanitize(attrs[:reason])} " <>
-          "#{(attrs[:detail] || "") |> String.trim()}",
-      occurred_at: DateTime.utc_now() |> DateTime.truncate(:microsecond)
-    })
+    result =
+      Samen.AuditChain.Writer.write(r, %{
+        org_id: (attrs[:org_id] && to_string(attrs[:org_id])) || Samen.AuditChain.global_org(),
+        event_type: "impersonation",
+        # The target ORG is the subject of an impersonation event — a bounded UUID.
+        subject_id: attrs[:org_id] && to_string(attrs[:org_id]),
+        actor_id: attrs[:operator_id] && to_string(attrs[:operator_id]),
+        correlation_id: attrs[:session_id],
+        detail:
+          "event=#{lifecycle} reason=#{sanitize(attrs[:reason])} " <>
+            "#{(attrs[:detail] || "") |> String.trim()}",
+        occurred_at: DateTime.utc_now() |> DateTime.truncate(:microsecond)
+      })
+
+    # Reported here so a TOLERANT caller (close, expiry: they remove access and must not depend on the audit)
+    # is never silent; `open/1` treats the error as fatal.
+    with {:error, reason} <- result do
+      Samen.Observability.Failure.report(:impersonation_audit, attrs[:org_id], reason)
+      result
+    end
   end
 
   # ==========================================================================

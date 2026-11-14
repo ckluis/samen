@@ -62,6 +62,10 @@ defmodule Samen.FaultRepo do
     check!(:exists?)
     Real.exists?(q, opts)
   end
+  def get(queryable, id, opts \\ []) do
+    check!(:get)
+    Real.get(queryable, id, opts)
+  end
   def insert(cs, opts \\ []) do
     check!(:insert)
     Real.insert(cs, opts)
@@ -74,6 +78,18 @@ defmodule Samen.FaultRepo do
     check!(:update)
     Real.update(cs, opts)
   end
-  def transaction(fun, opts \\ []), do: Real.transaction(fun, opts)
+  # An `Ecto.Multi` must run its steps against THIS module (so `Multi.run` callbacks see the faults), not the
+  # real repo: the same wrap/return `Ecto.Repo.Transaction` uses, with `self()` as the repo handed to the steps.
+  def transaction(multi, opts \\ [])
+
+  def transaction(%Ecto.Multi{} = multi, opts) do
+    case Ecto.Multi.__apply__(multi, __MODULE__, &Real.transaction(&1, opts), &Real.rollback/1) do
+      {:ok, values} -> {:ok, values}
+      {:error, {key, error_value, values}} -> {:error, key, error_value, values}
+    end
+  end
+
+  def transaction(fun, opts), do: Real.transaction(fun, opts)
+  def in_transaction?, do: Real.in_transaction?()
   def rollback(value), do: Real.rollback(value)
 end
