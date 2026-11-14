@@ -60,7 +60,9 @@ defmodule Samen.Automation.ActionStep do
         :ok
     end
   rescue
-    _ -> :ok
+    e ->
+      Samen.Observability.Failure.report(:compile_undo, nil, e)
+      :ok
   end
 
   # The action's own config keys, minus the routing key.

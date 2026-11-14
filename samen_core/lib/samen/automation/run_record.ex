@@ -113,7 +113,9 @@ defmodule Samen.Automation.RunRecord do
     |> Ash.read!(authorize?: false)
     |> List.first()
   rescue
-    _ -> nil
+    e ->
+      Samen.Observability.Failure.report(:run_record_find_by_key, org_id, e)
+      nil
   end
 
   @doc "Transition an opened run :queued -> :running, stamping `started_at`. No-op on `nil`."
@@ -126,10 +128,14 @@ defmodule Samen.Automation.RunRecord do
     |> Ash.update(authorize?: false)
     |> case do
       {:ok, run} -> run
-      {:error, _reason} -> run
+      {:error, reason} ->
+        Samen.Observability.Failure.report(:run_record_mark_running, nil, reason)
+        run
     end
   rescue
-    _ -> run
+    e ->
+      Samen.Observability.Failure.report(:run_record_mark_running, nil, e)
+      run
   end
 
   @doc """

@@ -72,8 +72,6 @@ defmodule Samen.Automation.ReminderFire do
       [record | _] -> record
       [] -> nil
     end
-  rescue
-    _ -> nil
   end
 
   defp notify_opts do

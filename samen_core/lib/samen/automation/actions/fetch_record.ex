@@ -38,6 +38,7 @@ defmodule Samen.Automation.Actions.FetchRecord do
 
   @behaviour Samen.Automation.Action
 
+  alias Samen.Automation.Actions.Support
   alias Samen.Automation.Context
   alias Samen.Automation.NonPiiPredicates
 
@@ -141,13 +142,11 @@ defmodule Samen.Automation.Actions.FetchRecord do
   end
 
   defp resolve_module(resource_key) when is_binary(resource_key) do
-    mod = String.to_existing_atom("Elixir." <> String.trim_leading(resource_key, "Elixir."))
+    mod = Support.safe_atom("Elixir." <> String.trim_leading(resource_key, "Elixir."))
 
-    if Code.ensure_loaded?(mod) and function_exported?(mod, :spark_dsl_config, 0),
+    if not is_nil(mod) and Code.ensure_loaded?(mod) and function_exported?(mod, :spark_dsl_config, 0),
       do: mod,
       else: nil
-  rescue
-    ArgumentError -> nil
   end
 
   # The GOVERNED read: `scope: ctx.actor` — the owner actor's real policy envelope
@@ -168,12 +167,16 @@ defmodule Samen.Automation.Actions.FetchRecord do
       {:ok, [record]} -> {:ok, record}
       {:ok, []} -> {:error, :record_not_found}
       {:error, %Ash.Error.Forbidden{}} -> {:error, :not_authorized}
-      {:error, _} -> {:error, :tool_failed}
+      {:error, reason} ->
+        Samen.Observability.Failure.report(:fetch_record_read, scope, reason)
+        {:error, :tool_failed}
     end
   rescue
     # An action error never crashes the engine (ADR-039 §5.1) — and never leaks a
-    # rich exception term (EG6): degrade to the bounded kind.
-    _ -> {:error, :tool_failed}
+    # rich exception term (EG6): degrade to the bounded kind (the failure is reported value-free).
+    e ->
+      Samen.Observability.Failure.report(:fetch_record_read, scope, e)
+      {:error, :tool_failed}
   end
 
   defp read_one(_resource, _id, _eligible, _actor), do: {:error, :not_authorized}
@@ -182,11 +185,7 @@ defmodule Samen.Automation.Actions.FetchRecord do
     resource |> Samen.Pii.Info.pii_attributes() |> Enum.map(& &1.name)
   end
 
-  defp existing_atom(name) when is_binary(name) do
-    String.to_existing_atom(name)
-  rescue
-    ArgumentError -> nil
-  end
+  defp existing_atom(name) when is_binary(name), do: Support.safe_atom(name)
 
   defp existing_atom(name) when is_atom(name), do: name
 end

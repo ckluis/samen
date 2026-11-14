@@ -157,11 +157,7 @@ defmodule Samen.Automation.Actions.Webhook do
 
   defp webhook_secret(_ctx), do: {:error, :no_webhook_secret}
 
-  defp safe_atom(name) do
-    String.to_existing_atom(name)
-  rescue
-    ArgumentError -> nil
-  end
+  defp safe_atom(name), do: Samen.Automation.Actions.Support.safe_atom(name)
 
   # ---------------------------------------------------------------------------
   # SSRF guard (§5.3) — https-only outside dev/test, resolve-then-deny

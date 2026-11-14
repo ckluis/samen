@@ -92,8 +92,6 @@ defmodule Samen.Automation.EscalationAdvance do
       [record | _] -> record
       [] -> nil
     end
-  rescue
-    _ -> nil
   end
 
   defp next_action_at(_deadline_at, nil), do: nil

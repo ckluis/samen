@@ -163,7 +163,7 @@ defmodule Samen.Automation.RunWorker do
       true ->
         with {:ok, resource} <- resolve_resource(resource_key),
              {:ok, eligible} <- NonPiiPredicates.eligible_names(resource_key) do
-          {:ok, load_eligible(resource, record_id, eligible)}
+          load_eligible(resource, record_id, eligible)
         else
           _ -> {:ok, %{}}
         end
@@ -182,11 +182,15 @@ defmodule Samen.Automation.RunWorker do
     |> Ash.Query.ensure_selected(eligible_atoms)
     |> Ash.read!(authorize?: false)
     |> case do
-      [record | _] -> Map.take(record, eligible_atoms)
-      [] -> %{}
+      [record | _] -> {:ok, Map.take(record, eligible_atoms)}
+      [] -> {:ok, %{}}
     end
   rescue
-    _ -> %{}
+    e ->
+      # A subject that could not be READ is not an empty subject: `neq` / `not_in` / `is_nil` (and a workflow with
+      # no conditions) all pass against one, so the run is skipped (and the failure reported) rather than fired.
+      Samen.Observability.Failure.report(:run_worker_load_eligible, nil, e)
+      {:skip, :internal_error}
   end
 
   defp conditions_gate(definition, subject_map, args) do
@@ -308,11 +312,7 @@ defmodule Samen.Automation.RunWorker do
 
   defp resolve_resource(_), do: :error
 
-  defp safe_atom(name) do
-    String.to_existing_atom(name)
-  rescue
-    ArgumentError -> nil
-  end
+  defp safe_atom(name), do: Samen.Automation.Actions.Support.safe_atom(name)
 
   defp derive_ref(wf, args) do
     "samen:workflow:#{wf.id}:#{args["event_id"]}"

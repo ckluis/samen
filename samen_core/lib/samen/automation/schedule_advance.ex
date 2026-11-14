@@ -56,7 +56,9 @@ defmodule Samen.Automation.ScheduleAdvance do
       [] -> nil
     end
   rescue
-    _ -> nil
+    e ->
+      Samen.Observability.Failure.report(:schedule_advance_reload_org, nil, e)
+      nil
   end
 
   defp usable?(%Ash.NotLoaded{}), do: false

@@ -426,6 +426,98 @@ defmodule Samen.Automation.ObservabilityTest do
   # ---------------------------------------------------------------------------
   # Helpers
 
+  # ---------------------------------------------------------------------------
+  # Honest reads — a read that FAILED is an outage or a skipped run, never "no data".
+
+  test "RED: Health.summary/runs answer {:error, :unavailable} when the read fails (they answered an empty fleet); healthy control" do
+    org = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+    operator = Actor.new(Ash.UUID.generate(), :operator_admin)
+
+    create_workflow!(org, owner,
+      actions: [%{"kind" => "notify", "recipient" => "owner", "event_type" => "workflow.fired"}]
+    )
+
+    # POSITIVE CONTROL: the same calls on the real modules answer the fleet
+    assert {:ok, [%{total_runs: 0}]} = Health.summary(operator, org)
+    assert {:ok, []} = Health.runs(operator, org)
+
+    ExUnit.CaptureLog.capture_log(fn ->
+      assert {:error, :unavailable} = Health.summary(operator, org, workflow_module: String)
+      assert {:error, :unavailable} = Health.summary(operator, org, run_module: String)
+      assert {:error, :unavailable} = Health.runs(operator, org, run_module: String)
+    end)
+  end
+
+  test "RED: a subject that cannot be READ skips the run instead of reading as an empty subject " <>
+         "(which every neq / not_in / is_nil gate passes); the readable subject fires (control)" do
+    org = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+
+    wf =
+      create_workflow!(org, owner,
+        conditions: [%{"attribute" => "priority", "op" => "neq", "values" => ["urgent"]}],
+        actions: [%{"kind" => "notify", "recipient" => "owner", "event_type" => "workflow.fired"}]
+      )
+
+    target = create_target!(org)
+
+    args = fn record_id ->
+      %{
+        "workflow_id" => to_string(wf.id),
+        "org_id" => org,
+        "resource_key" => @target_key,
+        "record_id" => record_id,
+        "event" => "created",
+        "event_id" => Ash.UUID.generate(),
+        "trigger_kind" => "resource_event",
+        "depth" => 0,
+        "chain" => []
+      }
+    end
+
+    ExUnit.CaptureLog.capture_log(fn ->
+      assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: args.("not-a-uuid")})
+    end)
+
+    assert notified(org, owner) == 0
+    assert [%{state: :skipped, error_kind: :internal_error}] = runs_for(org, wf.id)
+
+    # POSITIVE CONTROL: the same workflow against the readable record fires
+    assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: args.(to_string(target.id))})
+    assert notified(org, owner) == 1
+  end
+
+  test "RED: an unknown event string no longer dispatches the :created workflows; 'created' does (control)" do
+    org = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+
+    create_workflow!(org, owner,
+      actions: [%{"kind" => "notify", "recipient" => "owner", "event_type" => "workflow.fired"}]
+    )
+
+    envelope = fn event ->
+      %{"org_id" => org, "resource_key" => @target_key, "event" => event, "trigger_kind" => "resource_event"}
+    end
+
+    ExUnit.CaptureLog.capture_log(fn ->
+      assert {:error, %ArgumentError{}} =
+               Samen.Automation.DispatchWorker.perform(%Oban.Job{args: envelope.("no_such_event_zzz")})
+    end)
+
+    assert Oban.drain_queue(queue: :automation) |> Map.get(:success) == 0
+
+    assert :ok = Samen.Automation.DispatchWorker.perform(%Oban.Job{args: envelope.("created")})
+  end
+
+  defp notified(org, owner) do
+    Notification
+    |> filter(org_id == ^org)
+    |> filter(recipient_id == ^owner)
+    |> Ash.read!(authorize?: false)
+    |> length()
+  end
+
   defp create_workflow!(org, owner, opts) do
     attrs = %{
       org_id: org,
