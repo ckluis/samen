@@ -125,16 +125,14 @@ defmodule Samen.Web.Reads.SwallowLintTest do
       reviewed = SwallowLint.reviewed()
       assert map_size(reviewed) > 0
 
-      for {{file, fun}, reason} <- reviewed do
-        assert is_binary(reason) and reason != "",
-               "#{file} #{fun}: a reviewed entry needs its reason"
+      # Every pin is EXACT (count == the swallowing clauses the scanner finds in that function) and carries a
+      # reason; a stale pin, or a clause added to a reviewed function, fails here (or in the ratchet below).
+      assert SwallowLint.reviewed_problems() == []
 
+      for {{file, fun}, {count, reason}} <- reviewed do
+        assert is_binary(reason) and reason != "", "#{file} #{fun}: a reviewed entry needs its reason"
+        assert is_integer(count) and count > 0, "#{file} #{fun}: a reviewed entry needs its pinned count"
         assert file in files, "#{file} is reviewed but is not in the scanned tree (stale entry)"
-
-        found = root |> Path.join(file) |> File.read!() |> SwallowLint.scan_source(file)
-
-        assert Enum.any?(found, &(&1.fun == fun)),
-               "#{file}: no swallowing clause in #{fun}/? any more — delete the @reviewed entry (its reason is stale)"
       end
 
       # And the unfiltered count is never below the reviewed set (each reviewed entry is one found clause).
@@ -143,7 +141,7 @@ defmodule Samen.Web.Reads.SwallowLintTest do
         |> Enum.map(&length(SwallowLint.scan_source(File.read!(Path.join(root, &1)), &1)))
         |> Enum.sum()
 
-      assert unfiltered >= map_size(reviewed)
+      assert unfiltered >= reviewed |> Map.values() |> Enum.map(&elem(&1, 0)) |> Enum.sum()
     end
 
     test "the converted read modules are swallow-free (WP6 phase 1)" do
@@ -191,6 +189,35 @@ defmodule Samen.Web.Reads.SwallowLintTest do
 
     test "the tree matches the baseline exactly (no new swallow, no un-lowered row)" do
       assert :ok = SwallowLint.check()
+    end
+
+    test "a clause added to a reviewed function is NOT absorbed by its entry (the pin is a count)" do
+      file = "samen_web/lib/samen/web/reads/guard.ex"
+      {pinned, _} = Map.fetch!(SwallowLint.reviewed(), {file, :run})
+      src = File.read!(Path.join(SwallowLint.repo_root(), file))
+
+      # One more catch-all in `run/3` than the entry pins: the same scan the live ratchet runs must count it.
+      grown =
+        String.replace(
+          src,
+          "    :throw, _value -> failed(name, scope, :throw)\n  end\n",
+          "    :throw, _value -> failed(name, scope, :throw)\n    :error, _ -> :empty\n  end\n",
+          global: false
+        )
+
+      refute grown == src
+      sites = Samen.Lint.Swallow.scan_source(grown, file, :rescue)
+      assert Enum.count(sites, &(&1.fun == :run)) > pinned
+    end
+
+    test "the non-rescue class: the tree matches its (empty) baseline, and the shared fixture proves the detector is live here" do
+      assert :ok = SwallowLint.check_error_arms()
+      assert SwallowLint.error_arm_baseline() == %{}
+
+      fixture = "samen_core/test/fixtures/swallow_fixture.ex"
+      assert SwallowLint.scan_error_arms([fixture]) == %{fixture => 3}
+      assert {:error, [msg]} = SwallowLint.check_error_arms(SwallowLint.scan_error_arms([fixture]), SwallowLint.error_arm_baseline())
+      assert msg =~ fixture
     end
   end
 end

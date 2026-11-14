@@ -6,14 +6,14 @@
 # TEST_FILES: test/samen/web/reads_swallow_lint_test.exs
 # MUST_FAIL: RED: flags a function-level
 # MUST_FAIL: non-vacuity: the scanner sees the tree
-diff --git a/samen_web/lib/samen/web/reads/swallow_lint.ex b/samen_web/lib/samen/web/reads/swallow_lint.ex
-index 25e3f536..ce0a90d3 100644
---- a/samen_web/lib/samen/web/reads/swallow_lint.ex
-+++ b/samen_web/lib/samen/web/reads/swallow_lint.ex
-@@ -255,7 +255,7 @@ defmodule Samen.Web.Reads.SwallowLint do
-   defp clause(_fun, _key, _other, acc), do: acc
+diff --git a/samen_core/lib/samen/lint/swallow.ex b/samen_core/lib/samen/lint/swallow.ex
+index b741eaaf..64dfe3f7 100644
+--- a/samen_core/lib/samen/lint/swallow.ex
++++ b/samen_core/lib/samen/lint/swallow.ex
+@@ -216,7 +216,7 @@ defmodule Samen.Lint.Swallow do
  
-   # rescue: one pattern, a bare/underscore variable. catch: every pattern a variable or `:exit`.
+   defp rescue_clause(_fun, _key, _other, acc), do: acc
+ 
 -  defp catch_all?(:rescue, [pattern]), do: variable?(pattern)
 +  defp catch_all?(:rescue, [_pattern]), do: false
  

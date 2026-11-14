@@ -5,14 +5,14 @@
 # APP: samen_web
 # TEST_FILES: test/samen/web/reads_swallow_lint_test.exs
 # MUST_FAIL: POSITIVE CONTROL: scan/1 counts a fixture
-diff --git a/samen_web/lib/samen/web/reads/swallow_lint.ex b/samen_web/lib/samen/web/reads/swallow_lint.ex
-index c413a6fe..0a5ad47b 100644
---- a/samen_web/lib/samen/web/reads/swallow_lint.ex
-+++ b/samen_web/lib/samen/web/reads/swallow_lint.ex
-@@ -170,7 +170,7 @@ defmodule Samen.Web.Reads.SwallowLint do
- 
-       {rel, length(swallows)}
-     end)
+diff --git a/samen_core/lib/samen/lint/swallow.ex b/samen_core/lib/samen/lint/swallow.ex
+index b741eaaf..1e5769bd 100644
+--- a/samen_core/lib/samen/lint/swallow.ex
++++ b/samen_core/lib/samen/lint/swallow.ex
+@@ -77,7 +77,7 @@ defmodule Samen.Lint.Swallow do
+   def scan(root, files, reviewed \\ %{}, class \\ :rescue) do
+     files
+     |> Enum.map(fn rel -> {rel, rel |> sites(root, class) |> unreviewed(rel, reviewed) |> length()} end)
 -    |> Enum.reject(fn {_rel, n} -> n == 0 end)
 +    |> Enum.reject(fn {_rel, n} -> n >= 0 end)
      |> Map.new()
