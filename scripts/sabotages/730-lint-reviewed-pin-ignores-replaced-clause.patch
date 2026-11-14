@@ -1,0 +1,20 @@
+# SABOTAGE: A reviewed pin keeps covering a clause that was replaced by another with the same count (the 
+#   hash is no longer compared).
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/swallow_lint_test.exs
+# MUST_FAIL: RED: a REPLACED clause (same count) is no longer covered by the pin
+diff --git a/samen_core/lib/samen/lint/swallow.ex b/samen_core/lib/samen/lint/swallow.ex
+index 8a05ab6a..31967817 100644
+--- a/samen_core/lib/samen/lint/swallow.ex
++++ b/samen_core/lib/samen/lint/swallow.ex
+@@ -154,7 +154,7 @@ defmodule Samen.Lint.Swallow do
+         case Map.get(reviewed, {rel, fun}) do
+           {pinned, hash, _reason} when is_integer(pinned) ->
+             taken = Enum.take(fun_sites, pinned)
+-            if length(taken) == pinned and hash_of(taken) == hash, do: taken, else: []
++            if length(taken) == pinned and hash == hash, do: taken, else: []
+ 
+           _ ->
+             []

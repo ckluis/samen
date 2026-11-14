@@ -1,0 +1,19 @@
+# SABOTAGE: A typed rescue list that answers a swallow literal is no longer counted as a swallow.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/swallow_lint_test.exs
+# MUST_FAIL: RED: a broad typed list that returns a swallow literal counts
+diff --git a/samen_core/lib/samen/lint/swallow.ex b/samen_core/lib/samen/lint/swallow.ex
+index 8a05ab6a..b84f04f4 100644
+--- a/samen_core/lib/samen/lint/swallow.ex
++++ b/samen_core/lib/samen/lint/swallow.ex
+@@ -345,7 +345,7 @@ defmodule Samen.Lint.Swallow do
+   defp rescue_clause(fun, key, {:->, _meta, [patterns, body]} = clause, acc) do
+     cond do
+       catch_all?(key, patterns) and not handled?(body, bound_vars(patterns)) -> [site(fun, :rescue, clause) | acc]
+-      key == :rescue and typed?(patterns) and swallow_literal?(final_expr(body)) and not logged?(body) -> [site(fun, :rescue, clause) | acc]
++      key == :catch and typed?(patterns) and swallow_literal?(final_expr(body)) and not logged?(body) -> [site(fun, :rescue, clause) | acc]
+       true -> acc
+     end
+   end

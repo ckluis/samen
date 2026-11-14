@@ -1,0 +1,20 @@
+# SABOTAGE: Module-body nodes (Ash DSL change fn, after_action fn) are no longer scanned by the swallow 
+#   lint.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/swallow_lint_test.exs
+# MUST_FAIL: RED: defmacro bodies and module-body nodes
+diff --git a/samen_core/lib/samen/lint/swallow.ex b/samen_core/lib/samen/lint/swallow.ex
+index 8a05ab6a..c32f0df9 100644
+--- a/samen_core/lib/samen/lint/swallow.ex
++++ b/samen_core/lib/samen/lint/swallow.ex
+@@ -292,7 +292,7 @@ defmodule Samen.Lint.Swallow do
+   # under the pseudo-function `:__module__`. Nested defs are pruned (the outer walk collects them under their own
+   # names); a nested defmodule is left to the outer walk too.
+   defp collect_module_body(class, block, ctx, acc) do
+-    stmts = block |> block_statements() |> Enum.map(&prune_defs/1) |> Enum.reject(&is_nil/1)
++    stmts = block |> block_statements() |> Enum.map(&prune_defs/1) |> Enum.reject(&is_nil/1) |> Enum.take(0)
+     Enum.reduce(stmts, acc, fn stmt, acc -> collect(class, :__module__, stmt, ctx, acc) end)
+   end
+ 

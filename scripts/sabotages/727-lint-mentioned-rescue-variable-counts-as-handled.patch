@@ -1,0 +1,20 @@
+# SABOTAGE: A rescue variable merely mentioned (not reaching the final expression) counts as handled again, 
+#   so `_ = e; []` passes the lint.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/swallow_lint_test.exs
+# MUST_FAIL: RED: `e -> _ = e; []` is a swallow
+diff --git a/samen_core/lib/samen/lint/swallow.ex b/samen_core/lib/samen/lint/swallow.ex
+index 8a05ab6a..2e1d1465 100644
+--- a/samen_core/lib/samen/lint/swallow.ex
++++ b/samen_core/lib/samen/lint/swallow.ex
+@@ -412,7 +412,7 @@ defmodule Samen.Lint.Swallow do
+           tainted
+       end)
+ 
+-    mentions?(last, tainted)
++    mentions?(body, tainted)
+   end
+ 
+   defp mentions?(ast, vars) do
