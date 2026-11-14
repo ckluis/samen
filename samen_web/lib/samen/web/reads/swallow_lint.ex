@@ -115,16 +115,13 @@ defmodule Samen.Web.Reads.SwallowLint do
   # The non-rescue form (`{:error, _} -> []/nil/0/false/:ok` in a function that calls an Ash/Ecto/Repo read or
   # write), per file: debt the scan found and the ratchet holds at that count (shrink-only, like `@baseline`).
   @error_arm_baseline %{
-    "samen_web/lib/samen/web/automation/reads.ex" => 1,
     "samen_web/lib/samen/web/crm/reads.ex" => 1,
-    "samen_web/lib/samen/web/flags/reads.ex" => 1,
     "samen_web/lib/samen/web/onboarding.ex" => 1,
     "samen_web/lib/samen/web/onboarding/wizard_controller.ex" => 1,
     "samen_web/lib/samen/web/onboarding/wizard_live.ex" => 1,
     "samen_web/lib/samen/web/reads/adoption.ex" => 1,
     "samen_web/lib/samen/web/settings/invitations_live.ex" => 1,
-    "samen_web/lib/samen/web/tags.ex" => 2,
-    "samen_web/lib/samen/web/tenant/analytics_reads.ex" => 1
+    "samen_web/lib/samen/web/tags.ex" => 2
   }
 
   alias Samen.Lint.Swallow
@@ -139,7 +136,7 @@ defmodule Samen.Web.Reads.SwallowLint do
       "pawchart/lib" => 0
     },
     error_arm: %{
-      "samen_web/lib" => 11,
+      "samen_web/lib" => 8,
       "driftwood/lib" => 0,
       "pawchart/lib" => 0
     }

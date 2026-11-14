@@ -1,0 +1,19 @@
+# SABOTAGE: flag admin outage reads not found
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/operator_flag_admin_test.exs
+# MUST_FAIL: kill/enable on a failing read says the read failed
+diff --git a/samen_web/lib/samen/web/operator/flag_admin_live.ex b/samen_web/lib/samen/web/operator/flag_admin_live.ex
+index cc1cd04f..686b2fa6 100644
+--- a/samen_web/lib/samen/web/operator/flag_admin_live.ex
++++ b/samen_web/lib/samen/web/operator/flag_admin_live.ex
+@@ -202,7 +202,7 @@ defmodule Samen.Web.Operator.FlagAdminLive do
+   defp kill(flags_mount, scope, id) do
+     case Reads.get_flag_result(flags_mount, scope, id) do
+       {:error, :not_found} -> {:error, "Flag not found."}
+-      {:error, :unavailable} -> {:error, Samen.Web.Reads.Guard.message()}
++      {:error, :unavailable} -> {:error, "Flag not found."}
+       {:ok, %{enabled: false} = flag} -> {:ok, flag}
+       {:ok, _flag} -> Reads.toggle_flag(flags_mount, scope, id)
+     end

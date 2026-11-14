@@ -406,4 +406,55 @@ defmodule Samen.Web.OperatorFlagAdminTest do
     assert {:error, _} = Reads.toggle_flag(flags_mount, Mount.scope(mount, op_org.id), flag.id)
     assert raw_flag(flag.id).enabled
   end
+
+  # ---------------------------------------------------------------------------
+  # An outage is not "Flag not found." (the honest-reads convention: Guard + the tagged `_result` sibling)
+  # ---------------------------------------------------------------------------
+
+  describe "a failed single-flag read" do
+    import ExUnit.CaptureLog
+
+    test "kill/enable on a failing read says the read failed (Guard copy) and changes nothing; an absent id is still 'Flag not found.'" do
+      op_org = seed_operator_org()
+      live = seed_flag(op_org.id, name: "platform.outage_flag")
+      socket = mount_socket(operator_mount(op_org.id))
+
+      inject_read_faults([:flags_get_flag])
+
+      failed =
+        with_log(fn -> event(socket, "kill_flag", %{"id" => live.id}) end)
+        |> elem(0)
+
+      assert failed.assigns.flag_error == Samen.Web.Reads.Guard.message()
+      refute failed.assigns.flag_error =~ "not found"
+      assert raw_flag(live.id).enabled
+
+      clear_read_faults()
+
+      # POSITIVE CONTROLS: healthy, an absent id is the (true) "not found"; the real flag kills
+      absent = event(socket, "kill_flag", %{"id" => Ash.UUID.generate()})
+      assert absent.assigns.flag_error == "Flag not found."
+
+      killed = event(socket, "kill_flag", %{"id" => live.id})
+      assert killed.assigns.flag_error == nil
+      refute raw_flag(live.id).enabled
+    end
+
+    test "opening the editor on a failing read is the error, not a silently absent modal" do
+      op_org = seed_operator_org()
+      live = seed_flag(op_org.id, name: "platform.edit_outage")
+      socket = mount_socket(operator_mount(op_org.id))
+
+      inject_read_faults([:flags_get_flag])
+      failed = capture_log(fn -> send(self(), {:s, event(socket, "edit_flag", %{"id" => live.id})}) end)
+      assert is_binary(failed)
+      assert_received {:s, failed_socket}
+
+      assert failed_socket.assigns.edit_flag == nil
+      assert html(failed_socket) =~ "Nothing was lost"
+
+      clear_read_faults()
+      assert event(socket, "edit_flag", %{"id" => live.id}).assigns.edit_flag.id == live.id
+    end
+  end
 end

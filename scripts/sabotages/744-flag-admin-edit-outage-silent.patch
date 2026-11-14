@@ -1,0 +1,20 @@
+# SABOTAGE: flag admin edit outage silent
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/operator_flag_admin_test.exs
+# MUST_FAIL: opening the editor on a failing read is the error
+diff --git a/samen_web/lib/samen/web/operator/flag_admin_live.ex b/samen_web/lib/samen/web/operator/flag_admin_live.ex
+index cc1cd04f..740c7290 100644
+--- a/samen_web/lib/samen/web/operator/flag_admin_live.ex
++++ b/samen_web/lib/samen/web/operator/flag_admin_live.ex
+@@ -131,9 +131,6 @@ defmodule Samen.Web.Operator.FlagAdminLive do
+         )
+ 
+       # A FAILED read is not "no such flag": say so, keep the list (the Guard error copy, as in the tenant SettingsLive).
+-      {:error, :unavailable} ->
+-        assign(socket, edit_flag: nil, ramp_form: nil, flag_error: Samen.Web.Reads.Guard.message())
+-
+       # absent / denied / no flags mount
+       _ ->
+         assign(socket, edit_flag: nil, ramp_form: nil)

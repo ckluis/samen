@@ -2,8 +2,10 @@ defmodule Samen.Marketing.ConsentChange do
   @moduledoc """
   An Ash change that appends ONE `Marketing.ConsentEvent` row per consent transition
   on a subscriber create/update — the consent-capture seam (F3 Unit 1), modeled
-  line-for-line on `Samen.Billing.SubscriptionMovement` (the `mov` ledger seam) and,
-  before it, `Samen.Notifications.StatusChange`.
+  on `Samen.Billing.SubscriptionMovement` (the `mov` ledger seam) and, before it,
+  `Samen.Notifications.StatusChange` — EXCEPT for the failure posture: those are
+  best-effort, this one is asymmetric (a lost grant is reported, a lost withdrawal
+  fails the write closed; see below).
 
   Attached by the `Marketing.Subscriber` blueprint as:
 

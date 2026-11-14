@@ -42,6 +42,12 @@ defmodule Samen.Web.TenantAnalyticsTest do
   # Sub-floor suppression — the shipped floor, load-bearing
   # ---------------------------------------------------------------------------
 
+  # The funnel rows, asserting the read SUCCEEDED (`funnel_result/3` is the only funnel read; an outage is `{:error, _}`).
+  defp funnel_rows(mount, scope, opts) do
+    assert {:ok, rows} = AnalyticsReads.funnel_result(mount, scope, opts)
+    rows
+  end
+
   test "k-anon: a count-of-one own-org stage SUPPRESSES (⊘); a >= k stage RELEASES" do
     mount = build_mount(:crm)
     org = Ash.UUID.generate()
@@ -50,7 +56,7 @@ defmodule Samen.Web.TenantAnalyticsTest do
     insert_paf!(org, "signup", 8)
     insert_paf!(org, "first_record", 1)
 
-    funnel = AnalyticsReads.funnel(mount, scope, k: 5)
+    funnel = funnel_rows(mount, scope, k: 5)
 
     assert %{actor_count: 8} = stage(funnel, "signup")
     lonely = stage(funnel, "first_record")
@@ -65,8 +71,8 @@ defmodule Samen.Web.TenantAnalyticsTest do
     scope = Mount.scope(mount, org)
     insert_paf!(org, "first_record", 1)
 
-    assert Suppressed.suppressed?(stage(AnalyticsReads.funnel(mount, scope, k: 5), "first_record").actor_count)
-    assert stage(AnalyticsReads.funnel(mount, scope, k: 1), "first_record").actor_count == 1
+    assert Suppressed.suppressed?(stage(funnel_rows(mount, scope, k: 5), "first_record").actor_count)
+    assert stage(funnel_rows(mount, scope, k: 1), "first_record").actor_count == 1
   end
 
   # ---------------------------------------------------------------------------
@@ -82,7 +88,7 @@ defmodule Samen.Web.TenantAnalyticsTest do
     insert_paf!(org_a, "signup", 6)
     insert_paf!(org_b, "signup", 999_999)
 
-    funnel = AnalyticsReads.funnel(mount, scope_a, k: 5)
+    funnel = funnel_rows(mount, scope_a, k: 5)
     assert %{actor_count: 6} = stage(funnel, "signup")
     refute Enum.any?(funnel, &(&1.actor_count == 999_999))
   end
@@ -104,7 +110,7 @@ defmodule Samen.Web.TenantAnalyticsTest do
     org = Ash.UUID.generate()
     insert_paf!(org, "signup", 8)
     orgless = %Samen.Scope{actor: %{id: "x", role: :member, plane: :tenant}}
-    assert AnalyticsReads.funnel(mount, orgless, k: 1) == []
+    assert AnalyticsReads.funnel_result(mount, orgless, k: 1) == {:ok, []}
   end
 
   # ---------------------------------------------------------------------------
@@ -133,13 +139,13 @@ defmodule Samen.Web.TenantAnalyticsTest do
     scope = Mount.scope(mount, org)
     insert_paf!(org, "first_record", 1)
 
-    floored = stage(AnalyticsReads.funnel(mount, scope, k: 5), "first_record")
+    floored = stage(funnel_rows(mount, scope, k: 5), "first_record")
     assert Suppressed.suppressed?(floored.actor_count)
     assert to_string(floored.actor_count) == Suppressed.glyph()
 
     # (c) SABOTAGE flip: neuter the floor → the count-of-one reconstructs (leak detected).
     #     "exactly 1 subject reached first_record" is the re-identifying fact the floor withheld.
-    leaked = stage(AnalyticsReads.funnel(mount, scope, k: 1), "first_record")
+    leaked = stage(funnel_rows(mount, scope, k: 1), "first_record")
     assert leaked.actor_count == 1
     refute Suppressed.suppressed?(leaked.actor_count)
   end

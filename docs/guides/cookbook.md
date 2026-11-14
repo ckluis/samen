@@ -414,7 +414,7 @@ patch IS the change now; the tree should go back to green). Prove it flips befor
 it — `scripts/sabotage.sh` does all five steps for every committed patch: SHA-256 the touched
 files, apply, run `TEST_FILES` and assert the `MUST_FAIL` names are among the failures, revert,
 and re-SHA to confirm a byte-exact restore. Run it locally against your new patch, then run the
-whole committed suite (<!--count:sabotages-->724<!--/count--> patches today; the number is generated) — both are opt-in (they deliberately
+whole committed suite (<!--count:sabotages-->737<!--/count--> patches today; the number is generated) — both are opt-in (they deliberately
 break the tree and re-run DB-backed suites), so they're run explicitly, not by the default
 `bash ci.sh`:
 
