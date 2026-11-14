@@ -371,19 +371,37 @@ defmodule Samen.Reveal.Grants do
   """
   @spec pending_for_org(String.t(), keyword()) :: [map()]
   def pending_for_org(org_id, opts \\ []) do
+    case pending_for_org_result(org_id, opts) do
+      {:ok, rows} -> rows
+      {:error, _} -> []
+    end
+  end
+
+  @doc """
+  Tagged sibling of `pending_for_org/2`: `{:ok, rows}` — an EMPTY list is the honest "nothing
+  pending" (and an unwired host, `:no_approvals_module`, is an honest empty too) — or
+  `{:error, :unavailable}` when the read itself FAILED (a DB error, a raise). A screen uses this
+  to show "could not load" instead of a false-clean "No pending reveal requests".
+  """
+  @spec pending_for_org_result(String.t(), keyword()) :: {:ok, [map()]} | {:error, :unavailable}
+  def pending_for_org_result(org_id, opts \\ []) do
     r = Keyword.get(opts, :repo, repo())
 
     case Samen.Approvals.list_pending(org_id, "pii_reveal", opts) do
       {:ok, approvals} ->
-        approvals
-        |> Enum.map(&enrich_pending(&1, r))
-        |> Enum.reject(&is_nil/1)
+        {:ok,
+         approvals
+         |> Enum.map(&enrich_pending(&1, r))
+         |> Enum.reject(&is_nil/1)}
+
+      {:error, :no_approvals_module} ->
+        {:ok, []}
 
       {:error, _} ->
-        []
+        {:error, :unavailable}
     end
   rescue
-    _ -> []
+    _ -> {:error, :unavailable}
   end
 
   # Join a pending `pii_reveal` approval to its governed RevealRequest (via subject_ref),

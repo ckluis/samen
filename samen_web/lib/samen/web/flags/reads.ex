@@ -32,9 +32,12 @@ defmodule Samen.Web.Flags.Reads do
 
   alias Samen.FeatureFlags
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   # The operator debugging fan-out (per-tenant evaluated state) — a bounded cohort,
   # not a hot list.
+  @write_failed_copy "We couldn't save this flag change right now. Nothing was changed — try again."
+  @denied_copy "You don't have permission to change this flag. Nothing was changed."
   @cohort_limit 50
 
   @doc """
@@ -44,21 +47,40 @@ defmodule Samen.Web.Flags.Reads do
   bounded plain attributes. On any read error the page is EMPTY.
   """
   def flags_page(mount, scope, state) do
-    Mount.resource(mount, FeatureFlag)
-    |> Ash.Query.ensure_selected([:name, :description, :enabled, :rollout_pct, :stage, :target_rules, :variants])
-    |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:name, :description])
-  rescue
-    _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(state.page_size)}
+    Guard.page(:flags_page, scope, state, fn ->
+      Mount.resource(mount, FeatureFlag)
+      |> Ash.Query.ensure_selected([:name, :description, :enabled, :rollout_pct, :stage, :target_rules, :variants])
+      |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:name, :description])
+    end)
   end
 
   @doc "Read ONE flag by id for `scope` (bounded lookup). `nil` when absent/denied."
   def get_flag(mount, scope, id) do
-    Mount.resource(mount, FeatureFlag)
-    |> Ash.Query.filter(id == ^id)
-    |> Ash.Query.limit(1)
-    |> Ash.read_one!(scope: scope)
-  rescue
-    _ -> nil
+    case get_flag_result(mount, scope, id) do
+      {:ok, flag} -> flag
+      {:error, _} -> nil
+    end
+  end
+
+  @doc """
+  Tagged sibling of `get_flag/3` (WP6): `{:ok, flag}`, `{:error, :not_found}` for an absent,
+  malformed-id or denied record, and `{:error, :unavailable}` ONLY when the read FAILED.
+  """
+  def get_flag_result(mount, scope, id) do
+    with {:ok, uuid} <- Ecto.UUID.cast(id),
+         {:ok, flag} <-
+           Guard.run(:flags_get_flag, scope, fn ->
+             Mount.resource(mount, FeatureFlag)
+             |> Ash.Query.filter(id == ^uuid)
+             |> Ash.Query.limit(1)
+             |> Ash.read_one!(scope: scope)
+           end) do
+      if flag, do: {:ok, flag}, else: {:error, :not_found}
+    else
+      :error -> {:error, :not_found}
+      {:error, :forbidden} -> {:error, :not_found}
+      {:error, :unavailable} = unavailable -> unavailable
+    end
   end
 
   @doc """
@@ -120,15 +142,19 @@ defmodule Samen.Web.Flags.Reads do
   filter). BOUNDED to #{@cohort_limit} rows; only bounded non-PII columns (name /
   plan) are selected — the targeting-subject keys, no PII path.
   """
-  def tenant_cohorts(operator_mount, operator_org_id) do
-    Mount.resource(operator_mount, Org)
-    |> Ash.Query.ensure_selected([:name, :plan, :org_id])
-    |> Ash.Query.filter(org_id == ^operator_org_id and id != ^operator_org_id)
-    |> Ash.Query.sort(inserted_at: :asc)
-    |> Ash.Query.limit(@cohort_limit)
-    |> Ash.read!(authorize?: false)
-  rescue
-    _ -> []
+  def tenant_cohorts(operator_mount, operator_org_id),
+    do: tenant_cohorts_result(operator_mount, operator_org_id) |> Guard.value([])
+
+  @doc "Tagged sibling of `tenant_cohorts/2` (WP6): `{:ok, rows}` or `{:error, :unavailable | :forbidden}`."
+  def tenant_cohorts_result(operator_mount, operator_org_id) do
+    Guard.run(:flags_tenant_cohorts, operator_org_id, fn ->
+      Mount.resource(operator_mount, Org)
+      |> Ash.Query.ensure_selected([:name, :plan, :org_id])
+      |> Ash.Query.filter(org_id == ^operator_org_id and id != ^operator_org_id)
+      |> Ash.Query.sort(inserted_at: :asc)
+      |> Ash.Query.limit(@cohort_limit)
+      |> Ash.read!(authorize?: false)
+    end)
   end
 
   # The plain config map `evaluate_config/4` expects, straight off the row (the same
@@ -149,11 +175,29 @@ defmodule Samen.Web.Flags.Reads do
   # Every mutation: bounded lookup → the sanctioned :update action (kernel policies +
   # NonPiiTargeting run) → write-through Cache.invalidate on success (design §3.3).
   defp update_flag(mount, scope, id, changes_fun) do
-    case get_flag(mount, scope, id) do
-      nil ->
+    case Guard.write(:flags_update, scope, fn -> do_update_flag(mount, scope, id, changes_fun) end) do
+      # The write itself blew up or the data layer failed (an outage — a raise, or a RETURNED
+      # Unknown/Framework error that `Guard.write/3` converts): value-free copy, never the exception
+      # (its message can interpolate the very values being written). Logged by `Guard.write/3`.
+      {:error, :unavailable} -> {:error, @write_failed_copy}
+      # A real DENIAL stays a denial — it is not an outage and must not read like one.
+      {:error, :forbidden} -> {:error, @denied_copy}
+      {:error, %Ash.Error.Forbidden{}} -> {:error, @denied_copy}
+      # A validation refusal (e.g. NonPiiTargeting): the kernel's own framework copy.
+      {:error, %{__exception__: true} = error} -> {:error, friendly_error(error)}
+      other -> other
+    end
+  end
+
+  defp do_update_flag(mount, scope, id, changes_fun) do
+    case get_flag_result(mount, scope, id) do
+      {:error, :not_found} ->
         {:error, "Flag not found."}
 
-      flag ->
+      {:error, :unavailable} ->
+        {:error, :unavailable}
+
+      {:ok, flag} ->
         flag
         |> Ash.Changeset.for_update(:update, changes_fun.(flag), scope: scope)
         |> Ash.update()
@@ -162,12 +206,11 @@ defmodule Samen.Web.Flags.Reads do
             :ok = Samen.FeatureFlags.Cache.invalidate(updated.name)
             {:ok, updated}
 
+          # Returned RAW: `update_flag/4` classifies it after `Guard.write/3` has had its say.
           {:error, error} ->
-            {:error, friendly_error(error)}
+            {:error, error}
         end
     end
-  rescue
-    e -> {:error, friendly_error(e)}
   end
 
   @doc """

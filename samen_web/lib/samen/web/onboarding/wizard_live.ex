@@ -94,6 +94,7 @@ defmodule Samen.Web.Onboarding.WizardLive do
     socket
     |> then(fn s -> if params["invited"] == "1", do: assign(s, invited?: true), else: s end)
     |> then(fn s -> if params["invite_error"] == "1", do: assign(s, invite_error: invite_refused_copy()), else: s end)
+    |> then(fn s -> if params["invite_error"] == "unavailable", do: assign(s, invite_error: invite_unavailable_copy()), else: s end)
     |> then(fn s -> if params["error"] == "1", do: assign(s, org_error: "Could not save — try again."), else: s end)
   end
 
@@ -107,6 +108,9 @@ defmodule Samen.Web.Onboarding.WizardLive do
   defp invite_refused_copy,
     do: "Invite refused (admin role required, verified account required, or the invited role outranks yours)."
 
+  # The membership lookup or the write itself FAILED (not a refusal): say so, value-free.
+  defp invite_unavailable_copy, do: "Couldn't send that invitation right now. Nothing was sent — try again."
+
   @doc false
   def load(socket, org_id, user_id) do
     mount = socket.assigns.samen_mount
@@ -117,29 +121,55 @@ defmodule Samen.Web.Onboarding.WizardLive do
       |> assign(org_id: org_id, user_id: user_id, return_to: Map.get(socket.assigns, :return_to))
 
     if is_nil(org_id) do
-      assign(socket, complete?: false, org: nil, org_form: blank_org_form(), plan_choices: :not_configured)
+      assign(socket, complete?: false, org: nil, org_form: blank_org_form(), plan_choices: :not_configured, load_error: nil)
     else
       scope = Mount.scope(mount, org_id)
-      complete? = not Onboarding.needed?(mount, scope, org_id)
 
-      org =
-        case Onboarding.org(mount, scope, org_id) do
-          {:ok, org} -> org
-          {:error, _} -> nil
-        end
+      # A FAILED org read is the error state (retry): it must never read as "You're all set".
+      # `complete?` is derived from THIS read — not from a second one (`Onboarding.needed?/3`
+      # fails safe to "not needed" on a read error, right for the offer probe but a false
+      # "complete" here, and a second read could fail on its own after this one succeeded).
+      case Onboarding.org_result(mount, scope, org_id) do
+        {:error, :unavailable} ->
+          assign(socket,
+            complete?: false,
+            org: nil,
+            org_form: blank_org_form(),
+            plan_choices: :not_configured,
+            load_error: Samen.Web.Reads.Guard.message()
+          )
 
-      assign(socket,
-        complete?: complete?,
-        org: org,
-        org_form: org_form(org),
-        plan_choices: Onboarding.plan_choices(mount, org_id)
-      )
+        result ->
+          org =
+            case result do
+              {:ok, org} -> org
+              {:error, _} -> nil
+            end
+
+          assign(socket,
+            complete?: complete?(org),
+            org: org,
+            org_form: org_form(org),
+            plan_choices: Onboarding.plan_choices(mount, org_id),
+            load_error: nil
+          )
+      end
     end
   end
 
-  # -- step 1: org naming ------------------------------------------------------
+  # Only a loaded org carrying `onboarded_at` is complete. An unknown / cross-org org keeps the
+  # offer-probe's fail-safe ("not needed", as `Onboarding.needed?/3`): no wizard for an org that
+  # is not ours to set up. (A FAILED read never gets here — it is the error state above.)
+  defp complete?(nil), do: true
+  defp complete?(%{onboarded_at: nil}), do: false
+  defp complete?(_org), do: true
 
   @impl true
+  def handle_event("retry_load", _params, socket),
+    do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.user_id)}
+
+  # -- step 1: org naming ------------------------------------------------------
+
   def handle_event("name_org", %{"org" => %{"name" => name}}, socket) do
     %{samen_mount: mount, org_id: org_id, user_id: user_id} = socket.assigns
     name = String.trim(name || "")
@@ -183,11 +213,12 @@ defmodule Samen.Web.Onboarding.WizardLive do
       {:error, :not_found} ->
         {:noreply, assign(socket, invite_error: "No membership in context — cannot invite.")}
 
+      # The lookup / write itself failed (an outage, not a refusal): nothing was sent.
+      {:error, :unavailable} ->
+        {:noreply, assign(socket, invite_error: invite_unavailable_copy())}
+
       {:error, _reason} ->
-        {:noreply,
-         assign(socket,
-           invite_error: "Invite refused (admin role required, verified account required, or the invited role outranks yours)."
-         )}
+        {:noreply, assign(socket, invite_error: invite_refused_copy())}
     end
   end
 
@@ -205,7 +236,7 @@ defmodule Samen.Web.Onboarding.WizardLive do
 
   defp membership(mount, org_id, user_id) when is_binary(org_id) and is_binary(user_id) do
     scope = Mount.scope(mount, org_id)
-    Reads.current_membership(mount, scope, user_id, org_id)
+    Reads.current_membership_result(mount, scope, user_id, org_id)
   end
 
   defp membership(_mount, _org_id, _user_id), do: {:error, :not_found}
@@ -238,10 +269,10 @@ defmodule Samen.Web.Onboarding.WizardLive do
         end
 
       _ ->
-        true
+        not Samen.Web.CurrentOrg.tenant_gate_armed?(mount)
     end
   rescue
-    _ -> true
+    _ -> not Samen.Web.CurrentOrg.tenant_gate_armed?(mount)
   end
 
   # -- render ------------------------------------------------------------------
@@ -256,12 +287,15 @@ defmodule Samen.Web.Onboarding.WizardLive do
       |> assign_new(:invited?, fn -> false end)
       |> assign_new(:onboarding_path, fn -> "/onboarding" end)
       |> assign_new(:samen_acting_as, fn -> false end)
+      |> assign_new(:load_error, fn -> nil end)
 
     ~H"""
     <div id="onboarding" class="wrap" style="max-width:480px;margin:60px auto">
       <%= cond do %>
         <% is_nil(@org_id) -> %>
           <.no_org_card mount={@samen_mount} />
+        <% @load_error != nil -> %>
+          <.error_state class="onboarding-error" body={@load_error} retry_event="retry_load" />
         <% @complete? -> %>
           <div id="onboarding-already-done" class="card" style="padding:28px 24px">
             <h2 style="margin:0 0 4px">You're all set</h2>

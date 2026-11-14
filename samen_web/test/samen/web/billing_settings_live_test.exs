@@ -272,6 +272,41 @@ defmodule Samen.Web.BillingSettingsLiveTest do
       assert out =~ "billing-admin-only"
     end
 
+    test "a REAL outage of the role lookup shows the error state — never 'Only an admin…' to an admin — and still fails CLOSED",
+         %{org_id: org_id, seed: seed} do
+      user = seed_member!(org_id, :admin)
+
+      # POSITIVE CONTROL: the same admin, lookup healthy → affordances shown, no outage copy.
+      healthy = mount_socket(org_id, user: user)
+      assert healthy.assigns.billing_admin?
+      refute healthy.assigns.billing_actor_failed?
+      refute html(healthy) =~ "billing-role-error"
+
+      table = AshPostgres.DataLayer.Info.table(Samen.WebTest.Operator.Membership)
+      Ecto.Adapters.SQL.query!(Samen.WebTest.Repo, "ALTER TABLE #{table} RENAME TO zz_gone_#{table}")
+
+      {socket, _log} = ExUnit.CaptureLog.with_log(fn -> mount_socket(org_id, user: user) end)
+      out = html(socket)
+
+      # Fail CLOSED: no actor, no admin affordance, the forced event is refused.
+      assert socket.assigns.billing_actor == nil
+      refute socket.assigns.billing_admin?
+      assert socket.assigns.billing_actor_failed?
+      refute out =~ ~s(class="checkout-plan")
+      refute out =~ ~s(id="manage-payment-method")
+
+      # ...but the screen tells the truth: an error state, not an admin-only note.
+      assert out =~ "billing-role-error"
+      assert out =~ "check your role"
+      refute out =~ "Only an admin"
+      refute out =~ "billing-admin-only"
+
+      forced = socket |> event("checkout", %{"plan_id" => seed.plan.id})
+      refute forced.redirected
+      assert forced.assigns.checkout_error =~ "check your role"
+      refute forced.assigns.checkout_error =~ "Only an admin"
+    end
+
     test "a VIEWER sees NO Subscribe / Manage-payment affordance", %{org_id: org_id} do
       out = mount_socket(org_id, role: :viewer) |> html()
 

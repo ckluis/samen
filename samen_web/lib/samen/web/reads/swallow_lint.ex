@@ -42,6 +42,8 @@ defmodule Samen.Web.Reads.SwallowLint do
   @reviewed %{
     {"samen_web/lib/samen/web/reads/guard.ex", :run} =>
       "the exit/throw clauses funnel into failed/3, which Guard.report/3s — the lint cannot see through the call",
+    {"samen_web/lib/samen/web/reads/guard.ex", :write} =>
+      "the exit/throw clauses (and the rescue) funnel into write_failed/3 -> log_failure/4, which Logger.errors and emits the write-error event — the lint cannot see through the call",
     {"samen_web/lib/samen/web/reads/guard.ex", :emit} =>
       "best-effort telemetry: observability must never break the read it observes",
     {"samen_web/lib/samen/web/crm/reads.ex", :work_resource?} =>
@@ -49,7 +51,47 @@ defmodule Samen.Web.Reads.SwallowLint do
     {"samen_web/lib/samen/web/crm/sequences_reads.ex", :live_resource?} =>
       "optional-scope probe: an unmounted Outreach scope IS 'absent' — the honest answer",
     {"samen_web/lib/samen/web/crm/sequences_reads.ex", :sends_configured?} =>
-      "fail-honest predicate: 'no sender configured' is the safe, truthful default"
+      "fail-honest predicate: 'no sender configured' is the safe, truthful default",
+    {"samen_web/lib/samen/web/marketing/leads_live.ex", :crm_mount} =>
+      "optional-scope probe: no (or an unresolvable) :crm_namespace label means the Leads lens is not wired on this host, which the lens renders as inert — a host-configuration fact, not a read",
+    {"samen_web/lib/samen/web/settings/security_live.ex", :safe_csrf_token} =>
+      "no CSRF token available (outside a request) renders the revoke forms without one, which the server then rejects — fail-closed, nothing to report",
+    {"samen_web/lib/samen/web/settings/invitations_live.ex", :verified?} =>
+      "fail-CLOSED capability probe (ADR-035 §5 A2): an unresolvable principal is unverified on an armed host (the invite is refused), never an elevated default",
+    {"samen_web/lib/samen/web/replay/recorder.ex", :on_mount} =>
+      "best-effort observer: session capture must never crash or block the LiveView it observes (documented 'Never crashes, never blocks'); a capture failure turns capture off, it does not change what the user sees",
+    {"samen_web/lib/samen/web/replay/recorder.ex", :attach} =>
+      "best-effort observer: same contract as on_mount/4 — attaching the recorder can never break the LiveView",
+    {"samen_web/lib/samen/web/replay/recorder.ex", :guarded} =>
+      "best-effort observer: a failing recorder hook turns capture :off for that LiveView and returns the socket untouched (documented)",
+    {"samen_web/lib/samen/web/replay/recorder.ex", :off} =>
+      "best-effort observer: detaching hooks after a recorder failure must itself be total",
+    {"samen_web/lib/samen/web/replay/renderer.ex", :render_body} =>
+      "returns the honest tagged value {:error, :render_failed}, which the player renders as a failed replay — not a swallow",
+    {"samen_web/lib/samen/web/replay/renderer.ex", :view_mount} =>
+      "optional-scope probe: a view with no resolvable router mount has no live mount; nil is the honest answer the caller handles",
+    {"samen_web/lib/samen/web/ai/server.ex", :public_field_names} =>
+      "pure introspection of a resource module (no read): a module with no resource info yields no extra fields, which only narrows what the grounding preview shows",
+    {"samen_web/lib/samen/web/object_ref/catalog.ex", :catalogued_resource?} =>
+      "pure module introspection (no read): a module that is not a loaded Ash resource is not catalogued — the inert chip, no existence oracle",
+    {"samen_web/lib/samen/web/object_ref/default_card.ex", :public_attributes} =>
+      "pure resource introspection (no read): a module with no resource info shows no extra fields on the card",
+    {"samen_web/lib/samen/web/object_ref/registry.ex", :card_for} =>
+      "a host card override that raises falls back to the default card (which resolves through the same PiiResolution output) — presentation only, never data",
+    {"samen_web/lib/samen/web/object_ref.ex", :selectable_attrs} =>
+      "pure resource introspection (no read): no attributes means the default card shows only what it was handed",
+    {"samen_web/lib/samen/web/account_health.ex", :sibling_mount} =>
+      "optional-scope probe: an unmounted sibling Billing/Support scope IS 'not mounted' — the framework-level honest absence (documented 'billing_available? false')",
+    {"samen_web/lib/samen/web/account_health.ex", :resource?} =>
+      "optional-scope probe: a module that is not a compiled Ash resource is 'not mounted'",
+    {"samen_web/lib/samen/web/onboarding/wizard_live.ex", :verified?} =>
+      "fail-CLOSED capability probe (ADR-035 §5 A2): an unresolvable principal is unverified on an armed host, never an elevated default",
+    {"samen_web/lib/samen/web/first_run.ex", :any_rows?} =>
+      "fail-safe probe: a failed existence check answers 'has records' so the first-run sample-data offer is NOT shown (never offers sample data into a possibly populated org)",
+    {"samen_web/lib/samen/web/reads.ex", :safe_count} =>
+      "an exact-total aggregate that fails is nil = 'total unknown'; the CRM pipeline column header prints no number for it, and the three board totals that sum group counts (Work timeline, CRM pipeline, CRM calendar) become nil — an em dash — when any group count is nil, never a fabricated count or the loaded row count",
+    {"samen_web/lib/samen/web/onboarding/wizard_controller.ex", :verified?} =>
+      "fail-CLOSED capability probe (ADR-035 §5 A2): an unresolvable principal is unverified on an armed host, never an elevated default"
   }
 
   # Swallows that still exist, per file, AFTER the reviewed ones are subtracted. Shrink-only: a
@@ -74,36 +116,13 @@ defmodule Samen.Web.Reads.SwallowLint do
     "samen_web/lib/samen/ui/gantt.ex" => 1,
     "samen_web/lib/samen/ui/nav.ex" => 1,
     "samen_web/lib/samen/ui/overlay.ex" => 1,
-    "samen_web/lib/samen/web/account_health.ex" => 2,
-    "samen_web/lib/samen/web/ai/agent_reads.ex" => 8,
-    "samen_web/lib/samen/web/ai/server.ex" => 3,
     "samen_web/lib/samen/web/auth/totp_enroll_controller.ex" => 1,
     "samen_web/lib/samen/web/auth/totp_pending.ex" => 2,
     "samen_web/lib/samen/web/auth_gate.ex" => 1,
-    "samen_web/lib/samen/web/automation/reads.ex" => 2,
-    "samen_web/lib/samen/web/billing/dunning.ex" => 1,
-    "samen_web/lib/samen/web/billing/reads.ex" => 15,
-    "samen_web/lib/samen/web/billing/settings_live.ex" => 1,
-    "samen_web/lib/samen/web/chat.ex" => 1,
-    "samen_web/lib/samen/web/chat/identity.ex" => 1,
-    "samen_web/lib/samen/web/chat/reads.ex" => 8,
     "samen_web/lib/samen/web/csv.ex" => 1,
     "samen_web/lib/samen/web/current_org.ex" => 6,
-    "samen_web/lib/samen/web/files/reads.ex" => 3,
-    "samen_web/lib/samen/web/first_run.ex" => 2,
-    "samen_web/lib/samen/web/flags/reads.ex" => 3,
     "samen_web/lib/samen/web/live.ex" => 1,
-    "samen_web/lib/samen/web/marketing/leads_live.ex" => 1,
-    "samen_web/lib/samen/web/marketing/reads.ex" => 18,
     "samen_web/lib/samen/web/metrics_controller.ex" => 2,
-    "samen_web/lib/samen/web/notifications/reads.ex" => 5,
-    "samen_web/lib/samen/web/object_ref.ex" => 3,
-    "samen_web/lib/samen/web/object_ref/catalog.ex" => 1,
-    "samen_web/lib/samen/web/object_ref/default_card.ex" => 1,
-    "samen_web/lib/samen/web/object_ref/registry.ex" => 1,
-    "samen_web/lib/samen/web/onboarding.ex" => 2,
-    "samen_web/lib/samen/web/onboarding/wizard_controller.ex" => 1,
-    "samen_web/lib/samen/web/onboarding/wizard_live.ex" => 1,
     "samen_web/lib/samen/web/operator.ex" => 2,
     "samen_web/lib/samen/web/operator/activity_reads.ex" => 7,
     "samen_web/lib/samen/web/operator/aggregate_live.ex" => 1,
@@ -118,21 +137,7 @@ defmodule Samen.Web.Reads.SwallowLint do
     "samen_web/lib/samen/web/operator/revenue/reads.ex" => 3,
     "samen_web/lib/samen/web/operator/revenue_live.ex" => 1,
     "samen_web/lib/samen/web/operator/webhook_dlq_live.ex" => 3,
-    "samen_web/lib/samen/web/reads.ex" => 1,
-    "samen_web/lib/samen/web/replay/recorder.ex" => 5,
-    "samen_web/lib/samen/web/replay/renderer.ex" => 3,
-    "samen_web/lib/samen/web/settings/api_keys.ex" => 1,
-    "samen_web/lib/samen/web/settings/invitations.ex" => 2,
-    "samen_web/lib/samen/web/settings/invitations_live.ex" => 1,
-    "samen_web/lib/samen/web/settings/reads.ex" => 3,
-    "samen_web/lib/samen/web/settings/reveal_approvals_live.ex" => 1,
-    "samen_web/lib/samen/web/settings/security_live.ex" => 5,
-    "samen_web/lib/samen/web/support/kb_reads.ex" => 1,
-    "samen_web/lib/samen/web/tags.ex" => 2,
-    "samen_web/lib/samen/web/tenant/analytics_reads.ex" => 1,
-    "samen_web/lib/samen/web/tenant_gate.ex" => 1,
-    "samen_web/lib/samen/web/webhook/ingress.ex" => 2,
-    "samen_web/lib/samen/web/work/reads.ex" => 7
+    "samen_web/lib/samen/web/tenant_gate.ex" => 1
   }
 
   def roots, do: @roots

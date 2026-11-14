@@ -8,19 +8,19 @@
 # MUST_FAIL: RED: an operator-impersonation plaintext PII write is REFUSED
 # MUST_FAIL: flagship profile: an operator plaintext self-edit is REFUSED
 diff --git a/samen_web/lib/samen/web/settings/profile.ex b/samen_web/lib/samen/web/settings/profile.ex
-index 0000000..1111111 100644
+index 29d546a6..a8876262 100644
 --- a/samen_web/lib/samen/web/settings/profile.ex
 +++ b/samen_web/lib/samen/web/settings/profile.ex
-@@ -47,8 +47,10 @@ defmodule Samen.Web.Settings.Profile do
-   def update(mount, scope, user_id, attrs) when is_binary(user_id) and is_map(attrs) do
-     with {:ok, user} <- fetch_user(mount, scope, user_id) do
-       user
--      |> Ash.Changeset.for_update(:update, sanitize(attrs), scope: scope)
--      |> Ash.update(scope: scope)
-+      # SABOTAGE (11-e5): drop the governed scope — the operator actor never reaches
-+      # the changeset, so WriteGuard cannot refuse the operator plaintext PII write.
-+      |> Ash.Changeset.for_update(:update, sanitize(attrs), authorize?: false)
-+      |> Ash.update(authorize?: false)
-       |> case do
-         {:ok, updated} -> {:ok, updated}
-         {:error, error} -> {:error, error}
+@@ -49,8 +49,10 @@ defmodule Samen.Web.Settings.Profile do
+     Guard.write(:settings_profile_update, scope, fn ->
+       with {:ok, user} <- fetch_user(mount, scope, user_id) do
+         user
+-        |> Ash.Changeset.for_update(:update, sanitize(attrs), scope: scope)
+-        |> Ash.update(scope: scope)
++        # SABOTAGE (11-e5): drop the governed scope — the operator actor never reaches
++        # the changeset, so WriteGuard cannot refuse the operator plaintext PII write.
++        |> Ash.Changeset.for_update(:update, sanitize(attrs), authorize?: false)
++        |> Ash.update(authorize?: false)
+         |> case do
+           {:ok, updated} -> {:ok, updated}
+           {:error, error} -> {:error, error}

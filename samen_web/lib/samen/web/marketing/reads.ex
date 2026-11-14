@@ -45,6 +45,7 @@ defmodule Samen.Web.Marketing.Reads do
   require Ash.Query
 
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   # A3 read-bounding (WS-A design §1.1 "read! elimination"): every non-page read on the
   # Marketing surfaces carries an explicit limit. Detail sub-lists (a campaign's sends,
@@ -62,14 +63,17 @@ defmodule Samen.Web.Marketing.Reads do
   (A3 read-bounding); the Campaigns page itself reads through the paginated
   `campaigns_page/3` — this remains only as a lookup read. Non-PII.
   """
-  def campaigns(mount, scope) do
-    Mount.resource(mount, Campaign)
-    |> Ash.Query.ensure_selected([:name, :description, :status, :scheduled_at, :sent_at, :custom])
-    |> Ash.Query.sort(inserted_at: :desc)
-    |> Ash.Query.limit(@detail_limit)
-    |> Ash.read!(scope: scope)
-  rescue
-    _ -> []
+  def campaigns(mount, scope), do: campaigns_result(mount, scope) |> Guard.value([])
+
+  @doc "Tagged sibling of `campaigns/2` (WP6): `{:ok, rows}` or `{:error, :unavailable | :forbidden}`; an outage is not an empty list."
+  def campaigns_result(mount, scope) do
+    Guard.run(:marketing_campaigns, scope, fn ->
+      Mount.resource(mount, Campaign)
+      |> Ash.Query.ensure_selected([:name, :description, :status, :scheduled_at, :sent_at, :custom])
+      |> Ash.Query.sort(inserted_at: :desc)
+      |> Ash.Query.limit(@detail_limit)
+      |> Ash.read!(scope: scope)
+    end)
   end
 
   @doc """
@@ -82,54 +86,69 @@ defmodule Samen.Web.Marketing.Reads do
   list event runs). On any read error the page is EMPTY — never unbounded.
   """
   def campaigns_page(mount, scope, state) do
-    page =
-      Mount.resource(mount, Campaign)
-      |> Ash.Query.ensure_selected([:name, :description, :status, :scheduled_at, :sent_at, :custom])
-      |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:name, :description])
+    Guard.page(:marketing_campaigns_page, scope, state, fn ->
+      page =
+        Mount.resource(mount, Campaign)
+        |> Ash.Query.ensure_selected([:name, :description, :status, :scheduled_at, :sent_at, :custom])
+        |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:name, :description])
 
-    %{page | items: Enum.map(page.items, &Map.put(&1, :send_count, send_count(mount, scope, &1.id)))}
-  rescue
-    _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(state.page_size)}
+      %{page | items: Enum.map(page.items, &Map.put(&1, :send_count, count_sends(mount, scope, &1.id)))}
+    end)
   end
 
   @doc """
   Count the sends for a campaign — a DB aggregate (`Ash.count`), no row set
-  transferred (bounded by construction). `0` on any error.
+  transferred (bounded by construction). `0` on any error; `send_count_result/3` tells a failed
+  count from a real zero.
   """
-  def send_count(mount, scope, campaign_id) do
+  def send_count(mount, scope, campaign_id), do: send_count_result(mount, scope, campaign_id) |> Guard.value(0)
+
+  @doc "Tagged sibling of `send_count/3` (WP6); same contract as `campaigns_result/2`."
+  def send_count_result(mount, scope, campaign_id),
+    do: Guard.run(:marketing_send_count, scope, fn -> count_sends(mount, scope, campaign_id) end)
+
+  # Raising on purpose: every caller is inside a `Guard.run/3`.
+  defp count_sends(mount, scope, campaign_id) do
     Mount.resource(mount, Send)
     |> Ash.Query.filter(campaign_id == ^campaign_id)
     |> Ash.count!(scope: scope)
-  rescue
-    _ -> 0
   end
 
   @doc "Read a single campaign by id. Non-PII. `{:ok, campaign}` or `:error`."
   def get_campaign(mount, scope, id) do
-    result =
+    case get_campaign_result(mount, scope, id) do
+      {:ok, campaign} -> {:ok, campaign}
+      {:error, _} -> :error
+    end
+  end
+
+  @doc """
+  Tagged sibling of `get_campaign/3` (WP6): `{:ok, campaign}`, `{:error, :not_found}` for a missing
+  (or malformed-id, or denied) record, and `{:error, :unavailable}` ONLY when the read FAILED — a
+  failed read is not "Campaign not found."
+  """
+  def get_campaign_result(mount, scope, id) do
+    single_result(:marketing_get_campaign, scope, id, fn uuid ->
       Mount.resource(mount, Campaign)
       |> Ash.Query.ensure_selected([:name, :description, :status, :scheduled_at, :sent_at, :custom])
-      |> Ash.Query.filter(id == ^id)
+      |> Ash.Query.filter(id == ^uuid)
       |> Ash.Query.limit(1)
       |> Ash.read!(scope: scope)
-
-    case result do
-      [campaign | _] -> {:ok, campaign}
-      [] -> :error
-    end
-  rescue
-    _ -> :error
+    end)
   end
 
   @doc "Read enabled Marketing templates for `scope`, capped at `#{@detail_limit}` rows. Non-PII."
-  def templates(mount, scope) do
-    Mount.resource(mount, Template)
-    |> Ash.Query.ensure_selected([:name, :subject_line, :body_html, :body_text, :from_name, :from_address, :enabled])
-    |> Ash.Query.sort(name: :asc)
-    |> Ash.Query.limit(@detail_limit)
-    |> Ash.read!(scope: scope)
-  rescue
-    _ -> []
+  def templates(mount, scope), do: templates_result(mount, scope) |> Guard.value([])
+
+  @doc "Tagged sibling of `templates/2` (WP6); same contract as `campaigns_result/2`."
+  def templates_result(mount, scope) do
+    Guard.run(:marketing_templates, scope, fn ->
+      Mount.resource(mount, Template)
+      |> Ash.Query.ensure_selected([:name, :subject_line, :body_html, :body_text, :from_name, :from_address, :enabled])
+      |> Ash.Query.sort(name: :asc)
+      |> Ash.Query.limit(@detail_limit)
+      |> Ash.read!(scope: scope)
+    end)
   end
 
   @doc """
@@ -138,14 +157,17 @@ defmodule Samen.Web.Marketing.Reads do
   `segments_page/3` — this remains only as the compose-page lookup read (the
   send-to-segment select). Non-PII (filter criteria are bounded jsonb).
   """
-  def segments(mount, scope) do
-    Mount.resource(mount, Segment)
-    |> Ash.Query.ensure_selected([:name, :description, :filter_criteria, :subscriber_count, :custom])
-    |> Ash.Query.sort(name: :asc)
-    |> Ash.Query.limit(@detail_limit)
-    |> Ash.read!(scope: scope)
-  rescue
-    _ -> []
+  def segments(mount, scope), do: segments_result(mount, scope) |> Guard.value([])
+
+  @doc "Tagged sibling of `segments/2` (WP6); same contract as `campaigns_result/2`."
+  def segments_result(mount, scope) do
+    Guard.run(:marketing_segments, scope, fn ->
+      Mount.resource(mount, Segment)
+      |> Ash.Query.ensure_selected([:name, :description, :filter_criteria, :subscriber_count, :custom])
+      |> Ash.Query.sort(name: :asc)
+      |> Ash.Query.limit(@detail_limit)
+      |> Ash.read!(scope: scope)
+    end)
   end
 
   @doc """
@@ -155,43 +177,48 @@ defmodule Samen.Web.Marketing.Reads do
   On any read error the page is EMPTY — never unbounded.
   """
   def segments_page(mount, scope, state) do
-    Mount.resource(mount, Segment)
-    |> Ash.Query.ensure_selected([:name, :description, :filter_criteria, :subscriber_count, :custom])
-    |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:name, :description])
-  rescue
-    _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(state.page_size)}
+    Guard.page(:marketing_segments_page, scope, state, fn ->
+      Mount.resource(mount, Segment)
+      |> Ash.Query.ensure_selected([:name, :description, :filter_criteria, :subscriber_count, :custom])
+      |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:name, :description])
+    end)
   end
 
   @doc "Read a single segment by id. Non-PII. `{:ok, segment}` or `:error`."
   def get_segment(mount, scope, id) do
-    result =
+    case get_segment_result(mount, scope, id) do
+      {:ok, segment} -> {:ok, segment}
+      {:error, _} -> :error
+    end
+  end
+
+  @doc "Tagged sibling of `get_segment/3` (WP6); same contract as `get_campaign_result/3`."
+  def get_segment_result(mount, scope, id) do
+    single_result(:marketing_get_segment, scope, id, fn uuid ->
       Mount.resource(mount, Segment)
       |> Ash.Query.ensure_selected([:name, :description, :filter_criteria, :subscriber_count, :custom])
-      |> Ash.Query.filter(id == ^id)
+      |> Ash.Query.filter(id == ^uuid)
       |> Ash.Query.limit(1)
       |> Ash.read!(scope: scope)
-
-    case result do
-      [segment | _] -> {:ok, segment}
-      [] -> :error
-    end
-  rescue
-    _ -> :error
+    end)
   end
 
   @doc """
   Read all subscribers for `scope`, with `email` (🔒 PII) plane-resolved through
   `Samen.Api.PiiResolution` (tenant clear / operator ••••). Non-recipient status is preserved.
   """
-  def subscribers(mount, scope) do
-    Mount.resource(mount, Subscriber)
-    |> Ash.Query.ensure_selected([:email, :status, :consent_at, :source, :custom])
-    |> Ash.Query.sort(inserted_at: :desc)
-    |> Ash.Query.limit(@detail_limit)
-    |> Ash.read!(scope: scope)
-    |> resolve_pii(mount, Subscriber, scope)
-  rescue
-    _ -> []
+  def subscribers(mount, scope), do: subscribers_result(mount, scope) |> Guard.value([])
+
+  @doc "Tagged sibling of `subscribers/2` (WP6); same contract as `campaigns_result/2`."
+  def subscribers_result(mount, scope) do
+    Guard.run(:marketing_subscribers, scope, fn ->
+      Mount.resource(mount, Subscriber)
+      |> Ash.Query.ensure_selected([:email, :status, :consent_at, :source, :custom])
+      |> Ash.Query.sort(inserted_at: :desc)
+      |> Ash.Query.limit(@detail_limit)
+      |> Ash.read!(scope: scope)
+      |> resolve_pii(mount, Subscriber, scope)
+    end)
   end
 
   @doc """
@@ -204,14 +231,14 @@ defmodule Samen.Web.Marketing.Reads do
   unbounded and never a plaintext downgrade.
   """
   def subscribers_page(mount, scope, state) do
-    page =
-      Mount.resource(mount, Subscriber)
-      |> Ash.Query.ensure_selected([:email, :status, :consent_at, :source, :custom])
-      |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:source])
+    Guard.page(:marketing_subscribers_page, scope, state, fn ->
+      page =
+        Mount.resource(mount, Subscriber)
+        |> Ash.Query.ensure_selected([:email, :status, :consent_at, :source, :custom])
+        |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:source])
 
-    %{page | items: resolve_pii(page.items, mount, Subscriber, scope)}
-  rescue
-    _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(state.page_size)}
+      %{page | items: resolve_pii(page.items, mount, Subscriber, scope)}
+    end)
   end
 
   @doc """
@@ -220,74 +247,94 @@ defmodule Samen.Web.Marketing.Reads do
   `filter_criteria["status"]` (default `"active"`) narrows to deliverable recipients. A
   richer criteria language is a follow-up; the audience is always the org's own subscribers.
   """
-  def segment_audience(mount, scope, segment) do
-    status = audience_status(segment)
+  def segment_audience(mount, scope, segment),
+    do: segment_audience_result(mount, scope, segment) |> Guard.value([])
 
-    Mount.resource(mount, Subscriber)
-    |> Ash.Query.ensure_selected([:email, :status, :consent_at, :source, :custom])
-    |> Ash.Query.filter(status == ^status)
-    |> Ash.Query.sort(inserted_at: :desc)
-    |> Ash.Query.limit(@detail_limit)
-    |> Ash.read!(scope: scope)
-    |> resolve_pii(mount, Subscriber, scope)
-  rescue
-    _ -> []
+  @doc "Tagged sibling of `segment_audience/3` (WP6); same contract as `campaigns_result/2`."
+  def segment_audience_result(mount, scope, segment) do
+    Guard.run(:marketing_segment_audience, scope, fn ->
+      status = audience_status(segment)
+
+      Mount.resource(mount, Subscriber)
+      |> Ash.Query.ensure_selected([:email, :status, :consent_at, :source, :custom])
+      |> Ash.Query.filter(status == ^status)
+      |> Ash.Query.sort(inserted_at: :desc)
+      |> Ash.Query.limit(@detail_limit)
+      |> Ash.read!(scope: scope)
+      |> resolve_pii(mount, Subscriber, scope)
+    end)
   end
 
   @doc "Read email events for a campaign (delivery/open/click/bounce/…), newest-first. Non-PII."
-  def email_events(mount, scope, campaign_id) do
-    send_ids =
-      Mount.resource(mount, Send)
-      |> Ash.Query.ensure_selected([:id, :campaign_id])
-      |> Ash.Query.filter(campaign_id == ^campaign_id)
-      |> Ash.Query.limit(@detail_limit)
-      |> Ash.read!(scope: scope)
-      |> Enum.map(& &1.id)
+  def email_events(mount, scope, campaign_id),
+    do: email_events_result(mount, scope, campaign_id) |> Guard.value([])
 
-    if send_ids == [] do
-      []
-    else
-      Mount.resource(mount, EmailEvent)
-      |> Ash.Query.ensure_selected([:event_type, :occurred_at, :metadata, :send_id, :subscriber_id])
-      |> Ash.Query.filter(send_id in ^send_ids)
-      |> Ash.Query.sort(occurred_at: :desc)
-      |> Ash.Query.limit(@detail_limit)
-      |> Ash.read!(scope: scope)
-    end
-  rescue
-    _ -> []
+  @doc "Tagged sibling of `email_events/3` (WP6); same contract as `campaigns_result/2`."
+  def email_events_result(mount, scope, campaign_id) do
+    Guard.run(:marketing_email_events, scope, fn ->
+      send_ids =
+        Mount.resource(mount, Send)
+        |> Ash.Query.ensure_selected([:id, :campaign_id])
+        |> Ash.Query.filter(campaign_id == ^campaign_id)
+        |> Ash.Query.limit(@detail_limit)
+        |> Ash.read!(scope: scope)
+        |> Enum.map(& &1.id)
+
+      if send_ids == [] do
+        []
+      else
+        Mount.resource(mount, EmailEvent)
+        |> Ash.Query.ensure_selected([:event_type, :occurred_at, :metadata, :send_id, :subscriber_id])
+        |> Ash.Query.filter(send_id in ^send_ids)
+        |> Ash.Query.sort(occurred_at: :desc)
+        |> Ash.Query.limit(@detail_limit)
+        |> Ash.read!(scope: scope)
+      end
+    end)
   end
 
   @doc """
   Read the sends for a campaign, newest-first (status pills — queued/delivered/…). Non-PII
   (the send row carries only opaque IDs — never the email).
   """
-  def sends_for_campaign(mount, scope, campaign_id) do
-    Mount.resource(mount, Send)
-    |> Ash.Query.ensure_selected([:status, :queued_at, :sent_at, :subscriber_id, :campaign_id])
-    |> Ash.Query.filter(campaign_id == ^campaign_id)
-    |> Ash.Query.sort(inserted_at: :desc)
-    |> Ash.Query.limit(@detail_limit)
-    |> Ash.read!(scope: scope)
-  rescue
-    _ -> []
+  def sends_for_campaign(mount, scope, campaign_id),
+    do: sends_for_campaign_result(mount, scope, campaign_id) |> Guard.value([])
+
+  @doc "Tagged sibling of `sends_for_campaign/3` (WP6); same contract as `campaigns_result/2`."
+  def sends_for_campaign_result(mount, scope, campaign_id) do
+    Guard.run(:marketing_sends_for_campaign, scope, fn ->
+      Mount.resource(mount, Send)
+      |> Ash.Query.ensure_selected([:status, :queued_at, :sent_at, :subscriber_id, :campaign_id])
+      |> Ash.Query.filter(campaign_id == ^campaign_id)
+      |> Ash.Query.sort(inserted_at: :desc)
+      |> Ash.Query.limit(@detail_limit)
+      |> Ash.read!(scope: scope)
+    end)
   end
 
   @doc "Count-by-event_type map for a campaign's email events (for the events summary pills)."
-  def event_counts(mount, scope, campaign_id) do
-    email_events(mount, scope, campaign_id)
-    |> Enum.frequencies_by(& &1.event_type)
+  def event_counts(mount, scope, campaign_id),
+    do: event_counts_result(mount, scope, campaign_id) |> Guard.value(%{})
+
+  @doc "Tagged sibling of `event_counts/3` (WP6); same contract as `campaigns_result/2`."
+  def event_counts_result(mount, scope, campaign_id) do
+    with {:ok, events} <- email_events_result(mount, scope, campaign_id) do
+      {:ok, Enum.frequencies_by(events, & &1.event_type)}
+    end
   end
 
   @doc "The active suppression rows for `scope` (opt-outs / bounces), capped at `#{@detail_limit}` rows. Non-PII (opaque subscriber_id)."
-  def suppressions(mount, scope) do
-    Mount.resource(mount, Suppression)
-    |> Ash.Query.ensure_selected([:reason, :active, :suppressed_at, :notes, :subscriber_id])
-    |> Ash.Query.filter(active == true)
-    |> Ash.Query.limit(@detail_limit)
-    |> Ash.read!(scope: scope)
-  rescue
-    _ -> []
+  def suppressions(mount, scope), do: suppressions_result(mount, scope) |> Guard.value([])
+
+  @doc "Tagged sibling of `suppressions/2` (WP6); same contract as `campaigns_result/2`."
+  def suppressions_result(mount, scope) do
+    Guard.run(:marketing_suppressions, scope, fn ->
+      Mount.resource(mount, Suppression)
+      |> Ash.Query.ensure_selected([:reason, :active, :suppressed_at, :notes, :subscriber_id])
+      |> Ash.Query.filter(active == true)
+      |> Ash.Query.limit(@detail_limit)
+      |> Ash.read!(scope: scope)
+    end)
   end
 
   @doc """
@@ -296,17 +343,21 @@ defmodule Samen.Web.Marketing.Reads do
   is filtered to the given (already page-bounded) ids and limited to their count —
   never a full-table suppression read. Non-PII (opaque ids only).
   """
-  def suppressed_ids(_mount, _scope, []), do: MapSet.new()
+  def suppressed_ids(mount, scope, subscriber_ids),
+    do: suppressed_ids_result(mount, scope, subscriber_ids) |> Guard.value(MapSet.new())
 
-  def suppressed_ids(mount, scope, subscriber_ids) when is_list(subscriber_ids) do
-    Mount.resource(mount, Suppression)
-    |> Ash.Query.ensure_selected([:subscriber_id, :active])
-    |> Ash.Query.filter(active == true and subscriber_id in ^subscriber_ids)
-    |> Ash.Query.limit(length(subscriber_ids))
-    |> Ash.read!(scope: scope)
-    |> MapSet.new(& &1.subscriber_id)
-  rescue
-    _ -> MapSet.new()
+  @doc "Tagged sibling of `suppressed_ids/3` (WP6); same contract as `campaigns_result/2`."
+  def suppressed_ids_result(_mount, _scope, []), do: {:ok, MapSet.new()}
+
+  def suppressed_ids_result(mount, scope, subscriber_ids) when is_list(subscriber_ids) do
+    Guard.run(:marketing_suppressed_ids, scope, fn ->
+      Mount.resource(mount, Suppression)
+      |> Ash.Query.ensure_selected([:subscriber_id, :active])
+      |> Ash.Query.filter(active == true and subscriber_id in ^subscriber_ids)
+      |> Ash.Query.limit(length(subscriber_ids))
+      |> Ash.read!(scope: scope)
+      |> MapSet.new(& &1.subscriber_id)
+    end)
   end
 
   # ---------------------------------------------------------------------------
@@ -464,7 +515,12 @@ defmodule Samen.Web.Marketing.Reads do
 
     {:ok, results}
   rescue
-    e -> {:error, e}
+    e ->
+      # The audience walk stopped part-way (some recipients may already be queued). Logged by name
+      # and cause only; the caller gets a value-free atom, never the exception (its message can
+      # interpolate subscriber ids / query values).
+      Guard.report(:marketing_send_campaign, scope, e)
+      {:error, :audience_unavailable}
   end
 
   defp audience_page(mount, scope, status, cursor, page_size) do
@@ -568,7 +624,11 @@ defmodule Samen.Web.Marketing.Reads do
         {:error, :not_found}
     end
   rescue
-    _ -> {:error, :deliverability_check_failed}
+    e ->
+      # Fail-CLOSED (the send is refused, never allowed): the caller renders the refusal per
+      # recipient. Logged by name and cause only, so an outage here is not invisible.
+      Guard.report(:marketing_deliverability_check, scope, e)
+      {:error, :deliverability_check_failed}
   end
 
   # Derive consent from the ledger (latest-event-wins). A most-recent :withdrawn refuses
@@ -625,7 +685,11 @@ defmodule Samen.Web.Marketing.Reads do
     |> Samen.Scopes.Marketing.SendWorker.new()
     |> Oban.insert()
   rescue
-    _ -> :ok
+    e ->
+      # Best-effort by design: a missing Oban (a pure render test, an un-migrated host) must not
+      # fail the send-row creation. Not silent: the failure is logged, by name and cause only.
+      Guard.report(:marketing_enqueue_worker, org_id, e)
+      :ok
   end
 
   defp audience_status(%{filter_criteria: %{"status" => status}}) when is_binary(status) do
@@ -650,7 +714,27 @@ defmodule Samen.Web.Marketing.Reads do
       repo: mount.repo
     )
   rescue
-    _ -> records
+    e ->
+      # Fail-closed (no plaintext downgrade), but not silent: a resolver outage is logged.
+      Guard.report(:marketing_resolve_pii, scope, e)
+      records
+  end
+
+  # One record by id: a malformed id is a plain not-found (no read is attempted), an empty
+  # result is not-found, a denial is not-found (no existence oracle), and only a FAILED read is
+  # `:unavailable`. `read` returns the (<= 1 row) list.
+  defp single_result(key, scope, id, read) do
+    with {:ok, uuid} <- Ecto.UUID.cast(id),
+         {:ok, rows} <- Guard.run(key, scope, fn -> read.(uuid) end) do
+      case rows do
+        [record | _] -> {:ok, record}
+        [] -> {:error, :not_found}
+      end
+    else
+      :error -> {:error, :not_found}
+      {:error, :forbidden} -> {:error, :not_found}
+      {:error, :unavailable} = unavailable -> unavailable
+    end
   end
 
   defp actor_of(%Samen.Scope{actor: actor}), do: actor

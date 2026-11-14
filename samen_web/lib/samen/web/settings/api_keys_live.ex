@@ -47,17 +47,26 @@ defmodule Samen.Web.Settings.ApiKeysLive do
   @doc false
   def load(socket, org_id, user_id) do
     mount = socket.assigns.samen_mount
-    socket = assign(socket, org_id: org_id, user_id: user_id, keys: [])
+    socket = assign(socket, org_id: org_id, user_id: user_id, keys: [], keys_failed: false)
 
     if is_nil(org_id) do
       socket
     else
       scope = Mount.scope(mount, org_id)
-      assign(socket, keys: ApiKeys.list(mount, scope))
+
+      # A FAILED list read is the error state (retry), never "No API keys yet.".
+      case ApiKeys.list_result(mount, scope) do
+        {:ok, keys} -> assign(socket, keys: keys)
+        {:error, :forbidden} -> socket
+        {:error, :unavailable} -> assign(socket, keys_failed: true)
+      end
     end
   end
 
   @impl true
+  def handle_event("retry_load", _params, socket),
+    do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.user_id)}
+
   def handle_event("mint", %{"key" => params}, socket) do
     %{samen_mount: mount, org_id: org_id, user_id: user_id} = socket.assigns
 
@@ -80,12 +89,26 @@ defmodule Samen.Web.Settings.ApiKeysLive do
       # `Mount.scope/2` default. With the real role a genuine admin/owner CAN revoke a
       # leaked key; a member is correctly denied. (Previously the hardcoded `:member` scope
       # silently DENIED every revoke, for every role including owners.)
-      with {:ok, membership} <- membership(mount, org_id, user_id) do
-        scope = admin_scope(user_id, org_id, membership.role)
-        _ = ApiKeys.revoke(mount, scope, key_id)
-      end
+      # A revoke of a (possibly leaked) key must never fail silently: say so, and re-read so the
+      # list shows the key's REAL state.
+      error =
+        case membership(mount, org_id, user_id) do
+          {:ok, membership} ->
+            case ApiKeys.revoke(mount, admin_scope(user_id, org_id, membership.role), key_id) do
+              {:ok, _view} -> nil
+              # Already gone: nothing to revoke (the list below shows the truth).
+              {:error, :not_found} -> nil
+              _ -> "Couldn't revoke that key — it is still active. Try again."
+            end
 
-      {:noreply, load(assign(socket, minted_key: nil), org_id, user_id)}
+          {:error, :not_found} ->
+            "No membership in context — cannot revoke."
+
+          {:error, :unavailable} ->
+            "Couldn't revoke that key — it is still active. Try again."
+        end
+
+      {:noreply, load(assign(socket, minted_key: nil, mint_error: error), org_id, user_id)}
     end
   end
 
@@ -187,8 +210,13 @@ defmodule Samen.Web.Settings.ApiKeysLive do
                       </button>
                     </td>
                   </tr>
-                  <tr :if={@keys == []}>
+                  <tr :if={@keys == [] and not @keys_failed}>
                     <td colspan="6" style="color:var(--muted)">No API keys yet.</td>
+                  </tr>
+                  <tr :if={@keys_failed} id="api-keys-unavailable">
+                    <td colspan="6">
+                      <.error_state class="api-keys-error" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -223,6 +251,10 @@ defmodule Samen.Web.Settings.ApiKeysLive do
       {:error, :not_found} ->
         {:noreply, assign(socket, mint_error: "No membership in context — cannot mint.")}
 
+      # The lookup / write itself failed (not a refusal): say so, value-free — no key was minted.
+      {:error, :unavailable} ->
+        {:noreply, assign(socket, mint_error: "Couldn't mint a key right now. Nothing was created — try again.")}
+
       {:error, _reason} ->
         {:noreply, assign(socket, mint_error: "Mint refused (admin role required).")}
     end
@@ -230,7 +262,7 @@ defmodule Samen.Web.Settings.ApiKeysLive do
 
   defp membership(mount, org_id, user_id) when is_binary(org_id) and is_binary(user_id) do
     scope = Mount.scope(mount, org_id)
-    Reads.current_membership(mount, scope, user_id, org_id)
+    Reads.current_membership_result(mount, scope, user_id, org_id)
   end
 
   defp membership(_mount, _org_id, _user_id), do: {:error, :not_found}

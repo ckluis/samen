@@ -69,7 +69,8 @@ defmodule Samen.Web.Work.TaskTreeLive do
       org_id: nil,
       focus: nil,
       tree: %Tree{roots: [], parent_field: :parent_id},
-      total_nodes: 0
+      total_nodes: 0,
+      load_error: nil
     )
     |> assign_nav(nil)
   end
@@ -79,7 +80,13 @@ defmodule Samen.Web.Work.TaskTreeLive do
     scope = Mount.scope(mount, org_id)
     focus = focus || socket.assigns[:focus]
 
-    %{tree: tree} = Reads.tasks_tree(mount, scope, focus)
+    # A failed walk is the kit error state (retry), never "No tasks".
+    {tree, load_error} =
+      case Reads.tasks_tree_result(mount, scope, focus) do
+        {:ok, %{tree: tree}} -> {tree, nil}
+        {:error, :unavailable} -> {%Tree{roots: [], parent_field: :parent_id}, Samen.Web.Reads.Guard.message()}
+        {:error, _denied} -> {%Tree{roots: [], parent_field: :parent_id}, nil}
+      end
 
     socket
     |> ensure_return_to()
@@ -88,7 +95,8 @@ defmodule Samen.Web.Work.TaskTreeLive do
       org_id: org_id,
       focus: focus,
       tree: tree,
-      total_nodes: tree.node_count
+      total_nodes: tree.node_count,
+      load_error: load_error
     )
     |> assign_nav(org_id)
   end
@@ -119,6 +127,10 @@ defmodule Samen.Web.Work.TaskTreeLive do
   defp parse_focus(_), do: nil
 
   @impl true
+  def handle_event("retry_load", _params, socket),
+    do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.focus)}
+
+  @impl true
   def render(assigns) do
     ~H"""
     <div id="work-tree">
@@ -137,7 +149,7 @@ defmodule Samen.Web.Work.TaskTreeLive do
           <span id="org-banner" style="display:none">Work org: {@org_id}</span>
 
           <div class="metrics">
-            <.metric label="Tasks in view" value={@total_nodes} sub="hierarchical, depth-bounded">
+            <.metric label="Tasks in view" value={@total_nodes} sub="hierarchical, depth-bounded" error={!!@load_error}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M5 4v6a2 2 0 002 2h4M5 12v4a2 2 0 002 2h4" />
@@ -156,6 +168,8 @@ defmodule Samen.Web.Work.TaskTreeLive do
               tree={@tree}
               label="Task hierarchy"
               empty_text="No tasks"
+              error={@load_error}
+              retry_event="retry_load"
               expand_param="focus"
               expand_prefix={@expand_prefix}
             >

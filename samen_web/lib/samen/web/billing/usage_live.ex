@@ -47,21 +47,29 @@ defmodule Samen.Web.Billing.UsageLive do
   def load(socket, nil) do
     socket
     |> ensure_return_to()
-    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, rows: [])
+    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, rows: [], load_error: nil)
   end
 
   def load(socket, org_id) do
     mount = socket.assigns.samen_mount
-    rows = Reads.usage(mount, Mount.scope(mount, org_id))
+    {rows, load_error} =
+      case Reads.usage_result(mount, Mount.scope(mount, org_id)) do
+        {:ok, rows} -> {rows, nil}
+        {:error, :unavailable} -> {[], Samen.Web.Reads.Guard.message()}
+        {:error, _denied} -> {[], nil}
+      end
 
     socket
     |> ensure_return_to()
-    |> assign(no_org: false, org_id: org_id, rows: rows)
+    |> assign(no_org: false, org_id: org_id, rows: rows, load_error: load_error)
   end
 
   defp ensure_return_to(socket) do
     if Map.has_key?(socket.assigns, :return_to), do: socket, else: assign(socket, return_to: nil)
   end
+
+  @impl true
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
 
   @impl true
   def render(assigns) do
@@ -93,8 +101,10 @@ defmodule Samen.Web.Billing.UsageLive do
                 from your billing provider.
               </p>
 
+              <.error_state :if={@load_error} class="usage-error" body={@load_error} retry_event="retry_load" />
+
               <.empty_state
-                :if={@rows == []}
+                :if={@rows == [] and is_nil(@load_error)}
                 class="usage-empty"
                 icon="∅"
                 title="No metered usage yet."

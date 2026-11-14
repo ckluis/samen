@@ -54,6 +54,7 @@ defmodule Samen.Web.Support.KbReads do
 
   alias Samen.AI.Embeddings
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   @suggest_limit 5
 
@@ -84,11 +85,33 @@ defmodule Samen.Web.Support.KbReads do
     |> Ash.read!(scope: scope)
   end
 
+  @doc """
+  Tagged sibling of `articles/2` (WP6): `{:ok, articles}` — an empty list is the honest "No
+  articles yet." — or `{:error, :unavailable | :forbidden}` when the read FAILED (the screen
+  shows the error state, never the create-your-first-article empty state).
+  """
+  def articles_result(kb_mount, scope), do: Guard.run(:support_kb_articles, scope, fn -> articles(kb_mount, scope) end)
+
   def get_article(kb_mount, scope, id) do
     Mount.resource(kb_mount, Post)
     |> Ash.Query.filter(id == ^id)
     |> Ash.Query.limit(1)
     |> Ash.read_one!(scope: scope)
+  end
+
+  @doc """
+  Tagged sibling of `get_article/3` (WP6): `{:ok, article}`, `{:error, :not_found}` for an absent,
+  malformed-id or denied record, and `{:error, :unavailable}` ONLY when the read FAILED.
+  """
+  def get_article_result(kb_mount, scope, id) do
+    with {:ok, uuid} <- Ecto.UUID.cast(id),
+         {:ok, article} <- Guard.run(:support_kb_get_article, scope, fn -> get_article(kb_mount, scope, uuid) end) do
+      if article, do: {:ok, article}, else: {:error, :not_found}
+    else
+      :error -> {:error, :not_found}
+      {:error, :forbidden} -> {:error, :not_found}
+      {:error, :unavailable} = unavailable -> unavailable
+    end
   end
 
   def new_article_form(kb_mount, scope) do
@@ -125,11 +148,15 @@ defmodule Samen.Web.Support.KbReads do
   def publish_article(kb_mount, org_id, id) do
     read_scope = Mount.scope(kb_mount, org_id)
 
-    case get_article(kb_mount, read_scope, id) do
-      nil ->
+    case get_article_result(kb_mount, read_scope, id) do
+      {:error, :not_found} ->
         {:error, :not_found}
 
-      post ->
+      # A failed lookup is not "not found": the caller says nothing was published.
+      {:error, :unavailable} = unavailable ->
+        unavailable
+
+      {:ok, post} ->
         admin_scope = write_scope(kb_mount, org_id)
 
         case post |> Ash.Changeset.for_update(:publish, %{}, scope: admin_scope) |> Ash.update() do
@@ -144,14 +171,17 @@ defmodule Samen.Web.Support.KbReads do
   end
 
   # Best-effort semantic reindex (T78) — never blocks a write on the AI plane's
-  # availability. `:not_configured`/any error is swallowed; the article still
+  # availability. `:not_configured`/any error is non-fatal; the article still
   # saved correctly, it simply is not yet semantically searchable (honest
-  # degradation, not a fabricated success).
+  # degradation, not a fabricated success). A RAISE is logged by name and cause
+  # (never the article), so a persistently failing index is visible to operators.
   defp reindex(scope, %{__struct__: resource} = post) do
     Embeddings.embed_record(scope, post, resource, [])
     :ok
   rescue
-    _ -> :ok
+    e ->
+      Guard.report(:support_kb_reindex, scope, e)
+      :ok
   end
 
   # --- portal view (unauthenticated, sees ONLY public+published) ----------------------------
@@ -163,6 +193,15 @@ defmodule Samen.Web.Support.KbReads do
     |> Ash.Query.sort(updated_at: :desc)
     |> Ash.read!(actor: nil, authorize?: true)
   end
+
+  @doc """
+  Tagged sibling of `public_articles/2` (WP6): `{:ok, articles}` — an empty list is the honest
+  "No help articles published yet." — or `{:error, :unavailable | :forbidden}` when the read
+  FAILED. The portal is PUBLIC and unauthenticated: a failure there must neither crash the page
+  nor read as "no articles".
+  """
+  def public_articles_result(kb_mount, org_id),
+    do: Guard.run(:support_kb_public_articles, org_id, fn -> public_articles(kb_mount, org_id) end)
 
   # --- AI-plane suggestion (composer) + deflection (portal) ----------------------------------
 
@@ -219,6 +258,17 @@ defmodule Samen.Web.Support.KbReads do
   # forwards to BOTH `Embeddings.search/3` and `Embeddings.embedder_simulated?/1` (test-only:
   # `:env_reader`, `:embedder`, `:repo` — never set outside a test).
   defp with_hits(scope_or_org_id, query, refetch, opts) when is_function(refetch, 1) do
+    # A raise anywhere in the retrieval / re-verification is the honest `:error` state ("suggestions
+    # are unavailable"), logged by name and cause — never a crashed page.
+    case Guard.run(:support_kb_suggest, scope_or_org_id, fn ->
+           do_with_hits(scope_or_org_id, query, refetch, opts)
+         end) do
+      {:ok, suggestion} -> suggestion
+      {:error, _} -> %{state: :error, hits: []}
+    end
+  end
+
+  defp do_with_hits(scope_or_org_id, query, refetch, opts) do
     case Embeddings.search(scope_or_org_id, query, Keyword.put(opts, :limit, @suggest_limit)) do
       {:ok, []} ->
         %{state: :empty, hits: []}

@@ -39,6 +39,7 @@ defmodule Samen.Web.Settings.Reads do
   require Ash.Query
 
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   @session_key "samen_current_user"
 
@@ -112,43 +113,70 @@ defmodule Samen.Web.Settings.Reads do
   `{:ok, user}` or `{:error, :not_found}`. Org-scoped: a cross-org id reads zero rows
   under `OrgScope` (no existence oracle).
   """
-  def get_user(mount, scope, id) when is_binary(id) do
-    Mount.resource(mount, User)
-    |> Ash.Query.ensure_selected(@user_select)
-    |> Ash.Query.filter(id == ^id)
-    |> Ash.Query.limit(1)
-    |> Ash.read!(scope: scope)
-    |> resolve_pii(mount, scope)
-    |> case do
-      [user | _] -> {:ok, user}
-      [] -> {:error, :not_found}
+  def get_user(mount, scope, id) do
+    case get_user_result(mount, scope, id) do
+      {:ok, user} -> {:ok, user}
+      {:error, _} -> {:error, :not_found}
     end
-  rescue
-    _ -> {:error, :not_found}
   end
 
-  def get_user(_mount, _scope, _id), do: {:error, :not_found}
+  @doc """
+  Tagged sibling of `get_user/3` (WP6): `{:ok, user}`, `{:error, :not_found}` for a missing or
+  denied record, and `{:error, :unavailable}` ONLY when the read FAILED — a failed read is not
+  "No user in context".
+  """
+  def get_user_result(mount, scope, id) when is_binary(id) do
+    case Guard.run(:settings_get_user, scope, fn ->
+           Mount.resource(mount, User)
+           |> Ash.Query.ensure_selected(@user_select)
+           |> Ash.Query.filter(id == ^id)
+           |> Ash.Query.limit(1)
+           |> Ash.read!(scope: scope)
+           |> resolve_pii(mount, scope)
+         end) do
+      {:ok, [user | _]} -> {:ok, user}
+      {:ok, []} -> {:error, :not_found}
+      {:error, :forbidden} -> {:error, :not_found}
+      {:error, :unavailable} = unavailable -> unavailable
+    end
+  end
+
+  def get_user_result(_mount, _scope, _id), do: {:error, :not_found}
 
   @doc """
   The current user's `Membership` in `org_id` (for the API-key minter ceiling) —
   `{:ok, membership}` or `{:error, :not_found}`. Org-scoped via `scope`.
   """
-  def current_membership(mount, scope, user_id, org_id)
-      when is_binary(user_id) and is_binary(org_id) do
-    Mount.resource(mount, Membership)
-    |> Ash.Query.ensure_selected([:role, :status, :org_id, :id, :user_id])
-    |> Ash.Query.filter(user_id == ^user_id and org_id == ^org_id)
-    |> Ash.Query.limit(1)
-    |> Ash.read!(scope: scope)
-    |> case do
-      [membership | _] -> {:ok, membership}
-      [] -> {:error, :not_found}
+  def current_membership(mount, scope, user_id, org_id) do
+    case current_membership_result(mount, scope, user_id, org_id) do
+      {:ok, membership} -> {:ok, membership}
+      {:error, _} -> {:error, :not_found}
     end
-  rescue
-    _ -> {:error, :not_found}
   end
 
-  def current_membership(_mount, _scope, _user_id, _org_id), do: {:error, :not_found}
+  @doc """
+  Tagged sibling of `current_membership/4` (WP6): `{:error, :not_found}` is "no membership"
+  (a real answer: fail-closed, no authority); `{:error, :unavailable}` is "the lookup FAILED" —
+  still fail-closed (no authority is granted), but a screen can say "couldn't check your role"
+  instead of "no membership in context".
+  """
+  def current_membership_result(mount, scope, user_id, org_id)
+      when is_binary(user_id) and is_binary(org_id) do
+    case Guard.run(:settings_current_membership, scope, fn ->
+           Mount.resource(mount, Membership)
+           |> Ash.Query.ensure_selected([:role, :status, :org_id, :id, :user_id])
+           |> Ash.Query.filter(user_id == ^user_id and org_id == ^org_id)
+           |> Ash.Query.limit(1)
+           |> Ash.read!(scope: scope)
+         end) do
+      {:ok, [membership | _]} -> {:ok, membership}
+      {:ok, []} -> {:error, :not_found}
+      {:error, :forbidden} -> {:error, :not_found}
+      {:error, :unavailable} = unavailable -> unavailable
+    end
+  end
+
+  def current_membership_result(_mount, _scope, _user_id, _org_id), do: {:error, :not_found}
 
   # -- private -----------------------------------------------------------------
 
@@ -160,7 +188,10 @@ defmodule Samen.Web.Settings.Reads do
       repo: mount.repo
     )
   rescue
-    _ -> records
+    e ->
+      # Fail-closed (no plaintext downgrade), but not silent: a resolver outage is logged.
+      Guard.report(:settings_resolve_pii, scope, e)
+      records
   end
 
   defp actor_of(%Samen.Scope{actor: actor}), do: actor

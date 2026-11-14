@@ -169,6 +169,136 @@ defmodule Samen.Web.ReadsGuardTest do
     end
   end
 
+  describe "write/3 (phase 2)" do
+    test "the write's own tagged return passes through untouched, logging nothing", %{org_id: org_id} do
+      log =
+        capture_log(fn ->
+          assert :ok = Guard.write(:t_w_ok, org_id, fn -> :ok end)
+          assert {:ok, :row} = Guard.write(:t_w_row, org_id, fn -> {:ok, :row} end)
+          assert {:error, :not_configured} = Guard.write(:t_w_nc, org_id, fn -> {:error, :not_configured} end)
+          assert {:error, :not_found} = Guard.write(:t_w_nf, org_id, fn -> {:error, :not_found} end)
+        end)
+
+      assert log == ""
+    end
+
+    test "a raise / exit becomes {:error, :unavailable}, logged by name and cause only", %{org_id: org_id} do
+      canary = "write-canary-#{System.unique_integer([:positive])}"
+
+      log =
+        capture_log(fn ->
+          assert {:error, :unavailable} = Guard.write(:t_w_boom, org_id, fn -> raise ArgumentError, canary end)
+          assert {:error, :unavailable} = Guard.write(:t_w_exit, org_id, fn -> exit(:db_gone) end)
+        end)
+
+      assert log =~ "write failed write=t_w_boom"
+      refute log =~ "read failed"
+      assert log =~ "cause=ArgumentError"
+      refute log =~ canary
+    end
+
+    test "a failed write emits its OWN telemetry event, never the read-error one", %{org_id: org_id} do
+      test_pid = self()
+      handler = "guard-write-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach_many(
+        handler,
+        [[:samen, :web, :write, :error], [:samen, :web, :read, :error]],
+        fn event, _m, metadata, _ -> send(test_pid, {:telemetry, event, metadata}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      capture_log(fn -> Guard.write(:t_w_tele, org_id, fn -> raise ArgumentError, "x" end) end)
+
+      assert_receive {:telemetry, [:samen, :web, :write, :error], %{write: :t_w_tele, cause: "ArgumentError"}}
+      refute_receive {:telemetry, [:samen, :web, :read, :error], _}
+    end
+
+    test "a RETURNED Unknown / Framework error is an outage; Invalid and Forbidden pass through untouched", %{org_id: org_id} do
+      unknown = Ash.Error.to_error_class(Ash.Error.Unknown.UnknownError.exception(error: "boom"), [])
+      framework = Ash.Error.to_error_class(Ash.Error.Framework.PendingCodegen.exception(diff: "x"), [])
+      invalid = Ash.Error.to_error_class(Ash.Error.Changes.Required.exception(field: :name), [])
+      forbidden = Ash.Error.to_error_class(Ash.Error.Forbidden.Policy.exception([]), [])
+
+      assert %Ash.Error.Unknown{} = unknown
+      assert %Ash.Error.Framework{} = framework
+      assert %Ash.Error.Invalid{} = invalid
+      assert %Ash.Error.Forbidden{} = forbidden
+
+      log =
+        capture_log(fn ->
+          assert {:error, :unavailable} = Guard.write(:t_w_unknown, org_id, fn -> {:error, unknown} end)
+          assert {:error, :unavailable} = Guard.write(:t_w_framework, org_id, fn -> {:error, framework} end)
+        end)
+
+      assert log =~ "write failed write=t_w_unknown"
+      assert log =~ "write failed write=t_w_framework"
+
+      # POSITIVE CONTROL: a real refusal / validation error is NOT an outage and logs nothing.
+      silent =
+        capture_log(fn ->
+          assert {:error, ^invalid} = Guard.write(:t_w_invalid, org_id, fn -> {:error, invalid} end)
+          assert {:error, ^forbidden} = Guard.write(:t_w_forbidden, org_id, fn -> {:error, forbidden} end)
+        end)
+
+      assert silent == ""
+    end
+
+    test "a REAL data-layer failure (the table is gone) is returned as Ash.Error.Unknown by the bare write — and Guard tells it",
+         %{org_id: org_id} do
+      Application.put_env(:samen_core, :delivery_env, :test)
+      on_exit(fn -> Application.delete_env(:samen_core, :delivery_env) end)
+
+      mount = Mount.new(:settings, Samen.WebTest.Operator, Samen.WebTest.Repo)
+
+      scope = %Samen.Scope{
+        actor: %{id: Ash.UUID.generate(), org_id: org_id, role: :admin, kind: :tenant, plane: :tenant, verified?: true}
+      }
+
+      # Control: the healthy write succeeds, so the failure below is the table, not the call.
+      assert {:ok, _invitation, _raw} = Samen.Web.Settings.Invitations.create(mount, scope, "ok-#{org_id}@example.com", "member")
+
+      table = AshPostgres.DataLayer.Info.table(Samen.WebTest.Operator.Invitation)
+      # Postgres DDL is transactional: the rename is undone with the sandbox transaction.
+      Ecto.Adapters.SQL.query!(Samen.WebTest.Repo, "ALTER TABLE #{table} RENAME TO zz_gone_#{table}")
+
+      # What the bare, non-bang write returns for the outage: a RETURNED error, not a raise.
+      bare = fn ->
+        Samen.Identity.Invite.revoke(Samen.Web.Settings.Invitations.mods(mount), scope, Ash.UUID.generate())
+      end
+
+      assert {:error, %Ash.Error.Unknown{}} = bare.()
+
+      log =
+        capture_log(fn ->
+          assert {:error, :unavailable} = Samen.Web.Settings.Invitations.revoke(mount, scope, Ash.UUID.generate())
+          assert {:error, :unavailable} = Samen.Web.Settings.Invitations.create(mount, scope, "down@example.com", "member")
+        end)
+
+      assert log =~ "write failed write=settings_invitation_revoke"
+      assert log =~ "write failed write=settings_invitation_create"
+      # Module names only — the Postgrex message (relation, query) never reaches the log.
+      refute log =~ "zz_gone"
+      refute log =~ "SELECT"
+    end
+
+    test "a denial stays a denial; the seam fails a named write", %{org_id: org_id} do
+      assert {:error, :forbidden} =
+               Guard.write(:t_w_denied, org_id, fn -> raise Ash.Error.Forbidden, errors: [] end)
+
+      inject_read_faults([:t_w_named])
+
+      capture_log(fn ->
+        assert {:error, :unavailable} = Guard.write(:t_w_named, org_id, fn -> :ok end)
+      end)
+
+      clear_read_faults()
+      assert :ok = Guard.write(:t_w_named, org_id, fn -> :ok end)
+    end
+  end
+
   defp render_name(name) when is_binary(name) do
     case Jason.decode(name) do
       {:ok, %{"first" => f, "last" => l}} -> "#{f} #{l}"

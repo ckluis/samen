@@ -12,18 +12,15 @@
 # MUST_FAIL: the OPERATOR-without-grant plane renders •••• on the SAME run
 # MUST_FAIL: the same DOM scan DETECTS a modeled leak, and the plane flip is the only difference
 diff --git a/samen_web/lib/samen/web/ai/agent_reads.ex b/samen_web/lib/samen/web/ai/agent_reads.ex
+index 01bd1bb9..a01f198a 100644
 --- a/samen_web/lib/samen/web/ai/agent_reads.ex
 +++ b/samen_web/lib/samen/web/ai/agent_reads.ex
-@@ -84,8 +84,11 @@
-     |> case do
-       {:ok, [run]} ->
-         # THE resolution: the actor's plane decides, `Samen.Api.PiiResolution` performs.
-+        # SABOTAGE (A5, ADR-047 §7.3): PLANE-BLIND resolution — the mount's real actor is
-+        # discarded for a hardcoded tenant-plane one, so an operator-without-grant reads
-+        # the vault-routed transcript CLEAR.
-         [resolved] =
--          Samen.Api.PiiResolution.resolve([run], Run, actor_of(mount, org_id), repo: mount.repo)
-+          Samen.Api.PiiResolution.resolve([run], Run, %{plane: :tenant}, repo: mount.repo)
+@@ -112,7 +112,7 @@ defmodule Samen.Web.AI.AgentReads do
+              [run] ->
+                # THE resolution: the actor's plane decides, `Samen.Api.PiiResolution` performs.
+                [resolved] =
+-                 Samen.Api.PiiResolution.resolve([run], Run, actor_of(mount, org_id), repo: mount.repo)
++                 Samen.Api.PiiResolution.resolve([run], Run, %{plane: :tenant}, repo: mount.repo)
  
-         {goal, lines} = decode_transcript(Map.get(resolved, :transcript))
-         approval = pending_approval(org_id, run)
+                {run, Map.get(resolved, :transcript)}
+ 

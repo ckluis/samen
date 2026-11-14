@@ -25,6 +25,7 @@ defmodule Samen.Web.Work.Reads do
   require Ash.Query
 
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   @detail_limit 200
 
@@ -43,21 +44,21 @@ defmodule Samen.Web.Work.Reads do
   is EMPTY — never unbounded.
   """
   def tasks_page(mount, scope, state) do
-    Mount.resource(mount, Task)
-    |> Ash.Query.ensure_selected([
-      :kind,
-      :title,
-      :status,
-      :priority,
-      :due_at,
-      :completed_at,
-      :owner_id,
-      :parent_id,
-      :project_id
-    ])
-    |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:title])
-  rescue
-    _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(state.page_size)}
+    Guard.page(:work_tasks_page, scope, state, fn ->
+      Mount.resource(mount, Task)
+      |> Ash.Query.ensure_selected([
+        :kind,
+        :title,
+        :status,
+        :priority,
+        :due_at,
+        :completed_at,
+        :owner_id,
+        :parent_id,
+        :project_id
+      ])
+      |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:title])
+    end)
   end
 
   @doc """
@@ -81,26 +82,35 @@ defmodule Samen.Web.Work.Reads do
     * `:per_group_limit` — per-lane bar cap forwarded to `timeline_window!/3`.
   """
   def tasks_timeline(mount, scope, {_s, _e} = range, opts \\ []) do
-    cap = Keyword.get(opts, :per_group_limit, Samen.Web.Reads.default_timeline_cap())
+    tasks_timeline_result(mount, scope, range, opts)
+    |> Guard.value(%{board: %Samen.Web.Board{groups: [], group_field: :status}, range: range})
+  end
 
-    lanes = Enum.map(@task_statuses, fn s -> {s, status_label(s)} end)
+  @doc """
+  Tagged sibling of `tasks_timeline/4` (WP6): `{:ok, %{board:, range:}}`, or
+  `{:error, :unavailable | :forbidden}` — a failed board read is not an empty board.
+  """
+  def tasks_timeline_result(mount, scope, {_s, _e} = range, opts \\ []) do
+    Guard.run(:work_tasks_timeline, scope, fn ->
+      cap = Keyword.get(opts, :per_group_limit, Samen.Web.Reads.default_timeline_cap())
 
-    board =
-      Mount.resource(mount, Task)
-      |> Ash.Query.ensure_selected([:title, :status, :priority, :due_at, :completed_at, :project_id, :inserted_at])
-      |> Samen.Web.Reads.timeline_window!(:inserted_at,
-        scope: scope,
-        end_field: :due_at,
-        lane_field: :status,
-        groups: lanes,
-        range: range,
-        per_group_limit: cap,
-        row_sort: {:inserted_at, :asc}
-      )
+      lanes = Enum.map(@task_statuses, fn s -> {s, status_label(s)} end)
 
-    %{board: board, range: range}
-  rescue
-    _ -> %{board: %Samen.Web.Board{groups: [], group_field: :status}, range: range}
+      board =
+        Mount.resource(mount, Task)
+        |> Ash.Query.ensure_selected([:title, :status, :priority, :due_at, :completed_at, :project_id, :inserted_at])
+        |> Samen.Web.Reads.timeline_window!(:inserted_at,
+          scope: scope,
+          end_field: :due_at,
+          lane_field: :status,
+          groups: lanes,
+          range: range,
+          per_group_limit: cap,
+          row_sort: {:inserted_at, :asc}
+        )
+
+      %{board: board, range: range}
+    end)
   end
 
   defp status_label(:pending), do: "Pending"
@@ -127,72 +137,112 @@ defmodule Samen.Web.Work.Reads do
   `opts` are forwarded to `tree!/3` (`:sibling_limit`, `:max_depth`, `:max_nodes`, `:row_sort`).
   """
   def tasks_tree(mount, scope, root \\ nil, opts \\ []) do
-    tree =
-      Mount.resource(mount, Task)
-      |> Ash.Query.ensure_selected([:title, :status, :priority, :parent_id, :project_id])
-      |> Samen.Web.Reads.tree!(
-        :parent_id,
-        [scope: scope, root: root, row_sort: {:inserted_at, :asc}] ++ opts
-      )
+    tasks_tree_result(mount, scope, root, opts)
+    |> Guard.value(%{tree: %Samen.Web.Tree{roots: [], parent_field: :parent_id}, root: root})
+  end
 
-    %{tree: tree, root: root}
-  rescue
-    _ -> %{tree: %Samen.Web.Tree{roots: [], parent_field: :parent_id}, root: root}
+  @doc """
+  Tagged sibling of `tasks_tree/4` (WP6): `{:ok, %{tree:, root:}}`, or
+  `{:error, :unavailable | :forbidden}` — a failed walk is not "No tasks".
+  """
+  def tasks_tree_result(mount, scope, root \\ nil, opts \\ []) do
+    Guard.run(:work_tasks_tree, scope, fn ->
+      tree =
+        Mount.resource(mount, Task)
+        |> Ash.Query.ensure_selected([:title, :status, :priority, :parent_id, :project_id])
+        |> Samen.Web.Reads.tree!(
+          :parent_id,
+          [scope: scope, root: root, row_sort: {:inserted_at, :asc}] ++ opts
+        )
+
+      %{tree: tree, root: root}
+    end)
   end
 
   @doc "Read a single Task by id for `scope`. `{:ok, task}` or `:error`."
   def get_task(mount, scope, id) do
-    result =
+    case get_task_result(mount, scope, id) do
+      {:ok, task} -> {:ok, task}
+      {:error, _} -> :error
+    end
+  end
+
+  @doc """
+  Tagged sibling of `get_task/3` (WP6): `{:ok, task}`, `{:error, :not_found}` for a missing,
+  malformed-id or denied record, and `{:error, :unavailable}` ONLY when the read FAILED — a
+  failed read is not "Task not found."
+  """
+  def get_task_result(mount, scope, id) do
+    single_result(:work_get_task, scope, id, fn uuid ->
       Mount.resource(mount, Task)
-      |> Ash.Query.filter(id == ^id)
+      |> Ash.Query.filter(id == ^uuid)
       |> Ash.Query.limit(1)
       |> Ash.read!(scope: scope)
-
-    case result do
-      [task | _] -> {:ok, task}
-      [] -> :error
-    end
-  rescue
-    _ -> :error
+    end)
   end
 
   @doc "Read the direct Subtasks (children) of `task_id` for `scope`. BOUNDED."
-  def subtasks(mount, scope, task_id) do
-    Mount.resource(mount, Task)
-    |> Ash.Query.filter(parent_id == ^task_id)
-    |> Ash.Query.ensure_selected([:title, :status, :priority, :due_at])
-    |> Ash.Query.sort(inserted_at: :asc)
-    |> Ash.Query.limit(@detail_limit)
-    |> Ash.read!(scope: scope)
-  rescue
-    _ -> []
+  def subtasks(mount, scope, task_id), do: subtasks_result(mount, scope, task_id) |> Guard.value([])
+
+  @doc "Tagged sibling of `subtasks/3` (WP6): `{:ok, rows}` or `{:error, :unavailable | :forbidden}`."
+  def subtasks_result(mount, scope, task_id) do
+    Guard.run(:work_subtasks, scope, fn ->
+      Mount.resource(mount, Task)
+      |> Ash.Query.filter(parent_id == ^task_id)
+      |> Ash.Query.ensure_selected([:title, :status, :priority, :due_at])
+      |> Ash.Query.sort(inserted_at: :asc)
+      |> Ash.Query.limit(@detail_limit)
+      |> Ash.read!(scope: scope)
+    end)
   end
 
   @doc "Read Projects for `scope`, newest-first. BOUNDED. No PII."
-  def projects(mount, scope) do
-    Mount.resource(mount, Project)
-    |> Ash.Query.ensure_selected([:name, :status, :owner_id])
-    |> Ash.Query.sort(inserted_at: :desc)
-    |> Ash.Query.limit(@detail_limit)
-    |> Ash.read!(scope: scope)
-  rescue
-    _ -> []
+  def projects(mount, scope), do: projects_result(mount, scope) |> Guard.value([])
+
+  @doc "Tagged sibling of `projects/2` (WP6): `{:ok, rows}` or `{:error, :unavailable | :forbidden}`."
+  def projects_result(mount, scope) do
+    Guard.run(:work_projects, scope, fn ->
+      Mount.resource(mount, Project)
+      |> Ash.Query.ensure_selected([:name, :status, :owner_id])
+      |> Ash.Query.sort(inserted_at: :desc)
+      |> Ash.Query.limit(@detail_limit)
+      |> Ash.read!(scope: scope)
+    end)
   end
 
   @doc "Read a single Project by id for `scope`. `{:ok, project}` or `:error`."
   def get_project(mount, scope, id) do
-    result =
+    case get_project_result(mount, scope, id) do
+      {:ok, project} -> {:ok, project}
+      {:error, _} -> :error
+    end
+  end
+
+  @doc "Tagged sibling of `get_project/3` (WP6); same contract as `get_task_result/3`."
+  def get_project_result(mount, scope, id) do
+    single_result(:work_get_project, scope, id, fn uuid ->
       Mount.resource(mount, Project)
-      |> Ash.Query.filter(id == ^id)
+      |> Ash.Query.filter(id == ^uuid)
       |> Ash.Query.limit(1)
       |> Ash.read!(scope: scope)
+    end)
+  end
 
-    case result do
-      [project | _] -> {:ok, project}
-      [] -> :error
+  # One record by id: a malformed id is a plain not-found (no read is attempted), an empty
+  # result is not-found, a denial is not-found (no existence oracle), and only a FAILED read is
+  # `:unavailable`. `read` returns the (<= 1 row) list.
+  defp single_result(key, scope, id, read) do
+    with {:ok, uuid} <- Ecto.UUID.cast(id),
+         {:ok, rows} <- Guard.run(key, scope, fn -> read.(uuid) end) do
+      case rows do
+        [record | _] -> {:ok, record}
+        [] -> {:error, :not_found}
+      end
+    else
+      :error -> {:error, :not_found}
+      {:error, :forbidden} -> {:error, :not_found}
+      {:error, :unavailable} = unavailable -> unavailable
     end
-  rescue
-    _ -> :error
   end
 
   # -- A3 write side (sanctioned defaults only) --------------------------------

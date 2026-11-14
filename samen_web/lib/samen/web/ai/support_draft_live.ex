@@ -32,18 +32,21 @@ defmodule Samen.Web.AI.SupportDraftLive do
   @doc "The framework page-load seam."
   def load(socket, org_id, opts \\ []) do
     mount = socket.assigns[:samen_mount]
-    drafts = if org_id, do: Server.list_drafts(mount, org_id), else: []
+    drafts_result = Server.list_drafts_result(mount, org_id)
 
     socket
     |> Phoenix.Component.assign(:org_id, org_id)
+    |> Phoenix.Component.assign(:drafts_error, Samen.Web.Reads.Guard.unavailable?(drafts_result))
     |> Phoenix.Component.assign(:to_subscriber_id, Keyword.get(opts, :to_subscriber_id, ""))
     |> Phoenix.Component.assign(:inbound_ref, Keyword.get(opts, :inbound_ref, ""))
     |> Phoenix.Component.assign(:instruction, Keyword.get(opts, :instruction, ""))
-    |> Phoenix.Component.assign(:drafts, drafts)
+    |> Phoenix.Component.assign(:drafts, Samen.Web.Reads.Guard.value(drafts_result, []))
     |> Phoenix.Component.assign(:outcome, Keyword.get(opts, :outcome, nil))
   end
 
   @impl true
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
+
   def handle_event("compose", params, socket) do
     org_id = socket.assigns.org_id
 
@@ -76,7 +79,18 @@ defmodule Samen.Web.AI.SupportDraftLive do
   # otherwise a fail-honest error term — surfaced truthfully (never "saved" on failure).
   defp classify_outcome({:ok, _}), do: {:saved, "Draft persisted; a pending approval was opened (no send)."}
   defp classify_outcome({:error, :not_configured}), do: {:not_configured, Server.configuration_hint()}
-  defp classify_outcome({:error, {:persist_unavailable, _}}), do: {:unavailable, "This host has not adopted the AI draft domain — nothing was persisted."}
+  # The ONE not-adopted case: this host never configured the AI draft domain (decided structurally).
+  defp classify_outcome({:error, {:persist_unavailable, :not_adopted}}),
+    do: {:unavailable, "This host has not adopted the AI draft domain — nothing was persisted."}
+
+  # A real failure (an outage): value-free, and it is safe to try again.
+  defp classify_outcome({:error, :unavailable}),
+    do: {:unavailable, "Draft could not be saved — nothing was saved. Try again."}
+
+  # A real denial: say so — it is not an outage and retrying will not help.
+  defp classify_outcome({:error, :forbidden}),
+    do: {:denied, "You are not allowed to compose a support draft here — nothing was saved."}
+
   defp classify_outcome({:error, _}), do: {:unavailable, "Draft could not be persisted — nothing was saved."}
 
   defp present(nil), do: nil
@@ -118,7 +132,8 @@ defmodule Samen.Web.AI.SupportDraftLive do
 
           <div class="card" id="ai-support-drafts" style="padding:16px">
             <h3 style="margin:0 0 8px;font-size:14px">Drafts in this org</h3>
-            <%= if @drafts == [] do %>
+            <.error_state :if={@drafts_error} class="ai-drafts-error" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
+            <%= if @drafts == [] and not @drafts_error do %>
               <.empty_state title="No drafts yet" body="Compose one above. Drafts are human-approved before any send." icon="✎" />
             <% else %>
               <ul style="list-style:none;margin:0;padding:0">
@@ -169,6 +184,17 @@ defmodule Samen.Web.AI.SupportDraftLive do
     ~H"""
     <div class="card" id="ai-support-outcome" data-state="unavailable" style="padding:12px">
       <.pill variant="warn">Not persisted</.pill>
+      <span style="margin-left:8px;color:var(--muted);font-size:13px">{@msg}</span>
+    </div>
+    """
+  end
+
+  defp compose_outcome(%{outcome: {:denied, msg}} = assigns) do
+    assigns = assign(assigns, :msg, msg)
+
+    ~H"""
+    <div class="card" id="ai-support-outcome" data-state="denied" style="padding:12px">
+      <.pill variant="bad">Not allowed</.pill>
       <span style="margin-left:8px;color:var(--muted);font-size:13px">{@msg}</span>
     </div>
     """

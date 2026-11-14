@@ -118,11 +118,15 @@ defmodule Samen.Web.Automation.BuilderLive do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
     scope = Mount.scope(mount, org_id)
 
-    case Reads.get_workflow(mount, scope, id) do
-      nil ->
+    case Reads.get_workflow_result(mount, scope, id) do
+      {:error, :not_found} ->
         assign(socket, edit_workflow: nil, wf_form: nil)
 
-      wf ->
+      # A FAILED read is not "no such workflow": say so, keep the list.
+      {:error, :unavailable} ->
+        assign(socket, edit_workflow: nil, wf_form: nil, wf_error: Samen.Web.Reads.Guard.message())
+
+      {:ok, wf} ->
         assign(socket,
           edit_workflow: wf,
           wf_form: to_form(wf_params(wf), as: :workflow),
@@ -168,11 +172,14 @@ defmodule Samen.Web.Automation.BuilderLive do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
     scope = Mount.scope(mount, org_id)
 
-    case Reads.get_workflow(mount, scope, id) do
-      nil ->
+    case Reads.get_workflow_result(mount, scope, id) do
+      {:error, :not_found} ->
         {:noreply, assign(socket, run_error: "Workflow not found.", run_ok: nil)}
 
-      wf ->
+      {:error, :unavailable} ->
+        {:noreply, assign(socket, run_error: "We couldn't load this workflow right now. Nothing was run — try again.", run_ok: nil)}
+
+      {:ok, wf} ->
         case Reads.run_now(mount, org_id, wf) do
           {:ok, %{enqueued: true} = result} ->
             {:noreply, assign(socket, run_ok: "Run enqueued (event #{result.event_id}).", run_error: nil)}

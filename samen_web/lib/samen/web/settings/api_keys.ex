@@ -28,6 +28,7 @@ defmodule Samen.Web.Settings.ApiKeys do
   alias Samen.Scope.ApiKey, as: ApiKeyScope
   alias Samen.Scope.Role
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   @doc "The canonical key digest — SHA-256 hex of the raw key material (never the key)."
   @spec digest(String.t()) :: String.t()
@@ -79,7 +80,10 @@ defmodule Samen.Web.Settings.ApiKeys do
   Returns `{:ok, raw, key_row}` — `raw` shown once, `key_row` stores only the digest —
   or `{:error, reason}`.
   """
-  def mint(mount, scope, opts) do
+  def mint(mount, scope, opts),
+    do: Guard.write(:settings_api_key_mint, scope, fn -> do_mint(mount, scope, opts) end)
+
+  defp do_mint(mount, scope, opts) do
     membership_id = Keyword.fetch!(opts, :membership_id)
     minter_role = Keyword.fetch!(opts, :minter_role)
     plane = Keyword.get(opts, :plane, :tenant)
@@ -113,15 +117,18 @@ defmodule Samen.Web.Settings.ApiKeys do
       {:ok, row} -> {:ok, raw, row}
       {:error, error} -> {:error, error}
     end
-  rescue
-    e -> {:error, e}
   end
 
   @doc """
   List the org's keys for `scope` as SAFE views — digest prefix, plane, scopes, minter
   role, created/revoked timestamps. NEVER the raw key (it isn't stored). Newest first.
   """
-  def list(mount, scope) do
+  def list(mount, scope), do: list_result(mount, scope) |> Guard.value([])
+
+  @doc "Tagged sibling of `list/2` (WP6): `{:ok, views}` or `{:error, :unavailable | :forbidden}`; an outage is not 'No API keys yet.'"
+  def list_result(mount, scope), do: Guard.run(:settings_api_keys, scope, fn -> fetch_list(mount, scope) end)
+
+  defp fetch_list(mount, scope) do
     Mount.resource(mount, ApiKey)
     |> Ash.Query.ensure_selected([
       :token_digest,
@@ -138,12 +145,15 @@ defmodule Samen.Web.Settings.ApiKeys do
     |> Ash.Query.sort(inserted_at: :desc)
     |> Ash.read!(scope: scope)
     |> Enum.map(&safe_view/1)
-  rescue
-    _ -> []
   end
 
   @doc "Revoke a key (sets `revoked_at`) — admin-gated. `{:ok, view}` or `{:error, reason}`."
-  def revoke(mount, scope, key_id) when is_binary(key_id) do
+  def revoke(mount, scope, key_id) when is_binary(key_id),
+    do: Guard.write(:settings_api_key_revoke, scope, fn -> do_revoke(mount, scope, key_id) end)
+
+  def revoke(_mount, _scope, _key_id), do: {:error, :not_found}
+
+  defp do_revoke(mount, scope, key_id) do
     with [row | _] <-
            Mount.resource(mount, ApiKey)
            |> Ash.Query.filter(id == ^key_id)
@@ -159,11 +169,7 @@ defmodule Samen.Web.Settings.ApiKeys do
     else
       _ -> {:error, :not_found}
     end
-  rescue
-    e -> {:error, e}
   end
-
-  def revoke(_mount, _scope, _key_id), do: {:error, :not_found}
 
   # -- private -----------------------------------------------------------------
 

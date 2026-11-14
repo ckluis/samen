@@ -3,15 +3,15 @@
 # TEST_FILES: test/samen/web/ai/ai_crm_masking_test.exs
 # MUST_FAIL: RED — operator plane grounds MASKED (••••), no plaintext, no vt_ token
 diff --git a/samen_web/lib/samen/web/ai/server.ex b/samen_web/lib/samen/web/ai/server.ex
-index 9899b00..603aa2e 100644
+index 64de6009..8a23789f 100644
 --- a/samen_web/lib/samen/web/ai/server.ex
 +++ b/samen_web/lib/samen/web/ai/server.ex
-@@ -148,7 +148,7 @@ defmodule Samen.Web.AI.Server do
-           Samen.Api.PiiResolution.resolve(
-             [record],
-             resource,
--            actor_of(scope(mount, org_id)),
-+            %{plane: :tenant},
-             repo: mount.repo
-           )
+@@ -155,7 +155,7 @@ defmodule Samen.Web.AI.Server do
+                    Samen.Api.PiiResolution.resolve(
+                      [record],
+                      resource,
+-                     actor_of(scope(mount, org_id)),
++                     %{plane: :tenant},
+                      repo: mount.repo
+                    )
  

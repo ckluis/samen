@@ -25,6 +25,11 @@ defmodule Samen.Web.Reads.Guard do
   ordinary return values of the function inside `run/3` and pass through untouched as
   `{:ok, _}`. Only an exception or exit becomes `:unavailable`.
 
+  A WRITE uses `write/3` (below): its own tagged return passes through, an exception — or a RETURNED
+  `{:error, %Ash.Error.Unknown{} | %Ash.Error.Framework{}}`, which is how a non-bang Ash write reports a
+  data-layer outage — becomes `{:error, :unavailable}` (logged by name as a WRITE failure), and the screen
+  tells the user — see cookbook Recipe 11. A returned `Invalid` / `Forbidden` is a real refusal and passes through.
+
   ## Adopting it with a small diff
 
   A read keeps its name and its legacy return shape (so existing callers are unchanged) and
@@ -43,7 +48,7 @@ defmodule Samen.Web.Reads.Guard do
   ## What is logged (and what never is)
 
   One `Logger.error` line per failure and one `[:samen, :web, :read, :error]` telemetry
-  event. The log carries the read's NAME, the org id and the exception MODULE names
+  event (a failed write: `write failed write=<name>` and `[:samen, :web, :write, :error]`). The log carries the read's NAME, the org id and the exception MODULE names
   (`Ash.Error.Unknown`, `DBConnection.ConnectionError`, …). It never carries the
   exception's message or struct, the query, row data, a vault token or any parameter: an
   Ash error interpolates the very values being processed, so it is never `inspect`ed or
@@ -86,6 +91,47 @@ defmodule Samen.Web.Reads.Guard do
   catch
     :exit, _reason -> failed(name, scope, :exit)
     :throw, _value -> failed(name, scope, :throw)
+  end
+
+  @doc """
+  Run a WRITE (or any action that returns its own `{:ok, _} | {:error, _}` / `:ok`) as the action
+  called `name` (WP6 phase 2). The function's own return value passes through UNTOUCHED — an
+  honest `{:error, :not_configured}`, a changeset error (`Ash.Error.Invalid`), a returned
+  `Ash.Error.Forbidden`, `:ok` — with two exceptions that are an OUTAGE, not a refusal:
+
+    * an exception or exit becomes `{:error, :unavailable}` (an `Ash.Error.Forbidden` raise becomes
+      `{:error, :forbidden}`);
+    * a RETURNED `{:error, %Ash.Error.Unknown{}}` or `{:error, %Ash.Error.Framework{}}` becomes
+      `{:error, :unavailable}`. A non-bang Ash write does not raise on a data-layer failure — it
+      returns the wrapped driver error — so without this a database outage reached the screen as
+      "Revoke refused (admin role required…)": denial copy for an outage.
+
+  The failure is reported as a failed WRITE (one `Logger.error` line `write failed write=<name>` and
+  one `[:samen, :web, :write, :error]` telemetry event, by name and exception module only), so the
+  caller can tell the user with value-free copy and no exception term ever reaches a template. The
+  same test seam (`inject_faults/1`) fails a named write through this path.
+  """
+  @spec write(atom(), term(), (-> t)) :: t | {:error, failure()} when t: term()
+  def write(name, scope, fun) when is_atom(name) and is_function(fun, 0) do
+    maybe_inject(name)
+
+    case fun.() do
+      {:error, %Ash.Error.Unknown{} = e} -> write_failed(name, scope, e)
+      {:error, %Ash.Error.Framework{} = e} -> write_failed(name, scope, e)
+      other -> other
+    end
+  rescue
+    e -> write_failed(name, scope, e)
+  catch
+    :exit, _reason -> write_failed(name, scope, :exit)
+    :throw, _value -> write_failed(name, scope, :throw)
+  end
+
+  defp write_failed(_name, _scope, %Ash.Error.Forbidden{}), do: {:error, :forbidden}
+
+  defp write_failed(name, scope, reason) do
+    log_failure(:write, name, scope, reason)
+    {:error, :unavailable}
   end
 
   @doc """
@@ -140,14 +186,16 @@ defmodule Samen.Web.Reads.Guard do
   else. Returns `:ok`. `reason` is the exception (or `:exit` / `:throw`).
   """
   @spec report(atom(), term(), term()) :: :ok
-  def report(name, scope, reason) when is_atom(name) do
+  def report(name, scope, reason) when is_atom(name), do: log_failure(:read, name, scope, reason)
+
+  defp log_failure(kind, name, scope, reason) do
     causes = causes(reason)
 
     Logger.error(
-      "[Samen.Web.Reads] read failed read=#{name} org=#{org_of(scope)} cause=#{Enum.join(causes, ",")}"
+      "[Samen.Web.Reads] #{kind} failed #{kind}=#{name} org=#{org_of(scope)} cause=#{Enum.join(causes, ",")}"
     )
 
-    emit(name, causes)
+    emit(kind, name, causes)
   end
 
   # Module names only — never the exception message or struct (it interpolates row values).
@@ -172,9 +220,11 @@ defmodule Samen.Web.Reads.Guard do
   defp org_of(org_id) when is_binary(org_id), do: org_id
   defp org_of(_), do: "unknown"
 
-  defp emit(name, causes) do
-    :telemetry.execute([:samen, :web, :read, :error], %{count: 1}, %{
-      read: name,
+  # Reads keep `[:samen, :web, :read, :error]` (`read`, `cause`); a failed write has its own
+  # `[:samen, :web, :write, :error]` (`write`, `cause`) so an outage dashboard never mixes the two.
+  defp emit(kind, name, causes) do
+    :telemetry.execute([:samen, :web, kind, :error], %{count: 1}, %{
+      kind => name,
       cause: List.first(causes)
     })
   rescue

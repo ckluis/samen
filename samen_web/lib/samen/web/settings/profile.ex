@@ -33,6 +33,7 @@ defmodule Samen.Web.Settings.Profile do
   require Ash.Query
 
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   @doc """
   Run a governed self-edit of `user_id`'s profile for `scope`. `attrs` is the
@@ -45,17 +46,17 @@ defmodule Samen.Web.Settings.Profile do
   `WriteGuard`, the DB unchanged).
   """
   def update(mount, scope, user_id, attrs) when is_binary(user_id) and is_map(attrs) do
-    with {:ok, user} <- fetch_user(mount, scope, user_id) do
-      user
-      |> Ash.Changeset.for_update(:update, sanitize(attrs), scope: scope)
-      |> Ash.update(scope: scope)
-      |> case do
-        {:ok, updated} -> {:ok, updated}
-        {:error, error} -> {:error, error}
+    Guard.write(:settings_profile_update, scope, fn ->
+      with {:ok, user} <- fetch_user(mount, scope, user_id) do
+        user
+        |> Ash.Changeset.for_update(:update, sanitize(attrs), scope: scope)
+        |> Ash.update(scope: scope)
+        |> case do
+          {:ok, updated} -> {:ok, updated}
+          {:error, error} -> {:error, error}
+        end
       end
-    end
-  rescue
-    e -> {:error, e}
+    end)
   end
 
   def update(_mount, _scope, _user_id, _attrs), do: {:error, :invalid}

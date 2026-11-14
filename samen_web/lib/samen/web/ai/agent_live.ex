@@ -99,26 +99,36 @@ defmodule Samen.Web.AI.AgentLive do
     mount = socket.assigns[:samen_mount]
     run_id = Keyword.get(opts, :run_id)
 
-    detail =
-      case run_id && org_id && AgentReads.get(mount, org_id, run_id) do
-        {:ok, detail} -> detail
-        _ -> nil
+    # A FAILED read is the error state (retry), never "No agent runs yet" / a silently absent run.
+    {detail, detail_error} =
+      case run_id && org_id && AgentReads.get_result(mount, org_id, run_id) do
+        {:ok, detail} -> {detail, false}
+        {:error, :unavailable} -> {nil, true}
+        _ -> {nil, false}
       end
+
+    runs_result = if(org_id, do: AgentReads.list_result(mount, org_id), else: {:ok, []})
 
     socket
     |> Phoenix.Component.assign(:org_id, org_id)
-    |> Phoenix.Component.assign(:runs, if(org_id, do: AgentReads.list(mount, org_id), else: []))
+    |> Phoenix.Component.assign(:runs, Samen.Web.Reads.Guard.value(runs_result, []))
+    |> Phoenix.Component.assign(:runs_error, Samen.Web.Reads.Guard.unavailable?(runs_result))
+    |> Phoenix.Component.assign(:detail_error, detail_error)
     |> Phoenix.Component.assign(:run_id, run_id)
     |> Phoenix.Component.assign(:detail, detail)
     |> Phoenix.Component.assign(:outcome, Keyword.get(opts, :outcome, nil))
   end
 
   @impl true
+  def handle_event("retry_load", _params, socket),
+    do: {:noreply, load(socket, socket.assigns[:org_id], run_id: socket.assigns[:run_id])}
+
   def handle_event("cancel", %{"id" => run_id}, socket) do
     outcome =
       case AgentReads.cancel(socket.assigns[:samen_mount], socket.assigns[:org_id], run_id) do
         {:ok, _run} -> {:ok, "Stopping after the current step."}
         {:error, :already_terminal} -> {:info, "That run has already finished."}
+        {:error, :unavailable} -> {:error, "That run could not be cancelled right now — it is still running. Try again."}
         {:error, _} -> {:error, "That run could not be cancelled."}
       end
 
@@ -217,10 +227,13 @@ defmodule Samen.Web.AI.AgentLive do
         <div class="pane" id="ai-agents" style="display:flex;flex-direction:column;gap:16px;padding:16px">
           <.outcome_card :if={@outcome} outcome={@outcome} />
 
-          <%= if @detail do %>
-            <.run_detail detail={@detail} base={ai_base(@samen_mount)} />
-          <% else %>
-            <.run_list runs={@runs} base={ai_base(@samen_mount)} />
+          <%= cond do %>
+            <% @detail -> %>
+              <.run_detail detail={@detail} base={ai_base(@samen_mount)} />
+            <% @detail_error -> %>
+              <.error_state class="agent-detail-error" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
+            <% true -> %>
+              <.run_list runs={@runs} runs_error={@runs_error} base={ai_base(@samen_mount)} />
           <% end %>
         </div>
       <% end %>
@@ -251,6 +264,7 @@ defmodule Samen.Web.AI.AgentLive do
   defp outcome_label(_), do: "Noted"
 
   attr :runs, :list, required: true
+  attr :runs_error, :boolean, default: false
   attr :base, :string, required: true
 
   defp run_list(assigns) do
@@ -258,7 +272,9 @@ defmodule Samen.Web.AI.AgentLive do
     <div class="card" id="agent-run-list" style="padding:16px">
       <h3 style="margin:0 0 8px;font-size:14px">Agent runs</h3>
 
-      <%= if @runs == [] do %>
+      <.error_state :if={@runs_error} class="agent-runs-error" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
+
+      <%= if @runs == [] and not @runs_error do %>
         <.empty_state
           title="No agent runs yet"
           body="An agent run appears here as soon as one starts. Runs are multi-step, budgeted, and every write is proposed for a human to approve — never executed by the agent."
@@ -309,6 +325,7 @@ defmodule Samen.Web.AI.AgentLive do
         </span>
       </div>
 
+      <.error_state :if={Map.get(@detail, :approval_failed, false)} class="agent-approval-error" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
       <.decision_card :if={@detail.approval} approval={@detail.approval} provenance={@detail.provenance} />
 
       <div id="agent-transcript" style="margin-top:16px">
@@ -325,6 +342,7 @@ defmodule Samen.Web.AI.AgentLive do
 
       <div id="agent-turn-log" style="margin-top:16px">
         <h4 style="margin:0 0 6px;font-size:13px">Turns</h4>
+        <.error_state :if={Map.get(@detail, :turns_failed, false)} class="agent-turns-error" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
         <.data_table :if={@detail.turns != []}>
           <:head>
             <th>#</th>
@@ -348,7 +366,7 @@ defmodule Samen.Web.AI.AgentLive do
             </td>
           </tr>
         </.data_table>
-        <.empty_state :if={@detail.turns == []} title="No turns yet" body="The first turn will appear once the run starts." icon="·" />
+        <.empty_state :if={@detail.turns == [] and not Map.get(@detail, :turns_failed, false)} title="No turns yet" body="The first turn will appear once the run starts." icon="·" />
       </div>
     </div>
     """

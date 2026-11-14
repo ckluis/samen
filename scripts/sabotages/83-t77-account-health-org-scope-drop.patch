@@ -22,14 +22,15 @@
 # MUST_FAIL: snapshot/2 WORST-OF-N (fix round 1, MED-2): an active sub + a sibling past_due sub reports the WORST status, never the best one
 # MUST_FAIL: ANTI-TAUTOLOGY: the degraded-read scenario is real — the SAME org with a REAL scope reports its REAL $199.00
 diff --git a/samen_web/lib/samen/web/account_health.ex b/samen_web/lib/samen/web/account_health.ex
+index e800161b..f43fcc98 100644
 --- a/samen_web/lib/samen/web/account_health.ex
 +++ b/samen_web/lib/samen/web/account_health.ex
-@@ -558,7 +558,7 @@
-     # fail-safe-empty contract; only this call site gained the canary.
+@@ -563,7 +563,7 @@ defmodule Samen.Web.AccountHealth do
+     # blank the panel.)
      Ash.count!(Mount.resource(billing_mount, Customer), scope: scope)
-
--    metrics = Samen.Web.Billing.Reads.metrics(billing_mount, scope)
-+    metrics = Samen.Web.Billing.Reads.metrics(billing_mount, nil)
-
+ 
+-    {metrics, failed} = Samen.Web.Billing.Reads.metrics_status(billing_mount, scope)
++    {metrics, failed} = Samen.Web.Billing.Reads.metrics_status(billing_mount, nil)
+     if Enum.any?(failed, &(&1 in [:mrr_cents, :active_subs])), do: raise("billing metrics unavailable")
+ 
      now = DateTime.utc_now()
-     sub_query = Ash.Query.new(Mount.resource(billing_mount, Subscription))

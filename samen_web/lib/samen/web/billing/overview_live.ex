@@ -67,7 +67,7 @@ defmodule Samen.Web.Billing.OverviewLive do
   def load(socket, nil) do
     socket
     |> ensure_return_to()
-    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, metrics: nil)
+    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, metrics: nil, metric_errors: [])
     |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
     |> assign(show_new: false, new_form: nil)
     |> assign_new(:delete_error, fn -> nil end)
@@ -77,9 +77,11 @@ defmodule Samen.Web.Billing.OverviewLive do
     mount = socket.assigns.samen_mount
     scope = Mount.scope(mount, org_id)
 
+    {metrics, metric_errors} = Reads.metrics_status(mount, scope)
+
     socket
     |> ensure_return_to()
-    |> assign(no_org: false, org_id: org_id, metrics: Reads.metrics(mount, scope))
+    |> assign(no_org: false, org_id: org_id, metrics: metrics, metric_errors: metric_errors)
     |> assign_new(:show_new, fn -> false end)
     |> assign_new(:delete_error, fn -> nil end)
     |> assign(new_form: new_customer_form(mount, scope))
@@ -89,6 +91,9 @@ defmodule Samen.Web.Billing.OverviewLive do
   # -- A3 CRUD events (list events belong to the ListLive hook) -----------------
 
   @impl true
+  # The kit error state's "Try again" (a failed metric read): re-run the whole load.
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
+
   def handle_event("new_customer", _params, socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
     scope = Mount.scope(mount, org_id)
@@ -183,28 +188,28 @@ defmodule Samen.Web.Billing.OverviewLive do
           </div>
 
           <div class="metrics">
-            <.metric label="MRR" value={dollars((@metrics && @metrics.mrr_cents) || 0)} sub="monthly recurring">
+            <.metric label="MRR" value={dollars((@metrics && @metrics.mrr_cents) || 0)} sub="monthly recurring" error={:mrr_cents in @metric_errors}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Active subscriptions" value={(@metrics && @metrics.active_subs) || 0}>
+            <.metric label="Active subscriptions" value={(@metrics && @metrics.active_subs) || 0} error={:active_subs in @metric_errors}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18" /><path d="M8 15h4M8 12h8" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Outstanding" value={dollars((@metrics && @metrics.outstanding_cents) || 0)} sub="open invoices">
+            <.metric label="Outstanding" value={dollars((@metrics && @metrics.outstanding_cents) || 0)} sub="open invoices" error={:outstanding_cents in @metric_errors}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M9 14l2 2 4-4" /><rect x="3" y="3" width="18" height="18" rx="2" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Collected this month" value={dollars((@metrics && @metrics.collected_cents) || 0)}>
+            <.metric label="Collected this month" value={dollars((@metrics && @metrics.collected_cents) || 0)} error={:collected_cents in @metric_errors}>
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <circle cx="12" cy="12" r="9" /><path d="M9 12l2 2 4-4" />

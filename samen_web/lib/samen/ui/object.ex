@@ -41,6 +41,16 @@ defmodule Samen.UI.Object do
   """
   attr :card, :any, required: true, doc: "a %Samen.Web.ObjectRef.Card{} or {:error, reason}"
 
+  # A FAILED load (an outage, never a denial) is its own chip: "couldn't load", not a missing object.
+  def object_card(%{card: {:error, :unavailable}} = assigns) do
+    ~H"""
+    <span class="obj-card obj-card-na obj-card-unavailable" data-obj-error="unavailable">
+      <span class="obj-na-icon">!</span>
+      <span class="obj-na-text">Couldn't load this object</span>
+    </span>
+    """
+  end
+
   def object_card(%{card: {:error, reason}} = assigns) do
     assigns = assign(assigns, :reason, reason)
 

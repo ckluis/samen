@@ -141,13 +141,24 @@ defmodule Samen.Web.Webhook.Ingress do
     end
   end
 
+  # Best-effort BY DESIGN: the verified event is already durably stored as `received` (the
+  # response is 200 and a replay is idempotent), so a failed enqueue must not turn into a 5xx that
+  # makes the provider retry a stored event. Not silent: logged by name and cause only (never the
+  # payload), so a persistently failing queue is visible.
   defp enqueue(row, repo) do
     IngestWorker.enqueue(row, repo: repo)
   rescue
-    _ -> :ok
+    e ->
+      Samen.Web.Reads.Guard.report(:webhook_enqueue, row_org(row), e)
+      :ok
   catch
-    _, _ -> :ok
+    kind, _reason ->
+      Samen.Web.Reads.Guard.report(:webhook_enqueue, row_org(row), kind)
+      :ok
   end
+
+  defp row_org(%{org_id: org_id}) when is_binary(org_id), do: org_id
+  defp row_org(_), do: nil
 
   # Domain from the normalized event struct — match by module split so we do NOT
   # compile-depend on Samen.Delivery.ProviderEvent (a later WS-C resource).

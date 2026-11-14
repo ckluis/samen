@@ -23,6 +23,7 @@ defmodule Samen.Web.Chat.Reads do
   require Ash.Query
 
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   # A3 read-bounding (WS-A design §1.1 "read! elimination", AC-G1-5): every chat read
   # carries an explicit limit. The inbox and a thread's messages/participants are
@@ -31,33 +32,55 @@ defmodule Samen.Web.Chat.Reads do
   # not a masking hole (PII still resolves through `PiiResolution` per plane).
   @detail_limit 200
 
+  @participant_fields [
+    :party,
+    :principal_kind,
+    :principal_id,
+    :handle,
+    :identity_shared,
+    :role,
+    :full_name,
+    :online_at,
+    :thread_id
+  ]
+
   @doc """
   Read chat threads for `scope`, newest-first. Non-PII (subject/kind/status).
   BOUNDED to `#{@detail_limit}` rows (A3 read-bounding).
   """
-  def threads(mount, scope) do
-    Mount.resource(mount, ChatThread)
-    |> Ash.Query.ensure_selected([:subject, :kind, :status, :disclosure_mode, :context_ref])
-    |> Ash.Query.sort(inserted_at: :desc)
-    |> Ash.Query.limit(@detail_limit)
-    |> Ash.read!(scope: scope)
-  rescue
-    _ -> []
+  def threads(mount, scope), do: threads_result(mount, scope) |> Guard.value([])
+
+  @doc "Tagged sibling of `threads/2` (WP6): `{:ok, rows}` or `{:error, :unavailable | :forbidden}`; an outage is not an empty inbox."
+  def threads_result(mount, scope) do
+    Guard.run(:chat_threads, scope, fn ->
+      Mount.resource(mount, ChatThread)
+      |> Ash.Query.ensure_selected([:subject, :kind, :status, :disclosure_mode, :context_ref])
+      |> Ash.Query.sort(inserted_at: :desc)
+      |> Ash.Query.limit(@detail_limit)
+      |> Ash.read!(scope: scope)
+    end)
   end
 
   @doc "Read a single thread by id for `scope`. `{:ok, thread}` or `:error`. Non-PII."
   def get_thread(mount, scope, id) do
-    Mount.resource(mount, ChatThread)
-    |> Ash.Query.ensure_selected([:subject, :kind, :status, :disclosure_mode, :context_ref])
-    |> Ash.Query.filter(id == ^id)
-    |> Ash.Query.limit(1)
-    |> Ash.read!(scope: scope)
-    |> case do
-      [thread | _] -> {:ok, thread}
-      [] -> :error
+    case get_thread_result(mount, scope, id) do
+      {:ok, thread} -> {:ok, thread}
+      {:error, _} -> :error
     end
-  rescue
-    _ -> :error
+  end
+
+  @doc """
+  Tagged sibling of `get_thread/3` (WP6): `{:ok, thread}`, `{:error, :not_found}` for a missing,
+  malformed-id or denied record, and `{:error, :unavailable}` ONLY when the read FAILED.
+  """
+  def get_thread_result(mount, scope, id) do
+    single_result(:chat_get_thread, scope, id, fn uuid ->
+      Mount.resource(mount, ChatThread)
+      |> Ash.Query.ensure_selected([:subject, :kind, :status, :disclosure_mode, :context_ref])
+      |> Ash.Query.filter(id == ^uuid)
+      |> Ash.Query.limit(1)
+      |> Ash.read!(scope: scope)
+    end)
   end
 
   @doc """
@@ -70,16 +93,20 @@ defmodule Samen.Web.Chat.Reads do
   def messages(mount, scope, thread_id), do: elem(messages_window(mount, scope, thread_id), 0)
 
   @doc "Like `messages/3` but `{messages, earlier_hidden?}` — `true` when older messages were cut."
-  def messages_window(mount, scope, thread_id) do
-    {rows, truncated?} =
-      Mount.resource(mount, ChatMessage)
-      |> Ash.Query.ensure_selected([:body, :sender_party, :kind, :refs, :participant_id, :thread_id])
-      |> Ash.Query.filter(thread_id == ^thread_id)
-      |> Samen.Web.Reads.newest_window(@detail_limit, scope: scope)
+  def messages_window(mount, scope, thread_id),
+    do: messages_window_result(mount, scope, thread_id) |> Guard.value({[], false})
 
-    {resolve_pii(rows, mount, ChatMessage, scope), truncated?}
-  rescue
-    _ -> {[], false}
+  @doc "Tagged sibling of `messages_window/3` (WP6): `{:ok, {messages, earlier_hidden?}}` or `{:error, :unavailable | :forbidden}`; an outage is not an empty conversation."
+  def messages_window_result(mount, scope, thread_id) do
+    Guard.run(:chat_messages_window, scope, fn ->
+      {rows, truncated?} =
+        Mount.resource(mount, ChatMessage)
+        |> Ash.Query.ensure_selected([:body, :sender_party, :kind, :refs, :participant_id, :thread_id])
+        |> Ash.Query.filter(thread_id == ^thread_id)
+        |> Samen.Web.Reads.newest_window(@detail_limit, scope: scope)
+
+      {resolve_pii(rows, mount, ChatMessage, scope), truncated?}
+    end)
   end
 
   @doc """
@@ -89,18 +116,22 @@ defmodule Samen.Web.Chat.Reads do
   subscriber (ADR-012 §3.2 — masking survives the realtime path by construction).
   """
   def get_message(mount, scope, id) do
-    Mount.resource(mount, ChatMessage)
-    |> Ash.Query.ensure_selected([:body, :sender_party, :kind, :refs, :participant_id, :thread_id])
-    |> Ash.Query.filter(id == ^id)
-    |> Ash.Query.limit(1)
-    |> Ash.read!(scope: scope)
-    |> resolve_pii(mount, ChatMessage, scope)
-    |> case do
-      [message | _] -> {:ok, message}
-      [] -> :error
+    case get_message_result(mount, scope, id) do
+      {:ok, message} -> {:ok, message}
+      {:error, _} -> :error
     end
-  rescue
-    _ -> :error
+  end
+
+  @doc "Tagged sibling of `get_message/3` (WP6); same contract as `get_thread_result/3`."
+  def get_message_result(mount, scope, id) do
+    single_result(:chat_get_message, scope, id, fn uuid ->
+      Mount.resource(mount, ChatMessage)
+      |> Ash.Query.ensure_selected([:body, :sender_party, :kind, :refs, :participant_id, :thread_id])
+      |> Ash.Query.filter(id == ^uuid)
+      |> Ash.Query.limit(1)
+      |> Ash.read!(scope: scope)
+      |> resolve_pii(mount, ChatMessage, scope)
+    end)
   end
 
   @doc """
@@ -111,50 +142,38 @@ defmodule Samen.Web.Chat.Reads do
   plane-choice resolve. The non-PII `handle`/`party` are always present.
   BOUNDED to `#{@detail_limit}` rows (A3 read-bounding).
   """
-  def participants(mount, scope, thread_id) do
-    Mount.resource(mount, ChatParticipant)
-    |> Ash.Query.ensure_selected([
-      :party,
-      :principal_kind,
-      :principal_id,
-      :handle,
-      :identity_shared,
-      :role,
-      :full_name,
-      :online_at,
-      :thread_id
-    ])
-    |> Ash.Query.filter(thread_id == ^thread_id)
-    |> Ash.Query.sort(inserted_at: :asc)
-    |> Ash.Query.limit(@detail_limit)
-    |> Ash.read!(scope: scope)
-  rescue
-    _ -> []
+  def participants(mount, scope, thread_id),
+    do: participants_result(mount, scope, thread_id) |> Guard.value([])
+
+  @doc "Tagged sibling of `participants/3` (WP6): `{:ok, rows}` or `{:error, :unavailable | :forbidden}`."
+  def participants_result(mount, scope, thread_id) do
+    Guard.run(:chat_participants, scope, fn ->
+      Mount.resource(mount, ChatParticipant)
+      |> Ash.Query.ensure_selected(@participant_fields)
+      |> Ash.Query.filter(thread_id == ^thread_id)
+      |> Ash.Query.sort(inserted_at: :asc)
+      |> Ash.Query.limit(@detail_limit)
+      |> Ash.read!(scope: scope)
+    end)
   end
 
   @doc "Read a single participant by id for `scope` (raw; identity NOT resolved). `{:ok, p}` or `:error`."
   def get_participant(mount, scope, id) do
-    Mount.resource(mount, ChatParticipant)
-    |> Ash.Query.ensure_selected([
-      :party,
-      :principal_kind,
-      :principal_id,
-      :handle,
-      :identity_shared,
-      :role,
-      :full_name,
-      :online_at,
-      :thread_id
-    ])
-    |> Ash.Query.filter(id == ^id)
-    |> Ash.Query.limit(1)
-    |> Ash.read!(scope: scope)
-    |> case do
-      [participant | _] -> {:ok, participant}
-      [] -> :error
+    case get_participant_result(mount, scope, id) do
+      {:ok, participant} -> {:ok, participant}
+      {:error, _} -> :error
     end
-  rescue
-    _ -> :error
+  end
+
+  @doc "Tagged sibling of `get_participant/3` (WP6); same contract as `get_thread_result/3`."
+  def get_participant_result(mount, scope, id) do
+    single_result(:chat_get_participant, scope, id, fn uuid ->
+      Mount.resource(mount, ChatParticipant)
+      |> Ash.Query.ensure_selected(@participant_fields)
+      |> Ash.Query.filter(id == ^uuid)
+      |> Ash.Query.limit(1)
+      |> Ash.read!(scope: scope)
+    end)
   end
 
   @doc """
@@ -162,14 +181,21 @@ defmodule Samen.Web.Chat.Reads do
   (the masked floor). Non-PII — a policy flag. BOUNDED to 1 row (A3 read-bounding — the
   caller only ever takes the first row).
   """
-  def disclosure_setting(mount, scope) do
-    Mount.resource(mount, ChatDisclosureSetting)
-    |> Ash.Query.ensure_selected([:expose_identity_to_support])
-    |> Ash.Query.limit(1)
-    |> Ash.read!(scope: scope)
-    |> List.first()
-  rescue
-    _ -> nil
+  def disclosure_setting(mount, scope), do: disclosure_setting_result(mount, scope) |> Guard.value(nil)
+
+  @doc """
+  Tagged sibling of `disclosure_setting/2` (WP6): `{:ok, row | nil}`, or `{:error, :unavailable |
+  :forbidden}`. The legacy shim stays on the MASKED floor when the read fails (fail-closed: never
+  discloses identity on a guess), but a screen that SHOWS the setting uses this to say so.
+  """
+  def disclosure_setting_result(mount, scope) do
+    Guard.run(:chat_disclosure_setting, scope, fn ->
+      Mount.resource(mount, ChatDisclosureSetting)
+      |> Ash.Query.ensure_selected([:expose_identity_to_support])
+      |> Ash.Query.limit(1)
+      |> Ash.read!(scope: scope)
+      |> List.first()
+    end)
   end
 
   # -- private -----------------------------------------------------------------
@@ -184,7 +210,27 @@ defmodule Samen.Web.Chat.Reads do
       repo: mount.repo
     )
   rescue
-    _ -> records
+    e ->
+      # Fail-closed (no plaintext downgrade), but not silent: a resolver outage is logged.
+      Guard.report(:chat_resolve_pii, scope, e)
+      records
+  end
+
+  # One record by id: a malformed id is a plain not-found (no read is attempted), an empty
+  # result is not-found, a denial is not-found (no existence oracle), and only a FAILED read is
+  # `:unavailable`. `read` returns the (<= 1 row) list.
+  defp single_result(key, scope, id, read) do
+    with {:ok, uuid} <- Ecto.UUID.cast(id),
+         {:ok, rows} <- Guard.run(key, scope, fn -> read.(uuid) end) do
+      case rows do
+        [record | _] -> {:ok, record}
+        [] -> {:error, :not_found}
+      end
+    else
+      :error -> {:error, :not_found}
+      {:error, :forbidden} -> {:error, :not_found}
+      {:error, :unavailable} = unavailable -> unavailable
+    end
   end
 
   defp actor_of(%Samen.Scope{actor: actor}), do: actor

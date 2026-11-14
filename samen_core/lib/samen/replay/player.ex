@@ -47,6 +47,19 @@ defmodule Samen.Replay.Player do
   """
   @spec list(Samen.Scope.t(), keyword()) :: [map()]
   def list(%Samen.Scope{} = scope, opts \\ []) do
+    case list_result(scope, opts) do
+      {:ok, sessions} -> sessions
+      {:error, _} -> []
+    end
+  end
+
+  @doc """
+  Tagged sibling of `list/2`: `{:ok, sessions}` — an empty list is the honest "no recorded
+  sessions" — or `{:error, :unavailable}` when the read itself FAILED (a DB error, a raise), so a
+  screen can say "could not load" instead of a false-clean "No recorded sessions.".
+  """
+  @spec list_result(Samen.Scope.t(), keyword()) :: {:ok, [map()]} | {:error, :unavailable}
+  def list_result(%Samen.Scope{} = scope, opts \\ []) do
     limit = opts |> Keyword.get(:limit, @list_limit) |> min(@list_limit) |> max(1)
 
     Session
@@ -55,11 +68,11 @@ defmodule Samen.Replay.Player do
     |> Ash.Query.limit(limit)
     |> Ash.read(scope: scope)
     |> case do
-      {:ok, sessions} -> Enum.map(sessions, &meta/1)
-      {:error, _} -> []
+      {:ok, sessions} -> {:ok, Enum.map(sessions, &meta/1)}
+      {:error, _} -> {:error, :unavailable}
     end
   rescue
-    _ -> []
+    _ -> {:error, :unavailable}
   end
 
   @doc """

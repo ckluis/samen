@@ -150,6 +150,7 @@ defmodule Samen.UI.Table do
       |> assign(:filter, assigns.filter || list_state_get(assigns.state, :filter, ""))
       |> assign(:selected, assigns.selected || list_state_get(assigns.state, :selected, MapSet.new()))
       |> assign(:items, page_items(assigns.page))
+      |> assign_page_error()
       |> assign(:prev?, list_prev?(assigns.state, assigns.page))
       |> assign(:row_class_attr, Enum.join(["list-row"] ++ List.wrap(assigns.row_class), " "))
 
@@ -321,6 +322,17 @@ defmodule Samen.UI.Table do
   defp sort_aria(_, _), do: nil
 
   # list_view helpers — STATE plumbing only; these never touch a field value.
+
+  # A page that carries `error: :unavailable` (a ListLive screen whose read failed — WP6) renders
+  # the error state BY DEFAULT: an unwired screen is honest at zero lines. An explicit `error`
+  # attr still wins, and a retry button defaults to the mixin's `list_retry` event.
+  defp assign_page_error(%{page: %{error: :unavailable}} = assigns) do
+    assigns
+    |> assign(:error, assigns.error || Samen.Web.Reads.Guard.message())
+    |> assign(:retry_event, assigns.retry_event || "list_retry")
+  end
+
+  defp assign_page_error(assigns), do: assigns
 
   # A nil / unloaded page (assign_async pending, failed load) is an empty page, not a crash.
   defp page_items(%{items: items}) when is_list(items), do: items

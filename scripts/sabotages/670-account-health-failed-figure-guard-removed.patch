@@ -1,0 +1,32 @@
+# SABOTAGE: Drops the metrics_status guard in AccountHealth.billing_snapshot/2 and support_snapshot/2: a 
+#   single failed figure (MRR, active subs, open tickets) is flattened to a real-looking 0 / $0 
+#   instead of honest absence, while the canary read still passes.
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_account_health_test.exs
+# MUST_FAIL: a failed MRR or active-subs read alone is honest absence, never a real-looking
+# MUST_FAIL: a failed support figure alone is honest absence
+diff --git a/samen_web/lib/samen/web/account_health.ex b/samen_web/lib/samen/web/account_health.ex
+index e800161b..37b3c01c 100644
+--- a/samen_web/lib/samen/web/account_health.ex
++++ b/samen_web/lib/samen/web/account_health.ex
+@@ -564,7 +564,7 @@ defmodule Samen.Web.AccountHealth do
+     Ash.count!(Mount.resource(billing_mount, Customer), scope: scope)
+ 
+     {metrics, failed} = Samen.Web.Billing.Reads.metrics_status(billing_mount, scope)
+-    if Enum.any?(failed, &(&1 in [:mrr_cents, :active_subs])), do: raise("billing metrics unavailable")
++    _ = failed
+ 
+     now = DateTime.utc_now()
+     sub_query = Ash.Query.new(Mount.resource(billing_mount, Subscription))
+@@ -772,8 +772,7 @@ defmodule Samen.Web.AccountHealth do
+ 
+     {metrics, failed} = Samen.Web.Support.Reads.metrics_status(support_mount, scope)
+ 
+-    if Enum.any?(failed, &(&1 in [:open_tickets, :breaching_sla, :solved_this_week])),
+-      do: raise("support metrics unavailable")
++    _ = failed
+ 
+     %{
+       open_tickets: metrics.open_tickets,

@@ -15,6 +15,8 @@ defmodule Samen.Web.Tenant.AnalyticsLive do
   """
   use Phoenix.LiveView
 
+  import Samen.UI, only: [error_state: 1]
+
   alias Samen.Aggregate.Suppressed
   alias Samen.Web.{CurrentOrg, Mount}
   alias Samen.Web.Tenant.AnalyticsReads
@@ -34,20 +36,29 @@ defmodule Samen.Web.Tenant.AnalyticsLive do
 
   @doc false
   def load(socket, nil) do
-    assign(socket, funnel: [], suppressed_count: 0, org_id: nil)
+    assign(socket, funnel: [], suppressed_count: 0, org_id: nil, load_error: nil)
   end
 
   def load(socket, org_id) do
     mount = socket.assigns[:samen_mount]
     scope = Mount.scope(mount, org_id)
-    funnel = AnalyticsReads.funnel(mount, scope)
+    # A FAILED rollup read is the error state (retry), never "No own-org activation data yet".
+    {funnel, load_error} =
+      case AnalyticsReads.funnel_result(mount, scope) do
+        {:ok, funnel} -> {funnel, nil}
+        {:error, :unavailable} -> {[], Samen.Web.Reads.Guard.message()}
+      end
 
     assign(socket,
       funnel: funnel,
       suppressed_count: AnalyticsReads.suppressed_count(funnel),
-      org_id: org_id
+      org_id: org_id,
+      load_error: load_error
     )
   end
+
+  @impl true
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
 
   @impl true
   def render(assigns) do
@@ -60,7 +71,9 @@ defmodule Samen.Web.Tenant.AnalyticsLive do
         re-identified — the framework never un-suppresses, and never exposes an individual.
       </p>
 
-      <p :if={@funnel == []} id="analytics-empty" class="empty">
+      <.error_state :if={@load_error} class="analytics-error" body={@load_error} retry_event="retry_load" />
+
+      <p :if={@funnel == [] and is_nil(@load_error)} id="analytics-empty" class="empty">
         No own-org activation data yet, or analytics is not available for your role.
       </p>
 

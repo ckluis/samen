@@ -40,6 +40,7 @@ defmodule Samen.Web.ObjectRef do
 
   alias Samen.Web.Mount
   alias Samen.Web.ObjectRef.{Card, Catalog, Registry}
+  alias Samen.Web.Reads.Guard
 
   require Ash.Query
 
@@ -49,7 +50,7 @@ defmodule Samen.Web.ObjectRef do
   @type t :: %__MODULE__{key: String.t(), id: String.t(), raw: String.t()}
 
   @typedoc "The resolver's failure reasons. Each renders an inert chip, never plaintext."
-  @type error :: :not_found | :unknown_key | :forbidden
+  @type error :: :not_found | :unknown_key | :forbidden | :unavailable
 
   # A resource key: dotted, lowercase (`crm.person`, `support.ticket`, `freight.driver`).
   @key_rx "[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+"
@@ -130,7 +131,10 @@ defmodule Samen.Web.ObjectRef do
     * `{:error, :not_found}`   — no row for this id under the viewer's org-scope (also the
                                  cross-org case: the row exists for another org → zero rows →
                                  not_found, no existence oracle).
-    * `{:error, :forbidden}`   — a load raised under authorization (fail-safe).
+    * `{:error, :forbidden}`   — the load was refused under authorization (fail-safe).
+    * `{:error, :unavailable}` — the load itself FAILED (an outage, not a denial): the chip says
+                                 "couldn't load", it is not mistaken for a missing/foreign object.
+                                 Only an exception produces it, so it is no existence oracle.
   """
   @spec resolve(Mount.t(), Samen.Scope.t(), t()) :: {:ok, Card.t()} | {:error, error()}
   def resolve(%Mount{} = mount, scope, %__MODULE__{key: key, id: id}) do
@@ -167,16 +171,39 @@ defmodule Samen.Web.ObjectRef do
   # the vault field NEVER leaks: it loads as the token-only `%Masked{}`, and PiiResolution
   # (step 3) resolves it per plane. Same discipline as `Samen.Web.CRM.Reads`.
   defp load_scoped(resource, id, scope) do
-    resource
-    |> Ash.Query.ensure_selected(selectable_attrs(resource))
-    |> Ash.Query.filter(id == ^id)
-    |> Ash.read!(scope: scope)
-    |> case do
-      [record | _] -> {:ok, record}
-      [] -> {:error, :not_found}
+    # The id is whatever the client typed into a ref: a malformed one is "no such object" (the
+    # inert chip), decided BEFORE the query — it must not raise, log an error, or read as an outage.
+    case cast_id(resource, id) do
+      {:ok, id} -> load_cast(resource, id, scope)
+      :error -> {:error, :not_found}
     end
-  rescue
-    _ -> {:error, :forbidden}
+  end
+
+  defp load_cast(resource, id, scope) do
+    case Guard.run(:object_ref_load, scope, fn ->
+           resource
+           |> Ash.Query.ensure_selected(selectable_attrs(resource))
+           |> Ash.Query.filter(id == ^id)
+           |> Ash.read!(scope: scope)
+         end) do
+      {:ok, [record | _]} -> {:ok, record}
+      {:ok, []} -> {:error, :not_found}
+      {:error, :forbidden} -> {:error, :forbidden}
+      {:error, :unavailable} -> {:error, :unavailable}
+    end
+  end
+
+  defp cast_id(resource, id) do
+    case Ash.Resource.Info.attribute(resource, :id) do
+      %{type: type, constraints: constraints} ->
+        case Ash.Type.cast_input(type, id, constraints) do
+          {:ok, value} when not is_nil(value) -> {:ok, value}
+          _ -> :error
+        end
+
+      _ ->
+        {:ok, id}
+    end
   end
 
   # All of the resource's own attribute names (public + private) so the card can render them.
@@ -198,7 +225,10 @@ defmodule Samen.Web.ObjectRef do
 
     resolved
   rescue
-    _ -> record
+    e ->
+      # Fail-closed (stays masked, no plaintext downgrade), but not silent: logged by name and cause.
+      Guard.report(:object_ref_resolve_pii, scope, e)
+      record
   end
 
   defp actor_of(%Samen.Scope{actor: actor}), do: actor

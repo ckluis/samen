@@ -50,6 +50,7 @@ defmodule Samen.Web.Settings.RevealApprovalsLive do
   alias Samen.Reveal.Grants
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
   alias Samen.Web.Settings.Reads
 
   @impl true
@@ -85,6 +86,8 @@ defmodule Samen.Web.Settings.RevealApprovalsLive do
         org_id: org_id,
         user_id: user_id,
         pending: [],
+        pending_failed: false,
+        role_failed: false,
         can_approve?: false,
         approver_role: nil
       )
@@ -92,10 +95,24 @@ defmodule Samen.Web.Settings.RevealApprovalsLive do
     if is_nil(org_id) do
       socket
     else
-      role = approver_role(mount, org_id, user_id)
+      {role, role_failed} = approver_role(mount, org_id, user_id)
+
+      # A FAILED pending read is the error state (retry), never "No pending reveal requests".
+      {pending, pending_failed} =
+        case Guard.run(:settings_reveal_pending, org_id, fn ->
+               case Grants.pending_for_org_result(org_id, repo: mount.repo) do
+                 {:ok, rows} -> rows
+                 {:error, :unavailable} -> raise "pending reveal read unavailable"
+               end
+             end) do
+          {:ok, rows} -> {rows, false}
+          {:error, _} -> {[], true}
+        end
 
       assign(socket,
-        pending: Grants.pending_for_org(org_id, repo: mount.repo),
+        pending: pending,
+        pending_failed: pending_failed,
+        role_failed: role_failed,
         approver_role: role,
         can_approve?: can_approve?(mount, role)
       )
@@ -103,6 +120,9 @@ defmodule Samen.Web.Settings.RevealApprovalsLive do
   end
 
   @impl true
+  def handle_event("retry_load", _params, socket),
+    do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.user_id)}
+
   def handle_event("approve", %{"request" => request_id}, socket) do
     decide(socket, request_id, :approve)
   end
@@ -174,19 +194,20 @@ defmodule Samen.Web.Settings.RevealApprovalsLive do
   defp notice(socket, msg), do: assign(socket, decision_notice: msg)
 
   # The approver's REAL tenant role, resolved from the authenticated principal's Membership
-  # (the InvitationsLive precedent). Fail-closed: no membership → nil → not an approver.
+  # (the InvitationsLive precedent). Fail-closed: no membership → nil → not an approver. Returns
+  # `{role, failed?}`: a FAILED lookup is still fail-closed (no approve buttons) but the screen
+  # says "couldn't check your role" instead of claiming the role is too low.
   defp approver_role(mount, org_id, user_id) when is_binary(org_id) and is_binary(user_id) do
     scope = Mount.scope(mount, org_id)
 
-    case Reads.current_membership(mount, scope, user_id, org_id) do
-      {:ok, %{role: role}} -> role
-      _ -> nil
+    case Reads.current_membership_result(mount, scope, user_id, org_id) do
+      {:ok, %{role: role}} -> {role, false}
+      {:error, :unavailable} -> {nil, true}
+      _ -> {nil, false}
     end
-  rescue
-    _ -> nil
   end
 
-  defp approver_role(_mount, _org_id, _user_id), do: nil
+  defp approver_role(_mount, _org_id, _user_id), do: {nil, false}
 
   # Tenant plane + `:admin`+ rank. The operator (impersonation) plane is read-only, so an
   # operator can never approve their own requests here (they would also be blocked as
@@ -234,8 +255,10 @@ defmodule Samen.Web.Settings.RevealApprovalsLive do
                 Approving and denying are tenant-plane actions.
               </p>
 
+              <.error_state :if={@role_failed} class="role-error" body={Guard.message()} retry_event="retry_load" />
+
               <p
-                :if={not operator_plane?(@samen_mount) and not @can_approve?}
+                :if={not operator_plane?(@samen_mount) and not @can_approve? and not @role_failed}
                 id="reveal-approvals-role-note"
                 style="color:var(--muted)"
               >
@@ -283,7 +306,12 @@ defmodule Samen.Web.Settings.RevealApprovalsLive do
                       <% end %>
                     </td>
                   </tr>
-                  <tr :if={@pending == []}>
+                  <tr :if={@pending_failed} id="reveal-approvals-unavailable">
+                    <td colspan="6">
+                      <.error_state class="pending-error" body={Guard.message()} retry_event="retry_load" />
+                    </td>
+                  </tr>
+                  <tr :if={@pending == [] and not @pending_failed}>
                     <td colspan="6" id="reveal-approvals-empty" style="color:var(--muted)">
                       No pending reveal requests for this org.
                     </td>

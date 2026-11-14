@@ -151,9 +151,13 @@ defmodule Samen.Web.Support.Reads do
   on demo) and looks up `Samen.Web.Tags.names_for/4`. Fails safe to `[]` if the
   host has not mounted the Tags scope — never raises.
   """
-  def ticket_tag_names(mount, scope, ticket_id) do
+  def ticket_tag_names(mount, scope, ticket_id),
+    do: ticket_tag_names_result(mount, scope, ticket_id) |> Guard.value([])
+
+  @doc "Tagged sibling of `ticket_tag_names/3` (WP6): `{:ok, names}` or `{:error, :unavailable | :forbidden}` — a failed read is not 'untagged'."
+  def ticket_tag_names_result(mount, scope, ticket_id) do
     subject_key = Samen.Web.ObjectRef.Catalog.key_for(Mount.resource(mount, Ticket))
-    Samen.Web.Tags.names_for(mount, scope, subject_key, ticket_id)
+    Samen.Web.Tags.names_for_result(mount, scope, subject_key, ticket_id)
   end
 
   @doc "Read conversations (+ PII-resolved messages) for a ticket. BOUNDED."

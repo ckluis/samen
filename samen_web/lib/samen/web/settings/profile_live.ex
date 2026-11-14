@@ -57,7 +57,7 @@ defmodule Samen.Web.Settings.ProfileLive do
   @doc false
   def load(socket, org_id, user_id) do
     mount = socket.assigns.samen_mount
-    assigns = %{org_id: org_id, user_id: user_id, user: nil, form: blank_form()}
+    assigns = %{org_id: org_id, user_id: user_id, user: nil, form: blank_form(), load_error: nil}
 
     socket = assign(socket, assigns)
 
@@ -68,14 +68,19 @@ defmodule Samen.Web.Settings.ProfileLive do
       true ->
         scope = Mount.scope(mount, org_id)
 
-        case Reads.get_user(mount, scope, user_id) do
+        # A FAILED read is the error state (retry), never "No user in context".
+        case Reads.get_user_result(mount, scope, user_id) do
           {:ok, user} -> assign(socket, user: user, form: profile_form(user))
-          {:error, _} -> socket
+          {:error, :not_found} -> socket
+          {:error, :unavailable} -> assign(socket, load_error: Samen.Web.Reads.Guard.message())
         end
     end
   end
 
   @impl true
+  def handle_event("retry_load", _params, socket),
+    do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.user_id)}
+
   def handle_event("save", %{"profile" => params}, socket) do
     %{samen_mount: mount, org_id: org_id, user_id: user_id} = socket.assigns
     scope = Mount.scope(mount, org_id)
@@ -86,6 +91,10 @@ defmodule Samen.Web.Settings.ProfileLive do
          socket
          |> assign(flash_ok: "Profile saved.")
          |> load(org_id, user_id)}
+
+      {:error, :unavailable} ->
+        # The write itself failed (not a refusal): say so, value-free — nothing was saved.
+        {:noreply, assign(socket, flash_ok: nil, save_error: "Couldn't save your profile. Nothing was changed — try again.")}
 
       {:error, _reason} ->
         # An operator-plane plaintext PII write is refused HERE by WriteGuard (the DB
@@ -119,6 +128,11 @@ defmodule Samen.Web.Settings.ProfileLive do
         <%= cond do %>
           <% is_nil(@org_id) -> %>
             <.no_org_card mount={@samen_mount} />
+
+          <% @load_error != nil -> %>
+            <div class="wrap">
+              <.error_state class="profile-error" body={@load_error} retry_event="retry_load" />
+            </div>
 
           <% is_nil(@user_id) or is_nil(@user) -> %>
             <div class="wrap">

@@ -111,8 +111,11 @@ defmodule Samen.Web.FirstRun do
 
     :ok
   rescue
-    # Belt: the emit is best-effort — a capture path fault never touches the caller.
-    _ -> :ok
+    # Belt: the emit is best-effort — a capture path fault never touches the caller (the create
+    # already succeeded). Not silent: logged by name and cause only.
+    e ->
+      Samen.Web.Reads.Guard.report(:first_run_emit, org_id, e)
+      :ok
   end
 
   @doc """

@@ -598,6 +598,48 @@ defmodule Samen.Web.CRMAccountHealthTest do
     assert snap.health.band == :unknown
   end
 
+  test "snapshot/2 FAILED FIGURE (WP6 review): a failed MRR or active-subs read alone is honest absence, never a real-looking $0 / 0" do
+    mount = build_mount(:crm)
+    org_id = Ash.UUID.generate()
+    seed_subscription(org_id, amount_cents: 19_900, status: :active)
+    scope = Samen.Web.Mount.scope(mount, org_id)
+
+    # The canary read (customer count) still SUCCEEDS here: only the one figure's own guarded read
+    # fails, which `Billing.Reads.metrics/2` would flatten into a plausible 0.
+    for figure <- [:billing_metric_mrr, :billing_metric_active_subs] do
+      inject_read_faults([figure])
+      {snap, _log} = ExUnit.CaptureLog.with_log(fn -> AccountHealth.snapshot(mount, scope) end)
+
+      assert snap.billing_available? == false, "#{figure} failed but the snapshot reported billing as available"
+      assert snap.mrr_cents == nil
+      assert snap.active_subs == nil
+      refute snap.mrr_cents == 0
+      clear_read_faults()
+    end
+
+    # POSITIVE CONTROL: with no fault the same org reports its real $199.00 and one active sub.
+    healthy = AccountHealth.snapshot(mount, scope)
+    assert healthy.billing_available? == true
+    assert healthy.mrr_cents == 19_900
+    assert healthy.active_subs == 1
+  end
+
+  test "snapshot/2 FAILED FIGURE (WP6 review): a failed support figure alone is honest absence, never '0 open tickets'" do
+    mount = build_mount(:crm)
+    org_id = Ash.UUID.generate()
+    scope = Samen.Web.Mount.scope(mount, org_id)
+
+    inject_read_faults([:support_metric_open_tickets])
+    {snap, _log} = ExUnit.CaptureLog.with_log(fn -> AccountHealth.snapshot(mount, scope) end)
+    assert snap.support_available? == false
+    assert snap.open_tickets == nil
+    clear_read_faults()
+
+    healthy = AccountHealth.snapshot(mount, scope)
+    assert healthy.support_available? == true
+    assert healthy.open_tickets == 0
+  end
+
   test "ANTI-TAUTOLOGY: the degraded-read scenario is real — the SAME org with a REAL scope reports its REAL $199.00" do
     mount = build_mount(:crm)
     org_id = Ash.UUID.generate()

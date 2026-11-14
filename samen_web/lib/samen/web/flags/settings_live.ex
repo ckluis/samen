@@ -96,11 +96,15 @@ defmodule Samen.Web.Flags.SettingsLive do
   defp open_edit(socket, id) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
 
-    case Reads.get_flag(mount, Mount.scope(mount, org_id), id) do
-      nil ->
+    case Reads.get_flag_result(mount, Mount.scope(mount, org_id), id) do
+      {:error, :not_found} ->
         assign(socket, edit_flag: nil, ramp_form: nil)
 
-      flag ->
+      # A FAILED read is not "no such flag": say so, keep the list.
+      {:error, :unavailable} ->
+        assign(socket, edit_flag: nil, ramp_form: nil, flag_error: Samen.Web.Reads.Guard.message())
+
+      {:ok, flag} ->
         assign(socket,
           edit_flag: flag,
           ramp_form: to_form(%{"rollout_pct" => flag.rollout_pct}, as: :ramp)

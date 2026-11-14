@@ -85,7 +85,9 @@ defmodule Samen.Web.Chat.Identity do
   rescue
     # Fail-safe: keep the raw (still-masked-for-operator) participant, never a plaintext
     # downgrade and never a raise to the caller.
-    _ -> participant
+    e ->
+      Samen.Web.Reads.Guard.report(:chat_resolve_participant, scope, e)
+      participant
   end
 
   @doc """

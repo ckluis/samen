@@ -48,6 +48,7 @@ defmodule Samen.Web.Billing.SettingsLive do
   alias Samen.Web.CurrentOrg
   alias Samen.Web.ListState
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
   alias Samen.Web.Page
 
   alias Samen.Web.Billing.Reads
@@ -96,9 +97,9 @@ defmodule Samen.Web.Billing.SettingsLive do
     |> ensure_return_to()
     |> ensure_current_uri()
     |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, configured: false)
-    |> assign(plans_with_prices: [], customer: nil, recent_invoices: %Page{})
+    |> assign(plans_with_prices: [], customer: nil, recent_invoices: %Page{}, section_errors: [])
     |> assign(checkout_error: nil, portal_error: nil)
-    |> assign(billing_actor: nil, billing_admin?: false)
+    |> assign(billing_actor: nil, billing_admin?: false, billing_actor_failed?: false)
   end
 
   def load(socket, org_id) do
@@ -108,40 +109,59 @@ defmodule Samen.Web.Billing.SettingsLive do
     # PP-5: the REAL per-org billing actor (role read from the caller's Membership, NOT the
     # synthetic `:member` Mount.scope default). This is the actor billing WRITES run under;
     # the admin gate is enforced BOTH here (affordance) and in the core BY CONSTRUCTION.
-    actor = billing_actor(mount, org_id, socket.assigns[:user_id])
+    {actor, actor_failed?} =
+      case billing_actor(mount, org_id, socket.assigns[:user_id]) do
+        {:ok, actor} -> {actor, false}
+        {:error, :not_found} -> {nil, false}
+        # The role lookup FAILED (an outage): still fail CLOSED (no actor, no admin affordances, the
+        # write refuses), but the screen says it could not check — it must not tell an admin that
+        # only an admin can do this.
+        {:error, :unavailable} -> {nil, true}
+      end
 
     socket
     |> ensure_return_to()
     |> ensure_current_uri()
     |> assign(no_org: false, org_id: org_id, configured: configured)
-    |> assign(billing_actor: actor, billing_admin?: admin_actor?(actor))
+    |> assign(billing_actor: actor, billing_admin?: admin_actor?(actor), billing_actor_failed?: actor_failed?)
     |> assign_new(:checkout_error, fn -> nil end)
     |> assign_new(:portal_error, fn -> nil end)
     |> load_billing(mount, scope, configured)
   end
 
   defp load_billing(socket, _mount, _scope, false) do
-    assign(socket, plans_with_prices: [], customer: nil, recent_invoices: %Page{})
+    assign(socket, plans_with_prices: [], customer: nil, recent_invoices: %Page{}, section_errors: [])
   end
 
   defp load_billing(socket, mount, scope, true) do
+    # Each section fails on its own (`section_errors`): a failed plans read is not "No plans yet",
+    # a failed customer read is not "Available after your first subscription", and a failed
+    # invoices read is not "No invoices yet".
+    plans = Reads.plans_with_prices_result(mount, scope)
+    customers = Reads.customers_result(mount, scope)
+    invoices = Reads.invoices_page(mount, scope, %ListState{page_size: 5, sort: {:due_date, :desc}})
+
     assign(socket,
-      plans_with_prices: Reads.plans_with_prices(mount, scope),
-      customer: Reads.customers(mount, scope) |> List.first(),
-      recent_invoices:
-        Reads.invoices_page(mount, scope, %ListState{page_size: 5, sort: {:due_date, :desc}})
+      plans_with_prices: Guard.value(plans, []),
+      customer: customers |> Guard.value([]) |> List.first(),
+      recent_invoices: invoices,
+      section_errors:
+        for({key, failed?} <- [plans: Guard.unavailable?(plans), customer: Guard.unavailable?(customers), invoices: Guard.unavailable?(invoices)], failed?, do: key)
     )
   end
 
   # -- events --------------------------------------------------------------------
 
+  # The kit error state's "Try again" (a failed plans / customer / invoices read).
   @impl true
+  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
+
   def handle_event("checkout", %{"plan_id" => plan_id}, socket) do
     cond do
       # PP-5: subscribing is a billing WRITE — admin+ only, by ROLE (not plane). The UI
       # affordance is already role-gated; this refuses a member/viewer who forces the event.
       not socket.assigns.billing_admin? ->
-        {:noreply, assign(socket, checkout_error: admin_only_copy())}
+        {:noreply, assign(socket, checkout_error: refusal_copy(socket))}
 
       true ->
         case find_plan_price_ref(socket, plan_id) do
@@ -177,7 +197,7 @@ defmodule Samen.Web.Billing.SettingsLive do
     cond do
       # PP-5: opening the portal changes the card / cancels the subscription — admin+ only.
       not socket.assigns.billing_admin? ->
-        {:noreply, assign(socket, portal_error: admin_only_copy())}
+        {:noreply, assign(socket, portal_error: refusal_copy(socket))}
 
       true ->
         case socket.assigns.customer do
@@ -209,11 +229,15 @@ defmodule Samen.Web.Billing.SettingsLive do
   @admin_only_copy "Only an admin can manage billing for this workspace."
 
   # PP-5 (Batch 2 TENANT-ROLE): the REAL per-org billing actor. Resolves the caller's
-  # `Membership` role in this org (the SAME `Reads.current_membership` seam the api-key
-  # MINT handler uses to gate on the real role) and builds a tenant-plane actor carrying
-  # that role — NEVER the synthetic `:member` of `Mount.scope/2`. `nil` when no user is in
-  # context or the user holds no membership in this org → billing writes FAIL CLOSED
-  # (affordance hidden, handler refuses, and the core function refuses by construction).
+  # `Membership` role in this org (`Reads.current_membership_result`, the tagged sibling of the
+  # seam the api-key MINT handler uses to gate on the real role) and builds a tenant-plane actor
+  # carrying that role — NEVER the synthetic `:member` of `Mount.scope/2`.
+  #
+  #   * `{:ok, actor}` — the real membership role;
+  #   * `{:error, :not_found}` — no user in context or no membership in this org: no authority;
+  #   * `{:error, :unavailable}` — the LOOKUP FAILED (an outage). Equally no authority — billing
+  #     writes FAIL CLOSED either way (affordance hidden, handler refuses, and the core function
+  #     refuses by construction) — but the screen shows an error state, not "only an admin can".
   #
   # The billing mount's own namespace is a Billing scope, which does not materialize
   # `User`/`Membership`; the host wires the identity scope onto the mount via the
@@ -224,18 +248,23 @@ defmodule Samen.Web.Billing.SettingsLive do
     identity = identity_mount(mount)
     scope = Mount.scope(identity, org_id)
 
-    case SettingsReads.current_membership(identity, scope, user_id, org_id) do
+    case SettingsReads.current_membership_result(identity, scope, user_id, org_id) do
       {:ok, membership} ->
-        %{id: user_id, org_id: org_id, role: membership.role, kind: :tenant, plane: :tenant}
+        {:ok, %{id: user_id, org_id: org_id, role: membership.role, kind: :tenant, plane: :tenant}}
 
-      _ ->
-        nil
+      {:error, :unavailable} = unavailable ->
+        unavailable
+
+      {:error, _not_found_or_forbidden} ->
+        {:error, :not_found}
     end
   rescue
-    _ -> nil
+    e ->
+      Guard.report(:billing_actor, org_id, e)
+      {:error, :unavailable}
   end
 
-  defp billing_actor(_mount, _org_id, _user_id), do: nil
+  defp billing_actor(_mount, _org_id, _user_id), do: {:error, :not_found}
 
   # Derive an Identity-kind mount from the billing mount + the host's `:identity_namespace`
   # label (same repo + plane), so `User`/`Membership` resolve off the identity scope. No
@@ -255,6 +284,12 @@ defmodule Samen.Web.Billing.SettingsLive do
   defp admin_actor?(_), do: false
 
   defp admin_only_copy, do: @admin_only_copy
+
+  defp refusal_copy(socket) do
+    if socket.assigns[:billing_actor_failed?],
+      do: "We couldn't check your role right now, so nothing was changed. Try again.",
+      else: admin_only_copy()
+  end
 
   defp ensure_return_to(socket) do
     if Map.has_key?(socket.assigns, :return_to), do: socket, else: assign(socket, return_to: nil)
@@ -408,6 +443,7 @@ defmodule Samen.Web.Billing.SettingsLive do
               <div :if={@portal_error} class="card form-error" id="portal-error" style="padding:10px 14px;color:var(--bad, #b91c1c);font-size:12px;margin-bottom:14px">
                 {@portal_error}
               </div>
+              <.error_state :if={@billing_actor_failed?} class="billing-role-error" body="We couldn't check your role right now. Billing actions are hidden until we can." retry_event="retry_load" />
 
               <div id="plan-picker">
                 <div class="gtitle">
@@ -415,8 +451,10 @@ defmodule Samen.Web.Billing.SettingsLive do
                   <span class="lane">· hosted checkout — samen never handles card data</span>
                 </div>
 
+                <.error_state :if={:plans in @section_errors} class="plan-picker-error" body={Guard.message()} retry_event="retry_load" />
+
                 <.empty_state
-                  :if={@plans_with_prices == []}
+                  :if={@plans_with_prices == [] and :plans not in @section_errors}
                   class="plan-picker-empty"
                   icon="◫"
                   title="No plans yet"
@@ -447,7 +485,7 @@ defmodule Samen.Web.Billing.SettingsLive do
                       Subscribe
                     </.button>
                     <div
-                      :if={writable?(@samen_mount) and not @billing_admin?}
+                      :if={writable?(@samen_mount) and not @billing_admin? and not @billing_actor_failed?}
                       class="billing-admin-only"
                       style="margin-top:12px;font-size:12px;color:var(--muted)"
                     >
@@ -471,10 +509,13 @@ defmodule Samen.Web.Billing.SettingsLive do
                 >
                   Manage payment method
                 </.button>
-                <span :if={writable?(@samen_mount) and @billing_admin? and not payment_method_available?(@customer)} style="font-size:12px;color:var(--muted)">
+                <span :if={writable?(@samen_mount) and @billing_admin? and not payment_method_available?(@customer) and :customer not in @section_errors} style="font-size:12px;color:var(--muted)">
                   Available after your first subscription.
                 </span>
-                <span :if={writable?(@samen_mount) and not @billing_admin?} class="billing-admin-only" style="font-size:12px;color:var(--muted)">
+                <span :if={:customer in @section_errors} class="payment-method-unavailable" style="font-size:12px;color:var(--muted)">
+                  {Guard.message()}
+                </span>
+                <span :if={writable?(@samen_mount) and not @billing_admin? and not @billing_actor_failed?} class="billing-admin-only" style="font-size:12px;color:var(--muted)">
                   Only an admin can manage the payment method.
                 </span>
               </div>
@@ -486,8 +527,10 @@ defmodule Samen.Web.Billing.SettingsLive do
                   <a href={"#{billing_path(@return_to)}/invoices?org=#{@org_id}"} class="lane" id="view-all-invoices">View all invoices →</a>
                 </div>
 
+                <.error_state :if={:invoices in @section_errors} class="settings-invoice-error" body={Guard.message()} retry_event="retry_load" />
+
                 <.empty_state
-                  :if={@recent_invoices.items == []}
+                  :if={@recent_invoices.items == [] and :invoices not in @section_errors}
                   class="settings-invoice-empty"
                   icon="☰"
                   title="No invoices yet"

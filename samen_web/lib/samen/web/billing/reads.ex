@@ -38,6 +38,7 @@ defmodule Samen.Web.Billing.Reads do
   require Ash.Query
 
   alias Samen.Web.Mount
+  alias Samen.Web.Reads.Guard
 
   # Bounded lookup reads (form selects, join maps). Single-org fan-outs, not hot lists.
   @detail_limit 200
@@ -58,15 +59,18 @@ defmodule Samen.Web.Billing.Reads do
   BOUNDED to #{@detail_limit} rows (A3 read-bounding) — this is the lookup read (the
   invoice form's customer select / the subscription list's customer-name join).
   """
-  def customers(mount, scope) do
+  def customers(mount, scope), do: customers_result(mount, scope) |> Guard.value([])
+
+  @doc "Tagged sibling of `customers/2` (WP6): `{:ok, rows}` or `{:error, :unavailable | :forbidden}`; an outage is not an empty list."
+  def customers_result(mount, scope), do: Guard.run(:billing_customers, scope, fn -> fetch_customers(mount, scope) end)
+
+  defp fetch_customers(mount, scope) do
     Mount.resource(mount, Customer)
     |> Ash.Query.ensure_selected([:billing_name, :billing_email, :status, :currency, :custom])
     |> Ash.Query.sort(inserted_at: :asc)
     |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
     |> resolve_pii(mount, Customer, scope)
-  rescue
-    _ -> []
   end
 
   @doc """
@@ -74,7 +78,12 @@ defmodule Samen.Web.Billing.Reads do
   BOUNDED to #{@detail_limit} rows; the Overview page itself reads through the
   paginated `subscriptions_page/3`.
   """
-  def subscriptions(mount, scope) do
+  def subscriptions(mount, scope), do: subscriptions_result(mount, scope) |> Guard.value([])
+
+  @doc "Tagged sibling of `subscriptions/2` (WP6); same contract as `customers_result/2`."
+  def subscriptions_result(mount, scope), do: Guard.run(:billing_subscriptions, scope, fn -> fetch_subscriptions(mount, scope) end)
+
+  defp fetch_subscriptions(mount, scope) do
     subs =
       Mount.resource(mount, Subscription)
       |> Ash.Query.ensure_selected([:status, :customer_id, :plan_id, :current_period_start, :current_period_end])
@@ -83,8 +92,6 @@ defmodule Samen.Web.Billing.Reads do
       |> Ash.read!(scope: scope)
 
     join_subscriptions(subs, mount, scope)
-  rescue
-    _ -> []
   end
 
   @doc """
@@ -96,6 +103,10 @@ defmodule Samen.Web.Billing.Reads do
   the page is EMPTY — never unbounded, never a plaintext downgrade.
   """
   def subscriptions_page(mount, scope, state) do
+    Guard.page(:billing_subscriptions_page, scope, state, fn -> fetch_subscriptions_page(mount, scope, state) end)
+  end
+
+  defp fetch_subscriptions_page(mount, scope, state) do
     page =
       Mount.resource(mount, Subscription)
       |> Ash.Query.ensure_selected([
@@ -108,8 +119,6 @@ defmodule Samen.Web.Billing.Reads do
       |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [])
 
     %{page | items: join_subscriptions(page.items, mount, scope)}
-  rescue
-    _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(state.page_size)}
   end
 
   @doc """
@@ -117,7 +126,12 @@ defmodule Samen.Web.Billing.Reads do
   BOUNDED to #{@detail_limit} rows; the Invoices page itself reads through the
   paginated `invoices_page/3`.
   """
-  def invoices(mount, scope) do
+  def invoices(mount, scope), do: invoices_result(mount, scope) |> Guard.value([])
+
+  @doc "Tagged sibling of `invoices/2` (WP6); same contract as `customers_result/2`."
+  def invoices_result(mount, scope), do: Guard.run(:billing_invoices, scope, fn -> fetch_invoices(mount, scope) end)
+
+  defp fetch_invoices(mount, scope) do
     invs =
       Mount.resource(mount, Invoice)
       |> Ash.Query.ensure_selected([
@@ -135,8 +149,6 @@ defmodule Samen.Web.Billing.Reads do
       |> Ash.read!(scope: scope)
 
     join_invoices(invs, mount, scope)
-  rescue
-    _ -> []
   end
 
   @doc """
@@ -152,6 +164,10 @@ defmodule Samen.Web.Billing.Reads do
   `Samen.Web.Billing.InvoicesLive`'s render).
   """
   def invoices_page(mount, scope, state) do
+    Guard.page(:billing_invoices_page, scope, state, fn -> fetch_invoices_page(mount, scope, state) end)
+  end
+
+  defp fetch_invoices_page(mount, scope, state) do
     page =
       Mount.resource(mount, Invoice)
       |> Ash.Query.ensure_selected([
@@ -170,22 +186,23 @@ defmodule Samen.Web.Billing.Reads do
       |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:currency])
 
     %{page | items: join_invoices(page.items, mount, scope)}
-  rescue
-    _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(state.page_size)}
   end
 
   @doc """
   Read Tier-0 billing plans for `scope`. Non-PII config rows. BOUNDED to
   #{@detail_limit} rows; the Plans page itself reads through `plans_page/3`.
   """
-  def plans(mount, scope) do
+  def plans(mount, scope), do: plans_result(mount, scope) |> Guard.value([])
+
+  @doc "Tagged sibling of `plans/2` (WP6); same contract as `customers_result/2`."
+  def plans_result(mount, scope), do: Guard.run(:billing_plans, scope, fn -> fetch_plans(mount, scope) end)
+
+  defp fetch_plans(mount, scope) do
     Mount.resource(mount, Plan)
     |> Ash.Query.ensure_selected([:name, :label, :description, :interval, :enabled, :features])
     |> Ash.Query.sort(inserted_at: :asc)
     |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
-  rescue
-    _ -> []
   end
 
   @doc """
@@ -203,26 +220,30 @@ defmodule Samen.Web.Billing.Reads do
   byte-identical to pre-T37h behavior.
   """
   def plans_page(mount, scope, state) do
+    Guard.page(:billing_plans_page, scope, state, fn -> fetch_plans_page(mount, scope, state) end)
+  end
+
+  defp fetch_plans_page(mount, scope, state) do
     base = Mount.resource(mount, Plan)
     base = if state.show_archived, do: Ash.Query.for_read(base, :archived), else: base
 
     base
     |> Ash.Query.ensure_selected([:name, :label, :description, :interval, :enabled, :features, :archived_at])
     |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:name, :label])
-  rescue
-    _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(state.page_size)}
   end
 
   @doc "Read plans with their prices joined: `[%{plan: plan, prices: [price]}]`. BOUNDED."
-  def plans_with_prices(mount, scope) do
-    all_plans = plans(mount, scope)
-    prices = prices_by_plan(mount, scope)
+  def plans_with_prices(mount, scope), do: plans_with_prices_result(mount, scope) |> Guard.value([])
 
-    Enum.map(all_plans, fn plan ->
-      %{plan: plan, prices: Map.get(prices, plan.id, [])}
+  @doc "Tagged sibling of `plans_with_prices/2` (WP6); same contract as `customers_result/2`."
+  def plans_with_prices_result(mount, scope) do
+    Guard.run(:billing_plans_with_prices, scope, fn ->
+      prices = fetch_prices_by_plan(mount, scope)
+
+      Enum.map(fetch_plans(mount, scope), fn plan ->
+        %{plan: plan, prices: Map.get(prices, plan.id, [])}
+      end)
     end)
-  rescue
-    _ -> []
   end
 
   @doc """
@@ -234,7 +255,12 @@ defmodule Samen.Web.Billing.Reads do
   already is (non-PII, public?: true on the Price blueprint), referenced under its
   CURRENT name per the billing-blueprint collision-group rule (T106 owns the rename).
   """
-  def prices_by_plan(mount, scope) do
+  def prices_by_plan(mount, scope), do: prices_by_plan_result(mount, scope) |> Guard.value(%{})
+
+  @doc "Tagged sibling of `prices_by_plan/2` (WP6); same contract as `customers_result/2`."
+  def prices_by_plan_result(mount, scope), do: Guard.run(:billing_prices_by_plan, scope, fn -> fetch_prices_by_plan(mount, scope) end)
+
+  defp fetch_prices_by_plan(mount, scope) do
     # ADR-036 §4.5(3): unit_amount_cents/currency were dropped by the H1 Money
     # migration; unit_amount is now the money_with_currency composite (sortable
     # via Postgres's default composite comparison — same-currency price lists
@@ -245,8 +271,6 @@ defmodule Samen.Web.Billing.Reads do
     |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
     |> Enum.group_by(& &1.plan_id)
-  rescue
-    _ -> %{}
   end
 
   @doc """
@@ -256,12 +280,25 @@ defmodule Samen.Web.Billing.Reads do
   subscription/invoice `read!`s).
   """
   def metrics(mount, scope) do
-    %{
-      active_subs: count_active_subscriptions(mount, scope),
-      mrr_cents: compute_mrr(mount, scope),
-      outstanding_cents: outstanding_cents(mount, scope),
-      collected_cents: collected_cents(mount, scope)
-    }
+    {stats, _failed} = metrics_status(mount, scope)
+    stats
+  end
+
+  @doc """
+  `metrics/2` plus WHICH of its four numbers could not be read (WP6): `{stats, failed}` where
+  `failed` is a subset of `[:active_subs, :mrr_cents, :outstanding_cents, :collected_cents]`. A
+  failed number is `0` in `stats` (the legacy value) but is named in `failed`, so its tile shows
+  an error instead of a confident `$0.00`. Each number is its own guarded read.
+  """
+  def metrics_status(mount, scope) do
+    parts = [
+      active_subs: Guard.run(:billing_metric_active_subs, scope, fn -> count_active_subscriptions(mount, scope) end),
+      mrr_cents: Guard.run(:billing_metric_mrr, scope, fn -> compute_mrr(mount, scope) end),
+      outstanding_cents: Guard.run(:billing_metric_outstanding, scope, fn -> outstanding_cents(mount, scope) end),
+      collected_cents: Guard.run(:billing_metric_collected, scope, fn -> collected_cents(mount, scope) end)
+    ]
+
+    split_status(parts)
   end
 
   @doc """
@@ -269,20 +306,37 @@ defmodule Samen.Web.Billing.Reads do
   outstanding_cents, all DB aggregates (bounded by construction).
   """
   def invoice_metrics(mount, scope) do
+    {stats, _failed} = invoice_metrics_status(mount, scope)
+    stats
+  end
+
+  @doc "`invoice_metrics/2` plus the keys that could not be read (WP6); same contract as `metrics_status/2`."
+  def invoice_metrics_status(mount, scope) do
     now = DateTime.utc_now()
 
-    %{
-      count: count_resource(Mount.resource(mount, Invoice), scope),
+    parts = [
+      count: Guard.run(:billing_invoice_metric_count, scope, fn -> count_resource(Mount.resource(mount, Invoice), scope) end),
       paid:
-        Mount.resource(mount, Invoice)
-        |> Ash.Query.filter(status == :paid)
-        |> count_resource(scope),
+        Guard.run(:billing_invoice_metric_paid, scope, fn ->
+          Mount.resource(mount, Invoice)
+          |> Ash.Query.filter(status == :paid)
+          |> count_resource(scope)
+        end),
       overdue:
-        Mount.resource(mount, Invoice)
-        |> Ash.Query.filter(status == :open and due_date < ^now)
-        |> count_resource(scope),
-      outstanding_cents: outstanding_cents(mount, scope)
-    }
+        Guard.run(:billing_invoice_metric_overdue, scope, fn ->
+          Mount.resource(mount, Invoice)
+          |> Ash.Query.filter(status == :open and due_date < ^now)
+          |> count_resource(scope)
+        end),
+      outstanding_cents: Guard.run(:billing_metric_outstanding, scope, fn -> outstanding_cents(mount, scope) end)
+    ]
+
+    split_status(parts)
+  end
+
+  defp split_status(parts) do
+    {Map.new(parts, fn {key, result} -> {key, Guard.value(result, 0)} end),
+     for({key, result} <- parts, Guard.unavailable?(result), do: key)}
   end
 
   # -- A3 write side (sanctioned defaults only) ---------------------------------
@@ -369,28 +423,34 @@ defmodule Samen.Web.Billing.Reads do
   price (ADR-051 D2: money is mirrored from the provider, never computed here). Non-PII.
   BOUNDED to #{@detail_limit} rows. On any read error the list is EMPTY.
   """
-  def usage(mount, scope) do
+  def usage(mount, scope), do: usage_result(mount, scope) |> Guard.value([])
+
+  @doc "Tagged sibling of `usage/2` (WP6); same contract as `customers_result/2`."
+  def usage_result(mount, scope), do: Guard.run(:billing_usage, scope, fn -> fetch_usage(mount, scope) end)
+
+  defp fetch_usage(mount, scope) do
     Mount.resource(mount, Usage)
     |> Ash.Query.ensure_selected([:metric, :quantity, :reported_quantity, :period_start, :period_end, :subscription_id])
     |> Ash.Query.sort(period_start: :desc, metric: :asc)
     |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
-  rescue
-    _ -> []
   end
 
   @doc """
   Read the Tier-0 feature entitlements for `scope` (non-PII config rows). BOUNDED to
   #{@detail_limit} rows. On any read error the list is EMPTY.
   """
-  def entitlements(mount, scope) do
+  def entitlements(mount, scope), do: entitlements_result(mount, scope) |> Guard.value([])
+
+  @doc "Tagged sibling of `entitlements/2` (WP6); same contract as `customers_result/2`."
+  def entitlements_result(mount, scope), do: Guard.run(:billing_entitlements, scope, fn -> fetch_entitlements(mount, scope) end)
+
+  defp fetch_entitlements(mount, scope) do
     Mount.resource(mount, Entitlement)
     |> Ash.Query.ensure_selected([:feature, :granted, :expires_at, :subscription_id, :plan_id])
     |> Ash.Query.sort(inserted_at: :asc)
     |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
-  rescue
-    _ -> []
   end
 
   @doc """
@@ -604,9 +664,9 @@ defmodule Samen.Web.Billing.Reads do
   end
 
   defp join_subscriptions(subs, mount, scope) do
-    custs_by_id = customers(mount, scope) |> Map.new(&{&1.id, &1})
-    plans_by_id = plans(mount, scope) |> Map.new(&{&1.id, &1})
-    prices = prices_by_plan(mount, scope)
+    custs_by_id = fetch_customers(mount, scope) |> Map.new(&{&1.id, &1})
+    plans_by_id = fetch_plans(mount, scope) |> Map.new(&{&1.id, &1})
+    prices = fetch_prices_by_plan(mount, scope)
 
     Enum.map(subs, fn sub ->
       sub
@@ -632,7 +692,7 @@ defmodule Samen.Web.Billing.Reads do
   end
 
   defp join_invoices(invs, mount, scope) do
-    custs_by_id = customers(mount, scope) |> Map.new(&{&1.id, &1})
+    custs_by_id = fetch_customers(mount, scope) |> Map.new(&{&1.id, &1})
 
     Enum.map(invs, fn inv ->
       Map.put(inv, :__customer__, Map.get(custs_by_id, inv.customer_id))
@@ -647,7 +707,10 @@ defmodule Samen.Web.Billing.Reads do
       repo: mount.repo
     )
   rescue
-    _ -> records
+    e ->
+      # Fail-closed (no plaintext downgrade), but not silent: a resolver outage is logged.
+      Guard.report(:billing_resolve_pii, scope, e)
+      records
   end
 
   defp actor_of(%Samen.Scope{actor: actor}), do: actor
@@ -680,8 +743,6 @@ defmodule Samen.Web.Billing.Reads do
 
       acc + subs_on_plan * Samen.Type.Money.cents(price.unit_amount)
     end)
-  rescue
-    _ -> 0
   end
 
   defp outstanding_cents(mount, scope) do
@@ -699,15 +760,9 @@ defmodule Samen.Web.Billing.Reads do
     |> sum_resource(:amount_paid_cents, scope)
   end
 
-  defp count_resource(resource_or_query, scope) do
-    Ash.count!(resource_or_query, scope: scope)
-  rescue
-    _ -> 0
-  end
+  # Raising on purpose: every caller is inside a `Guard.run/3` (a failed aggregate is an error
+  # tile, never a confident zero).
+  defp count_resource(resource_or_query, scope), do: Ash.count!(resource_or_query, scope: scope)
 
-  defp sum_resource(query, field, scope) do
-    Ash.sum!(query, field, scope: scope) || 0
-  rescue
-    _ -> 0
-  end
+  defp sum_resource(query, field, scope), do: Ash.sum!(query, field, scope: scope) || 0
 end
