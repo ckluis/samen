@@ -53,9 +53,9 @@ defmodule Samen.Scopes.Primitives.SearchIndexGuard do
   @doc """
   Returns the list of PII-declared field names (as atoms) for a resource module.
 
-  Returns `[]` if the resource has no PII declarations or if introspection fails
-  (fail-open for introspection; the red path test validates the fail-closed path
-  directly).
+  Returns `[]` only when the resource genuinely declares no PII. A module whose declarations cannot be
+  introspected RAISES (fail closed): `assert_no_pii_column/2` must refuse the index registration, never read
+  "cannot introspect" as "declares no PII".
   """
   def get_pii_fields(resource_module) do
     # No rescue: a module whose PII declarations cannot be introspected must REFUSE the index registration. The old

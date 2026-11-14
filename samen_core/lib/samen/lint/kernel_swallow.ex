@@ -37,9 +37,6 @@ defmodule Samen.Lint.KernelSwallow do
     {"samen_core/lib/samen/fleet/crypto.ex", :verify_ed25519} =>
       {1,
        ":crypto.verify raises for a malformed public key or signature (wrong size/type); a signature that cannot be verified is not valid, so `false` (reject) is the exact answer, never an accept"},
-    {"samen_core/lib/samen/files.ex", :ensure_loaded} =>
-      {1,
-       "Map.get/2 plus a struct update on an Ash record that fills a missing org_id; it raises only for a non-map, and returns the record unchanged — it reads nothing and decides nothing"},
     {"samen_core/lib/samen/observability/failure.ex", :report} =>
       {1,
        "the failure reporter itself: observability must never break the operation it observes, and a reporter that raised would turn every handled failure into a crash — the clause is the last line, there is nothing left to report to"},

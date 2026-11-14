@@ -649,7 +649,9 @@ defmodule Samen.Files do
       _ -> file
     end
   rescue
-    _ -> file
+    # exactly the two ways the update can fail on a record that is not the expected shape: `Map.get/2` on a
+    # non-map, or `%{file | org_id: _}` on a map without the key. Anything else is a real fault and propagates.
+    _ in [BadMapError, KeyError] -> file
   end
 
   # ---------------------------------------------------------------------------

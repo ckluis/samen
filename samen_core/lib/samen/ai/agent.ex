@@ -427,6 +427,10 @@ defmodule Samen.AI.Agent do
   # or `run/4` at all — which refuses the escape at compile/gate time regardless of
   # which spawn primitive the module would have used, and costs no concurrency. Recorded
   # as ADR-047 §10a row 19 and carried as an explicit A7 obligation.
+  #
+  # A CHAIN SPAWNED ON ANOTHER NODE is not part of that residual any more: its ancestors cannot be inspected
+  # (`Process.info/2` raises for a remote pid), so `provenance_of/1` treats it as AT the ceiling and the nested run is
+  # refused. A raw `spawn` on the SAME node remains the named residual.
   @max_agent_depth 0
   @provenance_key {__MODULE__, :tool_provenance}
 
@@ -3218,8 +3222,9 @@ defmodule Samen.AI.Agent do
   # Walk the spawn chain for an ambient marker. `$callers` is set by `Task.async`/
   # `Task.Supervisor` (transitively — a task of a task carries the whole chain);
   # `$ancestors` covers a bare `spawn_link`/GenServer start under a supervisor. Both
-  # are read defensively: a dead pid, a registered-name atom that no longer resolves,
-  # and a process that refuses inspection all contribute nothing.
+  # are read defensively: a dead LOCAL pid, a registered-name atom that no longer resolves,
+  # and a process that refuses inspection all contribute nothing. A pid on another node is the
+  # exception: it is unknowable, so it counts as AT the ceiling (fail closed, see `provenance_of/1`).
   #
   # A RAW `spawn/1` sets neither list and therefore still escapes this walk — a NAMED,
   # DEFERRED residual whose sound closure is A7's static AST check, argued in full at
@@ -3228,6 +3233,12 @@ defmodule Samen.AI.Agent do
     (Process.get(:"$callers", []) ++ Process.get(:"$ancestors", []))
     |> Enum.find_value(&provenance_of/1)
   end
+
+  # A pid on ANOTHER node cannot be inspected (`Process.info/2` raises for it), which used to read as "no marker" and
+  # reset the depth guard for a remote-spawned chain. Unknown provenance is not "top level": fail CLOSED, as if the
+  # caller sat at the ceiling, so the nested run is refused `:depth_exceeded`.
+  defp provenance_of(pid) when is_pid(pid) and node(pid) != node(),
+    do: %{depth: @max_agent_depth, chain: []}
 
   defp provenance_of(pid) when is_pid(pid) do
     case Process.info(pid, :dictionary) do

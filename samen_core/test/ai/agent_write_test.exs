@@ -1089,6 +1089,51 @@ defmodule Samen.AI.AgentWriteTest do
     end
   end
 
+  describe "provenance from a pid on another node fails closed" do
+    # A pid of a node this VM is not connected to, built from the external term format (no distribution needed).
+    defp remote_pid do
+      node = "fake_remote@nowhere"
+      :erlang.binary_to_term(<<131, 88, 119, byte_size(node), node::binary, 7::32, 0::32, 1::32>>)
+    end
+
+    test "the fake remote pid really is remote (the test's own premise)" do
+      pid = remote_pid()
+      assert is_pid(pid)
+      assert node(pid) != node()
+    end
+
+    test "RED: a remote ancestor is unknown provenance and counts as AT the ceiling, not as top level" do
+      prior_callers = Process.get(:"$callers")
+      Process.put(:"$callers", [remote_pid()])
+      on_exit(fn -> if prior_callers, do: Process.put(:"$callers", prior_callers) end)
+
+      assert %{depth: depth, chain: []} = Agent.current_provenance()
+      assert depth == Agent.max_agent_depth()
+
+      # and a run started under it is refused (it used to start at depth 0: the guard was reset)
+      s = new_scope()
+      script(final: "never reached")
+      assert {:error, :depth_exceeded} = Agent.run(ReadOnly, s, "nested", provider: scripted_provider())
+    end
+
+    test "POSITIVE CONTROL: the same run with no remote ancestor is accepted" do
+      s = new_scope()
+      script(final: "ok")
+      assert {:ok, _} = Agent.run(ReadOnly, s, "top level", provider: scripted_provider())
+    end
+
+    test "POSITIVE CONTROL: a local ancestor with no marker is still 'not inside a tool' (nil)" do
+      parent = spawn(fn -> Process.sleep(:infinity) end)
+      on_exit(fn -> Process.exit(parent, :kill) end)
+
+      assert Task.async(fn ->
+               Process.put(:"$callers", [parent])
+               Agent.current_provenance()
+             end)
+             |> Task.await() == nil
+    end
+  end
+
   # ── A5 FOLD F3: a lapsed proposal expires; it never executes ────────────────────────
 
   describe "parked-proposal deadline expiry (the A4 verifier's R4b)" do
