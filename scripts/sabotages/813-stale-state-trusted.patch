@@ -1,0 +1,19 @@
+# SABOTAGE: a hung lease last published state is believed forever
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_test.exs
+# MUST_FAIL: strict never refuses on UNKNOWN, whatever the reason
+diff --git a/samen_core/lib/samen/single_node.ex b/samen_core/lib/samen/single_node.ex
+index 83ec314b..98f6608b 100644
+--- a/samen_core/lib/samen/single_node.ex
++++ b/samen_core/lib/samen/single_node.ex
+@@ -239,7 +239,7 @@ defmodule Samen.SingleNode do
+     at = Map.get(raw, :at)
+     stale_ms = Map.get(raw, :stale_ms)
+ 
+-    if is_integer(at) and is_integer(stale_ms) and now - at < stale_ms,
++    if is_integer(at) or is_integer(stale_ms),
+       do: resolve_fresh(raw, now),
+       else: %{state: :unknown, reason: :lease_stale, strict?: Map.get(raw, :strict, false)}
+   end
