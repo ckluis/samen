@@ -69,6 +69,8 @@ defmodule Samen.Observability do
      `Samen.Observability.LiveTelemetry` turns each LiveView `mount`/`handle_params`/
      `handle_event` (and LiveComponent `handle_event`) callback and each endpoint request
      into ONE bounded `Samen.WideEvent`. Opt out with `request_events: false`.
+  4b. **One instance per database — ON for a serving instance (ADR-054).** `Samen.SingleNode` refuses to boot
+     clustered, disconnects a visible Erlang peer and detects a second instance on the same database.
   4a. **Nested-value-safe param logging — ON by default (ADR-052 §2.1.2).**
      `Samen.Observability.ParamFilter` wraps Phoenix's and LiveView's param-logging handlers
      so a kept `filter_parameters` key keeps only a scalar value, never a nested map/list
@@ -151,7 +153,8 @@ defmodule Samen.Observability do
 
     prefix = Keyword.get(opts, :repo_event_prefix, [otp_app, :repo])
 
-    [otel_ecto_spec(otp_app, prefix)] ++
+    single_node_specs(otp_app, opts) ++
+      [otel_ecto_spec(otp_app, prefix)] ++
       metrics_specs(otp_app, prefix, opts) ++
       request_event_specs(otp_app, opts) ++
       param_filter_specs(otp_app, opts) ++
@@ -160,6 +163,13 @@ defmodule Samen.Observability do
       replay_specs(otp_app, opts) ++
       prometheus_specs(otp_app, opts) ++
       wide_event_sink_specs(otp_app, opts)
+  end
+
+  # ADR-054 — the one-instance-per-database guard. Armed only for a SERVING instance (`Samen.SingleNode.serving?/2`),
+  # so mix tasks, tests, migrations and release `eval` never start it. `single_node: false` is for a unit test of the
+  # other specs, not for a deployment.
+  defp single_node_specs(otp_app, opts) do
+    if Keyword.get(opts, :single_node, true), do: Samen.SingleNode.child_specs(otp_app, opts), else: []
   end
 
   # ---------------------------------------------------------------------------

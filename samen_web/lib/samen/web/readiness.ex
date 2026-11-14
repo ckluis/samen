@@ -40,6 +40,11 @@ defmodule Samen.Web.Readiness do
     * `{:unknown, reason}` — the runway could not be computed. NEVER `:ok`: a catalog query that fails is not a
       healthy table.
 
+  The second advisory is `:single_node` (ADR-054, `Samen.SingleNode.advisory/1`): `:ok` while this instance is alone
+  on its database or a rolling deploy's overlap is inside the grace period; `{:critical, detail}` once another
+  instance has shared the database longer than that; `{:unknown, reason}` when the lease cannot read it. With
+  `strict: true` the late instance additionally fails `check/1` with `single_node: FAIL` (503).
+
   `report/1` renders `check/1` + `advisories/1` as the `{status, body}` the controllers send.
   """
 
@@ -49,7 +54,7 @@ defmodule Samen.Web.Readiness do
   # wrapped-DEK store answered, without minting, unwrapping, or mutating any key.
   @kms_probe_subject "__samen_readiness_probe__"
 
-  @type component :: :repo | :kms | :oban
+  @type component :: :repo | :kms | :oban | :single_node
   @type status :: :ok | {:error, term()}
 
   @spec check(keyword()) ::
@@ -58,7 +63,7 @@ defmodule Samen.Web.Readiness do
     repo = Keyword.fetch!(opts, :repo)
     oban = Keyword.get(opts, :oban, Oban)
 
-    checks = [repo: check_repo(repo), kms: check_kms(), oban: check_oban(oban)]
+    checks = [repo: check_repo(repo), kms: check_kms(), oban: check_oban(oban)] ++ strict_single_node()
 
     if Enum.all?(checks, fn {_component, status} -> status == :ok end),
       do: {:ok, checks},
@@ -71,10 +76,27 @@ defmodule Samen.Web.Readiness do
   The non-gating findings: `[partitions: advisory]` (see the moduledoc). Emits the runway as telemetry too
   (`PartitionManager.emit_runway/1`), so the gauge is as fresh as the probe.
   """
-  @spec advisories(keyword()) :: [{:partitions, advisory()}]
+  @spec advisories(keyword()) :: [{:partitions | :single_node, advisory()}]
   def advisories(opts) do
     repo = Keyword.fetch!(opts, :repo)
-    [partitions: partitions_advisory(repo)]
+    [partitions: partitions_advisory(repo)] ++ single_node_advisory()
+  end
+
+  # No lease on this node (not serving, or no repo): no line, rather than a line that says nothing.
+  defp single_node_advisory do
+    case Samen.SingleNode.status() do
+      :disarmed -> []
+      _armed -> [single_node: Samen.SingleNode.advisory()]
+    end
+  end
+
+  # `strict: true` (config :samen_core, Samen.SingleNode): the LATE instance of a database shared past the grace
+  # period answers 503. Not armed (not serving / not strict) adds no line at all.
+  defp strict_single_node do
+    case Samen.SingleNode.strict_check() do
+      :not_armed -> []
+      status -> [single_node: status]
+    end
   end
 
   # The probe must never block or slow `/readyz` (Fly's check has a 2 s budget, and every machine runs it):
