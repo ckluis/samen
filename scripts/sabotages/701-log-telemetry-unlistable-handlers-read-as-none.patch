@@ -1,0 +1,20 @@
+# SABOTAGE: A failed :telemetry handler listing is again read as 'no OpentelemetryEcto handlers', so a 
+#   recording handler cannot be ruled out yet the tier passes.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_test.exs
+# MUST_FAIL: RED: listing the :telemetry handlers fails
+diff --git a/samen_core/lib/samen/no_plaintext_pii/tiers/log_telemetry.ex b/samen_core/lib/samen/no_plaintext_pii/tiers/log_telemetry.ex
+index 0b3b0aa4..f95c4a75 100644
+--- a/samen_core/lib/samen/no_plaintext_pii/tiers/log_telemetry.ex
++++ b/samen_core/lib/samen/no_plaintext_pii/tiers/log_telemetry.ex
+@@ -167,7 +167,7 @@ defmodule Samen.NoPlaintextPii.Tiers.LogTelemetry do
+     # with a violation (this clause used to say so in a comment and return [] — "no handlers", a clean pass).
+     e ->
+       Samen.Observability.Failure.report(:log_telemetry_list_handlers, nil, e)
+-      {:error, :unavailable}
++      {:ok, []}
+   end
+ 
+   # The handler lister: `:telemetry.list_handlers/1`. Overridable with `config :samen_core, :telemetry_handler_lister`

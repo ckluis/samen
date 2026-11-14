@@ -1,0 +1,21 @@
+# SABOTAGE: When the sealed transcript is unreadable the pending approval is read as 'nothing pending', so 
+#   a run expires with its write proposal still approvable.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_write_test.exs
+# MUST_FAIL: RED: a run whose transcript was SHREDDED still has its approval withdrawn
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 02b770e6..31fbec80 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -3151,7 +3151,8 @@ defmodule Samen.AI.Agent do
+         # The sealed transcript names the pending approval, but it CANNOT be read (a shredded or corrupt run key).
+         # That is not "nothing pending": the old `else _ -> :ok` let the run expire with its approval still
+         # decidable. Find the approval through the still-`:proposed` turn row instead (its subject_ref names the turn).
+-        withdraw_by_turn(run)
++        _ = run
++        :ok
+     end
+   end
+ 

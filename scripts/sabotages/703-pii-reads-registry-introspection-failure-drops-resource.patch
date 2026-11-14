@@ -1,0 +1,35 @@
+# SABOTAGE: A domain or resource that cannot be introspected is again silently dropped from the PII-read 
+#   registry, so the verifier runs against a smaller registry than the app has.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_test.exs
+# MUST_FAIL: RED: PiiReads.Registry over a non-resource
+diff --git a/samen_core/lib/samen/pii_reads/registry.ex b/samen_core/lib/samen/pii_reads/registry.ex
+index 356baf5d..3fb19843 100644
+--- a/samen_core/lib/samen/pii_reads/registry.ex
++++ b/samen_core/lib/samen/pii_reads/registry.ex
+@@ -149,7 +149,13 @@ defmodule Samen.PiiReads.Registry do
+   defp resources_from_domains(domains) do
+     domains
+     |> List.wrap()
+-    |> Enum.flat_map(&Ash.Domain.Info.resources/1)
++    |> Enum.flat_map(fn d ->
++      try do
++        Ash.Domain.Info.resources(d)
++      rescue
++        _ -> []
++      end
++    end)
+     |> Enum.uniq()
+   end
+ 
+@@ -159,6 +165,8 @@ defmodule Samen.PiiReads.Registry do
+     logical = resource |> Info.pii_attributes() |> Enum.map(& &1.name)
+     storage = Info.vault_routed_columns(resource)
+     logical ++ storage
++  rescue
++    _ -> []
+   end
+ 
+   defp safe_reveal_actions(resource) do

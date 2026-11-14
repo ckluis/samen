@@ -1,0 +1,20 @@
+# SABOTAGE: A failed aud_chain existence probe is read as 'table absent', so an audit event lands with no 
+#   chain entry and the write reports success.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_test.exs
+# MUST_FAIL: RED: the probe fails -> the write fails
+diff --git a/samen_core/lib/samen/audit_chain/writer.ex b/samen_core/lib/samen/audit_chain/writer.ex
+index 516b6f46..e0a9de91 100644
+--- a/samen_core/lib/samen/audit_chain/writer.ex
++++ b/samen_core/lib/samen/audit_chain/writer.ex
+@@ -104,7 +104,7 @@ defmodule Samen.AuditChain.Writer do
+     case aud_chain_exists?(repo, get(chain_attrs, :org_id)) do
+       {:ok, true} -> AuditChain.append(chain_attrs, repo: repo)
+       {:ok, false} -> {:skip, :aud_chain_absent}
+-      {:error, :unavailable} -> {:error, :audit_chain_unavailable}
++      {:error, :unavailable} -> {:skip, :aud_chain_absent}
+     end
+   end
+ 

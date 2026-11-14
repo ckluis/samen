@@ -1,0 +1,21 @@
+# SABOTAGE: A failed audit write is swallowed again, so an operator suspension or clear stands with no 
+#   entry on the tamper-evident chain.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_test.exs
+# MUST_FAIL: RED: suspend with the audit probe down fails
+# MUST_FAIL: RED: clear with the audit probe down keeps the operator suspended
+diff --git a/samen_core/lib/samen/operator_plane/suspension.ex b/samen_core/lib/samen/operator_plane/suspension.ex
+index 1e485e4b..d1c2f15d 100644
+--- a/samen_core/lib/samen/operator_plane/suspension.ex
++++ b/samen_core/lib/samen/operator_plane/suspension.ex
+@@ -255,7 +255,7 @@ defmodule Samen.OperatorPlane.Suspension do
+ 
+       {:error, reason} ->
+         Samen.Observability.Failure.report(:suspension_audit, attrs.org_id, reason)
+-        {:error, :audit_unavailable}
++        {:ok, :unaudited}
+     end
+   rescue
+     e ->

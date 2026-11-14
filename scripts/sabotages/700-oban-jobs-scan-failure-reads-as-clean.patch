@@ -1,0 +1,40 @@
+# SABOTAGE: An unreadable oban_jobs table or row set is again a clean PII scan, so the oracle tier passes 
+#   because its probe failed.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_test.exs
+# MUST_FAIL: RED: the table-existence probe fails
+# MUST_FAIL: RED: the recent-jobs scan fails
+# MUST_FAIL: RED: the post-shred subject scan fails
+diff --git a/samen_core/lib/samen/no_plaintext_pii/tiers/oban_jobs.ex b/samen_core/lib/samen/no_plaintext_pii/tiers/oban_jobs.ex
+index 6354e970..d3ee90ce 100644
+--- a/samen_core/lib/samen/no_plaintext_pii/tiers/oban_jobs.ex
++++ b/samen_core/lib/samen/no_plaintext_pii/tiers/oban_jobs.ex
+@@ -120,7 +120,7 @@ defmodule Samen.NoPlaintextPii.Tiers.ObanJobs do
+         ci_findings ++ post_shred_findings
+ 
+       {:error, :unavailable} ->
+-        [scan_failed("could not determine whether oban_jobs exists")]
++        []
+     end
+   end
+ 
+@@ -154,7 +154,7 @@ defmodule Samen.NoPlaintextPii.Tiers.ObanJobs do
+         end)
+ 
+       {:error, :unavailable} ->
+-        [scan_failed("could not read the recent jobs of queue #{queue}")]
++        []
+     end
+   end
+ 
+@@ -210,7 +210,7 @@ defmodule Samen.NoPlaintextPii.Tiers.ObanJobs do
+         end)
+ 
+       {:error, :unavailable} ->
+-        [scan_failed("could not read the oban_jobs rows that reference subject #{subject_id}")]
++        []
+     end
+   end
+ 

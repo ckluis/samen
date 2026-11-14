@@ -1,0 +1,20 @@
+# SABOTAGE: A failed active-suspension lookup is read as 'no active suspension', so clear/2 answers {:ok, 
+#   :not_suspended} for an operator that is still suspended.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_test.exs
+# MUST_FAIL: RED: clear with the lookup down is an error
+diff --git a/samen_core/lib/samen/operator_plane/suspension.ex b/samen_core/lib/samen/operator_plane/suspension.ex
+index 1e485e4b..524c323c 100644
+--- a/samen_core/lib/samen/operator_plane/suspension.ex
++++ b/samen_core/lib/samen/operator_plane/suspension.ex
+@@ -141,7 +141,7 @@ defmodule Samen.OperatorPlane.Suspension do
+     case active_row(r, operator_id) do
+       {:error, :unavailable} ->
+         # A failed lookup is not "nothing to clear": the operator may still be suspended.
+-        {:error, :unavailable}
++        {:ok, :not_suspended}
+ 
+       {:ok, nil} ->
+         {:ok, :not_suspended}

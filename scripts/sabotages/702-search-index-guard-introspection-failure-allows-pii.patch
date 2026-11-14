@@ -1,0 +1,24 @@
+# SABOTAGE: A module whose PII declarations cannot be introspected is again 'declares no PII', so a PII 
+#   column can be registered into a tsvector search index.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_test.exs
+# MUST_FAIL: RED: SearchIndexGuard refuses to register a column of a module whose PII it cannot read
+diff --git a/samen_core/lib/samen/scopes/primitives/search_index_guard.ex b/samen_core/lib/samen/scopes/primitives/search_index_guard.ex
+index 1706a39b..34b63811 100644
+--- a/samen_core/lib/samen/scopes/primitives/search_index_guard.ex
++++ b/samen_core/lib/samen/scopes/primitives/search_index_guard.ex
+@@ -62,7 +62,11 @@ defmodule Samen.Scopes.Primitives.SearchIndexGuard do
+     # `rescue _ -> []` (and `_ -> :ok` in `assert_no_pii_column/2`) read "cannot introspect" as "declares no PII", so
+     # a PII column could be indexed into a tsvector search index whenever the introspection failed.
+     entities =
+-      Spark.Dsl.Extension.get_entities(resource_module, [:pii])
++      try do
++        Spark.Dsl.Extension.get_entities(resource_module, [:pii])
++      rescue
++        _ -> []
++      end
+ 
+     Enum.flat_map(entities, fn entity ->
+       cond do

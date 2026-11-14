@@ -1,0 +1,20 @@
+# SABOTAGE: A failed pii_vault key-column probe is read as 'no key-shaped column', so the PITR verifier 
+#   answers {:ok, :key_absent} and erasure is proven by a probe that could not run.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_test.exs
+# MUST_FAIL: RED: the key-column probe fails
+diff --git a/samen_core/lib/samen/vault.ex b/samen_core/lib/samen/vault.ex
+index 7fc73989..0c9bea96 100644
+--- a/samen_core/lib/samen/vault.ex
++++ b/samen_core/lib/samen/vault.ex
+@@ -360,7 +360,7 @@ defmodule Samen.Vault do
+       {:error, :unavailable} ->
+         # A failed column probe is NOT "no key-shaped column": the old `rescue _ -> []` made this verifier answer
+         # `{:ok, :key_absent}` (erasure proven) because the probe could not run. It fails closed instead.
+-        {:leaks, ["pii_vault key-material column probe FAILED — cannot prove the key is absent (fail closed)"]}
++        scan_pitr_key_absent(subject_id, repo, [])
+     end
+   end
+ 
