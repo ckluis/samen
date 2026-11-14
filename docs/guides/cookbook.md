@@ -414,7 +414,7 @@ patch IS the change now; the tree should go back to green). Prove it flips befor
 it — `scripts/sabotage.sh` does all five steps for every committed patch: SHA-256 the touched
 files, apply, run `TEST_FILES` and assert the `MUST_FAIL` names are among the failures, revert,
 and re-SHA to confirm a byte-exact restore. Run it locally against your new patch, then run the
-whole committed suite (<!--count:sabotages-->670<!--/count--> patches today; the number is generated) — both are opt-in (they deliberately
+whole committed suite (<!--count:sabotages-->674<!--/count--> patches today; the number is generated) — both are opt-in (they deliberately
 break the tree and re-run DB-backed suites), so they're run explicitly, not by the default
 `bash ci.sh`:
 
@@ -504,7 +504,7 @@ and keeps the real empty state for an honestly empty result.
 `samen_web/lib/samen/web/crm/reads.ex` (`contacts_for_company_result/3`, `get_contact_result/3`,
 `companies_page/3`), `samen_web/lib/samen/web/list_live.ex` (`reread/2`) and the screen proofs in
 `samen_web/test/samen/web/reads_honest_failure_test.exs`, `reads_honest_failure_p2_test.exs` (writes: `Guard.write/3`) and
-`reads_honest_failure_p3_test.exs` (the operator plane).
+`reads_honest_failure_p3_test.exs` (the operator plane) and, for the verticals, `driftwood/test/reads_honest_failure_p4_test.exs` / `pawchart/test/reads_honest_failure_p4_test.exs`.
 
 ```elixir
 # A detail/aggregate read: the tagged result is the real function; the legacy name is a shim.
@@ -614,8 +614,21 @@ it with a positive control that an empty result still renders the real empty sta
 
 **Ratchet.** `Samen.Web.Reads.SwallowLint` counts catch-all `rescue`/`catch` clauses that neither log, report
 nor re-raise, per file, and fails on any increase (and on a decrease that is not written into its
-baseline). Converting a file lowers its row; a swallow that is correct (an optional-scope probe, a
+baseline). Converting a file lowers its row (the baseline map is EMPTY since phase 4 and stays as the ratchet: a file not listed is allowed 0); a swallow that is correct (an optional-scope probe, a
 fail-closed authz lookup) goes into `@reviewed` with its reason.
+
+**In a host app (phase 4).** A vertical's read layer follows the same shape; nothing in the framework changed for it. Give each read a
+tagged `*_result` over `Guard.run` (`Driftwood.Reads.driver_roster_result/2`, `PawChartWeb.ClinicReads.owner_roster_result/1`) and keep the
+legacy name as `|> Guard.value([])`; cast the id first (`Ecto.UUID.cast/1`: a malformed id is `{:error, :not_found}`, no log); render each
+pane's `{value, error}` pair with `<.error_state retry_event=…>` so panes fail alone; wrap every write in `Guard.write/3` and give the
+`:unavailable` / `:forbidden` / refusal cases their own copy. A host does not re-implement what the framework already reports: a
+directory (`org_directory`) or membership (`authorized_orgs`) function should simply raise on a failed read, because
+`CurrentOrg.list_orgs/1` and `authorized_orgs/2` already catch it, deny, and report it by name. **A host test cannot use the fault
+seam** (it is compiled out of a vertical build): break the table for real inside the sandbox transaction (`ALTER TABLE … RENAME COLUMN`
+makes the read fail, `ADD CONSTRAINT … CHECK (false) NOT VALID` makes the insert fail; both roll back) and assert the error state, the
+absent empty-state copy and CTA, the retry, and a positive control. A seed probe ("already seeded?") must be allowed to raise: answering
+`true`/`false` on a failed read skips or repeats a step and still reports success; an idempotent seed matches "already exists"
+specifically and a real failure is a non-zero exit.
 
 ---
 
