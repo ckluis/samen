@@ -1190,6 +1190,69 @@ defmodule Samen.AI.AgentWriteTest do
     end
   end
 
+  describe "a lapsed proposal fails closed whether or not the expiry job could run" do
+    # `Approvals.cancel` rides the approvals repo: with its connection down the withdrawal fails, so the expiry
+    # rolls back and the run stays parked past its deadline.
+    defp with_approvals_repo(repo) do
+      prior = Application.get_env(:samen_core, Samen.Approvals)
+      Application.put_env(:samen_core, Samen.Approvals, Keyword.put(prior, :repo, repo))
+      on_exit(fn -> Application.put_env(:samen_core, Samen.Approvals, prior) end)
+    end
+
+    defp lapse_approval!(approval) do
+      {:ok, id} = Ecto.UUID.dump(approval.id)
+
+      Ecto.Adapters.SQL.query!(
+        TestRepo,
+        "UPDATE apv_approval SET apv_deadline_at = $1 WHERE apv_id = $2",
+        [DateTime.add(DateTime.utc_now(), -60), id]
+      )
+    end
+
+    test "RED: an approval past its deadline_at is refused at execution although the run was never expired" do
+      {s, run, target, approval, _new_owner} = propose!()
+      lapse_approval!(approval)
+
+      # the run is still parked (the expiry job has not run); the lapsed approval must still not execute
+      assert reload_run!(run).state == :awaiting_approval
+      assert {:error, :proposal_expired} = Approvals.approve(approval.id, approver_id(approval.org_id))
+
+      assert reload_target!(target.id).owner_id == nil
+      assert [%{id: id}] = pending_approvals(s.actor.org_id)
+      assert id == approval.id
+      assert reload_run!(run).state == :awaiting_approval
+    end
+
+    test "withdrawal down: expire_parked is an {:error, :expiry_incomplete}, the run stays parked, and once the outage lifts it reaches :expired" do
+      {s, run, target, approval, _new_owner} = propose!()
+      lapse!(run)
+      lapse_approval!(approval)
+
+      Samen.FaultRepo.fail([:transaction])
+      with_approvals_repo(Samen.FaultRepo)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, :expiry_incomplete} = Agent.expire_parked(run.id)
+          assert {:error, :expiry_incomplete} = Agent.expire_parked(run.id)
+        end)
+
+      # one value-free report per attempt (the cron re-enqueues every minute), never a stacktrace or a value
+      assert length(Regex.scan(~r/read=agent_expire_parked/, log)) == 2
+      refute log =~ "stacktrace"
+
+      # fail-closed does not depend on the job: still parked, and the lapsed approval cannot execute
+      assert reload_run!(run).state == :awaiting_approval
+      Samen.FaultRepo.heal()
+      assert {:error, :proposal_expired} = Approvals.approve(approval.id, approver_id(approval.org_id))
+      assert reload_target!(target.id).owner_id == nil
+      assert reload_run!(run).state == :awaiting_approval
+
+      assert {:ok, %{state: :expired}} = Agent.expire_parked(run.id)
+      assert pending_approvals(s.actor.org_id) == []
+    end
+  end
+
   # --- A5 helpers -------------------------------------------------------------------------
 
   # Drive the parked run's deadline (its `next_turn_at`) into the past — what the

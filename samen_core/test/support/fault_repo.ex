@@ -83,13 +83,17 @@ defmodule Samen.FaultRepo do
   def transaction(multi, opts \\ [])
 
   def transaction(%Ecto.Multi{} = multi, opts) do
+    check!(:transaction)
     case Ecto.Multi.__apply__(multi, __MODULE__, &Real.transaction(&1, opts), &Real.rollback/1) do
       {:ok, values} -> {:ok, values}
       {:error, {key, error_value, values}} -> {:error, key, error_value, values}
     end
   end
 
-  def transaction(fun, opts), do: Real.transaction(fun, opts)
+  def transaction(fun, opts) do
+    check!(:transaction)
+    Real.transaction(fun, opts)
+  end
   def in_transaction?, do: Real.in_transaction?()
   def rollback(value), do: Real.rollback(value)
 end

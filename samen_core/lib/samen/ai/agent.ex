@@ -298,6 +298,7 @@ defmodule Samen.AI.Agent do
     # A5: the A4 verifier's R4b — a proposal whose deadline lapsed with no human
     # decision, and the R2 fail-closed refusal of an unresolvable approver.
     :deadline_expired,
+    :proposal_expired,
     :approver_unresolvable,
     :depth_exceeded,
     :no_owner_attribute,
@@ -2794,10 +2795,18 @@ defmodule Samen.AI.Agent do
 
   def expire_parked(run_id) when is_binary(run_id) do
     with {:ok, %Run{state: :awaiting_approval} = run} <- fetch_run(run_id) do
-      {:ok,
-       run
-       |> Ash.Changeset.for_update(:expire_due, %{})
-       |> Ash.update!(authorize?: false)}
+      # `Ash.update`, not `update!`: a failed expiry (the approval could not be withdrawn rolls the action back) is
+      # an `{:error, _}` per this function's spec, reported by name and value-free — not a stacktrace per cron tick.
+      case run
+           |> Ash.Changeset.for_update(:expire_due, %{})
+           |> Ash.update(authorize?: false) do
+        {:ok, expired} ->
+          {:ok, expired}
+
+        {:error, error} ->
+          Samen.Observability.Failure.report(:agent_expire_parked, run.org_id, error)
+          {:error, :expiry_incomplete}
+      end
     else
       {:ok, %Run{}} -> {:error, :run_not_parked}
       other -> other
@@ -2934,6 +2943,12 @@ defmodule Samen.AI.Agent do
           loaded.subject_ref != WriteProposal.subject_ref(turn_row.id) ->
             {:error, :proposal_mismatch}
 
+          # A LAPSED proposal is never executable. Fail-closed must not depend on the expiry job having run (it
+          # rolls back, and re-enqueues, while the approval cannot be withdrawn): the approval's own deadline is
+          # checked here, from the row, at execution time.
+          deadline_lapsed?(loaded) ->
+            {:error, :proposal_expired}
+
           not is_binary(loaded.decided_by) or loaded.decided_by == "" ->
             {:error, :approval_not_approved}
 
@@ -2955,6 +2970,9 @@ defmodule Samen.AI.Agent do
         {:error, :approval_not_found}
     end
   end
+
+  defp deadline_lapsed?(%{deadline_at: %DateTime{} = at}), do: DateTime.compare(at, DateTime.utc_now()) != :gt
+  defp deadline_lapsed?(_approval), do: false
 
   # Fail-closed on every edge: a nil/garbled/unknown id is `:approval_not_found`, never a
   # raise escaping into the decision transaction.
