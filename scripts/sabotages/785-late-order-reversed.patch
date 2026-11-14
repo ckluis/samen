@@ -1,0 +1,19 @@
+# SABOTAGE: the late instance is picked backwards: strict mode refuses the incumbent
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_lease_test.exs
+# MUST_FAIL: the late instance is the one whose session started later
+diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
+index 405ed0bb..fc2eee9f 100644
+--- a/samen_core/lib/samen/single_node/lease.ex
++++ b/samen_core/lib/samen/single_node/lease.ex
+@@ -137,7 +137,7 @@ defmodule Samen.SingleNode.Lease do
+   # Ordered by (session start, pid): late = some peer is strictly older. A session whose start is not visible
+   # to this role (NULL) cannot be ordered, so it never makes us "late" (we do not refuse on a guess).
+   defp late?([_, my_pid, my_start, _], others) when is_integer(my_start) do
+-    Enum.any?(others, fn [_, pid, start, _] -> is_integer(start) and {start, pid} < {my_start, my_pid} end)
++    Enum.any?(others, fn [_, pid, start, _] -> is_integer(start) and {start, pid} > {my_start, my_pid} end)
+   end
+ 
+   defp late?(_mine, _others), do: false

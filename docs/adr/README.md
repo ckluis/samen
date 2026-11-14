@@ -6,7 +6,7 @@ decision in one clause. Read the ADR itself before changing anything it governs 
 
 Numbering is chronological, not thematic; the columns below group them by concern so you can
 scan for "everything about the vault" or "everything about the operator plane" without
-reading all <!--count:adrs-->54<!--/count-->.
+reading all <!--count:adrs-->55<!--/count-->.
 
 ## Vault, crypto-shred, audit
 
@@ -165,7 +165,7 @@ reading all <!--count:adrs-->54<!--/count-->.
 
 ---
 
-<!--count:adrs-->54<!--/count--> ADRs total (generated count; every ADR has exactly one row above). The **Status**
+<!--count:adrs-->55<!--/count--> ADRs total (generated count; every ADR has exactly one row above). The **Status**
 column is derived from each ADR's own header, checked against the code and the other ADRs, and corrected where the
 header was wrong (2026-11-13: ADR-008 is superseded by ADR-009; ADR-048's build is COMPLETE, not "NOT STARTED";
 ADR-047's T182/T183/T184 addenda shipped). Statuses at a glance: **Accepted** is the default; **Proposed (deferred)**

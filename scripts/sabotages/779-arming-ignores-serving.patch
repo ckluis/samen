@@ -1,0 +1,19 @@
+# SABOTAGE: the guard arms for every VM, mix tasks and migrations included
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_test.exs
+# MUST_FAIL: not serving (mix test / ecto.* / samen.* tasks / release eval): no children, nothing started
+diff --git a/samen_core/lib/samen/single_node.ex b/samen_core/lib/samen/single_node.ex
+index 74f4dfe1..039ba1ac 100644
+--- a/samen_core/lib/samen/single_node.ex
++++ b/samen_core/lib/samen/single_node.ex
+@@ -133,7 +133,7 @@ defmodule Samen.SingleNode do
+   """
+   @spec child_specs(atom(), keyword()) :: [Supervisor.child_spec()]
+   def child_specs(otp_app, opts \\ []) when is_atom(otp_app) do
+-    if serving?(otp_app, opts) do
++    if true do
+       assert_standalone!(otp_app)
+ 
+       repo = Keyword.get_lazy(opts, :repo, fn -> otp_app |> Application.get_env(:ecto_repos, []) |> List.first() end)

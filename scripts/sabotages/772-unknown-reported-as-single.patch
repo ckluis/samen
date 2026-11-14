@@ -1,0 +1,19 @@
+# SABOTAGE: a dead database is read as single: an unreadable state is reported healthy
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_lease_test.exs
+# MUST_FAIL: the database is unreachable
+diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
+index 405ed0bb..026aa924 100644
+--- a/samen_core/lib/samen/single_node/lease.ex
++++ b/samen_core/lib/samen/single_node/lease.ex
+@@ -131,7 +131,7 @@ defmodule Samen.SingleNode.Lease do
+     end
+   end
+ 
+-  def interpret({:error, %DBConnection.ConnectionError{}}), do: {:unknown, :connection_down}
++  def interpret({:error, %DBConnection.ConnectionError{}}), do: :single
+   def interpret(_other), do: {:unknown, :query_failed}
+ 
+   # Ordered by (session start, pid): late = some peer is strictly older. A session whose start is not visible
