@@ -1,0 +1,19 @@
+# SABOTAGE: the PITR key-absence scan stops flagging a master_key column on pii_vault
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault_key_column_scan_test.exs
+# MUST_FAIL: a master_key column on pii_vault is reported as a PITR key leak
+diff --git a/samen_core/lib/samen/vault.ex b/samen_core/lib/samen/vault.ex
+index 92f4dc64..088424d5 100644
+--- a/samen_core/lib/samen/vault.ex
++++ b/samen_core/lib/samen/vault.ex
+@@ -430,7 +430,7 @@ defmodule Samen.Vault do
+     |> Enum.filter(fn name ->
+       n = String.downcase(to_string(name))
+       String.contains?(n, "wrapped_dek") or n == "dek" or String.ends_with?(n, "_dek") or
+-        String.contains?(n, "master_key") or String.contains?(n, "key_material")
++        String.contains?(n, "master_key") and String.contains?(n, "key_material")
+     end)
+     |> then(&{:ok, &1})
+   rescue
