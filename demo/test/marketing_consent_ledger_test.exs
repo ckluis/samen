@@ -65,7 +65,7 @@ defmodule Demo.MarketingConsentLedgerTest do
     assert event.purpose == :marketing
     assert is_binary(event.subject_hash) and event.subject_hash != ""
 
-    assert Consent.state(@event_resource, org.id, sub.id) == :granted
+    assert {:ok, :granted} = Consent.state_result(@event_resource, org.id, sub.id)
   end
 
   test "unsubscribing appends a :withdrawn event; state derives :withdrawn (latest-wins)" do
@@ -81,7 +81,7 @@ defmodule Demo.MarketingConsentLedgerTest do
       })
       |> Ash.create(authorize?: false)
 
-    assert Consent.state(@event_resource, org.id, sub.id) == :granted
+    assert {:ok, :granted} = Consent.state_result(@event_resource, org.id, sub.id)
 
     {:ok, _sub} =
       sub
@@ -92,7 +92,7 @@ defmodule Demo.MarketingConsentLedgerTest do
     assert kinds == [:granted, :withdrawn]
 
     # Latest-event-wins: the ledger is the source of truth over the mutable cache.
-    assert Consent.state(@event_resource, org.id, sub.id) == :withdrawn
+    assert {:ok, :withdrawn} = Consent.state_result(@event_resource, org.id, sub.id)
   end
 
   test "state_result/3 tells an UNREADABLE ledger from 'no consent on file' (a gate must not treat it as :none)" do
@@ -123,7 +123,8 @@ defmodule Demo.MarketingConsentLedgerTest do
       ExUnit.CaptureLog.capture_log(fn ->
         assert {:error, :unavailable} = Consent.state_result(@event_resource, org.id, sub.id)
         # the legacy shape keeps its documented fallback (and reports it)
-        assert Consent.state(@event_resource, org.id, sub.id) == :none
+        # (apply/3: the deprecated call is the thing under test)
+        assert apply(Consent, :state, [@event_resource, org.id, sub.id]) == :none
       end)
 
     Demo.Repo.query!(~s(ALTER TABLE "#{table}_outage" RENAME TO "#{table}"))
@@ -223,6 +224,6 @@ defmodule Demo.MarketingConsentLedgerTest do
     assert Enum.sort(after_rows) == Enum.sort(before_hashes)
 
     # Do-not-contact is STILL honored after the PII is gone.
-    assert Consent.state(@event_resource, org.id, sub.id) == :withdrawn
+    assert {:ok, :withdrawn} = Consent.state_result(@event_resource, org.id, sub.id)
   end
 end

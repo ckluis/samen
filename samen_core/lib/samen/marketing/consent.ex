@@ -59,6 +59,7 @@ defmodule Samen.Marketing.Consent do
   (and is reported) — it never fabricates `:granted`, but `:none` is NOT a refusal for a gate that proceeds on
   anything but `:withdrawn`; such a gate uses `state_result/3`.
   """
+  @deprecated "use state_result/3: state/3 reads an unreadable ledger as :none, which is not a refusal"
   @spec state(module(), String.t() | binary(), String.t() | binary()) ::
           :granted | :withdrawn | :none
   def state(event_resource, org_id, subscriber_id) do
