@@ -93,6 +93,81 @@ defmodule Samen.Web.ReadinessTest do
     def transaction(_fun, _opts \\ []), do: {:error, %DBConnection.ConnectionError{message: "down"}}
   end
 
+  describe "single_node (ADR-054): a second instance on this database" do
+    # The lease publishes its status in this table; the tests publish the same shapes the lease does.
+    @table Samen.SingleNode.Lease.default_table()
+
+    defp publish(raw) do
+      :ets.new(@table, [:named_table, :public])
+      :ets.insert(@table, {:status, raw})
+    end
+
+    defp overlap(opts) do
+      Map.merge(
+        %{state: :overlap, peers: 1, since: System.monotonic_time(:millisecond), late?: true, grace_ms: 300_000, strict: false},
+        Map.new(opts)
+      )
+    end
+
+    test "no lease on this node: no single_node line at all (existing bodies unchanged)", %{oban: oban} do
+      refute Keyword.has_key?(Readiness.advisories(repo: Repo), :single_node)
+      assert {200, "ready"} = Readiness.report(repo: Repo, oban: oban)
+    end
+
+    test "alone: ok, body is just `ready`", %{oban: oban} do
+      publish(%{state: :single, strict: false})
+      assert Readiness.advisories(repo: Repo)[:single_node] == :ok
+      assert {200, "ready"} = Readiness.report(repo: Repo, oban: oban)
+    end
+
+    test "overlap inside the grace period is not an advisory (a rolling deploy)", %{oban: oban} do
+      publish(overlap(since: System.monotonic_time(:millisecond)))
+      assert Readiness.advisories(repo: Repo)[:single_node] == :ok
+      assert {200, "ready"} = Readiness.report(repo: Repo, oban: oban)
+    end
+
+    test "overlap past the grace period: `single_node: CRITICAL` in a 200 body (strict off)", %{oban: oban} do
+      publish(overlap(since: System.monotonic_time(:millisecond) - 301_000))
+      assert {:critical, detail} = Readiness.advisories(repo: Repo)[:single_node]
+      assert detail =~ "ADR-054"
+
+      assert {200, body} = Readiness.report(repo: Repo, oban: oban)
+      assert body =~ "ready\nsingle_node: CRITICAL 1 other instance(s)"
+    end
+
+    test "unreadable lease is `single_node: UNKNOWN`, never ok and never absent", %{oban: oban} do
+      publish(%{state: :unknown, reason: :connection_pooler, strict: false})
+      assert {:unknown, _} = Readiness.advisories(repo: Repo)[:single_node]
+      assert {200, body} = Readiness.report(repo: Repo, oban: oban)
+      assert body =~ "single_node: UNKNOWN single-node state unreadable (connection_pooler)"
+    end
+
+    test "strict: the LATE instance past grace is a 503; the early one and a within-grace late one stay ready", %{oban: oban} do
+      stale = System.monotonic_time(:millisecond) - 301_000
+
+      publish(overlap(since: stale, strict: true, late?: true))
+      assert {503, body} = Readiness.report(repo: Repo, oban: oban)
+      assert body =~ "not ready"
+      assert body =~ "single_node: FAIL"
+      assert body =~ "single_node: CRITICAL"
+      assert {:error, checks} = Readiness.check(repo: Repo, oban: oban)
+      assert checks[:repo] == :ok and checks[:kms] == :ok and checks[:oban] == :ok
+      assert checks[:single_node] == {:error, :overlap}
+      :ets.delete(@table)
+
+      publish(overlap(since: stale, strict: true, late?: false))
+      assert {200, _} = Readiness.report(repo: Repo, oban: oban)
+      :ets.delete(@table)
+
+      publish(overlap(since: System.monotonic_time(:millisecond), strict: true, late?: true))
+      assert {200, "ready"} = Readiness.report(repo: Repo, oban: oban)
+    end
+
+    setup do
+      on_exit(fn -> if :ets.whereis(@table) != :undefined, do: :ets.delete(@table) end)
+    end
+  end
+
   describe "advisories: the audit-partition runway (ARCH-9) never takes the node out of rotation" do
     test "healthy: :ok, and the body is exactly `ready`", %{oban: oban} do
       Repo.query!("TRUNCATE aud_event_default")
