@@ -957,8 +957,28 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
       :ok = Driftwood.Seeds.run(org)
       assert ^org = Driftwood.Seeds.demo_all(org)
 
+      # `fmc_campaign` is read by the probe AND written by the step behind it, so this fault fails the old swallowed
+      # probe's fallback too. What only the probe's failure can show is that NOTHING behind it ran: the step creates
+      # a template and six subscribers before it reaches the campaign, and the raising frame is the probe's read.
+      templates = Ash.count!(Driftwood.Marketing.Template, authorize?: false)
+      subscribers = Ash.count!(Driftwood.Marketing.Subscriber, authorize?: false)
       break_select!("fmc_campaign", "fmc_org_id")
-      assert_raise Ash.Error.Unknown, fn -> Driftwood.Seeds.demo_all(org) end
+
+      {error, stacktrace} =
+        try do
+          Driftwood.Seeds.demo_all(org)
+          flunk("expected the seed to raise")
+        rescue
+          e in ExUnit.AssertionError -> reraise e, __STACKTRACE__
+          e -> {e, __STACKTRACE__}
+        end
+
+      assert %Ash.Error.Unknown{} = error
+      formatted = Exception.format_stacktrace(stacktrace)
+      assert formatted =~ "Ash.exists?"
+      refute formatted =~ "Ash.create"
+      assert Ash.count!(Driftwood.Marketing.Template, authorize?: false) == templates
+      assert Ash.count!(Driftwood.Marketing.Subscriber, authorize?: false) == subscribers
     end
   end
 

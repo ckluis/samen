@@ -283,13 +283,17 @@ defmodule PawChart.ReadsHonestFailureP4Test do
       assert saved.assigns.owner_modal == nil
     end
 
-    test "update_owner on a failing table writes nothing and is :unavailable, never :not_found; the stored contacts survive" do
+    # NOT a test of the stored-lists guard: both reads `update_owner/3` makes select every column of `own_patient`, so no
+    # DDL fault can fail `get_owner_result/2` alone, and this one fails the FIRST read (`fetch_result`, logged as
+    # pawchart_fetch_owner). It proves what it can: an outage there is :unavailable (never :not_found), nothing is written.
+    test "update_owner on a failing table writes nothing and is :unavailable, never :not_found; the stored contacts survive (first read fails)" do
       owner = create_owner!(@org, "Edie")
       scope = Reads.tenant_scope(@org)
       {:ok, before} = Reads.get_owner_result(scope, owner.id)
 
       break_select!("own_patient", "own_marketing_opt_in")
-      assert {:error, :unavailable} = quiet(fn -> Reads.update_owner(@org, owner.id, %{"first" => "Edie", "last" => "Owner", "email" => "new@example.test"}) end)
+      log = capture_log(fn -> assert {:error, :unavailable} = Reads.update_owner(@org, owner.id, %{"first" => "Edie", "last" => "Owner", "email" => "new@example.test"}) end)
+      assert log =~ "read=pawchart_fetch_owner"
 
       ddl!("ALTER TABLE own_patient RENAME COLUMN own_marketing_opt_in_renamed TO own_marketing_opt_in")
       {:ok, after_} = Reads.get_owner_result(scope, owner.id)
