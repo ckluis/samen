@@ -216,6 +216,10 @@ scaffolding decision is [ADR-024](../adr/ADR-024-generated-deploy-fail-honest.md
 fail-honest artifacts + explicit operator-TODO runbooks, never an aspirational
 "just run `fly deploy`".
 
+One thing the generated `fly.toml` and `docs/runbooks/deploy.md` state outright: **run one instance per database**
+([ADR-054](../adr/ADR-054-single-instance-per-database.md)). `fly deploy --ha=false`, never `fly scale count 2`. The app
+refuses to boot clustered and reports a second instance in `/readyz`.
+
 ## Where next
 
 - [Generators reference](generators.md) — every `mix samen.gen.app` flag (incl.

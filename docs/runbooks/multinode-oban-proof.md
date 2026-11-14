@@ -1,5 +1,9 @@
 # Runbook — Multi-Node Oban Proof (L4 / T90)
 
+> **Scope (ADR-054).** This proves the Oban job substrate is safe under multiple nodes. It is NOT a license to run two
+> instances of a Samen application: the app is one serving instance per database (replay-nonce cache, AI kill switch, rate
+> limiter and other node-local state), and refuses clustering at boot.
+
 > **What this proves:** the Oban job substrate is **safe under multiple nodes** —
 > no double-execution, correct insert-time uniqueness, and correct
 > leadership/failover — demonstrated on **two real BEAM nodes against one

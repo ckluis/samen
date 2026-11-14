@@ -139,7 +139,7 @@ Every component cites the doc passage that mandates it. Section names refer to t
 | K1 | Expand/contract migrations; expand additive + reversible with tested `down/0`; contract in a separate later release behind a `contract_ready?` bake-window check |
 | K2 | DDL tx: `lock_timeout = 5s`, `statement_timeout = 15s`; **carve-outs**: `CREATE INDEX CONCURRENTLY` and chunked batched backfills run outside that transaction with long/disabled per-statement bounds |
 | K3 | PITR posture (Neon branch-and-restore), quarterly game-day on a production-sized branch; RPO ≤ 1 min steady-state; bad-contract effective RPO = detection latency (stated honestly); RTO ≤ 30 min forward-fix/expand-reversal (target), ≤ 2 h full PITR (drilled) |
-| K4 | Deploy: single `mix release` (UI+logic+workers+cron), Fly rolling deploy, expand migration as a release command, `dns_cluster`/libcluster + PubSub, jittered reconnect, presence-aware draining |
+| K4 | Deploy: single `mix release` (UI+logic+workers+cron), Fly rolling deploy, expand migration as a release command, `dns_cluster`/libcluster + PubSub (**SUPERSEDED by ADR-054: one instance per database; the app refuses to boot clustered**), jittered reconnect, presence-aware draining |
 
 ### L. UI layer
 
@@ -616,7 +616,7 @@ phases:
 | OD-6 | Public API flavor | AshJsonApi only at first; AshGraphql behind OD when a consumer demands it | halves the C6 contract surface. Lock at T3.11. |
 | OD-7 | WORM anchor target | S3 Object Lock (compliance mode) | cheapest true-WORM with an API the anchor job can drive. ADR-002 at T4.3. |
 | OD-8 | Trace/event sink | Honeycomb (doc names Honeycomb/Tempo/Loki; pick one to build the ingress-schema check against) | any OTel sink works; the schema check is sink-agnostic. Lock at T2.7. |
-| OD-9 | Deploy target | Fly.io (doc assumes it: rolling deploys, WireGuard clustering) | lock at T5.3. |
+| OD-9 | Deploy target | Fly.io (doc assumes it: rolling deploys; ~~WireGuard clustering~~ — one instance per database, ADR-054) | lock at T5.3. |
 | OD-10 | Scope build depth in P3 | build all seven scopes in the fan-out, but Marketing + CMS to a thinner acceptance bar (resources + policies + catalog + Tier-0; workflows minimal) — Driftwood needs Identity/CRM/Billing/Support/Primitives deep | keeps "the 80% exists" true without gold-plating scopes the dogfood won't exercise; deepen in P6. |
 | OD-11 | `non_pii!` second-reviewer mechanics for a solo builder | the review gate = a signed entry in the catalog registry requiring a separate approval identity (a second session/PR approval), never same-commit self-approval; honest residue documented | doc requires a second reviewer; a solo operator needs a defined stand-in. Lock at T1.8c. |
 

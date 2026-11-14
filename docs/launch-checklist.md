@@ -81,6 +81,11 @@ The Stripe mirror schema is real; `SyncAdapter.Stub` returns `{:ok, %{stub: true
 - [ ] Generate/adopt the deploy artifacts (`mix samen.gen.app --deploy` or the committed
       `fly.toml`/`runtime.exs` pattern); front the endpoint with TLS; point `DATABASE_URL` at a
       managed Postgres (Neon) branch. See `docs/adr/ADR-024-*` and the generated `runbook.md`.
+- [ ] Run **one** instance per database ([ADR-054](adr/ADR-054-single-instance-per-database.md)):
+      `fly deploy --ha=false`, `fly scale count 1`. Fly's default is two machines, and a second
+      instance weakens the replay-nonce cache, the AI kill switch and the rate limiter. If `DATABASE_URL`
+      goes through PgBouncer in transaction mode, set `Samen.SingleNode`'s `lease_url` to a direct URL.
+      `/readyz` shows `single_node:` if you get this wrong.
 
 ## 6 · Production drills **[DRILL]**
 

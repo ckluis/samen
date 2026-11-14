@@ -120,6 +120,21 @@ All notable changes to Samen are recorded here. The format follows
   2099 with a without-force refusal as its control; `FaultRepo`/`CountingRepo`/`ToggleRepo` delegate `in_transaction?/0`; the February-bounds test
   asserts the row's partition. A creator that loses the race for a month (`duplicate_table`) is a success once the existing relation is verified to be that month's partition with those bounds; an unreadable (MINVALUE/MAXVALUE) sibling bound falls back to the scanning ATTACH instead of failing the move; a zero or non-integer `:partition_move_lock_timeout_ms` / a zero budget on a plain create is refused (never Postgres's "no limit"); `:partition_move_clock` (a 0-arity ms function) lets a test consume part of the window budget without sleeping. The runbook's "DEFAULT too large to move" remedy raises both knobs. Existing tests changed: the total-budget test now consumes a known part of the budget after the DETACH and asserts every later statement's timeout is at most what is left; the budget-0 test restores its config on failure. Sabotages 824-838, 847-854.
 
+### One instance per database (ARCH-3, ADR-054)
+
+- **ADR-054** declares and inventories it: 14 node-local mechanisms (replay-nonce cache, AI kill switch, rate limiter, flag cache, FileBacked
+  KMS, local audit/anchor/files, PubSub/Presence, ...) with what two instances do to each, what IS safe to scale (Postgres, Oban), the revisit
+  triggers and a path to cluster safety per mechanism. The generated `fly.toml` pins one machine and says why; the deploy runbook, launch
+  checklist and getting-started say it; the "multi-node" compliance row is qualified to the job substrate.
+- **`Samen.SingleNode`** (wired through `Samen.Observability.child_specs/2`, so no host code): armed only for a SERVING instance (the
+  endpoint binds a listener). `Peers` refuses to boot with `libcluster`/`dns_cluster` configured or a visible node connected, and disconnects
+  a visible peer at runtime, loudly; hidden nodes (`bin/app remote`, `rpc`, `iex --hidden --remsh`) are allowed. `Lease` holds a shared
+  session advisory lock on a dedicated connection and counts the other holders: a second instance on the same database is reported in
+  `/readyz` as `single_node: CRITICAL` after a 5-minute grace period (a rolling deploy overlaps on purpose), `strict: true` makes the late
+  instance answer 503, an unreadable state is `UNKNOWN` (never single; PgBouncer transaction mode is detected as `connection_pooler`, fix
+  with `lease_url`). Metrics `samen.single_node.*`; alerts.md §8. Sabotages 771-776.
+- Existing tests changed: none (the `single_node:` advisory line exists only where a lease runs).
+
 ### Host action required (existing hosts and generated apps)
 
 0. **Run the migration `20261114120000_aud_event_default_partition`** (ARCH-9; copy the reference in `driftwood/priv/repo/migrations/`; a
@@ -158,6 +173,11 @@ directory and diff, or apply by hand:
 7. **Oban hosts that do not call `Samen.Jobs.install_defaults/1`** must add `{Samen.Jobs.BootRun, workers:
    Samen.Jobs.default_boot_workers()}` so the `aud_event` partition rolls forward at boot (a fresh deploy could not
    write audit events from its first request otherwise). Hosts using `install_defaults/1` get it automatically.
+9. **One instance per database (ADR-054).** Hosts that call `Samen.Observability.child_specs/2` get the guard for free. Generated apps
+   made before this change: run ONE machine (`fly deploy --ha=false`, `fly scale count 1`; copy the comment and `strategy = "rolling"` from
+   `samen_core/priv/templates/fly_toml.eex`), remove `dns_cluster`/`libcluster` if present (the app now refuses to boot with them), and
+   use `Samen.Web.Readiness.report/1` for `/readyz` so the `single_node:` line appears. Behind PgBouncer in transaction mode set
+   `config :samen_core, Samen.SingleNode, lease_url: <direct URL>`.
 8. **Seed tasks** should boot through `Samen.SeedBoot.start!/2` instead of `@requirements ["app.start"]`, or
    `mix <app>.seed` dies with `:eaddrinuse` while the dev server runs.
 

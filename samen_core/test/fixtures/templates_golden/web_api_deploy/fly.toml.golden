@@ -7,10 +7,21 @@
 app = "acme"
 primary_region = "iad"
 
+# ONE MACHINE (ADR-054). A Samen app runs as ONE instance per database: the replay-nonce cache, the AI kill
+# switch, the rate limiter and the rest of the node-local state are not cluster-safe, and a second machine on the
+# same database weakens them silently. Fly creates TWO machines on a first `fly deploy` unless told otherwise, so
+# deploy with `fly deploy --ha=false` and keep `fly scale count 1`; never raise `min_machines_running` above 1 or
+# add `[[vm]]` processes/regions. The app detects a second instance itself (`/readyz` carries `single_node:
+# CRITICAL ...` after the 5-minute rolling-deploy grace period; `config :samen_core, Samen.SingleNode, strict:
+# true` makes the late instance answer 503).
+
 [build]
   dockerfile = "Dockerfile"
 
 [deploy]
+  # `rolling` replaces the machine; `bluegreen`/`canary` overlap two instances for the whole health-check window
+  # (inside the ADR-054 grace period that is tolerated, but it is a deliberate overlap, not a way to scale).
+  strategy = "rolling"
   # Runs the app's migrations before the new release takes traffic. `Acme.Release`
   # is the release-safe migrator (config/runtime.exs is loaded; no Mix at runtime).
   release_command = "/app/bin/acme eval Acme.Release.migrate"
@@ -24,6 +35,7 @@ primary_region = "iad"
   force_https = true
   auto_stop_machines = "stop"
   auto_start_machines = true
+  # ADR-054: exactly one instance. `1` here is a floor that keeps the machine from being stopped, not a scale knob.
   min_machines_running = 1
 
   [[http_service.checks]]
