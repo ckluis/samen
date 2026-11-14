@@ -1,0 +1,19 @@
+# SABOTAGE: mix samen.verify.indexes treats a resource it cannot inspect as clean instead of a violation
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/indexing_test.exs
+# MUST_FAIL: a resource whose table is absent is a violation (cannot inspect), never a silent pass
+diff --git a/samen_core/lib/mix/tasks/samen.verify.indexes.ex b/samen_core/lib/mix/tasks/samen.verify.indexes.ex
+index c700dd3d..26d2ab8d 100644
+--- a/samen_core/lib/mix/tasks/samen.verify.indexes.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.indexes.ex
+@@ -98,7 +98,7 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
+         [missing(spec, indexes)]
+       end
+     else
+-      {:error, reason} -> ["cannot inspect #{inspect(resource)}: #{reason}"]
++      {:error, _reason} -> []
+     end
+   end
+ 
