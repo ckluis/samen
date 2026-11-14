@@ -256,12 +256,26 @@ defmodule Samen.HonestKernelReadsTest do
 
   describe "BreakGlass.Reconciliation — an unreadable anchor count alarms, it does not read as zero residue" do
     test "the failure is reported by name (the count stays on the alarm side)" do
+      path = Path.join(System.tmp_dir!(), "hk_recon_#{System.unique_integer([:positive])}.local")
+      on_exit(fn -> File.rm_rf!(path) end)
+
+      for n <- 1..2 do
+        {:ok, _} =
+          Samen.BreakGlass.LocalAudit.append(
+            %{org_id: Ecto.UUID.generate(), subject_id: "s#{n}", actor_id: "a", reason: "r"},
+            path: path
+          )
+      end
+
+      # positive control: with the anchor table readable, none anchored -> both entries are unanchored
+      assert Samen.BreakGlass.Reconciliation.unanchored_count(repo: Repo, path: path) == 2
+
       FaultRepo.fail([:one])
 
       log =
         capture_log(fn ->
-          # local entries minus anchored (unreadable -> 0): never below the local count
-          assert is_integer(Samen.BreakGlass.Reconciliation.unanchored_count(repo: FaultRepo))
+          # local entries (2) minus anchored (unreadable -> 0): the alarm direction, exactly the local count
+          assert Samen.BreakGlass.Reconciliation.unanchored_count(repo: FaultRepo, path: path) == 2
         end)
 
       assert log =~ "read=break_glass_anchored_count"

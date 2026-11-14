@@ -115,13 +115,21 @@ defmodule Demo.MarketingConsentLedgerTest do
     assert {:ok, :withdrawn} = Consent.state_result(@event_resource, org.id, sub.id)
     assert {:ok, :none} = Consent.state_result(@event_resource, org.id, Ecto.UUID.generate())
 
-    # RED: an unreadable ledger (a module that is not a mounted event resource) is an outage, not :none
+    # RED: an unreadable ledger — the ledger table is really gone for a moment (renamed inside the sandbox transaction) — is an outage, not :none
+    table = AshPostgres.DataLayer.Info.table(ConsentEvent)
+    Demo.Repo.query!(~s(ALTER TABLE "#{table}" RENAME TO "#{table}_outage"))
+
     log =
       ExUnit.CaptureLog.capture_log(fn ->
-        assert {:error, :unavailable} = Consent.state_result(String, org.id, sub.id)
+        assert {:error, :unavailable} = Consent.state_result(@event_resource, org.id, sub.id)
         # the legacy shape keeps its documented fallback (and reports it)
-        assert Consent.state(String, org.id, sub.id) == :none
+        assert Consent.state(@event_resource, org.id, sub.id) == :none
       end)
+
+    Demo.Repo.query!(~s(ALTER TABLE "#{table}_outage" RENAME TO "#{table}"))
+
+    # the same call is a real answer again once the ledger is back
+    assert {:ok, :withdrawn} = Consent.state_result(@event_resource, org.id, sub.id)
 
     assert log =~ "read=marketing_consent_state"
   end
