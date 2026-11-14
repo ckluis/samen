@@ -6,13 +6,13 @@
 # TEST_FILES: test/suspension_asymmetry_test.exs
 # MUST_FAIL: audit down + over budget: the operator IS suspended
 diff --git a/samen_core/lib/samen/operator_plane/suspension.ex b/samen_core/lib/samen/operator_plane/suspension.ex
-index e9f98a09..01305e61 100644
+index a96a3304..91067974 100644
 --- a/samen_core/lib/samen/operator_plane/suspension.ex
 +++ b/samen_core/lib/samen/operator_plane/suspension.ex
-@@ -167,7 +167,9 @@ defmodule Samen.OperatorPlane.Suspension do
+@@ -170,7 +170,9 @@ defmodule Samen.OperatorPlane.Suspension do
  
      case audited do
-       {:ok, :ok} -> inserted
+       {:ok, :ok} -> %{inserted | audit: :written}
 -      {:error, _} -> %{inserted | audit: defer_audit(attrs, operator_id, org_id, reason)}
 +      {:error, _} ->
 +        r.delete!(inserted)

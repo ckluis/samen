@@ -12,11 +12,13 @@
 # APP: samen_core
 # TEST_FILES: test/approvals/engine_test.exs
 # MUST_FAIL: null approver: approve(id, nil) is REFUSED
+diff --git a/samen_core/lib/samen/approvals.ex b/samen_core/lib/samen/approvals.ex
+index 95986474..2ea1bff3 100644
 --- a/samen_core/lib/samen/approvals.ex
 +++ b/samen_core/lib/samen/approvals.ex
-@@ -180,6 +180,9 @@
-     end
-   end
+@@ -226,6 +226,9 @@ defmodule Samen.Approvals do
+   # A handler that enforces the deadline itself (the agent write proposal: own error + run expiry) keeps doing so.
+   defp owns_deadline?(handler), do: exports?(handler, :owns_deadline?, 0) and handler.owns_deadline?()
  
 +  # SABOTAGE (T34-F1): defeat the mandatory-approver guard — a null/blank approver passes.
 +  defp blank_actor?(_sab) when 1 == 1, do: false
