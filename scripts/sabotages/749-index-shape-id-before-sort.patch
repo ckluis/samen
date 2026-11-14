@@ -1,10 +1,10 @@
-# SABOTAGE: the tenant index is built (org_id, id, sort): it cannot serve ORDER BY sort, id, so the EXPLAIN 
-#   of the real page must show a Sort
+# SABOTAGE: the contract asks for (org_id, id, sort): the migrated index (org_id, sort, id) no longer serves it,
+#   so the live-catalog check goes red
 #
 # Flips the named test(s).
-# APP: samen_web
-# TEST_FILES: test/samen/web/tenant_index_plan_test.exs
-# MUST_FAIL: person — the first page and the page after a cursor are ordered index scans (ASC, forward)
+# APP: samen_core
+# TEST_FILES: test/indexing_test.exs
+# MUST_FAIL: the migrated fixture table carries the index the contract names
 diff --git a/samen_core/lib/samen/indexing.ex b/samen_core/lib/samen/indexing.ex
 index caf88369..76c2ea03 100644
 --- a/samen_core/lib/samen/indexing.ex
