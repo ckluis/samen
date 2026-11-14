@@ -52,5 +52,13 @@ defmodule Samen.Approvals.Handler do
   """
   @callback on_reject(approval :: struct(), ctx :: ctx()) :: :ok | {:error, term()}
 
-  @optional_callbacks on_reject: 2
+  @doc """
+  Optional: `true` when this handler enforces `deadline_at` ITSELF with its own error and cleanup (the agent write
+  proposal does, and expires its run). Every other handler, and the generic Gate, is held to the deadline by the engine:
+  `Samen.Approvals.approve/3` refuses `{:error, :expired}` for an approval past its `deadline_at` before the
+  handler runs.
+  """
+  @callback owns_deadline?() :: boolean()
+
+  @optional_callbacks on_reject: 2, owns_deadline?: 0
 end

@@ -200,10 +200,10 @@ defmodule Samen.Approvals do
         approval.state != :pending ->
           {:error, :not_pending}
 
-        # An approval past its `deadline_at` can no longer be APPROVED (every kind: Gate, handler, reveal). Rejecting a
-        # late request stays possible. The one chokepoint: nothing reaches a handler or a gated action through here
-        # after the deadline.
-        decision == :approve and past_deadline?(approval) ->
+        # An approval past its `deadline_at` can no longer be APPROVED (Gate and every handler kind, unless the handler
+        # owns the check itself). Rejecting a late request stays possible. The one chokepoint: nothing reaches a
+        # handler or a gated action through here after the deadline.
+        decision == :approve and past_deadline?(approval) and not owns_deadline?(handler) ->
           {:error, :expired}
 
         # POLICY LAYER (§4.2 layer 1): refuse self-decision before touching the DB, write
@@ -222,6 +222,9 @@ defmodule Samen.Approvals do
     do: DateTime.compare(DateTime.utc_now(), deadline) == :gt
 
   defp past_deadline?(_), do: false
+
+  # A handler that enforces the deadline itself (the agent write proposal: own error + run expiry) keeps doing so.
+  defp owns_deadline?(handler), do: exports?(handler, :owns_deadline?, 0) and handler.owns_deadline?()
 
   defp blank_actor?(nil), do: true
   defp blank_actor?(""), do: true
