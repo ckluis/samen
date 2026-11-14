@@ -5,7 +5,7 @@
 # TEST_FILES: test/samen/web/readiness_test.exs
 # MUST_FAIL: a read that never returns is UNKNOWN within the deadline
 diff --git a/samen_web/lib/samen/web/readiness.ex b/samen_web/lib/samen/web/readiness.ex
-index eb667b30..3ab31d91 100644
+index 388f709..8486e5d 100644
 --- a/samen_web/lib/samen/web/readiness.ex
 +++ b/samen_web/lib/samen/web/readiness.ex
 @@ -88,7 +88,7 @@ defmodule Samen.Web.Readiness do
@@ -15,5 +15,5 @@ index eb667b30..3ab31d91 100644
 -  @advisory_deadline_ms 500
 +  @advisory_deadline_ms 5_000
    @advisory_lock_ms 300
- 
-   defp partitions_advisory(repo) do
+   # a little under the deadline: the server stops a read the task was killed for
+   @advisory_statement_ms 400

@@ -6,15 +6,15 @@
 # TEST_FILES: test/aud_event_default_partition_test.exs
 # MUST_FAIL: a row committed AFTER the staging copy is taken by the top-up
 diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
-index e0afe242..f8c5c76f 100644
+index a7409fe5..f9b8f81e 100644
 --- a/samen_core/lib/samen/audit_event/partition_manager.ex
 +++ b/samen_core/lib/samen/audit_event/partition_manager.ex
-@@ -368,7 +368,7 @@ defmodule Samen.AuditEvent.PartitionManager do
-           # ---- phase 2: the bounded exclusive window ----
-           q!(repo, "SET LOCAL statement_timeout = #{window_ms}", window_ms)
-           q!(repo, "LOCK TABLE aud_event IN ACCESS EXCLUSIVE MODE", window_ms)
--          q!(repo, missing.(@staged_month, in_range), window_ms)
-+          :ok
-           q!(repo, missing.(@staged_default, "NOT (#{in_range})"), window_ms)
+@@ -448,7 +448,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+             q!(repo, sql, left + 5_000)
+           end
  
-           before = scalar!(repo, "SELECT count(*) FROM ONLY #{@default_partition}", window_ms)
+-          window!.(missing.(@staged_month, in_range))
++          :ok
+           window!.(missing.(@staged_default, "NOT (#{in_range})"))
+           window!.("ALTER TABLE aud_event DETACH PARTITION #{@default_partition}")
+           window!.("ALTER TABLE #{@staged_month} RENAME TO #{name}")

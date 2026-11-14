@@ -5,13 +5,13 @@
 # TEST_FILES: test/aud_event_default_partition_test.exs
 # MUST_FAIL: WITH the DEFAULT partition the same insert succeeds and sits in it
 diff --git a/samen_core/priv/test_repo/migrations/20261114120000_aud_event_default_partition.exs b/samen_core/priv/test_repo/migrations/20261114120000_aud_event_default_partition.exs
-index 5489c67e..ebc4ed1a 100644
+index abd3f6c5..9a84f022 100644
 --- a/samen_core/priv/test_repo/migrations/20261114120000_aud_event_default_partition.exs
 +++ b/samen_core/priv/test_repo/migrations/20261114120000_aud_event_default_partition.exs
-@@ -15,7 +15,7 @@ defmodule SamenCore.TestRepo.Migrations.AudEventDefaultPartition do
-   use Ecto.Migration
+@@ -20,7 +20,7 @@ defmodule SamenCore.TestRepo.Migrations.AudEventDefaultPartition do
+     # than park every audited write behind one long reader. Transaction-scoped; same bound as expand_contract.
+     execute "SET LOCAL lock_timeout = '5s'"
  
-   def up do
 -    execute Samen.AuditEvent.PartitionManager.default_partition_sql(),
 +    execute "SELECT 1",
              "DROP TABLE IF EXISTS aud_event_default"

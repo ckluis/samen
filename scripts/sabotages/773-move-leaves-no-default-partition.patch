@@ -5,15 +5,15 @@
 # TEST_FILES: test/aud_event_default_partition_test.exs
 # MUST_FAIL: rows of the new month move into it
 diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
-index e0afe242..cf743f67 100644
+index a7409fe5..4ab93445 100644
 --- a/samen_core/lib/samen/audit_event/partition_manager.ex
 +++ b/samen_core/lib/samen/audit_event/partition_manager.ex
-@@ -384,7 +384,7 @@ defmodule Samen.AuditEvent.PartitionManager do
-           q!(repo, "ALTER TABLE aud_event ATTACH PARTITION #{name} FOR VALUES FROM ('#{from_ts}') TO ('#{to_ts}')", window_ms)
-           q!(repo, "DROP TABLE #{@default_partition}", window_ms)
-           q!(repo, "ALTER TABLE #{@staged_default} RENAME TO #{@default_partition}", window_ms)
--          q!(repo, "ALTER TABLE aud_event ATTACH PARTITION #{@default_partition} DEFAULT", window_ms)
+@@ -456,7 +456,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+           window!.("ALTER TABLE #{name} DROP CONSTRAINT #{check}")
+           window!.("DROP TABLE #{@default_partition}")
+           window!.("ALTER TABLE #{@staged_default} RENAME TO #{@default_partition}")
+-          window!.("ALTER TABLE aud_event ATTACH PARTITION #{@default_partition} DEFAULT")
 +          :ok
+           window!.("ALTER TABLE #{@default_partition} DROP CONSTRAINT #{check}")
            name
          end,
-         timeout: staging_ms + 4 * window_ms

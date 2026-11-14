@@ -6,15 +6,15 @@
 # TEST_FILES: test/aud_event_default_partition_test.exs
 # MUST_FAIL: a failing bounds read is reported and the transaction
 diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
-index e0afe242..655c9983 100644
+index a7409fe5..c87c575d 100644
 --- a/samen_core/lib/samen/audit_event/partition_manager.ex
 +++ b/samen_core/lib/samen/audit_event/partition_manager.ex
-@@ -562,7 +562,7 @@ defmodule Samen.AuditEvent.PartitionManager do
-   end
+@@ -630,7 +630,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+     # A SAVEPOINT inside a transaction (a failing read must not abort the caller's transaction: 25P02); outside one
+     # Postgrex refuses `mode: :savepoint` ("transaction is not started") without contacting the server, so there the
+     # plain query is the whole story (a failure aborts nothing).
+-    opts = if repo.in_transaction?(), do: [mode: :savepoint], else: []
++    opts = []
  
-   defp load_bounds(repo) do
--    case repo.query(@bounds_sql, [], mode: :savepoint) do
-+    case repo.query(@bounds_sql, []) do
+     case repo.query(@bounds_sql, [], opts) do
        {:ok, %{rows: rows}} ->
-         if Enum.all?(rows, fn [lo, hi] -> lo != nil and hi != nil end),
-           do: {:ok, Enum.map(rows, fn [lo, hi] -> {lo, hi} end)},
