@@ -482,4 +482,23 @@ defmodule PawChart.ReadsHonestFailureP4Test do
       assert_raise Ash.Error.Unknown, fn -> PawChart.OperatorSeeds.seed() end
     end
   end
+
+  # ===========================================================================
+  # MCP key auth: a failing key lookup fails closed and is reported, not silent
+  # ===========================================================================
+
+  describe "mcp key lookup" do
+    test "a key lookup that FAILS is :error (closed) and reported by name; a healthy lookup of an unknown key is silent" do
+      alias PawChartWeb.Api.McpKeyResolver
+
+      log = capture_log(fn -> assert :error = McpKeyResolver.resolve_scope("some-unknown-key") end)
+      refute log =~ "mcp_key_lookup"
+
+      break_select!("pok_api_key", "pok_token_digest")
+      log = capture_log(fn -> assert :error = McpKeyResolver.resolve_scope("some-unknown-key") end)
+
+      assert log =~ "read=pawchart_mcp_key_lookup"
+      refute log =~ "some-unknown-key"
+    end
+  end
 end

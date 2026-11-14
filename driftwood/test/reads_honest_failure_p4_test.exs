@@ -670,4 +670,28 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
       assert_raise Ash.Error.Unknown, fn -> Driftwood.Seeds.demo_all(org) end
     end
   end
+
+  # ===========================================================================
+  # API key auth: a failing key lookup fails closed and is reported, not silent
+  # ===========================================================================
+
+  describe "api key lookup" do
+    test "a key lookup that FAILS sets no actor (closed) and is reported by name; a healthy lookup of an unknown key is silent" do
+      conn = Plug.Test.conn(:get, "/") |> put_req_header("authorization", "Bearer some-unknown-key")
+
+      # POSITIVE CONTROL: healthy table, unknown key -> no actor, nothing logged
+      log = capture_log(fn -> send(self(), {:conn, DriftwoodWeb.Api.KeyAuthPlug.call(conn, [])}) end)
+      assert_received {:conn, healthy}
+      refute Map.has_key?(healthy.private, :samen_api_actor)
+      refute log =~ "api_key_lookup"
+
+      break_select!("dak_api_key", "dak_token_digest")
+      log = capture_log(fn -> send(self(), {:conn, DriftwoodWeb.Api.KeyAuthPlug.call(conn, [])}) end)
+      assert_received {:conn, failed}
+
+      refute Map.has_key?(failed.private, :samen_api_actor)
+      assert log =~ "read=driftwood_api_key_lookup"
+      refute log =~ "some-unknown-key"
+    end
+  end
 end
