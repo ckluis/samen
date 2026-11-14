@@ -1,0 +1,19 @@
+# SABOTAGE: mix samen.gen.indexes writes a migration whose up/0 creates no index
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/indexing_test.exs
+# MUST_FAIL: renders a literal, sorted @resources list and a reversible concurrent up/down
+diff --git a/samen_core/lib/mix/tasks/samen.gen.indexes.ex b/samen_core/lib/mix/tasks/samen.gen.indexes.ex
+index 4bc18fe0..ec91bf83 100644
+--- a/samen_core/lib/mix/tasks/samen.gen.indexes.ex
++++ b/samen_core/lib/mix/tasks/samen.gen.indexes.ex
+@@ -87,7 +87,7 @@ defmodule Mix.Tasks.Samen.Gen.Indexes do
+     #{list}
+       ]
+ 
+-      def up, do: create_org_keyset_indexes(@resources, concurrently: true)
++      def up, do: :ok
+       def down, do: drop_org_keyset_indexes(@resources, concurrently: true)
+     end
+     """
