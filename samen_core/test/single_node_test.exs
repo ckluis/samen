@@ -28,6 +28,28 @@ defmodule Samen.SingleNodeTest do
     end
   end
 
+  # `:peer` and `:net_kernel.start/1` need an epmd. Find it on PATH, else inside the running OTP (`erts-*/bin`), and
+  # FAIL with a named message when there is none: a skipped distribution test would leave the guard unproven.
+  defp ensure_epmd! do
+    found =
+      System.find_executable("epmd") ||
+        [to_string(:code.root_dir()), "erts-*", "bin", "epmd"] |> Path.join() |> Path.wildcard() |> List.first()
+
+    case found do
+      nil ->
+        raise ExUnit.AssertionError,
+          message:
+            "epmd (the Erlang port mapper) was not found on PATH or under #{:code.root_dir()}/erts-*/bin; " <>
+              "the distributed-Erlang tests need it (install Erlang/OTP with its bin directory, or put epmd on PATH)"
+
+      path ->
+        case System.cmd(path, ["-daemon"], stderr_to_stdout: true) do
+          {_, 0} -> :ok
+          {out, code} -> raise ExUnit.AssertionError, message: "`#{path} -daemon` failed (#{code}): #{out}"
+        end
+    end
+  end
+
   defp disconnect_probe(test, node) do
     send(test, {:disconnected, node})
     true
@@ -74,7 +96,7 @@ defmodule Samen.SingleNodeTest do
 
   describe "Peers with real distributed nodes" do
     setup do
-      System.cmd("epmd", ["-daemon"])
+      ensure_epmd!()
 
       started? =
         if Node.alive?() do
@@ -192,7 +214,7 @@ defmodule Samen.SingleNodeTest do
     end
 
     test "a connected visible node fails boot" do
-      System.cmd("epmd", ["-daemon"])
+      ensure_epmd!()
       started? = not Node.alive?()
       if started?, do: {:ok, _} = :net_kernel.start([:"samen_sn_boot_#{System.unique_integer([:positive])}@127.0.0.1", :longnames])
 
@@ -220,6 +242,8 @@ defmodule Samen.SingleNodeTest do
       Application.put_env(:samen_core, SnArmingFake.Endpoint, server: false)
 
       on_exit(fn ->
+        # `child_specs` of a serving instance ARMS the default table; this VM runs no lease on it
+        SingleNode.disarm()
         if is_nil(saved), do: Application.delete_env(:phoenix, :serve_endpoints), else: Application.put_env(:phoenix, :serve_endpoints, saved)
         Application.delete_env(:samen_core, SnArmingFake.Endpoint)
       end)
@@ -281,10 +305,11 @@ defmodule Samen.SingleNodeTest do
   end
 
   describe "status resolution, advisory and strict check" do
-    defp ets(raw) do
+    # The lease publishes `at` (when) and `stale_ms` with every state; a state without them is stale by definition.
+    defp ets(raw, fresh \\ %{at: 0, stale_ms: 1_000_000_000}) do
       table = :"sn_status_#{System.unique_integer([:positive])}"
       :ets.new(table, [:named_table, :public])
-      :ets.insert(table, {:status, raw})
+      :ets.insert(table, {:status, Map.merge(fresh, raw)})
       table
     end
 
@@ -309,7 +334,7 @@ defmodule Samen.SingleNodeTest do
     end
 
     test "overlap: ok INSIDE the grace period, critical from the exact boundary on" do
-      raw = %{state: :overlap, peers: 1, since: 1_000, late?: false, grace_ms: 300_000, strict: false}
+      raw = %{state: :overlap, peers: 1, since: 1_000, late?: false, verified?: true, grace_ms: 300_000, strict: false}
       table = ets(raw)
 
       assert SingleNode.advisory(table: table, now: 1_000 + 299_999) == :ok
@@ -320,16 +345,52 @@ defmodule Samen.SingleNodeTest do
     end
 
     test "strict: only the LATE instance, only past grace, only when strict" do
-      base = %{state: :overlap, peers: 1, since: 0, grace_ms: 1_000}
+      base = %{state: :overlap, peers: 1, since: 0, grace_ms: 1_000, verified?: true}
       late = ets(Map.merge(base, %{late?: true, strict: true}))
       early = ets(Map.merge(base, %{late?: false, strict: true}))
       lax = ets(Map.merge(base, %{late?: true, strict: false}))
+      unconfirmed = ets(Map.merge(base, %{late?: true, strict: true, verified?: false}))
 
       assert SingleNode.strict_check(table: late, now: 999) == :ok
       assert SingleNode.strict_check(table: late, now: 1_000) == {:error, :overlap}
       assert SingleNode.strict_check(table: early, now: 5_000) == :ok
       assert SingleNode.strict_check(table: lax, now: 5_000) == :not_armed
-      assert SingleNode.strict_check(table: ets(%{state: :unknown, reason: :connection_down, strict: true}), now: 5_000) == :ok
+      # a holder not confirmed alive (its beat never changed: a ghost) is never a reason to refuse
+      assert SingleNode.strict_check(table: unconfirmed, now: 5_000) == :ok
+      assert {:unknown, _} = SingleNode.advisory(table: unconfirmed, now: 5_000)
+    end
+
+    test "strict never refuses on UNKNOWN, whatever the reason (a lone healthy instance must not 503 itself)" do
+      for reason <- [:connection_down, :connection_pooler, :stale_holder, :lease_lost, :query_failed, :starting] do
+        table = ets(%{state: :unknown, reason: reason, strict: true})
+        assert %{state: :unknown, strict?: true} = SingleNode.status(table: table, now: 5_000)
+        assert SingleNode.strict_check(table: table, now: 5_000) == :ok
+        assert {:unknown, _} = SingleNode.advisory(table: table, now: 5_000)
+      end
+
+      # a stale published state, and an armed node whose lease is gone, are UNKNOWN too, with strict on
+      stale = ets(%{state: :single, strict: true}, %{at: 0, stale_ms: 1_000})
+      assert %{state: :unknown, reason: :lease_stale, strict?: true} = SingleNode.status(table: stale, now: 1_000)
+      assert %{state: :single} = SingleNode.status(table: stale, now: 999)
+      assert SingleNode.strict_check(table: stale, now: 1_000) == :ok
+
+      # a state with no timestamp at all cannot be shown to be fresh
+      untimed = ets(%{state: :single, strict: true}, %{})
+      assert %{state: :unknown, reason: :lease_stale} = SingleNode.status(table: untimed, now: 0)
+    end
+
+    test "armed + no lease table is UNKNOWN :lease_not_running; never armed is :disarmed" do
+      table = :"sn_armed_#{System.unique_integer([:positive])}"
+      assert SingleNode.status(table: table) == :disarmed
+      SingleNode.arm(table)
+      on_exit(fn -> SingleNode.disarm(table) end)
+
+      assert %{state: :unknown, reason: :lease_not_running} = SingleNode.status(table: table)
+      assert {:unknown, detail} = SingleNode.advisory(table: table)
+      assert detail =~ "lease_not_running"
+
+      SingleNode.disarm(table)
+      assert SingleNode.status(table: table) == :disarmed
     end
   end
 end
