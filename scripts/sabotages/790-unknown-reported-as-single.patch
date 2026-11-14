@@ -5,15 +5,15 @@
 # TEST_FILES: test/single_node_lease_test.exs
 # MUST_FAIL: the database is unreachable
 diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
-index 405ed0bb..026aa924 100644
+index edeca69e..33945b3a 100644
 --- a/samen_core/lib/samen/single_node/lease.ex
 +++ b/samen_core/lib/samen/single_node/lease.ex
-@@ -131,7 +131,7 @@ defmodule Samen.SingleNode.Lease do
+@@ -276,7 +276,7 @@ defmodule Samen.SingleNode.Lease do
      end
    end
  
--  def interpret({:error, %DBConnection.ConnectionError{}}), do: {:unknown, :connection_down}
-+  def interpret({:error, %DBConnection.ConnectionError{}}), do: :single
-   def interpret(_other), do: {:unknown, :query_failed}
+-  def interpret({:error, %DBConnection.ConnectionError{}}, _ctx), do: {:unknown, :connection_down}
++  def interpret({:error, %DBConnection.ConnectionError{}}, _ctx), do: {:view, []}
  
-   # Ordered by (session start, pid): late = some peer is strictly older. A session whose start is not visible
+   # The server ended the session (a restart, pg_terminate_backend, idle_session_timeout) and the answer to the next
+   # query on it is the FATAL error itself: the connection is down, not the query wrong.

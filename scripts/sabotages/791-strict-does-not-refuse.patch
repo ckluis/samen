@@ -5,15 +5,15 @@
 # TEST_FILES: test/single_node_test.exs
 # MUST_FAIL: strict: only the LATE instance, only past grace, only when strict
 diff --git a/samen_core/lib/samen/single_node.ex b/samen_core/lib/samen/single_node.ex
-index 74f4dfe1..7800b876 100644
+index 83ec314b..5ad6a13e 100644
 --- a/samen_core/lib/samen/single_node.ex
 +++ b/samen_core/lib/samen/single_node.ex
-@@ -256,7 +256,7 @@ defmodule Samen.SingleNode do
+@@ -301,7 +301,7 @@ defmodule Samen.SingleNode do
      case status(opts) do
        :disarmed -> :not_armed
        %{strict?: false} -> :not_armed
--      %{state: :overlap, exceeded?: true, late?: true} -> {:error, :overlap}
-+      %{state: :overlap, exceeded?: true, late?: true} -> :ok
+-      %{state: :overlap, exceeded?: true, late?: true, verified?: true} -> {:error, :overlap}
++      %{state: :overlap, exceeded?: true, late?: true, verified?: true} -> :ok
        _ -> :ok
      end
    end

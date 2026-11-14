@@ -6,15 +6,15 @@
 # TEST_FILES: test/single_node_lease_test.exs
 # MUST_FAIL: a statement served by a session that never ran after_connect
 diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
-index 405ed0bb..3222156f 100644
+index edeca69e..879ff20d 100644
 --- a/samen_core/lib/samen/single_node/lease.ex
 +++ b/samen_core/lib/samen/single_node/lease.ex
-@@ -114,7 +114,7 @@ defmodule Samen.SingleNode.Lease do
-     holders = rows |> Enum.reject(fn [_, pid, _, _] -> is_nil(pid) end) |> Enum.uniq_by(fn [_, pid, _, _] -> pid end)
- 
+@@ -252,7 +252,7 @@ defmodule Samen.SingleNode.Lease do
+   @spec interpret(term(), map()) :: {:view, [map()]} | {:unknown, atom()}
+   def interpret({:ok, %Postgrex.Result{rows: [[me, var | _] | _] = rows}}, ctx) do
      cond do
--      flag in [nil, ""] ->
+-      var in [nil, ""] or var != ctx.token or me != ctx.pid ->
 +      false ->
          {:unknown, :connection_pooler}
  
-       not Enum.any?(holders, fn [_, pid, _, _] -> pid == me end) ->
+       true ->
