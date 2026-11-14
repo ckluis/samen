@@ -80,6 +80,10 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
       Mix.shell().info("#{@task_name}: NOT inspected (declared unmounted on this host): #{inspect(resource)} — #{reason}")
     end
 
+    for note <- notes(domains: domains(opts), unmounted: unmounted) do
+      Mix.shell().info("#{@task_name}: NOTE: #{note}")
+    end
+
     Samen.Verifier.halt_if_violations(
       @task_name,
       violations(domains: domains(opts), unmounted: unmounted)
@@ -130,27 +134,41 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
          true <- repo != nil or {:error, "#{inspect(resource)} declares no repo"},
          :ok <- ensure_repo_started(repo),
          {:ok, indexes} <- Samen.Indexing.live_indexes(repo, spec.schema, spec.table) do
-      nullable_sort(spec, repo) ++
-        if Enum.any?(indexes, &Samen.Indexing.serves?(&1, spec)) do
-          []
-        else
-          [missing(spec, indexes)]
-        end
+      if Enum.any?(indexes, &Samen.Indexing.serves?(&1, spec)) do
+        []
+      else
+        [missing(spec, indexes)]
+      end
     else
       {:error, reason} -> ["cannot inspect #{inspect(resource)}: #{reason}"]
     end
   end
 
-  # An attribute that says "never nil" over a column that still accepts NULL: the ascending cursor
-  # bound is decided from the column (see `Samen.Indexing.column_not_null/3`), so the page is
-  # still correct, but it loses the seek and the schema no longer says what the resource does.
-  defp nullable_sort(spec, repo) do
-    for attr <- spec.logical -- [:org_id, :id],
-        %{allow_nil?: false} <- [Ash.Resource.Info.attribute(spec.resource, attr)],
-        Samen.Indexing.column_not_null(spec.resource, attr, repo: repo) == {:ok, false} do
-      "#{inspect(spec.resource)} (#{spec.table}): attribute #{inspect(attr)} is `allow_nil? false` but the " <>
-        "database column is nullable — the ascending keyset cursor cannot use its index bound. " <>
-        "Next: write a migration that backfills the NULLs and sets the column NOT NULL " <>
+  @doc """
+  Advisory lines (never violations) for `opts[:domains]`: a sort attribute that says `allow_nil? false`
+  over a database column that still accepts NULL. The page is still correct (the ascending cursor
+  bound is decided from the column, see `Samen.Indexing.column_not_null/3`) but it loses the seek and
+  the schema no longer says what the resource does. Not a violation: fixing it is a data migration
+  (backfill, then SET NOT NULL) that a host owns, and the verifier must not block on it.
+  """
+  @spec notes(keyword()) :: [String.t()]
+  def notes(opts) do
+    unmounted = Keyword.get(opts, :unmounted, %{})
+    spec_opts = Keyword.take(opts, [:keyset_sorts])
+    {resources, _} = Samen.Indexing.org_scoped(Keyword.get(opts, :domains, []))
+
+    for resource <- resources,
+        not Map.has_key?(unmounted, resource),
+        {:ok, spec} <- [Samen.Indexing.spec(resource, spec_opts)],
+        repo = repo(resource),
+        repo != nil,
+        :ok == ensure_repo_started(repo),
+        attr <- spec.logical -- [:org_id, :id],
+        %{allow_nil?: false} <- [Ash.Resource.Info.attribute(resource, attr)],
+        Samen.Indexing.column_not_null(resource, attr, repo: repo) == {:ok, false} do
+      "#{inspect(resource)} (#{spec.table}): attribute #{inspect(attr)} is `allow_nil? false` but the " <>
+        "database column is nullable — its ascending keyset cursor gets no index bound. " <>
+        "Next: a migration that backfills the NULLs and sets the column NOT NULL " <>
         "(or make the attribute `allow_nil? true` if NULLs are legitimate)."
     end
   end

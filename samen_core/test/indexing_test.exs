@@ -702,13 +702,15 @@ defmodule Samen.IndexingTest do
       :ok
     end
 
-    test "the verifier names it; making the column NOT NULL clears it" do
-      assert [violation] = Indexes.violations(domains: [RankedDomain], keyset_sorts: @ranked)
-      assert violation =~ "Samen.IndexingTest.Ranked (ix_ranked): attribute :rank is `allow_nil? false`"
-      assert violation =~ "database column is nullable"
+    test "the verifier notes it (advisory, not a violation); making the column NOT NULL clears the note" do
+      opts = [domains: [RankedDomain], keyset_sorts: @ranked]
+      assert Indexes.violations(opts) == []
+      assert [note] = Indexes.notes(opts)
+      assert note =~ "Samen.IndexingTest.Ranked (ix_ranked): attribute :rank is `allow_nil? false`"
+      assert note =~ "database column is nullable"
 
       @repo.query!("ALTER TABLE ix_ranked ALTER COLUMN rank SET NOT NULL")
-      assert Indexes.violations(domains: [RankedDomain], keyset_sorts: @ranked) == []
+      assert Indexes.notes(opts) == []
     end
   end
 
