@@ -193,10 +193,18 @@ strict: true`. Alert on the metrics or the body line.
 - `single_node: CRITICAL N other instance(s) share this database for Ns` — another instance has been on this database longer
   than `grace_ms` (default 300 s). A rolling deploy produces `samen.single_node.peers` = 1 for a few minutes and no line; the line
   means the old instance was not stopped, or someone scaled the app.
-- `single_node: UNKNOWN … (reason)` — the lease cannot say. `connection_down` / `query_failed`: the database or the dedicated
-  connection is failing (§5 will usually be failing too). `connection_pooler`: the lease connection goes through PgBouncer in
-  transaction mode, where session locks do not work; set `lease_url` to a direct URL. `lease_lost`: the lock vanished under a live
-  session (`pg_advisory_unlock_all()`, a pooler `DISCARD ALL`); the lease re-takes it only on a new session, restart the instance.
+- `single_node: UNKNOWN … (reason)` — the lease cannot say. It never refuses traffic, not even with `strict: true` (ADR-054 §2.2:
+  strict does not 503 on UNKNOWN). `connection_down` / `query_failed`: the database or the dedicated connection is failing (§5 will
+  usually be failing too). **`connection_pooler`: the lease connection goes through a transaction pooler (PgBouncer, Neon's
+  `-pooler` host), where session locks do not work. A pooled URL can ONLY give UNKNOWN; `lease_url` (generated apps:
+  `DATABASE_DIRECT_URL`) must be a DIRECT, unpooled URL.** Two instances whose statements share one server connection (also a
+  pooler) read the same. `lease_lost`: the lock vanished under a live session (`pg_advisory_unlock_all()`, a pooler `DISCARD ALL`);
+  the lease re-takes it only on a new session, restart the instance. `stale_holder`: a lock whose owner stopped beating (a crashed
+  machine whose session Postgres has not dropped yet, or a lock left on a pooler's server connection); it clears when the session
+  ends (15 s after the owner went silent on Postgres 14+, else when TCP keepalive drops it; or `SELECT pg_terminate_backend(pid)` for
+  the pid in step 3 below). `lease_not_running` / `lease_stale`: this instance's lease process died or hung; its supervisor restarts it,
+  a persistent line means it keeps failing (look for `Samen.SingleNode.Lease` in the log). `not confirmed alive`: another holder
+  exists but its beat has not changed yet; it resolves to CRITICAL or `stale_holder` within one to three check intervals.
 - `samen.single_node.peer_refused.count` rising — something connects a VISIBLE Erlang node (a clustering library, or an operator
   starting `iex`/`:observer` without `--hidden`). It is disconnected each time. Use `bin/app remote` or `iex --hidden --remsh`.
 

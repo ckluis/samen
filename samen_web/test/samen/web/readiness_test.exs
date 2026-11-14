@@ -99,12 +99,13 @@ defmodule Samen.Web.ReadinessTest do
 
     defp publish(raw) do
       :ets.new(@table, [:named_table, :public])
-      :ets.insert(@table, {:status, raw})
+      # the lease stamps every state with when it was published and how long that stays believable
+      :ets.insert(@table, {:status, Map.merge(%{at: System.monotonic_time(:millisecond), stale_ms: 3_600_000}, raw)})
     end
 
     defp overlap(opts) do
       Map.merge(
-        %{state: :overlap, peers: 1, since: System.monotonic_time(:millisecond), late?: true, grace_ms: 300_000, strict: false},
+        %{state: :overlap, peers: 1, since: System.monotonic_time(:millisecond), late?: true, verified?: true, grace_ms: 300_000, strict: false},
         Map.new(opts)
       )
     end
@@ -161,6 +162,30 @@ defmodule Samen.Web.ReadinessTest do
 
       publish(overlap(since: System.monotonic_time(:millisecond), strict: true, late?: true))
       assert {200, "ready"} = Readiness.report(repo: Repo, oban: oban)
+    end
+
+    test "a lease that died (armed node, no table) is UNKNOWN in a 200 body, also with strict on", %{oban: oban} do
+      Samen.SingleNode.arm(@table)
+      on_exit(fn -> Samen.SingleNode.disarm(@table) end)
+
+      assert {:unknown, detail} = Readiness.advisories(repo: Repo)[:single_node]
+      assert detail =~ "lease_not_running"
+      assert {200, body} = Readiness.report(repo: Repo, oban: oban)
+      assert body =~ "single_node: UNKNOWN"
+      refute body =~ "single_node: FAIL"
+
+      Application.put_env(:samen_core, Samen.SingleNode, strict: true)
+      on_exit(fn -> Application.delete_env(:samen_core, Samen.SingleNode) end)
+      # strict never turns "cannot tell" into a 503
+      assert {200, _} = Readiness.report(repo: Repo, oban: oban)
+    end
+
+    test "a hung lease's last word expires: a published `single` older than its stale_ms is UNKNOWN", %{oban: oban} do
+      publish(%{state: :single, strict: false, at: System.monotonic_time(:millisecond) - 10_000, stale_ms: 5_000})
+      assert {:unknown, detail} = Readiness.advisories(repo: Repo)[:single_node]
+      assert detail =~ "lease_stale"
+      assert {200, body} = Readiness.report(repo: Repo, oban: oban)
+      assert body =~ "single_node: UNKNOWN"
     end
 
     setup do

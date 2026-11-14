@@ -87,38 +87,78 @@ Two instances behind a load balancer are not an Erlang cluster, so 2.1 never fir
 Postgres is the detector.
 
 - **Mechanism.** Each serving instance owns one dedicated Postgres connection (a size-1 `Postgrex` pool, outside the Ecto pool and
-  the SQL sandbox). `after_connect` takes a session-level **shared** advisory lock, `pg_advisory_lock_shared(0x53414D45,
-  0x4E4F4445)`, and sets a session variable. A check counts the other holders in `pg_locks` (with their `backend_start` from
-  `pg_stat_activity`) every `interval_ms` (5 s). Zero others is `single`, more is `overlap`.
-- **Why a shared session lock and not an exclusive try-lock or a heartbeat row.** (1) It cannot go stale: Postgres releases a session
-  lock the instant the session ends, so a crashed or partitioned instance leaves nothing behind and there is no heartbeat TTL to tune
-  against deploy time. (2) It is symmetric: an exclusive try-lock tells only the loser, while counting shared holders tells both
-  instances, so whichever instance the load balancer or the probe reaches reports. (3) It needs no table, no migration and no row to
-  expire.
-- **Connection drops and pool recycling.** The lock is taken only in `after_connect`, which runs on every new session before the pool
-  serves its first query on it. A dropped connection that the pool re-establishes therefore re-takes the lock by construction, with no
-  retry loop in the guard (proved by `terminate_backend` in `samen_core/test/single_node_lease_test.exs`). The Ecto pool's recycling is
-  irrelevant: it is a different connection.
+  the SQL sandbox). `after_connect` runs ONE statement on every new session that takes four session-level **shared** advisory locks
+  and sets a session variable: the presence lock `(0x53414D45, 0x4E4F4445)`; the **boot epoch** (microseconds of the DATABASE
+  clock, read once per lease process, as two locks `(kS, secs)` and `(kU, usec)`); the **beat** `(kB, n)`, which every
+  verified check replaces with `n + 1`; and `samen.single_node_lease` = a per-boot random token. A check counts the other holders of
+  the presence lock in `pg_locks` every `interval_ms` (5 s). Zero others is `single`, more is `overlap`.
+- **Why a shared session lock and not an exclusive try-lock or a heartbeat row.** (1) It needs no table, no migration and no row to
+  expire, and a lock vanishes with its session. (2) It is symmetric: an exclusive try-lock tells only the loser, while counting shared
+  holders tells both instances, so whichever instance the load balancer or the probe reaches reports.
+- **A lock CAN go stale; the real bound.** Postgres releases a session lock when the backend ends. A clean exit, a `kill -9` of the BEAM
+  (the kernel sends a FIN) and a restart end it at once. A host that dies WITHOUT a FIN (power loss, a partition) leaves its backend and
+  lock behind until the server notices, which by default is about two hours of TCP keepalive. This ADR therefore does NOT claim the lock
+  "cannot go stale". Three layers bound it: (a) `idle_session_timeout` (Postgres 14+) on the lease session, `3 x interval_ms` = **15 s**:
+  the lease queries every `interval_ms`, so a healthy session is never idle that long and a session whose client is gone is terminated by
+  the server; (b) TCP keepalive on both ends (`tcp_keepalives_idle/interval/count` = 10/5/3 s on the session, `keepalive: true` on the
+  client socket), about 25 s where the transport supports it (not on a unix socket); (c) the beat: a holder whose beat has not changed
+  for `stale_ms` (`3 x interval_ms`) is no longer evidence of a second instance and reads `UNKNOWN (stale_holder)`, never `overlap`, so
+  a restarted instance neither pages nor, in strict mode, 503s because of its predecessor's ghost. **Below Postgres 14**
+  `idle_session_timeout` does not exist: the lease logs that once per session, and the bound is (b) and (c) only (CI and local runs are
+  Postgres 16; `samen_core/test/single_node_lease_test.exs` proves the mechanism by letting the server end a silent session after
+  500 ms). A holder carrying the lease's OWN boot epoch is a ghost of its own earlier session and is ignored.
+- **Connection drops and pool recycling.** The locks are taken only in `after_connect`, which runs on every new session before the pool
+  serves its first query on it. A dropped connection that the pool re-establishes therefore re-takes them by construction, with no retry
+  loop in the guard (proved by `terminate_backend` in `samen_core/test/single_node_lease_test.exs`). The epoch belongs to the lease
+  process, not to the session, so the reconnect does not change the instance's place in the ordering.
 - **Rolling deploy.** The overlap is expected. For `grace_ms` (default 300 000, five minutes) nothing is reported and `/readyz` is clean.
   Past it: one `Logger.error` and one `Failure` report per overlap episode, `samen.single_node.overlap.count`, and `/readyz` carries
-  `single_node: CRITICAL N other instance(s) share this database for Ns …` in its **200** body. The default never fails a deploy.
-- **`strict: true`** (`config :samen_core, Samen.SingleNode, strict: true`): past the grace period the **late** instance, the one
-  whose lease session started later (ties broken by backend pid), answers **503** (`single_node: FAIL`) instead of becoming ready, so
-  a deploy that does not stop the old instance in time stops being ready by itself. The older instance keeps serving. Consequence to
-  know: an instance whose lease session was lost and re-established becomes the "late" one.
-- **Fail-honest.** The check returns `single`, `overlap` or `{:unknown, reason}`. An unreadable state is never `single`:
-  `:starting` (nothing read yet), `:connection_down`, `:query_failed`, `:lease_lost` (the session variable is present and the lock is
-  gone, for example `pg_advisory_unlock_all()`), `:connection_pooler` (below). `/readyz` shows `single_node: UNKNOWN …` and
-  `samen.single_node.unknown` is 1. Strict mode does not refuse on unknown (a dead database already fails the `repo` check).
-- **PgBouncer, honestly.** A session lock lives on a server connection. Behind a pooler in **transaction** mode a client's statements
-  land on different server connections, so a lock taken by one statement is invisible to the next and this mechanism cannot work. The
-  guard does not guess: the check reads the session variable only `after_connect` sets, and a statement served by a session that never
-  ran `after_connect` can only be a pooled one, so the answer is `{:unknown, :connection_pooler}`, loudly, instead of a false "single".
-  The fix is operational: set `config :samen_core, Samen.SingleNode, lease_url: <direct, unpooled URL>` so this one connection bypasses
-  the pooler. In **session** mode the lock works unchanged. A pooler that happens to pin this client to one server connection is
-  indistinguishable from a direct connection, and then the lock really is held by this client's session, so the answer is right.
-  What the guard cannot see: two instances using different databases (they are two deployments, not one), and a database restored from a
-  backup next to the original (different cluster, no shared locks).
+  `single_node: CRITICAL N other instance(s) share this database for Ns …` in its **200** body. The default never fails a deploy. The
+  overlap clock restarts only when a check observes `single`; an unreadable moment in between does not reset it. CRITICAL (and a strict
+  503) additionally require the other holder to be **confirmed alive**: its beat changed between two of our checks. Until then
+  `/readyz` says `UNKNOWN (not confirmed alive)`. A peer that beats confirms itself within one interval.
+- **`strict: true`** (`config :samen_core, Samen.SingleNode, strict: true`): past the grace period the **late** instance, the one whose
+  lease **booted** later (by the database clock, carried in `pg_locks` so every role can read it; ties broken by backend pid), answers
+  **503** (`single_node: FAIL`) instead of becoming ready, so a deploy that does not stop the old instance in time stops being ready by
+  itself. The older instance keeps serving. A reconnect does not change who is late. (An earlier design ordered by
+  `pg_stat_activity.backend_start`, which is NULL across roles, so nobody was refused, and which made a reconnected long-running
+  instance the "late" one.)
+- **Strict mode and UNKNOWN (decided).** `strict` NEVER answers 503 on `UNKNOWN`, whatever the reason: a database that cannot be read,
+  a pooler, a stale holder, a dead or hung lease. "Cannot tell" is also what a healthy lone instance looks like when its lease
+  connection is the part that is broken, and a guard that takes the only instance out of rotation when it cannot tell causes the outage it
+  exists to prevent. The cost is stated: while the state is unreadable strict mode does not protect. The signal is `single_node: UNKNOWN`
+  in the `/readyz` body and `samen.single_node.unknown`; alert on UNKNOWN sustained for more than 15 minutes (alerts runbook §8).
+- **Fail-honest.** The check returns `single`, `overlap` or `{:unknown, reason}`. An unreadable state is never `single`: `:starting`
+  (nothing read yet), `:connection_down` (including a session the server ended), `:query_failed`, `:lease_lost` (the session variable is
+  present and the lock is gone, for example `pg_advisory_unlock_all()`), `:connection_pooler`, `:stale_holder`, and, read from the
+  published state, `:lease_not_running` (an instance that arms the guard, whose lease process is gone) and `:lease_stale` (the published
+  state is older than `3 x interval_ms`, a hung lease). `child_specs` sets an **armed** flag outside the lease process, and the lease
+  publishes the time of every state with it, so a dead or hung lease can no longer be read as "the last thing it said was fine" or as
+  "this node has no guard".
+- **Poolers: `lease_url` MUST be a direct URL.** A session lock lives on a server connection. Behind a pooler in **transaction** mode
+  (PgBouncer, Neon's `-pooler` endpoint) a client's statements land on different server connections, and a pooled URL gives
+  **UNKNOWN**, never a verdict. On every check the lease proves the statement ran on the session it owns: the backend pid equals the one
+  `after_connect` recorded (in an `:atomics`, written synchronously by the connection process), the session variable equals this boot's
+  random token, and the session carries exactly this boot's epoch and one beat. Otherwise `UNKNOWN (connection_pooler)`. Two failures
+  this closes: **(1)** two instances whose statements share ONE server connection take re-entrant shared locks there (one row in
+  `pg_locks`), so a plain holder count says "alone" for both; the variable holds the last writer's token and the session carries two
+  epochs, so both are UNKNOWN. **(2)** a lock and variable left on a server connection the pooler keeps after the lease moved on: a
+  statement landing there carries this boot's token but not the recorded pid. UNKNOWN. A third, one step further: the leftover lock is
+  also visible to a DIRECT instance sharing the database, as a holder it cannot verify. It never beats, so it is `UNKNOWN
+  (stale_holder)` after `stale_ms` and never `overlap` or a strict 503 (a live pooled instance beats on whichever server it lands on,
+  which the direct instance correctly reads as a second instance). The beat statement checks pid and token **inside the SQL** before it
+  takes a lock, so a pooled lease cannot leak a lock per check; what it cannot avoid is the lock `after_connect` takes when it connects.
+  The fix is operational and is not optional: set `config :samen_core, Samen.SingleNode, lease_url: <direct, unpooled URL>`. The
+  generated app reads it from `DATABASE_DIRECT_URL` (Neon: the connection string without `-pooler` in the host). In **session** mode
+  pooling the lock works unchanged. What the guard cannot see: two instances using different databases (they are two deployments, not
+  one), and a database restored from a backup next to the original (different cluster, no shared locks).
+- **Connection settings come from the repo.** The lease takes `repo.config/0` (so a runtime `url`, an `init/2` callback or a `:configure`
+  function that resolves dynamic credentials, such as IAM tokens, apply to it) and passes everything on to Postgrex except the keys that
+  belong to the Ecto pool.
+- **Code-built clusters are caught only by the lease.** `assert_standalone!/1` reads configuration (`libcluster` topologies,
+  `dns_cluster`) and `Peers` accepts hidden nodes by design. A clustering topology built in code (a hand-written supervised
+  `Cluster.Supervisor`, a `:net_kernel.connect_node/1` loop) that connects with `--hidden` passes both. The database lease is the backstop:
+  two such instances still share one database and are reported by half 2.
 - **Reading the state costs no query.** The lease publishes its state in a protected ETS table; `/readyz` reads that. A slow or dead
   database cannot block the probe.
 
