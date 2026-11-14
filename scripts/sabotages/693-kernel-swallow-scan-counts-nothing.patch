@@ -1,0 +1,21 @@
+# SABOTAGE: The kernel ratchet's scan stops counting any file's swallows, so a new bare 'rescue _ -> []' in 
+#   samen_core/lib passes the baseline check.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/swallow_lint_test.exs
+# MUST_FAIL: POSITIVE CONTROL: scan/1 counts the fixture
+# MUST_FAIL: the kernel baseline is real debt
+diff --git a/samen_core/lib/samen/lint/kernel_swallow.ex b/samen_core/lib/samen/lint/kernel_swallow.ex
+index 6d602ad4..2eaabf40 100644
+--- a/samen_core/lib/samen/lint/kernel_swallow.ex
++++ b/samen_core/lib/samen/lint/kernel_swallow.ex
+@@ -190,7 +190,7 @@ defmodule Samen.Lint.KernelSwallow do
+   def files, do: Swallow.files(repo_root(), @roots)
+ 
+   @doc "Unreviewed rescue-class swallow count per file."
+-  def scan(files \\ files()), do: Swallow.scan(repo_root(), files, @reviewed, :rescue)
++  def scan(files \\ files()), do: Swallow.scan(repo_root(), Enum.take(files, 0), @reviewed, :rescue)
+ 
+   @doc "Non-rescue (`{:error, _} -> literal`) site count per file."
+   def scan_error_arms(files \\ files()), do: Swallow.scan(repo_root(), files, %{}, :error_arm)

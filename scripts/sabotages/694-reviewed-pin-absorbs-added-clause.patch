@@ -1,0 +1,20 @@
+# SABOTAGE: A reviewed entry stops being pinned to its clause count, so a swallow added to an 
+#   already-reviewed function is absorbed by the entry and the ratchet never sees it.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/swallow_lint_test.exs
+# MUST_FAIL: RED: a clause ADDED to an already-reviewed function counts
+diff --git a/samen_core/lib/samen/lint/swallow.ex b/samen_core/lib/samen/lint/swallow.ex
+index b741eaaf..1b3ea51f 100644
+--- a/samen_core/lib/samen/lint/swallow.ex
++++ b/samen_core/lib/samen/lint/swallow.ex
+@@ -98,7 +98,7 @@ defmodule Samen.Lint.Swallow do
+         case Map.get(reviewed, {rel, site.fun}) do
+           {pinned, _reason} ->
+             n = Map.get(used, site.fun, 0)
+-            if n < pinned, do: {kept, Map.put(used, site.fun, n + 1)}, else: {[site | kept], used}
++            if n >= 0, do: {kept, Map.put(used, site.fun, n + 1)}, else: {[site | kept], used}
+ 
+           nil ->
+             {[site | kept], used}
