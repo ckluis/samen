@@ -1,0 +1,20 @@
+# SABOTAGE: A failed non-PII registration is swallowed again, leaving a plaintext column out of the erasure 
+#   redaction carve-out.
+#
+# Flips the named test(s).
+# APP: pawchart
+# TEST_FILES: test/analytics_non_pii_setup_test.exs
+# MUST_FAIL: a failing registration is an {:error, _}, not :ok
+diff --git a/pawchart/lib/pawchart/analytics.ex b/pawchart/lib/pawchart/analytics.ex
+index ed7576e8..2f338151 100644
+--- a/pawchart/lib/pawchart/analytics.ex
++++ b/pawchart/lib/pawchart/analytics.ex
+@@ -80,7 +80,7 @@ defmodule PawChart.Analytics.NonPiiSetup do
+              })
+            ) do
+         {:ok, _} -> {:cont, :ok}
+-        {:error, failure} -> {:halt, {:error, failure}}
++        {:error, _failure} -> {:cont, :ok}
+       end
+     end)
+   end
