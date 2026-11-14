@@ -37,30 +37,44 @@ defmodule Driftwood.OperatorReveal do
   """
   @spec reveal_cdl(binary(), binary()) :: {:ok, String.t()} | {:error, term()}
   def reveal_cdl(operator_id, driver_id) do
-    case masked_cdl(driver_id) do
-      {:ok, masked} ->
-        # WP6 phase 4: a reveal that RAISES (decrypt/KMS/DB outage) is `{:error, :unavailable}`, reported by
-        # name and exception module — fail CLOSED (nothing is revealed) and distinguishable from a real
-        # denial, so the console never says "no active grant" for an outage.
-        reveal =
-          Guard.run(:driftwood_reveal_cdl, nil, fn ->
-            Samen.Reveal.reveal(
-              operator_id,
-              masked,
-              :reveal_driver,
-              Driftwood.Freight.Driver,
-              subject_id: to_string(driver_id),
-              repo: Driftwood.Repo
-            )
-          end)
+    with {:ok, masked} <- masked_cdl(driver_id),
+         :ok <- suspension_readable(operator_id) do
+      reveal(operator_id, driver_id, masked)
+    end
+  end
 
-        case reveal do
-          {:ok, result} -> result
-          {:error, kind} -> {:error, kind}
-        end
+  # The grant gate fails CLOSED when the suspension table cannot be read, which reads as a plain denial. Ask first, so
+  # an outage is `{:error, :unavailable}` (still nothing revealed) and the console can say it was a failed check.
+  defp suspension_readable(operator_id) do
+    case Samen.OperatorPlane.Suspension.status(operator_id) do
+      {:ok, _suspended?} ->
+        :ok
 
-      {:error, _} = err ->
-        err
+      {:error, :unavailable} ->
+        Guard.report(:driftwood_reveal_suspension, nil, :unavailable)
+        {:error, :unavailable}
+    end
+  end
+
+  defp reveal(operator_id, driver_id, masked) do
+    # WP6 phase 4: a reveal that RAISES (decrypt/KMS/DB outage) is `{:error, :unavailable}`, reported by
+    # name and exception module — fail CLOSED (nothing is revealed) and distinguishable from a real
+    # denial, so the console never says "no active grant" for an outage.
+    reveal =
+      Guard.run(:driftwood_reveal_cdl, nil, fn ->
+        Samen.Reveal.reveal(
+          operator_id,
+          masked,
+          :reveal_driver,
+          Driftwood.Freight.Driver,
+          subject_id: to_string(driver_id),
+          repo: Driftwood.Repo
+        )
+      end)
+
+    case reveal do
+      {:ok, result} -> result
+      {:error, kind} -> {:error, kind}
     end
   end
 

@@ -36,6 +36,10 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
 
   defp break_select!(table, column), do: ddl!("ALTER TABLE #{table} RENAME COLUMN #{column} TO #{column}_renamed")
 
+  defp unbreak_select!(table, column), do: ddl!("ALTER TABLE #{table} RENAME COLUMN #{column}_renamed TO #{column}")
+
+  defp assign_sentinel(socket), do: Phoenix.Component.assign(socket, loads: :sentinel)
+
   # A table whose every INSERT / UPDATE now fails: the write the screen runs fails, its reads still work.
   defp break_writes!(table), do: ddl!("ALTER TABLE #{table} ADD CONSTRAINT zz_p4_broken CHECK (false) NOT VALID")
 
@@ -520,6 +524,112 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
       assert rendered =~ "reveal-windows-unknown"
       assert rendered =~ "couldn&#39;t check whether a reveal window is open" or rendered =~ "couldn't check whether a reveal window is open"
       refute rendered =~ "Privileged reveal window OPEN"
+
+      # ...and it RECOVERS on retry: once the table is healthy again the very same call shows the window again.
+      unbreak_select!("rvg_reveal_grant", "rvg_expires_at")
+      recovered = op_load(op, s)
+
+      assert recovered.assigns.reveal_windows_error == nil
+      assert [_] = recovered.assigns.reveal_windows
+      assert op_html(recovered) =~ "Privileged reveal window OPEN"
+      refute op_html(recovered) =~ "reveal-windows-unknown"
+    end
+
+    # The tick re-reads the windows every second; during an outage that is one Logger.error (+ telemetry) a second per
+    # open console. An unknown state is re-probed on a backoff (`windows_retry_at`), not every tick.
+    test "tick: a first failure reloads once; a repeated failure does not re-read or re-log; recovery reloads once", %{s: s, op: op} do
+      driver_id = to_string(s.compliant_driver_id)
+      {:ok, req} = Grants.request(%{subject_id: driver_id, requestor_id: op.id, reason: "ticket #4404 verify"})
+      {:ok, _} = Grants.approve(req, %{granted_by: "distinct-reviewer-p4", window_minutes: 15})
+
+      tick = fn socket ->
+        log = capture_log(fn -> send(self(), {:ticked, OpLive.handle_info(:tick, socket)}) end)
+        assert_received {:ticked, {:noreply, socket}}
+        {socket, length(Regex.scan(~r/driftwood_reveal_windows/, log))}
+      end
+
+      # POSITIVE CONTROL: a healthy tick neither reloads nor logs, and keeps the windows.
+      healthy = op_load(op, s)
+      sentinel = assign_sentinel(healthy)
+      {socket, logged} = tick.(sentinel)
+      assert logged == 0
+      assert socket.assigns.loads == :sentinel
+      assert [_] = socket.assigns.reveal_windows
+      assert socket.assigns.windows_retry_at == nil
+
+      # FIRST failure: the console reloads (the sentinel is replaced, revealed values are dropped) and goes unknown.
+      break_select!("rvg_reveal_grant", "rvg_expires_at")
+      {down, _logged} = tick.(Phoenix.Component.assign(sentinel, revealed: %{driver_id => "CDL-LINGERING"}))
+      assert down.assigns.reveal_windows_error == :unavailable
+      assert down.assigns.revealed == %{}
+      assert down.assigns.loads != :sentinel
+      assert %DateTime{} = down.assigns.windows_retry_at
+
+      # REPEATED failure inside the backoff: no read, no log, no reload — only the clock advances.
+      down = assign_sentinel(down)
+      {again, logged} = tick.(down)
+      assert logged == 0
+      {again, logged2} = tick.(again)
+      assert logged2 == 0
+      assert again.assigns.loads == :sentinel
+      assert again.assigns.reveal_windows_error == :unavailable
+
+      # Backoff elapsed and STILL down: exactly one probe, one log, no reload, the next probe is pushed out.
+      due = Phoenix.Component.assign(again, windows_retry_at: DateTime.add(DateTime.utc_now(), -1, :second))
+      {probed, logged} = tick.(due)
+      assert logged == 1
+      assert probed.assigns.loads == :sentinel
+      assert probed.assigns.reveal_windows_error == :unavailable
+      assert DateTime.compare(probed.assigns.windows_retry_at, DateTime.utc_now()) == :gt
+
+      # RECOVERY: the next due probe succeeds and reloads once; the banner is back and the retry clock is cleared.
+      unbreak_select!("rvg_reveal_grant", "rvg_expires_at")
+      due = Phoenix.Component.assign(probed, windows_retry_at: DateTime.add(DateTime.utc_now(), -1, :second))
+      {up, logged} = tick.(due)
+      assert logged == 0
+      assert up.assigns.reveal_windows_error == nil
+      assert up.assigns.loads != :sentinel
+      assert [_] = up.assigns.reveal_windows
+      assert up.assigns.windows_retry_at == nil
+    end
+
+    test "a reveal while the windows are unknown is refused (fail closed) and nothing lingers; with known windows the same click reveals", %{s: s, op: op} do
+      driver_id = to_string(s.compliant_driver_id)
+      {:ok, req} = Grants.request(%{subject_id: driver_id, requestor_id: op.id, reason: "ticket #4404 verify"})
+      {:ok, _} = Grants.approve(req, %{granted_by: "distinct-reviewer-p4", window_minutes: 15})
+
+      # POSITIVE CONTROL: windows known + live grant -> the click reveals.
+      healthy = op_load(op, s)
+      revealed = op_event(healthy, "reveal", %{"driver" => driver_id})
+      assert map_size(revealed.assigns.revealed) == 1
+
+      # The windows query fails (the grant check behind the click would still work): the console is 'unknown'.
+      # A click now is refused rather than revealing a value no banner accounts for.
+      unknown = Phoenix.Component.assign(healthy, reveal_windows_error: :unavailable, windows_retry_at: DateTime.add(DateTime.utc_now(), 20, :second))
+      refused = op_event(unknown, "reveal", %{"driver" => driver_id})
+      assert refused.assigns.revealed == %{}
+      assert refused.assigns.flash["error"] =~ "Reveal windows are unknown"
+    end
+
+    test "a reveal whose SUSPENSION check fails is outage copy (still denied), not 'no active second-party grant'", %{s: s, op: op} do
+      driver_id = to_string(s.compliant_driver_id)
+      {:ok, req} = Grants.request(%{subject_id: driver_id, requestor_id: op.id, reason: "ticket #4404 verify"})
+      {:ok, _} = Grants.approve(req, %{granted_by: "distinct-reviewer-p4", window_minutes: 15})
+      socket = op_load(op, s)
+
+      # POSITIVE CONTROL: the suspension table healthy, the grant live -> revealed.
+      assert {:ok, _} = Driftwood.OperatorReveal.reveal_cdl(op.id, driver_id)
+
+      # Only the suspension probe reads this column; the grant lookup and the CDL read are untouched.
+      break_select!("osp_operator_suspension", "osp_cleared_at")
+      assert {:error, :unavailable} = quiet(fn -> Driftwood.OperatorReveal.reveal_cdl(op.id, driver_id) end)
+
+      log = capture_log(fn -> send(self(), {:socket, op_event(socket, "reveal", %{"driver" => driver_id})}) end)
+      assert_received {:socket, failed}
+      assert failed.assigns.flash["error"] =~ "Couldn't check the reveal grant"
+      refute failed.assigns.flash["error"] =~ "denied"
+      assert failed.assigns.revealed == %{}
+      assert log =~ "driftwood_reveal_suspension"
     end
 
     test "a reveal that cannot check its grant fails CLOSED with outage copy; a real denial keeps denial copy", %{s: s, op: op} do
