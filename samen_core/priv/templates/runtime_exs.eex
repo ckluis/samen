@@ -56,8 +56,12 @@ if config_env() == :prod do
 
   # ADR-054: the single-instance lease holds Postgres SESSION locks, which a transaction pooler (Neon's `-pooler`
   # host, PgBouncer) cannot keep. Point it at the DIRECT (unpooled) connection string; with a pooled DATABASE_URL and
-  # no DATABASE_DIRECT_URL `/readyz` reports `single_node: UNKNOWN ... (connection_pooler)` (never "single").
-  if direct_url = System.get_env("DATABASE_DIRECT_URL") do
+  # no DATABASE_DIRECT_URL the lease is unreliable: `/readyz` reports `single_node: UNKNOWN ... (connection_pooler)` once its
+  # statements land on different server connections, and until then it can read "single" next to a second instance.
+  # An empty DATABASE_DIRECT_URL counts as unset.
+  direct_url = System.get_env("DATABASE_DIRECT_URL")
+
+  if direct_url not in [nil, ""] do
     config :samen_core, Samen.SingleNode, lease_url: direct_url
   end
 

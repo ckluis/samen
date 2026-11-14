@@ -131,7 +131,7 @@ All notable changes to Samen are recorded here. The format follows
   a visible peer at runtime, loudly; hidden nodes (`bin/app remote`, `rpc`, `iex --hidden --remsh`) are allowed. `Lease` holds a shared
   session advisory lock on a dedicated connection and counts the other holders: a second instance on the same database is reported in
   `/readyz` as `single_node: CRITICAL` after a 5-minute grace period (a rolling deploy overlaps on purpose), `strict: true` makes the late
-  instance answer 503, an unreadable state is `UNKNOWN` (never single; PgBouncer transaction mode is detected as `connection_pooler`, fix
+  instance answer 503, an unreadable state is `UNKNOWN` (never single; PgBouncer transaction mode is latched as `connection_pooler` once a statement lands elsewhere, fix
   with `lease_url`). Metrics `samen.single_node.*`; alerts.md §8. Sabotages 789-803.
 - Existing tests changed: none (the `single_node:` advisory line exists only where a lease runs).
 

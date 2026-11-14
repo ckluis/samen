@@ -38,7 +38,8 @@ defmodule Samen.SingleNode.Lease do
   and locks behind until the server notices, which by default is ~2 h of TCP keepalive. Three layers bound that:
 
     1. `idle_session_timeout` (Postgres 14+) on the lease session, `session_idle_ms` (default `3 x interval_ms`,
-       15 s). The lease queries every `interval_ms`, so a healthy session is never idle that long; a session whose
+       15 s). While the client lives the session is never idle that long (the lease queries every `interval_ms`, and the pool
+       pings an idle connection every `idle_interval`, 1 s by default); a session whose
        client is gone is terminated by the server and its locks vanish. On Postgres < 14 the setting does not
        exist: it is logged, and only layers 2 and 3 apply.
     2. TCP keepalive on both ends (`tcp_keepalives_idle/interval/count` set on the session, `keepalive: true` on the
@@ -68,11 +69,26 @@ defmodule Samen.SingleNode.Lease do
     * a lock and variable left behind on a server connection the lease no longer owns (a pooler keeps it): a
       statement landing there carries this boot's token but not the recorded pid. UNKNOWN.
 
+  The first check that PROVES the statements are multiplexed LATCHES `{:unknown, :connection_pooler}` for the rest of
+  the lease process's life (`pooler_proof?/2`) and logs ONE error naming `DATABASE_DIRECT_URL` / `lease_url`. Proof
+  is something a direct connection never shows: the session variable absent or holding another boot's token
+  (`after_connect` sets it before the pool serves the session, and nobody else runs statements on it), or a backend
+  pid that differs from the recorded one with no reconnect while the statement ran. A GENUINE reconnect re-runs
+  `after_connect`, which re-records pid and variable, so it never latches; a pid that changed DURING the statement is
+  that race, and is not proof. Two epochs or two beats on the session are UNKNOWN for that check but do not latch.
+
+  Be exact about what a pooled lease is: UNKNOWN only from the moment its first statement lands on another server
+  connection; until then it can read `single` or `overlap` (a statement that lands on the server connection its own
+  `after_connect` locked verifies), and after the pooler recycles that server connection the lease holds no lock
+  anywhere, so an instance it shares the database with may read `single` while it serves. A pooled lease also writes
+  `idle_session_timeout` and the tcp_keepalives settings onto a SHARED server connection, which every other client on
+  it then runs with. It is a misconfiguration to be fixed, not a mode to run in.
+
   The same leftover is visible to a DIRECT instance sharing the database as a holder it cannot verify: it never
-  beats, so after `stale_ms` it is `:stale_holder` (UNKNOWN: not overlap, not a strict 503). A live pooled
-  instance beats on whichever server it lands on, which a direct instance correctly reads as a second instance.
-  The beat statement checks pid and token IN SQL before it takes anything, so a pooled lease cannot leak a lock
-  per check; what it cannot avoid is the lock `after_connect` takes when it connects.
+  beats, so after `stale_ms` it is `:stale_holder` (UNKNOWN: not overlap, not a strict 503). A pooled instance that
+  does beat (its statements happen to land on one server twice in a row) is a second instance to a direct one, but
+  mostly an unconfirmed one. The beat statement checks pid and token IN SQL before it takes anything, so a pooled
+  lease cannot leak a lock per check; what it cannot avoid is the lock `after_connect` takes when it connects.
 
   The fix is operational: `lease_url` must be a DIRECT (unpooled) URL for this one connection (with Neon, the
   host without `-pooler`). In session-mode pooling the lock works as is.
@@ -87,8 +103,10 @@ defmodule Samen.SingleNode.Lease do
 
   First observation of an overlap logs a warning (rolling deploys do this on purpose). Once the overlap has
   lasted `grace_ms` ONE value-free `Samen.Observability.Failure` report is filed per episode and
-  `[:samen, :single_node, :overlap]` fires. The overlap clock (`since`) is reset only by an observed `:single`; an
-  unreadable moment in between does not restart it. Entering `:unknown` files a report and fires
+  `[:samen, :single_node, :overlap]` fires. The overlap clock (`since`) STARTS only on an overlap whose holder is
+  confirmed alive (a ghost that never beats must not use up the grace period of a later rolling deploy, and files no
+  report); it is reset only by an observed `:single`, and an unreadable or unconfirmed moment in between does not
+  restart it. Entering `:unknown` files a report and fires
   `[:samen, :single_node, :unknown]`. Every check emits `[:samen, :single_node, :state]` (peers, unknown,
   overlap seconds) and every new session `[:samen, :single_node, :session]`. The state is published with the time it
   was published (`at`) in a protected ETS table that `Samen.SingleNode.status/1` reads; a state older than
@@ -112,7 +130,6 @@ defmodule Samen.SingleNode.Lease do
   @mask_beat 0x3C3C3C3C
   # atomics slots written by the connection process / the lease
   @a_pid 1
-  @a_beat 2
   @a_epoch 3
   # Config keys that belong to the Ecto pool or the repo, not to a dedicated Postgrex connection. EVERYTHING else
   # in `repo.config/0` (`:configure`, `:ssl_opts`, `:parameters`, `:socket_options`, ...) is passed through.
@@ -228,7 +245,6 @@ defmodule Samen.SingleNode.Lease do
     end
 
     :atomics.put(ref, @a_pid, pid)
-    :atomics.put(ref, @a_beat, 0)
 
     :telemetry.execute(
       [:samen, :single_node, :session],
@@ -423,6 +439,7 @@ defmodule Samen.SingleNode.Lease do
       kind: :unknown,
       since: nil,
       reported?: false,
+      pooled?: false,
       last_reason: nil,
       seen: %{}
     }
@@ -465,7 +482,7 @@ defmodule Samen.SingleNode.Lease do
           repo_config = Keyword.fetch!(opts, :repo).config()
           lease_url = Keyword.get(opts, :lease_url, config.lease_url)
 
-          if lease_url,
+          if lease_url not in [nil, ""],
             do: Keyword.merge(repo_config, Ecto.Repo.Supervisor.parse_url(lease_url)),
             else: repo_config
       end
@@ -477,29 +494,75 @@ defmodule Samen.SingleNode.Lease do
 
   defp check(state) do
     now = state.clock.()
+    # The recorded pid BEFORE the statement: if it is the same after, no reconnect happened while it ran.
+    pid_before = :atomics.get(state.ref, @a_pid)
     result = state.q.query(state.conn, state.sql, [], timeout: state.query_timeout_ms)
     # Read AFTER the statement: a reconnect while it waited for the pool updates the recorded pid.
-    ctx = %{token: state.token, pid: :atomics.get(state.ref, @a_pid), epoch: :atomics.get(state.ref, @a_epoch)}
+    ctx = %{token: state.token, pid: :atomics.get(state.ref, @a_pid), pid_before: pid_before, epoch: :atomics.get(state.ref, @a_epoch)}
+    state = if not state.pooled? and pooler_proof?(result, ctx), do: latch_pooler(state), else: state
 
-    case interpret(result, ctx) do
-      {:view, others} ->
-        {verdict, seen} = decide(others, state.seen, now, state.stale_ms, {ctx.epoch, ctx.pid})
-        beat(state, ctx)
-        apply_verdict(verdict, now, %{state | seen: seen})
+    if state.pooled? do
+      # Latched for the life of this lease process: even a check that happens to land on its own server connection
+      # proves nothing about the lock held elsewhere, and a pooled lease never beats.
+      apply_verdict({:unknown, :connection_pooler}, now, state)
+    else
+      case interpret(result, ctx) do
+        {:view, others} ->
+          {verdict, seen} = decide(others, state.seen, now, state.stale_ms, {ctx.epoch, ctx.pid})
+          beat(state, ctx, own_beat(result))
+          apply_verdict(verdict, now, %{state | seen: seen})
 
-      {:unknown, _reason} = verdict ->
-        apply_verdict(verdict, now, state)
+        {:unknown, _reason} = verdict ->
+          apply_verdict(verdict, now, state)
+      end
     end
   end
 
-  defp beat(state, ctx) do
-    n = :atomics.get(state.ref, @a_beat)
+  @doc """
+  Does this check result PROVE that the lease's statements are multiplexed over several server connections (a
+  transaction pooler)? Two things a direct connection never shows:
 
-    case state.q.query(state.conn, state.beat_sql, [state.token, ctx.pid, n + 1, n], timeout: state.query_timeout_ms) do
-      {:ok, %Postgrex.Result{rows: [[taken]]}} when is_binary(taken) -> :atomics.compare_exchange(state.ref, @a_beat, n, n + 1)
-      _ -> :ok
+    * the session variable is absent or holds another boot's token. `after_connect` sets it before the pool serves
+      the session and nobody else runs statements on it, so a genuine reconnect (which re-runs `after_connect`) never
+      produces this;
+    * the backend pid differs from the recorded one although no reconnect happened while the statement ran
+      (`ctx.pid_before == ctx.pid`). A pid that changed DURING the statement is the benign race of a genuine
+      reconnect (the statement ran on the old session, `after_connect` has since re-recorded), not evidence.
+
+  A session that merely carries two epochs or two beats is NOT proof (`interpret/2` reads it as UNKNOWN for that one
+  check): it can follow a recorded-pid race and heals on its own.
+  """
+  @spec pooler_proof?(term(), map()) :: boolean()
+  def pooler_proof?({:ok, %Postgrex.Result{rows: [[me, var | _] | _]}}, ctx) do
+    var in [nil, ""] or var != ctx.token or (me != ctx.pid and Map.get(ctx, :pid_before, ctx.pid) == ctx.pid)
+  end
+
+  def pooler_proof?(_result, _ctx), do: false
+
+  defp latch_pooler(state) do
+    Logger.error(
+      "[Samen.SingleNode] the lease connection is NOT a dedicated database session: its statements ran on different server " <>
+        "connections (a transaction pooler, e.g. a PgBouncer / Neon -pooler URL). The single-node guard is UNKNOWN from now on " <>
+        "and stays so until this process restarts, and an instance sharing the database may read single. Set DATABASE_DIRECT_URL " <>
+        "(config :samen_core, Samen.SingleNode, lease_url) to a DIRECT, unpooled URL (#{Samen.SingleNode.adr()})"
+    )
+
+    %{state | pooled?: true}
+  end
+
+  # My own beat, read from the check row itself (not from a counter): a reconnect that resets the session cannot leave
+  # a counter and the session disagreeing.
+  defp own_beat({:ok, %Postgrex.Result{rows: [[me | _] | _] = rows}}) do
+    case Enum.find(rows, fn [_, _, pid | _] -> pid == me end) do
+      [_, _, _, _, _, [n]] when is_integer(n) -> n
+      _ -> nil
     end
+  end
 
+  defp beat(_state, _ctx, nil), do: :ok
+
+  defp beat(state, ctx, n) do
+    state.q.query(state.conn, state.beat_sql, [state.token, ctx.pid, n + 1, n], timeout: state.query_timeout_ms)
     :ok
   end
 
@@ -515,25 +578,28 @@ defmodule Samen.SingleNode.Lease do
   end
 
   defp apply_verdict({:overlap, peers, late?, verified?}, now, state) do
-    # `since` is kept across an unknown reading and reset only by an observed :single.
-    since = state.since || now
+    # The clock starts only on a CONFIRMED-alive overlap (a ghost that never beats must not use up the grace period
+    # of a later, legitimate rolling deploy). It is kept across an unknown or unconfirmed reading and reset only by an
+    # observed :single.
+    since = state.since || if(verified?, do: now)
 
-    if state.since == nil do
+    if state.since == nil and state.kind != :overlap do
       Logger.warning(
         "[Samen.SingleNode] another instance shares this database peers=#{peers}; fine during a rolling deploy, " <>
-          "reported as CRITICAL after #{div(state.grace_ms, 1000)}s (#{Samen.SingleNode.adr()})"
+          "reported as CRITICAL after #{div(state.grace_ms, 1000)}s once it is confirmed alive (#{Samen.SingleNode.adr()})"
       )
     end
 
-    exceeded? = now - since >= state.grace_ms
-    reported? = state.reported? or (exceeded? and report_overlap(peers, state))
+    exceeded? = since != nil and now - since >= state.grace_ms
+    reported? = state.reported? or (verified? and exceeded? and report_overlap(peers, state))
 
-    emit(peers, 0, div(now - since, 1000))
+    emit(peers, 0, if(since, do: div(now - since, 1000), else: 0))
 
     publish(state, now, %{
       state: :overlap,
       peers: peers,
-      since: since,
+      # An unconfirmed overlap with no clock yet reads as "just now" (exceeded only when grace is 0).
+      since: since || now,
       late?: late?,
       verified?: verified?,
       grace_ms: state.grace_ms,
@@ -569,5 +635,6 @@ defmodule Samen.SingleNode.Lease do
     :telemetry.execute([:samen, :single_node, :state], %{peers: peers, unknown: unknown, overlap_seconds: overlap_s}, %{})
   end
 
-  defp publish(state, now, raw), do: :ets.insert(state.table, {:status, Map.merge(raw, %{at: now, stale_ms: state.stale_ms})})
+  # `at` is the time of publishing (read now), not the start of the check: a slow database must not make a fresh state read stale.
+  defp publish(state, _checked_at, raw), do: :ets.insert(state.table, {:status, Map.merge(raw, %{at: state.clock.(), stale_ms: state.stale_ms})})
 end
