@@ -1,0 +1,21 @@
+# SABOTAGE: The clinic surface turns a failed patient or pet read into an empty list again, so an outage 
+#   renders 'No patients yet.' and 'No pets yet.'
+#
+# Flips the named test(s).
+# APP: pawchart
+# TEST_FILES: test/reads_honest_failure_p4_test.exs
+# MUST_FAIL: a failed patient roster is the error state with a retry
+# MUST_FAIL: a failed pet roster is the error state
+diff --git a/pawchart/lib/pawchart_web/clinic_live.ex b/pawchart/lib/pawchart_web/clinic_live.ex
+index bd8609c1..31a982e3 100644
+--- a/pawchart/lib/pawchart_web/clinic_live.ex
++++ b/pawchart/lib/pawchart_web/clinic_live.ex
+@@ -124,7 +124,7 @@ defmodule PawChartWeb.ClinicLive do
+   end
+ 
+   defp pane({:ok, value}), do: {value, nil}
+-  defp pane({:error, kind}), do: {[], kind}
++  defp pane({:error, _kind}), do: {[], nil}
+ 
+   defp error_body(:forbidden), do: "You don't have access to view this."
+   defp error_body(_kind), do: Samen.Web.Reads.Guard.message()
