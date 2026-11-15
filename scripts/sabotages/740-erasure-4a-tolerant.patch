@@ -5,13 +5,13 @@
 # TEST_FILES: test/erasure_retry_after_rollback_test.exs
 # MUST_FAIL: STEP 4a is strict
 diff --git a/samen_core/lib/samen/erasure.ex b/samen_core/lib/samen/erasure.ex
-index 872c1e28..243ffdc4 100644
+index e91f22ef..c17250e6 100644
 --- a/samen_core/lib/samen/erasure.ex
 +++ b/samen_core/lib/samen/erasure.ex
-@@ -498,7 +498,7 @@ defmodule Samen.Erasure do
-             "outcome=#{outcome} attestation_id=#{attestation[:attestation_id] || "none"} " <>
+@@ -677,7 +677,7 @@ defmodule Samen.Erasure do
                "vault_sealed=#{sealed} non_pii_redacted=#{redacted} " <>
-               "derived_summary_invalidation=#{derived_summary_invalidation(disposition)}"
+               "derived_summary_invalidation=#{derived_summary_invalidation(disposition)}" <>
+               acknowledged_detail(disposition)
 -        }, strict: true)
 +        })
        end)
