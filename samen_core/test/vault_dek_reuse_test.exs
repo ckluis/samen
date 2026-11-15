@@ -218,6 +218,22 @@ defmodule Samen.VaultDekReuseTest do
       assert tag_count(:reveal) == 9
     end
 
+    test "several distinct record structs of the SAME subject (replay frames) cost one unwrap, with every value resolved" do
+      a = subject!("a")
+      b = subject!("b")
+      _ = drain(:kms_unwrap)
+
+      # Three structs for subject a (the same id and tokens in separate structs, as replay frames hold them),
+      # one for b.
+      frames = [record(a), record(a), record(a), record(b)]
+      resolved = resolve(frames, tenant())
+
+      assert Enum.map(resolved, &values/1) == [expected(a), expected(a), expected(a), expected(b)]
+      unwrapped = drain(:kms_unwrap)
+      assert length(unwrapped) == 2
+      assert unwrapped |> Enum.map(&elem(&1, 1)) |> Enum.sort() == Enum.sort([a.id, b.id])
+    end
+
     test "the reuse ends with the call: a second call unwraps again; a subject shredded between is masked" do
       a = subject!("a")
       b = subject!("b")

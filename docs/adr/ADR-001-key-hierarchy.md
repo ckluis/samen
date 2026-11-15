@@ -219,12 +219,18 @@ unencrypted. Rules, in force from this date:
   key and its vault and field must be the field's own; otherwise the write is refused (field + reason, never the token),
   nothing is stored, and `Failure.report_write(:vault_token_unbound)` records the reason. A create without an explicit
   primary key cannot carry a `%Masked{}`; an id-preserving move must pass the PK. An upsert-create on a PII resource is
-  refused (the subject would be a generated UUID, not the existing row's key).
+  refused (the subject would be a generated UUID, not the existing row's key): at build time when the action or
+  `for_create` is an upsert, and, because inside the action Ash marks every create an upsert, by an `after_action` that
+  compares the written row's primary key with the vault subject for a call-site `Ash.create(cs, upsert?: true)`; the error
+  rolls back the action transaction, vault rows included (same repo). The same `after_action` refuses a vault attribute a
+  later hook changed after `Vault.Change` approved it. Atomic writes of a vault field are refused by Ash itself.
 - **Read.** `Vault.reveal/3` takes `field: {vault, name}` beside `subject_id:`; both are checked BEFORE any DEK is
   unwrapped. `PiiResolution` asserts the holding record's primary key and the field on every value, admits to the DEK memo
   only rows whose `{subject, vault, field}` match what their holder expects (a foreign subject's key is never unwrapped),
-  renders a mismatch masked/absent on every plane, and reports it once per call per reason (no token in the metadata).
-  The webhook signing-secret reveal asserts the endpoint's id.
+  renders a mismatch masked/absent on every plane, and reports it once per call per record and field (the log line names
+  resource, field and record id; telemetry and logs carry no token or value). The webhook signing-secret reveal asserts
+  the endpoint's id and field; a mismatch is permanent and is discarded, not retried. `Samen.Reveal.reveal/5` requires
+  `:subject_id` (`{:error, :subject_required}`) and forwards `:field`.
 - **Unchanged.** The memo key stays `{adapter, subject_id}` (`unwrap/1` keeps arity 1); the cipher and its AAD are not
   changed (binding subject and field into the AEAD AAD is a separate, one-way decision, deferred); `pii_vault` gains no
   `org_id` (a subject is a UUID primary key, and Credential has no org); internal scans (oracle, CDC, replay) stay unbound.

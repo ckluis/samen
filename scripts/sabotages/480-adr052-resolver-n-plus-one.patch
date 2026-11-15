@@ -6,11 +6,11 @@
 # TEST_FILES: test/replay/resolver_batch_test.exs
 # MUST_FAIL: a 50-row frame costs a CONSTANT number of queries
 diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
-index 05dcfcb5..27aaecd0 100644
+index bc102a2..2182630 100644
 --- a/samen_core/lib/samen/api/pii_resolution.ex
 +++ b/samen_core/lib/samen/api/pii_resolution.ex
 @@ -199,7 +199,8 @@ defmodule Samen.Api.PiiResolution do
-             do: {token, expected_binding(resource, vaults, record, name)}
+             do: {token, expected_binding(resource, vaults, record, name), {subject_of(resource, record), name}}
  
        tokens = decrypting |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
 -      rows = vault_rows(tokens, opts)

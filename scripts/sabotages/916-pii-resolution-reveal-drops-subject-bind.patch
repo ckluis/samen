@@ -6,6 +6,8 @@
 # TEST_FILES: test/pii_resolution_token_binding_test.exs
 # MUST_FAIL: tenant plane: the planted value is
 # MUST_FAIL: impersonation: ••••
+# MUST_FAIL: operator WITH a grant on the holder: still
+# MUST_FAIL: AI egress with the host opt-in and a live grant: the planted value stays
 diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
 index 05dcfcb5..55b07db1 100644
 --- a/samen_core/lib/samen/api/pii_resolution.ex

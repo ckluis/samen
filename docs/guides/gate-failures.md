@@ -581,6 +581,13 @@ binding or by a path that bypassed Ash. The output never contains a token or a v
 subject's plaintext into the record (that launders it past the owner's erasure); clear the cell
 through a reviewed change, and re-enter plaintext values through the governed update.
 
+A `non_token_value` cell (legacy plaintext that starts with `vt_`) also blocks every update of that record on a
+**versioned** resource, with the changeset error `vault column(s) :field hold a legacy non-token value ...`. It is
+fail-closed on purpose and never auto-fixed. **Remediate:** list the rows with this task, then update each record once,
+setting EVERY field the error names to its plaintext (`Ash.update` of the governed action); the new write mints real
+tokens, and the version row records the token, not the value. Unversioned resources are not blocked, but the cell stays
+flagged until re-entered the same way.
+
 ### `mix samen.verify.ai_prompt_masking`
 
 **Errors** (`samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex`):

@@ -3,17 +3,21 @@
 # Flips the named test(s).
 # APP: samen_core
 # TEST_FILES: test/pii_resolution_token_binding_test.exs
-# MUST_FAIL: two records holding foreign tokens produce ONE report for the call
+# MUST_FAIL: one report per holding record (a repeat adds none); the log names resource, field, record; telemetry has the reason only
 diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
-index 05dcfcb5..1835913c 100644
+index bc102a22..1b921bc1 100644
 --- a/samen_core/lib/samen/api/pii_resolution.ex
 +++ b/samen_core/lib/samen/api/pii_resolution.ex
-@@ -478,7 +478,7 @@ defmodule Samen.Api.PiiResolution do
-       end
+@@ -483,11 +483,7 @@ defmodule Samen.Api.PiiResolution do
      end)
      |> Enum.uniq()
--    |> Enum.each(&Samen.Observability.Failure.report(:vault_token_unbound, actor, &1))
-+    |> Enum.each(fn _reason -> actor end)
+     |> Enum.take(@max_unbound_reports)
+-    |> Enum.each(fn {reason, record_id, field} ->
+-      Samen.Observability.Failure.report(:read, :vault_token_unbound, actor, reason,
+-        locate: [resource: resource, field: field, record: record_id]
+-      )
+-    end)
++    |> Enum.each(fn _reason -> {actor, resource} end)
    end
  
    defp unbound_reason(%{subject_id: subject}, subject), do: :field_mismatch
