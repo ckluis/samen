@@ -20,7 +20,8 @@ defmodule Samen.Vault.DekMemo do
   @enforce_keys [:entries]
   defstruct entries: %{}
 
-  @opaque t :: %__MODULE__{}
+  # Not @opaque: `Samen.Vault` matches `%DekMemo{}` in a function head. Inspect is what protects the bytes.
+  @type t :: %__MODULE__{entries: map()}
 
   @doc false
   @spec new(%{{module(), String.t()} => {:ok, binary()} | {:error, term()}}) :: t()
