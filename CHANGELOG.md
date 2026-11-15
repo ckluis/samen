@@ -11,6 +11,18 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Fixed: an erasure that failed after the key shred is resumable (AI derived context is withdrawn on the retry)
+
+- **Fixed: `Samen.Erasure.shred/2` could report completion while AI runs citing the subject were never withdrawn.** The
+  irreversible `Kms.shred/1` runs before the seal transaction, and the pseudonym `subject_ref` the fold-ledger and
+  fold-source arms need dies with the key. A failure of any step 2-5 after the shred rolled the transaction back; the
+  retry saw `:shredded`, recorded both arms as `:no_pseudonym` and never stamped the fold index. The ref is now committed
+  as a `"pending"` marker (in `era_erasure_report`, no schema change) before the shred and deleted by the completing
+  transaction; the retry resumes from it and its report equals an uninterrupted run's. A shredded key with no marker and
+  no earlier completed report now fails loudly (`{:error, {:shred_reference_lost, report}}` + an `operator_action_required`
+  report; `acknowledge_lost_reference: true` is the operator override). `Erasure.pending/1` lists unfinished erasures.
+  ADR-048 §7.3 addendum 2026-11-15; `samen_core/test/erasure_resumable_test.exs`.
+
 ### Security: vault tokens are bound to the record that holds them (High)
 
 - **Fixed: a tenant could read another subject's PII, across orgs, by planting its vault token.** Tokens are stored

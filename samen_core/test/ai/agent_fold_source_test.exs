@@ -70,12 +70,19 @@ defmodule Samen.AI.AgentFoldSourceTest do
 
   # ---------------------------------------------------------------------------
   # A repo façade that APPENDS a failing step to the steps-2–5 `Ecto.Multi`, so the whole
-  # DB tier rolls back while every step above it still really ran. `Samen.Erasure` calls
-  # exactly one function on the `:repo` option it is handed — `transaction/1` — so this is
-  # the smallest possible seam and it does not stub any erasure behaviour.
+  # DB tier rolls back while every step above it still really ran.
   # ---------------------------------------------------------------------------
+  #
+  # Only `transaction/1` is changed. `Samen.Erasure` also reads/writes its resume marker
+  # BEFORE the shred (`one`/`insert`/`update`/`exists?`/`delete_all`); those are delegated to
+  # the real repo, so the seam still stubs no erasure behaviour.
   defmodule RollbackRepo do
     @moduledoc false
+    defdelegate one(q), to: SamenCore.TestRepo
+    defdelegate insert(cs), to: SamenCore.TestRepo
+    defdelegate update(cs), to: SamenCore.TestRepo
+    defdelegate exists?(q), to: SamenCore.TestRepo
+    defdelegate delete_all(q), to: SamenCore.TestRepo
     def transaction(multi) do
       SamenCore.TestRepo.transaction(
         Ecto.Multi.run(multi, :forced_tier_failure, fn _repo, _changes ->

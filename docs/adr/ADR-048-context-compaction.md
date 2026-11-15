@@ -502,6 +502,37 @@ subject's **own** DEK. Then:
 > the shipped call sites can supply it unchanged is the one thing in §7 this draft cannot settle
 > from the ADRs alone — **§11 O-3**.
 
+> **Addendum 2026-11-15 — the captured ref is made durable, so the erasure is resumable.** The STEP 0 capture above
+> lived only in the `shred/2` call's memory. `Kms.shred/1` is irreversible and sits outside the steps-2–5
+> transaction, so a failure of ANY of steps 2–5 after the shred (a DB error, `FoldSource.table_present?/1` raising)
+> rolled the transaction back with the key already gone; the retry read the subject as `:shredded`, took `ref = nil`,
+> recorded both fold arms as `:no_pseudonym` and reported completion while the runs citing the subject were never
+> withdrawn (`withdrawn?/2` never fired). Two designs were weighed:
+>
+> - **(b) reorder — withdraw before the shred.** Rejected. The withdrawal would commit in its own transaction before
+>   the key dies, leaving a window in which a run can fold a citation of the subject AFTER the walk and BEFORE the
+>   shred; nothing could reach that row (the pseudonym is uncomputable from then on). It also cannot make the report
+>   identical, because nothing durable would say the withdrawal was `performed`. The shred must stay the point after
+>   which no new row can be keyed to the subject; the walk must run after it.
+> - **(a) record before the shred — CHOSEN.** While the key is live, `shred/2` commits a `"pending"` row in
+>   `era_erasure_report` (`tiers = {"pending": {"subject_ref", "disposition"}}`, no new table or column) BEFORE
+>   `Kms.shred/1`; the completing transaction deletes it (`:clear_pending`), so it commits or rolls back with the arms.
+>   A retry that finds the key `:shredded` takes the ref and `:performed` from the marker.
+>
+> | crash / failure | state | retry |
+> |---|---|---|
+> | before the marker commits | key live, nothing written | fail-closed `{:erasure_pending_failed, _}`; nothing destroyed |
+> | after the marker, before/during `Kms.shred` | key live (or `{:kms_shred_failed, _}`, which drops the marker) | recomputes the ref, refreshes the one marker, shreds |
+> | after the shred, at ANY of steps 2–5 (`seal_vault` … `aud_event`) | key gone, transaction rolled back, marker intact | `:shredded` + marker → same ref, `:performed`; every arm idempotent; report equals an uninterrupted run's |
+> | after the commit | complete, marker deleted | `:shredded` + earlier completed report → the old idempotent `already_shredded` re-run |
+> | key `:shredded`, NO marker, NO completed report (pre-fix crash, out-of-band `Kms.shred`) | the ref is unrecoverable | `{:error, {:shred_reference_lost, report}}` plus an `operator_action_required` report; never `:no_pseudonym`. `acknowledge_lost_reference: true` is the operator override and discloses `unavailable` |
+>
+> **What is persisted, and why that does not undo the erasure.** The marker holds the SAME value the index rows
+> (`afs_subject_ref`) hold permanently by design: `HMAC(psk_S, subject_id)`, hex, keyed off a key that is destroyed
+> by the time the marker is ever read. Without that key it links to nothing, and it is deleted when the erasure
+> completes. No PII and no key material is stored. `latest_report/2` ignores `"pending"` rows; `Erasure.pending/1`
+> lists unfinished erasures for the operator.
+
 **The walk** (`Samen.AI.Agent.Compaction.withdraw/2`, illustrative name), registered as an ADR-046
 **erasure arm keyed on `subject_id`**, so `mix samen.verify.erasure_completeness` **discovers** it:
 
