@@ -94,6 +94,12 @@ defmodule Samen.SingleNodeTest do
     end
   end
 
+  # Node up/down and the guard's verdict travel through net_kernel and a second OS process, so they arrive
+  # when the distribution layer gets to them, not within ExUnit's default 100 ms (a loaded CI runner took
+  # longer and the test flaked). Each receive below returns the moment its message arrives; this is only the
+  # deadline after which a missing message is a failure.
+  @dist_deadline 5_000
+
   describe "Peers with real distributed nodes" do
     setup do
       ensure_epmd!()
@@ -145,9 +151,9 @@ defmodule Samen.SingleNodeTest do
       peer = start_peer([])
       assert :peer.call(peer, :net_kernel, :connect_node, [me])
 
-      assert_receive {:nodeup, peer_node, [node_type: :visible]}
-      assert_receive {:telemetry, [:samen, :single_node, :peer, :refused]}
-      assert_receive {:nodedown, ^peer_node, _}
+      assert_receive {:nodeup, peer_node, [node_type: :visible]}, @dist_deadline
+      assert_receive {:telemetry, [:samen, :single_node, :peer, :refused]}, @dist_deadline
+      assert_receive {:nodedown, ^peer_node, _}, @dist_deadline
       :peer.stop(peer)
     end
 
@@ -156,8 +162,8 @@ defmodule Samen.SingleNodeTest do
       peer = start_peer([~c"-hidden"])
       assert :peer.call(peer, :net_kernel, :connect_node, [me])
 
-      assert_receive {:nodeup, peer_node, [node_type: :hidden]}
-      assert_receive {:telemetry, [:samen, :single_node, :peer, :allowed]}
+      assert_receive {:nodeup, peer_node, [node_type: :hidden]}, @dist_deadline
+      assert_receive {:telemetry, [:samen, :single_node, :peer, :allowed]}, @dist_deadline
       refute_received {:telemetry, [:samen, :single_node, :peer, :refused]}
       refute_received {:nodedown, ^peer_node, _}
       assert Node.list() == []
@@ -167,12 +173,12 @@ defmodule Samen.SingleNodeTest do
     test "a visible node already connected when the guard starts is found by the scan (no subscribe/scan gap)", %{me: me} do
       peer = start_peer([])
       assert :peer.call(peer, :net_kernel, :connect_node, [me])
-      assert_receive {:nodeup, peer_node, [node_type: :visible]}
+      assert_receive {:nodeup, peer_node, [node_type: :visible]}, @dist_deadline
 
       start_guard()
 
-      assert_receive {:telemetry, [:samen, :single_node, :peer, :refused]}
-      assert_receive {:nodedown, ^peer_node, _}
+      assert_receive {:telemetry, [:samen, :single_node, :peer, :refused]}, @dist_deadline
+      assert_receive {:nodedown, ^peer_node, _}, @dist_deadline
       :peer.stop(peer)
     end
   end
@@ -229,7 +235,7 @@ defmodule Samen.SingleNodeTest do
       :net_kernel.monitor_nodes(true, [{:node_type, :all}])
       assert :peer.call(peer, :net_kernel, :connect_node, [node()])
       # the nodeup message orders the assertion after the connection is visible in Node.list/0
-      assert_receive {:nodeup, _peer_node, [node_type: :visible]}
+      assert_receive {:nodeup, _peer_node, [node_type: :visible]}, @dist_deadline
       assert [finding] = SingleNode.cluster_findings(:samen_core)
       assert finding =~ "visible nodes are connected"
       assert_raise SingleNode.ClusteredError, ~r/ADR-054/, fn -> SingleNode.assert_standalone!(:samen_core) end
