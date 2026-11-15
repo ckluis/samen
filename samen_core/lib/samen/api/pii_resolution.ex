@@ -163,7 +163,15 @@ defmodule Samen.Api.PiiResolution do
   grant revoked or an operator suspended in between takes effect there. `resolve/4` calls
   this itself; a caller that resolves the same `records` one at a time (the replay resolver,
   inside a per-record reveal span) prefetches once and passes the returned `opts` to each
-  call. Idempotent on already-prefetched `opts`.
+  call WITHIN THE SAME FUNCTION CALL. Idempotent on already-prefetched `opts`.
+
+  CONTRACT: the returned `opts` are SINGLE-USE. They carry raw DEKs (`Samen.Vault.DekMemo`) and
+  the ciphertext rows. Use them only inside the function that called `prefetch/4`, for the
+  `resolve/4` calls of the same batch. Never put them in a LiveView assign, process or
+  GenServer state, ETS, a job argument or a cache, and never hand them to another process or
+  across a call boundary: the shred check is the unwrap, so stored opts would keep serving
+  plaintext for a subject shredded after they were built. Call `prefetch/4` again per batch.
+  `Samen.VaultDekCallSiteScanTest` pins the allowed call sites.
   """
   @spec prefetch(list(struct()), module(), map() | nil, keyword()) :: keyword()
   def prefetch(records, resource, actor, opts) when is_list(records) do

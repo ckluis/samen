@@ -7,8 +7,11 @@ defmodule Samen.Vault do
   ## The single reveal chokepoint (D5)
 
   `reveal/3` is the ONLY function in this module that returns subject plaintext.
-  It is the one place `Samen.Kms.unwrap/1` + `Kms.Crypto.decrypt/2` are called
-  for a read. Everything else (`load_masked/3`, JSON, CSV, logs) sees `%Masked{}`,
+  It is the one place `Kms.Crypto.decrypt/2` is called for a read, and the one
+  place `Samen.Kms.unwrap/1` is called per value. `unwrap_subjects/1` is the only
+  other read-side unwrap: it returns raw DEKs in a `Samen.Vault.DekMemo` that
+  `reveal/3` accepts as `deks:` (see its docs for the single-use contract).
+  Everything else (`load_masked/3`, JSON, CSV, logs) sees `%Masked{}`,
   which holds no plaintext. Structural invariants:
 
     1. `Kms.Crypto.decrypt/2` for a vault read is called from exactly one private
@@ -187,8 +190,14 @@ defmodule Samen.Vault do
        a caller could decrypt subject A's plaintext while the tamper-evident audit /
        breadth budget recorded subject B. The bind is at the single plaintext
        chokepoint, so every path through here is covered.
-    3. Unwraps the subject's DEK via the KMS adapter (fails closed on shred /
-       outage).
+    3. Obtains the subject's DEK: a live `Samen.Kms.unwrap/1` (fails closed on shred /
+       outage), or, when a `Samen.Vault.DekMemo` is passed as `:deks`, the DEK that memo
+       already holds for this subject. The shred check IS the unwrap
+       (`{:error, :shredded}`); `reveal/3` reads no other shred state. So the shred check
+       runs once per SUBJECT per call when a memo is passed, once per value otherwise. A
+       subject shredded after the memo was built can still be served for the remainder of
+       THAT call, never by a later call. `reveal/3` has no audit or breadth ledger; the
+       audited paths (`Samen.Reveal`, `Samen.BreakGlass`) never pass a memo.
     4. Decrypts the ciphertext.
 
   Returns `{:ok, plaintext}` or
@@ -201,6 +210,14 @@ defmodule Samen.Vault do
     * `:subject_id` — the subject the caller asserts this reveal is ABOUT. When
       present it is bound to the token's real subject (see step 2). When absent
       (raw internal callers, e.g. oracle scans), no bind is applied.
+    * `:prefetched` — a `prefetch_rows/2` map; a row in it is used instead of a repo read.
+    * `:deks` — a `Samen.Vault.DekMemo` from `unwrap_subjects/1`. SINGLE-USE: it holds raw
+      DEKs and is valid only inside the resolve call that built it. Never store it (assign,
+      GenServer state, ETS, job args, cache), never hand it across a process or call
+      boundary: a stored memo would serve plaintext for a subject shredded since it was
+      built. A memo presented by a process other than the one that built it is ignored
+      (live unwrap); that does not stop same-process storage, which the source-scan test
+      `Samen.VaultDekCallSiteScanTest` pins by call site.
   """
   @spec reveal(Masked.t(), Ecto.Repo.t(), keyword()) ::
           {:ok, binary()}
@@ -219,7 +236,8 @@ defmodule Samen.Vault do
   Read the vault rows of `tokens` in ONE query (ADR-052 §2.4.1 — no N+1 on a list or a replay
   frame): `%{token => %VaultRow{} | nil}`, a key for EVERY requested token (`nil` = no row).
   Ciphertext only — nothing is decrypted here. Pass the map to `reveal/3` as `prefetched:`;
-  the decrypt, subject bind and shred check still happen per value, in `reveal/3`. Nothing is
+  the decrypt and subject bind still happen per value in `reveal/3`; the shred check is the
+  DEK unwrap, per value unless `deks:` is passed (see `unwrap_subjects/1`). Nothing is
   cached across calls: the caller holds the map for one resolve call.
 
   See `unwrap_subjects/1` for the per-call DEK reuse that rides on these rows.
@@ -248,8 +266,16 @@ defmodule Samen.Vault do
   to decrypt should be passed, so a value the plane denies never triggers an unwrap. A failed
   unwrap is held as that subject's `{:error, _}` (denying only its values), never as a key.
   Entries are keyed `{adapter, subject_id}`; `reveal/3` takes a memoised DEK only for the
-  subject of the row it is decrypting, under the adapter now configured. Subject binding,
-  shred checks and the audit/breadth ledger stay per value in `reveal/3`.
+  subject of the row it is decrypting, under the adapter now configured. Subject binding and
+  decryption stay per value in `reveal/3`. The shred check is the unwrap, so with a memo it runs
+  once per subject per call: a subject shredded mid-call can still be served for the rest of
+  THAT call, never after it. `reveal/3` and the `PiiResolution` path have no audit or breadth
+  ledger (the audited `Samen.Reveal`/`BreakGlass` paths never take a memo).
+
+  CONTRACT: the returned memo holds raw DEKs and is single-use. Use it inside the function
+  that built it; never store it in an assign, process state, ETS, a job or a cache, and never
+  pass it across a process or call boundary. The same holds for any `opts` that carry it
+  (`Samen.Api.PiiResolution.prefetch/4`). `reveal/3` ignores a memo built by another process.
   """
   @spec unwrap_subjects(%{String.t() => struct() | nil}) :: DekMemo.t()
   def unwrap_subjects(rows) when is_map(rows) do
@@ -274,9 +300,12 @@ defmodule Samen.Vault do
   defp unwrap_dek(subject_id, %DekMemo{} = memo) do
     adapter = Kms.adapter()
 
-    case DekMemo.fetch(memo, adapter, subject_id) do
-      {:ok, result} -> result
-      :error -> adapter.unwrap(subject_id)
+    # A memo built by another process is not this call's memo: ignore it (live unwrap).
+    with true <- DekMemo.owned_by_caller?(memo),
+         {:ok, result} <- DekMemo.fetch(memo, adapter, subject_id) do
+      result
+    else
+      _ -> adapter.unwrap(subject_id)
     end
   end
 

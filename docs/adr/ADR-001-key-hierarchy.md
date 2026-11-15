@@ -184,9 +184,20 @@ network KMS. Within ONE `Samen.Api.PiiResolution.resolve/4` call the vault now u
 - **Key.** `{adapter, subject_id}` — everything `Samen.Kms.unwrap/1` depends on (org, wrapped DEK and master-key
   version sit behind the adapter, addressed by subject id alone). `reveal/3` takes a memoised DEK only for the subject
   of the row it is decrypting and only under the adapter now configured.
-- **Unchanged.** Authorisation, the subject bind, the per-value shred check and the audit/breadth ledger are all still
-  per value. A failed unwrap is held as that subject's `{:error, _}` for the call: it denies only that subject's values,
+- **Unchanged.** Authorisation (decided per value by `decrypts?/5` and the plane rules, never by memo membership), the
+  subject bind and the decrypt are still per value. **Changed:** there is no separate shred check — the shred check IS
+  the KMS unwrap (`{:error, :shredded}`), so with a memo it runs once per SUBJECT per call, not per value. The
+  `Vault.reveal/3` and `PiiResolution` path has no audit or breadth ledger and never had one; the audited paths
+  (`Samen.Reveal`, `Samen.BreakGlass`) never pass a memo and always unwrap live. A failed unwrap is held as that subject's `{:error, _}` for the call: it denies only that subject's values,
   is never a key, and costs one failed unwrap rather than one per value. The behaviour gained no callback.
+- **Single-use contract.** The memo and any `opts` carrying it (`PiiResolution.prefetch/4`) hold raw DEKs and must not
+  be stored in an assign, process state, ETS, a job or a cache, nor cross a process or call boundary. `reveal/3`
+  ignores a memo presented by a process other than the one that built it; `Samen.VaultDekCallSiteScanTest` pins every
+  call site of `unwrap_subjects(`, `deks:` and `PiiResolution.prefetch(`. The memo key is "everything `unwrap/1`
+  depends on": that is `{adapter, subject_id}` only while `unwrap/1` has arity 1; if it gains an argument (key version,
+  encryption context) the memo key must grow with it.
+- **In-call shred window.** A subject shredded after the memo is built is still served for the rest of THAT call
+  (one page, one replay resource batch), never by a later call.
 - **No cross-request cache, deliberately.** The TTL cache above remains unbuilt. Reuse across calls is the only way
   a shredded subject could be served after the shred, so it needs a shred-epoch invalidation design (a shred
   must evict on every node before it is acknowledged) and its own ADR. Within a call the window between the unwrap and

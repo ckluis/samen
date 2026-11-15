@@ -98,6 +98,15 @@ defmodule Samen.VaultDekReuseTest do
     def granted?(_), do: Application.get_env(:samen_core, :__dek_grant, false)
   end
 
+  # Grants keyed on the RECORD id (`ctx.subject_id`): `:__dek_grant_ids` lists the record ids the operator may reveal.
+  defmodule PerRecordGrant do
+    @moduledoc false
+    def granted_many(ctxs), do: Enum.map(ctxs, &granted?/1)
+
+    def granted?(ctx),
+      do: ctx.subject_id in Application.get_env(:samen_core, :__dek_grant_ids, [])
+  end
+
   setup do
     Samen.TestSandbox.shared!(@repo)
     Samen.Kms.FileBacked.simulate_outage(false)
@@ -107,6 +116,7 @@ defmodule Samen.VaultDekReuseTest do
       Samen.Kms.FileBacked.simulate_outage(false)
       Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
       Application.delete_env(:samen_core, :__dek_grant)
+      Application.delete_env(:samen_core, :__dek_grant_ids)
     end)
 
     :ok
@@ -305,6 +315,111 @@ defmodule Samen.VaultDekReuseTest do
       granted = resolve(recs, operator())
       assert plains(granted) == Enum.map(recs, &elem(&1, 1))
       assert length(drain(:kms_unwrap)) == 2
+    end
+
+    test "a subject IN the memo still has its DENIED value masked: no plaintext, no vt_ token" do
+      s = subject!("s", 2)
+      [{t1, p1}, {t2, p2}] = s.vals
+      r1 = Ash.UUID.generate()
+      r2 = Ash.UUID.generate()
+      rec1 = struct(RevealPerson, %{id: r1, emails: Masked.new(t1, :emails)})
+      rec2 = struct(RevealPerson, %{id: r2, emails: Masked.new(t2, :emails)})
+      _ = drain(:kms_unwrap)
+
+      Application.put_env(:samen_core, :__dek_grant_ids, [r1])
+
+      [out1, out2] =
+        PiiResolution.resolve([rec1, rec2], RevealPerson, operator(),
+          repo: @repo,
+          vault: CountingVault,
+          grant: PerRecordGrant
+        )
+
+      # the granted value is clear; its sibling (SAME subject, whose DEK is in the memo) stays masked
+      assert out1.emails == p1
+      assert %Masked{} = out2.emails
+      refute inspect(out2) =~ p2
+      refute inspect(out2) =~ "vt_"
+      # one unwrap for S, and Vault.reveal/3 was never asked for the denied value
+      assert unwraps() == 1
+      assert drain(:reveal) == [{:reveal, t1}]
+
+      # POSITIVE CONTROL: grant both -> both clear (the denial above was the grant, not the memo)
+      Application.put_env(:samen_core, :__dek_grant_ids, [r1, r2])
+
+      both =
+        PiiResolution.resolve([rec1, rec2], RevealPerson, operator(),
+          repo: @repo,
+          vault: CountingVault,
+          grant: PerRecordGrant
+        )
+
+      assert Enum.map(both, & &1.emails) == [p1, p2]
+    end
+
+    test "building the memo never widens what is decrypted: a fully denied subject is never unwrapped" do
+      allowed = subject!("allowed", 1)
+      denied = subject!("denied", 2)
+      [{ta, pa}] = allowed.vals
+      [{td1, pd1}, {td2, pd2}] = denied.vals
+      ra = Ash.UUID.generate()
+      rd1 = Ash.UUID.generate()
+      rd2 = Ash.UUID.generate()
+
+      recs = [
+        struct(RevealPerson, %{id: ra, emails: Masked.new(ta, :emails)}),
+        struct(RevealPerson, %{id: rd1, emails: Masked.new(td1, :emails)}),
+        struct(RevealPerson, %{id: rd2, emails: Masked.new(td2, :emails)})
+      ]
+
+      _ = drain(:kms_unwrap)
+      Application.put_env(:samen_core, :__dek_grant_ids, [ra])
+
+      out =
+        PiiResolution.resolve(recs, RevealPerson, operator(),
+          repo: @repo,
+          vault: CountingVault,
+          grant: PerRecordGrant
+        )
+
+      assert [%{emails: ^pa}, %{emails: %Masked{}}, %{emails: %Masked{}}] = out
+      refute inspect(out) =~ pd1
+      refute inspect(out) =~ pd2
+      # only the ALLOWED subject reached the KMS (the denied one's DEK is never in memory)
+      assert drain(:kms_unwrap) == [{:kms_unwrap, allowed.id}]
+    end
+
+    test "a memo built by ANOTHER process is ignored: reveal unwraps live" do
+      a = subject!("a", 1)
+      [{t, plain}] = a.vals
+      rows = Vault.prefetch_rows([t], @repo)
+      memo = Task.async(fn -> Vault.unwrap_subjects(rows) end) |> Task.await()
+      _ = drain(:kms_unwrap)
+
+      # the foreign memo is not used: a live unwrap happens in this process
+      assert {:ok, ^plain} = Vault.reveal(Masked.new(t, :emails), @repo, prefetched: rows, deks: memo)
+      assert unwraps() == 1
+
+      # POSITIVE CONTROL: a memo built by THIS process is used (no further unwrap)
+      own = Vault.unwrap_subjects(rows)
+      _ = drain(:kms_unwrap)
+      assert {:ok, ^plain} = Vault.reveal(Masked.new(t, :emails), @repo, prefetched: rows, deks: own)
+      assert unwraps() == 0
+    end
+
+    test "a subject shredded mid-call is served for the rest of THAT call, never by the next" do
+      a = subject!("a", 2)
+      [{t1, p1}, {t2, p2}] = a.vals
+      rows = Vault.prefetch_rows([t1, t2], @repo)
+      memo = Vault.unwrap_subjects(rows)
+
+      assert {:ok, ^p1} = Vault.reveal(Masked.new(t1, :emails), @repo, prefetched: rows, deks: memo)
+      {:ok, _} = Vault.shred(a.id)
+      # the shred check IS the unwrap, done once when the memo was built: this call still serves it
+      assert {:ok, ^p2} = Vault.reveal(Masked.new(t2, :emails), @repo, prefetched: rows, deks: memo)
+      # the next call builds a new memo and the shred is seen
+      fresh = Vault.unwrap_subjects(Vault.prefetch_rows([t2], @repo))
+      assert {:error, :shredded} = Vault.reveal(Masked.new(t2, :emails), @repo, deks: fresh)
     end
 
     test "AI egress without the host opt-in decrypts nothing and unwraps nothing" do

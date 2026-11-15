@@ -21,18 +21,31 @@ defmodule Samen.Vault.DekMemo do
   of one subject id resolve to the same unwrap today, per value; the memo returns exactly what that
   live call would have, and can never differ from it.
 
-  It holds raw key bytes, so `Inspect` is redacted and `Samen.Vault` is the only reader.
+  It holds raw key bytes, so `Inspect` is redacted and `Samen.Vault` is the only intended
+  reader (`entries` is a public field; nothing enforces that beyond the call-site scan test).
+
+  SINGLE-USE: never store a memo (or opts carrying it) in an assign, process state, ETS, a job
+  or a cache, and never pass it across a process or call boundary. The shred check is the
+  unwrap, so a memo serves a subject shredded after it was built until the call ends; a stored
+  memo would serve it indefinitely. The memo records its creating process (`owner`) and
+  `Samen.Vault.reveal/3` ignores a memo presented by any other process. That does not stop
+  same-process storage (a LiveView assign); `Samen.VaultDekCallSiteScanTest` pins the call
+  sites instead.
   """
 
-  @enforce_keys [:entries]
-  defstruct entries: %{}
+  @enforce_keys [:entries, :owner]
+  defstruct entries: %{}, owner: nil
 
   # Not @opaque: `Samen.Vault` matches `%DekMemo{}` in a function head. Inspect is what protects the bytes.
-  @type t :: %__MODULE__{entries: map()}
+  @type t :: %__MODULE__{entries: map(), owner: pid()}
 
   @doc false
   @spec new(%{{module(), String.t()} => {:ok, binary()} | {:error, term()}}) :: t()
-  def new(entries) when is_map(entries), do: %__MODULE__{entries: entries}
+  def new(entries) when is_map(entries), do: %__MODULE__{entries: entries, owner: self()}
+
+  @doc false
+  @spec owned_by_caller?(t()) :: boolean()
+  def owned_by_caller?(%__MODULE__{owner: owner}), do: owner == self()
 
   @doc false
   @spec fetch(t(), module(), String.t()) :: {:ok, {:ok, binary()} | {:error, term()}} | :error
