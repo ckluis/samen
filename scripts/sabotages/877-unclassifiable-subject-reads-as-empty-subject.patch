@@ -1,0 +1,22 @@
+# SABOTAGE: an unresolvable or unclassifiable subject resource becomes an empty subject, which passes every 
+#   neq gate, so the workflow fires
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: a subject whose resource cannot be classified skips the run
+diff --git a/samen_core/lib/samen/automation/run_worker.ex b/samen_core/lib/samen/automation/run_worker.ex
+index c8ee43f3..0e9f60e4 100644
+--- a/samen_core/lib/samen/automation/run_worker.ex
++++ b/samen_core/lib/samen/automation/run_worker.ex
+@@ -168,8 +168,8 @@ defmodule Samen.Automation.RunWorker do
+           # An unresolvable resource or an unclassifiable one (`eligible_names/1` answered its default-deny) is not an
+           # empty subject: `neq` / `not_in` / `is_nil` gates all pass against one. Skip, exactly as `load_eligible/3`.
+           other ->
+-            Samen.Observability.Failure.report(:run_worker_reread_subject, nil, reread_reason(other))
+-            {:skip, :internal_error}
++            _ = reread_reason(other)
++            {:ok, %{}}
+         end
+     end
+   end

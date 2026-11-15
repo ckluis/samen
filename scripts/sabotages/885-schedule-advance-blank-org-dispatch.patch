@@ -1,0 +1,19 @@
+# SABOTAGE: a schedule advance with an unresolvable org enqueues a dispatch under a blank org
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: a schedule advance whose org cannot be resolved enqueues NO dispatch
+diff --git a/samen_core/lib/samen/automation/schedule_advance.ex b/samen_core/lib/samen/automation/schedule_advance.ex
+index 66c68b89..8f1123da 100644
+--- a/samen_core/lib/samen/automation/schedule_advance.ex
++++ b/samen_core/lib/samen/automation/schedule_advance.ex
+@@ -26,7 +26,7 @@ defmodule Samen.Automation.ScheduleAdvance do
+     |> advance()
+     |> Ash.Changeset.after_action(fn cs, result ->
+       case resolve_org_id(cs, result) do
+-        nil ->
++        nil when false ->
+           # No org to dispatch under (the reload failed and was reported): a dispatch with a blank org would be
+           # rejected downstream and leave no Run row at all, so none is enqueued; the next scheduled fire retries.
+           Samen.Observability.Failure.report_write(:schedule_advance_enqueue_skipped, nil, :no_org)

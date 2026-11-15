@@ -1,0 +1,19 @@
+# SABOTAGE: the agent health page load drops a failed read, so the page renders the empty state
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/ai/agent_surface_test.exs
+# MUST_FAIL: load/3 maps a failed turn read to a read error
+diff --git a/samen_web/lib/samen/web/operator/agent_health_live.ex b/samen_web/lib/samen/web/operator/agent_health_live.ex
+index 4aec414a..c55c032b 100644
+--- a/samen_web/lib/samen/web/operator/agent_health_live.ex
++++ b/samen_web/lib/samen/web/operator/agent_health_live.ex
+@@ -187,7 +187,7 @@ defmodule Samen.Web.Operator.AgentHealthLive do
+   defp rows({:ok, rows}), do: rows
+   defp rows(_failed), do: []
+ 
+-  defp failed_reads(results), do: for({name, {:error, _}} <- results, do: name)
++  defp failed_reads(_results), do: []
+ 
+   # No run selected is an honest empty `{:ok, []}`; a selected run whose turns could not be read is the error.
+   defp fetch_turns(_operator, _org_id, nil), do: {:ok, []}

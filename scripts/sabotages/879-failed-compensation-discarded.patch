@@ -1,0 +1,20 @@
+# SABOTAGE: ActionStep.undo/4 discards a failed compensation, so Reactor and the Run outcome see a clean 
+#   undo
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: a compensation that FAILS is stamped on the failed run
+diff --git a/samen_core/lib/samen/automation/compile.ex b/samen_core/lib/samen/automation/compile.ex
+index 916ef835..f6f3b8f2 100644
+--- a/samen_core/lib/samen/automation/compile.ex
++++ b/samen_core/lib/samen/automation/compile.ex
+@@ -51,7 +51,7 @@ defmodule Samen.Automation.ActionStep do
+       module when is_atom(module) and not is_nil(module) ->
+         if function_exported?(module, :undo, 3) do
+           case module.undo(config(action), meta, ctx) do
+-            {:error, _reason} -> compensation_failed(arguments, action, kind)
++            {:error, _reason} -> :ok
+             _ok -> :ok
+           end
+         else
