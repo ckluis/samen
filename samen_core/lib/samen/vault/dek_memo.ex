@@ -14,6 +14,13 @@ defmodule Samen.Vault.DekMemo do
   subject id alone). A failed unwrap is held as its `{:error, reason}` — never as success,
   never as a key — so it denies that subject's values only.
 
+  Why `{adapter, subject_id}` is the WHOLE key: `Samen.Kms.unwrap/1` takes the subject id and nothing
+  else (`kms.ex` callback `unwrap(subject_id)`), and each adapter holds exactly ONE wrapped DEK per
+  subject id (`file_backed.ex` `dek_path/1` and `read_dek/1`, `in_memory.ex` store keyed by subject).
+  A `VaultRow` carries no org, key version or wrapped-DEK column (`vault/schema.ex`). So two rows
+  of one subject id resolve to the same unwrap today, per value; the memo returns exactly what that
+  live call would have, and can never differ from it.
+
   It holds raw key bytes, so `Inspect` is redacted and `Samen.Vault` is the only reader.
   """
 
