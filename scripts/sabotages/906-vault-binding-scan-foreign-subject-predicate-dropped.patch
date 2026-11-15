@@ -1,0 +1,18 @@
+# SABOTAGE: BindingScan stops comparing the vault row's subject with the record's primary key
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/verify_vault_token_binding_test.exs
+# MUST_FAIL: foreign_subject (and shared_token for both holders)
+diff --git a/samen_core/lib/samen/vault/binding_scan.ex b/samen_core/lib/samen/vault/binding_scan.ex
+index c06ee3fc..a945f171 100644
+--- a/samen_core/lib/samen/vault/binding_scan.ex
++++ b/samen_core/lib/samen/vault/binding_scan.ex
+@@ -180,7 +180,6 @@ defmodule Samen.Vault.BindingScan do
+     cond do
+       not Vault.token?(value) -> :non_token_value
+       is_nil(row_token) -> :dangling_token
+-      subject != pk_text -> :foreign_subject
+       vault != to_string(col.field.vault) or field != to_string(col.field.name) -> :field_mismatch
+       true -> nil
+     end
