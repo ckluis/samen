@@ -15,9 +15,12 @@ defmodule Samen.Vault.WriteGuardTest do
   """
   use ExUnit.Case, async: false
 
+  # MUTATION_OWNS: samen_core/lib/samen/vault/change.ex
+
   require Ash.Query
   require Ash.Expr
 
+  alias Samen.Masked
   alias Samen.Vault
   alias SamenCore.Support.Clinical.Patient
 
@@ -84,6 +87,37 @@ defmodule Samen.Vault.WriteGuardTest do
 
       plain = create(%{org_id: org, job_title: "plain", mrn: "MRN-PLAIN"})
       assert {:ok, "MRN-PLAIN"} = Vault.reveal(reload!(plain).mrn, @repo)
+    end
+
+    test "a conflicting upsert that only re-sets a BOUND %Masked{} (nothing minted) is refused too, and rolls back" do
+      org = Ash.UUID.generate()
+      existing = create(%{org_id: org, job_title: "same", mrn: "MRN-ORIGINAL"})
+      token_before = raw_mrn(existing)
+
+      # An id-preserving move: the token is bound to the PK the new row would carry, which is NOT the existing row's.
+      pk = Ash.UUID.generate()
+      {:ok, token} = Vault.store_field(pk, :pii_mrn, :mrn, "MRN-MOVED", @repo)
+      vault_before = vault_rows()
+
+      # `upsert_fields` leaves the key out, so the existing row keeps ITS key while taking a token bound to `pk`.
+      assert {:error, %Ash.Error.Invalid{} = err} =
+               Patient
+               |> Ash.Changeset.for_create(:create, %{org_id: org, job_title: "same", mrn: Masked.new(token, :mrn)})
+               |> Ash.Changeset.force_change_attribute(:id, pk)
+               |> Ash.create(upsert?: true, upsert_identity: :title, upsert_fields: [:mrn, :job_title])
+
+      assert Exception.message(err) =~ "vault subject does not match the written row"
+      assert raw_mrn(existing) == token_before
+      assert vault_rows() == vault_before
+
+      # CONTROL: the same move as a plain create (no conflict) succeeds.
+      assert {:ok, moved} =
+               Patient
+               |> Ash.Changeset.for_create(:create, %{org_id: org, job_title: "moved", mrn: Masked.new(token, :mrn)})
+               |> Ash.Changeset.force_change_attribute(:id, pk)
+               |> Ash.create()
+
+      assert {:ok, "MRN-MOVED"} = Vault.reveal(reload!(moved).mrn, @repo)
     end
 
     test "a conflicting upsert that sets NO vault field is not refused (nothing was minted under the wrong subject)" do
