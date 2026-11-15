@@ -612,4 +612,18 @@ defmodule Samen.Vault do
   def generate_token do
     "vt_" <> (:crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower))
   end
+
+  @token_shape ~r/\Avt_[0-9a-f]{32}\z/
+
+  @doc """
+  Is `value` shaped like a token `generate_token/0` mints (`"vt_"` + 32 lowercase hex)?
+
+  A grammar check ONLY: it says nothing about whether a `pii_vault` row exists or whom it
+  belongs to (that is `check_bindings/3`). `Samen.Type.VaultField.dump_to_native/2` persists
+  only token-shaped values, and `Samen.Vault.BindingScan` reads any other value in a vault
+  column as plaintext at rest.
+  """
+  @spec token?(term()) :: boolean()
+  def token?(value) when is_binary(value), do: Regex.match?(@token_shape, value)
+  def token?(_other), do: false
 end
