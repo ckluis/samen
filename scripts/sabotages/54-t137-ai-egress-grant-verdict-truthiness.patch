@@ -13,14 +13,15 @@
 # TEST_FILES: test/ai/verbs_test.exs
 # MUST_FAIL: TRUTHY-NON-true grant verdict
 diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+index 05dcfcb5..cfb1a317 100644
 --- a/samen_core/lib/samen/api/pii_resolution.ex
 +++ b/samen_core/lib/samen/api/pii_resolution.ex
-@@ -161,7 +161,7 @@ defmodule Samen.Api.PiiResolution do
+@@ -345,7 +345,7 @@ defmodule Samen.Api.PiiResolution do
      # PID, …) must NOT admit plaintext into the egress payload by accident. Anything but `true`
      # keeps the value masked (`••••`) — fail-closed, no plaintext egress.
      if Keyword.get(opts, :grant_egress?, false) and
 -         operator_granted?(record, label, resource, reveal_action, actor, opts) === true do
 +         operator_granted?(record, label, resource, reveal_action, actor, opts) do
-       reveal_plaintext(masked, opts) || masked
+       reveal_plaintext(masked, binding_of(resource, record, label, opts), opts) || masked
      else
        masked

@@ -222,12 +222,20 @@ defmodule Samen.PiiResolutionPlanesTest do
       assert prefetched_tokens() == []
     end
 
-    test "prefetched rows are handed to reveal only when there are some" do
-      resolve(rec("vt_a"), tenant(), [])
-      assert_received {:reveal, "vt_a", :stub_repo, [prefetched: %{"vt_a" => :row}]}
+    test "prefetched rows are handed to reveal only when there are some; the subject and field are ALWAYS asserted" do
+      id = Ecto.UUID.generate()
+      resolve(rec("vt_a", id), tenant(), [])
 
-      resolve(rec("vt_e"), tenant(), vault: EmptyPrefetchVault)
-      assert_received {:reveal, "vt_e", :stub_repo, []}
+      assert_received {:reveal, "vt_a", :stub_repo, opts}
+      assert Keyword.fetch!(opts, :prefetched) == %{"vt_a" => :row}
+      assert Keyword.fetch!(opts, :subject_id) == id
+      assert Keyword.fetch!(opts, :field) == {"pii_email", "emails"}
+
+      resolve(rec("vt_e", id), tenant(), vault: EmptyPrefetchVault)
+      assert_received {:reveal, "vt_e", :stub_repo, opts}
+      refute Keyword.has_key?(opts, :prefetched)
+      assert Keyword.fetch!(opts, :subject_id) == id
+      assert Keyword.fetch!(opts, :field) == {"pii_email", "emails"}
     end
   end
 

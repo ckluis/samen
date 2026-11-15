@@ -210,6 +210,9 @@ defmodule Samen.Vault do
     * `:subject_id` — the subject the caller asserts this reveal is ABOUT. When
       present it is bound to the token's real subject (see step 2). When absent
       (raw internal callers, e.g. oracle scans), no bind is applied.
+    * `:field` — `{vault_name, field_name}` (strings or atoms): the vault and logical field the
+      caller expects this token to be FOR. Checked next to the subject bind, BEFORE any DEK is
+      unwrapped; a token minted for another field is `{:error, :field_mismatch}`. Absent = no check.
     * `:prefetched` — a `prefetch_rows/2` map; a row in it is used instead of a repo read.
     * `:deks` — a `Samen.Vault.DekMemo` from `unwrap_subjects/1`. SINGLE-USE: it holds raw
       DEKs and is valid only inside the resolve call that built it. Never store it (assign,
@@ -221,16 +224,30 @@ defmodule Samen.Vault do
   """
   @spec reveal(Masked.t(), Ecto.Repo.t(), keyword()) ::
           {:ok, binary()}
-          | {:error, :subject_mismatch | :shredded | :unavailable | :not_found | term}
+          | {:error, :subject_mismatch | :field_mismatch | :shredded | :unavailable | :not_found | term}
   def reveal(%Masked{token: token}, repo, opts \\ []) do
     reveal_token(
       token,
       repo,
-      Keyword.get(opts, :subject_id),
+      {Keyword.get(opts, :subject_id), Keyword.get(opts, :field)},
       Keyword.get(opts, :prefetched),
       Keyword.get(opts, :deks)
     )
   end
+
+  @doc """
+  Does the vault row `row` (a `%VaultRow{}`, or nil) belong to `subject_id` and to the
+  `{vault_name, field_name}` field? The in-memory twin of `check_bindings/3` for rows a caller
+  already holds (`Samen.Api.PiiResolution` uses it to admit only matching rows to the DEK memo,
+  so a foreign subject's key is never unwrapped).
+  """
+  @spec bound?(struct() | nil, String.t(), {term(), term()}) :: boolean()
+  def bound?(%VaultRow{} = row, subject_id, {vault, field}) do
+    row.subject_id == subject_id and row.vault_name == to_string(vault) and
+      row.field_name == to_string(field)
+  end
+
+  def bound?(_row, _subject_id, _expected), do: false
 
   @doc """
   Are `pairs` (`[{field, token}]`, `field` anything with `:name` and `:vault`, i.e. a
@@ -355,13 +372,14 @@ defmodule Samen.Vault do
 
   defp unwrap_dek(subject_id, _no_memo), do: Kms.adapter().unwrap(subject_id)
 
-  defp reveal_token(token, repo, asserted_subject_id, prefetched, deks) do
+  defp reveal_token(token, repo, {asserted_subject_id, asserted_field}, prefetched, deks) do
     case fetch_row(token, repo, prefetched) do
       nil ->
         {:error, :not_found}
 
-      %VaultRow{subject_id: subject_id, ciphertext: ciphertext} ->
+      %VaultRow{subject_id: subject_id, ciphertext: ciphertext} = row ->
         with :ok <- bind_subject(asserted_subject_id, subject_id),
+             :ok <- bind_field(asserted_field, row),
              {:ok, dek} <- unwrap_dek(subject_id, deks) do
           do_decrypt(dek, ciphertext)
         end
@@ -387,6 +405,16 @@ defmodule Samen.Vault do
   defp bind_subject(nil, _real), do: :ok
   defp bind_subject(same, same), do: :ok
   defp bind_subject(_asserted, _real), do: {:error, :subject_mismatch}
+
+  # The same accountability bind for the FIELD: a token minted for another vault/field is not
+  # this field's value. Also BEFORE the DEK is touched; `nil` = no assertion (internal scans).
+  defp bind_field(nil, _row), do: :ok
+
+  defp bind_field({vault, field}, %VaultRow{vault_name: vault_name, field_name: field_name}) do
+    if vault_name == to_string(vault) and field_name == to_string(field),
+      do: :ok,
+      else: {:error, :field_mismatch}
+  end
 
   # The ONLY call site of Crypto.decrypt/2 for a vault read. A second decrypt
   # path anywhere else is a structural violation caught by the C3 pii_reads verifier
@@ -524,7 +552,7 @@ defmodule Samen.Vault do
 
   # :decryptable | :clean | {:failed, reason}
   defp probe_token(token, repo) do
-    case reveal_token(token, repo, nil, nil, nil) do
+    case reveal_token(token, repo, {nil, nil}, nil, nil) do
       {:ok, _plaintext} ->
         :decryptable
 

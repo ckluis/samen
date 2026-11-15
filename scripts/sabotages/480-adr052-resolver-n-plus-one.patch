@@ -6,21 +6,25 @@
 # TEST_FILES: test/replay/resolver_batch_test.exs
 # MUST_FAIL: a 50-row frame costs a CONSTANT number of queries
 diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
-index da1e3136..cfe23da6 100644
+index 05dcfcb5..27aaecd0 100644
 --- a/samen_core/lib/samen/api/pii_resolution.ex
 +++ b/samen_core/lib/samen/api/pii_resolution.ex
-@@ -189,11 +189,12 @@ defmodule Samen.Api.PiiResolution do
-             uniq: true,
-             do: token
+@@ -199,7 +199,8 @@ defmodule Samen.Api.PiiResolution do
+             do: {token, expected_binding(resource, vaults, record, name)}
  
+       tokens = decrypting |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
 -      rows = vault_rows(tokens, opts)
 +      # SABOTAGE (ADR-052 §2.4.1): nothing prefetched.
 +      rows = Map.take(vault_rows([], opts), tokens)
+ 
+       # A token binds only to the {subject, vault, field} of the record/field that holds it. Only
+       # rows matching what the holder expects reach the DEK memo, so a foreign subject's key is
+@@ -215,7 +216,7 @@ defmodule Samen.Api.PiiResolution do
  
        Keyword.merge(opts,
          __prefetched: true,
 -        __grants: grants,
 +        __grants: Map.take(grants, []),
          __vault_rows: rows,
-         __vault_deks: vault_deks(rows, opts),
-         __bag_ctx: bag_context(resource, records, plane, actor, opts)
+         __vault_deks: vault_deks(admitted, opts),
+         __vault_vaults: vaults,

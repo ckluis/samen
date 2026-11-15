@@ -1,0 +1,19 @@
+# SABOTAGE: PiiResolution masks a mismatched token silently (no Failure.report)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/pii_resolution_token_binding_test.exs
+# MUST_FAIL: two records holding foreign tokens produce ONE report for the call
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+index 05dcfcb5..1835913c 100644
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -478,7 +478,7 @@ defmodule Samen.Api.PiiResolution do
+       end
+     end)
+     |> Enum.uniq()
+-    |> Enum.each(&Samen.Observability.Failure.report(:vault_token_unbound, actor, &1))
++    |> Enum.each(fn _reason -> actor end)
+   end
+ 
+   defp unbound_reason(%{subject_id: subject}, subject), do: :field_mismatch
