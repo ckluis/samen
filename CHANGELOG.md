@@ -20,7 +20,7 @@ All notable changes to Samen are recorded here. The format follows
   `.Writer`, `.Canonical`). Every survivor is closed by a test (new files `vault_key_column_scan_test`,
   `pii_resolution_planes_test`, `pii_resolution_bag_planes_test`, `policy/org_scope_test`, `reveal_grants_windows_test`,
   `erasure_branches_test`, `audit_chain_{canonical,writer,branches}_test`, plus additions to `break_glass_test` and
-  `observability/reveal_span_test`) or by a proven-equivalent ledger row (7). Sabotages 870-876 promote the most
+  `observability/reveal_span_test`) or by a proven-equivalent ledger row (6; `Grants.write_audit/3` now takes atom keys only and raises on any other, so its string-key row is gone, and `verify_anchor` reads head and sealed-seq hash in one statement). Sabotages 870-876 promote the most
   important sole-killer mutants. `Samen.AI.MaskedPayloadScan` moves into test support so `ai/verbs_test.exs` no longer
   needs another test module loaded first, and the `Widget` fixture declares a reveal action so the operator-with-grant
   custom-bag posture is provable.

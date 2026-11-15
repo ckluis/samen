@@ -763,6 +763,13 @@ defmodule Samen.Reveal.Grants do
   """
   @spec write_audit(module(), map(), keyword()) :: {:ok, RevealAudit.t()} | {:error, term}
   def write_audit(r, attrs, opts \\ []) do
+    # Atom keys ONLY, refused loudly. Ecto's `cast/4` inspects only the first key its map iterator yields,
+    # so a large string-keyed map can slip past it; the chain fields below read atom keys, so such a map
+    # would be written with a nil correlation id. Every in-repo caller passes an atom-keyed literal.
+    unless Enum.all?(Map.keys(attrs), &is_atom/1) do
+      raise ArgumentError, "Grants.write_audit/3 requires atom keys; got #{inspect(Map.keys(attrs))}"
+    end
+
     result = r.insert(audit_changeset(attrs))
 
     # Also emit to the aud_event tier AND the T4.3 hash chain (grant lifecycle events
@@ -774,15 +781,13 @@ defmodule Samen.Reveal.Grants do
       Samen.AuditChain.Writer.write(r, %{
       # Reveal/grant events ride the subject's org chain when the caller supplies an
       # org_id; otherwise the reserved "__global__" operator chain (ADR-002 §2.1).
-      org_id: attrs[:org_id] || attrs["org_id"] || Samen.AuditChain.global_org(),
+      org_id: attrs[:org_id] || Samen.AuditChain.global_org(),
       event_type: "grant_lifecycle",
-      subject_id: attrs[:subject_id] || attrs["subject_id"],
-      actor_id: attrs[:actor_id] || attrs["actor_id"],
-      correlation_id:
-        attrs[:grant_id] || attrs[:request_id] || attrs["grant_id"] || attrs["request_id"],
+      subject_id: attrs[:subject_id],
+      actor_id: attrs[:actor_id],
+      correlation_id: attrs[:grant_id] || attrs[:request_id],
       detail:
-        "event=#{attrs[:event] || attrs["event"]} " <>
-          "#{(attrs[:detail] || attrs["detail"] || "") |> String.trim()}",
+        "event=#{attrs[:event]} " <> "#{(attrs[:detail] || "") |> String.trim()}",
       occurred_at: DateTime.utc_now() |> DateTime.truncate(:microsecond)
       })
 
@@ -794,7 +799,7 @@ defmodule Samen.Reveal.Grants do
         result
 
       {:error, reason} ->
-        Samen.Observability.Failure.report(:reveal_audit_chain, attrs[:org_id] || attrs["org_id"], reason)
+        Samen.Observability.Failure.report(:reveal_audit_chain, attrs[:org_id], reason)
         if Keyword.get(opts, :strict, false), do: {:error, reason}, else: result
     end
   end

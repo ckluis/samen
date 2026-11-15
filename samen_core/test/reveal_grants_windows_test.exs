@@ -134,6 +134,34 @@ defmodule Samen.Reveal.GrantsWindowsTest do
       end
     end
 
+    test "the audit ROW and the chain entry both carry the grant id as their correlation, on the normal path" do
+      g = Ecto.UUID.generate()
+      a = attrs(%{grant_id: g, detail: "x"})
+      assert {:ok, %{grant_id: ^g}} = Grants.write_audit(@repo, a)
+      assert [%{correlation_id: ^g}] = chain_rows(a.subject_id)
+      assert [%{grant_id: ^g}] = Grants.audit_for(a.subject_id)
+    end
+
+    test "a string-keyed attrs map is REFUSED loudly, of any size, and nothing is written (atom-keyed control writes)" do
+      g = Ecto.UUID.generate()
+      subject = subj()
+      base = %{"event" => "probe", "subject_id" => subject, "grant_id" => g}
+      # Ecto's cast only inspects the first key the iterator yields, so a map past 32 keys is not rejected by it.
+      big = Enum.reduce(1..40, base, fn i, m -> Map.put(m, "pad#{i}", "v") end)
+
+      for attrs <- [base, big] do
+        assert_raise ArgumentError, ~r/atom keys/, fn -> Grants.write_audit(@repo, attrs) end
+      end
+
+      assert chain_rows(subject) == []
+      assert Grants.audit_for(subject) == []
+
+      # Positive control: the same content, atom-keyed, is written with its correlation id.
+      ok = %{event: "probe", subject_id: subject, grant_id: g}
+      assert {:ok, _} = Grants.write_audit(@repo, ok)
+      assert [%{correlation_id: ^g}] = chain_rows(subject)
+    end
+
     test "a row with no detail writes (the detail is optional) and records only the event" do
       a = attrs(%{})
       assert {:ok, _} = Grants.write_audit(@repo, a)

@@ -41,6 +41,21 @@ defmodule Samen.Policy.OrgScopeTest do
     |> Ash.create!()
   end
 
+  # The fixture column is NOT NULL, so no NULL-org row can exist by default. Relax it INSIDE the sandbox transaction
+  # (postgres DDL is transactional; this module is async: false) and insert a genuine NULL-org row, then read it back
+  # through Ash exactly like any other row.
+  defp orphan_activity! do
+    SamenCore.TestRepo.query!("ALTER TABLE cea_activity ALTER COLUMN cea_org_id DROP NOT NULL")
+
+    %{rows: [[id]]} =
+      SamenCore.TestRepo.query!(
+        "INSERT INTO cea_activity (cea_kind, cea_org_id, cea_inserted_at, cea_updated_at) " <>
+          "VALUES ('visit', NULL, now(), now()) RETURNING cea_id"
+      )
+
+    %{id: Ecto.UUID.load!(id)}
+  end
+
   describe "filter/3 — which rows the actor MAY see" do
     test "an org-bearing actor keeps ITS org's rows and no other org's" do
       mine = activity!(@org)
@@ -63,13 +78,34 @@ defmodule Samen.Policy.OrgScopeTest do
   end
 
   describe "reject/3 — which rows the actor may NOT touch" do
-    test "a foreign-org row is rejected and the actor's own row is not (NULL-org rows are rejected too)" do
+    test "a foreign-org row is rejected and the actor's own row is not" do
       mine = activity!(@org)
       theirs = activity!(@other)
       ids = Enum.sort([mine.id, theirs.id])
 
       assert kept(OrgScope.reject(%{org_id: @org}, nil, []), ids) == [theirs.id]
       assert OrgScope.reject(%{org_id: @org}, nil, []) == Ash.Expr.expr(org_id != ^@org or is_nil(org_id))
+    end
+
+    test "a NULL-org row is returned to NO org's actor by filter/3 and rejected for EVERY actor by reject/3" do
+      mine = activity!(@org)
+      theirs = activity!(@other)
+      orphan = orphan_activity!()
+      ids = Enum.sort([mine.id, theirs.id, orphan.id])
+
+      # The row really has no org (guards the setup: otherwise this proves nothing).
+      assert %{rows: [[nil]]} =
+               SamenCore.TestRepo.query!("SELECT cea_org_id FROM cea_activity WHERE cea_id = $1", [Ecto.UUID.dump!(orphan.id)])
+
+      for {org, own} <- [{@org, mine.id}, {@other, theirs.id}] do
+        actor = %{org_id: org}
+        # positive control: the actor's own row IS visible and NOT rejected ...
+        assert own in kept(OrgScope.filter(actor, nil, []), ids)
+        refute own in kept(OrgScope.reject(actor, nil, []), ids)
+        # ... while the NULL-org row is never visible, and is rejected (postgres `!=` alone would give NULL).
+        refute orphan.id in kept(OrgScope.filter(actor, nil, []), ids)
+        assert orphan.id in kept(OrgScope.reject(actor, nil, []), ids)
+      end
     end
 
     test "an actor with no org is rejected from EVERY row" do
