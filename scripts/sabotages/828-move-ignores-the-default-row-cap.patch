@@ -1,0 +1,19 @@
+# SABOTAGE: an automated move takes on a DEFAULT of any size
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: a DEFAULT over the row cap is REFUSED
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index a7409fe5..9c70f963 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -403,7 +403,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+   # Counts up to `cap + 1` rows (a bounded read, outside any lock), so the answer costs at most `cap + 1` rows.
+   defp default_small_enough(repo, cap) do
+     case repo.query("SELECT count(*) FROM (SELECT 1 FROM ONLY #{@default_partition} LIMIT #{cap + 1}) s") do
+-      {:ok, %{rows: [[n]]}} when n > cap -> {:error, {:default_too_large_to_move, cap}}
++      {:ok, %{rows: [[n]]}} when n > cap and false -> {:error, {:default_too_large_to_move, cap}}
+       {:ok, _} -> :ok
+       {:error, reason} -> {:error, reason}
+     end

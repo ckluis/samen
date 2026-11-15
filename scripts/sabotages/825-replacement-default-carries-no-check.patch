@@ -1,0 +1,20 @@
+# SABOTAGE: the replacement DEFAULT carries no implying CHECK, so its ATTACH rescans every row under the 
+#   lock
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: both ATTACHes of the move validate NOTHING
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index c608d8cf..5f0032b1 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -488,7 +488,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+           q!(repo, "CREATE TABLE #{@staged_default} (LIKE aud_event INCLUDING DEFAULTS INCLUDING INDEXES)", staging_ms)
+           # AFTER the first CREATE … LIKE: that holds ACCESS SHARE on aud_event, so no sibling can be detached between
+           # reading the bounds and the end of the move (a detach in that gap would make the CHECK too strict)
+-          default_check = default_check_sql(repo, in_range, staging_ms)
++          default_check = "true"
+           # the CHECKs go on the EMPTY tables (no scan to add them) and are what lets each ATTACH skip its scan
+           q!(repo, "ALTER TABLE #{@staged_month} ADD CONSTRAINT #{check} CHECK (#{in_range})", staging_ms)
+           q!(repo, "ALTER TABLE #{@staged_default} ADD CONSTRAINT #{check} CHECK (#{default_check})", staging_ms)

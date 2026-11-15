@@ -1,0 +1,19 @@
+# SABOTAGE: the /readyz runway read ignores its lock_timeout and waits behind the move
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: a probe behind the move's exclusive lock fails fast
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index e0afe242..26944392 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -694,7 +694,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+ 
+   defp with_lock_timeout(repo, opts, fun) do
+     case Keyword.get(opts, :lock_timeout_ms) do
+-      ms when is_integer(ms) and ms > 0 ->
++      ms when ms == :never ->
+         repo.transaction(fn ->
+           repo.query!("SET LOCAL lock_timeout = #{ms}")
+ 

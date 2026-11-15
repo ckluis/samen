@@ -1,0 +1,18 @@
+# SABOTAGE: the daily CREATE PARTITION OF (and its DEFAULT scan) has no statement_timeout
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: the CREATE runs under lock_timeout and the budget as statement_timeout
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index c608d8cf..d99b5c63 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -321,7 +321,6 @@ defmodule Samen.AuditEvent.PartitionManager do
+       result =
+         repo.transaction(fn ->
+           q!(repo, "SET LOCAL lock_timeout = #{lock_ms}", budget_ms)
+-          q!(repo, "SET LOCAL statement_timeout = #{budget_ms}", budget_ms)
+           q!(repo, create_partition_sql(name, from_ts, to_ts), budget_ms + 5_000)
+           name
+         end)

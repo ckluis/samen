@@ -1,0 +1,18 @@
+# SABOTAGE: detaching a partition leaves the in-memory bounds stale
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: the MANAGER invalidates the in-memory bounds itself
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index a7409fe5..33496636 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -972,7 +972,6 @@ defmodule Samen.AuditEvent.PartitionManager do
+     with :ok <- gate_check(policy, name, from_ts, to_ts, force),
+          :ok <- assert_partition_exists(repo, name),
+          {:ok, _} <- do_detach(repo, name) do
+-      invalidate_bounds(repo)
+       {:ok, name}
+     end
+   end

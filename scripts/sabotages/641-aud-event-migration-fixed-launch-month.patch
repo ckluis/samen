@@ -6,7 +6,7 @@
 # TEST_FILES: test/aud_event_test.exs
 # MUST_FAIL: the template partitions the month it is migrated in, never a fixed month
 diff --git a/samen_core/priv/templates/m_aud_event.eex b/samen_core/priv/templates/m_aud_event.eex
-index 87d4cb18..9df5a915 100644
+index 95f801b..58f0c9a 100644
 --- a/samen_core/priv/templates/m_aud_event.eex
 +++ b/samen_core/priv/templates/m_aud_event.eex
 @@ -71,13 +71,12 @@ defmodule <%= module %>.Repo.Migrations.AudEvent do
@@ -27,9 +27,9 @@ index 87d4cb18..9df5a915 100644
 +    """,
 +    "DROP TABLE IF EXISTS aud_event_y2026m07"
  
-     execute """
-     CREATE INDEX aud_event_brin_occurred_at
-@@ -148,6 +147,7 @@ defmodule <%= module %>.Repo.Migrations.AudEvent do
+     # The DEFAULT partition (ARCH-9): a row whose time is in no monthly partition lands here, reported by the
+     # partition manager, instead of failing the audited write. Dropping the table drops it with it.
+@@ -152,6 +151,7 @@ defmodule <%= module %>.Repo.Migrations.AudEvent do
      execute "DROP TRIGGER IF EXISTS aud_event_append_only_tg ON aud_event"
      execute "DROP FUNCTION IF EXISTS aud_event_enforce_append_only()"
      execute "DROP INDEX IF EXISTS aud_event_brin_occurred_at"

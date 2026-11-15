@@ -1,0 +1,19 @@
+# SABOTAGE: UNKNOWN does not say which table could not be read
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/readiness_test.exs
+# MUST_FAIL: a table whose bounds cannot be read is UNKNOWN and the detail names it
+diff --git a/samen_web/lib/samen/web/readiness.ex b/samen_web/lib/samen/web/readiness.ex
+index eb667b30..a95571da 100644
+--- a/samen_web/lib/samen/web/readiness.ex
++++ b/samen_web/lib/samen/web/readiness.ex
+@@ -145,7 +145,7 @@ defmodule Samen.Web.Readiness do
+   # Value-free: module names only, never a message (a Postgres error can quote a value).
+   defp unknown_detail(%{__struct__: module}), do: "runway unreadable (#{inspect(module)})"
+   # A table NAME is not a row value, and "which table" is what an operator needs.
+-  defp unknown_detail({tag, table}) when is_atom(tag) and is_binary(table), do: "runway unreadable (#{tag} #{table})"
++  defp unknown_detail({tag, table}) when is_atom(tag) and is_integer(table), do: "runway unreadable (#{tag} #{table})"
+   defp unknown_detail({tag, _}) when is_atom(tag), do: "runway unreadable (#{tag})"
+   defp unknown_detail(tag) when is_atom(tag), do: "runway unreadable (#{tag})"
+   defp unknown_detail(_), do: "runway unreadable"

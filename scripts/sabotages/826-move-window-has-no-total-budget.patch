@@ -1,0 +1,19 @@
+# SABOTAGE: the exclusive window never checks its total budget
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: a window that has used its budget ROLLS BACK
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index c608d8cf..d256783b 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -503,7 +503,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+ 
+           window! = fn sql ->
+             left = budget_ms - (clock.() - started)
+-            if left <= 0, do: repo.rollback({:partition_move_window_exceeded, budget_ms})
++            if false, do: repo.rollback({:partition_move_window_exceeded, budget_ms})
+             q!(repo, "SET LOCAL statement_timeout = #{left}", left + 5_000)
+             q!(repo, sql, left + 5_000)
+           end

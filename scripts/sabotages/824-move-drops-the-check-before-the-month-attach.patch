@@ -1,0 +1,21 @@
+# SABOTAGE: the move drops the month CHECK before ATTACH, so Postgres scans the whole month under ACCESS 
+#   EXCLUSIVE
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: both ATTACHes of the move validate NOTHING
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index a7409fe5..b2db113b 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -452,8 +452,8 @@ defmodule Samen.AuditEvent.PartitionManager do
+           window!.(missing.(@staged_default, "NOT (#{in_range})"))
+           window!.("ALTER TABLE aud_event DETACH PARTITION #{@default_partition}")
+           window!.("ALTER TABLE #{@staged_month} RENAME TO #{name}")
+-          window!.("ALTER TABLE aud_event ATTACH PARTITION #{name} FOR VALUES FROM ('#{from_ts}') TO ('#{to_ts}')")
+           window!.("ALTER TABLE #{name} DROP CONSTRAINT #{check}")
++          window!.("ALTER TABLE aud_event ATTACH PARTITION #{name} FOR VALUES FROM ('#{from_ts}') TO ('#{to_ts}')")
+           window!.("DROP TABLE #{@default_partition}")
+           window!.("ALTER TABLE #{@staged_default} RENAME TO #{@default_partition}")
+           window!.("ALTER TABLE aud_event ATTACH PARTITION #{@default_partition} DEFAULT")

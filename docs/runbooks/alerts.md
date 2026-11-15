@@ -13,6 +13,7 @@ matches) until egress is enabled.
 | Seal-lag | `[:samen,:audit_chain,:verify]` recency; `[:samen,:break_glass,:unanchored]` age | no verify success in 30m; unanchored entry > 20m | no verify success in 60m; ANY `[:samen,:audit_chain,:tamper]` | this file, §3; [breach-notification.md](breach-notification.md) |
 | KMS error rate | wrap/unwrap failure rate on `Samen.Kms.AwsKmsDynamo`; `/readyz` `:kms` check | any failures, non-sustained | ANY sustained KMS failure > 1m | this file, §4 |
 | `/readyz` failing | `GET /readyz` 503 (`Samen.Web.Readiness.check/1`) | single flaky 503 | 503 sustained > 2m OR any machine failing Fly's health check | this file, §5 |
+| Audit partition runway | `samen.audit.partition.runway_days`, `.default_rows`, `.default_landing.count`, `.runway_unknown.count`; `/readyz` body line `partitions:` | runway < 31 days, OR any `default_rows` > 0, OR no DEFAULT partition, OR any `runway_unknown` | runway <= 0 (`partitions: CRITICAL`), OR `runway_unknown` for > 1h, OR `default_landing` still rising after the roll-forward ran | this file, §7 |
 | Pool saturation | `samen.pool.saturation.events` (event `[:samen,:pool,:saturation]`, default threshold 50ms checkout wait) | events present, low rate | sustained rate increase over baseline | this file, §6 |
 
 ---
@@ -127,3 +128,57 @@ First response:
 2. Check for a recent deploy introducing a long-held transaction or N+1 pattern.
 3. Confirm Postgres/Neon isn't itself under load (see pitr/observability tooling); pool saturation upstream of a healthy DB usually means app-side pool sizing or a stuck query.
 4. If sustained, consider whether a query is worth killing at the Postgres level — verify via [beam-introspection.md](beam-introspection.md) before doing so.
+
+## 7. Audit partition runway
+
+`aud_event` is partitioned by month. `Samen.AuditEvent.PartitionManager` (daily 01:00 and once at boot) keeps two
+months ahead; `aud_event_default` catches any row outside every month so an audited write never fails for want of
+a partition. `/readyz` adds a `partitions:` line (WARN, CRITICAL or UNKNOWN) to its **200** body: this is an advisory, not a
+readiness failure, because every node shares the database and a 503 would drain the fleet without curing anything.
+Alert on the metrics (or poll the `/readyz` body), not on the status code.
+
+- **Warn:** `runway_days` < 31; any `default_rows` > 0 or a `default_landing` event (a row fell outside the window: a
+  backdated or future import, or a lapsed roll-forward); the DEFAULT partition is missing (migration `20261114120000`
+  not run); any `runway_unknown` event (the catalog could not be read: unknown is never healthy).
+- **Page:** `runway_days` <= 0 (`partitions: CRITICAL`); `runway_unknown` sustained > 1h; `default_landing` still
+  rising after the roll-forward has run.
+
+First response:
+1. `SELECT relname, pg_get_expr(relpartbound, oid) FROM pg_class WHERE relname LIKE 'aud_event%' ORDER BY 1;` — what exists.
+2. Check the `PartitionManager` job in `oban_jobs` (`maintenance` queue): a discarded or failing job is the usual cause; its error names the month.
+3. Run it now: `Oban.insert(Samen.AuditEvent.PartitionManager.new(%{}))`. If DEFAULT holds rows for a month, the job moves them into the new partition.
+4. Rows in DEFAULT for a month that already has a partition cannot occur; rows for months not yet created are moved when the job creates them. Rows older than the first partition stay in DEFAULT by design: they are still read through `aud_event`.
+5. Confirm `runway_days` > 31 and `default_rows` is falling to the rows you accept before closing.
+
+**A move that fails** (job error `partition_roll_forward_failed`, `audit_partition_move` in the log, Postgres `lock_not_available`):
+something held a lock on `aud_event` for longer than `:partition_move_lock_timeout_ms` (5 s). The move rolled back whole and Oban
+retries (5 attempts); nothing is lost. Find the holder (`SELECT pid, state, xact_start, query FROM pg_stat_activity WHERE state <> 'idle' ORDER BY xact_start`)
+— usually a long transaction that wrote audit rows — and end it, or raise the timeout for the retry.
+
+**DEFAULT too large to move** (`audit_partition_move` in the log with `default_too_large_to_move`): the roll-forward job lapsed for long
+enough that `aud_event_default` holds more than `:partition_move_max_default_rows` (500 000) rows. An automated move would pass over all of
+them under the exclusive lock, so it refuses. Raising only the row cap is not enough: a DEFAULT that large then trips the window budget
+(`:partition_move_window_budget_ms`, 15 s; `partition_move_window_exceeded` or `query_canceled`). Off-peak does not change the answer (the cap is a
+row count). Drain it with ONE supervised run that raises BOTH, in a remote shell on the node that runs the job:
+
+```elixir
+Application.put_env(:samen_core, :partition_move_max_default_rows, 5_000_000)   # above the DEFAULT's row count
+Application.put_env(:samen_core, :partition_move_window_budget_ms, 120_000)     # the longest write stall you accept
+Samen.AuditEvent.PartitionManager.ensure_partition(YourApp.Repo, ~D[YYYY-MM-01])  # for the month the rows belong to
+# then, always (also if it failed):
+Application.delete_env(:samen_core, :partition_move_max_default_rows)
+Application.delete_env(:samen_core, :partition_move_window_budget_ms)
+```
+
+Audited writes STALL, for up to the raised budget, while the move holds its exclusive lock (plus the lock wait, `:partition_move_lock_timeout_ms`,
+5 s), so pick a quiet period and a budget you can live with. `Application.put_env` is node-wide: the daily job on that node sees the raised values
+until you delete them, so do not leave them set. A move that is refused or rolled back loses nothing; read `DEFAULT too large` /
+`partition_move_window_exceeded` again after raising and retry with a larger budget only if you accept the longer stall.
+
+**Permanent WARN (rows older than every partition).** `default_rows` > 0 that never falls: those rows are older than the first
+partition (a backdated import, a replayed anchor), so no month the job creates will take them. They are not lost — `aud_event`
+reads include them. Remediation: create the missing months (`Samen.AuditEvent.PartitionManager.ensure_partition(Repo, ~D[YYYY-MM-01])`
+for each month they belong to; the move puts the rows in), or, if they are accepted as they are, record the decision in the incident
+log and silence the `default_rows` alert for this table (the `default_landing` counter must still alert: it tells you a NEW row fell out).
+`partitions: UNKNOWN` names the table it could not read (integer or MAXVALUE-bounded tables are not read at all).
+

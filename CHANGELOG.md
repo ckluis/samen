@@ -89,7 +89,42 @@ All notable changes to Samen are recorded here. The format follows
 - Tests: `Samen.IndexingTest`, `Samen.Web.TenantIndexPlanTest` (EXPLAIN of the real page query, with a drop-the-index control),
   `Samen.Web.CrmRefsIndexPlanTest`, `Samen.Web.KeysetSortParityTest`, `Samen.Web.ReadsCursorBoundTest`. Recorded in ADR-016 §9. Sabotages 745-762 (745-750 the original six, re-anchored; 751-762 the review fixes).
 
+### Audit partition hardening (ARCH-9)
+
+- **`aud_event_default`**: a DEFAULT partition, so a row outside every month lands there instead of failing the (audit-or-refuse) write.
+  The roll-forward moves DEFAULT rows into a month it creates (Postgres refuses otherwise), transactionally, losing none. A landing is
+  reported (`Failure` + `[:samen,:audit,:partition,:default_landing]`).
+- **Runway**: `PartitionManager.runway/2` per partitioned table; gauges `samen.audit.partition.runway_days` / `.default_rows`; `/readyz`
+  gains a non-gating `partitions:` advisory (WARN < 31 days or rows in DEFAULT, CRITICAL <= 0, UNKNOWN when unreadable); `Readiness.report/1`
+  replaces the controllers' hand-rolled body; alerts.md §7. The roll-forward job now fails when a month cannot be created.
+- **`occurred_at`**: a time more than 300 s ahead is clamped to the write time (claim kept in `detail`); past times are kept. Recorded in ADR-002 §7. Sabotages 763-770.
+- Existing tests changed: the T128 baseline in `aud_event_test.exs` now drops the DEFAULT partition first (it proves the mechanism, which the
+  default now hides).
+- **Review fixes (ARCH-9 round 2).** The DEFAULT-row move no longer holds an exclusive lock across a copy of everything: it stages the month's
+  rows and a replacement DEFAULT in standalone tables with no lock, then takes `ACCESS EXCLUSIVE` under `lock_timeout`
+  (`:partition_move_lock_timeout_ms`, 5 s) for a top-up, a count taken under the lock, and the detach/ATTACH swap; a lock it cannot get fails the
+  move (Oban retries). `/readyz`'s partition advisory is cached 60 s per node, bounded by a 500 ms deadline and a 300 ms `lock_timeout`, and is
+  UNKNOWN (never a stale `:ok`) when a refresh fails; no partitioned table is UNKNOWN, an unreadable table is named, and only time-partitioned
+  tables are read. The default-landing test compares `occurred_at` with in-memory partition bounds (no query per write; the re-read is a
+  SAVEPOINT, so it cannot abort the caller's transaction). `AuditEvent.insert/2` clamps a future `occurred_at` too. The host migration `down`
+  raises while the DEFAULT partition holds rows. Existing tests changed: rows meant to land in DEFAULT use past dates (1995-1999) because
+  `insert/2` now clamps future ones; the fake repos in `readiness_test.exs` gained `transaction/2`. Sabotages 764, 768, 769 re-built for the
+  moved clamp and landing test, 771-788 added.
+- **Review fixes (ARCH-9 round 3).** The DEFAULT-row move keeps the month's CHECK through the ATTACH (it used to drop it first, so Postgres scanned the
+  whole month under `ACCESS EXCLUSIVE`) and gives the replacement DEFAULT its own CHECK so that re-ATTACH is scan-free too; the two `count(*)`
+  statements under the lock are gone; the window has a TOTAL budget (`:partition_move_window_budget_ms`, replaces the per-statement
+  `:partition_move_statement_timeout_ms`) and an automated move refuses a DEFAULT over `:partition_move_max_default_rows` (500 000). The daily
+  `CREATE … PARTITION OF` runs under `lock_timeout` + the budget. The bounds read uses a savepoint only inside a transaction (outside one a
+  DEFAULT landing was never classified). `/readyz` emits `runway_unknown` when its refresh misses its deadline. The migration `up` has a
+  `lock_timeout`; its `down` guard locks the PARENT `aud_event` (a writer's lock order; locking the partition first deadlocked with a write and aborted the writer) under a `lock_timeout` in every host's `down`. Existing tests changed: the `:force` detach test is back on
+  2099 with a without-force refusal as its control; `FaultRepo`/`CountingRepo`/`ToggleRepo` delegate `in_transaction?/0`; the February-bounds test
+  asserts the row's partition. A creator that loses the race for a month (`duplicate_table`) is a success once the existing relation is verified to be that month's partition with those bounds; an unreadable (MINVALUE/MAXVALUE) sibling bound falls back to the scanning ATTACH instead of failing the move; a zero or non-integer `:partition_move_lock_timeout_ms` / a zero budget on a plain create is refused (never Postgres's "no limit"); `:partition_move_clock` (a 0-arity ms function) lets a test consume part of the window budget without sleeping. The runbook's "DEFAULT too large to move" remedy raises both knobs. Existing tests changed: the total-budget test now consumes a known part of the budget after the DETACH and asserts every later statement's timeout is at most what is left; the budget-0 test restores its config on failure. Sabotages 824-838, 847-854.
+
 ### Host action required (existing hosts and generated apps)
+
+0. **Run the migration `20261114120000_aud_event_default_partition`** (ARCH-9; copy the reference in `driftwood/priv/repo/migrations/`; a
+   generated app made after this change has it in its `aud_event` migration). Replace a hand-written `readyz` with
+   `Samen.Web.Readiness.report(repo: MyApp.Repo)`.
 
 A generated app is a copy, so these do **not** reach an app generated before the change. Re-generate into a scratch
 directory and diff, or apply by hand:

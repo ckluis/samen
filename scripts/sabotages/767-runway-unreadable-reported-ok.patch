@@ -1,0 +1,19 @@
+# SABOTAGE: an unreadable partition runway is reported as healthy
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/readiness_test.exs
+# MUST_FAIL: unreadable runway is UNKNOWN, never :ok
+diff --git a/samen_web/lib/samen/web/readiness.ex b/samen_web/lib/samen/web/readiness.ex
+index 21f64287..49771ec8 100644
+--- a/samen_web/lib/samen/web/readiness.ex
++++ b/samen_web/lib/samen/web/readiness.ex
+@@ -83,7 +83,7 @@ defmodule Samen.Web.Readiness do
+ 
+     case result do
+       {:ok, rows} -> worst_advisory(rows)
+-      {:error, reason} -> {:unknown, unknown_detail(reason)}
++      {:error, _reason} -> :ok
+     end
+   rescue
+     e -> {:unknown, unknown_detail(e)}

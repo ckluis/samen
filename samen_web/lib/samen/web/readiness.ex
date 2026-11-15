@@ -23,7 +23,27 @@ defmodule Samen.Web.Readiness do
 
   FAIL-CLOSED: any component that raises, exits, or times out is `{:error, _}`,
   never silently treated as ready.
+
+  ## Advisories — what is wrong but does not take the node out of rotation
+
+  `advisories/1` is a SECOND level, deliberately not part of `check/1`: a finding that every node shares and
+  that draining a node cannot fix. Today: the audit-partition runway (`:partitions`, ARCH-9). A 503 for it would
+  pull every machine out of rotation over a problem no machine can cure by restarting, while the writes it
+  warns about still succeed (they land in the DEFAULT partition). So it is reported in the `/readyz` body and as
+  telemetry, and paged on from there (docs/runbooks/alerts.md §7):
+
+    * `:ok`
+    * `{:warn, detail}` — fewer than `PartitionManager.runway_warn_days/0` days of partitions ahead, rows sit in
+      the DEFAULT partition, or the DEFAULT partition is missing;
+    * `{:critical, detail}` — runway zero or negative (the next audited write outside the existing months
+      lands in DEFAULT, and with no DEFAULT would fail);
+    * `{:unknown, reason}` — the runway could not be computed. NEVER `:ok`: a catalog query that fails is not a
+      healthy table.
+
+  `report/1` renders `check/1` + `advisories/1` as the `{status, body}` the controllers send.
   """
+
+  alias Samen.AuditEvent.PartitionManager
 
   # A subject id that never exists — `attest/1` on it is a pure READ that proves the
   # wrapped-DEK store answered, without minting, unwrapping, or mutating any key.
@@ -43,6 +63,145 @@ defmodule Samen.Web.Readiness do
     if Enum.all?(checks, fn {_component, status} -> status == :ok end),
       do: {:ok, checks},
       else: {:error, checks}
+  end
+
+  @type advisory :: :ok | {:warn, String.t()} | {:critical, String.t()} | {:unknown, String.t()}
+
+  @doc """
+  The non-gating findings: `[partitions: advisory]` (see the moduledoc). Emits the runway as telemetry too
+  (`PartitionManager.emit_runway/1`), so the gauge is as fresh as the probe.
+  """
+  @spec advisories(keyword()) :: [{:partitions, advisory()}]
+  def advisories(opts) do
+    repo = Keyword.fetch!(opts, :repo)
+    [partitions: partitions_advisory(repo)]
+  end
+
+  # The probe must never block or slow `/readyz` (Fly's check has a 2 s budget, and every machine runs it):
+  #
+  #   * the advisory is CACHED for `@advisory_ttl_ms` (60 s) in `:persistent_term` under `{Readiness, :partitions, repo}`
+  #     as `{read_at_ms, advisory}` — per node, not shared, and gone on restart;
+  #   * past the TTL it is recomputed in a Task with a hard deadline (`@advisory_deadline_ms`, 500 ms), the query
+  #     itself carrying `lock_timeout` (`@advisory_lock_ms`, 300 ms) so a partition move holding the exclusive lock
+  #     fails the read fast instead of parking it;
+  #   * a recompute that fails or misses its deadline is `{:unknown, _}` — NEVER the old cached value, however
+  #     recent it was an hour ago: a stale `:ok` past its TTL is exactly the false health this advisory exists
+  #     to prevent. Only a successful read is cached; UNKNOWN is not, so the next probe tries again.
+  @advisory_ttl_ms 60_000
+  @advisory_deadline_ms 500
+  @advisory_lock_ms 300
+  # a little under the deadline: the server stops a read the task was killed for
+  @advisory_statement_ms 400
+
+  defp partitions_advisory(repo) do
+    key = {__MODULE__, :partitions, repo}
+    now_ms = System.monotonic_time(:millisecond)
+
+    case :persistent_term.get(key, nil) do
+      {read_at, advisory} when now_ms - read_at < @advisory_ttl_ms ->
+        advisory
+
+      _expired_or_missing ->
+        case read_partitions(repo) do
+          {:unknown, _} = unknown ->
+            unknown
+
+          advisory ->
+            :persistent_term.put(key, {now_ms, advisory})
+            advisory
+        end
+    end
+  end
+
+  @doc "Forget the cached partition advisory of `repo` (tests; a deploy that wants the next probe to read)."
+  @spec reset_advisory_cache(module()) :: :ok
+  def reset_advisory_cache(repo) do
+    :persistent_term.erase({__MODULE__, :partitions, repo})
+    :ok
+  end
+
+  defp read_partitions(repo) do
+    task = Task.async(fn -> compute_partitions(repo) end)
+
+    case Task.yield(task, @advisory_deadline_ms) || Task.shutdown(task, :brutal_kill) do
+      {:ok, advisory} -> advisory
+      # The refresh that emits the runway series was killed or crashed: the series would keep its last good value and
+      # the `runway_unknown` alert would stay silent while /readyz says UNKNOWN. Say it on the metrics side too.
+      {:exit, _reason} ->
+        PartitionManager.emit_runway({:error, :task_exit})
+        {:unknown, "runway unreadable (task_exit)"}
+
+      nil ->
+        PartitionManager.emit_runway({:error, :deadline_exceeded})
+        {:unknown, "runway unreadable (deadline_exceeded)"}
+    end
+  end
+
+  defp compute_partitions(repo) do
+    result = PartitionManager.runway(repo, lock_timeout_ms: @advisory_lock_ms, statement_timeout_ms: @advisory_statement_ms)
+    PartitionManager.emit_runway(result)
+
+    case result do
+      {:ok, rows} -> worst_advisory(rows)
+      {:error, reason} -> {:unknown, unknown_detail(reason)}
+    end
+  rescue
+    e -> {:unknown, unknown_detail(e)}
+  catch
+    :exit, reason -> {:unknown, unknown_detail(reason)}
+  end
+
+  # Value-free: module names only, never a message (a Postgres error can quote a value).
+  defp unknown_detail(%{__struct__: module}), do: "runway unreadable (#{inspect(module)})"
+  # A table NAME is not a row value, and "which table" is what an operator needs.
+  defp unknown_detail({tag, table}) when is_atom(tag) and is_binary(table), do: "runway unreadable (#{tag} #{table})"
+  defp unknown_detail({tag, _}) when is_atom(tag), do: "runway unreadable (#{tag})"
+  defp unknown_detail(tag) when is_atom(tag), do: "runway unreadable (#{tag})"
+  defp unknown_detail(_), do: "runway unreadable"
+
+  defp worst_advisory(rows) do
+    case Enum.reject(rows, &(&1.status == :ok)) do
+      [] ->
+        :ok
+
+      bad ->
+        level = if Enum.any?(bad, &(&1.status == :critical)), do: :critical, else: :warn
+
+        detail =
+          Enum.map_join(bad, "; ", fn r ->
+            "#{r.table}: runway_days=#{r.runway_days} default_rows=#{r.default_rows} " <>
+              Enum.join(r.reasons, ",")
+          end)
+
+        {level, detail}
+    end
+  end
+
+  @doc """
+  `check/1` + `advisories/1` as `{http_status, body}`: 200 `ready` (plus one `partitions: WARN|CRITICAL|UNKNOWN …`
+  line per advisory that is not `:ok`) when every dependency answers, else 503 `not ready` + the component lines.
+  """
+  @spec report(keyword()) :: {200 | 503, String.t()}
+  def report(opts) do
+    advisory_lines =
+      for {component, advisory} <- advisories(opts), advisory != :ok do
+        {level, detail} = advisory
+        "#{component}: #{level |> to_string() |> String.upcase()} #{detail}"
+      end
+
+    case check(opts) do
+      {:ok, _checks} ->
+        {200, Enum.join(["ready" | advisory_lines], "\n")}
+
+      {:error, checks} ->
+        lines =
+          Enum.map(checks, fn
+            {component, :ok} -> "#{component}: ok"
+            {component, {:error, _reason}} -> "#{component}: FAIL"
+          end)
+
+        {503, Enum.join(["not ready" | lines ++ advisory_lines], "\n")}
+    end
   end
 
   defp check_repo(repo) do

@@ -1,0 +1,20 @@
+# SABOTAGE: the move does not top up rows that reached DEFAULT after staging, so a concurrent writer loses 
+#   a row (or the count check refuses the move)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: a row committed AFTER the staging copy is taken by the top-up
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index a7409fe5..f9b8f81e 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -448,7 +448,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+             q!(repo, sql, left + 5_000)
+           end
+ 
+-          window!.(missing.(@staged_month, in_range))
++          :ok
+           window!.(missing.(@staged_default, "NOT (#{in_range})"))
+           window!.("ALTER TABLE aud_event DETACH PARTITION #{@default_partition}")
+           window!.("ALTER TABLE #{@staged_month} RENAME TO #{name}")

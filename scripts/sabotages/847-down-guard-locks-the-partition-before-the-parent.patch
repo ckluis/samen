@@ -1,0 +1,20 @@
+# SABOTAGE: the down guard locks the DEFAULT partition before the parent (the reverse of a writer's order), 
+#   so a write in between deadlocks and the WRITER is aborted
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: the down guard + DROP never deadlock with a concurrent audited write
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index c608d8cf..e578f3c4 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -760,7 +760,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+         -- Held to the end of the migration: a writer cannot commit a row between this check and the DROP (the DROP
+         -- would wait for it and then destroy its row). The PARENT first (a writer's order: parent, then partition),
+         -- and it recurses to the DEFAULT. Waits at most the migration's lock_timeout.
+-        LOCK TABLE aud_event IN ACCESS EXCLUSIVE MODE;
++        LOCK TABLE #{@default_partition} IN ACCESS EXCLUSIVE MODE;
+         IF EXISTS (SELECT 1 FROM ONLY #{@default_partition}) THEN
+           RAISE EXCEPTION '#{@default_partition} holds audit rows that are in no monthly partition; dropping it would destroy them. Create the missing months first (Samen.AuditEvent.PartitionManager.ensure_partition/2 moves the rows in), then roll back again.';
+         END IF;

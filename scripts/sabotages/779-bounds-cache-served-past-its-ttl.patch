@@ -1,0 +1,19 @@
+# SABOTAGE: stale partition bounds are served as current when the re-read fails
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: past its TTL the bounds are read again
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index e0afe242..417b8a0f 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -550,7 +550,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+     now_ms = System.monotonic_time(:millisecond)
+ 
+     case :persistent_term.get(key, nil) do
+-      {read_at, ranges} when now_ms - read_at < ttl ->
++      {read_at, ranges} when is_integer(read_at) ->
+         {:ok, ranges}
+ 
+       _expired_or_missing ->

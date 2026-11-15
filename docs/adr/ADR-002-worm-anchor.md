@@ -246,3 +246,68 @@ this window (the same "detection-latency RPO" honesty the plan states for bad co
 - Break-glass deferred-anchor (T4.4) builds directly on this: the operator-node local chain
   is anchored into this same WORM chain on reconnect, and the gap/tamper detection reuses
   `verify_chain`.
+
+## 7 · Amendment (2026-11-14, ARCH-9) — the partition time-bomb class
+
+§2.2 left `aud_event` RANGE-partitioned by `occurred_at`. #119 fixed one instance (the roll-forward counted 31-day
+steps); the CLASS stayed open: a row whose time is in no partition hard-failed the write, audited writes are
+audit-or-refuse, so a missing partition blocked the business action it audited. `aud_event` is the only partitioned
+table in the framework and the four hosts (found by catalog: `pg_partitioned_table`; `PartitionManager.runway/2`
+reads the catalog, so a later one is covered). Partitions are created by the daily `PartitionManager` job (cron
+`0 1 * * *`, and once at Oban boot), two months ahead, and by the `aud_event` migration (the migration month + 2).
+Amended:
+
+- **DEFAULT partition `aud_event_default`** (migration `20261114120000` per host and test repo; the generated
+  `m_aud_event.eex` creates it with the table). A row outside every month lands there instead of failing.
+  `aud_chain` is not partitioned and is not touched. Nothing else enumerates partitions: chain verification walks
+  `aud_chain`, rollups and DSAR read the parent, and `detach_partition/3` takes a month, so it cannot detach DEFAULT
+  — so no verification, rollup or archival path skips rows in DEFAULT (they read the parent), and none can archive it.
+- **DEFAULT is loud, never silent.** `AuditEvent.insert/2` tests where the row landed by comparing its `occurred_at`
+  with the partition bounds held in memory (`PartitionManager.partition_bounds/1`: `:persistent_term`, 60 s TTL,
+  dropped whenever the manager creates, moves or detaches a partition; past the TTL they are re-read, and a failed re-read
+  is an error, never the stale ranges). No query per write; the re-read is a SAVEPOINT when the caller is in a transaction (Postgrex refuses one otherwise), so a failure cannot abort the
+  caller's transaction (25P02) and lose the audited write. `PartitionManager.report_default_landing/1` emits a
+  value-free `Failure` write report (`audit_event_in_default_partition`) and
+  `[:samen, :audit, :partition, :default_landing]`; the daily job and `/readyz` report rows sitting there
+  (`default_rows`, counted up to 10 000: a bounded scan).
+- **Attach over DEFAULT rows.** Postgres refuses to create a month whose range DEFAULT already holds rows for, and the
+  append-only trigger forbids taking them out. `ensure_partition/2` therefore swaps, in one transaction, in two phases.
+  *Staging* (no lock on `aud_event`, writers keep going): the in-range rows are copied into a standalone table carrying
+  the month's CHECK, the rest into a standalone replacement DEFAULT carrying `NOT (month) AND NOT (each sibling)` as a
+  CHECK (what a DEFAULT's partition constraint amounts to). *Window* (`LOCK TABLE aud_event IN ACCESS EXCLUSIVE` after at
+  most `:partition_move_lock_timeout_ms`, default 5 s, of waiting): rows that reached the old DEFAULT since staging are
+  topped up (up to two passes over the old DEFAULT: two anti-joins, the in-range one can use the BRIN index, the other is a full scan), the old DEFAULT is detached and dropped, and the two staged tables are
+  ATTACHed. Verified on Postgres 16: `ATTACH PARTITION` scans the table ("verifying table") unless a validated CHECK on it
+  implies the bound ("partition constraint … is implied by existing constraints"), so the month's CHECK is kept through
+  the ATTACH and dropped after it (dropping it first made the ATTACH a full scan of the month under the lock), and the
+  replacement DEFAULT's CHECK likewise spares the DEFAULT re-ATTACH its scan of every row (if a sibling appeared between
+  staging and the window the CHECK no longer implies the constraint and that ATTACH scans: slower, still correct). The
+  test measures this per statement with `pg_stat_get_xact_numscans`, not with time. There is no row count under the lock:
+  after the top-up every old-DEFAULT row is in one staged table, and a staged table holds nothing else.
+
+  What bounds the window: `lock_timeout` bounds only the wait for the lock, so the window has its own TOTAL budget
+  (`:partition_move_window_budget_ms`, default 15 s): `statement_timeout` is set to what is left before every statement,
+  and a window that has used it rolls back with `{:partition_move_window_exceeded, budget}`. What remains proportional to
+  a table size is the top-up's passes over the old DEFAULT, so an automated move REFUSES a DEFAULT of more than
+  `:partition_move_max_default_rows` (default 500 000) rows with `{:default_too_large_to_move, cap}` and the runbook
+  (alerts.md, "DEFAULT too large to move") says how to drain it. Audited writes queue behind the lock for at most the lock
+  wait plus the window budget; they are not free during it. A failed move (lock, budget, cap) fails the roll-forward job,
+  Oban retries, nothing is lost. The daily plain `CREATE … PARTITION OF` (nothing to move) runs under the same
+  `lock_timeout` and the budget as `statement_timeout`; Postgres scans DEFAULT there for rows of the new range, which
+  the budget cuts off rather than prevents.
+- **`occurred_at` is clamped, not rejected.** `Writer` keeps a past time as given (the break-glass reconciler, replays and
+  imports carry the real time; older than every partition it lands in DEFAULT, reported; the true write time is
+  `aud_chain.inserted_at`). A time more than `:audit_future_skew_seconds` (300) ahead is replaced by the write time, the claim is appended
+  to `detail` as `occurred_at_claimed=<iso>`, and the chain commits the clamped time and that detail. Rejecting was the
+  alternative: it would let a timestamp make an audited privileged action fail, and the reconciler's node-local clock
+  would then never anchor its entry.
+- **Direct callers are clamped too.** The rule lives in `AuditEvent.clamp_future/2`, called by `AuditEvent.insert/2` (every
+  caller: identity, breakers, send worker, scopes) and by the Writer (which needs the clamped values for the chain).
+- **A far-past `occurred_at` has consequences, kept by design (no behaviour change).** A past time is stored as given, so the
+  row sits in the old month's partition: it leaves with that month's archival detach, sorts deep in an activity feed ordered by
+  `occurred_at`, and a feed or export that wants "when was it written" should read `aud_chain.inserted_at`. Older than every
+  partition it stays in DEFAULT and keeps `/readyz` at WARN until the rows are accepted (runbook alerts.md §7, "Permanent WARN").
+- **`/readyz` cannot be slowed by the advisory.** Computed in a Task with a 500 ms deadline, the query under
+  `lock_timeout` 300 ms, cached 60 s per node (`:persistent_term`); a failed or late refresh is UNKNOWN, never the old value.
+  The runway reads only tables RANGE-partitioned on one time column; no such table is UNKNOWN (`no_partitioned_table`), and an
+  unreadable bound is UNKNOWN naming the table.

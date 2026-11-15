@@ -1,0 +1,20 @@
+# SABOTAGE: the move waits for its exclusive lock without a lock_timeout, queueing every audited writer 
+#   behind it
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: a held conflicting lock makes the move fail FAST
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index e0afe242..68dcd1a6 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -353,7 +353,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+     result =
+       repo.transaction(
+         fn ->
+-          q!(repo, "SET LOCAL lock_timeout = #{lock_ms}", staging_ms)
++          q!(repo, "SET LOCAL lock_timeout = 0", staging_ms)
+           q!(repo, "SET LOCAL statement_timeout = #{staging_ms}", staging_ms)
+           # one mover at a time (the staging tables have fixed names); waits are bounded by lock_timeout
+           q!(repo, "SELECT pg_advisory_xact_lock(hashtext('samen:aud_event:partition_move'))", staging_ms)

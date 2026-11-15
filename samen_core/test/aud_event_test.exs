@@ -160,7 +160,7 @@ defmodule Samen.AuditEventTest do
   describe "PartitionManager.ensure_partition/2" do
     test "creates a partition for a month that does not yet exist" do
       # Use a far-future month that almost certainly doesn't exist.
-      date = Date.new!(2099, 1, 1)
+      date = Date.new!(1998, 1, 1)
       name = PartitionManager.partition_name(date)
 
       # Ensure it doesn't exist before the test.
@@ -188,7 +188,7 @@ defmodule Samen.AuditEventTest do
     end
 
     test "ensure_partition is idempotent (second call returns {:ok, name})" do
-      date = Date.new!(2099, 2, 1)
+      date = Date.new!(1998, 2, 1)
       name = PartitionManager.partition_name(date)
       Repo.query("DROP TABLE IF EXISTS #{name}")
 
@@ -234,12 +234,15 @@ defmodule Samen.AuditEventTest do
   end
 
   describe "PartitionManager forward-roll (T128 production audit-write safety)" do
-    test "BASELINE: an audit write to a month with NO partition FAILS (the silent prod defect)" do
+    test "BASELINE: an audit write to a month with NO partition and NO DEFAULT partition FAILS (the prod defect)" do
       # A far-future month whose partition does not exist. This is exactly what happens
-      # in production once the clock passes the last migration-seeded partition.
-      future = ~U[2099-11-15 09:00:00Z]
+      # in production once the clock passes the last migration-seeded partition — on a database
+      # without the DEFAULT partition (ARCH-9 added it; `aud_event_default_partition_test.exs` proves the
+      # write then succeeds). Dropped here (inside the sandbox) to keep the mechanism itself under test.
+      future = ~U[1998-11-15 09:00:00Z]
       name = PartitionManager.partition_name(DateTime.to_date(future))
       Repo.query("DROP TABLE IF EXISTS #{name}")
+      Repo.query!("DROP TABLE IF EXISTS #{PartitionManager.default_partition_name()}")
       refute aud_partition_exists?(name)
 
       # No partition to hold the row -> Postgres refuses the insert. Audit trail lost.
@@ -255,13 +258,13 @@ defmodule Samen.AuditEventTest do
     test "ensure_upcoming crossing a boundary creates the partition + the write SUCCEEDS (idempotent)" do
       # Anchor two months BEFORE a fresh future month so the job's lookahead rolls the
       # boundary forward into it (mirrors the daily cron catching up past a boundary).
-      anchor = ~D[2099-09-15]
-      target = ~U[2099-11-15 09:00:00Z]
+      anchor = ~D[1998-09-15]
+      target = ~U[1998-11-15 09:00:00Z]
       target_date = DateTime.to_date(target)
       target_name = PartitionManager.partition_name(target_date)
 
       created_names =
-        [~D[2099-09-01], ~D[2099-10-01], target_date]
+        [~D[1998-09-01], ~D[1998-10-01], target_date]
         |> Enum.map(&PartitionManager.partition_name/1)
 
       # Start clean: none of the three months exist.
@@ -306,7 +309,7 @@ defmodule Samen.AuditEventTest do
                AuditEvent.insert(Repo, %{
                  event_type: "system",
                  subject_id: "t128-forward-2",
-                 occurred_at: ~U[2099-11-20 09:00:00Z]
+                 occurred_at: ~U[1998-11-20 09:00:00Z]
                })
 
       # Cleanup (belt-and-suspenders; the sandbox rolls this back anyway).
@@ -350,21 +353,21 @@ defmodule Samen.AuditEventTest do
 
   describe "PartitionManager month arithmetic and the test database's partitions" do
     test "ensure_upcoming_partitions counts calendar months: from January 31 it creates February" do
-      names = Enum.map([~D[2099-01-01], ~D[2099-02-01], ~D[2099-03-01]], &PartitionManager.partition_name/1)
+      names = Enum.map([~D[1998-01-01], ~D[1998-02-01], ~D[1998-03-01]], &PartitionManager.partition_name/1)
       Enum.each(names, &Repo.query("DROP TABLE IF EXISTS #{&1}"))
 
       # Jan 31 + 31 days is March 3: a 31-day step skipped February entirely.
-      results = PartitionManager.ensure_upcoming_partitions(Repo, ~D[2099-01-31], 2)
+      results = PartitionManager.ensure_upcoming_partitions(Repo, ~D[1998-01-31], 2)
 
       assert results == Enum.map(names, &{:ok, &1})
       assert Enum.all?(names, &aud_partition_exists?/1)
     end
 
     test "ensure_partitions_between covers every month of the range, inclusive, and nothing for an empty one" do
-      assert [{:ok, "aud_event_y2099m11"}, {:ok, "aud_event_y2099m12"}, {:ok, "aud_event_y2100m01"}] =
-               PartitionManager.ensure_partitions_between(Repo, ~D[2099-11-30], ~D[2100-01-01])
+      assert [{:ok, "aud_event_y1998m11"}, {:ok, "aud_event_y1998m12"}, {:ok, "aud_event_y1999m01"}] =
+               PartitionManager.ensure_partitions_between(Repo, ~D[1998-11-30], ~D[1999-01-01])
 
-      assert PartitionManager.ensure_partitions_between(Repo, ~D[2099-12-01], ~D[2099-11-01]) == []
+      assert PartitionManager.ensure_partitions_between(Repo, ~D[1998-12-01], ~D[1998-11-01]) == []
     end
 
     test "the test database has a partition for every month from the launch month through two months ahead" do
@@ -394,10 +397,10 @@ defmodule Samen.AuditEventTest do
 
   describe "a fresh database's partitions: the generated aud_event migration" do
     test "upcoming_partition_sql/2 creates the anchor month and the next two, by calendar month" do
-      names = Enum.map([~D[2099-01-01], ~D[2099-02-01], ~D[2099-03-01]], &PartitionManager.partition_name/1)
+      names = Enum.map([~D[1998-01-01], ~D[1998-02-01], ~D[1998-03-01]], &PartitionManager.partition_name/1)
       Enum.each(names, &Repo.query("DROP TABLE IF EXISTS #{&1}"))
 
-      statements = PartitionManager.upcoming_partition_sql(~D[2099-01-31], 2)
+      statements = PartitionManager.upcoming_partition_sql(~D[1998-01-31], 2)
       assert length(statements) == 3
       Enum.each(statements, &({:ok, _} = Repo.query(&1)))
 
@@ -408,8 +411,11 @@ defmodule Samen.AuditEventTest do
                AuditEvent.insert(Repo, %{
                  event_type: "system",
                  subject_id: "feb-28",
-                 occurred_at: ~U[2099-02-28 23:59:59Z]
+                 occurred_at: ~U[1998-02-28 23:59:59Z]
                })
+
+      # (the DEFAULT partition would accept that write too, so assert WHERE it landed)
+      assert Repo.query!("SELECT count(*) FROM #{PartitionManager.partition_name(~D[1998-02-01])} WHERE aud_subject_id = 'feb-28'").rows == [[1]]
 
       # A migration re-run (IF NOT EXISTS) is a no-op, not an error.
       Enum.each(statements, &({:ok, _} = Repo.query(&1)))
@@ -494,16 +500,21 @@ defmodule Samen.AuditEventTest do
       assert :not_relevant = result
     end
 
-    test "detach with :force bypasses the erasure window gate (operator override)" do
-      # :force=true detaches despite the erasure window.
-      # We use a far-future partition so we can safely create+detach it.
+    test "detach with :force bypasses the erasure window gate (operator override); without it the gate refuses" do
+      # A partition INSIDE the erasure window (a far-future month, so it can be created and detached safely). It
+      # holds no row, so the insert clamp is not involved. WITHOUT :force the gate refuses (the control that makes
+      # this test unable to pass when :force is ignored); WITH it the detach goes through.
       date = Date.new!(2099, 3, 1)
       name = PartitionManager.partition_name(date)
       Repo.query("DROP TABLE IF EXISTS #{name}")
 
       {:ok, _} = PartitionManager.ensure_partition(Repo, date)
 
+      assert {:error, :erasure_window_active, _detail} = PartitionManager.detach_partition(Repo, date)
+      assert aud_partition_exists?(name)
+
       assert {:ok, ^name} = PartitionManager.detach_partition(Repo, date, force: true)
+      refute aud_partition_exists?(name)
 
       # Cleanup.
       Repo.query("DROP TABLE IF EXISTS #{name}")

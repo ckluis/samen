@@ -1,0 +1,18 @@
+# SABOTAGE: creating or moving a partition leaves the old in-memory bounds in place
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: they are read again after invalidation
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index e0afe242..59cf1f6e 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -576,7 +576,6 @@ defmodule Samen.AuditEvent.PartitionManager do
+   @doc "Forget the in-memory bounds of `repo` (a partition was created, moved or detached)."
+   @spec invalidate_bounds(module()) :: :ok
+   def invalidate_bounds(repo) do
+-    :persistent_term.erase({__MODULE__, :bounds, repo})
+     :ok
+   end
+ 

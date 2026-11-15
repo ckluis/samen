@@ -1,0 +1,19 @@
+# SABOTAGE: the roll-forward job returns :ok although a month could not be created
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: perform/1 FAILS (so Oban retries
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index 4dae51f6..48f93cdf 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -199,7 +199,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+       [first | _] ->
+         Samen.Observability.Failure.report(:write, :audit_partition_roll_forward, nil, first, [])
+         observe_runway(repo)
+-        {:error, {:partition_roll_forward_failed, length(failed)}}
++        :ok
+     end
+   end
+ 

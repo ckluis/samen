@@ -1,0 +1,18 @@
+# SABOTAGE: a host migration creates the DEFAULT partition without a lock_timeout
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: every host migration's up takes its lock under a lock_timeout
+diff --git a/pawchart/priv/repo/migrations/20261114120000_aud_event_default_partition.exs b/pawchart/priv/repo/migrations/20261114120000_aud_event_default_partition.exs
+index 5f30f01c..79bd5c4d 100644
+--- a/pawchart/priv/repo/migrations/20261114120000_aud_event_default_partition.exs
++++ b/pawchart/priv/repo/migrations/20261114120000_aud_event_default_partition.exs
+@@ -18,7 +18,6 @@ defmodule PawChart.Repo.Migrations.AudEventDefaultPartition do
+   def up do
+     # CREATE … PARTITION OF takes ACCESS EXCLUSIVE on aud_event: give up (the deploy fails, nothing queues) rather
+     # than park every audited write behind one long reader. Transaction-scoped; same bound as expand_contract.
+-    execute "SET LOCAL lock_timeout = '5s'"
+ 
+     execute Samen.AuditEvent.PartitionManager.default_partition_sql(),
+             "DROP TABLE IF EXISTS aud_event_default"

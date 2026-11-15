@@ -1,0 +1,19 @@
+# SABOTAGE: the creator that loses the race (42P07) fails the roll-forward instead of succeeding
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: two concurrent creators of the SAME month both succeed
+diff --git a/samen_core/lib/samen/audit_event/partition_manager.ex b/samen_core/lib/samen/audit_event/partition_manager.ex
+index b6197bc2..de79113b 100644
+--- a/samen_core/lib/samen/audit_event/partition_manager.ex
++++ b/samen_core/lib/samen/audit_event/partition_manager.ex
+@@ -344,7 +344,7 @@ defmodule Samen.AuditEvent.PartitionManager do
+   # second waits for the parent lock and then fails with `duplicate_table`. That is success (a concurrent creator won)
+   # only if what exists really IS this month's partition of `aud_event` with these bounds; an unrelated table of that
+   # name, or a partition of another range, stays an error.
+-  defp create_failed(repo, name, from_ts, to_ts, %Postgrex.Error{postgres: %{code: :duplicate_table}} = e) do
++  defp create_failed(repo, name, from_ts, to_ts, %Postgrex.Error{postgres: %{code: :never_duplicate_table}} = e) do
+     case expected_partition?(repo, name, from_ts, to_ts) do
+       {:ok, true} ->
+         invalidate_bounds(repo)

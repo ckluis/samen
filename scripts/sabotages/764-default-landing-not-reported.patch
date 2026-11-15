@@ -1,0 +1,19 @@
+# SABOTAGE: a row landing in the DEFAULT partition is no longer reported
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_event_default_partition_test.exs
+# MUST_FAIL: log line + telemetry carry no row value
+diff --git a/samen_core/lib/samen/audit_event/schema.ex b/samen_core/lib/samen/audit_event/schema.ex
+index 709101d6..cae88484 100644
+--- a/samen_core/lib/samen/audit_event/schema.ex
++++ b/samen_core/lib/samen/audit_event/schema.ex
+@@ -190,7 +190,7 @@ defmodule Samen.AuditEvent do
+   # landing then goes unclassified — loudly) and never undoes the insert.
+   defp note_default_landing(repo, row) do
+     case Samen.AuditEvent.PartitionManager.lands_in_default?(repo, row.occurred_at) do
+-      {:ok, true} -> Samen.AuditEvent.PartitionManager.report_default_landing("aud_event")
++      {:ok, :never} -> Samen.AuditEvent.PartitionManager.report_default_landing("aud_event")
+       {:ok, false} -> :ok
+       {:error, reason} -> Samen.Observability.Failure.report(:audit_default_landing_probe, nil, reason)
+     end

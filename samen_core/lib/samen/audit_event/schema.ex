@@ -5,7 +5,9 @@ defmodule Samen.AuditEvent do
   ## Schema
 
   `aud_event` is a PostgreSQL table PARTITIONED BY RANGE on `aud_occurred_at`
-  (monthly RANGE partitions created ahead of time by `Samen.AuditEvent.PartitionManager`).
+  (monthly RANGE partitions created ahead of time by `Samen.AuditEvent.PartitionManager`, plus an
+  `aud_event_default` partition that catches a row whose time is in no month so the write never fails — and
+  `insert/2` reports such a row loudly).
   A BRIN index on the time column gives sub-KB index overhead over huge append-only tables.
 
   ## Append-only enforcement (belt and braces)
@@ -109,17 +111,95 @@ defmodule Samen.AuditEvent do
   @spec insert(module(), map()) :: {:ok, t()} | {:error, Ecto.Changeset.t()}
   def insert(repo, attrs) when is_atom(repo) and is_map(attrs) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
-    occurred_at = Map.get(attrs, :occurred_at) || Map.get(attrs, "occurred_at") || now
+    claimed = Map.get(attrs, :occurred_at) || Map.get(attrs, "occurred_at") || now
+    detail = Map.get(attrs, :detail) || Map.get(attrs, "detail")
+
+    # The chokepoint: whoever calls (the Writer, which has already clamped for the chain's sake, or a direct
+    # caller), a future `occurred_at` never becomes the partition key.
+    {occurred_at, detail, clamped?} = clamp_future(claimed, detail)
+
+    attrs = Map.put(attrs, :occurred_at, occurred_at)
+    attrs = if clamped?, do: Map.put(attrs, :detail, detail), else: attrs
 
     cs =
       %__MODULE__{}
       |> Ecto.Changeset.cast(
-        Map.put(attrs, :occurred_at, occurred_at),
+        attrs,
         [:event_type, :subject_id, :actor_id, :correlation_id, :detail, :occurred_at]
       )
       |> Ecto.Changeset.validate_required([:event_type, :occurred_at])
 
-    repo.insert(cs)
+    case repo.insert(cs) do
+      {:ok, row} ->
+        note_default_landing(repo, row)
+        {:ok, row}
+
+      other ->
+        other
+    end
+  end
+
+  @doc """
+  The rule for a caller-supplied `occurred_at`, the PARTITION KEY (ARCH-9; ADR-002 amendment):
+  `{occurred_at, detail, clamped?}`.
+
+    * not a `DateTime` -> now;
+    * in the past, any distance -> kept (a replay or deferred anchor carries the time the thing happened; older than
+      every partition it lands in DEFAULT, reported);
+    * further ahead than `:audit_future_skew_seconds` (default 300) -> CLAMPED to now, the claimed time appended to
+      `detail` (`occurred_at_claimed=…`), the clamp reported (`audit_occurred_at_clamped`,
+      `[:samen, :audit, :occurred_at, :clamped]`). Never rejected: a timestamp must not make an audited
+      privileged action fail.
+
+  Called by `insert/2` (every writer) and by `Samen.AuditChain.Writer` (which needs the clamped values to commit
+  the same time and detail into the chain).
+  """
+  @spec clamp_future(term(), String.t() | nil) :: {DateTime.t(), String.t() | nil, boolean()}
+  def clamp_future(occurred_at, detail) do
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+    case occurred_at do
+      %DateTime{} = dt ->
+        dt = DateTime.truncate(dt, :microsecond)
+
+        if DateTime.diff(dt, now, :second) > future_skew_seconds() do
+          Samen.Observability.Failure.report(:write, :audit_occurred_at_clamped, nil, :future_occurred_at, [])
+          :telemetry.execute([:samen, :audit, :occurred_at, :clamped], %{count: 1}, %{})
+          {now, clamp_note(detail, dt), true}
+        else
+          {dt, detail, false}
+        end
+
+      _ ->
+        {now, detail, false}
+    end
+  end
+
+  defp clamp_note(detail, claimed) do
+    note = "occurred_at_claimed=#{DateTime.to_iso8601(claimed)}"
+    if is_binary(detail) and detail != "", do: detail <> " " <> note, else: note
+  end
+
+  defp future_skew_seconds, do: Application.get_env(:samen_core, :audit_future_skew_seconds, 300)
+
+  # A row whose time is in no monthly partition lands in `aud_event_default` instead of failing the write (ARCH-9).
+  # That is the safety net doing its job, and it must not be silent. The test compares the row's time with the
+  # partition bounds KNOWN IN MEMORY (`PartitionManager.lands_in_default?/2`): no query per write while they are
+  # fresh, and when they must be re-read the read is a SAVEPOINT, so a failing read cannot put the caller's
+  # transaction into the aborted state (25P02) and lose the audited write. A read that fails is reported (the
+  # landing then goes unclassified — loudly) and never undoes the insert.
+  defp note_default_landing(repo, row) do
+    case Samen.AuditEvent.PartitionManager.lands_in_default?(repo, row.occurred_at) do
+      {:ok, true} -> Samen.AuditEvent.PartitionManager.report_default_landing("aud_event")
+      {:ok, false} -> :ok
+      {:error, reason} -> Samen.Observability.Failure.report(:audit_default_landing_probe, nil, reason)
+    end
+
+    :ok
+  rescue
+    e ->
+      Samen.Observability.Failure.report(:audit_default_landing_probe, nil, e)
+      :ok
   end
 
   # ---------------------------------------------------------------------------
