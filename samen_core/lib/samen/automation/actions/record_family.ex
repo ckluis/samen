@@ -108,7 +108,7 @@ defmodule Samen.Automation.Actions.MutateRecord do
       # Nothing to undo: the resource is gone from the registry, or the record it created is already gone.
       :error -> :ok
       {:ok, nil} -> :ok
-      {:error, reason} -> undo_failed(reason)
+      {:error, reason} -> undo_failed(reason, actor)
     end
   end
 
@@ -123,8 +123,8 @@ defmodule Samen.Automation.Actions.MutateRecord do
   end
 
   # A compensation that did not happen is on record and tagged, never an `:ok` for a record left behind.
-  defp undo_failed(reason) do
-    Samen.Observability.Failure.report(:record_family_undo, nil, reason)
+  defp undo_failed(reason, actor) do
+    Samen.Observability.Failure.report_write(:record_family_undo, actor, reason)
     {:error, :undo_failed}
   end
 

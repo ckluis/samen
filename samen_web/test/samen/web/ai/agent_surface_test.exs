@@ -430,6 +430,54 @@ defmodule Samen.Web.AI.AgentSurfaceTest do
       refute empty =~ "agent-plane-unavailable"
     end
 
+    test "RED: a run / turn log whose READ failed renders the kit error state + retry, never 'No runs recorded.'; an honest empty still does (control)",
+         %{org_id: org_id} do
+      # POSITIVE CONTROL: honestly empty
+      empty = render_health(org_id, selected_run: "run-1")
+      assert empty =~ "No agent runs for this org."
+      assert empty =~ "No runs recorded."
+      assert empty =~ "No turns for that run."
+      refute empty =~ "agent-read-error"
+
+      failed = render_health(org_id, selected_run: "run-1", read_errors: [:summary, :runs, :turns])
+
+      for class <- ["agent-read-error", "agent-run-read-error", "turn-read-error"] do
+        assert failed =~ class
+      end
+
+      assert failed =~ ~s(phx-click="retry_load")
+      refute failed =~ "No agent runs for this org."
+      refute failed =~ "No runs recorded."
+      refute failed =~ "No turns for that run."
+    end
+
+    test "RED: load/3 maps a failed turn read to a read error (the turn table is unreadable), a readable one to none (control)",
+         %{org_id: org_id} do
+      run = AgentFixture.run!(org_id, agent: "support_triage", state: :running)
+      operator_id = Ash.UUID.generate()
+      open_impersonation!(operator_id, org_id)
+
+      load = fn ->
+        %Phoenix.LiveView.Socket{}
+        |> Phoenix.Component.assign(:samen_mount, build_operator_mount(operator_id))
+        |> Phoenix.Component.assign(:samen_acting_as, false)
+        |> with_operator_identity(operator_id)
+        |> Samen.Web.Operator.AgentHealthLive.load(org_id, selected_run: to_string(run.id))
+      end
+
+      # POSITIVE CONTROL
+      assert load.().assigns.read_errors == []
+
+      Samen.WebTest.Repo.query!("ALTER TABLE ai_agent_turn RENAME TO ai_agent_turn_unreadable")
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        socket = load.()
+        assert socket.assigns.impersonation == :active
+        assert :turns in socket.assigns.read_errors
+        assert render_html(Samen.Web.Operator.AgentHealthLive, socket.assigns) =~ "turn-read-error"
+      end)
+    end
+
     test "an UNREADABLE kill row renders 'kill state unreadable', never 'active'", %{
       org_id: org_id
     } do
@@ -496,8 +544,9 @@ defmodule Samen.Web.AI.AgentSurfaceTest do
         agent_plane: Keyword.get(opts, :agent_plane, :available),
         summary: Keyword.get(opts, :summary, []),
         runs: Keyword.get(opts, :runs, []),
-        turns: [],
-        selected_run: nil,
+        turns: Keyword.get(opts, :turns, []),
+        read_errors: Keyword.get(opts, :read_errors, []),
+        selected_run: Keyword.get(opts, :selected_run),
         action_error: nil,
         session_info: nil,
         open_error: nil

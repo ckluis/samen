@@ -93,6 +93,8 @@ defmodule Samen.Web.Operator.AgentHealthLive do
         summary: [],
         runs: [],
         turns: [],
+        # which active-session reads FAILED (an outage): rendered as the kit error state + retry, never as an empty state
+        read_errors: [],
         selected_run: Keyword.get(opts, :selected_run),
         action_error: Keyword.get(opts, :action_error),
         session_info: nil,
@@ -106,14 +108,19 @@ defmodule Samen.Web.Operator.AgentHealthLive do
       true ->
         case Impersonation.gate_socket(socket, socket.assigns[:samen_operator_id], target_org_id) do
           {:ok, _actor, info} ->
+            summary = Health.summary(operator, target_org_id)
+            runs = Health.runs(operator, target_org_id, limit: 50)
+            turns = fetch_turns(operator, target_org_id, Keyword.get(opts, :selected_run))
+
             assign(
               socket,
               base
               |> Keyword.merge(
                 impersonation: :active,
-                summary: fetch(Health.summary(operator, target_org_id)),
-                runs: fetch(Health.runs(operator, target_org_id, limit: 50)),
-                turns: fetch_turns(operator, target_org_id, Keyword.get(opts, :selected_run)),
+                summary: rows(summary),
+                runs: rows(runs),
+                turns: rows(turns),
+                read_errors: failed_reads(summary: summary, runs: runs, turns: turns),
                 session_info: info
               )
             )
@@ -140,7 +147,8 @@ defmodule Samen.Web.Operator.AgentHealthLive do
     end
   end
 
-  def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns[:target_org_id])}
+  def handle_event("retry_load", _params, socket),
+    do: {:noreply, load(socket, socket.assigns[:target_org_id], selected_run: socket.assigns[:selected_run])}
 
   def handle_event("select_run", %{"id" => run_id}, socket),
     do: {:noreply, load(socket, socket.assigns[:target_org_id], selected_run: run_id)}
@@ -176,12 +184,15 @@ defmodule Samen.Web.Operator.AgentHealthLive do
     end
   end
 
-  defp fetch({:ok, rows}), do: rows
-  defp fetch(_), do: []
+  defp rows({:ok, rows}), do: rows
+  defp rows(_failed), do: []
 
-  defp fetch_turns(_operator, _org_id, nil), do: []
+  defp failed_reads(results), do: for({name, {:error, _}} <- results, do: name)
 
-  defp fetch_turns(operator, org_id, run_id), do: fetch(Health.turns(operator, org_id, run_id))
+  # No run selected is an honest empty `{:ok, []}`; a selected run whose turns could not be read is the error.
+  defp fetch_turns(_operator, _org_id, nil), do: {:ok, []}
+
+  defp fetch_turns(operator, org_id, run_id), do: Health.turns(operator, org_id, run_id)
 
   defp open_error_copy(:reason_required), do: "A reason for access is required."
   defp open_error_copy(:not_authorized), do: "Your operator role may not open an impersonation session."
@@ -317,8 +328,10 @@ defmodule Samen.Web.Operator.AgentHealthLive do
                   <span class="n">{length(@summary)}</span>
                 </div>
 
+                <.error_state :if={:summary in @read_errors} class="agent-read-error" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
+
                 <.empty_state
-                  :if={@summary == []}
+                  :if={@summary == [] and :summary not in @read_errors}
                   class="agent-empty"
                   icon="◎"
                   title="No agent runs for this org."
@@ -373,7 +386,9 @@ defmodule Samen.Web.Operator.AgentHealthLive do
                   <span class="n">{length(@runs)}</span>
                 </div>
 
-                <.empty_state :if={@runs == []} class="agent-run-empty" icon="✓" title="No runs recorded."
+                <.error_state :if={:runs in @read_errors} class="agent-run-read-error" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
+
+                <.empty_state :if={@runs == [] and :runs not in @read_errors} class="agent-run-empty" icon="✓" title="No runs recorded."
                   body="Queued, running, parked, and terminal runs appear here as agents dispatch." />
 
                 <.data_table :if={@runs != []}>
@@ -434,7 +449,9 @@ defmodule Samen.Web.Operator.AgentHealthLive do
                   </tr>
                 </.data_table>
 
-                <.empty_state :if={@turns == []} class="turn-empty" icon="·" title="No turns for that run." body="" />
+                <.error_state :if={:turns in @read_errors} class="turn-read-error" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
+
+                <.empty_state :if={@turns == [] and :turns not in @read_errors} class="turn-empty" icon="·" title="No turns for that run." body="" />
               </div>
           <% end %>
         </div>

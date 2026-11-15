@@ -129,12 +129,12 @@ defmodule Samen.Automation.RunRecord do
     |> case do
       {:ok, run} -> run
       {:error, reason} ->
-        Samen.Observability.Failure.report(:run_record_mark_running, nil, reason)
+        Samen.Observability.Failure.report_write(:run_record_mark_running, nil, reason)
         run
     end
   rescue
     e ->
-      Samen.Observability.Failure.report(:run_record_mark_running, nil, e)
+      Samen.Observability.Failure.report_write(:run_record_mark_running, nil, e)
       run
   end
 

@@ -61,6 +61,31 @@ defmodule Samen.Web.OperatorAutomationHealthTest do
     assert html =~ ~s(phx-click="kill")
   end
 
+  test "RED: a failed summary / run read renders the kit error state + retry, never 'No workflows' / 'No runs recorded.'; the healthy empty page still does (control)" do
+    org = Ash.UUID.generate()
+
+    # POSITIVE CONTROL: honestly empty
+    empty = render_gated(org)
+    assert empty =~ "No workflows for this org."
+    assert empty =~ "No runs recorded."
+    refute empty =~ "wf-read-error"
+
+    # An unusable run module makes every Health read answer {:error, :unavailable}
+    # (a real failed read through the page's own load path, not a stubbed assign).
+    prev = Application.get_env(:samen_core, Samen.Automation)
+    Application.put_env(:samen_core, Samen.Automation, workflow_module: String, run_module: String, repo: Repo)
+
+    {failed, _log} = ExUnit.CaptureLog.with_log(fn -> render_gated(org) end)
+
+    Application.put_env(:samen_core, Samen.Automation, prev)
+
+    assert failed =~ "wf-read-error"
+    assert failed =~ "run-read-error"
+    assert failed =~ ~s(phx-click="retry_load")
+    refute failed =~ "No workflows for this org."
+    refute failed =~ "No runs recorded."
+  end
+
   test "the kill-switch round-trips through Health.kill/4 — a direct resource read confirms the write" do
     org = Ash.UUID.generate()
     owner = Ash.UUID.generate()

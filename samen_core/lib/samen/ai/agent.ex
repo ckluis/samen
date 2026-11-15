@@ -3128,7 +3128,18 @@ defmodule Samen.AI.Agent do
   defp approver_scope(approver_id, %Run{org_id: org_id}),
     do: Approver.resolve(approver_id, org_id)
 
+  # A malformed id is a deterministic fact about the INPUT, not an outage: it is "no such turn" (so a garbled approval
+  # can still be rejected, as `reject_proposal/3` promises). Only a failed read of a well-formed id is `:unavailable`.
   defp fetch_turn(turn_id) when is_binary(turn_id) do
+    case Ecto.UUID.cast(turn_id) do
+      {:ok, uuid} -> read_turn(uuid)
+      :error -> {:error, :turn_not_found}
+    end
+  end
+
+  defp fetch_turn(_turn_id), do: {:error, :turn_not_found}
+
+  defp read_turn(turn_id) do
     require Ash.Query
 
     Turn
@@ -3152,8 +3163,6 @@ defmodule Samen.AI.Agent do
       Samen.Observability.Failure.report(:agent_fetch_turn, nil, e)
       {:error, :unavailable}
   end
-
-  defp fetch_turn(_turn_id), do: {:error, :turn_not_found}
 
   defp cancel_parked(%Run{} = run) do
     run = reload!(run)

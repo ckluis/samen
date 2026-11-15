@@ -42,6 +42,14 @@ All notable changes to Samen are recorded here. The format follows
   compensation that did not happen. The fail-closed tool, capability, catalogue and surface probes stay non-fatal and now report by name; the
   four `String.to_existing_atom` rescues collapse into one reviewed `Support.safe_atom/1`. Web LiveViews that map `{:error, _}` to `[]`
   (operator agent / automation health) are the web phase's.
+  Review follow-ups (sabotages 877+): `RunWorker.reread_subject/2` skips (`internal_error`) on a resource it cannot resolve or classify instead of
+  firing against an empty subject; `ReembedWorker` returns `{:error, :unavailable}` (Oban retries) instead of a `CaseClauseError`;
+  `ActionStep.undo/4` returns a failed compensation to Reactor (which stacks an `UndoStepError`, still undoes the remaining steps and fails the
+  run) and `RunWorker` stamps it on the Run outcome as status `compensation_failed`; a malformed turn id in `reject_proposal/3` is `:turn_not_found`
+  (a garbled approval can still be rejected), only a failed read of a well-formed id is `:unavailable`; the operator agent and automation health
+  pages render the kit error state with a retry when a read failed (no longer "No runs recorded."); `Embeddings.embedder_simulated?/1` answers
+  `true` (not verified real) when a provider's `simulated?/0` raises; `ScheduleAdvance` enqueues no dispatch when the org cannot be resolved;
+  `Failure.report_write/3` reports failed writes as `write` (the lint scanner counts it as a report) and the write sites use it.
 
 ### Kernel review fixes (samen_core, samen_web, demo, driftwood, pawchart)
 

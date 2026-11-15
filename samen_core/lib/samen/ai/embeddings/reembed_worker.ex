@@ -53,6 +53,15 @@ defmodule Samen.AI.Embeddings.ReembedWorker do
         )
 
         {:discard, :not_configured}
+
+      # The stale-row read FAILED (a DB blip): not "nothing to re-embed". Return the error so Oban backs off and
+      # retries (max_attempts above) instead of crashing the job with a CaseClauseError.
+      {:error, :unavailable} = error ->
+        Logger.warning(
+          "[Samen.AI.Embeddings.ReembedWorker] job_id=#{job_id} stale-row read failed (unavailable); will retry"
+        )
+
+        error
     end
   end
 

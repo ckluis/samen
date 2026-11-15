@@ -165,10 +165,18 @@ defmodule Samen.Automation.RunWorker do
              {:ok, eligible} <- NonPiiPredicates.eligible_names(resource_key) do
           load_eligible(resource, record_id, eligible)
         else
-          _ -> {:ok, %{}}
+          # An unresolvable resource or an unclassifiable one (`eligible_names/1` answered its default-deny) is not an
+          # empty subject: `neq` / `not_in` / `is_nil` gates all pass against one. Skip, exactly as `load_eligible/3`.
+          other ->
+            Samen.Observability.Failure.report(:run_worker_reread_subject, nil, reread_reason(other))
+            {:skip, :internal_error}
         end
     end
   end
+
+  # A value-free atom for the report (the `eligible_names/1` tuple carries free text; the report names only a kind).
+  defp reread_reason(:error), do: :unresolvable_resource
+  defp reread_reason({:error, _kind, _key, _msg}), do: :unclassifiable_resource
 
   defp load_eligible(resource, record_id, eligible) do
     eligible_atoms =
@@ -274,6 +282,12 @@ defmodule Samen.Automation.RunWorker do
   end
 
   defp extract_failure(%Reactor.Error.Invalid.RunStepError{error: inner}), do: extract_failure(inner)
+
+  # A compensation that FAILED (`ActionStep.undo/4` -> `{:error, bounded outcome}`): its outcome is stamped on the
+  # run (status `:compensation_failed`) without taking over the run's own `error_kind` (the action that failed).
+  defp extract_failure(%Reactor.Error.Invalid.UndoStepError{error: %{status: :compensation_failed} = outcome}) do
+    if plain_map?(outcome), do: {[outcome], nil}, else: {[], nil}
+  end
 
   defp extract_failure({%{} = failed, completed}) when is_list(completed) do
     {Enum.filter(completed, &plain_map?/1) ++ [failed], Map.get(failed, :error_kind, :action_failed)}

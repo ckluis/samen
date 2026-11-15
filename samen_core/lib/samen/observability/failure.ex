@@ -20,6 +20,10 @@ defmodule Samen.Observability.Failure do
   @spec report(atom(), term(), term()) :: :ok
   def report(name, scope, reason), do: report(:read, name, scope, reason, [])
 
+  @doc "Report a failed WRITE `name` (a side effect that did not happen): same shape as `report/3`, kind `:write`."
+  @spec report_write(atom(), term(), term()) :: :ok
+  def report_write(name, scope, reason), do: report(:write, name, scope, reason, [])
+
   @doc """
   Report a failure of `kind` (`:read` | `:write`). Options: `:tag` (log prefix, default
   `"[Samen.Core]"`) and `:event_prefix` (telemetry prefix, default `[:samen, :core]`; the event is
