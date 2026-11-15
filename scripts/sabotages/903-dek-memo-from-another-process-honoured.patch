@@ -1,0 +1,19 @@
+# SABOTAGE: reveal/3 honours a DEK memo built by a different process
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault_dek_reuse_test.exs
+# MUST_FAIL: a memo built by ANOTHER process is ignored
+diff --git a/samen_core/lib/samen/vault.ex b/samen_core/lib/samen/vault.ex
+index d6ecaf47..c794a33d 100644
+--- a/samen_core/lib/samen/vault.ex
++++ b/samen_core/lib/samen/vault.ex
+@@ -301,7 +301,7 @@ defmodule Samen.Vault do
+     adapter = Kms.adapter()
+ 
+     # A memo built by another process is not this call's memo: ignore it (live unwrap).
+-    with true <- DekMemo.owned_by_caller?(memo),
++    with true <- is_struct(memo),
+          {:ok, result} <- DekMemo.fetch(memo, adapter, subject_id) do
+       result
+     else

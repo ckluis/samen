@@ -1,0 +1,21 @@
+# SABOTAGE: The DEK memo is built from every masked token, including values the plane denies, so a denied 
+#   subject is unwrapped
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault_dek_reuse_test.exs
+# MUST_FAIL: building the memo never widens what is decrypted
+# MUST_FAIL: operator WITHOUT a grant: masked and ZERO unwraps
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+index 6e0cfb37..783f4e86 100644
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -203,7 +203,7 @@ defmodule Samen.Api.PiiResolution do
+         __prefetched: true,
+         __grants: grants,
+         __vault_rows: rows,
+-        __vault_deks: vault_deks(rows, opts),
++        __vault_deks: vault_deks(vault_rows(for({_, _, %Masked{token: t}} <- masked, is_binary(t), do: t), opts), opts),
+         __bag_ctx: bag_context(resource, records, plane, actor, opts)
+       )
+     end
