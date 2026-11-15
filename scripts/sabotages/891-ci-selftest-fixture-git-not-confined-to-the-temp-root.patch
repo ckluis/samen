@@ -1,0 +1,21 @@
+# SABOTAGE: the fixture guard stops refusing — a `git` command aimed at any repository outside the self-test's temp root runs
+#   anyway, so a fixture builder whose `cd` failed commits onto the developer's branch and moves its origin/main again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: ESCAPE the self-test fails closed on an unusable temp root and can never write to the repo it tests
+diff --git a/scripts/fixture_guard.sh b/scripts/fixture_guard.sh
+index 68d0fff2..162d647a 100644
+--- a/scripts/fixture_guard.sh
++++ b/scripts/fixture_guard.sh
+@@ -92,8 +92,7 @@ git() {
+     case "$sub" in cat-file|show|rev-parse|rev-list|log|ls-files|ls-tree|diff|status|merge-base|describe|symbolic-ref|show-ref)
+         command git "$@"; return ;; esac
+   fi
+-  _FG_WHY="its repository is '${top:-none}' (directory '$dir'), not inside the fixture root $FG_T"
+-  _fg_deny "$@"; return 97
++  command git "$@"; return
+ }
+ 
+ fixture_finish() { # -> rc 0 clean, 1 if the guard tripped or the real repo moved. Prints; never repairs.

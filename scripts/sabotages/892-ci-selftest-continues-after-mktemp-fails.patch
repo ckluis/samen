@@ -1,0 +1,20 @@
+# SABOTAGE: the self-test shrugs off a failed `mktemp -d` instead of exiting before anything runs, so an unusable TMPDIR no
+#   longer stops it with its own "nothing was touched" refusal (only the arming backstop is left)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: ESCAPE the self-test fails closed on an unusable temp root and can never write to the repo it tests
+diff --git a/scripts/ci_test.sh b/scripts/ci_test.sh
+index e9ed5314..3c832064 100644
+--- a/scripts/ci_test.sh
++++ b/scripts/ci_test.sh
+@@ -101,7 +101,7 @@ CI="$ROOT/scripts/ci"
+ # command can only act on a repo INSIDE $T; the real repo's HEAD / branch / origin/main / status are recorded now and
+ # re-checked on EXIT. (Once a failed `cd "$R"` let the fixture commit run in the REAL repo and moved its origin/main.)
+ source "$ROOT/scripts/fixture_guard.sh" || { echo "ci_test: cannot load scripts/fixture_guard.sh" >&2; exit 1; }
+-T="$(fixture_mktemp samen_ci_test)" || { echo "ci_test: no usable temp root (TMPDIR=${TMPDIR:-unset}) — refusing to run, nothing was touched" >&2; exit 1; }
++T="$(fixture_mktemp samen_ci_test)" || true
+ fixture_arm "$T" "$ROOT" ci_test || exit 1
+ _ci_test_exit() { local rc=$?; fixture_finish || rc=1; rm -rf "$T"; trap - EXIT; exit "$rc"; }
+ trap _ci_test_exit EXIT
