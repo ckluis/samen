@@ -62,13 +62,13 @@ defmodule Samen.Vault.Change do
     subject_id = resolve_subject_id(changeset)
 
     # Collect the (field, plaintext) pairs the caller actually set to a non-token
-    # plaintext value. A %Masked{} or a raw token means "already vaulted, leave it".
+    # plaintext value. A %Masked{} means "already vaulted, leave it" (any other string, a
+    # "vt_"-prefixed one included, is plaintext and is encrypted).
     to_vault =
       fields
       |> Enum.flat_map(fn field ->
         case fetch_plaintext(changeset, field.name) do
           {:set, %Masked{}} -> []
-          {:set, "vt_" <> _} -> []
           {:set, nil} -> []
           {:set, plaintext} -> [{field, plaintext}]
           :unset -> []

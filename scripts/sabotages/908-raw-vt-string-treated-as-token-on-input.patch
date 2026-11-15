@@ -1,0 +1,32 @@
+# SABOTAGE: a vt_-prefixed raw string is accepted as an already-vaulted token on input (cast_input and 
+#   Vault.Change skip it)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault/vault_token_input_test.exs
+# MUST_FAIL: create with another record's live token string vaults it as NEW plaintext
+# MUST_FAIL: the column holds a minted token, never the body
+diff --git a/samen_core/lib/samen/type/vault_field.ex b/samen_core/lib/samen/type/vault_field.ex
+index a657cf08..f48aa033 100644
+--- a/samen_core/lib/samen/type/vault_field.ex
++++ b/samen_core/lib/samen/type/vault_field.ex
+@@ -59,6 +59,7 @@ defmodule Samen.Type.VaultField do
+   @impl true
+   def cast_input(nil, _constraints), do: {:ok, nil}
+   def cast_input(%Masked{} = masked, _constraints), do: {:ok, masked}
++  def cast_input("vt_" <> _ = token, _constraints), do: {:ok, token}
+   def cast_input(value, _constraints), do: {:ok, Samen.Pii.Plaintext.wrap(value)}
+ 
+   # ---------------------------------------------------------------------------
+diff --git a/samen_core/lib/samen/vault/change.ex b/samen_core/lib/samen/vault/change.ex
+index 7f5989fa..1517e100 100644
+--- a/samen_core/lib/samen/vault/change.ex
++++ b/samen_core/lib/samen/vault/change.ex
+@@ -69,6 +69,7 @@ defmodule Samen.Vault.Change do
+       |> Enum.flat_map(fn field ->
+         case fetch_plaintext(changeset, field.name) do
+           {:set, %Masked{}} -> []
++          {:set, "vt_" <> _} -> []
+           {:set, nil} -> []
+           {:set, plaintext} -> [{field, plaintext}]
+           :unset -> []

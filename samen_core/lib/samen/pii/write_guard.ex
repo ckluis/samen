@@ -46,9 +46,9 @@ defmodule Samen.Pii.WriteGuard do
 
   ## What counts as "setting a vaulted attribute"
 
-  Only a change that provides a NON-TOKEN, NON-`%Masked{}`, NON-nil value for a
+  Only a change that provides a NON-`%Masked{}`, NON-nil value for a
   vault-routed field is a plaintext write. A changeset carrying the field's existing
-  `%Masked{}`/`vt_*` token (an operator editing a NON-PII field on the same row, with the
+  `%Masked{}` (an operator editing a NON-PII field on the same row, with the
   masked value round-tripping untouched) is NOT a plaintext overwrite and is allowed —
   otherwise every operator-plane update to a benign field on a PII-bearing row would be
   blocked. This matches `Samen.Vault.Change`'s own "already vaulted, leave it" rule, so
@@ -113,11 +113,10 @@ defmodule Samen.Pii.WriteGuard do
 
   # A field is a "plaintext write" iff the changeset SETS it to a non-token, non-masked,
   # non-nil value — the exact set Samen.Vault.Change would encrypt. An untouched field, an
-  # explicit nil (clear), a round-tripping %Masked{}, or a raw vt_* token are NOT writes.
+  # explicit nil (clear), a round-tripping %Masked{} are NOT writes. A raw "vt_…" string IS a plaintext write.
   defp plaintext_write?(changeset, name) do
     case Ash.Changeset.fetch_change(changeset, name) do
       {:ok, %Masked{}} -> false
-      {:ok, "vt_" <> _} -> false
       {:ok, nil} -> false
       {:ok, _plaintext} -> true
       :error -> false
