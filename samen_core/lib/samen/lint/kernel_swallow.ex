@@ -45,7 +45,7 @@ defmodule Samen.Lint.KernelSwallow do
       {1, "3edb3c5dd1080096",
        ":crypto.verify raises for a malformed public key or signature (wrong size/type); a signature that cannot be verified is not valid, so `false` (reject) is the exact answer, never an accept"},
     {"samen_core/lib/samen/observability/failure.ex", :report} =>
-      {1, "5effab65c1a31e95",
+      {1, "24d21c6c6a87560b",
        "the failure reporter itself: observability must never break the operation it observes, and a reporter that raised would turn every handled failure into a crash — the clause is the last line, there is nothing left to report to"},
     {"samen_core/lib/samen/observability/failure.ex", :emit} =>
       {1, "15b438c33ee4efe2", "best-effort telemetry: observability must never break the read or write it observes"}
