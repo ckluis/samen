@@ -11,6 +11,30 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Security: vault tokens are bound to the record that holds them (High)
+
+- **Fixed: a tenant could read another subject's PII, across orgs, by planting its vault token.** Tokens are stored
+  "token-only downstream" by design, so anyone with read access to a replica, the CDC mirror, a backup, version or audit
+  rows could learn one; `VaultField.cast_input/2` accepted any `"vt_"` string as an already-vaulted token, so it could be
+  written into a vaulted field through a form, a CSV cell, an automation literal or an inbound mail body, and
+  `PiiResolution` revealed it. A plaintext that merely started with `vt_` was also stored unencrypted. Now a raw string is
+  always plaintext and is encrypted; only an internal `%Masked{}` means "already vaulted".
+- **`Samen.Vault.Change` binds every changed `%Masked{}`** to the record's subject (its primary key), vault and field in one
+  query (`Vault.check_bindings/3`); a mismatch is a changeset error naming the field and reason, never the token, and is
+  reported (`:vault_token_unbound`). An untouched round-trip of the record's own value costs no query. A create without an
+  explicit primary key cannot carry a `%Masked{}`; an upsert-create on a PII resource is refused.
+- **Reads reveal bound-only.** `Vault.reveal/3` gains `field:`, checked with `subject_id:` before any key is unwrapped;
+  `PiiResolution` asserts the holder's primary key and field for every value, never unwraps a foreign subject's DEK, and
+  renders a mismatch masked/absent on every plane. The webhook signing-secret reveal asserts the endpoint's id.
+- **Behaviour change:** a `"vt_…"` string written to a vault field (including by an operator, formerly a no-op) is now
+  plaintext; an operator typing one is refused like any plaintext write. `Vault.token?/1` is the token grammar.
+- **New verifier** `mix samen.verify.vault_token_binding` (`Samen.Vault.BindingScan`, ci steps for samen_core, demo,
+  driftwood, pawchart, samen_web): finds existing cells that do not belong to their record (`foreign_subject`,
+  `field_mismatch`, `dangling_token`, `non_token_value`, `shared_token`). Report only; no token or value in its output.
+- Proof: `vault_token_input_test.exs`, `vault_change_integration_test.exs`, `pii_resolution_token_binding_test.exs`,
+  `vault_dek_reuse_test.exs`, `verify_vault_token_binding_test.exs`, `csv_masking_test.exs`; sabotages 905-921. ADR-001
+  section 6.2, ADR-036 section 12, ADR-041 section 13a.
+
 ### Vault: one KMS unwrap per subject per resolve call (ARCH-2)
 
 - **`Samen.Api.PiiResolution` unwraps each subject's DEK once per call, not once per vaulted value.** A page of N rows x M

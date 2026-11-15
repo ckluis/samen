@@ -49,7 +49,7 @@ defmodule Samen.Vault do
   available only via `reveal/3`.
 
   **The last-line guard is fail-closed:** `Samen.Type.VaultField.dump_to_native/2`
-  refuses to persist anything that is not already a `vt_*` token, so even a bug
+  refuses to persist anything that is not a token-shaped value (`token?/1`), so even a bug
   that skipped `Samen.Vault.Change` cannot write plaintext to the domain column —
   the insert fails instead.
 
