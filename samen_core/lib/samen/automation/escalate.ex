@@ -123,14 +123,16 @@ defmodule Samen.Automation.Escalate do
     |> case do
       {:ok, [escalation]} -> {:ok, escalation}
       {:ok, []} -> {:error, :not_found}
-      {:error, _reason} -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
     end
   end
 
   defp fetch_escalation(res, escalation_id) do
-    case Ash.get(res, escalation_id, authorize?: false) do
+    # `:not_found` is ONLY a row that is not there; a failed read returns its reason (see `Remind.fetch_reminder/3`).
+    case Ash.get(res, escalation_id, authorize?: false, not_found_error?: false) do
+      {:ok, nil} -> {:error, :not_found}
       {:ok, escalation} -> {:ok, escalation}
-      {:error, _reason} -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
     end
   end
 

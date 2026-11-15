@@ -63,14 +63,29 @@ defmodule Samen.Automation.Actions.Escalate do
   end
 
   @impl true
-  def undo(_config, %{escalation_id: escalation_id}, _ctx) when is_binary(escalation_id) do
+  def undo(_config, %{escalation_id: escalation_id}, %Context{actor: actor})
+      when is_binary(escalation_id) do
     case Samen.Automation.Escalate.resolve(escalation_id, :cancelled) do
       {:ok, _escalation} -> :ok
-      _other -> :ok
+      # Nothing to cancel: the escalation is gone.
+      {:error, :not_found} -> :ok
+      {:error, reason} -> if terminal_transition?(reason), do: :ok, else: undo_failed(reason, actor)
     end
   end
 
   def undo(_config, _meta, _ctx), do: :ok
+
+  # Already resolved / cancelled / exhausted: the state machine refuses the transition, and the chain walk has already stopped.
+  defp terminal_transition?(%{errors: errors}) when is_list(errors),
+    do: errors != [] and Enum.all?(errors, &match?(%AshStateMachine.Errors.NoMatchingTransition{}, &1))
+
+  defp terminal_transition?(_reason), do: false
+
+  # A cancel that did not happen leaves the escalation walking its chain: on record and tagged, never an `:ok`.
+  defp undo_failed(reason, actor) do
+    Samen.Observability.Failure.report_write(:escalation_undo, actor, reason)
+    {:error, :undo_failed}
+  end
 
   defp error_kind(reason) when is_atom(reason), do: reason
   defp error_kind(_), do: :escalate_failed

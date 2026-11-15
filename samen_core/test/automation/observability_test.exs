@@ -621,6 +621,177 @@ defmodule Samen.Automation.ObservabilityTest do
     end
   end
 
+  test "RED: an UndoStepError that is not the bounded compensation map keeps the failing action's error_kind (it overrode it with :action_failed); an ordinary failure is unchanged (control)" do
+    run_error = Reactor.Error.Invalid.RunStepError.exception(error: %{error_kind: :write_failed, index: 1, kind: "zz_fail"})
+    undo_error = Reactor.Error.Invalid.UndoStepError.exception(error: :reactor_internal)
+    wrapped = fn errors -> Reactor.Error.Invalid.exception(errors: errors) end
+
+    # POSITIVE CONTROL
+    assert {[_], :write_failed} = Samen.Automation.RunWorker.failure_summary(wrapped.([run_error]))
+
+    # undo errors come FIRST in Reactor's error list
+    assert {_outs, :write_failed} = Samen.Automation.RunWorker.failure_summary(wrapped.([undo_error, run_error]))
+  end
+
+  # Fails AFTER the compensable action ran, having first put the world into the state under test.
+  defmodule BreakThenFail do
+    @moduledoc false
+    @behaviour Samen.Automation.Action
+    def kind, do: :zz_break
+    def validate(config, _key), do: {:ok, config}
+
+    def run(config, _ctx) do
+      table = config["table"]
+
+      case config["mode"] do
+        # the table cannot be READ any more (rolled back with the sandbox transaction)
+        "unreadable" -> SamenCore.TestRepo.query!("ALTER TABLE #{table} RENAME TO #{table}_unreadable")
+        # the row it created is gone
+        "gone" -> SamenCore.TestRepo.query!("DELETE FROM #{table}")
+        # the row it created is already cancelled / resolved
+        "resolve_escalation" ->
+          [esc] = SamenCore.Support.AutomationFixture.Escalation |> Ash.read!(authorize?: false)
+          {:ok, _} = Samen.Automation.Escalate.resolve(esc.id, :resolved)
+
+        "cancel_reminder" ->
+          [rem] = SamenCore.Support.AutomationFixture.Reminder |> Ash.read!(authorize?: false)
+          actor = Samen.Scope.new(%{id: rem.recipient_id, org_id: rem.org_id, role: :member})
+          {:ok, _} = Samen.Automation.Remind.cancel(rem.id, actor)
+
+        "none" -> :ok
+      end
+
+      {:error, :write_failed}
+    end
+  end
+
+  describe "a compensating undo that FAILS is on the run (enqueue_reminder, escalate)" do
+    alias SamenCore.Support.AutomationFixture.{Escalation, Reminder}
+
+    setup do
+      prev = %{
+        action: Application.get_env(:samen_core, Samen.Automation.Action),
+        remind: Application.get_env(:samen_core, Samen.Automation.Remind),
+        escalate: Application.get_env(:samen_core, Samen.Automation.Escalate)
+      }
+
+      Application.put_env(:samen_core, Samen.Automation.Action, extra: %{"zz_break" => BreakThenFail})
+      Application.put_env(:samen_core, Samen.Automation.Remind, reminder_module: Reminder, repo: TestRepo)
+
+      Application.put_env(:samen_core, Samen.Automation.Escalate,
+        escalation_module: Escalation,
+        repo: TestRepo
+      )
+
+      on_exit(fn ->
+        restore(:samen_core, Samen.Automation.Action, prev.action)
+        restore(:samen_core, Samen.Automation.Remind, prev.remind)
+        restore(:samen_core, Samen.Automation.Escalate, prev.escalate)
+      end)
+
+      :ok
+    end
+
+    @cases [
+      {"enqueue_reminder", %{"kind" => "enqueue_reminder", "recipient" => "owner", "offset_minutes" => 60}, "arm_reminder",
+       "write=reminder_undo"},
+      {"escalate", %{"kind" => "escalate", "deadline_minutes" => 30}, "aes_escalation", "write=escalation_undo"}
+    ]
+
+    defp fire_failing(compensable, breaker) do
+      org = Ash.UUID.generate()
+      owner = Ash.UUID.generate()
+      target = create_target!(org)
+      wf = create_workflow!(org, owner, conditions: [], actions: [compensable, Map.put(breaker, "kind", "zz_break")])
+
+      args = %{
+        "workflow_id" => to_string(wf.id),
+        "org_id" => org,
+        "resource_key" => @target_key,
+        "record_id" => to_string(target.id),
+        "event" => "created",
+        "event_id" => Ash.UUID.generate(),
+        "trigger_kind" => "resource_event",
+        "depth" => 0,
+        "chain" => []
+      }
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: args})
+        end)
+
+      [run] = runs_for(org, wf.id)
+      {org, run, log}
+    end
+
+    defp compensation_failed_on?(run) do
+      Enum.any?(run.outcome || [], fn o -> (o["status"] || o[:status]) |> to_string() == "compensation_failed" end)
+    end
+
+    for {name, compensable, table, write_tag} <- @cases do
+      test "RED: #{name} - an undo whose row cannot be READ is compensation_failed on the run and reported; the run's own error_kind stays" do
+        {_org, run, log} = fire_failing(unquote(Macro.escape(compensable)), %{"mode" => "unreadable", "table" => unquote(table)})
+
+        assert run.state == :failed
+        assert compensation_failed_on?(run), "#{unquote(name)}: the failed compensation is not on the run"
+        assert run.error_kind == :write_failed
+        assert log =~ unquote(write_tag)
+      end
+
+      test "positive controls: #{name} - a successful undo is clean; a row that is already gone is :ok with no report" do
+        {_org, clean, clean_log} = fire_failing(unquote(Macro.escape(compensable)), %{"mode" => "none"})
+        assert clean.state == :failed
+        refute compensation_failed_on?(clean)
+        refute clean_log =~ unquote(write_tag)
+
+        {_org, gone, gone_log} =
+          fire_failing(unquote(Macro.escape(compensable)), %{"mode" => "gone", "table" => unquote(table)})
+
+        assert gone.state == :failed
+        refute compensation_failed_on?(gone)
+        refute gone_log =~ unquote(write_tag)
+      end
+    end
+
+    test "positive control: an escalation already resolved is :ok - nothing to cancel, no report" do
+      {_org, run, log} =
+        fire_failing(%{"kind" => "escalate", "deadline_minutes" => 30}, %{"mode" => "resolve_escalation"})
+
+      assert run.state == :failed
+      refute compensation_failed_on?(run)
+      refute log =~ "write=escalation_undo"
+    end
+
+    test "positive control: a reminder already cancelled is :ok - no report" do
+      {_org, run, log} =
+        fire_failing(
+          %{"kind" => "enqueue_reminder", "recipient" => "owner", "offset_minutes" => 60},
+          %{"mode" => "cancel_reminder"}
+        )
+
+      assert run.state == :failed
+      refute compensation_failed_on?(run)
+      refute log =~ "write=reminder_undo"
+    end
+
+    test "Remind.cancel/3 and Escalate.resolve/3 tell a failed read from a missing row" do
+      actor = Samen.Scope.new(%{id: Ash.UUID.generate(), org_id: Ash.UUID.generate(), role: :member})
+      assert {:error, :not_found} = Samen.Automation.Remind.cancel(Ash.UUID.generate(), actor)
+      assert {:error, :not_found} = Samen.Automation.Escalate.resolve(Ash.UUID.generate(), :cancelled)
+
+      TestRepo.query!("ALTER TABLE arm_reminder RENAME TO arm_reminder_unreadable")
+      TestRepo.query!("ALTER TABLE aes_escalation RENAME TO aes_escalation_unreadable")
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, reason} = Samen.Automation.Remind.cancel(Ash.UUID.generate(), actor)
+        refute reason == :not_found
+        assert {:error, reason} = Samen.Automation.Escalate.resolve(Ash.UUID.generate(), :cancelled)
+        refute reason == :not_found
+      end)
+    end
+  end
+
   test "RED: a schedule advance whose org cannot be resolved enqueues NO dispatch (it enqueued one with org_id \"\"); a resolvable org enqueues one (control)" do
     org = Ash.UUID.generate()
     owner = Ash.UUID.generate()

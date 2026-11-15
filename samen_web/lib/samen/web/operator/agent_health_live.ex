@@ -192,7 +192,15 @@ defmodule Samen.Web.Operator.AgentHealthLive do
   # No run selected is an honest empty `{:ok, []}`; a selected run whose turns could not be read is the error.
   defp fetch_turns(_operator, _org_id, nil), do: {:ok, []}
 
-  defp fetch_turns(operator, org_id, run_id), do: Health.turns(operator, org_id, run_id)
+  # A `select_run` id that is not a UUID (a crafted phx-click) names no run: "no such run" (empty), never an outage.
+  defp fetch_turns(operator, org_id, run_id) when is_binary(run_id) do
+    case Ecto.UUID.cast(run_id) do
+      {:ok, uuid} -> Health.turns(operator, org_id, uuid)
+      :error -> {:ok, []}
+    end
+  end
+
+  defp fetch_turns(_operator, _org_id, _run_id), do: {:ok, []}
 
   defp open_error_copy(:reason_required), do: "A reason for access is required."
   defp open_error_copy(:not_authorized), do: "Your operator role may not open an impersonation session."

@@ -351,9 +351,12 @@ defmodule Samen.AI.Embeddings do
 
   @doc """
   Whether the CURRENTLY RESOLVED embedder for `search/3` / `embed_field/6` self-declares as
-  simulated (T78, mirroring T152's `%Samen.AI.Completion{simulated:}` mechanism —
+  simulated (T78, following T152's `%Samen.AI.Completion{simulated:}` mechanism —
   `Samen.AI.Chokepoint`'s private `simulated_provider?/1`, duplicated here because it is the
-  embeddings lane's own resolution, not the completion lane's). `Samen.AI.Embedder.
+  embeddings lane's own resolution, not the completion lane's). It differs from the Chokepoint's
+  copy in ONE place, deliberately: a provider whose `simulated?/0` RAISES answers `true` here
+  ("not verified real", so the badge shows), where the Chokepoint's answers `false` ("never
+  silently mark a live output simulated", `Samen.AI.Completion`). `Samen.AI.Embedder.
   Deterministic` (the keyless `:test`-only fallback, `unwired_embedder/1` above) self-declares
   `true` via the optional `Samen.AI.Provider.simulated?/0` callback; a live adapter that omits
   the callback is treated as LIVE (`false`, fail-honest default). A caller (a KB-suggestion
@@ -371,10 +374,10 @@ defmodule Samen.AI.Embeddings do
     end
   end
 
-  # Mirrors `Samen.AI.Chokepoint`'s private `simulated_provider?/1` exactly (T152's mechanism):
-  # a provider that OMITS the optional callback is LIVE by default (fail-honest — never claim a
-  # real provider is simulated, never claim a keyless one is real). Wrapped so a provider whose
-  # `simulated?/0` raises can never crash the caller (and answers `true`, "not verified real", see the rescue).
+  # Follows `Samen.AI.Chokepoint`'s private `simulated_provider?/1` (T152's mechanism) EXCEPT on a raise: a provider
+  # that OMITS the optional callback is LIVE by default (fail-honest). Wrapped so a provider whose `simulated?/0`
+  # raises can never crash the caller; it answers `true` ("not verified real", see the rescue), where the
+  # Chokepoint's copy answers `false` on purpose (a completion is never silently marked simulated).
   defp simulated_provider?(provider) do
     Code.ensure_loaded?(provider) and function_exported?(provider, :simulated?, 0) and
       provider.simulated?() == true
