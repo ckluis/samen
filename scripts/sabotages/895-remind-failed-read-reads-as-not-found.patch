@@ -1,0 +1,20 @@
+# SABOTAGE: Remind.fetch_reminder maps a failed read to :not_found, so a cancel that could not look reads 
+#   as nothing to cancel
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: tell a failed read from a missing row
+diff --git a/samen_core/lib/samen/automation/remind.ex b/samen_core/lib/samen/automation/remind.ex
+index b704b6f9..eb7be5f3 100644
+--- a/samen_core/lib/samen/automation/remind.ex
++++ b/samen_core/lib/samen/automation/remind.ex
+@@ -72,7 +72,7 @@ defmodule Samen.Automation.Remind do
+     case Ash.get(res, id, actor: actor, not_found_error?: false) do
+       {:ok, nil} -> {:error, :not_found}
+       {:ok, reminder} -> {:ok, reminder}
+-      {:error, reason} -> {:error, reason}
++      {:error, _reason} -> {:error, :not_found}
+     end
+   end
+ 

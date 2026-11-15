@@ -1,0 +1,22 @@
+# SABOTAGE: escalate's undo answers :ok when the escalation cancel failed, so the failed compensation is 
+#   not on the Run and the escalation keeps walking its chain
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: an undo whose row cannot be READ is compensation_failed on the run and reported
+diff --git a/samen_core/lib/samen/automation/actions/escalate.ex b/samen_core/lib/samen/automation/actions/escalate.ex
+index 66f1736e..9554f9c0 100644
+--- a/samen_core/lib/samen/automation/actions/escalate.ex
++++ b/samen_core/lib/samen/automation/actions/escalate.ex
+@@ -69,7 +69,9 @@ defmodule Samen.Automation.Actions.Escalate do
+       {:ok, _escalation} -> :ok
+       # Nothing to cancel: the escalation is gone.
+       {:error, :not_found} -> :ok
+-      {:error, reason} -> if terminal_transition?(reason), do: :ok, else: undo_failed(reason, actor)
++      {:error, reason} ->
++        if terminal_transition?(reason), do: :ok, else: undo_failed(reason, actor)
++        :ok
+     end
+   end
+ 

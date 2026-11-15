@@ -1,0 +1,21 @@
+# SABOTAGE: a crafted non-UUID select_run id is read as a run id, so the agent health page renders an outage
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/ai/agent_surface_test.exs
+# MUST_FAIL: a crafted NON-UUID select_run id
+diff --git a/samen_web/lib/samen/web/operator/agent_health_live.ex b/samen_web/lib/samen/web/operator/agent_health_live.ex
+index 4d035757..6181fb83 100644
+--- a/samen_web/lib/samen/web/operator/agent_health_live.ex
++++ b/samen_web/lib/samen/web/operator/agent_health_live.ex
+@@ -195,8 +195,8 @@ defmodule Samen.Web.Operator.AgentHealthLive do
+   # A `select_run` id that is not a UUID (a crafted phx-click) names no run: "no such run" (empty), never an outage.
+   defp fetch_turns(operator, org_id, run_id) when is_binary(run_id) do
+     case Ecto.UUID.cast(run_id) do
+-      {:ok, uuid} -> Health.turns(operator, org_id, uuid)
+-      :error -> {:ok, []}
++      {:ok, _uuid} -> Health.turns(operator, org_id, run_id)
++      :error -> Health.turns(operator, org_id, run_id)
+     end
+   end
+ 
