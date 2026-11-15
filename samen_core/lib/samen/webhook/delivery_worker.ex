@@ -110,7 +110,7 @@ defmodule Samen.Webhook.DeliveryWorker do
     with {:ok, endpoint} <- load_endpoint(endpoint_id, repo),
          {:ok, url} <- endpoint_url(endpoint),
          :ok <- egress_check(url),
-         {:ok, secret} <- reveal_secret(endpoint, repo),
+         {:ok, secret} <- reveal_secret(endpoint, endpoint_id, repo),
          {:ok, _} <- deliver(url, body, secret) do
       :ok
     else
@@ -152,13 +152,16 @@ defmodule Samen.Webhook.DeliveryWorker do
     {:error, :no_repo}
   end
 
-  # Try to use the configured vault + repo to reveal the signing secret.
-  defp reveal_secret(endpoint, repo) do
+  # Try to use the configured vault + repo to reveal the signing secret. The reveal asserts the
+  # endpoint's own id as the vault subject (a signing secret is minted under the endpoint's
+  # primary key): a row whose `signing_secret` holds another subject's token is refused as
+  # `{:error, :subject_mismatch}` before any key is unwrapped, never signed with.
+  defp reveal_secret(endpoint, endpoint_id, repo) do
     vault = Application.get_env(:samen_core, :vault_module, Samen.Vault)
 
     case Map.get(endpoint, :signing_secret) do
       %Samen.Masked{} = masked ->
-        vault.reveal(masked, repo, [])
+        vault.reveal(masked, repo, subject_id: endpoint_id)
 
       nil ->
         {:error, :no_secret}
