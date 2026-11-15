@@ -150,16 +150,26 @@ def merge_section(section, scratch):
 def candidate_body(merges, scratch):
     """The diff from the working tree to the merge result, as a patch body with repo-relative paths."""
     g = tempfile.mkdtemp(dir=scratch)
-    run(["git", "init", "-q", "."], cwd=g)
+    # Fail closed: every git command below COMMITS, so it must act on the scratch repo and nowhere else. Never let a
+    # failed init (or a stray GIT_DIR) turn `git add -A && git commit` into a commit on the real repo.
+    genv = {k: v for k, v in os.environ.items() if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")}
+    rc, out = run(["git", "init", "-q", "."], cwd=g, env=genv)
+    top = run(["git", "rev-parse", "--show-toplevel"], cwd=g, env=genv)
+    if rc != 0 or top[0] != 0 or os.path.realpath(top[1].decode().strip()) != os.path.realpath(g) \
+            or os.path.realpath(g) == os.path.realpath(REPO):
+        raise Refuse("could not set up the scratch repo %s (git init rc=%d, toplevel=%r) — refusing to run git commands "
+                     "that could land in the real repo" % (g, rc, top[1].decode().strip()))
     for path, cur, _ in merges:
         os.makedirs(os.path.dirname(os.path.join(g, path)) or g, exist_ok=True)
         shutil.copy2(os.path.join(REPO, path), os.path.join(g, path))
-    run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], cwd=g)
-    run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "cur"], cwd=g)
+    for step in (["add", "-A"], ["commit", "-q", "-m", "cur"]):
+        rc, out = run(["git", "-c", "user.email=t@t", "-c", "user.name=t"] + step, cwd=g, env=genv)
+        if rc != 0:
+            raise Refuse("scratch repo %s: git %s failed: %s" % (g, step[0], out.decode(errors="replace").strip()))
     for path, _, merged in merges:
         with open(os.path.join(g, path), "wb") as f:
             f.write(merged)
-    rc, out = run(["git", "diff", "--no-color", "--no-ext-diff", "--binary"], cwd=g)
+    rc, out = run(["git", "diff", "--no-color", "--no-ext-diff", "--binary"], cwd=g, env=genv)
     if rc != 0 or not out.strip():
         raise Refuse("could not produce the re-anchored diff")
     return out

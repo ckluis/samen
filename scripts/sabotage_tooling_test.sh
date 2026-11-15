@@ -27,8 +27,14 @@ unset SAMEN_SABOTAGE_ROOT
 
 SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WHICH="${1:-all}"
-T="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/samen_sabotage_tooling.XXXXXX")" && pwd -P)"
-trap 'rm -rf "$T"' EXIT INT TERM
+SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPTS_DIR/fixture_guard.sh" || { echo "sabotage_tooling_test: cannot load fixture_guard.sh" >&2; exit 1; }
+T="$(fixture_mktemp samen_sabotage_tooling)" || { echo "sabotage_tooling_test: no usable temp root — refusing to run, nothing was touched" >&2; exit 1; }
+fixture_arm "$T" "$(cd "$SCRIPTS_DIR/.." && pwd)" sabotage_tooling_test || exit 1
+_fg_exit() { local rc=$?; fixture_finish || rc=1; rm -rf "$T"; trap - EXIT; exit "$rc"; }
+trap _fg_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 pass_count=0; fail_count=0
 ok()  { pass_count=$((pass_count + 1)); echo "PASS: $*"; }
