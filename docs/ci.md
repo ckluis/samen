@@ -281,7 +281,7 @@ change to `scripts/ci*`, `ci/steps.conf`, `ci.sh`/`ci-fast.sh` or the sabotage/c
 a case there and proves it with `scripts/sabotage new`. The self-tests that build throwaway git repos (`ci_test.sh`,
 `sabotage_{tooling,lanes,apply_check}_test.sh`, `double_sweep_test.sh`) source `scripts/fixture_guard.sh`: it fails closed
 without a usable temp root, shadows `git` so a fixture command can only act on a repository inside that root (physical
-paths), and re-checks the real repo's HEAD / branch / `origin/main` / status on exit. Never write a fixture builder as
+paths), and re-checks the real repo's HEAD / branch / `origin/main` / staged index on exit (not the working tree: other steps and Python's bytecode cache write there). Never write a fixture builder as
 `cd "$R" && … ; …` — a failed `cd` then runs the rest in the real repo.
 
 ## 7. Mutation gate (ADR-049)
