@@ -1,0 +1,19 @@
+# SABOTAGE: The DEK memo is stashed in the process dictionary so it outlives the resolve call
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault_dek_reuse_test.exs
+# MUST_FAIL: nothing is left in the process dictionary after a resolve
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+index da1e3136..0fa770af 100644
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -278,7 +278,7 @@ defmodule Samen.Api.PiiResolution do
+     vault = Keyword.get(opts, :vault, Samen.Vault)
+ 
+     if Code.ensure_loaded?(vault) and function_exported?(vault, :unwrap_subjects, 1),
+-      do: vault.unwrap_subjects(rows),
++      do: vault.unwrap_subjects(rows) |> tap(&Process.put(:dek_memo_leak, &1)),
+       else: nil
+   rescue
+     # A failed batch costs only the per-value unwrap it would have saved.
