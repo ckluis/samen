@@ -1,0 +1,20 @@
+# SABOTAGE: an unrecognised UndoStepError falls to the catch-all and overrides the run's error_kind with 
+#   :action_failed
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: an UndoStepError that is not the bounded compensation map keeps
+diff --git a/samen_core/lib/samen/automation/run_worker.ex b/samen_core/lib/samen/automation/run_worker.ex
+index 0ebdf579..39fc0fce 100644
+--- a/samen_core/lib/samen/automation/run_worker.ex
++++ b/samen_core/lib/samen/automation/run_worker.ex
+@@ -295,8 +295,6 @@ defmodule Samen.Automation.RunWorker do
+ 
+   # Any OTHER undo failure (Reactor-internal, not our bounded map) carries no outcome and no kind of its own: it must not
+   # fall to the catch-all and override the failing action's `error_kind` with `:action_failed`.
+-  defp extract_failure(%Reactor.Error.Invalid.UndoStepError{}), do: {[], nil}
+-
+   defp extract_failure({%{} = failed, completed}) when is_list(completed) do
+     {Enum.filter(completed, &plain_map?/1) ++ [failed], Map.get(failed, :error_kind, :action_failed)}
+   end
