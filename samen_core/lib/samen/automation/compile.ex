@@ -50,8 +50,10 @@ defmodule Samen.Automation.ActionStep do
     case Action.module_for(to_string(kind)) do
       module when is_atom(module) and not is_nil(module) ->
         if function_exported?(module, :undo, 3) do
-          _ = module.undo(config(action), meta, ctx)
-          :ok
+          case module.undo(config(action), meta, ctx) do
+            {:error, _reason} -> compensation_failed(arguments, action, kind)
+            _ok -> :ok
+          end
         else
           :ok
         end
@@ -61,9 +63,27 @@ defmodule Samen.Automation.ActionStep do
     end
   rescue
     e ->
-      Samen.Observability.Failure.report(:compile_undo, nil, e)
-      :ok
+      Samen.Observability.Failure.report_write(:compile_undo, ctx_of(arguments), e)
+      compensation_failed(arguments, arguments[:action] || %{}, nil)
   end
+
+  # Reactor's `undo/4` contract: `{:error, reason}` is wrapped in an `UndoStepError`, stacked with the run's own
+  # errors, the remaining steps are STILL undone, and the run returns the combined error. The reason is a BOUNDED
+  # outcome (never the action's error, which may carry free text), so `RunWorker` stamps it into the Run's outcome:
+  # the created record that was left behind is on the run, not only in a log line.
+  defp compensation_failed(arguments, action, kind) do
+    kind = kind || action["kind"] || action[:kind]
+
+    {:error,
+     %{
+       index: arguments[:index] || 0,
+       kind: kind && to_string(kind),
+       status: :compensation_failed,
+       error_kind: :write_failed
+     }}
+  end
+
+  defp ctx_of(arguments), do: arguments[:ctx]
 
   # The action's own config keys, minus the routing key.
   defp config(action) do

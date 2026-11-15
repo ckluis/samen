@@ -126,11 +126,65 @@ defmodule Samen.AI.HonestReadsTest do
   describe "Agent.reject_proposal/3" do
     test "RED: a turn that cannot be READ rolls the rejection back ({:error, :unavailable}); a turn that is gone is :ok (control)" do
       # POSITIVE CONTROL: no such turn -> nothing to reject, never blocks the rejection
-      assert :ok = Samen.AI.Agent.reject_proposal(Ash.UUID.generate(), %{}, %{})
+      turn_id = Ash.UUID.generate()
+      assert :ok = Samen.AI.Agent.reject_proposal(turn_id, %{}, %{})
+
+      # A REAL read failure of a well-formed id (the Turn table is unreadable inside this sandbox transaction, which
+      # rolls back with the test) is an outage, not "no such turn".
+      TestRepo.query!("ALTER TABLE ai_agent_turn RENAME TO ai_agent_turn_unreadable")
 
       capture_log(fn ->
-        assert {:error, :unavailable} = Samen.AI.Agent.reject_proposal("not-a-uuid", %{}, %{})
+        assert {:error, :unavailable} = Samen.AI.Agent.reject_proposal(turn_id, %{}, %{})
       end)
+    end
+
+    test "RED: a MALFORMED turn id is 'no such turn' (:ok) - a garbled approval can still be rejected - not an outage" do
+      assert :ok = Samen.AI.Agent.reject_proposal(Ash.UUID.generate(), %{}, %{})
+      assert :ok = Samen.AI.Agent.reject_proposal("not-a-uuid", %{}, %{})
+      assert :ok = Samen.AI.Agent.reject_proposal("samen:atn:garbled", %{}, %{})
+    end
+  end
+
+  describe "ReembedWorker" do
+    test "RED: a failed stale read is {:error, :unavailable} so Oban retries (it crashed with a CaseClauseError); healthy it is :ok" do
+      job = %Oban.Job{id: 4242, args: %{}}
+
+      # POSITIVE CONTROL
+      assert :ok = Samen.AI.Embeddings.ReembedWorker.perform(job)
+
+      previous = Application.get_env(:samen_core, :vault_repo)
+      Application.put_env(:samen_core, :vault_repo, Samen.FaultRepo)
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:samen_core, :vault_repo, previous),
+          else: Application.delete_env(:samen_core, :vault_repo)
+      end)
+
+      Samen.FaultRepo.fail([:query])
+
+      capture_log(fn ->
+        assert {:error, :unavailable} = Samen.AI.Embeddings.ReembedWorker.perform(job)
+      end)
+    end
+  end
+
+  describe "Embeddings.embedder_simulated?/1" do
+    defmodule RaisingSimulated do
+      @moduledoc false
+      def simulated?, do: raise("boom")
+    end
+
+    defmodule RealProvider do
+      @moduledoc false
+      def simulated?, do: false
+    end
+
+    test "RED: a provider whose simulated?/0 raises is NOT claimed real (true = not verified real); a declared-real one is false (control)" do
+      assert {:ok, false} = Embeddings.embedder_simulated?(embedder: {RealProvider, %{}})
+
+      log = capture_log(fn -> assert {:ok, true} = Embeddings.embedder_simulated?(embedder: {RaisingSimulated, %{}}) end)
+      assert log =~ "read=embeddings_simulated_provider"
     end
   end
 

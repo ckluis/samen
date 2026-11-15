@@ -210,12 +210,12 @@ defmodule Samen.Automation.Actions.AssignRecordOwner do
       {:ok, updated} -> {:ok, updated}
       {:error, %Ash.Error.Forbidden{}} -> {:error, :not_authorized}
       {:error, reason} ->
-        Samen.Observability.Failure.report(:assign_owner_write, scope, reason)
+        Samen.Observability.Failure.report_write(:assign_owner_write, scope, reason)
         {:error, :write_failed}
     end
   rescue
     e ->
-      Samen.Observability.Failure.report(:assign_owner_write, scope, e)
+      Samen.Observability.Failure.report_write(:assign_owner_write, scope, e)
       {:error, :write_failed}
   end
 

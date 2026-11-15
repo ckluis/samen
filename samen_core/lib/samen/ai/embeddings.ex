@@ -374,14 +374,16 @@ defmodule Samen.AI.Embeddings do
   # Mirrors `Samen.AI.Chokepoint`'s private `simulated_provider?/1` exactly (T152's mechanism):
   # a provider that OMITS the optional callback is LIVE by default (fail-honest — never claim a
   # real provider is simulated, never claim a keyless one is real). Wrapped so a provider whose
-  # `simulated?/0` raises can never crash the caller.
+  # `simulated?/0` raises can never crash the caller (and answers `true`, "not verified real", see the rescue).
   defp simulated_provider?(provider) do
     Code.ensure_loaded?(provider) and function_exported?(provider, :simulated?, 0) and
       provider.simulated?() == true
   rescue
     e ->
+      # Unknown is not "real": the answer feeds the SIMULATED-ranking badge, so a provider whose `simulated?/0`
+      # raised is reported as not verified real (`true`) rather than silently presented as a real semantic match.
       Samen.Observability.Failure.report(:embeddings_simulated_provider, nil, e)
-      false
+      true
   end
 
   # --- deny-by-default allowlist ------------------------------------------------------------

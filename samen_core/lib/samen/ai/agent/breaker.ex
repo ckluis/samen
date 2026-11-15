@@ -340,7 +340,7 @@ defmodule Samen.AI.Agent.Breaker do
   to `[]` — so the operator surface rendered a definition as `active` while every run of
   it was being refused `:killed`. That is the fail-honest contract inverted (ADR-014/024/
   026: a read that could not happen never reports an empty success). This is the honest
-  read; `kills/1` keeps the lossy `[]` shape for callers that only aggregate.
+  read; `kills/1` is the raising twin: the rows, or a RAISE when the kill table cannot be read (never the lossy `[]`).
   """
   @spec kills_status(String.t()) :: {:ok, [map()]} | {:error, :unavailable}
   def kills_status(org_id) when is_binary(org_id) do

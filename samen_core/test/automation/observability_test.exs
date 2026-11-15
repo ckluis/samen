@@ -488,6 +488,178 @@ defmodule Samen.Automation.ObservabilityTest do
     assert notified(org, owner) == 1
   end
 
+  test "RED: a subject whose resource cannot be classified skips the run (an EMPTY subject passes every neq gate and fires it); a classifiable one fires (control)" do
+    org = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+
+    wf =
+      create_workflow!(org, owner,
+        conditions: [%{"attribute" => "priority", "op" => "neq", "values" => ["urgent"]}],
+        actions: [%{"kind" => "notify", "recipient" => "owner", "event_type" => "workflow.fired"}]
+      )
+
+    target = create_target!(org)
+
+    args = fn resource_key ->
+      %{
+        "workflow_id" => to_string(wf.id),
+        "org_id" => org,
+        "resource_key" => resource_key,
+        "record_id" => to_string(target.id),
+        "event" => "created",
+        "event_id" => Ash.UUID.generate(),
+        "trigger_kind" => "resource_event",
+        "depth" => 0,
+        "chain" => []
+      }
+    end
+
+    # `String` resolves to a loaded module but is not a Spark resource: its columns cannot be classified.
+    # `Nope.Missing` does not resolve at all.
+    for key <- ["String", "Nope.Missing"] do
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: args.(key)})
+      end)
+    end
+
+    assert notified(org, owner) == 0
+    assert [%{state: :skipped, error_kind: :internal_error}, %{state: :skipped, error_kind: :internal_error}] = runs_for(org, wf.id)
+
+    # POSITIVE CONTROL: the same workflow and record under the real resource key fires
+    assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: args.(@target_key)})
+    assert notified(org, owner) == 1
+  end
+
+  defmodule CompensatedOk do
+    @moduledoc false
+    @behaviour Samen.Automation.Action
+    def kind, do: :zz_comp_ok
+    def validate(config, _key), do: {:ok, config}
+    def run(_config, _ctx), do: {:ok, %{}}
+    def undo(_config, _meta, _ctx), do: :ok
+  end
+
+  defmodule CompensatedBad do
+    @moduledoc false
+    @behaviour Samen.Automation.Action
+    def kind, do: :zz_comp_bad
+    def validate(config, _key), do: {:ok, config}
+    def run(_config, _ctx), do: {:ok, %{}}
+    def undo(_config, _meta, _ctx), do: {:error, :undo_failed}
+  end
+
+  defmodule CompensatedRaises do
+    @moduledoc false
+    @behaviour Samen.Automation.Action
+    def kind, do: :zz_comp_raises
+    def validate(config, _key), do: {:ok, config}
+    def run(_config, _ctx), do: {:ok, %{}}
+    def undo(_config, _meta, _ctx), do: raise("boom")
+  end
+
+  defmodule AlwaysFails do
+    @moduledoc false
+    @behaviour Samen.Automation.Action
+    def kind, do: :zz_fail
+    def validate(config, _key), do: {:ok, config}
+    def run(_config, _ctx), do: {:error, :write_failed}
+  end
+
+  test "RED: a compensation that FAILS is stamped on the failed run's outcome (the engine discarded it, Reactor saw :ok); a clean compensation leaves none (control)" do
+    prev = Application.get_env(:samen_core, Samen.Automation.Action)
+
+    Application.put_env(:samen_core, Samen.Automation.Action,
+      extra: %{
+        "zz_comp_ok" => CompensatedOk,
+        "zz_comp_bad" => CompensatedBad,
+        "zz_comp_raises" => CompensatedRaises,
+        "zz_fail" => AlwaysFails
+      }
+    )
+
+    on_exit(fn -> restore(:samen_core, Samen.Automation.Action, prev) end)
+
+    org = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+    target = create_target!(org)
+
+    fire = fn first_kind ->
+      wf = create_workflow!(org, owner, conditions: [], actions: [%{"kind" => first_kind}, %{"kind" => "zz_fail"}])
+
+      args = %{
+        "workflow_id" => to_string(wf.id),
+        "org_id" => org,
+        "resource_key" => @target_key,
+        "record_id" => to_string(target.id),
+        "event" => "created",
+        "event_id" => Ash.UUID.generate(),
+        "trigger_kind" => "resource_event",
+        "depth" => 0,
+        "chain" => []
+      }
+
+      ExUnit.CaptureLog.capture_log(fn -> assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: args}) end)
+      [run] = runs_for(org, wf.id)
+      run
+    end
+
+    compensation_failed? = fn run ->
+      Enum.any?(run.outcome || [], fn o -> (o["status"] || o[:status]) |> to_string() == "compensation_failed" end)
+    end
+
+    # POSITIVE CONTROL: the failed run whose compensation succeeded carries no compensation failure
+    clean = fire.("zz_comp_ok")
+    assert clean.state == :failed
+    refute compensation_failed?.(clean)
+
+    for kind <- ["zz_comp_bad", "zz_comp_raises"] do
+      run = fire.(kind)
+      assert run.state == :failed
+      assert compensation_failed?.(run), "#{kind}: the failed compensation is not on the run"
+      # the run's own failure stays the action that failed
+      assert run.error_kind == :write_failed
+    end
+  end
+
+  test "RED: a schedule advance whose org cannot be resolved enqueues NO dispatch (it enqueued one with org_id \"\"); a resolvable org enqueues one (control)" do
+    org = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+    wf = create_workflow!(org, owner, conditions: [], actions: [%{"kind" => "notify", "recipient" => "owner", "event_type" => "workflow.fired"}])
+
+    advance = fn changeset, result ->
+      # `for_update/3` already ran the action's changes (ScheduleAdvance registered its after_action hook)
+      for entry <- changeset.after_action do
+        callback = if is_function(entry), do: entry, else: elem(entry, 0)
+        callback.(changeset, result)
+      end
+    end
+
+    # the schedule dispatches enqueued so far (any org: the blank-org one is the lie under test)
+    dispatches = fn ->
+      require Ecto.Query
+
+      Oban.Job
+      |> Ecto.Query.where([j], j.worker == "Samen.Automation.DispatchWorker")
+      |> TestRepo.all()
+      |> Enum.filter(&(&1.args["trigger_kind"] == "schedule"))
+    end
+
+    assert dispatches.() == []
+
+    # POSITIVE CONTROL: the org is on the row -> one dispatch under that org
+    changeset = Ash.Changeset.for_update(wf, :dispatch_due, %{})
+    advance.(changeset, wf)
+    assert [%{args: %{"org_id" => ^org}}] = dispatches.()
+
+    # RED: org_id not loaded on the changeset OR the result and the row cannot be reloaded (a stale id)
+    ghost = %{wf | id: Ash.UUID.generate(), org_id: %Ash.NotLoaded{field: :org_id}}
+    changeset = Ash.Changeset.for_update(%{wf | org_id: %Ash.NotLoaded{field: :org_id}}, :dispatch_due, %{})
+
+    log = ExUnit.CaptureLog.capture_log(fn -> advance.(changeset, ghost) end)
+    assert [%{args: %{"org_id" => ^org}}] = dispatches.()
+    assert log =~ "write=schedule_advance_enqueue_skipped"
+  end
+
   test "RED: an unknown event string no longer dispatches the :created workflows; 'created' does (control)" do
     org = Ash.UUID.generate()
     owner = Ash.UUID.generate()
