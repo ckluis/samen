@@ -345,8 +345,8 @@ defmodule Samen.AI.EmbeddingsTest do
                Embeddings.embedder_simulated?(Keyword.merge(opts(), env_reader: fn -> :prod end))
     end
 
-    test "a provider whose simulated?/0 raises degrades to false, never a crash (belt)" do
-      assert {:ok, false} =
+    test "a provider whose simulated?/0 raises degrades to true (not verified real), never a crash (belt)" do
+      assert {:ok, true} =
                Embeddings.embedder_simulated?(
                  Keyword.merge(opts(), embedder: {RaisingSimulatedProvider, %{}})
                )

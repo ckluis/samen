@@ -17,7 +17,7 @@
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -1541,8 +1541,15 @@
+@@ -3125,8 +3125,15 @@
    # non-member refuses `:not_authorized` and an unwired host refuses
    # `:approver_unresolvable` — either way the whole E3 decision rolls back, the approval
    # stays pending, and nothing executed. Sabotage 257 puts the synthesis back.
@@ -33,5 +33,5 @@ diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
 +
 +  defp approver_scope(_approver_id, _run), do: {:error, :not_authorized}
  
-   defp fetch_turn(turn_id) when is_binary(turn_id) do
-     require Ash.Query
+   # A malformed id is a deterministic fact about the INPUT, not an outage: it is "no such turn" (so a garbled approval
+   # can still be rejected, as `reject_proposal/3` promises). Only a failed read of a well-formed id is `:unavailable`.
