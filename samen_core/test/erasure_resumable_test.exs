@@ -193,6 +193,24 @@ defmodule Samen.ErasureResumableTest do
     end
   end
 
+  test "the retry takes the subject_ref from the marker: the fold ledger and sources are withdrawn after a post-shred failure" do
+    {sid, s, run} = seed!()
+    FaultRepo.fail([{:after_step, :aud_event}])
+
+    capture_log(fn ->
+      assert {:error, {:erasure_tx_failed, _}} = Erasure.shred(sid, repo: FaultRepo, org_id: s.actor.org_id)
+    end)
+
+    FaultRepo.heal()
+    assert {:error, :shredded} = Vault.pseudonym(sid)
+    refute withdrawn?(run)
+
+    assert {:ok, %{report: report}} = Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id)
+    assert withdrawn?(run)
+    assert [%{"summary" => "[withdrawn: fold #1, source withdrawn]"}] = folds_of(run)
+    assert report.tiers["derived_summaries"]["invalidation"] == "performed"
+  end
+
   test "a second shred of a completed erasure is still idempotent (earlier completed report, no marker)" do
     {sid, s, _run} = seed!()
     assert {:ok, _} = Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id)
