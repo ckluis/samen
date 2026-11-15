@@ -398,6 +398,22 @@ defmodule Samen.ErasureResumableTest do
                )
     end
 
+    test "another subject's operator report is never returned as this subject's" do
+      {sid, s, _run} = seed!()
+      other = "erz-other-#{System.unique_integer([:positive])}"
+
+      @repo.insert!(%Report{
+        subject_id: other,
+        outcome: "operator_action_required",
+        tiers: %{},
+        recorded_at: DateTime.utc_now()
+      })
+
+      assert {:ok, _} = Kms.shred(sid)
+      assert {:error, {:shred_reference_lost, %Report{subject_id: ^sid}}} =
+               Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id)
+    end
+
     test "another subject's marker is never taken as this subject's reference" do
       {sid, s, run} = seed!()
       other = "erz-other-#{System.unique_integer([:positive])}"
