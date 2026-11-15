@@ -153,4 +153,64 @@ defmodule Samen.Reveal.GrantSeamTest do
                vault: Samen.Vault
              )
   end
+
+  # WP28 S2: the seam forwards :field to the vault and refuses a reveal with no subject.
+  test "RED PATH: a field-bound reveal of a same-subject token minted for ANOTHER field DENIES :field_mismatch" do
+    prior_kms = Application.get_env(:samen_core, :kms_adapter)
+    Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
+
+    on_exit(fn ->
+      Application.put_env(:samen_core, :kms_adapter, prior_kms || Samen.Kms.FileBacked)
+    end)
+
+    subject = subj()
+
+    {:ok, token} =
+      Samen.Vault.store_field(subject, :pii_email, :emails, "same-subject@x.test", @repo)
+
+    masked = Masked.new(token, :emails)
+
+    assert {:error, :field_mismatch} =
+             Reveal.reveal(actor(), masked, :reveal_email, @resource,
+               repo: @repo,
+               subject_id: subject,
+               field: {:pii_email, :phones},
+               grant: ApproveAll,
+               vault: Samen.Vault
+             )
+
+    # Positive control: the field the token was minted for reveals.
+    assert {:ok, "same-subject@x.test"} =
+             Reveal.reveal(actor(), masked, :reveal_email, @resource,
+               repo: @repo,
+               subject_id: subject,
+               field: {:pii_email, :emails},
+               grant: ApproveAll,
+               vault: Samen.Vault
+             )
+  end
+
+  test "RED PATH: a reveal with NO subject (absent, nil or empty) is refused :subject_required before the grant and the vault" do
+    masked = Masked.new("vt_seam_token", :emails)
+
+    for opts <- [[], [subject_id: nil], [subject_id: ""]] do
+      assert {:error, :subject_required} =
+               Reveal.reveal(
+                 actor(),
+                 masked,
+                 :reveal_email,
+                 @resource,
+                 [repo: @repo, grant: ApproveAll, vault: ExplodingVault] ++ opts
+               )
+    end
+
+    # Positive control: the same call WITH a subject passes the gate and reaches the vault.
+    assert {:ok, "plaintext@revealed.test"} =
+             Reveal.reveal(actor(), masked, :reveal_email, @resource,
+               repo: @repo,
+               subject_id: subj(),
+               grant: ApproveAll,
+               vault: OkVault
+             )
+  end
 end

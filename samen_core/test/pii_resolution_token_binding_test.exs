@@ -194,8 +194,8 @@ defmodule Samen.PiiResolutionTokenBindingTest do
 
   # --- T-R3 report -------------------------------------------------------------------------------------------
 
-  describe "T-R3 the mismatch is reported once per call, with no token" do
-    test "two records holding foreign tokens produce ONE report for the call; the metadata carries the reason only" do
+  describe "T-R3 a mismatch is reported once per record and field, locatable, tokenless" do
+    test "one report per holding record (a repeat adds none); the log names resource, field, record; telemetry has the reason only" do
       v = owner!("victim")
       h1 = owner!("h1")
       h2 = owner!("h2")
@@ -205,12 +205,50 @@ defmodule Samen.PiiResolutionTokenBindingTest do
       :telemetry.attach(id, [:samen, :core, :read, :error], fn _e, _m, meta, _ -> send(test_pid, {:failure, meta}) end, nil)
       on_exit(fn -> :telemetry.detach(id) end)
 
-      out = PiiResolution.resolve([planted(h1, v), planted(h2, v)], Person, %{plane: :tenant, org_id: Ash.UUID.generate()}, repo: @repo)
-      assert Enum.all?(out, &match?(%Masked{}, &1.full_name))
+      victim_token = elem(v.vals.full_name, 0)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          out =
+            PiiResolution.resolve([planted(h1, v), planted(h2, v), planted(h1, v)], Person, %{plane: :tenant, org_id: Ash.UUID.generate()},
+              repo: @repo
+            )
+
+          assert Enum.all?(out, &match?(%Masked{}, &1.full_name))
+        end)
 
       assert_receive {:failure, %{read: :vault_token_unbound, cause: "foreign_subject"} = meta}
+      assert_receive {:failure, %{read: :vault_token_unbound, cause: "foreign_subject"}}
       refute inspect(meta) =~ "vt_"
+      refute inspect(meta) =~ h1.id
       refute_receive {:failure, %{read: :vault_token_unbound}}, 50
+
+      # An operator can find the rows from the log line alone.
+      for h <- [h1, h2] do
+        assert log =~ "resource=#{inspect(Person)} field=full_name record=#{h.id}"
+      end
+
+      refute log =~ v.id, "the victim is not named"
+      refute log =~ victim_token
+      refute log =~ "vt_"
+    end
+
+    test "a non-UUID record id and a hostile field are never put in the log line verbatim" do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          Samen.Observability.Failure.report(:read, :vault_token_unbound, nil, :foreign_subject,
+            locate: [resource: Person, field: :"x\ny=1", record: "9\nforged=1"]
+          )
+
+          Samen.Observability.Failure.report(:read, :vault_token_unbound, nil, :foreign_subject,
+            locate: [resource: Person, field: :full_name, record: 42]
+          )
+        end)
+
+      assert log =~ "record=invalid"
+      assert log =~ "field=x?y?1"
+      refute log =~ "forged"
+      assert log =~ "field=full_name record=42"
     end
 
     test "CONTROL: an all-bound page reports nothing" do
@@ -235,8 +273,11 @@ defmodule Samen.PiiResolutionTokenBindingTest do
       on_exit(fn -> :telemetry.detach(id) end)
 
       swapped = %{record(h) | full_name: Masked.new(elem(h.vals.emails, 0), :full_name)}
-      PiiResolution.resolve([swapped], Person, %{plane: :tenant}, repo: @repo)
+
+      log = ExUnit.CaptureLog.capture_log(fn -> PiiResolution.resolve([swapped], Person, %{plane: :tenant}, repo: @repo) end)
+
       assert_receive {:failure, %{read: :vault_token_unbound, cause: "field_mismatch"}}
+      assert log =~ "resource=#{inspect(Person)} field=full_name record=#{h.id}"
     end
   end
 

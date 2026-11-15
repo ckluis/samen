@@ -294,14 +294,37 @@ defmodule Samen.Webhook.DeliveryWorkerSsrfTest do
       assert [_one_post] = AdapterDouble.calls(double)
     end
 
-    test "RED: a row holding ANOTHER subject's token is refused (:subject_mismatch) and nothing is POSTed", %{double: double} do
+    test "RED: a row holding ANOTHER subject's token is DISCARDED (permanent, not retried), reported once, and nothing is POSTed", %{double: double} do
       other = Ecto.UUID.generate()
       {:ok, foreign} = Samen.Vault.store_field(other, :pii_secret, :signing_secret, "whsec_foreign", SamenCore.TestRepo)
+      endpoint_id = Ecto.UUID.generate()
 
-      assert {:error, :subject_mismatch} =
-               DeliveryWorker.perform(%Oban.Job{args: masked_endpoint_args(foreign, Ecto.UUID.generate())})
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:discard, msg} =
+                   DeliveryWorker.perform(%Oban.Job{args: masked_endpoint_args(foreign, endpoint_id)})
 
+          assert msg =~ endpoint_id
+          assert msg =~ "subject_mismatch"
+          refute msg =~ foreign
+        end)
+
+      assert length(Regex.scan(~r/write=vault_token_unbound/, log)) == 1
+      assert log =~ "subject_mismatch"
+      refute log =~ foreign
       assert AdapterDouble.calls(double) == [], "a foreign secret must never sign a delivery"
+    end
+
+    test "RED: the endpoint's OWN subject but a token minted for ANOTHER field is DISCARDED (:field_mismatch)", %{double: double} do
+      id = Ecto.UUID.generate()
+      {:ok, wrong_field} = Samen.Vault.store_field(id, :pii_secret, :other_secret, "whsec_wrong_field", SamenCore.TestRepo)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:discard, msg} = DeliveryWorker.perform(%Oban.Job{args: masked_endpoint_args(wrong_field, id)})
+        assert msg =~ "field_mismatch"
+      end)
+
+      assert AdapterDouble.calls(double) == []
     end
   end
 end

@@ -68,6 +68,7 @@ defmodule Driftwood.OperatorReveal do
           :reveal_driver,
           Driftwood.Freight.Driver,
           subject_id: to_string(driver_id),
+          field: {:pii_cdl, :cdl_number},
           repo: Driftwood.Repo
         )
       end)

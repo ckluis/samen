@@ -196,7 +196,7 @@ defmodule Samen.Api.PiiResolution do
         for {record, name, %Masked{token: token}} <- masked,
             is_binary(token),
             decrypts?(plane, record, name, grants, opts),
-            do: {token, expected_binding(resource, vaults, record, name)}
+            do: {token, expected_binding(resource, vaults, record, name), {subject_of(resource, record), name}}
 
       tokens = decrypting |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
       rows = vault_rows(tokens, opts)
@@ -211,7 +211,7 @@ defmodule Samen.Api.PiiResolution do
           Enum.any?(Map.get(expected, token, []), fn {subject, vault_field} -> Vault.bound?(row, subject, vault_field) end)
         end)
 
-      report_unbound(rows, decrypting, actor)
+      report_unbound(rows, decrypting, actor, resource)
 
       Keyword.merge(opts,
         __prefetched: true,
@@ -468,17 +468,26 @@ defmodule Samen.Api.PiiResolution do
     to_string(Map.get(record, pk))
   end
 
-  # One report per distinct reason per call; the metadata is the reason only, never a token.
-  defp report_unbound(rows, decrypting, actor) do
+  # One report per distinct {reason, record, field} per call (at most @max_unbound_reports), so an operator
+  # can find the row without running the verifier: the log line carries resource, field and record id
+  # (the record's primary key, i.e. its vault subject). Never a token, never a value.
+  @max_unbound_reports 20
+
+  defp report_unbound(rows, decrypting, actor, resource) do
     decrypting
-    |> Enum.flat_map(fn {token, {subject, vault_field}} ->
+    |> Enum.flat_map(fn {token, {subject, vault_field}, {record_id, field}} ->
       case Map.get(rows, token) do
         nil -> []
-        row -> if Vault.bound?(row, subject, vault_field), do: [], else: [unbound_reason(row, subject)]
+        row -> if Vault.bound?(row, subject, vault_field), do: [], else: [{unbound_reason(row, subject), record_id, field}]
       end
     end)
     |> Enum.uniq()
-    |> Enum.each(&Samen.Observability.Failure.report(:vault_token_unbound, actor, &1))
+    |> Enum.take(@max_unbound_reports)
+    |> Enum.each(fn {reason, record_id, field} ->
+      Samen.Observability.Failure.report(:read, :vault_token_unbound, actor, reason,
+        locate: [resource: resource, field: field, record: record_id]
+      )
+    end)
   end
 
   defp unbound_reason(%{subject_id: subject}, subject), do: :field_mismatch
