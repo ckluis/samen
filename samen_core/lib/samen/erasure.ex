@@ -216,7 +216,8 @@ defmodule Samen.Erasure do
     * `:acknowledge_lost_reference` — operator override for the one state a retry refuses
       (`{:error, {:shred_reference_lost, report}}`: key already destroyed, no resume marker, no
       earlier completed report). `true` completes the DB tiers and DISCLOSES the withdrawal as
-      `unavailable` (`pseudonym_shredded`); only after a manual review of derived AI context.
+      `unavailable` (`shred_reference_lost_acknowledged`), and the lifecycle audit row says so. Kernel option for an operator
+      (console/mix task) only: no tenant, API or LiveView path passes it, and `Samen.Retention` never does.
   """
   @spec shred(String.t(), keyword()) ::
           {:ok, %{attestation: Kms.attestation(), report: Report.t()}} | {:error, term}
@@ -391,10 +392,10 @@ defmodule Samen.Erasure do
         {:ok, ref, :performed}
 
       _ ->
-        if acknowledge? or completed_report?(subject_id, r) do
-          {:ok, nil, :shredded}
-        else
-          lost_reference(subject_id, r)
+        cond do
+          completed_report?(subject_id, r) -> {:ok, nil, :shredded}
+          acknowledge? -> {:ok, nil, :lost_acknowledged}
+          true -> lost_reference(subject_id, r)
         end
     end
   rescue
@@ -409,6 +410,19 @@ defmodule Samen.Erasure do
   # finishing the erasure would report derived AI context as withdrawn when it is not. Write an operator-action report
   # (token-only) and refuse.
   defp lost_reference(subject_id, r) do
+    case r.one(
+           from(p in Report,
+             where: p.subject_id == ^subject_id and p.outcome == "operator_action_required",
+             order_by: [desc: p.recorded_at],
+             limit: 1
+           )
+         ) do
+      %Report{} = existing -> {:error, {:shred_reference_lost, existing}}
+      nil -> write_lost_reference_report(subject_id, r)
+    end
+  end
+
+  defp write_lost_reference_report(subject_id, r) do
     attrs = %{
       subject_id: subject_id,
       outcome: "operator_action_required",
@@ -661,7 +675,8 @@ defmodule Samen.Erasure do
           detail:
             "outcome=#{outcome} attestation_id=#{attestation[:attestation_id] || "none"} " <>
               "vault_sealed=#{sealed} non_pii_redacted=#{redacted} " <>
-              "derived_summary_invalidation=#{derived_summary_invalidation(disposition)}"
+              "derived_summary_invalidation=#{derived_summary_invalidation(disposition)}" <>
+              acknowledged_detail(disposition)
         }, strict: true)
       end)
       # STEP 4b — append-only event tier row (T2.2: erasure events mirror to
@@ -780,12 +795,18 @@ defmodule Samen.Erasure do
     }
   end
 
+  # The operator override is AUDITED: the lifecycle row (which already carries `actor_id`) names it.
+  defp acknowledged_detail(:lost_acknowledged), do: " acknowledged_lost_reference=true"
+  defp acknowledged_detail(_), do: ""
+
   defp derived_summary_invalidation(:performed), do: "performed"
   defp derived_summary_invalidation(:shredded), do: "unavailable"
+  defp derived_summary_invalidation(:lost_acknowledged), do: "unavailable"
   defp derived_summary_invalidation(:absent), do: "not_applicable"
 
   defp derived_summary_reason(:performed), do: nil
   defp derived_summary_reason(:shredded), do: "pseudonym_shredded"
+  defp derived_summary_reason(:lost_acknowledged), do: "shred_reference_lost_acknowledged"
   defp derived_summary_reason(:absent), do: "no_dek"
 
   # ---------------------------------------------------------------------------

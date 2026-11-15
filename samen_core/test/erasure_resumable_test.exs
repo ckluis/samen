@@ -235,6 +235,106 @@ defmodule Samen.ErasureResumableTest do
     assert pending_rows(sid) == []
   end
 
+  defp put_marker!(subject_id, ref) do
+    @repo.insert!(%Report{
+      subject_id: subject_id,
+      outcome: "pending",
+      tiers: %{"pending" => %{"subject_ref" => ref, "disposition" => "performed"}},
+      recorded_at: DateTime.utc_now()
+    })
+  end
+
+  defmodule ShredOutageKms do
+    @moduledoc false
+    @behaviour Samen.Kms
+    alias Samen.Kms.FileBacked
+    @impl true
+    def generate_subject_key(s), do: FileBacked.generate_subject_key(s)
+    @impl true
+    def unwrap(s), do: FileBacked.unwrap(s)
+    @impl true
+    def shred(_s), do: {:error, :unavailable}
+    @impl true
+    def attest(s), do: FileBacked.attest(s)
+    @impl true
+    def backups_disabled?, do: FileBacked.backups_disabled?()
+    @impl true
+    def key_material_present?(s), do: FileBacked.key_material_present?(s)
+    @impl true
+    def list_active_subjects, do: FileBacked.list_active_subjects()
+    @impl true
+    def pseudonym(a, b), do: FileBacked.pseudonym(a, b)
+  end
+
+  test "marker bookkeeping touches only THIS subject's pending row: another subject's marker and this subject's non-pending report are left alone" do
+    {sid, s, _run} = seed!()
+    other = "erz-other-#{System.unique_integer([:positive])}"
+    other_row = put_marker!(other, "cafe01")
+
+    prior =
+      @repo.insert!(%Report{subject_id: sid, outcome: "shredded", tiers: %{"keep" => "me"}, recorded_at: DateTime.utc_now()})
+
+    assert {:ok, _} = Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id)
+
+    # the other subject's marker: untouched (not refreshed to our ref, not cleared)
+    assert [%{id: id, tiers: %{"pending" => %{"subject_ref" => "cafe01"}}}] = pending_rows(other)
+    assert id == other_row.id
+    # this subject's earlier non-pending row: untouched
+    assert %Report{outcome: "shredded", tiers: %{"keep" => "me"}} = @repo.get!(Report, prior.id)
+    assert pending_rows(sid) == []
+  end
+
+  test "a shred the key store REFUSES (key still live) drops only this subject's marker" do
+    {sid, s, _run} = seed!()
+    other = "erz-other-#{System.unique_integer([:positive])}"
+    put_marker!(other, "cafe02")
+
+    prior =
+      @repo.insert!(%Report{subject_id: sid, outcome: "shredded", tiers: %{"keep" => "me"}, recorded_at: DateTime.utc_now()})
+
+    Application.put_env(:samen_core, :kms_adapter, ShredOutageKms)
+
+    assert {:error, {:kms_shred_failed, :unavailable}} = Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id)
+
+    Application.put_env(:samen_core, :kms_adapter, Kms.FileBacked)
+    assert pending_rows(sid) == []
+    assert [%{tiers: %{"pending" => %{"subject_ref" => "cafe02"}}}] = pending_rows(other)
+    assert %Report{outcome: "shredded"} = @repo.get!(Report, prior.id)
+    assert Kms.FileBacked.key_material_present?(sid)
+  end
+
+  test "pending/1 lists unfinished erasures on the configured default repo, oldest first, and not completed ones" do
+    prior = for k <- [:non_pii_repo, :reveal_grant_repo, :verify_repo], do: {k, Application.get_env(:samen_core, k)}
+    Application.put_env(:samen_core, :non_pii_repo, @repo)
+
+    on_exit(fn ->
+      for {k, v} <- prior do
+        if v == nil, do: Application.delete_env(:samen_core, k), else: Application.put_env(:samen_core, k, v)
+      end
+    end)
+
+    a = "erz-pend-a-#{System.unique_integer([:positive])}"
+    put_marker!(a, "aa")
+    {done, ds, _} = seed!()
+    assert {:ok, _} = Erasure.shred(done, repo: @repo, org_id: ds.actor.org_id)
+
+    pending = Erasure.pending()
+    assert Enum.any?(pending, &(&1.subject_id == a))
+    refute Enum.any?(pending, &(&1.subject_id == done))
+  end
+
+  test "a pending marker is not a report: latest_report ignores it, and a marker newer than a completed report does not shadow it" do
+    {sid, s, _run} = seed!()
+    assert {:ok, %{report: done}} = Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id)
+    put_marker!(sid, "ff00")
+    assert %Report{id: id, outcome: "shredded"} = Erasure.latest_report(sid, repo: @repo)
+    assert id == done.id
+
+    only = "erz-only-pending-#{System.unique_integer([:positive])}"
+    put_marker!(only, "ff01")
+    assert Erasure.latest_report(only, repo: @repo) == nil
+  end
+
   describe "shredded but no reference recorded" do
     test "fails loudly with a tagged error and an operator report; never :no_pseudonym, never a success" do
       {sid, s, run} = seed!()
@@ -262,8 +362,58 @@ defmodule Samen.ErasureResumableTest do
       assert {:ok, %{report: report}} =
                Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id, acknowledge_lost_reference: true)
 
-      assert report.tiers["derived_summaries"]["reason"] == "pseudonym_shredded"
+      assert report.tiers["derived_summaries"]["reason"] == "shred_reference_lost_acknowledged"
+      assert report.tiers["derived_summaries"]["invalidation"] == "unavailable"
       assert Erasure.erased?(sid, repo: @repo)
+
+      # the override is AUDITED: the lifecycle row names it, with the acting operator
+      assert [audit] =
+               Samen.Reveal.Grants.audit_for(sid, repo: @repo)
+               |> Enum.filter(&(&1.event == "erased"))
+
+      assert audit.detail =~ "acknowledged_lost_reference=true"
+      assert audit.detail =~ "derived_summary_invalidation=unavailable"
+    end
+
+    test "an ordinary (non-overridden) erasure's audit row does not carry the acknowledgement" do
+      {sid, s, _run} = seed!()
+      assert {:ok, _} = Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id)
+      audits = Samen.Reveal.Grants.audit_for(sid, repo: @repo) |> Enum.filter(&(&1.event == "erased"))
+      assert [%{detail: detail}] = audits
+      refute detail =~ "acknowledged_lost_reference"
+      assert detail =~ "derived_summary_invalidation=performed"
+    end
+
+    test "the operator report is written ONCE; a repeated refusal returns the same row" do
+      {sid, s, _run} = seed!()
+      assert {:ok, _} = Kms.shred(sid)
+      assert {:error, {:shred_reference_lost, first}} = Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id)
+      assert {:error, {:shred_reference_lost, second}} = Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id)
+      assert first.id == second.id
+
+      assert 1 ==
+               @repo.aggregate(
+                 from(p in Report, where: p.subject_id == ^sid and p.outcome == "operator_action_required"),
+                 :count
+               )
+    end
+
+    test "another subject's marker is never taken as this subject's reference" do
+      {sid, s, run} = seed!()
+      other = "erz-other-#{System.unique_integer([:positive])}"
+      put_marker!(other, "deadbeef")
+      assert {:ok, _} = Kms.shred(sid)
+
+      assert {:error, {:shred_reference_lost, _}} = Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id)
+      refute withdrawn?(run)
+      assert [%{tiers: %{"pending" => %{"subject_ref" => "deadbeef"}}}] = pending_rows(other)
+    end
+
+    test "a malformed marker (no subject_ref) is not a reference" do
+      {sid, s, _run} = seed!()
+      @repo.insert!(%Report{subject_id: sid, outcome: "pending", tiers: %{"pending" => %{}}, recorded_at: DateTime.utc_now()})
+      assert {:ok, _} = Kms.shred(sid)
+      assert {:error, {:shred_reference_lost, _}} = Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id)
     end
   end
 end
