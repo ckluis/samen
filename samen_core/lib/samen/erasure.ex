@@ -313,7 +313,7 @@ defmodule Samen.Erasure do
             # no fabricated attestation. The caller retries when the store heals. The key is
             # provably NOT destroyed here, so the resume marker is not needed: drop it (best effort;
             # a leftover one is harmless, the retry refreshes it).
-            clear_pending(subject_id, r)
+            _ = clear_pending(subject_id, r)
             {:error, {:kms_shred_failed, reason}}
         end
     end
@@ -373,7 +373,9 @@ defmodule Samen.Erasure do
     r.delete_all(from(p in Report, where: p.subject_id == ^subject_id and p.outcome == ^@pending_outcome))
     :ok
   rescue
-    _ -> :ok
+    e ->
+      Samen.Observability.Failure.report_write(:erasure_clear_pending, subject_id, e)
+      {:error, :unavailable}
   end
 
   defp pending_row(subject_id, r) do
@@ -435,15 +437,13 @@ defmodule Samen.Erasure do
       recorded_at: DateTime.utc_now() |> DateTime.truncate(:microsecond)
     }
 
-    report =
-      case %Report{}
-           |> Ecto.Changeset.cast(attrs, [:subject_id, :outcome, :tiers, :recorded_at])
-           |> r.insert() do
-        {:ok, row} -> row
-        _ -> nil
-      end
-
-    {:error, {:shred_reference_lost, report}}
+    case %Report{}
+         |> Ecto.Changeset.cast(attrs, [:subject_id, :outcome, :tiers, :recorded_at])
+         |> r.insert() do
+      {:ok, report} -> {:error, {:shred_reference_lost, report}}
+      # still refused, but the operator report itself could not be written: say so, tagged
+      {:error, reason} -> {:error, {:shred_reference_lost_unreported, reason}}
+    end
   end
 
   @doc """

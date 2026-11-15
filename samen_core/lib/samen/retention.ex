@@ -287,7 +287,7 @@ defmodule Samen.Retention do
         {:ok, _} -> acc + 1
         # An operator action, not a transient: log it loudly each sweep; the sweep never retries it in a loop and
         # never counts it (the operator report is already written, once).
-        {:error, {:shred_reference_lost, _}} ->
+        {:error, {tag, _}} when tag in [:shred_reference_lost, :shred_reference_lost_unreported] ->
           Logger.error(
             "[Samen.Retention] shred of #{subject_id} needs OPERATOR ACTION: the key is destroyed but no " <>
               "reference was recorded (Samen.Erasure :shred_reference_lost); not retried automatically."
