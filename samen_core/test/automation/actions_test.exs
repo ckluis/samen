@@ -516,7 +516,7 @@ defmodule Samen.Automation.ActionsTest do
         assert {:error, :undo_failed} = Samen.Automation.Actions.MutateRecord.undo(%{}, meta.("not-a-uuid"), ctx)
       end)
 
-    assert log =~ "read=record_family_undo"
+    assert log =~ "write=record_family_undo"
   end
 
   # ---------------------------------------------------------------------------
