@@ -1,0 +1,19 @@
+# SABOTAGE: the agent health run log renders No runs recorded. next to a failed read
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/ai/agent_surface_test.exs
+# MUST_FAIL: a run / turn log whose READ failed renders the kit error state
+diff --git a/samen_web/lib/samen/web/operator/agent_health_live.ex b/samen_web/lib/samen/web/operator/agent_health_live.ex
+index 4aec414a..7d3dbacb 100644
+--- a/samen_web/lib/samen/web/operator/agent_health_live.ex
++++ b/samen_web/lib/samen/web/operator/agent_health_live.ex
+@@ -388,7 +388,7 @@ defmodule Samen.Web.Operator.AgentHealthLive do
+ 
+                 <.error_state :if={:runs in @read_errors} class="agent-run-read-error" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
+ 
+-                <.empty_state :if={@runs == [] and :runs not in @read_errors} class="agent-run-empty" icon="✓" title="No runs recorded."
++                <.empty_state :if={@runs == []} class="agent-run-empty" icon="✓" title="No runs recorded."
+                   body="Queued, running, parked, and terminal runs appear here as agents dispatch." />
+ 
+                 <.data_table :if={@runs != []}>

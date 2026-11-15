@@ -1,0 +1,19 @@
+# SABOTAGE: the automation health page drops a failed read back to the empty-state copy
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/operator_automation_health_test.exs
+# MUST_FAIL: a failed summary / run read renders the kit error state
+diff --git a/samen_web/lib/samen/web/operator/automation_health_live.ex b/samen_web/lib/samen/web/operator/automation_health_live.ex
+index 680973d5..c8df746b 100644
+--- a/samen_web/lib/samen/web/operator/automation_health_live.ex
++++ b/samen_web/lib/samen/web/operator/automation_health_live.ex
+@@ -234,7 +234,7 @@ defmodule Samen.Web.Operator.AutomationHealthLive do
+   defp rows({:ok, rows}), do: rows
+   defp rows(_failed), do: []
+ 
+-  defp failed_reads(results), do: for({name, {:error, _}} <- results, do: name)
++  defp failed_reads(_results), do: []
+ 
+   # Bridges ADR-010's tenant-shaped operator-workspace actor to the
+   # `Samen.OperatorPlane.Actor` `Samen.Automation.Health` expects — see

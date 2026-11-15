@@ -1,0 +1,19 @@
+# SABOTAGE: a provider whose simulated?/0 raises is presented as a real provider, hiding the SIMULATED badge
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/honest_reads_test.exs
+# MUST_FAIL: a provider whose simulated?/0 raises is NOT claimed real
+diff --git a/samen_core/lib/samen/ai/embeddings.ex b/samen_core/lib/samen/ai/embeddings.ex
+index 82a3387c..adb05db9 100644
+--- a/samen_core/lib/samen/ai/embeddings.ex
++++ b/samen_core/lib/samen/ai/embeddings.ex
+@@ -383,7 +383,7 @@ defmodule Samen.AI.Embeddings do
+       # Unknown is not "real": the answer feeds the SIMULATED-ranking badge, so a provider whose `simulated?/0`
+       # raised is reported as not verified real (`true`) rather than silently presented as a real semantic match.
+       Samen.Observability.Failure.report(:embeddings_simulated_provider, nil, e)
+-      true
++      false
+   end
+ 
+   # --- deny-by-default allowlist ------------------------------------------------------------

@@ -1,0 +1,19 @@
+# SABOTAGE: report_write/3 reports a failed write as a failed read
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: a schedule advance whose org cannot be resolved enqueues NO dispatch
+diff --git a/samen_core/lib/samen/observability/failure.ex b/samen_core/lib/samen/observability/failure.ex
+index 5bdaaaa2..4b98033f 100644
+--- a/samen_core/lib/samen/observability/failure.ex
++++ b/samen_core/lib/samen/observability/failure.ex
+@@ -22,7 +22,7 @@ defmodule Samen.Observability.Failure do
+ 
+   @doc "Report a failed WRITE `name` (a side effect that did not happen): same shape as `report/3`, kind `:write`."
+   @spec report_write(atom(), term(), term()) :: :ok
+-  def report_write(name, scope, reason), do: report(:write, name, scope, reason, [])
++  def report_write(name, scope, reason), do: report(:read, name, scope, reason, [])
+ 
+   @doc """
+   Report a failure of `kind` (`:read` | `:write`). Options: `:tag` (log prefix, default
