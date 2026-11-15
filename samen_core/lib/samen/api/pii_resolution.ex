@@ -280,9 +280,6 @@ defmodule Samen.Api.PiiResolution do
     if Code.ensure_loaded?(vault) and function_exported?(vault, :unwrap_subjects, 1),
       do: vault.unwrap_subjects(rows),
       else: nil
-  rescue
-    # A failed batch costs only the per-value unwrap it would have saved.
-    _ -> nil
   end
 
   defp resolve_pii_fields(record, fields, plane, resource, reveal_action, actor, opts) do
