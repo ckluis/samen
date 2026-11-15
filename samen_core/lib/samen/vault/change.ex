@@ -30,8 +30,7 @@ defmodule Samen.Vault.Change do
     * **On read** — no per-resource hook is needed: the vault column's type
       (`Samen.Type.VaultField`) presents `%Samen.Masked{}` from the stored token
       via `cast_stored`, so `Ash.read` returns `%Masked{}` as the field's normal
-      value. `Samen.Vault.materialize/2` remains available for callers holding a
-      raw struct (e.g. from a non-Ash query), but the type covers the Ash path.
+      value.
 
   The subject key + ciphertext write happen in `before_action`, inside the same
   Ecto transaction Ash opens for the action, so a failed insert rolls back the
@@ -85,19 +84,68 @@ defmodule Samen.Vault.Change do
 
     case bind_masked(Enum.reverse(masked), subject_id, repo) do
       :ok ->
-        case Enum.reverse(to_vault) do
-          [] ->
-            changeset
+        bound? = masked != [] or to_vault != []
 
-          to_vault ->
-            changeset = ensure_subject_attr(changeset, subject_id)
-            do_vault(changeset, subject_id, to_vault, repo)
-        end
+        routed =
+          case Enum.reverse(to_vault) do
+            [] ->
+              changeset
+
+            to_vault ->
+              changeset = ensure_subject_attr(changeset, subject_id)
+              do_vault(changeset, subject_id, to_vault, repo)
+          end
+
+        guard_written_row(routed, fields, subject_id, bound?)
 
       {:error, failures} ->
         reject_unbound(changeset, failures)
     end
   end
+
+  # The write-side guard (WP28 S1/N1), an after_action inside the action transaction. It checks the
+  # truth AFTER the write, where the build-time view can be wrong:
+  #   * the written row's primary key is the vault subject this action minted/bound under. Inside
+  #     the action Ash marks EVERY create as an upsert, so a call-site `Ash.create(cs, upsert?: true)`
+  #     onto an existing identity cannot be told apart in a before_action; the existing row would
+  #     keep its PK while its new tokens were minted under a throwaway UUID (masked forever, never
+  #     shredded with the row). An error here rolls the transaction back: the vault rows
+  #     (`store_fields` uses the same repo) and the domain write both.
+  #   * every vault attribute on the changeset is still exactly what this change approved (a later
+  #     host before_action that swapped in an unchecked %Masked{} is refused).
+  defp guard_written_row(%Ash.Changeset{errors: [_ | _]} = changeset, _fields, _subject, _bound?),
+    do: changeset
+
+  defp guard_written_row(changeset, fields, subject_id, bound?) do
+    approved = Map.new(fields, fn field -> {field.name, vault_view(changeset, field.name)} end)
+    pk = pk_attr(changeset.resource)
+
+    Ash.Changeset.after_action(changeset, fn cs, result ->
+      cond do
+        bound? and to_string(Map.get(result, pk)) != subject_id ->
+          {:error, invalid_vault(:vault, "vault subject does not match the written row (an upsert onto an existing record?)")}
+
+        swapped = Enum.find(fields, &(vault_view(cs, &1.name) != Map.fetch!(approved, &1.name))) ->
+          {:error, invalid_vault(swapped.name, "the vault value was changed after Samen.Vault.Change approved it")}
+
+        true ->
+          {:ok, result}
+      end
+    end)
+  end
+
+  # What the changeset will write for a vault field, comparable across hooks. Never a plaintext.
+  defp vault_view(changeset, name) do
+    case Ash.Changeset.fetch_change(changeset, name) do
+      {:ok, %Masked{token: token}} -> {:token, token}
+      {:ok, nil} -> :cleared
+      {:ok, _other} -> :other
+      :error -> :unchanged
+    end
+  end
+
+  defp invalid_vault(field, message),
+    do: Ash.Error.Changes.InvalidChanges.exception(fields: [field], message: message)
 
   # The token this record already holds for `field` (an untouched round-trip of its own value
   # needs no check and no query). A create has none.
@@ -146,7 +194,8 @@ defmodule Samen.Vault.Change do
   # key, so a later token check/reveal would be bound to the wrong subject. Until upsert subject
   # resolution is designed, a PII resource refuses it (fail closed). Checked at BUILD time
   # (`change/3`): inside the action Ash sets `context.private.upsert?` on EVERY create, so only
-  # the build-time flag (an upsert action, or `for_create(…, upsert?: true)`) is meaningful.
+  # the build-time flag (an upsert action, or `for_create(…, upsert?: true)`) is meaningful here. A
+  # call-site `Ash.create(cs, upsert?: true)` is caught after the write by `guard_written_row/4`.
   defp upsert?(changeset) do
     changeset.action_type == :create and
       (changeset.action.upsert? == true or get_in(changeset.context, [:private, :upsert?]) == true)

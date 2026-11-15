@@ -148,31 +148,6 @@ defmodule Samen.Vault do
     end
   end
 
-  @doc """
-  Materialize a domain struct read OUTSIDE the Ash type path (e.g. a raw
-  non-Ash query that returns the token string in the field): replace each
-  vault-routed field that still holds a raw `vt_*` token with `%Masked{}`.
-
-  The normal Ash read path does NOT need this — `Samen.Type.VaultField.cast_stored/2`
-  already presents `%Masked{}`. This helper is only for callers holding a struct
-  whose vault fields are still raw token strings. Already-`%Masked{}` and `nil`
-  fields are left unchanged. No-op if the resource has no pii_attributes.
-  """
-  @spec materialize(struct(), module()) :: struct()
-  def materialize(record, resource_module) do
-    pii_fields = Samen.Pii.Info.fields(resource_module)
-
-    Enum.reduce(pii_fields, record, fn field, acc ->
-      case Map.get(acc, field.name) do
-        "vt_" <> _ = token ->
-          Map.put(acc, field.name, Masked.new(token, field.name))
-
-        _ ->
-          acc
-      end
-    end)
-  end
-
   # =====================================================================
   # THE SINGLE REVEAL CHOKEPOINT — the only path that returns plaintext.
   # =====================================================================
