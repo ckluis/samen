@@ -262,3 +262,11 @@ defmodule Samen.Meta.CiDriverGuardTest.GenDepsCache do
     Samen.Meta.CiDriverGuard.run_case!("GENDEPS")
   end
 end
+
+defmodule Samen.Meta.CiDriverGuardTest.SelfTestEscape do
+  use ExUnit.Case, async: true
+
+  test "ESCAPE the self-test fails closed on an unusable temp root and can never write to the repo it tests" do
+    Samen.Meta.CiDriverGuard.run_case!("ESCAPE")
+  end
+end

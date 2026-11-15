@@ -38,9 +38,14 @@ pass_count=0; fail_count=0
 ok()  { echo "PASS: $*"; pass_count=$((pass_count + 1)); }
 bad() { echo "FAIL: $*"; fail_count=$((fail_count + 1)); }
 
-T="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/samen_lanes_test.XXXXXX")" && pwd -P)"
-cleanup() { rm -rf "$T"; }
-trap cleanup EXIT INT TERM
+SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPTS_DIR/fixture_guard.sh" || { echo "sabotage_lanes_test: cannot load fixture_guard.sh" >&2; exit 1; }
+T="$(fixture_mktemp samen_lanes_test)" || { echo "sabotage_lanes_test: no usable temp root — refusing to run, nothing was touched" >&2; exit 1; }
+fixture_arm "$T" "$(cd "$SCRIPTS_DIR/.." && pwd)" sabotage_lanes_test || exit 1
+_fg_exit() { local rc=$?; fixture_finish || rc=1; rm -rf "$T"; trap - EXIT; exit "$rc"; }
+trap _fg_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 FIX="$T/repo"; MARK="$T/marks"; BIN="$T/bin"
 LANE_DIRS=("$T/lane-b" "$T/lane-c")   # lane 2 honours SAMEN_LANE_B_DIR; lane 3 lives under the git dir

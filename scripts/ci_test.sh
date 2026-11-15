@@ -84,14 +84,29 @@
 #          own mix.exs reads, and config.exs under a runtime.exs override (runtime.exs alone does not change it); a seed
 #          cut short by an eviction leaves nothing seeded.
 #
+#   ESCAPE   the self-test can never write to the repository it is testing (it once did: a failed `cd "$R"` let the fixture's
+#          `git add -A && git commit && git update-ref refs/remotes/origin/main` run in the REAL repo). An unusable temp root
+#          exits 1 before anything runs; `git` is shadowed (scripts/fixture_guard.sh) and refuses any command whose repo
+#          is not inside the temp root; an un-enterable fixture dir aborts mkrepo; the real repo's HEAD / branch /
+#          origin/main / status are re-checked on EXIT ("SELF-TEST ESCAPED INTO THE REAL REPO"). Run against a COPY in a
+#          throwaway outer repo, so a regression damages only the throwaway.
+#
 # Usage: scripts/ci_test.sh [CASE…]      (default: every case)
 # Exit:  0 all assertions pass · 1 otherwise. Residue: none (temp dirs, trap on EXIT/INT/TERM).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CI="$ROOT/scripts/ci"
-T="$(mktemp -d "${TMPDIR:-/tmp}/samen_ci_test.XXXXXX")"
-trap 'rm -rf "$T"' EXIT INT TERM
+# Fail closed (scripts/fixture_guard.sh): no usable temp root -> exit before anything runs; `git` is shadowed so a fixture
+# command can only act on a repo INSIDE $T; the real repo's HEAD / branch / origin/main / status are recorded now and
+# re-checked on EXIT. (Once a failed `cd "$R"` let the fixture commit run in the REAL repo and moved its origin/main.)
+source "$ROOT/scripts/fixture_guard.sh" || { echo "ci_test: cannot load scripts/fixture_guard.sh" >&2; exit 1; }
+T="$(fixture_mktemp samen_ci_test)" || { echo "ci_test: no usable temp root (TMPDIR=${TMPDIR:-unset}) — refusing to run, nothing was touched" >&2; exit 1; }
+fixture_arm "$T" "$ROOT" ci_test || exit 1
+_ci_test_exit() { local rc=$?; fixture_finish || rc=1; rm -rf "$T"; trap - EXIT; exit "$rc"; }
+trap _ci_test_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 pass=0
 fail=0
@@ -109,14 +124,19 @@ jsonget() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(e
 mkrepo() {
   R="$T/$1"
   rm -rf "$R" "$T/$1.home"
-  mkdir -p "$R"/{core/lib,core/test,web/lib,vert_a,vert_b,docs}
+  mkdir -p "$R"/{core/lib,core/test,web/lib,vert_a,vert_b,docs} && [[ -d "$R" ]] \
+    || { echo "ci_test: mkrepo $1: cannot create the fixture directory $R — aborting the self-test" >&2; exit 1; }
   (
-    cd "$R" && git init -q -b main . && git config user.email t@t && git config user.name t
+    # set -e + a fatal cd FIRST: nothing below may run in the caller's directory (the real repo) — and `git` is the
+    # guarded function, which refuses anything outside $T even if this were removed.
+    set -e
+    fixture_cd "$R"
+    git init -q -b main . && git config user.email t@t && git config user.name t
     echo core > core/lib/a.txt; echo coretest > core/test/a_test.txt; echo web > web/lib/w.txt
     echo va > vert_a/a.txt; echo vb > vert_b/b.txt; echo doc > docs/d.md
     printf '*.log\n' > .gitignore
     git add -A && git commit -qm init && git update-ref refs/remotes/origin/main HEAD
-  )
+  ) || { echo "ci_test: mkrepo $1: building the fixture repo $R failed — aborting the self-test" >&2; exit 1; }
   export SAMEN_CI_REPO="$R" SAMEN_CI_HOME="$T/$1.home" SAMEN_CI_MANIFEST="$T/$1.conf"
   export SAMEN_CI_TOOLCHAIN="fake-toolchain-1" CI_TEST_RUNS="$T/$1.runs"
   : > "$CI_TEST_RUNS"
@@ -1845,7 +1865,123 @@ PY
   eq "$n" 4 "GENDEPS: the four gen_* probe steps declare the helper as an input"
 }
 
-ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS LOCALPATHS GENPROBE NARROW RECHUNK COSTW TIMEOUT SELTMO GENDEPS)
+# ESCAPE: the self-test can never write to the repository it is testing. Every scenario runs a COPY of the harness
+# (scripts/ci_test.sh + scripts/fixture_guard.sh) inside a throwaway OUTER repo under this run's own known-good $T, with
+# cwd = <outer>/samen_core (where a developer runs it), so a regression commits into the throwaway and the case asserts on
+# THAT — never on the real repo. Every red scenario has a positive control that proves the path it guards still works.
+case_ESCAPE() {
+  local O="$T/esc" TMP_OK="$T/esc.tmp" out rc before after
+  rm -rf "$O" "$TMP_OK" "$T/esc.notadir" "$T/esc.nodir"; mkdir -p "$O/scripts" "$O/samen_core" "$TMP_OK"
+  cp "$ROOT/scripts/ci_test.sh" "$ROOT/scripts/fixture_guard.sh" "$O/scripts/"
+  echo base > "$O/samen_core/mix.exs"
+  ( cd "$O" && git init -q -b main . && git config user.email t@t && git config user.name t && git add -A \
+    && git commit -qm outer && git update-ref refs/remotes/origin/main HEAD ) || { bad "ESCAPE: could not build the outer repo"; return; }
+  : > "$T/esc.notadir"
+  outer_state() { { git -C "$O" rev-parse HEAD refs/remotes/origin/main; git -C "$O" symbolic-ref HEAD; git -C "$O" status --porcelain
+                    git -C "$O" log --oneline | wc -l; ls -A "$O" "$O/samen_core" | tr '\n' ' '; } | shasum -a 256 | cut -d' ' -f1; }
+  before="$(outer_state)"
+
+  # (a) the temp root is unusable -> exit non-zero BEFORE anything runs, nothing in the repo changes
+  local how bad_tmp
+  for how in file missing; do
+    case "$how" in file) bad_tmp="$T/esc.notadir" ;; missing) bad_tmp="$T/esc.nodir/deeper" ;; esac
+    out="$T/esc.a.$how"
+    ( cd "$O/samen_core" && TMPDIR="$bad_tmp" bash ../scripts/ci_test.sh NOSUCH_CASE > "$out" 2>&1 ); rc=$?
+    eq "$rc" 1 "ESCAPE: TMPDIR is $how -> the self-test exits 1 (not 0, and not past the temp root to the case check)"
+    has "$out" 'no usable temp root' "ESCAPE: ... and says why"
+    has "$out" 'refusing to run, nothing was touched' "ESCAPE: ... from the script's own exit path (not only the arming backstop)"
+    hasnt "$out" 'unknown case|CASE |ALL PASSED' "ESCAPE: ... before any case or the case list is looked at"
+    eq "$(outer_state)" "$before" "ESCAPE: ... and the repo it ran in is byte-identical (HEAD, origin/main, status, files)"
+    [[ ! -e "$O/samen_core/.gitignore" && ! -e "$T/esc.nodir" ]] && ok || bad "ESCAPE: TMPDIR=$how left a stray file behind"
+  done
+  # positive control: a good TMPDIR gets past the temp root (to the unknown-case refusal, rc 2) and leaves no residue
+  ( cd "$O/samen_core" && TMPDIR="$TMP_OK" bash ../scripts/ci_test.sh NOSUCH_CASE > "$T/esc.a.ok" 2>&1 ); rc=$?
+  eq "$rc" 2 "ESCAPE: positive control — a usable TMPDIR passes the temp-root check (then refuses the unknown case)"
+  has "$T/esc.a.ok" 'unknown case NOSUCH_CASE' "ESCAPE: ... at the case check"
+  eq "$(ls -A "$TMP_OK" | wc -l | tr -d ' ')" 0 "ESCAPE: ... and removes its temp root"
+  eq "$(outer_state)" "$before" "ESCAPE: ... the repo untouched"
+
+  # (b) mkrepo (the REAL function text, extracted from the script under test) with an un-enterable $R
+  local H="$T/esc.b.sh"
+  { echo 'set -u'
+    echo "source '$O/scripts/fixture_guard.sh'"
+    echo "T=\"\$(fixture_mktemp esc_b)\" || exit 1; ROOT='$O'; CI=/bin/true; fixture_arm \"\$T\" \"\$ROOT\" esc_b"
+    echo 'trap '"'"'fixture_finish; echo "FINISH_RC=$?"; rm -rf "$T"'"'"' EXIT'
+    awk '/^mkrepo\(\) \{/,/^\}$/' "$ROOT/scripts/ci_test.sh"
+    echo 'case "${1:-}" in'
+    echo '  badcd) cd() { if [[ "${1:-}" == "$T/zz" ]]; then return 1; fi; builtin cd "$@"; } ;;'
+    echo '  nodir) mkdir() { return 0; } ;;'
+    echo 'esac'
+    echo 'mkrepo zz; echo "MKREPO_RETURNED R=$R commits=$(git -C "$R" log --oneline | wc -l | tr -d " ") inside=$([[ "$(cd "$R" && pwd -P)" == "$T"/* ]] && echo yes || echo no)"'
+  } > "$H"
+  [[ "$(grep -c '^mkrepo() {' "$H")" == 1 ]] && ok || bad "ESCAPE: could not extract mkrepo from the script under test"
+  ( cd "$O/samen_core" && TMPDIR="$TMP_OK" bash "$H" ok > "$T/esc.b.ok" 2>&1 ); rc=$?
+  eq "$rc" 0 "ESCAPE: positive control — mkrepo on a normal \$R builds the fixture"
+  has "$T/esc.b.ok" 'MKREPO_RETURNED .*commits=1 inside=yes' "ESCAPE: ... one commit, inside the temp root"
+  has "$T/esc.b.ok" 'FINISH_RC=0' "ESCAPE: ... and the exit check is clean"
+  eq "$(outer_state)" "$before" "ESCAPE: ... and the surrounding repo untouched"
+  for how in badcd nodir; do
+    ( cd "$O/samen_core" && TMPDIR="$TMP_OK" bash "$H" "$how" > "$T/esc.b.$how" 2>&1 ); rc=$?
+    [[ "$rc" -ne 0 ]] && ok || bad "ESCAPE: mkrepo with an un-enterable \$R ($how) exited 0"
+    hasnt "$T/esc.b.$how" 'MKREPO_RETURNED' "ESCAPE: ($how) mkrepo never returns to its caller"
+    has "$T/esc.b.$how" 'aborting the self-test|cannot enter fixture directory' "ESCAPE: ($how) ... and says so"
+    eq "$(outer_state)" "$before" "ESCAPE: ($how) nothing was written, committed or re-pointed in the surrounding repo"
+    [[ ! -e "$O/samen_core/.gitignore" && ! -e "$O/samen_core/core" ]] && ok || bad "ESCAPE: ($how) a fixture file landed in the caller's directory"
+  done
+  # (c) the guard on its own, with mkrepo's own protections out of the picture: git commands aimed at the surrounding
+  # repo are refused (rc 97), nothing moves, and the exit check FAILS the run; the same commands in $T work.
+  cat > "$T/esc.c.sh" <<SH
+set -u
+source '$O/scripts/fixture_guard.sh'
+T="\$(fixture_mktemp esc_c)" || exit 1; fixture_arm "\$T" '$O' esc_c
+git init -q . ; echo "init_rc=\$?"
+git commit -q --allow-empty -m x; echo "commit_rc=\$?"
+git update-ref refs/remotes/origin/main HEAD; echo "ref_rc=\$?"
+git -C '$O' add -A; echo "C_rc=\$?"
+git -C "\$T" init -q; echo "inside_rc=\$?"
+git -C "\$T" -c user.email=t@t -c user.name=t commit -q --allow-empty -m ok; echo "inside_commit_rc=\$?"
+git -C '$O' rev-parse HEAD >/dev/null; echo "readonly_rc=\$?"
+fixture_finish; echo "finish_rc=\$?"
+rm -rf "\$T"
+SH
+  ( cd "$O/samen_core" && TMPDIR="$TMP_OK" bash "$T/esc.c.sh" > "$T/esc.c" 2>&1 )
+  has "$T/esc.c" '^init_rc=97$' "ESCAPE: git init in the surrounding repo's directory is refused"
+  has "$T/esc.c" '^commit_rc=97$' "ESCAPE: git commit there is refused"
+  has "$T/esc.c" '^ref_rc=97$' "ESCAPE: git update-ref there is refused"
+  has "$T/esc.c" '^C_rc=97$' "ESCAPE: ... also through -C"
+  has "$T/esc.c" '^inside_rc=0$' "ESCAPE: positive control — git init inside the temp root runs"
+  has "$T/esc.c" '^inside_commit_rc=0$' "ESCAPE: ... and so does a commit there"
+  has "$T/esc.c" '^readonly_rc=0$' "ESCAPE: ... and a read-only command on the real repo"
+  has "$T/esc.c" '^finish_rc=1$' "ESCAPE: a refused command fails the run at exit"
+  eq "$(outer_state)" "$before" "ESCAPE: ... and nothing in the surrounding repo moved"
+  # (d) the exit check reports a repo that moved anyway (the guard bypassed with `command git`), naming what changed
+  cat > "$T/esc.d.sh" <<SH
+set -u
+source '$O/scripts/fixture_guard.sh'
+T="\$(fixture_mktemp esc_d)" || exit 1; fixture_arm "\$T" '$O' ci_test
+command git commit -q --allow-empty -m escaped
+fixture_finish; echo "finish_rc=\$?"
+rm -rf "\$T"
+SH
+  ( cd "$O" && TMPDIR="$TMP_OK" bash "$T/esc.d.sh" > "$T/esc.d" 2>&1 )
+  has "$T/esc.d" 'ci_test: SELF-TEST ESCAPED INTO THE REAL REPO' "ESCAPE: a repo that moved anyway is reported loudly"
+  has "$T/esc.d" 'was: HEAD=' "ESCAPE: ... naming the HEAD that changed"
+  has "$T/esc.d" '^finish_rc=1$' "ESCAPE: ... and the run fails"
+  git -C "$O" reset -q --hard "$(git -C "$O" rev-parse HEAD~1)"   # undo the deliberate escape in the throwaway
+  # a developer's own pre-existing dirty tree is not an escape
+  echo wip >> "$O/samen_core/mix.exs"; echo new > "$O/samen_core/untracked.txt"
+  cat > "$T/esc.e.sh" <<SH
+set -u
+source '$O/scripts/fixture_guard.sh'
+T="\$(fixture_mktemp esc_e)" || exit 1; fixture_arm "\$T" '$O' ci_test
+fixture_finish; echo "finish_rc=\$?"
+rm -rf "\$T"
+SH
+  ( cd "$O" && TMPDIR="$TMP_OK" bash "$T/esc.e.sh" > "$T/esc.e" 2>&1 )
+  has "$T/esc.e" '^finish_rc=0$' "ESCAPE: positive control — a dirty tree that was dirty at the start is not reported"
+}
+
+ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS LOCALPATHS GENPROBE NARROW RECHUNK COSTW TIMEOUT SELTMO GENDEPS ESCAPE)
 CASES=("$@")
 [[ ${#CASES[@]} -gt 0 ]] || CASES=("${ALL[@]}")
 for c in "${CASES[@]}"; do

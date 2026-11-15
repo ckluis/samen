@@ -45,9 +45,14 @@ fail_count=0
 ok()  { echo "PASS: $*"; pass_count=$((pass_count + 1)); }
 bad() { echo "FAIL: $*"; fail_count=$((fail_count + 1)); }
 
-T="$(mktemp -d "${TMPDIR:-/tmp}/samen_ds_test.XXXXXX")"
-cleanup() { rm -rf "$T"; }
-trap cleanup EXIT INT TERM
+SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPTS_DIR/fixture_guard.sh" || { echo "double_sweep_test: cannot load fixture_guard.sh" >&2; exit 1; }
+T="$(fixture_mktemp samen_ds_test)" || { echo "double_sweep_test: no usable temp root — refusing to run, nothing was touched" >&2; exit 1; }
+fixture_arm "$T" "$REPO_ROOT" double_sweep_test || exit 1
+_fg_exit() { local rc=$?; fixture_finish || rc=1; rm -rf "$T"; trap - EXIT; exit "$rc"; }
+trap _fg_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 FIX="$T/repo"
 LOGS="$T/logs"

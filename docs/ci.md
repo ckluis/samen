@@ -275,10 +275,14 @@ tree: a patch that fails in BOTH baselines is "pre-existing" to the double sweep
 patch that stopped applying would be a guard with no red (issue #53). Neither replaces the replay.
 
 **Driver red paths.** `scripts/ci_test.sh [CASE…]` (the `ci_selftest` step) holds the driver's and the CI
-tooling's own red paths (C1–C10, A1–A3, SABNEW, DOCS, …), each with a positive control, and each case is a named
+tooling's own red paths (C1–C10, A1–A3, SABNEW, DOCS, ESCAPE, …), each with a positive control, and each case is a named
 test in `samen_core/test/meta/ci_driver_guard_test.exs` so a sabotage can flip it (the range is in CLAUDE.md). A
 change to `scripts/ci*`, `ci/steps.conf`, `ci.sh`/`ci-fast.sh` or the sabotage/counts/docs tooling adds or extends
-a case there and proves it with `scripts/sabotage new`.
+a case there and proves it with `scripts/sabotage new`. The self-tests that build throwaway git repos (`ci_test.sh`,
+`sabotage_{tooling,lanes,apply_check}_test.sh`, `double_sweep_test.sh`) source `scripts/fixture_guard.sh`: it fails closed
+without a usable temp root, shadows `git` so a fixture command can only act on a repository inside that root (physical
+paths), and re-checks the real repo's HEAD / branch / `origin/main` / status on exit. Never write a fixture builder as
+`cd "$R" && … ; …` — a failed `cd` then runs the rest in the real repo.
 
 ## 7. Mutation gate (ADR-049)
 
