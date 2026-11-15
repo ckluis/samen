@@ -44,6 +44,28 @@ defmodule Samen.PiiResolutionPlanesTest do
     def prefetch_rows(_tokens, _repo), do: %{}
   end
 
+  # A vault double that returns REAL, correctly-bound rows but does NOT implement `unwrap_subjects/1`:
+  # the resolver must build no DEK memo for it (and not call a function it lacks).
+  defmodule BoundRowVault do
+    @moduledoc false
+    def reveal(%Samen.Masked{token: t}, repo, opts \\ []) do
+      send(self(), {:reveal, t, repo, opts})
+      {:ok, "plain-" <> to_string(t)}
+    end
+
+    def prefetch_rows(tokens, _repo) do
+      Map.new(tokens, fn t ->
+        {t,
+         %Samen.Vault.VaultRow{
+           token: t,
+           subject_id: Process.get({:bound_subject, t}),
+           vault_name: "pii_email",
+           field_name: "emails"
+         }}
+      end)
+    end
+  end
+
   # A grant checker that implements the batch callback AND the single one; `verdict` rides in a pdict-free way
   # through the app env so one module serves true / false / truthy-non-true.
   defmodule Grant do
@@ -220,6 +242,16 @@ defmodule Samen.PiiResolutionPlanesTest do
     test "no repo → the vault is never asked to prefetch" do
       resolve(rec(), tenant(), repo: nil)
       assert prefetched_tokens() == []
+    end
+
+    test "a vault double without unwrap_subjects/1 gets no DEK memo even when its rows are bound" do
+      id = Ecto.UUID.generate()
+      Process.put({:bound_subject, "vt_b"}, id)
+
+      assert [%{emails: "plain-vt_b"}] = resolve(rec("vt_b", id), tenant(), vault: BoundRowVault)
+      assert_received {:reveal, "vt_b", :stub_repo, opts}
+      assert Keyword.has_key?(opts, :prefetched)
+      refute Keyword.has_key?(opts, :deks)
     end
 
     test "prefetched rows are handed to reveal only when there are some; the subject and field are ALWAYS asserted" do

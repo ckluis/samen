@@ -133,8 +133,13 @@ defmodule Samen.Vault.Change do
     end)
   end
 
+  # The record's org for the report's log line: the new value on a create, else the stored row's (an
+  # unselected attribute is `%Ash.NotLoaded{}`, not an org).
   defp org_of(changeset) do
-    Map.get(changeset.attributes || %{}, :org_id) || Map.get(changeset.data || %{}, :org_id)
+    Enum.find(
+      [Map.get(changeset.attributes, :org_id), Map.get(changeset.data, :org_id)],
+      &is_binary/1
+    )
   end
 
   # An upsert-create would mint under a generated UUID rather than the existing row's primary

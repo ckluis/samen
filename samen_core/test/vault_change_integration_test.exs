@@ -231,7 +231,7 @@ defmodule Samen.VaultChangeIntegrationTest do
     defp reload!(p) do
       Patient
       |> Ash.Query.filter(id == ^p.id)
-      |> Ash.Query.ensure_selected([:full_name, :mrn, :dob])
+      |> Ash.Query.ensure_selected([:org_id, :full_name, :mrn, :dob])
       |> Ash.read_one!()
     end
 
@@ -348,6 +348,49 @@ defmodule Samen.VaultChangeIntegrationTest do
       assert_receive {:failure, %{write: :vault_token_unbound, cause: "foreign_subject"} = meta}
       refute inspect(meta) =~ "vt_"
       refute_receive {:failure, %{write: :vault_token_unbound}}, 50
+    end
+
+    test "a token row that matches on ONE of vault/field but not the other is still refused (field_mismatch)" do
+      a = reload!(patient_in(Ash.UUID.generate()))
+
+      # right subject and vault, wrong field
+      {:ok, other_field} = Vault.store_field(a.id, :pii_mrn, :renamed_field, "x", @repo)
+      assert {:error, %Ash.Error.Invalid{} = e1} = set_mrn(a, Masked.new(other_field, :mrn))
+      assert error_text(e1) =~ "field_mismatch"
+
+      # right subject and field, wrong vault
+      {:ok, other_vault} = Vault.store_field(a.id, :pii_dob, :mrn, "x", @repo)
+      assert {:error, %Ash.Error.Invalid{} = e2} = set_mrn(a, Masked.new(other_vault, :mrn))
+      assert error_text(e2) =~ "field_mismatch"
+
+      # CONTROL: a token minted for exactly this subject, vault and field IS accepted
+      {:ok, exact} = Vault.store_field(a.id, :pii_mrn, :mrn, "MRN-EXACT", @repo)
+      assert {:ok, _} = set_mrn(a, Masked.new(exact, :mrn))
+      assert {:ok, "MRN-EXACT"} = Vault.reveal(reload!(a).mrn, @repo)
+    end
+
+    test "the report names the record's org (from the new attributes on a create, from the stored row on an update)" do
+      import ExUnit.CaptureLog
+
+      org = Ash.UUID.generate()
+      victim = reload!(patient_in(org))
+      holder = reload!(patient_in(org))
+
+      update_log = capture_log([level: :error], fn -> assert {:error, _} = set_mrn(holder, victim.mrn) end)
+      assert update_log =~ "write=vault_token_unbound"
+      assert update_log =~ "org=#{org}"
+
+      create_org = Ash.UUID.generate()
+
+      create_log =
+        capture_log([level: :error], fn ->
+          assert {:error, _} =
+                   Patient
+                   |> Ash.Changeset.for_create(:create, %{org_id: create_org, mrn: victim.mrn})
+                   |> Ash.create()
+        end)
+
+      assert create_log =~ "org=#{create_org}"
     end
 
     test "CONTROL: re-setting the record's OWN %Masked{} succeeds and costs ZERO vault queries" do
