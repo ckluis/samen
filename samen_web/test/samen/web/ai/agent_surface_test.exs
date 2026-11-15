@@ -478,6 +478,35 @@ defmodule Samen.Web.AI.AgentSurfaceTest do
       end)
     end
 
+    test "RED: a crafted NON-UUID select_run id is 'no such run' (no read error), not an outage; a well-formed run id whose turn read fails still is one (control)",
+         %{org_id: org_id} do
+      run = AgentFixture.run!(org_id, agent: "support_triage", state: :running)
+      operator_id = Ash.UUID.generate()
+      open_impersonation!(operator_id, org_id)
+
+      load = fn selected ->
+        %Phoenix.LiveView.Socket{}
+        |> Phoenix.Component.assign(:samen_mount, build_operator_mount(operator_id))
+        |> Phoenix.Component.assign(:samen_acting_as, false)
+        |> with_operator_identity(operator_id)
+        |> Samen.Web.Operator.AgentHealthLive.load(org_id, selected_run: selected)
+      end
+
+      Samen.WebTest.Repo.query!("ALTER TABLE ai_agent_turn RENAME TO ai_agent_turn_unreadable")
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        # POSITIVE CONTROL: the turn table is unreadable, so a well-formed id IS an outage
+        assert :turns in load.(to_string(run.id)).assigns.read_errors
+
+        for crafted <- ["not-a-uuid", "../../etc", "samen:run:garbled"] do
+          socket = load.(crafted)
+          assert socket.assigns.impersonation == :active
+          refute :turns in socket.assigns.read_errors, "#{crafted}: a malformed run id rendered as an outage"
+          assert socket.assigns.turns == []
+        end
+      end)
+    end
+
     test "an UNREADABLE kill row renders 'kill state unreadable', never 'active'", %{
       org_id: org_id
     } do

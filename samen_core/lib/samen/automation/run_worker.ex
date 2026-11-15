@@ -269,6 +269,10 @@ defmodule Samen.Automation.RunWorker do
   # Run log (that would be exactly the freeform-text leak
   # `Samen.Automation.RunRecord.bounded_outcomes/1` exists to prevent) — any
   # shape this doesn't recognize degrades to `{[], :action_failed}`.
+  # `extract_failure/1` is the proof surface for the shapes Reactor produces that a test cannot provoke end to end.
+  @doc false
+  def failure_summary(reason), do: extract_failure(reason)
+
   defp extract_failure(%Reactor.Error.Invalid{errors: errors}) when is_list(errors) do
     errors
     |> Enum.map(&extract_failure/1)
@@ -288,6 +292,10 @@ defmodule Samen.Automation.RunWorker do
   defp extract_failure(%Reactor.Error.Invalid.UndoStepError{error: %{status: :compensation_failed} = outcome}) do
     if plain_map?(outcome), do: {[outcome], nil}, else: {[], nil}
   end
+
+  # Any OTHER undo failure (Reactor-internal, not our bounded map) carries no outcome and no kind of its own: it must not
+  # fall to the catch-all and override the failing action's `error_kind` with `:action_failed`.
+  defp extract_failure(%Reactor.Error.Invalid.UndoStepError{}), do: {[], nil}
 
   defp extract_failure({%{} = failed, completed}) when is_list(completed) do
     {Enum.filter(completed, &plain_map?/1) ++ [failed], Map.get(failed, :error_kind, :action_failed)}

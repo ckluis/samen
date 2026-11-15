@@ -50,6 +50,11 @@ All notable changes to Samen are recorded here. The format follows
   pages render the kit error state with a retry when a read failed (no longer "No runs recorded."); `Embeddings.embedder_simulated?/1` answers
   `true` (not verified real) when a provider's `simulated?/0` raises; `ScheduleAdvance` enqueues no dispatch when the org cannot be resolved;
   `Failure.report_write/3` reports failed writes as `write` (the lint scanner counts it as a report) and the write sites use it.
+  Second review (sabotages 893+): the `enqueue_reminder` and `escalate` compensations no longer answer `:ok` when the undo failed - a row that is gone
+  (or an escalation already past its transitions) is `:ok`, any other failed read or write is reported (`reminder_undo` / `escalation_undo`) and
+  returns `{:error, :undo_failed}`, so it is on the Run as `compensation_failed`; `Remind.cancel/3` and `Escalate.resolve/3` tell a failed read from
+  a missing row; an `UndoStepError` that is not the bounded compensation map no longer overrides the run's `error_kind`; a non-UUID `select_run` on the
+  operator agent health page is "no such run", not an outage; the `embedder_simulated?` comments state how they differ from the Chokepoint's.
 
 ### Kernel review fixes (samen_core, samen_web, demo, driftwood, pawchart)
 
