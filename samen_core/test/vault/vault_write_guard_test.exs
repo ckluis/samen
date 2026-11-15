@@ -27,8 +27,8 @@ defmodule Samen.Vault.WriteGuardTest do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(@repo)
     Samen.Kms.FileBacked.simulate_outage(false)
     Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
-    # The test schema has no unique index for the `:org_title` identity; the DDL is rolled back with the sandbox.
-    @repo.query!("CREATE UNIQUE INDEX wg_org_title ON pat_patient (pat_org_id, pat_job_title)", [])
+    # The test schema has no unique index for the `:title` identity; the DDL is rolled back with the sandbox.
+    @repo.query!("CREATE UNIQUE INDEX wg_title ON pat_patient (pat_job_title)", [])
     :ok
   end
 
@@ -39,7 +39,7 @@ defmodule Samen.Vault.WriteGuardTest do
   defp upsert(attrs) do
     Patient
     |> Ash.Changeset.for_create(:create, attrs)
-    |> Ash.create(upsert?: true, upsert_identity: :org_title)
+    |> Ash.create(upsert?: true, upsert_identity: :title)
   end
 
   defp reload!(p) do
