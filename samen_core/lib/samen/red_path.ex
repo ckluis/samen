@@ -514,7 +514,7 @@ defmodule Samen.RedPath do
 
       test "the VaultField last-line guard refuses a raw #{unquote(label)} plaintext write (red path)" do
         # Even if a bug bypassed Samen.Vault.Change, the VaultField type's dump
-        # guard refuses to persist anything that is not already a vt_* token.
+        # guard refuses to persist anything that is not token-shaped (Samen.Vault.token?/1).
         minted = Samen.Vault.generate_token()
         assert {:ok, ^minted} = Samen.Type.VaultField.dump_to_native(minted, [])
         # a "vt_"-prefixed string that is not a minted token is plaintext, not a token

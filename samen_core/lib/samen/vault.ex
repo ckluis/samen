@@ -233,6 +233,50 @@ defmodule Samen.Vault do
   end
 
   @doc """
+  Are `pairs` (`[{field, token}]`, `field` anything with `:name` and `:vault`, i.e. a
+  `Samen.Pii.Info.Field`) all bound to `subject_id`? ONE query for all tokens.
+
+  A token is bound when its vault row's `subject_id` equals `subject_id` (the record's primary
+  key), its `vault_name` equals the field's vault and its `field_name` equals the field's
+  logical name: exactly what `store_fields/4` wrote. Returns `:ok` or
+  `{:error, [{field_name, :not_found | :foreign_subject | :field_mismatch}]}`; the failures never
+  carry a token. Used by `Samen.Vault.Change` for every `%Masked{}` a write sets that differs
+  from the stored value.
+  """
+  @spec check_bindings([{map(), String.t()}], String.t(), Ecto.Repo.t()) ::
+          :ok | {:error, [{atom(), :not_found | :foreign_subject | :field_mismatch}]}
+  def check_bindings([], _subject_id, _repo), do: :ok
+
+  def check_bindings(pairs, subject_id, repo) when is_list(pairs) do
+    tokens = pairs |> Enum.map(fn {_field, token} -> token end) |> Enum.filter(&is_binary/1) |> Enum.uniq()
+
+    rows =
+      case tokens do
+        [] -> %{}
+        _ -> repo.all(from(r in VaultRow, where: r.token in ^tokens)) |> Map.new(&{&1.token, &1})
+      end
+
+    failures =
+      for {field, token} <- pairs,
+          reason = binding_failure(Map.get(rows, token), subject_id, field),
+          reason != nil,
+          do: {field.name, reason}
+
+    if failures == [], do: :ok, else: {:error, failures}
+  end
+
+  # nil = bound. Order matters: a missing row, then another subject's, then the right subject
+  # but another vault/field.
+  defp binding_failure(nil, _subject_id, _field), do: :not_found
+
+  defp binding_failure(%VaultRow{subject_id: subject}, subject_id, _field) when subject != subject_id,
+    do: :foreign_subject
+
+  defp binding_failure(%VaultRow{vault_name: vault, field_name: name}, _subject_id, field) do
+    if vault == to_string(field.vault) and name == to_string(field.name), do: nil, else: :field_mismatch
+  end
+
+  @doc """
   Read the vault rows of `tokens` in ONE query (ADR-052 §2.4.1 — no N+1 on a list or a replay
   frame): `%{token => %VaultRow{} | nil}`, a key for EVERY requested token (`nil` = no row).
   Ciphertext only — nothing is decrypted here. Pass the map to `reveal/3` as `prefetched:`;

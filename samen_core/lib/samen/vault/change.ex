@@ -47,10 +47,10 @@ defmodule Samen.Vault.Change do
   def change(changeset, _opts, _context) do
     fields = Info.fields(changeset.resource)
 
-    if fields == [] do
-      changeset
-    else
-      Ash.Changeset.before_action(changeset, fn cs -> route_fields(cs, fields) end)
+    cond do
+      fields == [] -> changeset
+      upsert?(changeset) -> refuse_upsert(changeset)
+      true -> Ash.Changeset.before_action(changeset, fn cs -> route_fields(cs, fields) end)
     end
   end
 
@@ -61,26 +61,99 @@ defmodule Samen.Vault.Change do
     repo = repo!(changeset)
     subject_id = resolve_subject_id(changeset)
 
-    # Collect the (field, plaintext) pairs the caller actually set to a non-token
-    # plaintext value. A %Masked{} means "already vaulted, leave it" (any other string, a
-    # "vt_"-prefixed one included, is plaintext and is encrypted).
-    to_vault =
-      fields
-      |> Enum.flat_map(fn field ->
+    # Collect the (field, plaintext) pairs the caller actually set to a plaintext value. A
+    # %Masked{} means "already vaulted": it is not encrypted again, but it IS bound below.
+    # Every other value, a "vt_"-prefixed string included, is plaintext.
+    {to_vault, masked} =
+      Enum.reduce(fields, {[], []}, fn field, {plain, masked} ->
         case fetch_plaintext(changeset, field.name) do
-          {:set, %Masked{}} -> []
-          {:set, nil} -> []
-          {:set, plaintext} -> [{field, plaintext}]
-          :unset -> []
+          {:set, %Masked{token: token}} ->
+            if token == current_token(changeset, field),
+              do: {plain, masked},
+              else: {plain, [{field, token} | masked]}
+
+          {:set, nil} ->
+            {plain, masked}
+
+          {:set, plaintext} ->
+            {[{field, plaintext} | plain], masked}
+
+          :unset ->
+            {plain, masked}
         end
       end)
 
-    if to_vault == [] do
-      changeset
-    else
-      changeset = ensure_subject_attr(changeset, subject_id)
-      do_vault(changeset, subject_id, to_vault, repo)
+    case bind_masked(Enum.reverse(masked), subject_id, repo) do
+      :ok ->
+        case Enum.reverse(to_vault) do
+          [] ->
+            changeset
+
+          to_vault ->
+            changeset = ensure_subject_attr(changeset, subject_id)
+            do_vault(changeset, subject_id, to_vault, repo)
+        end
+
+      {:error, failures} ->
+        reject_unbound(changeset, failures)
     end
+  end
+
+  # The token this record already holds for `field` (an untouched round-trip of its own value
+  # needs no check and no query). A create has none.
+  defp current_token(changeset, field) do
+    case Map.get(changeset.data || %{}, field.name) do
+      %Masked{token: token} -> token
+      _ -> nil
+    end
+  end
+
+  # ONE batched lookup for every changed %Masked{} of this changeset: the token's vault row must
+  # belong to THIS record (subject = its primary key), this vault and this field. On a create
+  # without an explicit primary key the subject is a fresh UUID, so no existing token can be
+  # bound: a new record cannot own a token it did not mint. Id-preserving moves pass the PK.
+  defp bind_masked([], _subject_id, _repo), do: :ok
+  defp bind_masked(pairs, subject_id, repo), do: Samen.Vault.check_bindings(pairs, subject_id, repo)
+
+  defp reject_unbound(changeset, failures) do
+    scope = %{org_id: org_of(changeset)}
+
+    failures
+    |> Enum.map(fn {_field, reason} -> reason end)
+    |> Enum.uniq()
+    |> Enum.each(&Samen.Observability.Failure.report_write(:vault_token_unbound, scope, &1))
+
+    Enum.reduce(failures, changeset, fn {field_name, reason}, cs ->
+      Ash.Changeset.add_error(cs,
+        field: field_name,
+        message:
+          "vault token not bound to this record (#{reason}): a token can only be re-set on the " <>
+            "record, vault and field it was minted for; set the plaintext instead"
+      )
+    end)
+  end
+
+  defp org_of(changeset) do
+    Map.get(changeset.attributes || %{}, :org_id) || Map.get(changeset.data || %{}, :org_id)
+  end
+
+  # An upsert-create would mint under a generated UUID rather than the existing row's primary
+  # key, so a later token check/reveal would be bound to the wrong subject. Until upsert subject
+  # resolution is designed, a PII resource refuses it (fail closed). Checked at BUILD time
+  # (`change/3`): inside the action Ash sets `context.private.upsert?` on EVERY create, so only
+  # the build-time flag (an upsert action, or `for_create(…, upsert?: true)`) is meaningful.
+  defp upsert?(changeset) do
+    changeset.action_type == :create and
+      (changeset.action.upsert? == true or get_in(changeset.context, [:private, :upsert?]) == true)
+  end
+
+  defp refuse_upsert(changeset) do
+    Ash.Changeset.add_error(changeset,
+      field: :vault,
+      message:
+        "upsert is not supported on a resource with vault-routed PII: the vault subject is the " <>
+          "record's primary key, which an upsert cannot know before the write"
+    )
   end
 
   defp do_vault(changeset, subject_id, to_vault, repo) do

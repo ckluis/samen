@@ -19,14 +19,16 @@ index a657cf08..f48aa033 100644
  
    # ---------------------------------------------------------------------------
 diff --git a/samen_core/lib/samen/vault/change.ex b/samen_core/lib/samen/vault/change.ex
-index 7f5989fa..1517e100 100644
+index bbf70a8e..85767dde 100644
 --- a/samen_core/lib/samen/vault/change.ex
 +++ b/samen_core/lib/samen/vault/change.ex
-@@ -69,6 +69,7 @@ defmodule Samen.Vault.Change do
-       |> Enum.flat_map(fn field ->
-         case fetch_plaintext(changeset, field.name) do
-           {:set, %Masked{}} -> []
-+          {:set, "vt_" <> _} -> []
-           {:set, nil} -> []
-           {:set, plaintext} -> [{field, plaintext}]
-           :unset -> []
+@@ -75,6 +75,9 @@ defmodule Samen.Vault.Change do
+           {:set, nil} ->
+             {plain, masked}
+ 
++          {:set, "vt_" <> _} ->
++            {plain, masked}
++
+           {:set, plaintext} ->
+             {[{field, plaintext} | plain], masked}
+ 

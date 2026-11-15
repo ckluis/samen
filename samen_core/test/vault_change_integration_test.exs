@@ -208,4 +208,228 @@ defmodule Samen.VaultChangeIntegrationTest do
       assert mrn_after == mrn_before
     end
   end
+
+  # ===========================================================================
+  # Token binding (evaluation 2026-11-13, T-W4): a %Masked{} set on a record is bound to
+  # THAT record's subject (its primary key), vault and field, or the write is refused.
+  # ===========================================================================
+  describe "T-W4 binding at the chokepoint" do
+    @prefix SamenCore.TestRepo.config()[:telemetry_prefix] || [:samen_core, :test_repo]
+
+    defp patient_in(org_id, mrn \\ "MRN-#{System.unique_integer([:positive])}") do
+      Patient
+      |> Ash.Changeset.for_create(:create, %{
+        org_id: org_id,
+        full_name: %{first: "Grace", last: "Hopper"},
+        mrn: mrn,
+        dob: ~D[1906-12-09]
+      })
+      |> Ash.create!()
+    end
+
+    # PII fields are not selected by default: select them so the record carries its own %Masked{} values.
+    defp reload!(p) do
+      Patient
+      |> Ash.Query.filter(id == ^p.id)
+      |> Ash.Query.ensure_selected([:full_name, :mrn, :dob])
+      |> Ash.read_one!()
+    end
+
+    defp raw(p, col) do
+      %{rows: [[v]]} =
+        @repo.query!("SELECT #{col} FROM pat_patient WHERE pat_id = $1", [Ecto.UUID.dump!(p.id)])
+
+      v
+    end
+
+    defp vault_rows, do: @repo.query!("SELECT count(*) FROM pii_vault", []).rows |> hd() |> hd()
+
+    # Run `fun`, returning {result, [sql]} of every repo query it issued.
+    defp queries(fun) do
+      ref = make_ref()
+      parent = self()
+      id = {__MODULE__, ref}
+
+      :telemetry.attach(id, @prefix ++ [:query], fn _e, _m, meta, _ -> send(parent, {ref, meta.query}) end, nil)
+
+      try do
+        result = fun.()
+        {result, drain(ref, [])}
+      after
+        :telemetry.detach(id)
+      end
+    end
+
+    defp drain(ref, acc) do
+      receive do
+        {^ref, q} -> drain(ref, [q | acc])
+      after
+        0 -> Enum.reverse(acc)
+      end
+    end
+
+    defp vault_queries(qs), do: Enum.filter(qs, &(&1 =~ "pii_vault"))
+
+    defp set_mrn(p, value) do
+      p |> Ash.Changeset.for_update(:update, %{mrn: value}) |> Ash.update()
+    end
+
+    defp error_text(%Ash.Error.Invalid{} = e), do: Exception.message(e)
+
+    test "a %Masked{} copied from A into B (same org) is refused, B unchanged, no new vault rows, no token in the error" do
+      org = Ash.UUID.generate()
+      a = patient_in(org)
+      b = patient_in(org)
+      a_masked = reload!(a).mrn
+      b_before = raw(b, "pii_pat_mrn")
+      rows_before = vault_rows()
+
+      assert {:error, %Ash.Error.Invalid{} = err} = set_mrn(reload!(b), a_masked)
+
+      text = error_text(err)
+      assert text =~ "mrn"
+      assert text =~ "not bound to this record"
+      assert text =~ "foreign_subject"
+      refute text =~ a_masked.token
+      refute inspect(err) =~ a_masked.token
+
+      assert raw(b, "pii_pat_mrn") == b_before
+      assert vault_rows() == rows_before
+      # the victim is intact and still reveals
+      assert {:ok, _} = Vault.reveal(reload!(a).mrn, @repo)
+    end
+
+    test "a %Masked{} copied from A into B in ANOTHER org is refused too" do
+      a = patient_in(Ash.UUID.generate())
+      b = patient_in(Ash.UUID.generate())
+      a_masked = reload!(a).mrn
+      b_before = raw(b, "pii_pat_mrn")
+
+      assert {:error, %Ash.Error.Invalid{}} = set_mrn(reload!(b), a_masked)
+      assert raw(b, "pii_pat_mrn") == b_before
+    end
+
+    test "a field swap within the SAME record is refused: dob's token set as the mrn" do
+      a = reload!(patient_in(Ash.UUID.generate()))
+      dob_token = a.dob.token
+
+      assert {:error, %Ash.Error.Invalid{} = err} = set_mrn(a, Masked.new(dob_token, :mrn))
+      assert error_text(err) =~ "field_mismatch"
+      refute error_text(err) =~ dob_token
+    end
+
+    test "a token with no vault row is refused (not_found)" do
+      a = reload!(patient_in(Ash.UUID.generate()))
+
+      assert {:error, %Ash.Error.Invalid{} = err} =
+               set_mrn(a, Masked.new(Vault.generate_token(), :mrn))
+
+      assert error_text(err) =~ "not_found"
+    end
+
+    test "the refusal is reported once per reason with the reason only (no token) in the telemetry" do
+      org = Ash.UUID.generate()
+      a = patient_in(org)
+      b = patient_in(org)
+      a_masked = reload!(a).mrn
+      test_pid = self()
+      id = {__MODULE__, :unbound}
+
+      :telemetry.attach(
+        id,
+        [:samen, :core, :write, :error],
+        fn _e, _m, meta, _ -> send(test_pid, {:failure, meta}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(id) end)
+
+      assert {:error, _} = set_mrn(reload!(b), a_masked)
+      assert_receive {:failure, %{write: :vault_token_unbound, cause: "foreign_subject"} = meta}
+      refute inspect(meta) =~ "vt_"
+      refute_receive {:failure, %{write: :vault_token_unbound}}, 50
+    end
+
+    test "CONTROL: re-setting the record's OWN %Masked{} succeeds and costs ZERO vault queries" do
+      a = reload!(patient_in(Ash.UUID.generate()))
+      before = raw(a, "pii_pat_mrn")
+
+      {result, qs} =
+        queries(fn ->
+          a
+          |> Ash.Changeset.for_update(:update, %{
+            # the shape a form re-submit produces: the same token under the field's own label, which
+            # is NOT equal to the stored `:vault`-labelled struct, so Ash records it as a change
+            mrn: Masked.new(a.mrn.token, :mrn),
+            dob: Masked.new(a.dob.token, :dob),
+            consent_on_file: true
+          })
+          |> Ash.update()
+        end)
+
+      assert {:ok, _} = result
+      assert raw(a, "pii_pat_mrn") == before
+      assert vault_queries(qs) == [], "an untouched round-trip must not query pii_vault, got: #{inspect(qs)}"
+    end
+
+    test "CONTROL (counter works): a CHANGED %Masked{} costs exactly ONE batched vault query for all its fields" do
+      org = Ash.UUID.generate()
+      a = patient_in(org)
+      b = reload!(patient_in(org))
+      a = reload!(a)
+
+      {result, qs} =
+        queries(fn ->
+          b
+          |> Ash.Changeset.for_update(:update, %{mrn: a.mrn, dob: a.dob})
+          |> Ash.update()
+        end)
+
+      assert {:error, %Ash.Error.Invalid{} = err} = result
+      assert error_text(err) =~ "mrn" and error_text(err) =~ "dob"
+      assert length(vault_queries(qs)) == 1, inspect(vault_queries(qs))
+    end
+
+    test "CONTROL: after the plaintext is re-set, the new token is the record's own and re-sets cleanly" do
+      a = patient_in(Ash.UUID.generate())
+      {:ok, updated} = set_mrn(reload!(a), "MRN-REPLACED")
+      assert {:ok, _} = set_mrn(reload!(updated), reload!(updated).mrn)
+      assert {:ok, "MRN-REPLACED"} = Vault.reveal(reload!(a).mrn, @repo)
+    end
+
+    test "create WITHOUT a primary key can never carry a %Masked{}; WITH the matching explicit PK it can" do
+      org = Ash.UUID.generate()
+      victim = reload!(patient_in(org))
+
+      assert {:error, %Ash.Error.Invalid{} = err} =
+               Patient
+               |> Ash.Changeset.for_create(:create, %{org_id: org, mrn: victim.mrn})
+               |> Ash.create()
+
+      assert error_text(err) =~ "foreign_subject"
+
+      # an id-preserving move: the token is minted under the PK the new row will carry
+      pk = Ash.UUID.generate()
+      {:ok, token} = Vault.store_field(pk, :pii_mrn, :mrn, "MRN-MOVED", @repo)
+
+      assert {:ok, moved} =
+               Patient
+               |> Ash.Changeset.for_create(:create, %{org_id: org, mrn: Masked.new(token, :mrn)})
+               |> Ash.Changeset.force_change_attribute(:id, pk)
+               |> Ash.create()
+
+      assert moved.id == pk
+      assert raw(moved, "pii_pat_mrn") == token
+      assert {:ok, "MRN-MOVED"} = Vault.reveal(reload!(moved).mrn, @repo)
+    end
+
+    test "an upsert-create on a PII resource is refused" do
+      assert {:error, %Ash.Error.Invalid{} = err} =
+               Patient
+               |> Ash.Changeset.for_create(:create, %{org_id: Ash.UUID.generate(), mrn: "MRN-UPSERT"}, upsert?: true)
+               |> Ash.create()
+
+      assert error_text(err) =~ "upsert"
+    end
+  end
 end
