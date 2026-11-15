@@ -61,7 +61,7 @@ defmodule Samen.Vault do
   alias Samen.Kms
   alias Samen.Kms.Crypto
   alias Samen.Masked
-  alias Samen.Vault.VaultRow
+  alias Samen.Vault.{DekMemo, VaultRow}
 
   import Ecto.Query, only: [from: 2]
 
@@ -206,15 +206,23 @@ defmodule Samen.Vault do
           {:ok, binary()}
           | {:error, :subject_mismatch | :shredded | :unavailable | :not_found | term}
   def reveal(%Masked{token: token}, repo, opts \\ []) do
-    reveal_token(token, repo, Keyword.get(opts, :subject_id), Keyword.get(opts, :prefetched))
+    reveal_token(
+      token,
+      repo,
+      Keyword.get(opts, :subject_id),
+      Keyword.get(opts, :prefetched),
+      Keyword.get(opts, :deks)
+    )
   end
 
   @doc """
   Read the vault rows of `tokens` in ONE query (ADR-052 §2.4.1 — no N+1 on a list or a replay
   frame): `%{token => %VaultRow{} | nil}`, a key for EVERY requested token (`nil` = no row).
   Ciphertext only — nothing is decrypted here. Pass the map to `reveal/3` as `prefetched:`;
-  the decrypt (and its KMS unwrap, subject bind and shred check) still happens per value, in
-  `reveal/3`. Nothing is cached: the caller holds the map for one resolve call.
+  the decrypt, subject bind and shred check still happen per value, in `reveal/3`. Nothing is
+  cached across calls: the caller holds the map for one resolve call.
+
+  See `unwrap_subjects/1` for the per-call DEK reuse that rides on these rows.
   """
   @spec prefetch_rows([String.t()], Ecto.Repo.t()) :: %{String.t() => struct() | nil}
   def prefetch_rows(tokens, repo) when is_list(tokens) do
@@ -229,14 +237,59 @@ defmodule Samen.Vault do
     Map.new(tokens, &{&1, Map.get(found, &1)})
   end
 
-  defp reveal_token(token, repo, asserted_subject_id \\ nil, prefetched \\ nil) do
+  @doc """
+  Unwrap each DISTINCT subject of `rows` (a `prefetch_rows/2` map) ONCE: a `Samen.Vault.DekMemo`
+  for one resolve call — one KMS unwrap per subject instead of per value (evaluation ARCH-2).
+  Pass it to `reveal/3` as `deks:`.
+
+  The memo is a value, not a cache: it lives in the caller's local `opts` for that one call and
+  is unreachable after it (no process dictionary, ETS, `persistent_term` or TTL — a cross-call
+  cache needs a shred-epoch invalidation design of its own). Only rows the caller already chose
+  to decrypt should be passed, so a value the plane denies never triggers an unwrap. A failed
+  unwrap is held as that subject's `{:error, _}` (denying only its values), never as a key.
+  Entries are keyed `{adapter, subject_id}`; `reveal/3` takes a memoised DEK only for the
+  subject of the row it is decrypting, under the adapter now configured. Subject binding,
+  shred checks and the audit/breadth ledger stay per value in `reveal/3`.
+  """
+  @spec unwrap_subjects(%{String.t() => struct() | nil}) :: DekMemo.t()
+  def unwrap_subjects(rows) when is_map(rows) do
+    adapter = Kms.adapter()
+
+    # DISTINCT subjects first: the comprehension's `uniq` dedups results, not the unwrap calls.
+    subjects =
+      rows
+      |> Enum.flat_map(fn
+        {_token, %VaultRow{subject_id: subject_id}} when is_binary(subject_id) -> [subject_id]
+        _ -> []
+      end)
+      |> Enum.uniq()
+
+    entries = Map.new(subjects, &{{adapter, &1}, adapter.unwrap(&1)})
+
+    DekMemo.new(entries)
+  end
+
+  # The subject's DEK: the call's memo when it holds THIS subject under the CURRENT adapter,
+  # else a live unwrap (today's behaviour).
+  defp unwrap_dek(subject_id, %DekMemo{} = memo) do
+    adapter = Kms.adapter()
+
+    case DekMemo.fetch(memo, adapter, subject_id) do
+      {:ok, result} -> result
+      :error -> adapter.unwrap(subject_id)
+    end
+  end
+
+  defp unwrap_dek(subject_id, _no_memo), do: Kms.adapter().unwrap(subject_id)
+
+  defp reveal_token(token, repo, asserted_subject_id, prefetched, deks) do
     case fetch_row(token, repo, prefetched) do
       nil ->
         {:error, :not_found}
 
       %VaultRow{subject_id: subject_id, ciphertext: ciphertext} ->
         with :ok <- bind_subject(asserted_subject_id, subject_id),
-             {:ok, dek} <- Kms.adapter().unwrap(subject_id) do
+             {:ok, dek} <- unwrap_dek(subject_id, deks) do
           do_decrypt(dek, ciphertext)
         end
     end
@@ -348,7 +401,7 @@ defmodule Samen.Vault do
        has no key column). We assert there is no `wrapped_dek`-shaped column on
        `pii_vault` (fail closed if the schema ever grew one).
     2. Reveal against THIS repo's ciphertext denies (the key is not resurrectable
-       from the snapshot) — the same `reveal_token/2` path, which routes through
+       from the snapshot) — the same `reveal_token/5` path, which routes through
        the external KMS adapter and returns `:shredded`/`:absent`/`:unavailable`
        post-shred.
 
@@ -398,7 +451,7 @@ defmodule Samen.Vault do
 
   # :decryptable | :clean | {:failed, reason}
   defp probe_token(token, repo) do
-    case reveal_token(token, repo) do
+    case reveal_token(token, repo, nil, nil, nil) do
       {:ok, _plaintext} ->
         :decryptable
 

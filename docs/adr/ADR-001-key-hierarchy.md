@@ -172,6 +172,26 @@ From §limits break-glass bullet, made concrete:
 - **No plaintext-key cache on disk or in Postgres.** The only permitted cache is a **short-TTL in-memory (BEAM) unwrapped-DEK cache** to amortize KMS `Decrypt` calls under load. It is process-memory only, TTL-bounded (order seconds–minutes), evicted on shred signal, and **never persisted** — so it neither survives a shred nor lands in a backup. (A shred must also invalidate any live cache entry for that subject; the shred path publishes an eviction over PubSub to all nodes.)
 - **Break-glass, reconciled with this decision (§limits):** the *ciphertext* is the row's own data → local and available even if the central audit DB is down; but a reveal **still has to decrypt**, and the key lives in the external store. So break-glass survives the *control-plane* being down (audit anchoring goes deferred to the operator node's fsync'd hash chain, reconciled on reconnect) — but it **does not manufacture plaintext when the KMS/key-store itself is unreachable.** "Decryptability depends on KMS reachability by the same design that makes key-shred final, and there is no degraded path that bypasses it."
 
+### 6.1 · Addendum 2026-11-14 — one unwrap per subject per resolve call (evaluation ARCH-2)
+
+`Samen.Vault.reveal/3` used to unwrap per vaulted VALUE: a 50-row x 3-field page was about 150 `Decrypt` calls against a
+network KMS. Within ONE `Samen.Api.PiiResolution.resolve/4` call the vault now unwraps each SUBJECT at most once.
+
+- **Scope.** `Samen.Vault.unwrap_subjects/1` builds a `Samen.Vault.DekMemo` from the rows the call has already chosen to
+  decrypt (`prefetch/4` admits only values the plane will decrypt, so a denied field never unwraps). The memo rides in
+  that call's local `opts` as `deks:` and is unreachable when the call returns. It is a value, not a cache: no process
+  dictionary, no ETS, no `persistent_term`, no TTL.
+- **Key.** `{adapter, subject_id}` — everything `Samen.Kms.unwrap/1` depends on (org, wrapped DEK and master-key
+  version sit behind the adapter, addressed by subject id alone). `reveal/3` takes a memoised DEK only for the subject
+  of the row it is decrypting and only under the adapter now configured.
+- **Unchanged.** Authorisation, the subject bind, the per-value shred check and the audit/breadth ledger are all still
+  per value. A failed unwrap is held as that subject's `{:error, _}` for the call: it denies only that subject's values,
+  is never a key, and costs one failed unwrap rather than one per value. The behaviour gained no callback.
+- **No cross-request cache, deliberately.** The TTL cache above remains unbuilt. Reuse across calls is the only way
+  a shredded subject could be served after the shred, so it needs a shred-epoch invalidation design (a shred
+  must evict on every node before it is acknowledged) and its own ADR. Within a call the window between the unwrap and
+  the last decrypt is one request, and every later call unwraps afresh, so crypto-shred stays immediate.
+
 ---
 
 ## 7 · What a PITR restore of the app-Postgres can and cannot resurrect (summary table)
