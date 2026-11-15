@@ -5,11 +5,11 @@
 # TEST_FILES: test/audit_chain_branches_test.exs
 # MUST_FAIL: verified / no anchor / diverged / truncated
 diff --git a/samen_core/lib/samen/audit_chain.ex b/samen_core/lib/samen/audit_chain.ex
-index 24dd959e..5dbb71b4 100644
+index 03ff8d2..b0a1b99 100644
 --- a/samen_core/lib/samen/audit_chain.ex
 +++ b/samen_core/lib/samen/audit_chain.ex
-@@ -654,7 +654,7 @@ defmodule Samen.AuditChain do
-           r.one(from(e in Entry, where: e.org_id == ^org_id, select: max(e.seq)))
+@@ -653,7 +653,7 @@ defmodule Samen.AuditChain do
+           )
  
          cond do
 -          is_nil(live_at_seq) or is_nil(head_seq) or head_seq < sealed_seq ->
