@@ -14,7 +14,7 @@
 #                             toplevel it would act on, after any -C) lies INSIDE <T>; `git init` only when its target
 #                             directory does. Read-only subcommands on <ROOT> stay allowed (cat-file, show, ...).
 #                             Anything else is refused (rc 97), reported, and recorded so fixture_finish fails the run.
-#                             It also records <ROOT>'s HEAD, branch, origin/main and `status --porcelain`.
+#                             It also records <ROOT>'s HEAD, branch, origin/main and the staged index diff.
 #   fixture_finish            call FIRST in the EXIT trap: fails the run if the guard refused anything, or if <ROOT>'s
 #                             recorded state changed (it reports, never repairs).
 #   fixture_cd <dir>          `cd` that is fatal: a fixture directory that cannot be entered aborts the subshell.
@@ -36,13 +36,19 @@ fixture_cd() { cd "$1" || { echo "$FG_TAG: cannot enter fixture directory '$1'" 
 
 _fg_real() { command git "$@"; }
 
-_fg_state() { # _fg_state <repo> -> HEAD | branch | origin/main | sha of status --porcelain
+# What the snapshot covers is what an escaped fixture builder does to a repository: it commits (HEAD), switches or
+# creates a branch, moves refs/remotes/origin/main, or stages files (the index). The WORKING TREE is deliberately
+# not part of it: other gate steps run beside the self-test and legitimately write there, and so does Python
+# (`scripts/__pycache__/` on a fresh clone failed this check on Actions without anything having escaped). Stray
+# working-tree writes are prevented at the source instead (fatal `cd`, `set -e`, the shadowed git) and proven by
+# the ESCAPE case against a throwaway outer repo, where the whole status IS compared.
+_fg_state() { # _fg_state <repo> -> HEAD | branch | origin/main | sha of the staged index diff
   local r="$1" h b o s
   h="$(_fg_real -C "$r" rev-parse -q --verify HEAD 2>/dev/null || echo none)"
   b="$(_fg_real -C "$r" symbolic-ref -q HEAD 2>/dev/null || echo detached)"
   o="$(_fg_real -C "$r" rev-parse -q --verify refs/remotes/origin/main 2>/dev/null || echo none)"
-  s="$(_fg_real -C "$r" status --porcelain 2>/dev/null | cksum)"
-  printf 'HEAD=%s\nbranch=%s\norigin/main=%s\nstatus=%s\n' "$h" "$b" "$o" "$s"
+  s="$(_fg_real -C "$r" diff --cached --raw --no-renames 2>/dev/null | cksum)"
+  printf 'HEAD=%s\nbranch=%s\norigin/main=%s\nstaged=%s\n' "$h" "$b" "$o" "$s"
 }
 
 fixture_arm() {
@@ -50,7 +56,7 @@ fixture_arm() {
   FG_T="$(cd "$1" && pwd -P)"; FG_ROOT="$(cd "$2" && pwd -P)"; FG_TAG="${3:-fixture}"; FG_TRIP="$FG_T/.fixture_guard_tripped"
   unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_NAMESPACE GIT_CEILING_DIRECTORIES
   FG_SNAP="$(_fg_state "$FG_ROOT")"
-  FG_STATUS_BEFORE="$(_fg_real -C "$FG_ROOT" status --porcelain 2>/dev/null)"
+  FG_STATUS_BEFORE="$(_fg_real -C "$FG_ROOT" diff --cached --name-status --no-renames 2>/dev/null)"
 }
 
 _fg_deny() { # _fg_deny <why>
@@ -106,7 +112,7 @@ fixture_finish() { # -> rc 0 clean, 1 if the guard tripped or the real repo move
   if [[ "$now" != "$FG_SNAP" ]]; then
     echo "$FG_TAG: SELF-TEST ESCAPED INTO THE REAL REPO ($FG_ROOT) — it changed while the self-test ran:" >&2
     diff <(printf '%s\n' "$FG_SNAP") <(printf '%s\n' "$now") | sed -n 's/^< /  was: /p;s/^> /  now: /p' >&2
-    diff <(printf '%s\n' "$FG_STATUS_BEFORE") <(_fg_real -C "$FG_ROOT" status --porcelain 2>/dev/null) | sed -n 's/^< /  status gone: /p;s/^> /  status new:  /p' >&2
+    diff <(printf '%s\n' "$FG_STATUS_BEFORE") <(_fg_real -C "$FG_ROOT" diff --cached --name-status --no-renames 2>/dev/null) | sed -n 's/^< /  staged gone: /p;s/^> /  staged new:  /p' >&2
     echo "$FG_TAG: nothing was repaired — inspect 'git -C $FG_ROOT log -3', 'git -C $FG_ROOT reflog -5' and refs/remotes/origin/main" >&2
     rc=1
   fi

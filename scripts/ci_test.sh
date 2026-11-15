@@ -1979,6 +1979,24 @@ rm -rf "\$T"
 SH
   ( cd "$O" && TMPDIR="$TMP_OK" bash "$T/esc.e.sh" > "$T/esc.e" 2>&1 )
   has "$T/esc.e" '^finish_rc=0$' "ESCAPE: positive control — a dirty tree that was dirty at the start is not reported"
+  # (f) the exit check covers refs and the index, not the working tree: a file a NEIGHBOUR writes while the
+  # self-test runs (another gate step, Python's scripts/__pycache__/ on a fresh clone — this failed on Actions)
+  # is not an escape; a file STAGED meanwhile is (that is the first half of what the escaped builder did)
+  cat > "$T/esc.f.sh" <<SH
+set -u
+source '$O/scripts/fixture_guard.sh'
+T="\$(fixture_mktemp esc_f)" || exit 1; fixture_arm "\$T" '$O' ci_test
+mkdir -p '$O/scripts/__pycache__' && echo bytecode > '$O/scripts/__pycache__/counts.cpython-312.pyc'
+echo neighbour >> '$O/samen_core/mix.exs'
+fixture_finish; echo "worktree_finish_rc=\$?"
+command git -C '$O' add scripts/__pycache__
+fixture_finish; echo "staged_finish_rc=\$?"
+rm -rf "\$T"
+SH
+  ( cd "$O" && TMPDIR="$TMP_OK" bash "$T/esc.f.sh" > "$T/esc.f" 2>&1 )
+  has "$T/esc.f" '^worktree_finish_rc=0$' "ESCAPE: a working-tree file written by a neighbour during the run is not reported"
+  has "$T/esc.f" '^staged_finish_rc=1$' "ESCAPE: ... but a file staged during the run is"
+  has "$T/esc.f" 'staged new: .*scripts/__pycache__' "ESCAPE: ... naming the staged path"
 }
 
 ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS LOCALPATHS GENPROBE NARROW RECHUNK COSTW TIMEOUT SELTMO GENDEPS ESCAPE)
