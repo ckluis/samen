@@ -365,7 +365,7 @@ name a file that never left a laptop by what it is, not where it was. Placeholde
   `scripts/ci actions plan pr --selection --base <PR base>` (it needs the toolchain: `mutate.sh --list` runs the
   mutation engine): it asks each such step's own lister how many items this diff selects and sets
   `timeout = min(360, max(history value, 5 * ceil(2 * selected * shard_each_s / 60 / 5)))` — twice the lane-seconds at
-  the manifest's conservative per-item rate (`shard_each_s`: 32 s per sabotage patch, 6 s per mutant), never below the
+  the manifest's conservative per-item rate (`shard_each_s`: 32 s per sabotage patch, 20 s per mutant for `mutation_changed`), never below the
   history value, never over GitHub's ceiling. A lister that fails or has no count line REFUSES the plan. Without
   `--selection` (a local `actions plan`) the history value alone applies. Not distinguished: guard vs ordinary
   patches (one rate; the 2x margin and the cap carry it).
