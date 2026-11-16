@@ -233,6 +233,55 @@ defmodule Samen.PiiResolutionTokenBindingTest do
       refute log =~ "vt_"
     end
 
+    test "S2: the cap is per reason, and what it cuts is reported (a flood of one reason never hides another)" do
+      # 22 holders with a planted FOREIGN subject token (over the cap of 20) plus ONE field mismatch.
+      v = owner!("victim")
+      foreign = for i <- 1..22, do: planted(owner!("f#{i}"), v)
+      h = owner!("mm")
+      mismatch = %{record(h) | full_name: Masked.new(elem(h.vals.emails, 0), :full_name)}
+
+      test_pid = self()
+      id = {__MODULE__, :cap}
+      :telemetry.attach(id, [:samen, :core, :read, :error], fn _e, m, meta, _ -> send(test_pid, {:failure, m, meta}) end, nil)
+      on_exit(fn -> :telemetry.detach(id) end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          PiiResolution.resolve(foreign ++ [mismatch], Person, %{plane: :tenant, org_id: Ash.UUID.generate()}, repo: @repo)
+        end)
+
+      # The only field_mismatch survives behind 22 foreign_subject reports.
+      assert_receive {:failure, _, %{read: :vault_token_unbound, cause: "field_mismatch"}}
+      assert log =~ "field=full_name record=#{h.id}"
+
+      for _ <- 1..20, do: assert_receive({:failure, _, %{read: :vault_token_unbound, cause: "foreign_subject"}})
+      refute_receive {:failure, _, %{read: :vault_token_unbound}}, 50
+
+      # The cut is reported: one value-free line + event per reason with the suppressed count.
+      assert_receive {:failure, %{count: 2}, %{read: :vault_token_unbound_truncated, cause: "foreign_subject"}}
+      assert log =~ "read=vault_token_unbound_truncated resource=#{inspect(Person)} cause=foreign_subject suppressed=2 cap=20"
+      refute_receive {:failure, _, %{read: :vault_token_unbound_truncated}}, 50
+      refute log =~ "cause=field_mismatch suppressed"
+      refute log =~ "vt_"
+      refute log =~ elem(v.vals.full_name, 0)
+    end
+
+    test "CONTROL: exactly the cap (20) of one reason is all reported and nothing is truncated" do
+      v = owner!("victim")
+      foreign = for i <- 1..20, do: planted(owner!("c#{i}"), v)
+      test_pid = self()
+      id = {__MODULE__, :cap_ctl}
+      :telemetry.attach(id, [:samen, :core, :read, :error], fn _e, m, meta, _ -> send(test_pid, {:failure, m, meta}) end, nil)
+      on_exit(fn -> :telemetry.detach(id) end)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        PiiResolution.resolve(foreign, Person, %{plane: :tenant, org_id: Ash.UUID.generate()}, repo: @repo)
+      end)
+
+      for _ <- 1..20, do: assert_receive({:failure, _, %{read: :vault_token_unbound, cause: "foreign_subject"}})
+      refute_receive {:failure, _, %{read: :vault_token_unbound_truncated}}, 50
+    end
+
     test "a non-UUID record id and a hostile field are never put in the log line verbatim" do
       log =
         ExUnit.CaptureLog.capture_log(fn ->

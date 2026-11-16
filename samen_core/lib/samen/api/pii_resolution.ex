@@ -49,6 +49,8 @@ defmodule Samen.Api.PiiResolution do
 
   use Ash.Resource.Preparation
 
+  require Logger
+
   alias Samen.Masked
   alias Samen.Pii.Info
   alias Samen.Reveal
@@ -468,9 +470,11 @@ defmodule Samen.Api.PiiResolution do
     to_string(Map.get(record, pk))
   end
 
-  # One report per distinct {reason, record, field} per call (at most @max_unbound_reports), so an operator
-  # can find the row without running the verifier: the log line carries resource, field and record id
-  # (the record's primary key, i.e. its vault subject). Never a token, never a value.
+  # One report per distinct {reason, record, field} per call, at most @max_unbound_reports PER REASON (a cap
+  # across reasons let 20 `foreign_subject` hide the only `field_mismatch`), so an operator can find the row
+  # without running the verifier: the log line carries resource, field and record id (the record's primary key,
+  # i.e. its vault subject). Never a token, never a value. Anything cut by the cap is itself reported, once per
+  # reason: a `vault_token_unbound_truncated` log line and telemetry event whose count is the suppressed number.
   @max_unbound_reports 20
 
   defp report_unbound(rows, decrypting, actor, resource) do
@@ -482,12 +486,33 @@ defmodule Samen.Api.PiiResolution do
       end
     end)
     |> Enum.uniq()
-    |> Enum.take(@max_unbound_reports)
-    |> Enum.each(fn {reason, record_id, field} ->
-      Samen.Observability.Failure.report(:read, :vault_token_unbound, actor, reason,
-        locate: [resource: resource, field: field, record: record_id]
-      )
+    |> Enum.group_by(fn {reason, _record_id, _field} -> reason end)
+    |> Enum.sort_by(fn {reason, _triples} -> reason end)
+    |> Enum.each(fn {reason, triples} ->
+      {reported, suppressed} = Enum.split(triples, @max_unbound_reports)
+
+      Enum.each(reported, fn {reason, record_id, field} ->
+        Samen.Observability.Failure.report(:read, :vault_token_unbound, actor, reason,
+          locate: [resource: resource, field: field, record: record_id]
+        )
+      end)
+
+      report_truncated(resource, reason, length(suppressed))
     end)
+  end
+
+  defp report_truncated(_resource, _reason, 0), do: :ok
+
+  defp report_truncated(resource, reason, suppressed) do
+    Logger.error(
+      "[Samen.Core] read failed read=vault_token_unbound_truncated resource=#{inspect(resource)} " <>
+        "cause=#{reason} suppressed=#{suppressed} cap=#{@max_unbound_reports}"
+    )
+
+    :telemetry.execute([:samen, :core, :read, :error], %{count: suppressed}, %{
+      read: :vault_token_unbound_truncated,
+      cause: Atom.to_string(reason)
+    })
   end
 
   defp unbound_reason(%{subject_id: subject}, subject), do: :field_mismatch
