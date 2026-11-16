@@ -69,6 +69,9 @@ by the application itself in two halves, because there are two different ways to
 - **At runtime** the instance subscribes to `:net_kernel` events of both kinds. A **hidden** node is accepted. A **visible**
   one (or an event that does not say) is refused: `Logger.error`, a value-free `Samen.Observability.Failure` report,
   `samen.single_node.peer_refused.count`, and `Node.disconnect/1`.
+  `Node.disconnect/1` answering anything but `true` is not taken as "gone": right after a node-up event `:net_kernel` may not
+  hold the connection as up yet, the call is then a no-op and the peer stays connected. While the runtime still lists the node
+  (`Node.list(:connected)`) the disconnect is repeated, and a peer that will not go is reported again (`peer_still_connected`).
 - **Hidden nodes are how an operator reaches a production node.** Mix releases start `bin/app remote` and `bin/app rpc` with
   `--hidden` (verified in `Mix.Tasks.Release.Init`'s `remote`/`rpc` scripts), and `docs/runbooks/beam-introspection.md` already
   prescribes `iex --hidden --remsh`. Hidden nodes never appear in `Node.list/0` and cannot make this node share state.

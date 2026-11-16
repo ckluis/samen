@@ -94,6 +94,103 @@ defmodule Samen.SingleNodeTest do
     end
   end
 
+  # `Node.disconnect/1` answers `false` for a connection `:net_kernel` has not registered yet, which is the case
+  # for a short window right after the node-up event (the runtime announces the node first). The guard must
+  # not read that as "gone". These drive the window by hand: `disconnect` answers from a script, `connected?`
+  # from an Agent the test flips.
+  describe "Peers server: a disconnect that did nothing" do
+    setup do
+      test = self()
+      {:ok, connected} = Agent.start_link(fn -> true end)
+      {:ok, script} = Agent.start_link(fn -> [] end)
+
+      disconnect = fn node ->
+        send(test, {:disconnected, node})
+        Agent.get_and_update(script, fn
+          [next | rest] -> {next, rest}
+          [] -> {true, []}
+        end)
+      end
+
+      handler = "peers-noop-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach_many(
+        handler,
+        [[:samen, :single_node, :peer, :refused], [:samen, :core, :write, :error]],
+        fn event, _m, meta, _ -> send(test, {:telemetry, event, meta}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      start = fn ->
+        name = :"peers_noop_#{System.unique_integer([:positive])}"
+
+        start_supervised!(
+          {Peers, name: name, disconnect: disconnect, connected?: fn _ -> Agent.get(connected, & &1) end, redisconnect_ms: 1}
+        )
+
+        name
+      end
+
+      %{start: start, connected: connected, script: script}
+    end
+
+    test "a no-op disconnect on a still-connected peer is repeated until it takes", %{start: start, script: script} do
+      Agent.update(script, fn _ -> [false, false, true] end)
+      name = start.()
+      send(name, {:nodeup, :"early@host", [node_type: :visible]})
+
+      assert_receive {:disconnected, :"early@host"}
+      assert_receive {:disconnected, :"early@host"}
+      assert_receive {:disconnected, :"early@host"}
+      # `true` ended it: the mailbox is drained by a round trip through the server, then nothing more arrives.
+      _ = :sys.get_state(name)
+      refute_receive {:disconnected, _}, 50
+
+      # ONE refusal was reported for the one node-up, not one per attempt.
+      assert_receive {:telemetry, [:samen, :single_node, :peer, :refused], _}
+      refute_received {:telemetry, [:samen, :single_node, :peer, :refused], _}
+    end
+
+    test "a `false` for a peer that is already gone is not repeated (positive control: the loop stops on the runtime's list)",
+         %{start: start, connected: connected, script: script} do
+      Agent.update(script, fn _ -> [false] end)
+      Agent.update(connected, fn _ -> false end)
+      name = start.()
+      send(name, {:nodeup, :"gone@host", [node_type: :visible]})
+
+      assert_receive {:disconnected, :"gone@host"}
+      assert_receive {:telemetry, [:samen, :single_node, :peer, :refused], _}
+      _ = :sys.get_state(name)
+      refute_receive {:disconnected, _}, 50
+    end
+
+    test "a peer that will not go is reported again, and the loop stops the moment it is gone",
+         %{start: start, connected: connected, script: script} do
+      Agent.update(script, fn _ -> List.duplicate(false, 1_000) end)
+      name = start.()
+      send(name, {:nodeup, :"stuck@host", [node_type: :visible]})
+
+      assert_receive {:telemetry, [:samen, :core, :write, :error], %{write: :single_node_peer, cause: "visible_peer"}}
+      assert_receive {:telemetry, [:samen, :core, :write, :error], %{write: :single_node_peer, cause: "peer_still_connected"}}, 5_000
+
+      Agent.update(connected, fn _ -> false end)
+      _ = :sys.get_state(name)
+      flush_disconnects()
+      _ = :sys.get_state(name)
+      refute_receive {:disconnected, _}, 50
+    end
+  end
+
+  defp flush_disconnects do
+    receive do
+      {:disconnected, _} -> flush_disconnects()
+    after
+      0 -> :ok
+    end
+  end
+
   # Node up/down and the guard's verdict travel through net_kernel and a second OS process, so they arrive
   # when the distribution layer gets to them, not within ExUnit's default 100 ms (a loaded CI runner took
   # longer and the test flaked). Each receive below returns the moment its message arrives; this is only the
