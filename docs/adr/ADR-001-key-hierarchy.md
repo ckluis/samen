@@ -222,13 +222,20 @@ unencrypted. Rules, in force from this date:
   refused (the subject would be a generated UUID, not the existing row's key): at build time when the action or
   `for_create` is an upsert, and, because inside the action Ash marks every create an upsert, by an `after_action` that
   compares the written row's primary key with the vault subject for a call-site `Ash.create(cs, upsert?: true)`; the error
-  rolls back the action transaction, vault rows included (same repo). The same `after_action` refuses a vault attribute a
+  rolls back the action transaction, vault rows included (same repo). The guard rolls back ITSELF (`repo.rollback/1`), so
+  it does not depend on the caller leaving Ash's `rollback_on_error?` at its default; and a create/update on a PII resource
+  that reaches the data layer with NO transaction open (an action declared `transaction? false`, a bulk `transaction: false`)
+  is refused in the `before_action`, before any vault insert or row write, because by then the writes would already be
+  committed. The same `after_action` refuses a vault attribute a
   later hook changed after `Vault.Change` approved it. Atomic writes of a vault field are refused by Ash itself.
 - **Read.** `Vault.reveal/3` takes `field: {vault, name}` beside `subject_id:`; both are checked BEFORE any DEK is
   unwrapped. `PiiResolution` asserts the holding record's primary key and the field on every value, admits to the DEK memo
   only rows whose `{subject, vault, field}` match what their holder expects (a foreign subject's key is never unwrapped),
   renders a mismatch masked/absent on every plane, and reports it once per call per record and field (the log line names
-  resource, field and record id; telemetry and logs carry no token or value). The webhook signing-secret reveal asserts
+  resource, field and record id; telemetry and logs carry no token or value). The report is capped at 20 records PER REASON
+  per call (a cap across reasons would let a flood of `foreign_subject` hide the only `field_mismatch`); whatever the cap
+  cuts is reported once per reason as `read=vault_token_unbound_truncated … suppressed=<n>` (log line, and a telemetry
+  event on `[:samen, :core, :read, :error]` whose `count` is the suppressed number), so a truncation is never silent. The webhook signing-secret reveal asserts
   the endpoint's id and field; a mismatch is permanent and is discarded, not retried. `Samen.Reveal.reveal/5` requires
   `:subject_id` (`{:error, :subject_required}`) and forwards `:field`.
 - **Unchanged.** The memo key stays `{adapter, subject_id}` (`unwrap/1` keeps arity 1); the cipher and its AAD are not

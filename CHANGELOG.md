@@ -28,6 +28,12 @@ All notable changes to Samen are recorded here. The format follows
   vault subject and errors on a mismatch, which rolls back the vault rows with the domain write. The same `after_action`
   refuses a later hook that swapped a vault attribute after `Vault.Change` approved it. Atomic writes of a vault field never
   reach the data layer (Ash refuses them; `Vault.Change` has no `atomic/3`).
+- **The write guard no longer depends on the caller's transaction options.** It rolls back itself (`repo.rollback/1`), so
+  `rollback_on_error?: false` cannot leave a refused write durable; a create/update on a PII resource with NO open
+  transaction (an action declared `transaction? false`, a bulk `transaction: false`) is refused before any vault insert or
+  row write. The read-side unbound report is capped per reason (20), and what the cap cuts is reported as
+  `vault_token_unbound_truncated` with the suppressed count.
+- **Removed: `Samen.Vault.materialize/2`** (public, no callers in the tree). Resolve through `Samen.Api.PiiResolution`.
 - **Reads reveal bound-only.** `Vault.reveal/3` gains `field:`, checked with `subject_id:` before any key is unwrapped;
   `PiiResolution` asserts the holder's primary key and field for every value, never unwraps a foreign subject's DEK, and
   renders a mismatch masked/absent on every plane. The webhook signing-secret reveal asserts the endpoint's id and field, and
