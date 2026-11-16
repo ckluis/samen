@@ -1,0 +1,19 @@
+# SABOTAGE: a hidden node is refused: bin/app remote and rpc stop working
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_test.exs
+# MUST_FAIL: a HIDDEN node (how `bin/app remote` starts) is accepted and stays connected
+diff --git a/samen_core/lib/samen/single_node/peers.ex b/samen_core/lib/samen/single_node/peers.ex
+index 01ab9576..17116a09 100644
+--- a/samen_core/lib/samen/single_node/peers.ex
++++ b/samen_core/lib/samen/single_node/peers.ex
+@@ -33,7 +33,7 @@ defmodule Samen.SingleNode.Peers do
+   @spec decide(term()) :: :allow | :refuse
+   def decide(info) when is_list(info) do
+     case Keyword.get(info, :node_type) do
+-      :hidden -> :allow
++      :hidden -> :refuse
+       _ -> :refuse
+     end
+   end

@@ -6,7 +6,8 @@ defmodule <%= module %>Web.PageController do
   `/healthz` returns `ok` (the LIVENESS probe — the BEAM is up).
   `/readyz` is the READINESS probe — it returns 200 only when Postgres, the KMS
   wrapped-DEK store, and Oban all answer (`Samen.Web.Readiness`), else 503. The body also carries the non-gating
-  advisories (audit-partition runway: `partitions: WARN|CRITICAL|UNKNOWN …`), which never change the status. Fly's
+  advisories (audit-partition runway: `partitions: WARN|CRITICAL|UNKNOWN …`; a second instance on this database:
+  `single_node: CRITICAL|UNKNOWN …`, ADR-054), which never change the status unless `Samen.SingleNode` is `strict` (and then only for a proven late instance, never on UNKNOWN). Fly's
   `[[http_service.checks]]` gates traffic on `/readyz`, so a machine whose deps are
   down is drained instead of being sent requests it can only 500.
   """

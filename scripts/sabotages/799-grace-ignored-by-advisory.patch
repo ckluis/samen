@@ -1,0 +1,19 @@
+# SABOTAGE: the readiness advisory is CRITICAL during the grace period
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_test.exs
+# MUST_FAIL: overlap: ok INSIDE the grace period, critical from the exact boundary on
+diff --git a/samen_core/lib/samen/single_node.ex b/samen_core/lib/samen/single_node.ex
+index 83ec314..e31d831 100644
+--- a/samen_core/lib/samen/single_node.ex
++++ b/samen_core/lib/samen/single_node.ex
+@@ -254,7 +254,7 @@ defmodule Samen.SingleNode do
+       state: :overlap,
+       peers: raw.peers,
+       since_ms: since_ms,
+-      exceeded?: since_ms >= raw.grace_ms,
++      exceeded?: true,
+       late?: raw.late?,
+       verified?: Map.get(raw, :verified?, false),
+       grace_ms: raw.grace_ms,

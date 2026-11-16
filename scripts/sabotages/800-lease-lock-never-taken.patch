@@ -1,0 +1,20 @@
+# SABOTAGE: after_connect does not take the lock: every instance believes it is alone (reported as a lost 
+#   lease, not single)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_lease_test.exs
+# MUST_FAIL: a second instance is detected by BOTH
+diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
+index edeca69e..5f13c6a6 100644
+--- a/samen_core/lib/samen/single_node/lease.ex
++++ b/samen_core/lib/samen/single_node/lease.ex
+@@ -212,7 +212,7 @@ defmodule Samen.SingleNode.Lease do
+     %{rows: [[pid | _]]} =
+       q.query!(
+         conn,
+-        "SELECT pg_backend_pid(), pg_advisory_lock_shared($1::int, $2::int), pg_advisory_lock_shared($3::int, $4::int), " <>
++        "SELECT pg_backend_pid(), $1::int + $2::int, pg_advisory_lock_shared($3::int, $4::int), " <>
+           "pg_advisory_lock_shared($5::int, $6::int), pg_advisory_lock_shared($7::int, 0), set_config('#{@guc}', $8, false), " <>
+           "set_config('tcp_keepalives_idle', '10', false), set_config('tcp_keepalives_interval', '5', false), " <>
+           "set_config('tcp_keepalives_count', '3', false)" <> idle_sql,

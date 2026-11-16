@@ -1,0 +1,19 @@
+# SABOTAGE: a reconnect re-reads the boot epoch, so the long-running instance becomes the late one
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_lease_test.exs
+# MUST_FAIL: a reconnect of the long-running instance does NOT make it the late one
+diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
+index edeca69e..c90f51eb 100644
+--- a/samen_core/lib/samen/single_node/lease.ex
++++ b/samen_core/lib/samen/single_node/lease.ex
+@@ -193,7 +193,7 @@ defmodule Samen.SingleNode.Lease do
+ 
+     # Once per lease process: a reconnect keeps the epoch, so it never makes the long-running instance "late".
+     epoch =
+-      case :atomics.get(ref, @a_epoch) do
++      case :atomics.get(ref, @a_epoch) * 0 do
+         0 ->
+           e = max(now_us - @origin_us, 1)
+           :atomics.put(ref, @a_epoch, e)

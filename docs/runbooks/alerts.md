@@ -14,6 +14,7 @@ matches) until egress is enabled.
 | KMS error rate | wrap/unwrap failure rate on `Samen.Kms.AwsKmsDynamo`; `/readyz` `:kms` check | any failures, non-sustained | ANY sustained KMS failure > 1m | this file, §4 |
 | `/readyz` failing | `GET /readyz` 503 (`Samen.Web.Readiness.check/1`) | single flaky 503 | 503 sustained > 2m OR any machine failing Fly's health check | this file, §5 |
 | Audit partition runway | `samen.audit.partition.runway_days`, `.default_rows`, `.default_landing.count`, `.runway_unknown.count`; `/readyz` body line `partitions:` | runway < 31 days, OR any `default_rows` > 0, OR no DEFAULT partition, OR any `runway_unknown` | runway <= 0 (`partitions: CRITICAL`), OR `runway_unknown` for > 1h, OR `default_landing` still rising after the roll-forward ran | this file, §7 |
+| Second instance on the database | `samen.single_node.peers`, `.overlap_seconds`, `.unknown`, `.overlap.count`, `.unknown.count`, `.peer_refused.count`; `/readyz` body line `single_node:` | `peers` > 0 (a rolling deploy does this for up to the 5-minute grace period; do not page on it), OR `peer_refused.count` rising | `single_node: CRITICAL` (overlap past the grace period), OR `single_node: UNKNOWN` sustained > 15m, OR `overlap.count` > 0 outside a deploy | this file, §8 |
 | Pool saturation | `samen.pool.saturation.events` (event `[:samen,:pool,:saturation]`, default threshold 50ms checkout wait) | events present, low rate | sustained rate increase over baseline | this file, §6 |
 
 ---
@@ -182,3 +183,45 @@ for each month they belong to; the move puts the rows in), or, if they are accep
 log and silence the `default_rows` alert for this table (the `default_landing` counter must still alert: it tells you a NEW row fell out).
 `partitions: UNKNOWN` names the table it could not read (integer or MAXVALUE-bounded tables are not read at all).
 
+## 8. Second instance on the database (ADR-054)
+
+Samen runs as ONE instance per database. Each serving instance holds a session advisory lock on a dedicated connection and counts
+the other holders (`Samen.SingleNode.Lease`). `/readyz` adds a `single_node:` line to its **200** body (it is an advisory like §7:
+draining a machine would not cure it), or answers **503** on the LATE instance when `config :samen_core, Samen.SingleNode,
+strict: true`. Alert on the metrics or the body line.
+
+- `single_node: CRITICAL N other instance(s) share this database for Ns` — another instance has been on this database longer
+  than `grace_ms` (default 300 s). A rolling deploy produces `samen.single_node.peers` = 1 for a few minutes and no line; the grace clock starts when the other instance is confirmed alive
+  (a holder that never beats starts nothing); the line
+  means the old instance was not stopped, or someone scaled the app.
+- `single_node: UNKNOWN … (reason)` — the lease cannot say. It never refuses traffic, not even with `strict: true` (ADR-054 §2.2:
+  strict does not 503 on UNKNOWN). `connection_down` / `query_failed`: the database or the dedicated connection is failing (§5 will
+  usually be failing too). **`connection_pooler`: the lease connection goes through a transaction pooler (PgBouncer, Neon's
+  `-pooler` host), where session locks do not work. The lease LATCHES this reading at the first check that proves it and logs
+  one error, and only a restart of the lease process clears it (redeploy with `DATABASE_DIRECT_URL` set; if the URL is already direct,
+  restart the instance and report it). A pooled lease reads UNKNOWN only from then on (until it does, and after the pooler recycles its server
+  connection, an instance sharing the database can read `single` while it serves), so treat any `connection_pooler` as a real
+  fault; `lease_url` (generated apps: `DATABASE_DIRECT_URL`) must be a DIRECT, unpooled URL.** Two instances whose statements
+  share one server connection (also a pooler) read the same. `lease_lost`: the lock vanished under a live session (`pg_advisory_unlock_all()`, a pooler `DISCARD ALL`);
+  the lease re-takes it only on a new session, restart the instance. `stale_holder`: a lock whose owner stopped beating (a crashed
+  machine whose session Postgres has not dropped yet, a lock left on a pooler's server connection, or a LIVE instance connected
+  through a pooler: it latched `connection_pooler`, no longer beats, and looks exactly like a ghost lock to a direct peer). BEFORE you
+  terminate anything, check the holder's `client_addr` / `application_name` in `pg_stat_activity` (step 3 below): if `client_addr` is your
+  pooler, find the instance that reports `connection_pooler` first, because terminating the pooler's server connection makes this
+  instance read `single` while that one keeps serving. It clears when the session
+  ends (15 s after the owner went silent on Postgres 14+, else when TCP keepalive drops it, which behind a proxy or session pooler can take hours; or `SELECT pg_terminate_backend(pid)` for
+  the pid in step 3 below). `lease_not_running` / `lease_stale`: this instance's lease process died or hung; its supervisor restarts it,
+  a persistent line means it keeps failing (look for `Samen.SingleNode.Lease` in the log). `not confirmed alive`: another holder
+  exists and an overlap clock already runs from an earlier confirmed episode (or `grace_ms` is 0), but its beat has not changed yet; a first-seen holder that is not yet confirmed starts no clock and `/readyz` stays clean. It resolves to CRITICAL or `stale_holder` within one to three check intervals.
+- The gauge `samen.single_node.unknown` is emitted by a RUNNING lease only: `lease_not_running` and `lease_stale` leave it at its
+  last value, so alert on the `/readyz` body line as well as on the metric.
+- `samen.single_node.peer_refused.count` rising — something connects a VISIBLE Erlang node (a clustering library, or an operator
+  starting `iex`/`:observer` without `--hidden`). It is disconnected each time. Use `bin/app remote` or `iex --hidden --remsh`.
+
+First response to CRITICAL:
+1. `fly status` / `fly machines list`: how many machines run this app? Expect one.
+2. Stop the extra one (`fly machines stop <id>` then `fly scale count 1`). The line clears on the next check (5 s).
+3. If only one machine exists, look for a second deployment pointing at the same `DATABASE_URL` (a staging app, a preview, a laptop with the production URL):
+   `SELECT pid, application_name, client_addr, backend_start FROM pg_stat_activity WHERE pid IN (SELECT pid FROM pg_locks WHERE locktype='advisory' AND classid=1396788549 AND objid=1313817669 AND objsubid=2);`
+   (`client_addr`, `backend_start` and `application_name` read NULL for another role's session: run it as the database owner, a superuser or a `pg_read_all_stats` member.)
+4. Meanwhile treat the node-local state as unreliable (ADR-054 §1.1): re-check the AI kill switch on BOTH instances if it was thrown, and review fleet heartbeat rejections.

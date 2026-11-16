@@ -1,0 +1,19 @@
+# SABOTAGE: a session the server ended is reported as a failed query
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_lease_test.exs
+# MUST_FAIL: other unreadable shapes
+diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
+index edeca69e..a7297f08 100644
+--- a/samen_core/lib/samen/single_node/lease.ex
++++ b/samen_core/lib/samen/single_node/lease.ex
+@@ -281,7 +281,7 @@ defmodule Samen.SingleNode.Lease do
+   # The server ended the session (a restart, pg_terminate_backend, idle_session_timeout) and the answer to the next
+   # query on it is the FATAL error itself: the connection is down, not the query wrong.
+   def interpret({:error, %Postgrex.Error{postgres: %{code: code}}}, _ctx)
+-      when code in [:admin_shutdown, :idle_session_timeout, :crash_shutdown, :cannot_connect_now],
++      when code in [:crash_shutdown],
+       do: {:unknown, :connection_down}
+ 
+   def interpret(_other, _ctx), do: {:unknown, :query_failed}

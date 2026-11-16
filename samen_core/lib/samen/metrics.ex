@@ -180,6 +180,11 @@ defmodule Samen.Metrics do
       `Samen.AuditEvent.PartitionManager.emit_runway/1` (the daily job and `/readyz`)
     - `samen.audit.partition.default_landing.count` — an audit row landed in the DEFAULT partition (it was
       outside every monthly window); `samen.audit.partition.runway_unknown.count` — the runway could not be read
+    - `samen.single_node.peers` / `.overlap_seconds` / `.unknown` — last-value gauges (ADR-054): other instances
+      sharing this database, how long the overlap has lasted, and 1 while the single-node state is unreadable;
+      emitted by `Samen.SingleNode.Lease` on every check. `samen.single_node.overlap.count` — an overlap outlived its
+      grace period; `.unknown.count` — the state became unreadable; `.peer_refused.count` — a visible Erlang peer
+      was refused and disconnected
     - `samen.audit.occurred_at.clamped.count` — a future-dated `occurred_at` was clamped at the Writer
     - `samen.replay.session.count` — counter of finished replay capture sessions by
       `result` (`persisted | discarded | failed | dropped`; ADR-052 §2.4.1); emitted by
@@ -309,6 +314,41 @@ defmodule Samen.Metrics do
         "samen.audit.occurred_at.clamped.count",
         event_name: [:samen, :audit, :occurred_at, :clamped],
         description: "A future-dated audit occurred_at was clamped to the write time"
+      ),
+
+      # ADR-054 — single-node guard. No tags: one series per instance.
+      last_value(
+        "samen.single_node.peers",
+        event_name: [:samen, :single_node, :state],
+        measurement: :peers,
+        description: "Other instances sharing this database (0 is healthy)"
+      ),
+      last_value(
+        "samen.single_node.overlap_seconds",
+        event_name: [:samen, :single_node, :state],
+        measurement: :overlap_seconds,
+        description: "Seconds the current overlap with another instance has lasted"
+      ),
+      last_value(
+        "samen.single_node.unknown",
+        event_name: [:samen, :single_node, :state],
+        measurement: :unknown,
+        description: "1 while the single-node state cannot be read (never reported as healthy)"
+      ),
+      counter(
+        "samen.single_node.overlap.count",
+        event_name: [:samen, :single_node, :overlap],
+        description: "An overlap with another instance outlived its grace period"
+      ),
+      counter(
+        "samen.single_node.unknown.count",
+        event_name: [:samen, :single_node, :unknown],
+        description: "The single-node state became unreadable"
+      ),
+      counter(
+        "samen.single_node.peer_refused.count",
+        event_name: [:samen, :single_node, :peer, :refused],
+        description: "A visible Erlang peer node connected and was refused and disconnected"
       ),
 
       # CSV export row count — bounded tag: result. Emitted by Samen.Web.Csv.export/3.

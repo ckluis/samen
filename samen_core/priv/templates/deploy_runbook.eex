@@ -25,6 +25,28 @@ Docker build therefore needs the **monorepo root** (the dir containing `samen_co
 
 run from the monorepo root (`.`).
 
+## ONE instance per database (ADR-054)
+
+Run exactly **one** Fly machine for this app: `fly deploy --ha=false`, then `fly scale count 1`. Fly's default is two
+machines. The replay-nonce cache, the AI kill switch, the rate limiter, the feature-flag invalidation, chat presence and
+the local-disk adapters are per-instance; with two instances behind the load balancer a replayed fleet nonce is accepted
+by the second one and a kill switch thrown on one leaves agents running on the other. The app checks for this itself:
+
+- `/readyz` stays `ready` while a rolling deploy overlaps two instances for up to 5 minutes (`grace_ms`), then adds
+  `single_node: CRITICAL N other instance(s) share this database ...` to its 200 body. Page on that line (see
+  `docs/runbooks/alerts.md` of the Samen repo, "Second instance on the database").
+- `single_node: UNKNOWN ... (connection_pooler)` means the lease connection goes through a transaction pooler (Neon's
+  `-pooler` host, PgBouncer), where session locks do not work. A pooled lease latches UNKNOWN at the first check that proves it (until then it can read `single` next to a second instance): set the secret
+  `DATABASE_DIRECT_URL` to the DIRECT (unpooled) connection string (Neon: the same string without `-pooler` in the
+  host); `config/runtime.exs` hands it to the lease as `lease_url`. `single_node: UNKNOWN ... (stale_holder)` is a lock
+  left by a crashed machine that no longer beats, or by a live instance behind a pooler (it latched and no longer beats): check
+  the holder's `client_addr` in `pg_stat_activity` and look for another instance reporting `connection_pooler` before you terminate
+  anything. It clears when Postgres drops that session (within ~15 s on Postgres 14+, else when TCP keepalive does).
+- `config :samen_core, Samen.SingleNode, strict: true` makes the LATE instance answer 503 instead (use it only with a
+  deploy that stops the old machine inside the grace period).
+- The app refuses to boot with `dns_cluster` / `libcluster` configured, and disconnects any visible Erlang peer. Operator
+  consoles are unaffected: `bin/<%= otp_app %> remote` and `rpc` connect as hidden nodes.
+
 ## Neon per-product database (branch-per-env)
 
 Provision ONE Neon project per product, and use Neon **branches** for environments so
@@ -35,7 +57,9 @@ each env has an isolated copy that shares the parent's schema:
    Each branch yields its own `DATABASE_URL`.
 3. The connection string is your `DATABASE_URL` secret (below). Neon requires TLS
    (`?sslmode=require`); `config/runtime.exs` sets `ssl: [verify: :verify_none]` — harden
-   to `verify_full` with a CA bundle as an operator step.
+   to `verify_full` with a CA bundle as an operator step. Neon gives a pooled string (host with `-pooler`) and a
+   direct one: keep the pooled one as `DATABASE_URL` if you like, and ALSO set `DATABASE_DIRECT_URL` to the direct one
+   (the single-instance lease needs a session; see "ONE instance per database").
 4. Migrations run automatically on deploy via `fly.toml`'s `release_command`.
 
 ## Secrets checklist
@@ -44,6 +68,8 @@ Set every secret before the first deploy — `config/runtime.exs` RAISES (fail-c
 any is missing, naming the variable:
 
 - [ ] `DATABASE_URL` — the Neon connection string (`postgres://…/<%= otp_app %>?sslmode=require`).
+- [ ] `DATABASE_DIRECT_URL` — the DIRECT (unpooled) Neon connection string, for the single-instance lease (the one OPTIONAL
+      entry: `config/runtime.exs` does not require it, but with a pooled `DATABASE_URL` the lease reads UNKNOWN without it).
 - [ ] `SECRET_KEY_BASE` — generate with `mix phx.gen.secret` (a ≥64-byte random string).
 - [ ] `PHX_HOST` — the public hostname (e.g. `<%= otp_app %>.fly.dev`).
 - [ ] `SAMEN_KMS_KEY_ID` — the AWS KMS key id/ARN that wraps per-subject DEKs. **The vault

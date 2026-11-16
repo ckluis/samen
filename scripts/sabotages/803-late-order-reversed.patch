@@ -1,0 +1,19 @@
+# SABOTAGE: the late instance is picked backwards: strict mode refuses the incumbent
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_lease_test.exs
+# MUST_FAIL: the later BOOT is late; strict refuses only it
+diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
+index edeca69e..30e1388e 100644
+--- a/samen_core/lib/samen/single_node/lease.ex
++++ b/samen_core/lib/samen/single_node/lease.ex
+@@ -345,7 +345,7 @@ defmodule Samen.SingleNode.Lease do
+   # Ordered by (boot epoch, pid): late = some LIVE peer is strictly older. A peer whose epoch is not readable
+   # cannot be ordered, so it never makes us "late" (we do not refuse on a guess).
+   defp late?(live, my_epoch, my_pid) do
+-    Enum.any?(live, fn o -> is_integer(o.epoch) and {o.epoch, o.pid} < {my_epoch, my_pid} end)
++    Enum.any?(live, fn o -> is_integer(o.epoch) and {o.epoch, o.pid} > {my_epoch, my_pid} end)
+   end
+ 
+   defp check_sql(k1, k2) do

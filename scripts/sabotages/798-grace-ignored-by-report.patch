@@ -1,0 +1,19 @@
+# SABOTAGE: the overlap is reported as soon as it is seen: a rolling deploy pages
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_lease_test.exs
+# MUST_FAIL: inside the grace nothing is reported or critical
+diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
+index 068c893e..81c8c38e 100644
+--- a/samen_core/lib/samen/single_node/lease.ex
++++ b/samen_core/lib/samen/single_node/lease.ex
+@@ -590,7 +590,7 @@ defmodule Samen.SingleNode.Lease do
+       )
+     end
+ 
+-    exceeded? = since != nil and now - since >= state.grace_ms
++    exceeded? = true
+     reported? = state.reported? or (verified? and exceeded? and report_overlap(peers, state))
+ 
+     emit(peers, 0, if(since, do: div(now - since, 1000), else: 0))

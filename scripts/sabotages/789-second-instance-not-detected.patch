@@ -1,0 +1,21 @@
+# SABOTAGE: the lease counts the other holders but answers single: a second instance on the database is 
+#   invisible
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_lease_test.exs
+# MUST_FAIL: a second instance is detected by BOTH
+diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
+index edeca69e..be6e9835 100644
+--- a/samen_core/lib/samen/single_node/lease.ex
++++ b/samen_core/lib/samen/single_node/lease.ex
+@@ -336,7 +336,8 @@ defmodule Samen.SingleNode.Lease do
+ 
+         true ->
+           verified? = Enum.any?(live, fn o -> elem(Map.fetch!(seen2, o.pid), 2) end)
+-          {:overlap, live |> Enum.map(& &1.identities) |> Enum.sum(), late?(live, my_epoch, my_pid), verified?}
++          _ = verified?
++          :single
+       end
+ 
+     {verdict, seen2}

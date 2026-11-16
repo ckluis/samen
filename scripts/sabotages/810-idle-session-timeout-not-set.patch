@@ -1,0 +1,19 @@
+# SABOTAGE: the lease session has no idle_session_timeout: a dead host keeps its lock for the TCP keepalive
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_lease_test.exs
+# MUST_FAIL: a silent client's session is terminated by the server
+diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
+index edeca69e..71ab841c 100644
+--- a/samen_core/lib/samen/single_node/lease.ex
++++ b/samen_core/lib/samen/single_node/lease.ex
+@@ -205,7 +205,7 @@ defmodule Samen.SingleNode.Lease do
+ 
+     {k1, k2} = cfg.key
+     c = classes(cfg.key)
+-    idle? = version >= 140_000
++    idle? = false
+ 
+     idle_sql = if idle?, do: ", set_config('idle_session_timeout', $9, false)", else: ""
+ 

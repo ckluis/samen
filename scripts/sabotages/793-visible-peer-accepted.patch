@@ -1,0 +1,19 @@
+# SABOTAGE: a visible Erlang peer is accepted: the node joins a cluster silently
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_test.exs
+# MUST_FAIL: a VISIBLE node that joins is refused and disconnected
+diff --git a/samen_core/lib/samen/single_node/peers.ex b/samen_core/lib/samen/single_node/peers.ex
+index 01ab9576..2171945f 100644
+--- a/samen_core/lib/samen/single_node/peers.ex
++++ b/samen_core/lib/samen/single_node/peers.ex
+@@ -34,7 +34,7 @@ defmodule Samen.SingleNode.Peers do
+   def decide(info) when is_list(info) do
+     case Keyword.get(info, :node_type) do
+       :hidden -> :allow
+-      _ -> :refuse
++      _ -> :allow
+     end
+   end
+ 

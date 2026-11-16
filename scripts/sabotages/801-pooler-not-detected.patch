@@ -1,0 +1,30 @@
+# SABOTAGE: a statement from a session that never ran after_connect is trusted: a transaction pooler yields 
+#   a false single
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_lease_test.exs
+# MUST_FAIL: a statement served by a session that never ran after_connect
+diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
+index 068c893e..fcbfb296 100644
+--- a/samen_core/lib/samen/single_node/lease.ex
++++ b/samen_core/lib/samen/single_node/lease.ex
+@@ -268,7 +268,7 @@ defmodule Samen.SingleNode.Lease do
+   @spec interpret(term(), map()) :: {:view, [map()]} | {:unknown, atom()}
+   def interpret({:ok, %Postgrex.Result{rows: [[me, var | _] | _] = rows}}, ctx) do
+     cond do
+-      var in [nil, ""] or var != ctx.token or me != ctx.pid ->
++      false ->
+         {:unknown, :connection_pooler}
+ 
+       true ->
+@@ -534,7 +534,8 @@ defmodule Samen.SingleNode.Lease do
+   """
+   @spec pooler_proof?(term(), map()) :: boolean()
+   def pooler_proof?({:ok, %Postgrex.Result{rows: [[me, var | _] | _]}}, ctx) do
+-    var in [nil, ""] or var != ctx.token or (me != ctx.pid and Map.get(ctx, :pid_before, ctx.pid) == ctx.pid)
++    _ = {me, var, ctx}
++    false
+   end
+ 
+   def pooler_proof?(_result, _ctx), do: false

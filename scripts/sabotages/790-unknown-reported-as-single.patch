@@ -1,0 +1,19 @@
+# SABOTAGE: a dead database is read as single: an unreadable state is reported healthy
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_lease_test.exs
+# MUST_FAIL: the database is unreachable
+diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
+index edeca69e..33945b3a 100644
+--- a/samen_core/lib/samen/single_node/lease.ex
++++ b/samen_core/lib/samen/single_node/lease.ex
+@@ -276,7 +276,7 @@ defmodule Samen.SingleNode.Lease do
+     end
+   end
+ 
+-  def interpret({:error, %DBConnection.ConnectionError{}}, _ctx), do: {:unknown, :connection_down}
++  def interpret({:error, %DBConnection.ConnectionError{}}, _ctx), do: {:view, []}
+ 
+   # The server ended the session (a restart, pg_terminate_backend, idle_session_timeout) and the answer to the next
+   # query on it is the FATAL error itself: the connection is down, not the query wrong.

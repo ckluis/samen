@@ -1,0 +1,18 @@
+# SABOTAGE: strict mode answers 503 when the single-node state cannot be read
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_test.exs
+# MUST_FAIL: strict never refuses on UNKNOWN, whatever the reason
+diff --git a/samen_core/lib/samen/single_node.ex b/samen_core/lib/samen/single_node.ex
+index 83ec314b..240b8263 100644
+--- a/samen_core/lib/samen/single_node.ex
++++ b/samen_core/lib/samen/single_node.ex
+@@ -302,6 +302,7 @@ defmodule Samen.SingleNode do
+       :disarmed -> :not_armed
+       %{strict?: false} -> :not_armed
+       %{state: :overlap, exceeded?: true, late?: true, verified?: true} -> {:error, :overlap}
++      %{state: :unknown} -> {:error, :overlap}
+       _ -> :ok
+     end
+   end
