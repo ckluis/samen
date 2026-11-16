@@ -129,6 +129,55 @@ defmodule Samen.Vault.WriteGuardTest do
     end
   end
 
+  describe "S1: the guard undoes the write even when the caller turns Ash's rollback off" do
+    test "a call-site upsert with rollback_on_error?: false is still refused and not durable" do
+      org = Ash.UUID.generate()
+      existing = create(%{org_id: org, job_title: "same", mrn: "MRN-ORIGINAL"})
+      token_before = raw_mrn(existing)
+      vault_before = vault_rows()
+      rows_before = patient_rows()
+
+      assert {:error, %Ash.Error.Invalid{} = err} =
+               Patient
+               |> Ash.Changeset.for_create(:create, %{org_id: org, job_title: "same", mrn: "MRN-OVERWRITE"})
+               |> Ash.create(upsert?: true, upsert_identity: :title, rollback_on_error?: false)
+
+      assert Exception.message(err) =~ "vault subject does not match the written row"
+      assert raw_mrn(existing) == token_before
+      assert vault_rows() == vault_before
+      assert patient_rows() == rows_before
+      assert {:ok, "MRN-ORIGINAL"} = Vault.reveal(reload!(existing).mrn, @repo)
+    end
+
+    test "a swapping hook with rollback_on_error?: false is refused and nothing is written" do
+      org = Ash.UUID.generate()
+      victim = create(%{org_id: org, job_title: "victim", mrn: "MRN-VICTIM"})
+      foreign = reload!(victim).mrn
+      rows_before = patient_rows()
+      vault_before = vault_rows()
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               Patient
+               |> Ash.Changeset.for_create(:create, %{org_id: org, job_title: "thief", mrn: "MRN-THIEF"})
+               |> Ash.Changeset.before_action(&Ash.Changeset.force_change_attribute(&1, :mrn, foreign))
+               |> Ash.create(rollback_on_error?: false)
+
+      assert patient_rows() == rows_before
+      assert vault_rows() == vault_before
+    end
+
+    test "CONTROL: the same calls with rollback_on_error?: false succeed when nothing is refused" do
+      org = Ash.UUID.generate()
+
+      assert {:ok, p} =
+               Patient
+               |> Ash.Changeset.for_create(:create, %{org_id: org, job_title: "ok", mrn: "MRN-OK"})
+               |> Ash.create(rollback_on_error?: false)
+
+      assert {:ok, "MRN-OK"} = Vault.reveal(reload!(p).mrn, @repo)
+    end
+  end
+
   describe "N1: a later hook that swaps a vault attribute" do
     defp with_hook(attrs, fun) do
       Patient

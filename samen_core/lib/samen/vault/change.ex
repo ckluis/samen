@@ -49,7 +49,25 @@ defmodule Samen.Vault.Change do
     cond do
       fields == [] -> changeset
       upsert?(changeset) -> refuse_upsert(changeset)
-      true -> Ash.Changeset.before_action(changeset, fn cs -> route_fields(cs, fields) end)
+      true -> Ash.Changeset.before_action(changeset, fn cs -> guarded_route(cs, fields) end)
+    end
+  end
+
+  # Fail closed (WP28 review S1): the guard below can only undo a write inside a transaction, and with
+  # none open the vault rows (and the domain row) are already committed when it fires. So a write that
+  # reaches the data layer outside a transaction (an action declared `transaction? false`, a bulk
+  # `transaction: false`) is refused here, before a vault insert or a row write.
+  defp guarded_route(changeset, fields) do
+    if changeset.action_type in [:create, :update] and not repo!(changeset).in_transaction?() do
+      Ash.Changeset.add_error(changeset,
+        field: :vault,
+        message:
+          "a write to a resource with vault-routed PII requires an open transaction: the vault rows " <>
+            "and the domain row must commit or roll back together (do not use `transaction? false` / " <>
+            "`transaction: false` on it)"
+      )
+    else
+      route_fields(changeset, fields)
     end
   end
 
@@ -120,19 +138,27 @@ defmodule Samen.Vault.Change do
     approved = Map.new(fields, fn field -> {field.name, vault_view(changeset, field.name)} end)
     pk = pk_attr(changeset.resource)
 
+    repo = repo!(changeset)
+
     Ash.Changeset.after_action(changeset, fn cs, result ->
       cond do
         bound? and to_string(Map.get(result, pk)) != subject_id ->
-          {:error, invalid_vault(:vault, "vault subject does not match the written row (an upsert onto an existing record?)")}
+          refuse_written(repo, invalid_vault(:vault, "vault subject does not match the written row (an upsert onto an existing record?)"))
 
         swapped = Enum.find(fields, &(vault_view(cs, &1.name) != Map.fetch!(approved, &1.name))) ->
-          {:error, invalid_vault(swapped.name, "the vault value was changed after Samen.Vault.Change approved it")}
+          refuse_written(repo, invalid_vault(swapped.name, "the vault value was changed after Samen.Vault.Change approved it"))
 
         true ->
           {:ok, result}
       end
     end)
   end
+
+  # Undo the write ourselves. Returning `{:error, _}` is not enough: Ash rolls back only while the caller
+  # leaves `rollback_on_error?` at its default (true), and commits the error's transaction otherwise.
+  # `guarded_route/2` guarantees a transaction is open here, so this always rolls back the vault rows and
+  # the domain write together (in a caller's outer transaction it aborts that one, which fails closed).
+  defp refuse_written(repo, error), do: repo.rollback(error)
 
   # What the changeset will write for a vault field, comparable across hooks. Never a plaintext.
   defp vault_view(changeset, name) do
