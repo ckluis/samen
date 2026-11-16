@@ -5,12 +5,12 @@
 # TEST_FILES: test/single_node_test.exs
 # MUST_FAIL: found by the scan
 diff --git a/samen_core/lib/samen/single_node/peers.ex b/samen_core/lib/samen/single_node/peers.ex
-index 01ab9576..e4479306 100644
+index e79466f..beddaf6 100644
 --- a/samen_core/lib/samen/single_node/peers.ex
 +++ b/samen_core/lib/samen/single_node/peers.ex
-@@ -48,7 +48,7 @@ defmodule Samen.SingleNode.Peers do
-     :ok = :net_kernel.monitor_nodes(true, [{:node_type, :all}])
-     state = %{disconnect: disconnect}
+@@ -67,7 +67,7 @@ defmodule Samen.SingleNode.Peers do
+     }
+ 
      # Subscribed first, scanned second (see "No race"). `Node.list/0` is the visible set by definition.
 -    for node <- Node.list(), do: refuse(node, state)
 +    _ = Node.list()
