@@ -213,6 +213,8 @@ defmodule Samen.Erasure do
       `:reveal_grant_repo` / `:verify_repo`.
     * `:actor_id` — who initiated the erasure (recorded in the audit row).
       Defaults to `"system:erasure"`.
+    * Must NOT run inside a transaction on the repo: the resume marker has to commit before the key is destroyed.
+      Inside one it returns `{:error, :erasure_in_transaction}` and nothing is read or shredded.
     * `:acknowledge_lost_reference` — operator override for the one state a retry refuses
       (`{:error, {:shred_reference_lost, report}}`: key already destroyed, no resume marker, no
       earlier completed report). `true` completes the DB tiers and DISCLOSES the withdrawal as
@@ -222,6 +224,19 @@ defmodule Samen.Erasure do
   @spec shred(String.t(), keyword()) ::
           {:ok, %{attestation: Kms.attestation(), report: Report.t()}} | {:error, term}
   def shred(subject_id, opts \\ []) when is_binary(subject_id) do
+    # The resume marker is only durable if it COMMITS before `Kms.shred/1` destroys the key (external, not
+    # transactional). Inside a caller's transaction it would roll back with that transaction while the key stays
+    # destroyed, and the retry would find neither key nor marker. So refuse BEFORE anything is read or shredded.
+    r = Keyword.get(opts, :repo) || default_repo()
+
+    if r.in_transaction?() do
+      {:error, :erasure_in_transaction}
+    else
+      do_shred(subject_id, opts)
+    end
+  end
+
+  defp do_shred(subject_id, opts) do
     r = Keyword.get(opts, :repo) || default_repo()
     actor_id = Keyword.get(opts, :actor_id, "system:erasure")
     # Optional: the subject's org, so the erasure event rides that org's T4.3 chain
@@ -309,11 +324,10 @@ defmodule Samen.Erasure do
             seal_db_tiers(subject_id, absent_att, "absent", actor_id, org_id, r, rollup_opts, file_opts, bidx_specs, custom_bag_specs, record_bag_specs, subject_ref, disposition)
 
           {:error, reason} ->
-            # Key store unreachable (outage) — FAIL CLOSED. No sentinel, no report,
-            # no fabricated attestation. The caller retries when the store heals. The key is
-            # provably NOT destroyed here, so the resume marker is not needed: drop it (best effort;
-            # a leftover one is harmless, the retry refreshes it).
-            _ = clear_pending(subject_id, r)
+            # Key store error — FAIL CLOSED. No sentinel, no report, no fabricated attestation. The marker is
+            # KEPT: `Kms.shred/1` promises nothing about the key on an error (a remote delete can succeed and the
+            # response time out), so the marker may be the only durable copy of the ref. The retry handles both
+            # cases: key still live -> the marker is refreshed; key gone -> the ref is read from the marker.
             {:error, {:kms_shred_failed, reason}}
         end
     end
@@ -367,15 +381,6 @@ defmodule Samen.Erasure do
     end
   rescue
     e -> {:error, Exception.message(e)}
-  end
-
-  defp clear_pending(subject_id, r) do
-    r.delete_all(from(p in Report, where: p.subject_id == ^subject_id and p.outcome == ^@pending_outcome))
-    :ok
-  rescue
-    e ->
-      Samen.Observability.Failure.report_write(:erasure_clear_pending, subject_id, e)
-      {:error, :unavailable}
   end
 
   defp pending_row(subject_id, r) do
@@ -592,7 +597,8 @@ defmodule Samen.Erasure do
       |> Ecto.Multi.run(:fold_ledger, fn repo, _changes ->
         case subject_ref do
           ref when is_binary(ref) ->
-            {:ok, Samen.AI.Agent.Compaction.withdraw(ref, repo: repo)}
+            # `{:error, {:fold_ledger_unavailable, _, _}}` aborts + rolls back the tx: the marker survives, the retry resumes
+            Samen.AI.Agent.Compaction.withdraw(ref, repo: repo)
 
           nil ->
             {:ok, %{runs_walked: 0, folds_withdrawn: 0, rounds: 0, halted: :no_pseudonym}}

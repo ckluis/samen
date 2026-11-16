@@ -148,7 +148,7 @@ defmodule Samen.ErasureResumableTest do
     {sid, s, run} = seed!()
     assert [%{"summary" => @summary}] = folds_of(run)
     refute withdrawn?(run)
-    assert [%{pending: _}] = [%{pending: pending_rows(sid) |> length()}]
+    assert pending_rows(sid) == []
 
     assert {:ok, %{report: report}} = Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id)
 
@@ -302,8 +302,37 @@ defmodule Samen.ErasureResumableTest do
     assert pending_rows(sid) == []
   end
 
-  test "a shred the key store REFUSES (key still live) drops only this subject's marker" do
-    {sid, s, _run} = seed!()
+  defmodule ShredThenTimeoutKms do
+    @moduledoc false
+    @behaviour Samen.Kms
+    alias Samen.Kms.FileBacked
+    @impl true
+    def generate_subject_key(s), do: FileBacked.generate_subject_key(s)
+    @impl true
+    def unwrap(s), do: FileBacked.unwrap(s)
+    # a remote delete that SUCCEEDS and whose response then times out
+    @impl true
+    def shred(s) do
+      _ = FileBacked.shred(s)
+      {:error, :timeout}
+    end
+    @impl true
+    def attest(s), do: FileBacked.attest(s)
+    @impl true
+    def backups_disabled?, do: FileBacked.backups_disabled?()
+    @impl true
+    def key_material_present?(s), do: FileBacked.key_material_present?(s)
+    @impl true
+    def list_active_subjects, do: FileBacked.list_active_subjects()
+    @impl true
+    def pseudonym(a, b), do: FileBacked.pseudonym(a, b)
+  end
+
+  # CORRECTED EXPECTATION (review S1): this test used to assert the marker was DROPPED on any shred error, on the
+  # premise that the key provably survived. The Kms contract does not promise that (see ShredThenTimeoutKms), so the
+  # marker is KEPT: it may be the only durable copy of the ref. The retry refreshes it (key live) or reads it (key gone).
+  test "a shred error KEEPS this subject's marker (the key may or may not survive); a healthy retry completes" do
+    {sid, s, run} = seed!()
     other = "erz-other-#{System.unique_integer([:positive])}"
     put_marker!(other, "cafe02")
 
@@ -315,10 +344,122 @@ defmodule Samen.ErasureResumableTest do
     assert {:error, {:kms_shred_failed, :unavailable}} = Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id)
 
     Application.put_env(:samen_core, :kms_adapter, Kms.FileBacked)
-    assert pending_rows(sid) == []
+    assert [%{tiers: %{"pending" => %{"subject_ref" => ref}}}] = pending_rows(sid)
+    assert is_binary(ref)
     assert [%{tiers: %{"pending" => %{"subject_ref" => "cafe02"}}}] = pending_rows(other)
     assert %Report{outcome: "shredded"} = @repo.get!(Report, prior.id)
     assert Kms.FileBacked.key_material_present?(sid)
+
+    # key still live: the retry refreshes the one marker and completes
+    assert {:ok, %{report: report}} = Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id)
+    assert withdrawn?(run)
+    assert report.tiers["derived_summaries"]["invalidation"] == "performed"
+    assert pending_rows(sid) == []
+  end
+
+  test "a shred that DESTROYED the key but reported a timeout keeps the marker, and the retry withdraws from it" do
+    {sid, s, run} = seed!()
+    Application.put_env(:samen_core, :kms_adapter, ShredThenTimeoutKms)
+
+    assert {:error, {:kms_shred_failed, :timeout}} = Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id)
+
+    Application.put_env(:samen_core, :kms_adapter, Kms.FileBacked)
+    refute Kms.FileBacked.key_material_present?(sid)
+    assert [%{tiers: %{"pending" => %{"subject_ref" => _}}}] = pending_rows(sid)
+    refute withdrawn?(run)
+
+    assert {:ok, %{report: report}} = Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id)
+    assert withdrawn?(run)
+    assert [%{"summary" => "[withdrawn: fold #1, source withdrawn]"}] = folds_of(run)
+    assert report.tiers["derived_summaries"]["invalidation"] == "performed"
+    assert pending_rows(sid) == []
+  end
+
+  describe "not inside a caller's transaction (review S2)" do
+    test "inside Repo.transaction/1 it refuses, tagged, before anything is read or shredded" do
+      {sid, s, run} = seed!()
+
+      assert {:ok, {:error, :erasure_in_transaction}} =
+               @repo.transaction(fn -> Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id) end)
+
+      assert Kms.FileBacked.key_material_present?(sid)
+      assert pending_rows(sid) == []
+      refute withdrawn?(run)
+    end
+
+    test "POSITIVE CONTROL: the same call outside a transaction proceeds" do
+      {sid, s, run} = seed!()
+      assert {:ok, _} = Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id)
+      assert withdrawn?(run)
+    end
+  end
+
+  describe "a citing run the withdrawal walk cannot open (review M1)" do
+    defmodule RunKeyOutageKms do
+      @moduledoc false
+      @behaviour Samen.Kms
+      alias Samen.Kms.FileBacked
+      @impl true
+      def generate_subject_key(s), do: FileBacked.generate_subject_key(s)
+      # an outage on ONE subject's key (the citing run's), the rest of the store is healthy
+      @impl true
+      def unwrap(s) do
+        if s == Application.get_env(:samen_core, :erz_blocked_subject), do: {:error, :unavailable}, else: FileBacked.unwrap(s)
+      end
+
+      @impl true
+      def shred(s), do: FileBacked.shred(s)
+      @impl true
+      def attest(s), do: FileBacked.attest(s)
+      @impl true
+      def backups_disabled?, do: FileBacked.backups_disabled?()
+      @impl true
+      def key_material_present?(s), do: FileBacked.key_material_present?(s)
+      @impl true
+      def list_active_subjects, do: FileBacked.list_active_subjects()
+      @impl true
+      def pseudonym(a, b), do: FileBacked.pseudonym(a, b)
+    end
+
+    setup do
+      on_exit(fn -> Application.delete_env(:samen_core, :erz_blocked_subject) end)
+    end
+
+    test "is NOT counted as withdrawn: the tx rolls back, the marker survives, the report is not written, the retry completes" do
+      {sid, s, run} = seed!()
+      Application.put_env(:samen_core, :kms_adapter, RunKeyOutageKms)
+      Application.put_env(:samen_core, :erz_blocked_subject, run.id)
+
+      assert {:error, {:erasure_tx_failed, {:fold_ledger_unavailable, run_id, :transcript_unreadable}}} =
+               Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id)
+
+      assert run_id == run.id
+      # nothing claims the withdrawal happened
+      assert [%{tiers: %{"pending" => %{"subject_ref" => _}}}] = pending_rows(sid)
+      refute Erasure.erased?(sid, repo: @repo)
+      assert Erasure.latest_report(sid, repo: @repo) == nil
+      refute withdrawn?(run)
+
+      # the store heals: the retry resumes from the marker and really withdraws
+      Application.put_env(:samen_core, :kms_adapter, Kms.FileBacked)
+      Application.delete_env(:samen_core, :erz_blocked_subject)
+      assert [%{"summary" => @summary}] = folds_of(run)
+
+      assert {:ok, %{report: report}} = Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id)
+      assert [%{"summary" => "[withdrawn: fold #1, source withdrawn]"}] = folds_of(run)
+      assert withdrawn?(run)
+      assert report.tiers["derived_summaries"]["invalidation"] == "performed"
+      assert pending_rows(sid) == []
+    end
+
+    test "POSITIVE CONTROL: a citing run whose OWN key was shredded (unreadable by design) is skipped, not a failure" do
+      {sid, s, run} = seed!()
+      assert {:ok, _} = Kms.shred(run.id)
+
+      assert {:ok, %{report: report}} = Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id)
+      assert report.tiers["derived_summaries"]["invalidation"] == "performed"
+      assert pending_rows(sid) == []
+    end
   end
 
   test "pending/1 lists unfinished erasures on the configured default repo, oldest first, and not completed ones" do
