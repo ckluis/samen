@@ -1,0 +1,18 @@
+# SABOTAGE: a KMS shred error deletes the resume marker although the key may be gone
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/erasure_resumable_test.exs
+# MUST_FAIL: a shred that DESTROYED the key but reported a timeout keeps the marker
+diff --git a/samen_core/lib/samen/erasure.ex b/samen_core/lib/samen/erasure.ex
+index edf52760..e604ba5c 100644
+--- a/samen_core/lib/samen/erasure.ex
++++ b/samen_core/lib/samen/erasure.ex
+@@ -328,6 +328,7 @@ defmodule Samen.Erasure do
+             # KEPT: `Kms.shred/1` promises nothing about the key on an error (a remote delete can succeed and the
+             # response time out), so the marker may be the only durable copy of the ref. The retry handles both
+             # cases: key still live -> the marker is refreshed; key gone -> the ref is read from the marker.
++            _ = r.delete_all(from(p in Report, where: p.subject_id == ^subject_id and p.outcome == ^@pending_outcome))
+             {:error, {:kms_shred_failed, reason}}
+         end
+     end
