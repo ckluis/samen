@@ -262,8 +262,6 @@ defmodule Samen.AI.SupportOperator do
 
   defp public_field_names(resource) do
     resource |> Ash.Resource.Info.public_attributes() |> Enum.map(& &1.name)
-  rescue
-    _ -> []
   end
 
   defp org_id(scope) do

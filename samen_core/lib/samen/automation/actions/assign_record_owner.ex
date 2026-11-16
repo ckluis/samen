@@ -171,7 +171,9 @@ defmodule Samen.Automation.Actions.AssignRecordOwner do
       _ -> {:error, :no_owner_attribute}
     end
   rescue
-    _ -> {:error, :no_owner_attribute}
+    e ->
+      Samen.Observability.Failure.report(:assign_owner_attribute, nil, e)
+      {:error, :no_owner_attribute}
   end
 
   # The governed read (arm 4): a foreign org's record does not exist for this scope.
@@ -185,10 +187,14 @@ defmodule Samen.Automation.Actions.AssignRecordOwner do
       {:ok, [record]} -> {:ok, record}
       {:ok, []} -> {:error, :record_not_found}
       {:error, %Ash.Error.Forbidden{}} -> {:error, :not_authorized}
-      {:error, _} -> {:error, :tool_failed}
+      {:error, reason} ->
+        Samen.Observability.Failure.report(:assign_owner_fetch, scope, reason)
+        {:error, :tool_failed}
     end
   rescue
-    _ -> {:error, :tool_failed}
+    e ->
+      Samen.Observability.Failure.report(:assign_owner_fetch, scope, e)
+      {:error, :tool_failed}
   end
 
   defp fetch(_resource, _id, _actor), do: {:error, :not_authorized}
@@ -203,10 +209,14 @@ defmodule Samen.Automation.Actions.AssignRecordOwner do
     |> case do
       {:ok, updated} -> {:ok, updated}
       {:error, %Ash.Error.Forbidden{}} -> {:error, :not_authorized}
-      {:error, _} -> {:error, :write_failed}
+      {:error, reason} ->
+        Samen.Observability.Failure.report_write(:assign_owner_write, scope, reason)
+        {:error, :write_failed}
     end
   rescue
-    _ -> {:error, :write_failed}
+    e ->
+      Samen.Observability.Failure.report_write(:assign_owner_write, scope, e)
+      {:error, :write_failed}
   end
 
   # (No non-Scope clause: `fetch/3` above already refuses a non-`%Samen.Scope{}` actor,

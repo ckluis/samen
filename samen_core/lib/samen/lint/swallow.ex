@@ -16,7 +16,7 @@ defmodule Samen.Lint.Swallow do
 
   and whose body does NOT
 
-    * log (`Logger.*`) or report (`Failure.report/3,5`, `Guard.report/3`),
+    * log (`Logger.*`) or report (`Failure.report/3,5`, `Failure.report_write/3`, `Guard.report/3`),
     * re-raise (`raise` / `reraise`), or
     * hand the exception on: the bound variable (or a variable assigned from it) must reach the clause's FINAL
       expression (`e -> {:error, e}`). `e -> _ = e; []` does not count: merely mentioning the variable is not
@@ -394,7 +394,8 @@ defmodule Samen.Lint.Swallow do
       Macro.prewalk(body, false, fn
         node, true -> {node, true}
         {{:., _, [{:__aliases__, _, [:Logger]}, _]}, _, _} = node, _ -> {node, true}
-        {{:., _, [{:__aliases__, _, aliases}, :report]}, _, _} = node, _ -> {node, List.last(aliases) in [:Guard, :Failure]}
+        {{:., _, [{:__aliases__, _, aliases}, fun]}, _, _} = node, _ when fun in [:report, :report_write] ->
+          {node, List.last(aliases) in [:Guard, :Failure]}
         {:raise, _, _} = node, _ -> {node, true}
         {:reraise, _, _} = node, _ -> {node, true}
         node, found -> {node, found}

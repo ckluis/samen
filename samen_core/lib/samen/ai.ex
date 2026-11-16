@@ -203,7 +203,9 @@ defmodule Samen.AI do
           provider.native_tools?() == true
     end
   rescue
-    _ -> false
+    e ->
+      Samen.Observability.Failure.report(:ai_native_tools, nil, e)
+      false
   end
 
   # `:model` names the model the caller wants (an agent definition's, a verb's). It rides

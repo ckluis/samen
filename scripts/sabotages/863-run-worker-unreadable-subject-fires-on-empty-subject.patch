@@ -1,0 +1,19 @@
+# SABOTAGE: an unreadable subject runs the workflow against an empty subject, which passes neq gates
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: a subject that cannot be READ skips the run
+diff --git a/samen_core/lib/samen/automation/run_worker.ex b/samen_core/lib/samen/automation/run_worker.ex
+index c119ace9..8fd50ae8 100644
+--- a/samen_core/lib/samen/automation/run_worker.ex
++++ b/samen_core/lib/samen/automation/run_worker.ex
+@@ -190,7 +190,7 @@ defmodule Samen.Automation.RunWorker do
+       # A subject that could not be READ is not an empty subject: `neq` / `not_in` / `is_nil` (and a workflow with
+       # no conditions) all pass against one, so the run is skipped (and the failure reported) rather than fired.
+       Samen.Observability.Failure.report(:run_worker_load_eligible, nil, e)
+-      {:skip, :internal_error}
++      {:ok, %{}}
+   end
+ 
+   defp conditions_gate(definition, subject_map, args) do

@@ -1,0 +1,19 @@
+# SABOTAGE: enqueue_reminder's undo treats a reminder that is already gone as a failed compensation
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: a row that is already gone is :ok with no report
+diff --git a/samen_core/lib/samen/automation/actions/enqueue_reminder.ex b/samen_core/lib/samen/automation/actions/enqueue_reminder.ex
+index 3098ed1b..c96f9612 100644
+--- a/samen_core/lib/samen/automation/actions/enqueue_reminder.ex
++++ b/samen_core/lib/samen/automation/actions/enqueue_reminder.ex
+@@ -87,7 +87,7 @@ defmodule Samen.Automation.Actions.EnqueueReminder do
+     case Samen.Automation.Remind.cancel(reminder_id, actor) do
+       {:ok, _reminder} -> :ok
+       # Nothing to cancel: the reminder row is gone. Cancelling an already-cancelled reminder is `{:ok, _}` above.
+-      {:error, :not_found} -> :ok
++      {:error, :not_found} -> undo_failed(:not_found, actor)
+       # A read or write that FAILED leaves the reminder live (it still fires for a failed run): on record and tagged.
+       {:error, reason} -> undo_failed(reason, actor)
+     end

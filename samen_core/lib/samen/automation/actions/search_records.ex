@@ -153,12 +153,15 @@ defmodule Samen.Automation.Actions.SearchRecords do
       {:error, :not_configured} ->
         {"not_configured", []}
 
-      {:error, _reason} ->
+      {:error, reason} ->
         # A broken arm did no work — reported honestly, never fabricated hits.
+        Samen.Observability.Failure.report(:search_records_semantic, scope, reason)
         {"error", []}
     end
   rescue
-    _ -> {"error", []}
+    e ->
+      Samen.Observability.Failure.report(:search_records_semantic, scope, e)
+      {"error", []}
   end
 
   # --- the full-text arm (Samen.Search — host-wired seams; ADR-027) ----------------------
@@ -191,7 +194,9 @@ defmodule Samen.Automation.Actions.SearchRecords do
          end)}
     end
   rescue
-    _ -> {"error", []}
+    e ->
+      Samen.Observability.Failure.report(:search_records_text, scope, e)
+      {"error", []}
   end
 
   defp text_seams do

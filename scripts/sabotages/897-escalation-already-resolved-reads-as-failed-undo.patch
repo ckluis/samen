@@ -1,0 +1,20 @@
+# SABOTAGE: escalate's undo treats an already-resolved escalation as a failed compensation, stamping 
+#   compensation_failed on a clean run
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: an escalation already resolved is :ok
+diff --git a/samen_core/lib/samen/automation/actions/escalate.ex b/samen_core/lib/samen/automation/actions/escalate.ex
+index 66f1736e..1ff7fc9c 100644
+--- a/samen_core/lib/samen/automation/actions/escalate.ex
++++ b/samen_core/lib/samen/automation/actions/escalate.ex
+@@ -76,7 +76,7 @@ defmodule Samen.Automation.Actions.Escalate do
+   def undo(_config, _meta, _ctx), do: :ok
+ 
+   # Already resolved / cancelled / exhausted: the state machine refuses the transition, and the chain walk has already stopped.
+-  defp terminal_transition?(%{errors: errors}) when is_list(errors),
++  defp terminal_transition?(%{errors: errors}) when is_list(errors) and false,
+     do: errors != [] and Enum.all?(errors, &match?(%AshStateMachine.Errors.NoMatchingTransition{}, &1))
+ 
+   defp terminal_transition?(_reason), do: false

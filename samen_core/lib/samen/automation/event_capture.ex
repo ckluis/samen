@@ -154,7 +154,9 @@ defmodule Samen.Automation.EventCapture do
       [_ | _] -> true
     end
   rescue
-    _ -> false
+    e ->
+      Samen.Observability.Failure.report(:event_capture_active_match, org_id, e)
+      false
   end
 
   defp event_of(:create), do: :created
@@ -212,7 +214,9 @@ defmodule Samen.Automation.EventCapture do
       [] -> nil
     end
   rescue
-    _ -> nil
+    e ->
+      Samen.Observability.Failure.report(:event_capture_reload_org, nil, e)
+      nil
   end
 
   defp usable?(%Ash.NotLoaded{}), do: false

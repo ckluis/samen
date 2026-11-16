@@ -162,9 +162,7 @@ defmodule Samen.Automation.DispatchWorker do
   defp event_atom("destroyed"), do: :destroyed
   defp event_atom(e) when is_atom(e), do: e
 
-  defp event_atom(other) do
-    String.to_existing_atom(other)
-  rescue
-    ArgumentError -> :created
-  end
+  # An event that is not one of the three (and not an existing atom) RAISES here and `perform/1` answers
+  # `{:error, e}`: it used to read as `:created`, dispatching the created-workflows for an event that never was.
+  defp event_atom(other), do: String.to_existing_atom(other)
 end

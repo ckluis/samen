@@ -86,11 +86,19 @@ defmodule Samen.Automation.Actions.EnqueueReminder do
       when is_binary(reminder_id) do
     case Samen.Automation.Remind.cancel(reminder_id, actor) do
       {:ok, _reminder} -> :ok
-      _other -> :ok
+      # Nothing to cancel: the reminder row is gone. Cancelling an already-cancelled reminder is `{:ok, _}` above.
+      {:error, :not_found} -> :ok
+      # A read or write that FAILED leaves the reminder live (it still fires for a failed run): on record and tagged.
+      {:error, reason} -> undo_failed(reason, actor)
     end
   end
 
   def undo(_config, _meta, _ctx), do: :ok
+
+  defp undo_failed(reason, actor) do
+    Samen.Observability.Failure.report_write(:reminder_undo, actor, reason)
+    {:error, :undo_failed}
+  end
 
   defp resolve_remind_at(%{"offset_minutes" => m}, _ctx) when is_integer(m) do
     DateTime.utc_now() |> DateTime.add(m * 60, :second) |> DateTime.truncate(:second)

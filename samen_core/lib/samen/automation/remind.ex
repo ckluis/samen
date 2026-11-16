@@ -67,9 +67,12 @@ defmodule Samen.Automation.Remind do
   # ---------------------------------------------------------------------------
 
   defp fetch_reminder(res, id, actor) do
-    case Ash.get(res, id, actor: actor) do
+    # `:not_found` is ONLY a row that is not there (or not visible to the actor); a read that FAILED returns its reason, so
+    # a caller (the `enqueue_reminder` compensation) can tell "nothing to cancel" from "could not look".
+    case Ash.get(res, id, actor: actor, not_found_error?: false) do
+      {:ok, nil} -> {:error, :not_found}
       {:ok, reminder} -> {:ok, reminder}
-      {:error, _reason} -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -92,7 +95,9 @@ defmodule Samen.Automation.Remind do
   defp res_repo(res) do
     AshPostgres.DataLayer.Info.repo(res)
   rescue
-    _ -> nil
+    e ->
+      Samen.Observability.Failure.report(:automation_res_repo, nil, e)
+      nil
   end
 
   defp opt(opts, key) do

@@ -1,0 +1,20 @@
+# SABOTAGE: a failed fetch_record read is tagged but never reported
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/actions_test.exs
+# MUST_FAIL: whose read FAILS is {:error, :tool_failed} AND reported
+diff --git a/samen_core/lib/samen/automation/actions/fetch_record.ex b/samen_core/lib/samen/automation/actions/fetch_record.ex
+index 03a251f6..e4e626eb 100644
+--- a/samen_core/lib/samen/automation/actions/fetch_record.ex
++++ b/samen_core/lib/samen/automation/actions/fetch_record.ex
+@@ -167,8 +167,7 @@ defmodule Samen.Automation.Actions.FetchRecord do
+       {:ok, [record]} -> {:ok, record}
+       {:ok, []} -> {:error, :record_not_found}
+       {:error, %Ash.Error.Forbidden{}} -> {:error, :not_authorized}
+-      {:error, reason} ->
+-        Samen.Observability.Failure.report(:fetch_record_read, scope, reason)
++      {:error, _reason} ->
+         {:error, :tool_failed}
+     end
+   rescue

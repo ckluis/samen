@@ -1,0 +1,19 @@
+# SABOTAGE: a garbled turn id reads as an outage, so a garbled approval can never be rejected
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/honest_reads_test.exs
+# MUST_FAIL: a MALFORMED turn id is 'no such turn'
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 3b2ad31c..a86fd99c 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -3133,7 +3133,7 @@ defmodule Samen.AI.Agent do
+   defp fetch_turn(turn_id) when is_binary(turn_id) do
+     case Ecto.UUID.cast(turn_id) do
+       {:ok, uuid} -> read_turn(uuid)
+-      :error -> {:error, :turn_not_found}
++      :error -> {:error, :unavailable}
+     end
+   end
+ 

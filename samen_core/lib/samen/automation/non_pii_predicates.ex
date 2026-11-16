@@ -122,7 +122,9 @@ defmodule Samen.Automation.NonPiiPredicates do
          "target resource_key does not resolve to a known resource (default-deny)"}
     end
   rescue
-    _ ->
+    e ->
+      Samen.Observability.Failure.report(:non_pii_eligible_names, nil, e)
+
       {:error, :condition, resource_key,
        "target resource could not be classified (default-deny)"}
   end

@@ -25,8 +25,16 @@ defmodule Samen.Automation.ScheduleAdvance do
     changeset
     |> advance()
     |> Ash.Changeset.after_action(fn cs, result ->
-      org_id = resolve_org_id(cs, result)
-      enqueue_dispatch(result, org_id)
+      case resolve_org_id(cs, result) do
+        nil ->
+          # No org to dispatch under (the reload failed and was reported): a dispatch with a blank org would be
+          # rejected downstream and leave no Run row at all, so none is enqueued; the next scheduled fire retries.
+          Samen.Observability.Failure.report_write(:schedule_advance_enqueue_skipped, nil, :no_org)
+
+        org_id ->
+          enqueue_dispatch(result, org_id)
+      end
+
       {:ok, result}
     end)
   end
@@ -56,7 +64,9 @@ defmodule Samen.Automation.ScheduleAdvance do
       [] -> nil
     end
   rescue
-    _ -> nil
+    e ->
+      Samen.Observability.Failure.report(:schedule_advance_reload_org, nil, e)
+      nil
   end
 
   defp usable?(%Ash.NotLoaded{}), do: false

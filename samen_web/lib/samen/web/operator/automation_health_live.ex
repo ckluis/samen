@@ -75,6 +75,10 @@ defmodule Samen.Web.Operator.AutomationHealthLive do
     operator_org_id = mount && Operator.org_id(mount)
     operator = mount && operator_actor(mount)
 
+    # `read_errors`: which active-session reads FAILED (an outage), so the page renders the kit error state with a
+    # retry instead of the empty-state copy ("No workflows" / "No runs recorded.") a failed read must never claim.
+    socket = assign(socket, read_errors: [])
+
     cond do
       is_nil(operator_org_id) ->
         assign(socket,
@@ -109,13 +113,17 @@ defmodule Samen.Web.Operator.AutomationHealthLive do
         # ONE tenant's workflows is recorded in that tenant's ledger). Deny-on-read when missing.
         case Impersonation.gate_socket(socket, socket.assigns[:samen_operator_id], target_org_id) do
           {:ok, _actor, info} ->
+            summary = Health.summary(operator, target_org_id)
+            runs = Health.runs(operator, target_org_id, limit: 50)
+
             assign(socket,
               no_org: false,
               impersonation: :active,
               target_org_id: target_org_id,
               operator: operator,
-              summary: fetch_summary(operator, target_org_id),
-              runs: fetch_runs(operator, target_org_id),
+              summary: rows(summary),
+              runs: rows(runs),
+              read_errors: failed_reads(summary: summary, runs: runs),
               action_error: nil,
               session_info: info,
               open_error: nil
@@ -223,19 +231,10 @@ defmodule Samen.Web.Operator.AutomationHealthLive do
 
   # ---------------------------------------------------------------------------
 
-  defp fetch_summary(operator, org_id) do
-    case Health.summary(operator, org_id) do
-      {:ok, summary} -> summary
-      {:error, _} -> []
-    end
-  end
+  defp rows({:ok, rows}), do: rows
+  defp rows(_failed), do: []
 
-  defp fetch_runs(operator, org_id) do
-    case Health.runs(operator, org_id, limit: 50) do
-      {:ok, runs} -> runs
-      {:error, _} -> []
-    end
-  end
+  defp failed_reads(results), do: for({name, {:error, _}} <- results, do: name)
 
   # Bridges ADR-010's tenant-shaped operator-workspace actor to the
   # `Samen.OperatorPlane.Actor` `Samen.Automation.Health` expects — see
@@ -365,8 +364,10 @@ defmodule Samen.Web.Operator.AutomationHealthLive do
                   <span class="n">{length(@summary)}</span>
                 </div>
 
+                <.error_state :if={:summary in @read_errors} class="wf-read-error" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
+
                 <.empty_state
-                  :if={@summary == []}
+                  :if={@summary == [] and :summary not in @read_errors}
                   class="wf-empty"
                   icon="⚙"
                   title="No workflows for this org."
@@ -428,8 +429,10 @@ defmodule Samen.Web.Operator.AutomationHealthLive do
                   <span class="n">{length(@runs)}</span>
                 </div>
 
+                <.error_state :if={:runs in @read_errors} class="run-read-error" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
+
                 <.empty_state
-                  :if={@runs == []}
+                  :if={@runs == [] and :runs not in @read_errors}
                   class="run-empty"
                   icon="✓"
                   title="No runs recorded."

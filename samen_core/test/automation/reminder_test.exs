@@ -120,6 +120,42 @@ defmodule Samen.Automation.ReminderTest do
   end
 
   # ---------------------------------------------------------------------------
+  # Honest reads — a failed reload must not stamp the reminder sent with no notification.
+
+  test "RED: when the reload that feeds the notification FAILS the :fire fails (it was stamped :sent with nothing emitted); the readable reminder fires (control)" do
+    org = Ash.UUID.generate()
+    recipient = Ash.UUID.generate()
+    past = DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.truncate(:second)
+
+    {:ok, reminder} =
+      Remind.schedule(%{
+        org_id: org,
+        recipient_id: recipient,
+        subject_ref: "samen:crm.opportunity:honest-1",
+        remind_at: past,
+        note: @note
+      })
+
+    # The change reloads by the changeset's id: an id the read rejects is a read that FAILS. It used to be swallowed
+    # to nil, so the change went ahead (state :sent) and the after_action emitted nothing.
+    unreadable = Ash.Changeset.new(%{reminder | id: "not-a-uuid"})
+
+    result =
+      try do
+        {:built, Samen.Automation.ReminderFire.change(unreadable, [], %{})}
+      rescue
+        e -> {:raised, e}
+      end
+
+    assert {:raised, _} = result
+    assert notification_count(org, recipient) == 0
+
+    # POSITIVE CONTROL: the same action on the readable row sends exactly one notification
+    assert {:ok, %{state: :sent}} = reminder |> Ash.Changeset.for_update(:fire, %{}) |> Ash.update(authorize?: false)
+    assert notification_count(org, recipient) == 1
+  end
+
+  # ---------------------------------------------------------------------------
   # Idempotency (INV-2) — a reminder must not double-fire.
 
   test "IDEMPOTENCY: a second :fire on an already-sent reminder is a no-op (the DB-level state-guard)" do

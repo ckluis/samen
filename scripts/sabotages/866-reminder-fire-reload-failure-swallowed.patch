@@ -1,0 +1,19 @@
+# SABOTAGE: a failed reminder reload is swallowed, so the reminder is stamped sent with no notification
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/reminder_test.exs
+# MUST_FAIL: when the reload that feeds the notification FAILS the :fire fails
+diff --git a/samen_core/lib/samen/automation/reminder_fire.ex b/samen_core/lib/samen/automation/reminder_fire.ex
+index 7a6e0fd5..dcbcbe52 100644
+--- a/samen_core/lib/samen/automation/reminder_fire.ex
++++ b/samen_core/lib/samen/automation/reminder_fire.ex
+@@ -72,6 +72,8 @@ defmodule Samen.Automation.ReminderFire do
+       [record | _] -> record
+       [] -> nil
+     end
++  rescue
++    _ -> nil
+   end
+ 
+   defp notify_opts do

@@ -163,12 +163,20 @@ defmodule Samen.Automation.RunWorker do
       true ->
         with {:ok, resource} <- resolve_resource(resource_key),
              {:ok, eligible} <- NonPiiPredicates.eligible_names(resource_key) do
-          {:ok, load_eligible(resource, record_id, eligible)}
+          load_eligible(resource, record_id, eligible)
         else
-          _ -> {:ok, %{}}
+          # An unresolvable resource or an unclassifiable one (`eligible_names/1` answered its default-deny) is not an
+          # empty subject: `neq` / `not_in` / `is_nil` gates all pass against one. Skip, exactly as `load_eligible/3`.
+          other ->
+            Samen.Observability.Failure.report(:run_worker_reread_subject, nil, reread_reason(other))
+            {:skip, :internal_error}
         end
     end
   end
+
+  # A value-free atom for the report (the `eligible_names/1` tuple carries free text; the report names only a kind).
+  defp reread_reason(:error), do: :unresolvable_resource
+  defp reread_reason({:error, _kind, _key, _msg}), do: :unclassifiable_resource
 
   defp load_eligible(resource, record_id, eligible) do
     eligible_atoms =
@@ -182,11 +190,15 @@ defmodule Samen.Automation.RunWorker do
     |> Ash.Query.ensure_selected(eligible_atoms)
     |> Ash.read!(authorize?: false)
     |> case do
-      [record | _] -> Map.take(record, eligible_atoms)
-      [] -> %{}
+      [record | _] -> {:ok, Map.take(record, eligible_atoms)}
+      [] -> {:ok, %{}}
     end
   rescue
-    _ -> %{}
+    e ->
+      # A subject that could not be READ is not an empty subject: `neq` / `not_in` / `is_nil` (and a workflow with
+      # no conditions) all pass against one, so the run is skipped (and the failure reported) rather than fired.
+      Samen.Observability.Failure.report(:run_worker_load_eligible, nil, e)
+      {:skip, :internal_error}
   end
 
   defp conditions_gate(definition, subject_map, args) do
@@ -257,6 +269,10 @@ defmodule Samen.Automation.RunWorker do
   # Run log (that would be exactly the freeform-text leak
   # `Samen.Automation.RunRecord.bounded_outcomes/1` exists to prevent) — any
   # shape this doesn't recognize degrades to `{[], :action_failed}`.
+  # `extract_failure/1` is the proof surface for the shapes Reactor produces that a test cannot provoke end to end.
+  @doc false
+  def failure_summary(reason), do: extract_failure(reason)
+
   defp extract_failure(%Reactor.Error.Invalid{errors: errors}) when is_list(errors) do
     errors
     |> Enum.map(&extract_failure/1)
@@ -270,6 +286,16 @@ defmodule Samen.Automation.RunWorker do
   end
 
   defp extract_failure(%Reactor.Error.Invalid.RunStepError{error: inner}), do: extract_failure(inner)
+
+  # A compensation that FAILED (`ActionStep.undo/4` -> `{:error, bounded outcome}`): its outcome is stamped on the
+  # run (status `:compensation_failed`) without taking over the run's own `error_kind` (the action that failed).
+  defp extract_failure(%Reactor.Error.Invalid.UndoStepError{error: %{status: :compensation_failed} = outcome}) do
+    if plain_map?(outcome), do: {[outcome], nil}, else: {[], nil}
+  end
+
+  # Any OTHER undo failure (Reactor-internal, not our bounded map) carries no outcome and no kind of its own: it must not
+  # fall to the catch-all and override the failing action's `error_kind` with `:action_failed`.
+  defp extract_failure(%Reactor.Error.Invalid.UndoStepError{}), do: {[], nil}
 
   defp extract_failure({%{} = failed, completed}) when is_list(completed) do
     {Enum.filter(completed, &plain_map?/1) ++ [failed], Map.get(failed, :error_kind, :action_failed)}
@@ -308,11 +334,7 @@ defmodule Samen.Automation.RunWorker do
 
   defp resolve_resource(_), do: :error
 
-  defp safe_atom(name) do
-    String.to_existing_atom(name)
-  rescue
-    ArgumentError -> nil
-  end
+  defp safe_atom(name), do: Samen.Automation.Actions.Support.safe_atom(name)
 
   defp derive_ref(wf, args) do
     "samen:workflow:#{wf.id}:#{args["event_id"]}"

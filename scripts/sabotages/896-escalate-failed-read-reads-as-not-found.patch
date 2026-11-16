@@ -1,0 +1,20 @@
+# SABOTAGE: Escalate.resolve maps a failed read of the escalation id to :not_found, so a cancel that could 
+#   not look reads as nothing to cancel
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: tell a failed read from a missing row
+diff --git a/samen_core/lib/samen/automation/escalate.ex b/samen_core/lib/samen/automation/escalate.ex
+index 2ca24152..ddcd2adb 100644
+--- a/samen_core/lib/samen/automation/escalate.ex
++++ b/samen_core/lib/samen/automation/escalate.ex
+@@ -132,7 +132,7 @@ defmodule Samen.Automation.Escalate do
+     case Ash.get(res, escalation_id, authorize?: false, not_found_error?: false) do
+       {:ok, nil} -> {:error, :not_found}
+       {:ok, escalation} -> {:ok, escalation}
+-      {:error, reason} -> {:error, reason}
++      {:error, _reason} -> {:error, :not_found}
+     end
+   end
+ 

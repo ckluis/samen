@@ -286,10 +286,12 @@ defmodule Samen.AI.Agent.FoldSource do
   end
 
   defp table_present?(repo) do
-    case Ecto.Adapters.SQL.query(repo, "SELECT to_regclass($1)", [@table]) do
+    case repo.query("SELECT to_regclass($1)", [@table]) do
       {:ok, %{rows: [[nil]]}} -> false
       {:ok, %{rows: [[_]]}} -> true
-      _ -> false
+      # A probe that FAILED is not an absent table: reading it as `false` answered "no folds to withdraw" / "this
+      # host has no index" for an erasure walk and the per-turn withdrawal check.
+      {:error, _reason} -> raise RuntimeError, "the fold-source index could not be probed: not an absent table"
     end
   end
 end

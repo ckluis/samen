@@ -474,6 +474,52 @@ defmodule Samen.Automation.ActionsTest do
   end
 
   # ---------------------------------------------------------------------------
+  # Honest reads — a tool whose read/write FAILED says so (tagged AND on record), never a success.
+
+  test "a fetch_record / assign_owner whose read FAILS is {:error, :tool_failed} AND reported; the readable record answers (control)" do
+    org = Ash.UUID.generate()
+    target = create_target!(org)
+    actor = Samen.Scope.new(%{id: Ash.UUID.generate(), org_id: org, role: :member})
+    ctx = %Context{org_id: org, workflow_id: "wf-honest", subject_ref: "samen:target:x", resource_key: @target_key, actor: actor}
+
+    assert {:ok, %{records: [_]}} =
+             Samen.Automation.Actions.FetchRecord.run(%{"resource" => @target_key, "id" => to_string(target.id)}, ctx)
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, :tool_failed} =
+                 Samen.Automation.Actions.FetchRecord.run(%{"resource" => @target_key, "id" => "not-a-uuid"}, ctx)
+
+        assert {:error, :tool_failed} =
+                 Samen.Automation.Actions.AssignRecordOwner.run(
+                   %{"resource" => @target_key, "id" => "not-a-uuid", "user_id" => Ash.UUID.generate()},
+                   ctx
+                 )
+      end)
+
+    assert log =~ "read=fetch_record_read"
+    assert log =~ "read=assign_owner_fetch"
+  end
+
+  test "MutateRecord.undo: a compensation that FAILS is {:error, :undo_failed} AND reported (it answered :ok, the created record left behind); a record already gone is :ok (control)" do
+    org = Ash.UUID.generate()
+    actor = Samen.Scope.new(%{id: Ash.UUID.generate(), org_id: org, role: :member})
+    ctx = %Context{org_id: org, workflow_id: "wf-undo", subject_ref: "samen:target:x", resource_key: @target_key, actor: actor}
+
+    meta = fn id -> %{mode: :create, record_id: id, resource_key: @target_key} end
+
+    # POSITIVE CONTROL: nothing left to undo
+    assert :ok = Samen.Automation.Actions.MutateRecord.undo(%{}, meta.(Ash.UUID.generate()), ctx)
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, :undo_failed} = Samen.Automation.Actions.MutateRecord.undo(%{}, meta.("not-a-uuid"), ctx)
+      end)
+
+    assert log =~ "write=record_family_undo"
+  end
+
+  # ---------------------------------------------------------------------------
   # Helpers
 
   defp create_workflow!(org, owner, opts) do

@@ -30,6 +30,31 @@ All notable changes to Samen are recorded here. The format follows
   campaign send gate refuses on it.
 - Closed-but-silent security sites (AI egress chokepoint, agent approver/breaker/hooks, fleet resolution/authz, identity, operator plane,
   break-glass anchoring) keep their closed answers and now report by name.
+- **AI / agent and automation areas** (`samen/ai/**`, `samen/automation/**`; kernel ceilings rescue 227 -> 176, error-arm 26 -> 20). Fail-open
+  sites fixed, each with a red test, a positive control and a sabotage (855-869): a failed `FoldSource` existence probe raises instead of
+  reading as an absent index (the erasure withdrawal walk and the per-turn withdrawal check answered "nothing to withdraw");
+  `Embeddings` reads an introspection failure as vault-routed (fail closed), its nearest-neighbour and stale reads are
+  `{:error, :unavailable}` and `reembed_stale/1` no longer claims `{:ok, 0 re-embedded}` (`stale_rows/3` raises, `stale_rows_result/3` is the
+  tagged form); `Agent.reject_proposal/3` rolls back when the turn or run cannot be READ; the agent Health `summary/runs/turns`, the automation
+  Health `summary/runs` and `Breaker.kills/1` answer an outage, not an empty fleet or "no kills"; `RunWorker` skips a run (`internal_error`)
+  whose subject cannot be READ, because an empty subject passes every `neq` / `not_in` / `is_nil` gate; `DispatchWorker` no longer reads an
+  unknown event as `:created`; `ReminderFire` and `EscalationAdvance` fail the change when their reload fails; `MutateRecord.undo/3` reports a
+  compensation that did not happen. The fail-closed tool, capability, catalogue and surface probes stay non-fatal and now report by name; the
+  four `String.to_existing_atom` rescues collapse into one reviewed `Support.safe_atom/1`. Web LiveViews that map `{:error, _}` to `[]`
+  (operator agent / automation health) are the web phase's.
+  Review follow-ups (sabotages 877+): `RunWorker.reread_subject/2` skips (`internal_error`) on a resource it cannot resolve or classify instead of
+  firing against an empty subject; `ReembedWorker` returns `{:error, :unavailable}` (Oban retries) instead of a `CaseClauseError`;
+  `ActionStep.undo/4` returns a failed compensation to Reactor (which stacks an `UndoStepError`, still undoes the remaining steps and fails the
+  run) and `RunWorker` stamps it on the Run outcome as status `compensation_failed`; a malformed turn id in `reject_proposal/3` is `:turn_not_found`
+  (a garbled approval can still be rejected), only a failed read of a well-formed id is `:unavailable`; the operator agent and automation health
+  pages render the kit error state with a retry when a read failed (no longer "No runs recorded."); `Embeddings.embedder_simulated?/1` answers
+  `true` (not verified real) when a provider's `simulated?/0` raises; `ScheduleAdvance` enqueues no dispatch when the org cannot be resolved;
+  `Failure.report_write/3` reports failed writes as `write` (the lint scanner counts it as a report) and the write sites use it.
+  Second review (sabotages 893+): the `enqueue_reminder` and `escalate` compensations no longer answer `:ok` when the undo failed - a row that is gone
+  (or an escalation already past its transitions) is `:ok`, any other failed read or write is reported (`reminder_undo` / `escalation_undo`) and
+  returns `{:error, :undo_failed}`, so it is on the Run as `compensation_failed`; `Remind.cancel/3` and `Escalate.resolve/3` tell a failed read from
+  a missing row; an `UndoStepError` that is not the bounded compensation map no longer overrides the run's `error_kind`; a non-UUID `select_run` on the
+  operator agent health page is "no such run", not an outage; the `embedder_simulated?` comments state how they differ from the Chokepoint's.
 
 ### Kernel review fixes (samen_core, samen_web, demo, driftwood, pawchart)
 

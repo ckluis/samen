@@ -187,10 +187,20 @@ defmodule Samen.AI.Embeddings do
   rows) OR `aie_model <> current_model` (the provider was upgraded since this row was written).
   Bounded by `:limit` (default 500) so a large backlog is swept incrementally, never as one
   unbounded scan. Returns raw maps (`:id`, `:org_id`, `:source_resource`, `:source_id`,
-  `:field`, `:model`) — the shape `reembed_stale/1` consumes.
+  `:field`, `:model`) — the shape `reembed_stale/1` consumes. A FAILED read RAISES (it used to answer `[]`, "nothing
+  is stale"); `stale_rows_result/3` is the tagged form `reembed_stale/1` uses.
   """
   @spec stale_rows(term(), String.t(), keyword()) :: [map()]
   def stale_rows(repo, current_model, opts \\ []) when is_binary(current_model) do
+    case stale_rows_result(repo, current_model, opts) do
+      {:ok, rows} -> rows
+      {:error, reason} -> raise RuntimeError, "the stale embedding rows could not be read (#{inspect(reason)}): not an empty list"
+    end
+  end
+
+  @doc "`stale_rows/3` with the failure tagged: `{:ok, rows}` | `{:error, :unavailable}`."
+  @spec stale_rows_result(term(), String.t(), keyword()) :: {:ok, [map()]} | {:error, :unavailable}
+  def stale_rows_result(repo, current_model, opts \\ []) when is_binary(current_model) do
     limit = Keyword.get(opts, :limit, 500)
 
     sql = """
@@ -203,19 +213,21 @@ defmodule Samen.AI.Embeddings do
 
     case repo.query(sql, [current_model, limit]) do
       {:ok, %{rows: rows}} ->
-        Enum.map(rows, fn [id, org_id, resource, source_id, field, model] ->
-          %{
-            id: id,
-            org_id: org_id,
-            source_resource: resource,
-            source_id: source_id,
-            field: field,
-            model: model
-          }
-        end)
+        {:ok,
+         Enum.map(rows, fn [id, org_id, resource, source_id, field, model] ->
+           %{
+             id: id,
+             org_id: org_id,
+             source_resource: resource,
+             source_id: source_id,
+             field: field,
+             model: model
+           }
+         end)}
 
-      {:error, _} ->
-        []
+      {:error, reason} ->
+        Samen.Observability.Failure.report(:embeddings_stale_rows, nil, reason)
+        {:error, :unavailable}
     end
   end
 
@@ -240,10 +252,10 @@ defmodule Samen.AI.Embeddings do
   @spec reembed_stale(keyword()) ::
           {:ok, %{reembedded: non_neg_integer(), errors: [{map(), term()}]}} | {:error, term()}
   def reembed_stale(opts \\ []) do
-    with {:ok, {embedder, config} = resolved} <- embedder_for(opts) do
-      current = model_identifier(resolved)
-      repo = repo_for(opts)
-      rows = stale_rows(repo, current, Keyword.take(opts, [:limit]))
+    with {:ok, {embedder, config} = resolved} <- embedder_for(opts),
+         current = model_identifier(resolved),
+         repo = repo_for(opts),
+         {:ok, rows} <- stale_rows_result(repo, current, Keyword.take(opts, [:limit])) do
       loader = Keyword.get(opts, :record_loader, &default_record_loader/2)
 
       result =
@@ -285,7 +297,9 @@ defmodule Samen.AI.Embeddings do
       {:error, {:unresolvable_resource, inspected}}
     end
   rescue
-    _ -> {:error, {:unresolvable_resource, inspected}}
+    e ->
+      Samen.Observability.Failure.report(:embeddings_resolve_resource, nil, e)
+      {:error, {:unresolvable_resource, inspected}}
   end
 
   # `aie_field` was written via `Atom.to_string/1` — the field atom already exists (it was
@@ -325,7 +339,7 @@ defmodule Samen.AI.Embeddings do
       # projection ⇒ a self-query lands at distance 0). Free-text query keystrokes are the
       # user's own input (§3.2 step-2 consent boundary); the scrub still refuses a `vt_*` token.
       case Chokepoint.embed(embedder, config, [normalized], chokepoint_opts(opts)) do
-        {:ok, [qvec]} -> {:ok, knn(repo_for(opts), org_id, qvec, limit(opts))}
+        {:ok, [qvec]} -> knn(repo_for(opts), org_id, qvec, limit(opts))
         {:error, _} = err -> err
       end
     else
@@ -337,9 +351,12 @@ defmodule Samen.AI.Embeddings do
 
   @doc """
   Whether the CURRENTLY RESOLVED embedder for `search/3` / `embed_field/6` self-declares as
-  simulated (T78, mirroring T152's `%Samen.AI.Completion{simulated:}` mechanism —
+  simulated (T78, following T152's `%Samen.AI.Completion{simulated:}` mechanism —
   `Samen.AI.Chokepoint`'s private `simulated_provider?/1`, duplicated here because it is the
-  embeddings lane's own resolution, not the completion lane's). `Samen.AI.Embedder.
+  embeddings lane's own resolution, not the completion lane's). It differs from the Chokepoint's
+  copy in ONE place, deliberately: a provider whose `simulated?/0` RAISES answers `true` here
+  ("not verified real", so the badge shows), where the Chokepoint's answers `false` ("never
+  silently mark a live output simulated", `Samen.AI.Completion`). `Samen.AI.Embedder.
   Deterministic` (the keyless `:test`-only fallback, `unwired_embedder/1` above) self-declares
   `true` via the optional `Samen.AI.Provider.simulated?/0` callback; a live adapter that omits
   the callback is treated as LIVE (`false`, fail-honest default). A caller (a KB-suggestion
@@ -357,15 +374,19 @@ defmodule Samen.AI.Embeddings do
     end
   end
 
-  # Mirrors `Samen.AI.Chokepoint`'s private `simulated_provider?/1` exactly (T152's mechanism):
-  # a provider that OMITS the optional callback is LIVE by default (fail-honest — never claim a
-  # real provider is simulated, never claim a keyless one is real). Wrapped so a provider whose
-  # `simulated?/0` raises can never crash the caller.
+  # Follows `Samen.AI.Chokepoint`'s private `simulated_provider?/1` (T152's mechanism) EXCEPT on a raise: a provider
+  # that OMITS the optional callback is LIVE by default (fail-honest). Wrapped so a provider whose `simulated?/0`
+  # raises can never crash the caller; it answers `true` ("not verified real", see the rescue), where the
+  # Chokepoint's copy answers `false` on purpose (a completion is never silently marked simulated).
   defp simulated_provider?(provider) do
     Code.ensure_loaded?(provider) and function_exported?(provider, :simulated?, 0) and
       provider.simulated?() == true
   rescue
-    _ -> false
+    e ->
+      # Unknown is not "real": the answer feeds the SIMULATED-ranking badge, so a provider whose `simulated?/0`
+      # raised is reported as not verified real (`true`) rather than silently presented as a real semantic match.
+      Samen.Observability.Failure.report(:embeddings_simulated_provider, nil, e)
+      true
   end
 
   # --- deny-by-default allowlist ------------------------------------------------------------
@@ -399,16 +420,21 @@ defmodule Samen.AI.Embeddings do
   defp vault_routed?(resource, field) do
     # Force the load FIRST (same guard as `declared_embeddable_fields/1`): the `Info.*`
     # introspection below reads the compiled Spark DSL, so on a not-yet-loaded module it would
-    # raise `UndefinedFunctionError` and `safe/2` would swallow it to `[]` — a fail-OPEN
-    # result (a vault-routed field read as NOT routed). If the module can't be loaded at all we
-    # cannot prove the field is safe, so fail-CLOSED (treat as vault-routed).
+    # raise `UndefinedFunctionError`, which used to be swallowed to `[]` — a fail-OPEN
+    # result (a vault-routed field read as NOT routed). If the module can't be loaded at all, or
+    # its introspection raises, we cannot prove the field is safe, so fail-CLOSED (treat as
+    # vault-routed) and say so.
     if Code.ensure_loaded?(resource) do
-      pii = safe(fn -> Enum.map(Info.pii_attributes(resource), & &1.name) end, [])
-      routed = safe(fn -> Info.vault_routed_columns(resource) end, [])
+      pii = Enum.map(Info.pii_attributes(resource), & &1.name)
+      routed = Info.vault_routed_columns(resource)
       field in pii or field in routed
     else
       true
     end
+  rescue
+    e ->
+      Samen.Observability.Failure.report(:embeddings_vault_routed, nil, e)
+      true
   end
 
   # --- embedder resolution (the Samen.AI.provider_for/2 mirror, embeddings lane) ------------
@@ -516,18 +542,20 @@ defmodule Samen.AI.Embeddings do
 
     case repo.query(sql, [org_id, encode_vector(qvec), limit]) do
       {:ok, %{rows: rows}} ->
-        Enum.map(rows, fn [res, sid, field, snippet, dist] ->
-          %Hit{
-            source_resource: res,
-            source_id: sid,
-            field: field,
-            snippet: snippet,
-            distance: to_float(dist)
-          }
-        end)
+        {:ok,
+         Enum.map(rows, fn [res, sid, field, snippet, dist] ->
+           %Hit{
+             source_resource: res,
+             source_id: sid,
+             field: field,
+             snippet: snippet,
+             distance: to_float(dist)
+           }
+         end)}
 
-      {:error, _} ->
-        []
+      {:error, reason} ->
+        Samen.Observability.Failure.report(:embeddings_knn, org_id, reason)
+        {:error, :unavailable}
     end
   end
 
@@ -572,10 +600,4 @@ defmodule Samen.AI.Embeddings do
   defp to_float(n) when is_integer(n), do: n * 1.0
   defp to_float(%Decimal{} = d), do: Decimal.to_float(d)
   defp to_float(_), do: 0.0
-
-  defp safe(fun, default) do
-    fun.()
-  rescue
-    _ -> default
-  end
 end
