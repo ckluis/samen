@@ -1,4 +1,7 @@
 defmodule Samen.SingleNode.Peers do
+  @redisconnect_ms 10
+  @stuck_report_every 100
+
   @moduledoc """
   The runtime half of the distributed-Erlang guard (`Samen.SingleNode`, ADR-054).
 
@@ -22,6 +25,17 @@ defmodule Samen.SingleNode.Peers do
 
   The subscription is made BEFORE `Node.list/0` is scanned in `init/1`, so a node that connects between the two
   is seen by one, the other, or both (handled idempotently) — never by neither.
+
+  ### A disconnect that did nothing is repeated until the peer is gone
+
+  `Node.disconnect/1` returns `false` for a node `:net_kernel` does not hold as up. That is also true for a
+  short window right AFTER the node-up event: the runtime announces the connection (`erlang:setnode`) before
+  the connection's setup process has told `:net_kernel` about it, so a guard that reacts at once finds the
+  connection still "pending" there, the call is a no-op, and the peer STAYS CONNECTED (measured on OTP 29
+  under CPU load: about 1 connect in 300). So an outcome other than `true` is never taken as "gone": while the
+  node is still in `Node.list(:connected)` the disconnect is repeated every `#{@redisconnect_ms}` ms, and a
+  peer that survives `#{@stuck_report_every}` attempts is reported again (`:peer_still_connected`) — each time.
+  The loop ends only when the runtime no longer lists the node.
   """
   use GenServer
 
@@ -46,7 +60,12 @@ defmodule Samen.SingleNode.Peers do
   def init(opts) do
     disconnect = Keyword.get(opts, :disconnect, &Node.disconnect/1)
     :ok = :net_kernel.monitor_nodes(true, [{:node_type, :all}])
-    state = %{disconnect: disconnect}
+    state = %{
+      disconnect: disconnect,
+      connected?: Keyword.get(opts, :connected?, &connected?/1),
+      redisconnect_ms: Keyword.get(opts, :redisconnect_ms, @redisconnect_ms)
+    }
+
     # Subscribed first, scanned second (see "No race"). `Node.list/0` is the visible set by definition.
     for node <- Node.list(), do: refuse(node, state)
     {:ok, state}
@@ -66,9 +85,46 @@ defmodule Samen.SingleNode.Peers do
     {:noreply, state}
   end
 
+  def handle_info({:redisconnect, node, attempt}, state) do
+    if state.connected?.(node) do
+      outcome = state.disconnect.(node)
+
+      cond do
+        outcome == true ->
+          Logger.warning("[Samen.SingleNode] visible peer node disconnected on attempt #{attempt} node=#{node}")
+
+        rem(attempt, @stuck_report_every) == 0 ->
+          Logger.error(
+            "[Samen.SingleNode] visible peer node STILL CONNECTED after #{attempt} disconnect attempts node=#{node} " <>
+              "last=#{inspect(outcome)} (#{Samen.SingleNode.adr()})"
+          )
+
+          Failure.report(:write, :single_node_peer, nil, :peer_still_connected, [])
+
+        true ->
+          :ok
+      end
+
+      until_gone(node, outcome, attempt + 1, state)
+    end
+
+    {:noreply, state}
+  end
+
   def handle_info(_other, state), do: {:noreply, state}
 
-  defp refuse(node, %{disconnect: disconnect}) do
+  defp connected?(node), do: node in Node.list(:connected)
+
+  # `true` is the only outcome that means the connection was taken down (see the moduledoc). Anything else is
+  # checked against the runtime's own list and repeated while the node is still there.
+  defp until_gone(_node, true, _attempt, _state), do: :ok
+
+  defp until_gone(node, _outcome, attempt, state) do
+    if state.connected?.(node), do: Process.send_after(self(), {:redisconnect, node, attempt}, state.redisconnect_ms)
+    :ok
+  end
+
+  defp refuse(node, %{disconnect: disconnect} = state) do
     outcome = disconnect.(node)
 
     Logger.error(
@@ -78,6 +134,6 @@ defmodule Samen.SingleNode.Peers do
 
     Failure.report(:write, :single_node_peer, nil, :visible_peer, [])
     :telemetry.execute([:samen, :single_node, :peer, :refused], %{count: 1}, %{})
-    :ok
+    until_gone(node, outcome, 2, state)
   end
 end
