@@ -7,15 +7,15 @@
 # MUST_FAIL: is refused on create and nothing is written
 # MUST_FAIL: is refused on update, and the row keeps its own token
 diff --git a/samen_core/lib/samen/vault/change.ex b/samen_core/lib/samen/vault/change.ex
-index 7e9005e1..8795a914 100644
+index 889b50a6..7cf5bff7 100644
 --- a/samen_core/lib/samen/vault/change.ex
 +++ b/samen_core/lib/samen/vault/change.ex
-@@ -125,7 +125,7 @@ defmodule Samen.Vault.Change do
+@@ -145,7 +145,7 @@ defmodule Samen.Vault.Change do
          bound? and to_string(Map.get(result, pk)) != subject_id ->
-           {:error, invalid_vault(:vault, "vault subject does not match the written row (an upsert onto an existing record?)")}
+           refuse_written(repo, invalid_vault(:vault, "vault subject does not match the written row (an upsert onto an existing record?)"))
  
 -        swapped = Enum.find(fields, &(vault_view(cs, &1.name) != Map.fetch!(approved, &1.name))) ->
 +        swapped = Enum.find(fields, &(vault_view(cs, &1.name) != vault_view(cs, &1.name))) ->
-           {:error, invalid_vault(swapped.name, "the vault value was changed after Samen.Vault.Change approved it")}
+           refuse_written(repo, invalid_vault(swapped.name, "the vault value was changed after Samen.Vault.Change approved it"))
  
          true ->
