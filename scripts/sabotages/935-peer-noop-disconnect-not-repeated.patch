@@ -1,0 +1,20 @@
+# SABOTAGE: a disconnect that did nothing is taken as done: a visible peer caught in the net_kernel pending 
+#   window stays connected
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_test.exs
+# MUST_FAIL: a no-op disconnect on a still-connected peer is repeated until it takes
+diff --git a/samen_core/lib/samen/single_node/peers.ex b/samen_core/lib/samen/single_node/peers.ex
+index e79466f8..b4d2e2f5 100644
+--- a/samen_core/lib/samen/single_node/peers.ex
++++ b/samen_core/lib/samen/single_node/peers.ex
+@@ -120,7 +120,7 @@ defmodule Samen.SingleNode.Peers do
+   defp until_gone(_node, true, _attempt, _state), do: :ok
+ 
+   defp until_gone(node, _outcome, attempt, state) do
+-    if state.connected?.(node), do: Process.send_after(self(), {:redisconnect, node, attempt}, state.redisconnect_ms)
++    _ = {node, attempt, state}
+     :ok
+   end
+ 
