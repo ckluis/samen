@@ -218,6 +218,14 @@ defmodule Samen.Meta.CiDriverGuardTest.GenHexIsolation do
   end
 end
 
+defmodule Samen.Meta.CiDriverGuardTest.GenHexCleanupNeverMasksRegistry do
+  use ExUnit.Case, async: true
+
+  test "GENHEXRO a failed HEX_HOME cleanup under set -e can never skip the abbrev-registry verify and repair" do
+    Samen.Meta.CiDriverGuard.run_case!("GENHEXRO")
+  end
+end
+
 defmodule Samen.Meta.CiDriverGuardTest.NarrowedInputs do
   use ExUnit.Case, async: true
 

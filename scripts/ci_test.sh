@@ -1422,6 +1422,62 @@ STUB
   has "$T/gh.log" " hex $hx " "GENHEX: positive control — with GEN_PROBE_SHARED_HEX=1 the probe sees the shared home"
 }
 
+# GENHEXRO: the registry verify/repair is the HANDS-OFF invariant (CLAUDE.md); the private HEX_HOME is only a temp dir. The
+# driver runs every step under `set -euo pipefail`, so a `rm -rf` of the home that FAILS (a read-only directory copied from
+# the shared Hex home, or any other refusal) used to end the EXIT trap before the committed registry was ever compared:
+# a probe that had modified it got no repair and no exit 2. Now the registry check runs first, a read-only home gets u+w and
+# is removed, and a cleanup that still fails is reported and never fatal. The fixture stubs `mix` (it can dirty the
+# registry and plant a read-only dir) and `rm` (it can refuse the private home outright).
+case_GENHEXRO() {
+  local F="$T/gr" B="$T/grbin" hx="$T/grhex"
+  rm -rf "$F" "$B" "$hx" "$T/gr.tmp"; mkdir -p "$F/samen_core/priv" "$B" "$T/gr.tmp" "$hx/packages/hexpm"
+  printf '{"abbrevs": {}}\n' > "$F/samen_core/priv/abbrev_registry.json"
+  : > "$hx/packages/hexpm/seed.tar"
+  cat > "$B/mix" <<'STUB'
+#!/usr/bin/env bash
+# GR_DIRTY: the probe modifies the committed registry; GR_RO: it plants a read-only directory under its private HEX_HOME
+if [[ -n "${GR_DIRTY:-}" ]]; then echo '{"abbrevs": {"tampered": 1}}' > priv/abbrev_registry.json; fi
+if [[ -n "${GR_RO:-}" ]]; then mkdir -p "$HEX_HOME/ro/sub"; : > "$HEX_HOME/ro/sub/f"; chmod 0555 "$HEX_HOME/ro/sub" "$HEX_HOME/ro"; fi
+exit 0
+STUB
+  cat > "$B/rm" <<'STUB'
+#!/usr/bin/env bash
+# GR_RM_FAIL: refuse to remove the private Hex home (every other removal is the real rm)
+if [[ -n "${GR_RM_FAIL:-}" ]]; then for a in "$@"; do case "$a" in *samen_ci_hex_home.*) exit 1 ;; esac; done; fi
+exec /bin/rm "$@"
+STUB
+  chmod +x "$B/mix" "$B/rm"
+  local reg="$F/samen_core/priv/abbrev_registry.json" pristine
+  pristine="$(shasum -a 256 "$reg" | awk '{print $1}')"
+  ghe() { # ghe [env…] — run_gen_probe under the driver's own `set -euo pipefail`
+    env PATH="$B:$PATH" REPO_ROOT="$F" TMPDIR="$T/gr.tmp" HEX_HOME="$hx" "$@" \
+      bash -c 'set -euo pipefail; source "'"$ROOT"'/scripts/gen_probe_guard.sh"; run_gen_probe priv/gen_post_probe.exs "stub probe"'
+  }
+  homes() { ls -d "$T"/gr.tmp/samen_ci_hex_home.* 2>/dev/null | wc -l | tr -d ' '; }
+  sha() { shasum -a 256 "$reg" | awk '{print $1}'; }
+  fixup() { chmod -R u+w "$T"/gr.tmp 2>/dev/null; rm -rf "$T"/gr.tmp/samen_ci_*; }
+  # control: nothing wrong, under set -e -> passes, nothing left
+  ghe > "$T/gr0" 2>&1; eq "$?" 0 "GENHEXRO: control — a clean probe passes under set -e"
+  eq "$(homes)" 0 "GENHEXRO: ... and leaves no home"
+  # control: a failing cleanup ALONE (registry untouched) is reported, not fatal
+  ghe GR_RM_FAIL=1 > "$T/gr1" 2>&1; eq "$?" 0 "GENHEXRO: control — a home that cannot be removed does not fail a probe whose registry is intact"
+  has "$T/gr1" "could not remove the private HEX_HOME" "GENHEXRO: ... the failed cleanup is reported"
+  fixup
+  # a read-only directory in the private home is made writable and removed
+  ghe GR_RO=1 > "$T/gr2" 2>&1; eq "$?" 0 "GENHEXRO: a read-only directory in the private home does not fail the probe"
+  eq "$(homes)" 0 "GENHEXRO: ... and the home is removed anyway"
+  fixup
+  # the red path: the probe modified the registry AND the home cannot be removed -> still repaired and still exit 2
+  ghe GR_DIRTY=1 GR_RM_FAIL=1 > "$T/gr3" 2>&1; eq "$?" 2 "GENHEXRO: a modified registry fails the probe (exit 2) even when the Hex home cannot be removed"
+  eq "$(sha)" "$pristine" "GENHEXRO: ... and the committed registry is repaired byte-identical"
+  has "$T/gr3" "FATAL: stub probe left" "GENHEXRO: ... with the FATAL naming it"
+  fixup
+  ghe GR_DIRTY=1 GR_RO=1 > "$T/gr4" 2>&1; eq "$?" 2 "GENHEXRO: a modified registry fails the probe (exit 2) with a read-only dir in the home"
+  eq "$(sha)" "$pristine" "GENHEXRO: ... and is repaired"
+  eq "$(homes)" 0 "GENHEXRO: ... and the read-only home is still removed"
+  fixup
+}
+
 # NARROW (ADR-053 P5): the gen probes and the ten dialyzer steps declare `!<app>/test/*_test.exs`. That is sound ONLY
 # because neither runs ExUnit on a kernel/vertical test module: dialyzer reads compiled .ex (never *_test.exs), and the
 # probes run `mix test` only inside the generated scratch app (the one exception, gen_agent, names its own emitted file).
@@ -2059,7 +2115,7 @@ SH
   has "$T/esc.f" 'staged new: .*scripts/__pycache__' "ESCAPE: ... naming the staged path"
 }
 
-ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS LOCALPATHS GENPROBE GENHEX NARROW RECHUNK COSTW TIMEOUT SELTMO GENDEPS ESCAPE)
+ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS LOCALPATHS GENPROBE GENHEX GENHEXRO NARROW RECHUNK COSTW TIMEOUT SELTMO GENDEPS ESCAPE)
 CASES=("$@")
 [[ ${#CASES[@]} -gt 0 ]] || CASES=("${ALL[@]}")
 for c in "${CASES[@]}"; do

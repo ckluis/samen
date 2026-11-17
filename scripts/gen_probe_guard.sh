@@ -89,13 +89,6 @@ gen_probe_restore() {
   fi
   GEN_PROBE_RESTORED=1
 
-  # the private Hex home goes first, on every path this trap covers (SIGINT/SIGTERM/ERR/EXIT): it can never be left behind
-  # by a later failure in this function
-  if [[ -n "$GEN_PROBE_HEX_HOME" ]]; then
-    rm -rf "$GEN_PROBE_HEX_HOME"
-    GEN_PROBE_HEX_HOME=""
-  fi
-
   local post_sha
   if [[ -n "$GEN_PROBE_PRIVATE" ]]; then
     # private mode: the committed file must be exactly what it was; nothing to restore, only to prove — and
@@ -121,6 +114,16 @@ gen_probe_restore() {
     rm -rf "$REPO_ROOT"/_gen_flagship_scratch "$REPO_ROOT"/_gen_flagship_scratch.* \
       "$REPO_ROOT"/_gen_post_scratch "$REPO_ROOT"/_gen_post_scratch.* \
       "$REPO_ROOT"/_gen_deploy_scratch "$REPO_ROOT"/_gen_deploy_scratch.*
+  fi
+
+  # The private Hex home goes LAST: the registry verify/repair above is the HANDS-OFF invariant and must run whatever this
+  # cleanup does. Under the driver's `set -e` a failing `rm -rf` (a read-only directory copied from the shared Hex home)
+  # would otherwise end the trap before the registry was ever compared. Read-only entries get u+w and one more try; a
+  # cleanup that still fails is REPORTED, never fatal and never able to mask the registry result.
+  if [[ -n "$GEN_PROBE_HEX_HOME" ]]; then
+    rm -rf "$GEN_PROBE_HEX_HOME" 2>/dev/null || { chmod -R u+w "$GEN_PROBE_HEX_HOME" 2>/dev/null; rm -rf "$GEN_PROBE_HEX_HOME"; } ||
+      echo "==> warn: could not remove the private HEX_HOME $GEN_PROBE_HEX_HOME (left behind; the registry check above still ran)" >&2
+    GEN_PROBE_HEX_HOME=""
   fi
 
   if [[ "$post_sha" != "$GEN_PROBE_PRISTINE_SHA" ]]; then
