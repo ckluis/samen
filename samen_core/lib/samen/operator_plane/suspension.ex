@@ -136,12 +136,12 @@ defmodule Samen.OperatorPlane.Suspension do
         {:ok, inserted}
 
       {:error, failure} ->
-        Samen.Observability.Failure.report(:suspension_insert, nil, failure)
+        Samen.Observability.Failure.report_write(:suspension_insert, nil, failure)
         {:error, :unavailable}
     end
   rescue
     e ->
-      Samen.Observability.Failure.report(:suspension_insert, nil, e)
+      Samen.Observability.Failure.report_write(:suspension_insert, nil, e)
       {:error, :unavailable}
   end
 
@@ -164,7 +164,7 @@ defmodule Samen.OperatorPlane.Suspension do
         end)
       rescue
         e ->
-          Samen.Observability.Failure.report(:suspension_audit, org_id, e)
+          Samen.Observability.Failure.report_write(:suspension_audit, org_id, e)
           {:error, :audit_unavailable}
       end
 
@@ -196,7 +196,7 @@ defmodule Samen.OperatorPlane.Suspension do
         :pending
 
       {:error, failure} ->
-        Samen.Observability.Failure.report(:suspension_audit_deferral, org_id, failure)
+        Samen.Observability.Failure.report_write(:suspension_audit_deferral, org_id, failure)
         :lost
     end
   end
@@ -328,12 +328,12 @@ defmodule Samen.OperatorPlane.Suspension do
         ok
 
       {:error, reason} ->
-        Samen.Observability.Failure.report(:suspension_audit, attrs.org_id, reason)
+        Samen.Observability.Failure.report_write(:suspension_audit, attrs.org_id, reason)
         {:error, :audit_unavailable}
     end
   rescue
     e ->
-      Samen.Observability.Failure.report(:suspension_audit, attrs.org_id, e)
+      Samen.Observability.Failure.report_write(:suspension_audit, attrs.org_id, e)
       {:error, :audit_unavailable}
   end
 

@@ -5,15 +5,15 @@
 # TEST_FILES: test/pii_resolution_planes_test.exs
 # MUST_FAIL: egress without the opt-in stays masked even when the checker would approve everything
 diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
-index 0b11dcdf..6ead8f7a 100644
+index 05dcfcb..bd46a53 100644
 --- a/samen_core/lib/samen/api/pii_resolution.ex
 +++ b/samen_core/lib/samen/api/pii_resolution.ex
-@@ -305,7 +305,7 @@ defmodule Samen.Api.PiiResolution do
+@@ -344,7 +344,7 @@ defmodule Samen.Api.PiiResolution do
      # checker is adversarial input: one returning a truthy NON-true verdict (`:yes`, a map, a
      # PID, …) must NOT admit plaintext into the egress payload by accident. Anything but `true`
      # keeps the value masked (`••••`) — fail-closed, no plaintext egress.
 -    if Keyword.get(opts, :grant_egress?, false) and
 +    if Keyword.get(opts, :grant_egress?, true) and
           operator_granted?(record, label, resource, reveal_action, actor, opts) === true do
-       reveal_plaintext(masked, opts) || masked
+       reveal_plaintext(masked, binding_of(resource, record, label, opts), opts) || masked
      else

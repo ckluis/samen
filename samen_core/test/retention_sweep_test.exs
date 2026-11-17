@@ -174,6 +174,33 @@ defmodule Samen.RetentionSweepTest do
       assert Samen.Erasure.erased?(shred_subject, repo: @repo)
       refute Samen.Erasure.erased?(keep_subject, repo: @repo)
     end
+
+    test "a subject whose key is gone with no recorded reference is an OPERATOR action: logged, not counted, not looped" do
+      lost = "retention-lost-#{System.unique_integer([:positive])}"
+      {:ok, _} = Vault.store_field(lost, :pii_email, :emails, "c@example.com", @repo)
+      {:ok, _} = Vault.shred(lost)
+      _old = company_aged!(lost, 400)
+
+      spec = %Spec{resource: Company, ttl_seconds: 365 * 24 * 60 * 60, action: :shred, subject_field: :name}
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert %{swept: 0} = Retention.sweep([spec], now: @now, repo: @repo)
+          assert %{swept: 0} = Retention.sweep([spec], now: @now, repo: @repo)
+        end)
+
+      require Ecto.Query
+      assert log =~ "needs OPERATOR ACTION"
+      refute Samen.Erasure.erased?(lost, repo: @repo)
+      # one operator report, however many sweeps
+      assert 1 ==
+               @repo.aggregate(
+                 Ecto.Query.from(r in Samen.Erasure.Report,
+                   where: r.subject_id == ^lost and r.outcome == "operator_action_required"
+                 ),
+                 :count
+               )
+    end
   end
 
   # ── D5 (ADR-046 §4.4) — a retention-driven shred rides the TENANT's chain ────

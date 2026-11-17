@@ -1,0 +1,22 @@
+# SABOTAGE: drop_invalid_index drops an invalid row whose valid flag another session is committing, so the 
+#   DROP fails tuple concurrently updated
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/indexing_test.exs
+# MUST_FAIL: an index whose valid flag is being committed by another session is left alone
+diff --git a/samen_core/lib/samen/migration/expand_contract.ex b/samen_core/lib/samen/migration/expand_contract.ex
+index 0b92a77e..c173564e 100644
+--- a/samen_core/lib/samen/migration/expand_contract.ex
++++ b/samen_core/lib/samen/migration/expand_contract.ex
+@@ -304,10 +304,6 @@ defmodule Samen.Migration.ExpandContract do
+                       JOIN pg_class c ON c.oid = i.indexrelid
+                       JOIN pg_namespace n ON n.oid = c.relnamespace
+                      WHERE c.relname = $1 AND i.indrelid = to_regclass($2) AND NOT i.indisvalid
+-                      AND (i.xmax::text = '0' OR pg_visible_in_snapshot(
+-                            (((pg_snapshot_xmin(pg_current_snapshot())::text::bigint >> 32) << 32)
+-                              | i.xmax::text::bigint)::text::xid8,
+-                            pg_current_snapshot()))
+                     """,
+                     [iname, q_ident(tname)]
+                   )

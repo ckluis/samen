@@ -140,7 +140,10 @@ defmodule Demo.CrmScopeVaultRoutingTest do
   test "the VaultField last-line guard refuses a raw plaintext write (red path)" do
     # The VaultField type's dump guard refuses anything that is not already a
     # vt_* token — the last line of defense even if Samen.Vault.Change were bypassed.
-    assert {:ok, "vt_realtoken"} = Samen.Type.VaultField.dump_to_native("vt_realtoken", [])
+    minted = Samen.Vault.generate_token()
+    assert {:ok, ^minted} = Samen.Type.VaultField.dump_to_native(minted, [])
+    # a "vt_"-prefixed string that is not a minted token is plaintext, not a token
+    assert :error == Samen.Type.VaultField.dump_to_native("vt_realtoken", [])
 
     # Raw plaintext is refused → :error (the INSERT would fail).
     assert :error == Samen.Type.VaultField.dump_to_native("alice@crmsecret.example", [])

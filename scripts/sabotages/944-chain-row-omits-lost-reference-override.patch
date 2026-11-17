@@ -1,0 +1,20 @@
+# SABOTAGE: the aud_event chain row no longer names the lost-reference operator override
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/erasure_resumable_test.exs
+# MUST_FAIL: the override is also recorded on the tamper-evident chain row
+diff --git a/samen_core/lib/samen/erasure.ex b/samen_core/lib/samen/erasure.ex
+index 2b7ffb33..f1eeb095 100644
+--- a/samen_core/lib/samen/erasure.ex
++++ b/samen_core/lib/samen/erasure.ex
+@@ -730,8 +730,7 @@ defmodule Samen.Erasure do
+           detail:
+             "outcome=#{outcome} vault_sealed=#{sealed} non_pii_redacted=#{redacted} " <>
+               "attestation_id=#{attestation[:attestation_id] || "none"} " <>
+-              "derived_summary_invalidation=#{derived_summary_invalidation(disposition)}" <>
+-              acknowledged_detail(disposition),
++              "derived_summary_invalidation=#{derived_summary_invalidation(disposition)}",
+           occurred_at: now
+         })
+       end)

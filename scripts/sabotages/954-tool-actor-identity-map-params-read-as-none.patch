@@ -1,0 +1,19 @@
+# SABOTAGE: map-shaped tool params read as no params, so an identity parameter passes the verifier
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/tool_actor_identity_verifier_test.exs
+# MUST_FAIL: an identity param declared in a MAP-shaped params is a violation
+diff --git a/samen_core/lib/mix/tasks/samen.verify.tool_actor_identity.ex b/samen_core/lib/mix/tasks/samen.verify.tool_actor_identity.ex
+index 8f4040c1..01c7fea6 100644
+--- a/samen_core/lib/mix/tasks/samen.verify.tool_actor_identity.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.tool_actor_identity.ex
+@@ -182,7 +182,7 @@ defmodule Mix.Tasks.Samen.Verify.ToolActorIdentity do
+ 
+           # A map-shaped declaration (`%{"org_id" => spec}`) names its parameters by KEY: it used to read as "none".
+           params when is_map(params) and not is_struct(params) ->
+-            {:ok, params |> Map.keys() |> Enum.map(&to_string/1)}
++            {:ok, []}
+ 
+           # Declared nothing: a tool with no params is legitimate.
+           nil ->

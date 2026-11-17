@@ -5,10 +5,11 @@ defmodule Samen.ErasureRetryAfterRollbackTest do
 
     * `Kms.shred/1` itself is idempotent (the tombstone answers; no second destruction, no error);
     * the DB tiers (vault sealing, redaction, report) are idempotent and complete on the retry;
-    * what a retry CANNOT do is the pseudonym-keyed derived-summary withdrawal (STEPS 3f/3g): the ref was captured at
-      STEP 0 while the key was live and is uncomputable now, so the retry records those arms as no-ops and DISCLOSES
-      it (`derived_summaries` tier: unavailable / `pseudonym_shredded`). Those rows are unlinkable (their key is
-      gone) but not neutralized. This test pins exactly that, so it cannot change silently.
+    * the pseudonym-keyed derived-summary withdrawal (STEPS 3f/3g) needs the `subject_ref`, which was derived from the
+      LIVE key at STEP 0 and is uncomputable once the key is gone. `shred/2` therefore commits it as a resume marker
+      BEFORE the shred and the retry takes it from there: the withdrawal runs and the report says `performed`
+      (this test formerly pinned the loss as a disclosed `pseudonym_shredded`; the full per-step proof is
+      `erasure_resumable_test.exs`).
   """
   use ExUnit.Case, async: false
 
@@ -60,8 +61,8 @@ defmodule Samen.ErasureRetryAfterRollbackTest do
     assert Erasure.erased?(subject, repo: @repo)
     assert {:ok, :no_plaintext} = Vault.scan_no_plaintext(subject, @repo)
 
-    # the disclosed loss: the pseudonym-keyed withdrawal could not run on the retry
-    assert report.tiers["derived_summaries"]["reason"] == "pseudonym_shredded"
+    # the withdrawal ran on the retry: the reference survived the shred in the resume marker
+    assert report.tiers["derived_summaries"] == %{"invalidation" => "performed", "reason" => nil}
   end
 
   test "POSITIVE CONTROL: the uninterrupted erasure performs the derived-summary withdrawal" do

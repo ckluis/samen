@@ -1,0 +1,20 @@
+# SABOTAGE: A webhook signing-secret binding mismatch falls into the generic error arm again: Oban retries 
+#   it 20 times and nothing is reported
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/webhook/delivery_worker_ssrf_test.exs
+# MUST_FAIL: is DISCARDED (permanent, not retried), reported once, and nothing is POSTed
+diff --git a/samen_core/lib/samen/webhook/delivery_worker.ex b/samen_core/lib/samen/webhook/delivery_worker.ex
+index 3ddac831..63b6924a 100644
+--- a/samen_core/lib/samen/webhook/delivery_worker.ex
++++ b/samen_core/lib/samen/webhook/delivery_worker.ex
+@@ -128,7 +128,7 @@ defmodule Samen.Webhook.DeliveryWorker do
+         {:discard,
+          "webhook endpoint URL refused by egress guard (#{reason}): endpoint #{endpoint_id}"}
+ 
+-      {:error, reason} when reason in [:subject_mismatch, :field_mismatch] ->
++      {:error, reason} when reason in [:never_a_binding_mismatch] ->
+         # The signing secret is a token minted for another subject or field. A binding mismatch is
+         # PERMANENT (no retry can fix the row), so discard and report ONCE, value- and token-free,
+         # naming the endpoint so an operator can find the row.

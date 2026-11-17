@@ -303,3 +303,11 @@ Composite validation-on-write (what T14's `Samen.Type.Address` ultimately wants)
 **Proof.** The garbage-Address red test + positive control (the Address analogue of T99's garbage-email probe) lives permanently in `samen_core/test/vault/vault_cast_validation_test.exs` (alongside T99's scalar probes) and is repeated, alongside the full `Ash.Type` contract and the `Samen.MaskingCase` 3-proof, in `samen_core/test/type/address_test.exs`.
 
 **H5 formalization + the extension recipe.** `pii_dob` (already live in `SamenCore.Support.Clinical.Patient`) and the new `pii_address` are both declared in `SamenCore.Support.RichTypes.PersonalFixture`'s `pii do` block — no central registry exists or was added (D4); a vault class IS the `vault :name` declaration. The general recipe (a `pii_ssn`-grade scalar field gets full vault/mask/reveal/write-validation behavior from two file touches — the `pii do` declaration and a migration — with NO extra code; a new PII composite additionally needs a type module and, only if it has a real format rule and no legacy writers, the same narrow `cast_declared_types/1` carve-out `Address` uses) is documented in `docs/guides/vault-class-extension.md`.
+
+## 12 · Addendum 2026-11-15 — a raw string is never a vault token
+
+`Samen.Type.VaultField.cast_input/2` no longer treats a `"vt_"`-prefixed string as an already-vaulted token: every string
+is plaintext (wrapped in `%Samen.Pii.Plaintext{}`) and is encrypted by `Samen.Vault.Change`, exactly like any other
+value; only an internal `%Samen.Masked{}` means "already vaulted". `dump_to_native/2` persists only token-shaped values
+(`Samen.Vault.token?/1`). This closes the path by which a form, CSV cell or inbound message could name another subject's
+token, and the case of a `vt_`-prefixed plaintext stored unencrypted. See ADR-001 section 6.2.

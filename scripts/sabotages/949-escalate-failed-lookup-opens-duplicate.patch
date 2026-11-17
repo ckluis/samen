@@ -1,0 +1,20 @@
+# SABOTAGE: Escalate.open reads a failed lookup of the existing active escalation as none and opens a 
+#   duplicate
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/escalation_test.exs
+# MUST_FAIL: open/2 whose lookup of the existing active escalation FAILS
+diff --git a/samen_core/lib/samen/automation/escalate.ex b/samen_core/lib/samen/automation/escalate.ex
+index d2381ffe..55bfc658 100644
+--- a/samen_core/lib/samen/automation/escalate.ex
++++ b/samen_core/lib/samen/automation/escalate.ex
+@@ -116,7 +116,7 @@ defmodule Samen.Automation.Escalate do
+       {:ok, []} -> :none
+       {:error, reason} ->
+         Samen.Observability.Failure.report(:escalate_existing_active, org_id, reason)
+-        {:error, :unavailable}
++        :none
+     end
+   rescue
+     e ->
