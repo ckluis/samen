@@ -42,6 +42,9 @@ defmodule DemoWeb.Api.KeyAuthPlug do
 
   Fail closed: a missing/malformed/unknown/revoked key sets NO actor. Downstream, an
   actor-less request hits the org-scope policy's nil-org branch and sees zero rows.
+
+  A key lookup that FAILS (not "no such key": the read errored) is `503` with `Retry-After`, reported once, and the
+  request is halted: a good key is never reported as bad during an outage.
   """
   import Plug.Conn
   require Ash.Query
@@ -71,9 +74,36 @@ defmodule DemoWeb.Api.KeyAuthPlug do
       # plane without re-resolving the key.
       |> put_private(:samen_api_actor, actor)
     else
+      # The key could not be CHECKED (a lookup failed): 503 + Retry-After, halted — never served, never "bad key".
+      :unavailable -> unavailable(conn)
       # Fail closed: no valid key → no actor. The org-scope policy denies (nil org).
       _ -> conn
     end
+  end
+
+  # demo is API-only (no samen_web dependency), so the 503 is framed here; hosts with samen_web use
+  # `Samen.Web.Api.KeyCheckUnavailable`. The body names no key, prefix or digest.
+  @retry_after_seconds 5
+
+  defp unavailable(conn) do
+    body =
+      Jason.encode!(%{
+        "errors" => [
+          %{
+            "status" => "503",
+            "code" => "service_unavailable",
+            "title" => "Service Unavailable",
+            "detail" => "The credential could not be checked right now. It was not judged invalid: retry shortly."
+          }
+        ],
+        "jsonapi" => %{"version" => "1.0"}
+      })
+
+    conn
+    |> put_resp_header("retry-after", Integer.to_string(@retry_after_seconds))
+    |> put_resp_content_type("application/vnd.api+json")
+    |> send_resp(503, body)
+    |> halt()
   end
 
   # --- key resolution ------------------------------------------------------
@@ -105,7 +135,10 @@ defmodule DemoWeb.Api.KeyAuthPlug do
     |> case do
       {:ok, nil} -> :error
       {:ok, key_row} -> {:ok, key_row}
-      {:error, _} -> :error
+      # A lookup that FAILED is an outage, not "an invalid key": report once (value-free) and answer 503.
+      {:error, error} ->
+        Samen.Observability.Failure.report(:demo_api_key_lookup, nil, error)
+        :unavailable
     end
   end
 
@@ -158,6 +191,10 @@ defmodule DemoWeb.Api.KeyAuthPlug do
         }
 
         {:ok, actor}
+
+      {:error, error} ->
+        Samen.Observability.Failure.report(:demo_api_key_membership_load, nil, error)
+        :unavailable
 
       _ ->
         :error

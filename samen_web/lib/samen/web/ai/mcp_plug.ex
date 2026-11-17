@@ -23,7 +23,10 @@ defmodule Samen.Web.AI.McpPlug do
   `{:ok, scope}` or anything else) maps the token → `%Samen.Scope{}` actor + plane via the
   host's own SHA-256 digest lookup — no new token resource is minted here (ADR-043 §11
   "MCP token storage shape" resolved: reuse the host's existing per-operator API token).
-  A missing/invalid/unresolvable token ⇒ **401** (fail-closed); no resolver wired ⇒ 401.
+  A missing/invalid/unresolvable token ⇒ **401** (fail-closed); no resolver wired ⇒ 401. A resolver whose key lookup
+  FAILED (the read errored: "could not check", not "bad key") returns `{:error, :unavailable}` and the answer is
+  **503** with `Retry-After`, never 401 and never served: a good key must not be reported as bad during an outage. The
+  RESOLVER reports that failure (once, by name, via `Samen.Web.Reads.Guard.report/3`); this plug only frames the 503.
 
   ## Transport
 
@@ -86,6 +89,9 @@ defmodule Samen.Web.AI.McpPlug do
 
       :unauthorized ->
         unauthorized(conn)
+
+      :unavailable ->
+        unavailable(conn)
     end
   end
 
@@ -97,6 +103,7 @@ defmodule Samen.Web.AI.McpPlug do
          {:ok, scope} <- resolve_actor(opts[:actor_resolver], raw) do
       {:ok, scope}
     else
+      :unavailable -> :unavailable
       _ -> :unauthorized
     end
   end
@@ -112,7 +119,17 @@ defmodule Samen.Web.AI.McpPlug do
   defp resolve_actor(_other, _raw), do: :unauthorized
 
   defp normalize_actor({:ok, scope}) when not is_nil(scope), do: {:ok, scope}
+  defp normalize_actor({:error, :unavailable}), do: :unavailable
   defp normalize_actor(_), do: :unauthorized
+
+  # The key could not be CHECKED: 503 + Retry-After, no key material in the body, request not served.
+  defp unavailable(conn) do
+    conn
+    |> put_resp_header("retry-after", Integer.to_string(Samen.Web.Api.KeyCheckUnavailable.retry_after_seconds()))
+    |> put_resp_header("content-type", "application/json")
+    |> send_resp(503, Jason.encode!(error_envelope(nil, -32_002, "service unavailable")))
+    |> halt()
+  end
 
   defp unauthorized(conn) do
     conn
