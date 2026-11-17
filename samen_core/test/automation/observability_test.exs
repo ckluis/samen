@@ -925,6 +925,31 @@ defmodule Samen.Automation.ObservabilityTest do
     assert log =~ "write=schedule_advance_enqueue_skipped"
   end
 
+  test "RED: a schedule advance whose org cannot be resolved FAILS the step (so the update rolls back and the fire retries) instead of returning ok; a resolvable org returns ok (control)" do
+    org = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+    wf = create_workflow!(org, owner, conditions: [], actions: @notify)
+
+    advance = fn changeset, result ->
+      for entry <- changeset.after_action do
+        callback = if is_function(entry), do: entry, else: elem(entry, 0)
+        callback.(changeset, result)
+      end
+    end
+
+    # POSITIVE CONTROL: the org is on the row -> the hook answers ok
+    changeset = Ash.Changeset.for_update(wf, :dispatch_due, %{})
+    assert [{:ok, _}] = advance.(changeset, wf)
+
+    # RED: org not loaded and the row cannot be reloaded
+    ghost = %{wf | id: Ash.UUID.generate(), org_id: %Ash.NotLoaded{field: :org_id}}
+    changeset = Ash.Changeset.for_update(%{wf | org_id: %Ash.NotLoaded{field: :org_id}}, :dispatch_due, %{})
+
+    ExUnit.CaptureLog.capture_log(fn ->
+      assert [{:error, :org_unresolved}] = advance.(changeset, ghost)
+    end)
+  end
+
   test "RED: an unknown event string no longer dispatches the :created workflows; 'created' does (control)" do
     org = Ash.UUID.generate()
     owner = Ash.UUID.generate()
