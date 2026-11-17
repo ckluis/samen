@@ -30,8 +30,7 @@ defmodule Samen.Vault.Change do
     * **On read** — no per-resource hook is needed: the vault column's type
       (`Samen.Type.VaultField`) presents `%Samen.Masked{}` from the stored token
       via `cast_stored`, so `Ash.read` returns `%Masked{}` as the field's normal
-      value. `Samen.Vault.materialize/2` remains available for callers holding a
-      raw struct (e.g. from a non-Ash query), but the type covers the Ash path.
+      value.
 
   The subject key + ciphertext write happen in `before_action`, inside the same
   Ecto transaction Ash opens for the action, so a failed insert rolls back the
@@ -47,10 +46,28 @@ defmodule Samen.Vault.Change do
   def change(changeset, _opts, _context) do
     fields = Info.fields(changeset.resource)
 
-    if fields == [] do
-      changeset
+    cond do
+      fields == [] -> changeset
+      upsert?(changeset) -> refuse_upsert(changeset)
+      true -> Ash.Changeset.before_action(changeset, fn cs -> guarded_route(cs, fields) end)
+    end
+  end
+
+  # Fail closed (WP28 review S1): the guard below can only undo a write inside a transaction, and with
+  # none open the vault rows (and the domain row) are already committed when it fires. So a write that
+  # reaches the data layer outside a transaction (an action declared `transaction? false`, a bulk
+  # `transaction: false`) is refused here, before a vault insert or a row write.
+  defp guarded_route(changeset, fields) do
+    if changeset.action_type in [:create, :update] and not repo!(changeset).in_transaction?() do
+      Ash.Changeset.add_error(changeset,
+        field: :vault,
+        message:
+          "a write to a resource with vault-routed PII requires an open transaction: the vault rows " <>
+            "and the domain row must commit or roll back together (do not use `transaction? false` / " <>
+            "`transaction: false` on it)"
+      )
     else
-      Ash.Changeset.before_action(changeset, fn cs -> route_fields(cs, fields) end)
+      route_fields(changeset, fields)
     end
   end
 
@@ -61,26 +78,162 @@ defmodule Samen.Vault.Change do
     repo = repo!(changeset)
     subject_id = resolve_subject_id(changeset)
 
-    # Collect the (field, plaintext) pairs the caller actually set to a non-token
-    # plaintext value. A %Masked{} or a raw token means "already vaulted, leave it".
-    to_vault =
-      fields
-      |> Enum.flat_map(fn field ->
+    # Collect the (field, plaintext) pairs the caller actually set to a plaintext value. A
+    # %Masked{} means "already vaulted": it is not encrypted again, but it IS bound below.
+    # Every other value, a "vt_"-prefixed string included, is plaintext.
+    {to_vault, masked} =
+      Enum.reduce(fields, {[], []}, fn field, {plain, masked} ->
         case fetch_plaintext(changeset, field.name) do
-          {:set, %Masked{}} -> []
-          {:set, "vt_" <> _} -> []
-          {:set, nil} -> []
-          {:set, plaintext} -> [{field, plaintext}]
-          :unset -> []
+          {:set, %Masked{token: token}} ->
+            if token == current_token(changeset, field),
+              do: {plain, masked},
+              else: {plain, [{field, token} | masked]}
+
+          {:set, nil} ->
+            {plain, masked}
+
+          {:set, plaintext} ->
+            {[{field, plaintext} | plain], masked}
+
+          :unset ->
+            {plain, masked}
         end
       end)
 
-    if to_vault == [] do
-      changeset
-    else
-      changeset = ensure_subject_attr(changeset, subject_id)
-      do_vault(changeset, subject_id, to_vault, repo)
+    case bind_masked(Enum.reverse(masked), subject_id, repo) do
+      :ok ->
+        bound? = masked != [] or to_vault != []
+
+        routed =
+          case Enum.reverse(to_vault) do
+            [] ->
+              changeset
+
+            to_vault ->
+              changeset = ensure_subject_attr(changeset, subject_id)
+              do_vault(changeset, subject_id, to_vault, repo)
+          end
+
+        guard_written_row(routed, fields, subject_id, bound?)
+
+      {:error, failures} ->
+        reject_unbound(changeset, failures)
     end
+  end
+
+  # The write-side guard (WP28 S1/N1), an after_action inside the action transaction. It checks the
+  # truth AFTER the write, where the build-time view can be wrong:
+  #   * the written row's primary key is the vault subject this action minted/bound under. Inside
+  #     the action Ash marks EVERY create as an upsert, so a call-site `Ash.create(cs, upsert?: true)`
+  #     onto an existing identity cannot be told apart in a before_action; the existing row would
+  #     keep its PK while its new tokens were minted under a throwaway UUID (masked forever, never
+  #     shredded with the row). An error here rolls the transaction back: the vault rows
+  #     (`store_fields` uses the same repo) and the domain write both.
+  #   * every vault attribute on the changeset is still exactly what this change approved (a later
+  #     host before_action that swapped in an unchecked %Masked{} is refused).
+  defp guard_written_row(%Ash.Changeset{errors: [_ | _]} = changeset, _fields, _subject, _bound?),
+    do: changeset
+
+  defp guard_written_row(changeset, fields, subject_id, bound?) do
+    approved = Map.new(fields, fn field -> {field.name, vault_view(changeset, field.name)} end)
+    pk = pk_attr(changeset.resource)
+
+    repo = repo!(changeset)
+
+    Ash.Changeset.after_action(changeset, fn cs, result ->
+      cond do
+        bound? and to_string(Map.get(result, pk)) != subject_id ->
+          refuse_written(repo, invalid_vault(:vault, "vault subject does not match the written row (an upsert onto an existing record?)"))
+
+        swapped = Enum.find(fields, &(vault_view(cs, &1.name) != Map.fetch!(approved, &1.name))) ->
+          refuse_written(repo, invalid_vault(swapped.name, "the vault value was changed after Samen.Vault.Change approved it"))
+
+        true ->
+          {:ok, result}
+      end
+    end)
+  end
+
+  # Undo the write ourselves. Returning `{:error, _}` is not enough: Ash rolls back only while the caller
+  # leaves `rollback_on_error?` at its default (true), and commits the error's transaction otherwise.
+  # `guarded_route/2` guarantees a transaction is open here, so this always rolls back the vault rows and
+  # the domain write together (in a caller's outer transaction it aborts that one, which fails closed).
+  defp refuse_written(repo, error), do: repo.rollback(error)
+
+  # What the changeset will write for a vault field, comparable across hooks. Never a plaintext.
+  defp vault_view(changeset, name) do
+    case Ash.Changeset.fetch_change(changeset, name) do
+      {:ok, %Masked{token: token}} -> {:token, token}
+      {:ok, nil} -> :cleared
+      {:ok, _other} -> :other
+      :error -> :unchanged
+    end
+  end
+
+  defp invalid_vault(field, message),
+    do: Ash.Error.Changes.InvalidChanges.exception(fields: [field], message: message)
+
+  # The token this record already holds for `field` (an untouched round-trip of its own value
+  # needs no check and no query). A create has none.
+  defp current_token(changeset, field) do
+    case Map.get(changeset.data || %{}, field.name) do
+      %Masked{token: token} -> token
+      _ -> nil
+    end
+  end
+
+  # ONE batched lookup for every changed %Masked{} of this changeset: the token's vault row must
+  # belong to THIS record (subject = its primary key), this vault and this field. On a create
+  # without an explicit primary key the subject is a fresh UUID, so no existing token can be
+  # bound: a new record cannot own a token it did not mint. Id-preserving moves pass the PK.
+  defp bind_masked([], _subject_id, _repo), do: :ok
+  defp bind_masked(pairs, subject_id, repo), do: Samen.Vault.check_bindings(pairs, subject_id, repo)
+
+  defp reject_unbound(changeset, failures) do
+    scope = %{org_id: org_of(changeset)}
+
+    failures
+    |> Enum.map(fn {_field, reason} -> reason end)
+    |> Enum.uniq()
+    |> Enum.each(&Samen.Observability.Failure.report_write(:vault_token_unbound, scope, &1))
+
+    Enum.reduce(failures, changeset, fn {field_name, reason}, cs ->
+      Ash.Changeset.add_error(cs,
+        field: field_name,
+        message:
+          "vault token not bound to this record (#{reason}): a token can only be re-set on the " <>
+            "record, vault and field it was minted for; set the plaintext instead"
+      )
+    end)
+  end
+
+  # The record's org for the report's log line: the new value on a create, else the stored row's (an
+  # unselected attribute is `%Ash.NotLoaded{}`, not an org).
+  defp org_of(changeset) do
+    Enum.find(
+      [Map.get(changeset.attributes, :org_id), Map.get(changeset.data, :org_id)],
+      &is_binary/1
+    )
+  end
+
+  # An upsert-create would mint under a generated UUID rather than the existing row's primary
+  # key, so a later token check/reveal would be bound to the wrong subject. Until upsert subject
+  # resolution is designed, a PII resource refuses it (fail closed). Checked at BUILD time
+  # (`change/3`): inside the action Ash sets `context.private.upsert?` on EVERY create, so only
+  # the build-time flag (an upsert action, or `for_create(…, upsert?: true)`) is meaningful here. A
+  # call-site `Ash.create(cs, upsert?: true)` is caught after the write by `guard_written_row/4`.
+  defp upsert?(changeset) do
+    changeset.action_type == :create and
+      (changeset.action.upsert? == true or get_in(changeset.context, [:private, :upsert?]) == true)
+  end
+
+  defp refuse_upsert(changeset) do
+    Ash.Changeset.add_error(changeset,
+      field: :vault,
+      message:
+        "upsert is not supported on a resource with vault-routed PII: the vault subject is the " <>
+          "record's primary key, which an upsert cannot know before the write"
+    )
   end
 
   defp do_vault(changeset, subject_id, to_vault, repo) do

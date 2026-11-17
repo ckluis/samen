@@ -1,0 +1,20 @@
+# SABOTAGE: A legacy non-token vault cell on a versioned record fails with a bare invalid error instead of 
+#   naming the field and the verifier
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/versioned_change_log_test.exs
+# MUST_FAIL: WP28 N5: a legacy vt_-prefixed PLAINTEXT in a vault column fails an update explicitly
+diff --git a/samen_core/lib/samen/versioning/select_for_version.ex b/samen_core/lib/samen/versioning/select_for_version.ex
+index 45354659..d6824796 100644
+--- a/samen_core/lib/samen/versioning/select_for_version.ex
++++ b/samen_core/lib/samen/versioning/select_for_version.ex
+@@ -64,7 +64,7 @@ defmodule Samen.Versioning.SelectForVersion do
+   defp legacy_non_token_fields(resource, record) do
+     for field <- Samen.Pii.Info.fields(resource),
+         %Masked{token: token} <- [Map.get(record, field.name)],
+-        not Samen.Vault.token?(token),
++        not Samen.Vault.token?(token) and token == :never,
+         do: field.name
+   end
+ 

@@ -110,7 +110,7 @@ defmodule Samen.Webhook.DeliveryWorker do
     with {:ok, endpoint} <- load_endpoint(endpoint_id, repo),
          {:ok, url} <- endpoint_url(endpoint),
          :ok <- egress_check(url),
-         {:ok, secret} <- reveal_secret(endpoint, repo),
+         {:ok, secret} <- reveal_secret(endpoint, endpoint_id, repo),
          {:ok, _} <- deliver(url, body, secret) do
       :ok
     else
@@ -127,6 +127,18 @@ defmodule Samen.Webhook.DeliveryWorker do
         # never POSTed, never retried. Fail closed and say why.
         {:discard,
          "webhook endpoint URL refused by egress guard (#{reason}): endpoint #{endpoint_id}"}
+
+      {:error, reason} when reason in [:subject_mismatch, :field_mismatch] ->
+        # The signing secret is a token minted for another subject or field. A binding mismatch is
+        # PERMANENT (no retry can fix the row), so discard and report ONCE, value- and token-free,
+        # naming the endpoint so an operator can find the row.
+        Samen.Observability.Failure.report_write(
+          :vault_token_unbound,
+          %{org_id: Map.get(args, "org_id")},
+          reason
+        )
+
+        {:discard, "webhook signing secret not bound to endpoint #{endpoint_id} (#{reason})"}
 
       {:error, reason} ->
         {:error, reason}
@@ -152,13 +164,17 @@ defmodule Samen.Webhook.DeliveryWorker do
     {:error, :no_repo}
   end
 
-  # Try to use the configured vault + repo to reveal the signing secret.
-  defp reveal_secret(endpoint, repo) do
+  # Try to use the configured vault + repo to reveal the signing secret. The reveal asserts the
+  # endpoint's own id as the vault subject (a signing secret is minted under the endpoint's
+  # primary key): a row whose `signing_secret` holds another subject's token is refused as
+  # `{:error, :subject_mismatch}` before any key is unwrapped, never signed with (`perform/1` discards
+  # it: a mismatch is permanent).
+  defp reveal_secret(endpoint, endpoint_id, repo) do
     vault = Application.get_env(:samen_core, :vault_module, Samen.Vault)
 
     case Map.get(endpoint, :signing_secret) do
       %Samen.Masked{} = masked ->
-        vault.reveal(masked, repo, [])
+        vault.reveal(masked, repo, subject_id: endpoint_id, field: {:pii_secret, :signing_secret})
 
       nil ->
         {:error, :no_secret}

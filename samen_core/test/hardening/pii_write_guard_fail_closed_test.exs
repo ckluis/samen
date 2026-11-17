@@ -110,14 +110,17 @@ defmodule Samen.Hardening.PiiWriteGuardFailClosedTest do
     end
   end
 
-  describe "MG-09 — a raw vt_* token is not a plaintext write (line 120)" do
-    test "MG-09: an OPERATOR writing back the raw vt_* token is ALLOWED" do
+  describe "MG-09 — a raw vt_* string is PLAINTEXT, not a token (was: allowed as a token)" do
+    test "MG-09: an OPERATOR writing back the raw vt_* string is REFUSED, the stored token unchanged" do
       org_id = Ash.UUID.generate()
       p = tenant_patient!(org_id, "MRN-TOKEN-ROUNDTRIP")
       token_before = raw_mrn(p)
       assert String.starts_with?(token_before, "vt_")
 
-      assert {:ok, _updated} = operator_update(reload(p), %{mrn: token_before}, org_id)
+      # A raw string can no longer name a token (token-binding design D1): the guard sees a
+      # plaintext write, exactly as it does for any other string.
+      assert {:error, %Ash.Error.Invalid{} = err} = operator_update(reload(p), %{mrn: token_before}, org_id)
+      assert error_message(err) =~ "no-operator-plaintext-write"
 
       assert raw_mrn(p) == token_before
     end

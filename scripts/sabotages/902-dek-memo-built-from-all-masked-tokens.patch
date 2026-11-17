@@ -7,15 +7,15 @@
 # MUST_FAIL: building the memo never widens what is decrypted
 # MUST_FAIL: operator WITHOUT a grant: masked and ZERO unwraps
 diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
-index 6e0cfb37..783f4e86 100644
+index 05dcfcb5..449a4272 100644
 --- a/samen_core/lib/samen/api/pii_resolution.ex
 +++ b/samen_core/lib/samen/api/pii_resolution.ex
-@@ -203,7 +203,7 @@ defmodule Samen.Api.PiiResolution do
+@@ -217,7 +217,7 @@ defmodule Samen.Api.PiiResolution do
          __prefetched: true,
          __grants: grants,
          __vault_rows: rows,
--        __vault_deks: vault_deks(rows, opts),
+-        __vault_deks: vault_deks(admitted, opts),
 +        __vault_deks: vault_deks(vault_rows(for({_, _, %Masked{token: t}} <- masked, is_binary(t), do: t), opts), opts),
+         __vault_vaults: vaults,
          __bag_ctx: bag_context(resource, records, plane, actor, opts)
        )
-     end

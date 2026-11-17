@@ -1,0 +1,21 @@
+# SABOTAGE: The after_action no longer compares the vault attributes with what Vault.Change approved: a 
+#   later hook can plant an unchecked token
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault/vault_write_guard_test.exs
+# MUST_FAIL: is refused on create and nothing is written
+# MUST_FAIL: is refused on update, and the row keeps its own token
+diff --git a/samen_core/lib/samen/vault/change.ex b/samen_core/lib/samen/vault/change.ex
+index 889b50a6..7cf5bff7 100644
+--- a/samen_core/lib/samen/vault/change.ex
++++ b/samen_core/lib/samen/vault/change.ex
+@@ -145,7 +145,7 @@ defmodule Samen.Vault.Change do
+         bound? and to_string(Map.get(result, pk)) != subject_id ->
+           refuse_written(repo, invalid_vault(:vault, "vault subject does not match the written row (an upsert onto an existing record?)"))
+ 
+-        swapped = Enum.find(fields, &(vault_view(cs, &1.name) != Map.fetch!(approved, &1.name))) ->
++        swapped = Enum.find(fields, &(vault_view(cs, &1.name) != vault_view(cs, &1.name))) ->
+           refuse_written(repo, invalid_vault(swapped.name, "the vault value was changed after Samen.Vault.Change approved it"))
+ 
+         true ->

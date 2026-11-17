@@ -1,0 +1,19 @@
+# SABOTAGE: Vault.Change refuses an unbound token silently (no Failure.report)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault_change_integration_test.exs
+# MUST_FAIL: the refusal is reported once per reason
+diff --git a/samen_core/lib/samen/vault/change.ex b/samen_core/lib/samen/vault/change.ex
+index bbf70a8e..ae82de3e 100644
+--- a/samen_core/lib/samen/vault/change.ex
++++ b/samen_core/lib/samen/vault/change.ex
+@@ -121,7 +121,7 @@ defmodule Samen.Vault.Change do
+     failures
+     |> Enum.map(fn {_field, reason} -> reason end)
+     |> Enum.uniq()
+-    |> Enum.each(&Samen.Observability.Failure.report_write(:vault_token_unbound, scope, &1))
++    |> Enum.each(fn _reason -> scope end)
+ 
+     Enum.reduce(failures, changeset, fn {field_name, reason}, cs ->
+       Ash.Changeset.add_error(cs,

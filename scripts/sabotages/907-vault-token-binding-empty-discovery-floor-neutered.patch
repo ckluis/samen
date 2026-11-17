@@ -1,0 +1,21 @@
+# SABOTAGE: the vault_token_binding task no longer refuses an empty discovery
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/verify_vault_token_binding_test.exs
+# MUST_FAIL: exits 1 with the fail-closed diagnostic when ash_domains is empty
+diff --git a/samen_core/lib/mix/tasks/samen.verify.vault_token_binding.ex b/samen_core/lib/mix/tasks/samen.verify.vault_token_binding.ex
+index 4769b0a3..53ff365e 100644
+--- a/samen_core/lib/mix/tasks/samen.verify.vault_token_binding.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.vault_token_binding.ex
+@@ -95,7 +95,9 @@ defmodule Mix.Tasks.Samen.Verify.VaultTokenBinding do
+     Samen.Catalog.resource_modules(Enum.uniq(domains))
+   end
+ 
+-  defp halt_if_vacuous!(resources) do
++  defp halt_if_vacuous!(_resources), do: :ok
++
++  defp unused_halt_if_vacuous!(resources) do
+     cond do
+       resources == [] ->
+         fail!("discovered ZERO resources — cannot verify token binding. Configure the host's :ash_domains so the resources are introspectable.")
