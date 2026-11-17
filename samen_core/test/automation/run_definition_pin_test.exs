@@ -301,7 +301,7 @@ defmodule Samen.Automation.RunDefinitionPinTest do
     assert event_types(org) == ["pin.v1"]
 
     # The retry: Oban hands the worker the SAME args it was enqueued with.
-    assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: args})
+    assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: args, attempt: 1, max_attempts: 3})
 
     assert event_types(org) == ["pin.v1", "pin.v1"]
   end

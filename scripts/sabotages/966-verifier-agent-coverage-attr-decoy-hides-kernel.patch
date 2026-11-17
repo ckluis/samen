@@ -1,0 +1,26 @@
+# SABOTAGE: agent_coverage resolves an @attr by one rescue over every value: a decoy non-Elixir atom hides 
+#   the kernel alias
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_coverage_verifier_test.exs
+# MUST_FAIL: a decoy non-Elixir atom value for `@k` placed FIRST cannot hide a kernel alias
+diff --git a/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex b/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
+index 890147d4..c323cc0b 100644
+--- a/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
+@@ -567,11 +567,13 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
+         resolves_to_kernel?(parts, env, %{})
+ 
+       mod when is_atom(mod) and mod not in [nil, true, false] ->
+-        atom_kernel?(mod)
++        mod |> Module.split() |> Enum.map(&String.to_atom/1) |> agent_module_parts?()
+ 
+       _ ->
+         false
+     end)
++  rescue
++    ArgumentError -> false
+   end
+ 
+   defp agent_kernel_alias?(_, _env), do: false

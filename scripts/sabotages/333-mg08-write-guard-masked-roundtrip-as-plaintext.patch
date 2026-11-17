@@ -20,14 +20,15 @@
 # TEST_FILES: test/hardening/pii_write_guard_fail_closed_test.exs
 # MUST_FAIL: MG-08: an OPERATOR re-setting the %Masked{} value they were shown is ALLOWED
 diff --git a/samen_core/lib/samen/pii/write_guard.ex b/samen_core/lib/samen/pii/write_guard.ex
+index 21a7b7b2..b28c67f2 100644
 --- a/samen_core/lib/samen/pii/write_guard.ex
 +++ b/samen_core/lib/samen/pii/write_guard.ex
 @@ -116,7 +116,7 @@ defmodule Samen.Pii.WriteGuard do
-   # explicit nil (clear), a round-tripping %Masked{}, or a raw vt_* token are NOT writes.
+   # explicit nil (clear), a round-tripping %Masked{} are NOT writes. A raw "vt_…" string IS a plaintext write.
    defp plaintext_write?(changeset, name) do
      case Ash.Changeset.fetch_change(changeset, name) do
 -      {:ok, %Masked{}} -> false
 +      {:ok, %Masked{}} -> true
-       {:ok, "vt_" <> _} -> false
        {:ok, nil} -> false
        {:ok, _plaintext} -> true
+       :error -> false

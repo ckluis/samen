@@ -44,10 +44,39 @@ defmodule Samen.Versioning.SelectForVersion do
     else
       changeset
       |> Ash.Changeset.set_context(%{@ctx_flag => true})
-      |> Ash.Changeset.after_action(fn cs, result -> {:ok, load_all(cs, result)} end,
-        prepend?: true
-      )
+      |> Ash.Changeset.after_action(&select_and_check/2, prepend?: true)
     end
+  end
+
+  defp select_and_check(changeset, result) do
+    loaded = load_all(changeset, result)
+
+    case legacy_non_token_fields(changeset.resource, loaded) do
+      [] -> {:ok, loaded}
+      names -> {:error, legacy_error(names)}
+    end
+  end
+
+  # A vault column holding a `vt_`-prefixed PLAINTEXT (written before token binding, when a raw string
+  # starting with `vt_` was kept as-is) loads as a %Masked{} whose token is no minted token.
+  # `VaultField.dump_to_native/2` refuses it, which would abort the version build with a bare
+  # "invalid" error. Say what is wrong and how to fix it instead. Nothing is auto-fixed.
+  defp legacy_non_token_fields(resource, record) do
+    for field <- Samen.Pii.Info.fields(resource),
+        %Masked{token: token} <- [Map.get(record, field.name)],
+        not Samen.Vault.token?(token),
+        do: field.name
+  end
+
+  defp legacy_error(names) do
+    Ash.Error.Changes.InvalidChanges.exception(
+      fields: names,
+      message:
+        "vault column(s) #{Enum.map_join(names, ", ", &inspect/1)} hold a legacy non-token value " <>
+          "(a plaintext that starts with \"vt_\"), so this versioned record cannot be updated until it is " <>
+          "remediated: run `mix samen.verify.vault_token_binding` to list the rows (class non_token_value) and " <>
+          "re-set every field named here to its plaintext in ONE update through the action"
+    )
   end
 
   # Materialize every attribute on `result` (vault fields as %Masked{}). Prefer an in-tx
@@ -96,7 +125,7 @@ defmodule Samen.Versioning.SelectForVersion do
 
   defp from_change(changeset, name) do
     case Ash.Changeset.fetch_change(changeset, name) do
-      {:ok, value} -> {:ok, normalize(value, name)}
+      {:ok, value} -> {:ok, value}
       :error -> :error
     end
   end
@@ -105,13 +134,9 @@ defmodule Samen.Versioning.SelectForVersion do
     case Map.get(data, name) do
       %Ash.NotLoaded{} -> :error
       nil -> :error
-      value -> {:ok, normalize(value, name)}
+      value -> {:ok, value}
     end
   end
 
   defp from_data(_changeset, _name), do: :error
-
-  defp normalize(%Masked{} = m, _name), do: m
-  defp normalize("vt_" <> _ = token, name), do: Masked.new(token, name)
-  defp normalize(value, _name), do: value
 end

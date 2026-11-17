@@ -43,6 +43,15 @@ defmodule Samen.Erasure do
   still gone (fail-safe: the data is already unrecoverable); a re-run is idempotent
   and completes the sentinel/redaction/report.
 
+  **Resumable.** Everything the post-shred arms need that is derived from LIVE state
+  (the subject's `subject_ref` pseudonym, which dies with the key) is committed as a
+  `"pending"` marker row in `era_erasure_report` BEFORE the shred and deleted by the
+  completing transaction. A re-run after a post-shred failure reads it back, so the
+  fold-ledger and fold-source withdrawal run on the retry and the report equals an
+  uninterrupted run's. A shredded key with no marker and no earlier completed report
+  is refused (`{:error, {:shred_reference_lost, report}}`), never recorded as
+  `:no_pseudonym`. See ADR-048 §7.3 addendum (2026-11-15).
+
   ## Idempotence
 
   A second `shred/2` for the same subject is safe. The KMS `shred/1` is idempotent
@@ -67,6 +76,9 @@ defmodule Samen.Erasure do
   alias Samen.Reveal.Grants
 
   import Ecto.Query, only: [from: 2]
+
+  @pending_outcome "pending"
+  @completed_outcomes ["shredded", "already_shredded", "absent"]
 
   @doc """
   DERIVE the canonical erasure specs for a host from its LIVE Ash schema.
@@ -201,10 +213,30 @@ defmodule Samen.Erasure do
       `:reveal_grant_repo` / `:verify_repo`.
     * `:actor_id` — who initiated the erasure (recorded in the audit row).
       Defaults to `"system:erasure"`.
+    * Must NOT run inside a transaction on the repo: the resume marker has to commit before the key is destroyed.
+      Inside one it returns `{:error, :erasure_in_transaction}` and nothing is read or shredded.
+    * `:acknowledge_lost_reference` — operator override for the one state a retry refuses
+      (`{:error, {:shred_reference_lost, report}}`: key already destroyed, no resume marker, no
+      earlier completed report). `true` completes the DB tiers and DISCLOSES the withdrawal as
+      `unavailable` (`shred_reference_lost_acknowledged`), and the lifecycle audit row says so. Kernel option for an operator
+      (console/mix task) only: no tenant, API or LiveView path passes it, and `Samen.Retention` never does.
   """
   @spec shred(String.t(), keyword()) ::
           {:ok, %{attestation: Kms.attestation(), report: Report.t()}} | {:error, term}
   def shred(subject_id, opts \\ []) when is_binary(subject_id) do
+    # The resume marker is only durable if it COMMITS before `Kms.shred/1` destroys the key (external, not
+    # transactional). Inside a caller's transaction it would roll back with that transaction while the key stays
+    # destroyed, and the retry would find neither key nor marker. So refuse BEFORE anything is read or shredded.
+    r = Keyword.get(opts, :repo) || default_repo()
+
+    if r.in_transaction?() do
+      {:error, :erasure_in_transaction}
+    else
+      do_shred(subject_id, opts)
+    end
+  end
+
+  defp do_shred(subject_id, opts) do
     r = Keyword.get(opts, :repo) || default_repo()
     actor_id = Keyword.get(opts, :actor_id, "system:erasure")
     # Optional: the subject's org, so the erasure event rides that org's T4.3 chain
@@ -256,8 +288,15 @@ defmodule Samen.Erasure do
     # aborts the erasure here — nothing is destroyed, nothing is sealed, nothing is
     # attested, no report is written — because an outage must never masquerade as a
     # completed erasure. See `pseudonym_ref/1` for the disposition table.
-    case pseudonym_ref(subject_id) do
-      {:error, {:pseudonym_unavailable, _reason}} = fail_closed ->
+    # RESUMABILITY (ADR-048 §7.3 addendum, 2026-11-15). The ref is also made DURABLE here: while the key is live,
+    # `resolve_reference/3` commits a `"pending"` marker row (`subject_ref` + disposition) BEFORE the irreversible
+    # `Kms.shred/1`. If anything after the shred fails, the next call finds the key `:shredded`, takes the ref from the
+    # marker, and the withdrawal arms run exactly as they would have the first time. The marker is deleted in the same
+    # transaction that completes the erasure, so a finished erasure leaves no extra row. A `:shredded` key with NO
+    # marker and NO earlier completed report cannot be reconstructed, and is refused loudly — never recorded as
+    # `:no_pseudonym` as if there had been nothing to withdraw.
+    case resolve_reference(subject_id, r, Keyword.get(opts, :acknowledge_lost_reference, false)) do
+      {:error, _} = fail_closed ->
         fail_closed
 
       {:ok, subject_ref, disposition} ->
@@ -285,11 +324,173 @@ defmodule Samen.Erasure do
             seal_db_tiers(subject_id, absent_att, "absent", actor_id, org_id, r, rollup_opts, file_opts, bidx_specs, custom_bag_specs, record_bag_specs, subject_ref, disposition)
 
           {:error, reason} ->
-            # Key store unreachable (outage) — FAIL CLOSED. No sentinel, no report,
-            # no fabricated attestation. The caller retries when the store heals.
+            # Key store error — FAIL CLOSED. No sentinel, no report, no fabricated attestation. The marker is
+            # KEPT: `Kms.shred/1` promises nothing about the key on an error (a remote delete can succeed and the
+            # response time out), so the marker may be the only durable copy of the ref. The retry handles both
+            # cases: key still live -> the marker is refreshed; key gone -> the ref is read from the marker.
             {:error, {:kms_shred_failed, reason}}
         end
     end
+  end
+
+  # STEP 0, made resumable. Returns `{:ok, subject_ref | nil, disposition}` or an `{:error, _}` that aborts BEFORE
+  # anything is destroyed (or, for a lost reference, refuses to continue). Disposition table:
+  #
+  #   key live            -> compute the ref, COMMIT the pending marker, then the caller shreds
+  #   key :absent         -> no ref can exist; nothing to record
+  #   key :shredded       -> the ref is read back from the pending marker (a previous call died after the shred);
+  #                          no marker but an earlier COMPLETED report -> the old idempotent re-run (`:shredded`
+  #                          disclosure); neither -> `{:error, {:shred_reference_lost, report}}` (operator action)
+  defp resolve_reference(subject_id, r, acknowledge?) do
+    case pseudonym_ref(subject_id) do
+      {:ok, ref, :performed} when is_binary(ref) ->
+        case record_pending(subject_id, ref, r) do
+          :ok -> {:ok, ref, :performed}
+          {:error, reason} -> {:error, {:erasure_pending_failed, reason}}
+        end
+
+      {:ok, nil, :shredded} ->
+        recover_reference(subject_id, r, acknowledge?)
+
+      other ->
+        other
+    end
+  end
+
+  defp record_pending(subject_id, ref, r) do
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+    tiers = %{"pending" => %{"subject_ref" => ref, "disposition" => "performed"}}
+
+    result =
+      case pending_row(subject_id, r) do
+        nil ->
+          %Report{}
+          |> Ecto.Changeset.cast(
+            %{subject_id: subject_id, outcome: @pending_outcome, tiers: tiers, recorded_at: now},
+            [:subject_id, :outcome, :tiers, :recorded_at]
+          )
+          |> r.insert()
+
+        %Report{} = row ->
+          row |> Ecto.Changeset.cast(%{tiers: tiers, recorded_at: now}, [:tiers, :recorded_at]) |> r.update()
+      end
+
+    case result do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
+  defp pending_row(subject_id, r) do
+    r.one(
+      from(p in Report,
+        where: p.subject_id == ^subject_id and p.outcome == ^@pending_outcome,
+        order_by: [desc: p.recorded_at],
+        limit: 1
+      )
+    )
+  end
+
+  defp recover_reference(subject_id, r, acknowledge?) do
+    case pending_row(subject_id, r) do
+      %Report{tiers: %{"pending" => %{"subject_ref" => ref}}} when is_binary(ref) ->
+        {:ok, ref, :performed}
+
+      _ ->
+        cond do
+          completed_report?(subject_id, r) -> {:ok, nil, :shredded}
+          acknowledge? -> {:ok, nil, :lost_acknowledged}
+          true -> lost_reference(subject_id, r)
+        end
+    end
+  rescue
+    e -> {:error, {:pseudonym_unavailable, Exception.message(e)}}
+  end
+
+  defp completed_report?(subject_id, r) do
+    r.exists?(from(p in Report, where: p.subject_id == ^subject_id and p.outcome in ^@completed_outcomes))
+  end
+
+  # The key is gone and nothing durable says which fold-index rows were the subject's: that cannot be rebuilt, and
+  # finishing the erasure would report derived AI context as withdrawn when it is not. Write an operator-action report
+  # (token-only) and refuse.
+  defp lost_reference(subject_id, r) do
+    case r.one(
+           from(p in Report,
+             where: p.subject_id == ^subject_id and p.outcome == "operator_action_required",
+             order_by: [desc: p.recorded_at],
+             limit: 1
+           )
+         ) do
+      %Report{} = existing -> {:error, {:shred_reference_lost, existing}}
+      nil -> write_lost_reference_report(subject_id, r)
+    end
+  end
+
+  defp write_lost_reference_report(subject_id, r) do
+    attrs = %{
+      subject_id: subject_id,
+      outcome: "operator_action_required",
+      tiers: %{
+        "derived_summaries" => %{"invalidation" => "unavailable", "reason" => "shred_reference_lost"},
+        "operator_action" =>
+          "key destroyed but no recorded subject_ref: derived AI summaries citing this subject cannot be " <>
+            "withdrawn automatically; re-run with acknowledge_lost_reference: true only after a manual review"
+      },
+      recorded_at: DateTime.utc_now() |> DateTime.truncate(:microsecond)
+    }
+
+    case %Report{}
+         |> Ecto.Changeset.cast(attrs, [:subject_id, :outcome, :tiers, :recorded_at])
+         |> r.insert() do
+      {:ok, report} -> {:error, {:shred_reference_lost, report}}
+      # still refused, but the operator report itself could not be written: say so, tagged
+      {:error, reason} -> {:error, {:shred_reference_lost_unreported, reason}}
+    end
+  end
+
+  @doc """
+  Erasures that started (the key was live and a resume marker was committed) and have not completed — one entry per
+  subject with a `"pending"` marker row. After a successful `shred/2` there is none; a leftover marker means a
+  `shred/2` died part-way and must be re-run (it resumes from the marker). Token-only: subject id and recorded time.
+  """
+  @spec pending(keyword()) :: [%{subject_id: String.t(), recorded_at: DateTime.t()}]
+  def pending(opts \\ []) do
+    r = Keyword.get(opts, :repo) || default_repo()
+
+    r.all(
+      from(p in Report,
+        where: p.outcome == ^@pending_outcome,
+        order_by: [asc: p.recorded_at],
+        select: %{subject_id: p.subject_id, recorded_at: p.recorded_at}
+      )
+    )
+  end
+
+  @stuck_after_seconds 900
+
+  @doc """
+  Report every erasure whose resume marker is older than `:max_age_seconds` (default #{@stuck_after_seconds}) — a stuck
+  erasure. While a marker exists it links the subject id to the pseudonym that keys the retained fold-source rows
+  (and it persists in backups taken meanwhile), so a marker that does not clear is both an unfinished erasure and a
+  re-linkage: an operator must see it. Value-free: one `Samen.Observability.Failure` log line + telemetry per stuck
+  marker, carrying no subject id and no pseudonym. Returns the number reported. Called on every `Samen.Retention.sweep/2`.
+
+  Options: `:repo`, `:now` (default `DateTime.utc_now/0`), `:max_age_seconds`.
+  """
+  @spec report_stuck(keyword()) :: non_neg_integer()
+  def report_stuck(opts \\ []) do
+    now = Keyword.get(opts, :now) || DateTime.utc_now()
+    cutoff = DateTime.add(now, -Keyword.get(opts, :max_age_seconds, @stuck_after_seconds), :second)
+    stuck = Enum.filter(pending(opts), &(DateTime.compare(&1.recorded_at, cutoff) == :lt))
+    Enum.each(stuck, fn _ -> Samen.Observability.Failure.report_write(:erasure_stuck_marker, nil, :marker_not_cleared) end)
+    length(stuck)
+  rescue
+    e ->
+      Samen.Observability.Failure.report(:erasure_pending_read, nil, e)
+      0
   end
 
   # The STEP 0 pseudonym read and its DISPOSITION TABLE (ADR-048 §7.3; the C4 ruling in
@@ -420,7 +621,8 @@ defmodule Samen.Erasure do
       |> Ecto.Multi.run(:fold_ledger, fn repo, _changes ->
         case subject_ref do
           ref when is_binary(ref) ->
-            {:ok, Samen.AI.Agent.Compaction.withdraw(ref, repo: repo)}
+            # `{:error, {:fold_ledger_unavailable, _, _}}` aborts + rolls back the tx: the marker survives, the retry resumes
+            Samen.AI.Agent.Compaction.withdraw(ref, repo: repo)
 
           nil ->
             {:ok, %{runs_walked: 0, folds_withdrawn: 0, rounds: 0, halted: :no_pseudonym}}
@@ -443,6 +645,12 @@ defmodule Samen.Erasure do
             {:ok, %{table: :no_pseudonym, rows_withdrawn: 0}}
         end
       end)
+      # STEP 3h — the erasure is now complete in this transaction: drop the resume marker (`resolve_reference/3`). It
+      # commits or rolls back WITH the arms above, so the marker survives exactly while some arm has not durably run.
+      |> Ecto.Multi.delete_all(
+        :clear_pending,
+        from(p in Report, where: p.subject_id == ^subject_id and p.outcome == ^@pending_outcome)
+      )
       # STEP 5 (built here, needs step 2/3/3b/3c results) — the erasure report.
       |> Ecto.Multi.run(:report, fn repo, changes ->
         {sealed, _} = changes.seal_vault
@@ -497,7 +705,8 @@ defmodule Samen.Erasure do
           detail:
             "outcome=#{outcome} attestation_id=#{attestation[:attestation_id] || "none"} " <>
               "vault_sealed=#{sealed} non_pii_redacted=#{redacted} " <>
-              "derived_summary_invalidation=#{derived_summary_invalidation(disposition)}"
+              "derived_summary_invalidation=#{derived_summary_invalidation(disposition)}" <>
+              acknowledged_detail(disposition)
         }, strict: true)
       end)
       # STEP 4b — append-only event tier row (T2.2: erasure events mirror to
@@ -521,7 +730,8 @@ defmodule Samen.Erasure do
           detail:
             "outcome=#{outcome} vault_sealed=#{sealed} non_pii_redacted=#{redacted} " <>
               "attestation_id=#{attestation[:attestation_id] || "none"} " <>
-              "derived_summary_invalidation=#{derived_summary_invalidation(disposition)}",
+              "derived_summary_invalidation=#{derived_summary_invalidation(disposition)}" <>
+              acknowledged_detail(disposition),
           occurred_at: now
         })
       end)
@@ -616,12 +826,18 @@ defmodule Samen.Erasure do
     }
   end
 
+  # The operator override is AUDITED: the lifecycle row (which already carries `actor_id`) names it.
+  defp acknowledged_detail(:lost_acknowledged), do: " acknowledged_lost_reference=true"
+  defp acknowledged_detail(_), do: ""
+
   defp derived_summary_invalidation(:performed), do: "performed"
   defp derived_summary_invalidation(:shredded), do: "unavailable"
+  defp derived_summary_invalidation(:lost_acknowledged), do: "unavailable"
   defp derived_summary_invalidation(:absent), do: "not_applicable"
 
   defp derived_summary_reason(:performed), do: nil
   defp derived_summary_reason(:shredded), do: "pseudonym_shredded"
+  defp derived_summary_reason(:lost_acknowledged), do: "shred_reference_lost_acknowledged"
   defp derived_summary_reason(:absent), do: "no_dek"
 
   # ---------------------------------------------------------------------------
@@ -637,7 +853,8 @@ defmodule Samen.Erasure do
 
     r.one(
       from(rep in Report,
-        where: rep.subject_id == ^subject_id,
+        # a "pending" resume marker is not a report (it has no tiers/attestation to read)
+        where: rep.subject_id == ^subject_id and rep.outcome != ^@pending_outcome,
         order_by: [desc: rep.recorded_at],
         limit: 1
       )

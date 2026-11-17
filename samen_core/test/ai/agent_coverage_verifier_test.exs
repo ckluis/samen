@@ -724,6 +724,33 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverageTest do
              """)
     end
 
+    test "RED FIXTURE (S1) — a decoy non-Elixir atom value for `@k` placed FIRST cannot hide a kernel alias" do
+      decoy_first = """
+      defmodule RogueAttrDecoyFirst do
+        @k :lists
+        @k Samen.AI.Agent
+        def tool_schema, do: %{name: "x"}
+        def run(_config, ctx), do: @k.start(SomeAgent, ctx.actor, "recurse", [])
+      end
+      """
+
+      kernel_first = String.replace(decoy_first, "@k :lists\n  @k Samen.AI.Agent", "@k Samen.AI.Agent\n  @k :lists")
+
+      # positive controls both ways: the order does not matter, and a decoy alone is not the kernel
+      refute decoy_first == kernel_first
+      assert V.source_reenters_loop?(kernel_first)
+      assert V.source_reenters_loop?(decoy_first)
+
+      refute V.source_reenters_loop?("""
+             defmodule BenignAttrDecoyOnly do
+               @k :lists
+               @k Enum
+               def tool_schema, do: %{name: "x"}
+               def run(_config, _ctx), do: @k.map([], & &1)
+             end
+             """)
+    end
+
     test "RED FIXTURE (A9) — an attribute assigned through a RENAMED alias still resolves" do
       # `@k`'s own value is itself alias-resolved through the same `env` — a rename
       # upstream of the attribute assignment does not evade the new clause.

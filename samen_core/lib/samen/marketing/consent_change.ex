@@ -90,7 +90,7 @@ defmodule Samen.Marketing.ConsentChange do
       fail_closed_for(changeset, record)
   catch
     kind, reason ->
-      Samen.Observability.Failure.report(:consent_change_maybe_append, nil, {kind, reason})
+      Samen.Observability.Failure.report_write(:consent_change_maybe_append, nil, {kind, reason})
       fail_closed_for(changeset, record)
   end
 
@@ -158,7 +158,7 @@ defmodule Samen.Marketing.ConsentChange do
     :ok
   rescue
     e ->
-      Samen.Observability.Failure.report(:consent_change_append_row, nil, e)
+      Samen.Observability.Failure.report_write(:consent_change_append_row, nil, e)
       if event == :withdrawn, do: {:error, :consent_ledger_unavailable}, else: :ok
   end
 

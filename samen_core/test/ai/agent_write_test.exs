@@ -1283,7 +1283,7 @@ defmodule Samen.AI.AgentWriteTest do
         end)
 
       # one value-free report per attempt (the cron re-enqueues every minute), never a stacktrace or a value
-      assert length(Regex.scan(~r/read=agent_expire_parked/, log)) == 2
+      assert length(Regex.scan(~r/write=agent_expire_parked/, log)) == 2
       refute log =~ "stacktrace"
 
       # fail-closed does not depend on the job: still parked, and the lapsed approval cannot execute
