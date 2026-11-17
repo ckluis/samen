@@ -175,6 +175,43 @@ defmodule Samen.Web.FleetIngressTest do
       assert resp.resp_body == ""
     end
 
+    test "a failed credential lookup is 503 + Retry-After, no bad-sig strike, no :heartbeat_rejected",
+         %{app_id: app_id, priv: priv} do
+      import ExUnit.CaptureLog
+
+      # control: a genuinely unknown kid is a 401, strikes the bad-sig bucket (peek after one failure is under limit, so
+      # assert via the bucket's own counter by flooding to the limit below)
+      {_pub, other_priv} = Crypto.generate_ed25519_keypair()
+      unknown = Ash.UUID.generate()
+      resp = CockpitIngress.heartbeat(signed_heartbeat_conn(unknown, other_priv), namespace: @ns)
+      assert resp.status == 401
+      assert resp.resp_body == ""
+      assert get_resp_header(resp, "retry-after") == []
+
+      break_table!(Credential)
+      {bad_sig_limit, _window} = Samen.Web.RateLimit.limit_for(:fleet_heartbeat_bad_sig)
+
+      log =
+        capture_log(fn ->
+          responses =
+            for _ <- 1..(bad_sig_limit + 3) do
+              CockpitIngress.heartbeat(signed_heartbeat_conn(app_id, priv, unique_nonce: true), namespace: @ns)
+            end
+
+          send(self(), {:responses, responses})
+        end)
+
+      assert_received {:responses, responses}
+      # every one is a 503 (never 401, and never 429 even far past the bad-sig limit), empty body, with Retry-After
+      assert Enum.all?(responses, &(&1.status == 503))
+      assert Enum.all?(responses, &(&1.resp_body == ""))
+      assert Enum.all?(responses, &(get_resp_header(&1, "retry-after") != []))
+      assert Enum.all?(responses, & &1.halted)
+      refute Samen.Fleet.Attention.raised?(:heartbeat_rejected, app_id)
+      refute Samen.Web.RateLimit.over_limit?(:fleet_heartbeat_bad_sig, :kid, app_id)
+      assert log =~ "read=fleet_heartbeat_credential_lookup"
+    end
+
     test "RP-J-13: over-limit is a byte-identical 429 for a KNOWN kid, GENUINELY VALID traffic only", %{
       app_id: app_id,
       priv: priv
@@ -389,6 +426,11 @@ defmodule Samen.Web.FleetIngressTest do
       assert resp.resp_body == ""
     end
 
+    defp break_table!(resource_name) do
+      table = AshPostgres.DataLayer.Info.table(Module.concat(@ns, resource_name))
+      Ecto.Adapters.SQL.query!(TestRepo, "ALTER TABLE #{table} RENAME TO #{table}_broken", [])
+    end
+
     defp signed_heartbeat_conn(app_id, priv, opts \\ []) do
       report = Samen.Fleet.Report.build(app_id: app_id)
       body = Samen.Fleet.Report.to_wire(report) |> Jason.encode!()
@@ -432,6 +474,28 @@ defmodule Samen.Web.FleetIngressTest do
       assert resp.status == 200
       body = Jason.decode!(resp.resp_body)
       assert is_binary(body["app_id"])
+    end
+
+    test "a failed enrollment consume is 503 + Retry-After, not 401" do
+      {:ok, %{raw_token: raw_token}} =
+        Registry.mint_enrollment_token(
+          @ns,
+          %{app_slug: "enrunav-#{System.unique_integer([:positive])}", display_name: "EnrUnav"},
+          @admin
+        )
+
+      {pub, _priv} = Crypto.generate_ed25519_keypair()
+      break_table!(EnrollmentToken)
+
+      conn =
+        conn(:post, "/fleet/enroll", %{})
+        |> Map.put(:body_params, %{"token" => raw_token, "public_key" => Base.encode64(pub)})
+
+      resp = ExUnit.CaptureLog.capture_log(fn -> send(self(), {:resp, CockpitIngress.enroll(conn, namespace: @ns)}) end)
+      assert is_binary(resp)
+      assert_received {:resp, resp}
+      assert resp.status == 503
+      assert get_resp_header(resp, "retry-after") != []
     end
 
     test "RED: an invalid token -> 401" do

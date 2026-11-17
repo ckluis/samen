@@ -1,0 +1,20 @@
+# SABOTAGE: the cockpit heartbeat ingest answers a failed credential lookup as an unknown kid: 401, a 
+#   bad-sig strike, 429 and a :heartbeat_rejected incident
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/fleet_ingress_test.exs
+# MUST_FAIL: a failed credential lookup is 503 + Retry-After, no bad-sig strike, no :heartbeat_rejected
+diff --git a/samen_web/lib/samen/web/fleet/cockpit_ingress.ex b/samen_web/lib/samen/web/fleet/cockpit_ingress.ex
+index 66361042..2c564c5c 100644
+--- a/samen_web/lib/samen/web/fleet/cockpit_ingress.ex
++++ b/samen_web/lib/samen/web/fleet/cockpit_ingress.ex
+@@ -135,7 +135,7 @@ defmodule Samen.Web.Fleet.CockpitIngress do
+   # The credential lookup FAILED (reported by the Registry): not a forged signature, so no bad-sig strike, no
+   # :heartbeat_rejected entry, no 429. The body stays EMPTY like every heartbeat answer (RP-J-2); only the status and
+   # Retry-After tell the app to retry.
+-  defp handle_heartbeat_result(conn, _kid, {:error, :unavailable}), do: unavailable(conn)
++  defp handle_heartbeat_result(conn, kid, {:error, :unavailable}), do: handle_heartbeat_result(conn, kid, {:error, :unknown_kid})
+ 
+   defp handle_heartbeat_result(conn, _kid, {:error, :replayed}), do: respond(conn, 409, "")
+   defp handle_heartbeat_result(conn, _kid, {:error, :app_id_mismatch}), do: respond(conn, 403, "")
