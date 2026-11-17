@@ -1,0 +1,19 @@
+# SABOTAGE: an unknown plane resolves a pii_declared bag key through the operator grant path
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/pii_resolution_bag_planes_test.exs
+# MUST_FAIL: an UNKNOWN plane never resolves the bag key to plaintext
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+index 0b11dcdf..11a0144d 100644
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -565,7 +565,7 @@ defmodule Samen.Api.PiiResolution do
+       plane == :tenant ->
+         value
+ 
+-      plane == :operator ->
++      plane != :operator ->
+         if operator_granted?(record, key, resource, reveal_action, actor, opts),
+           do: value,
+           else: bag_mask(key)

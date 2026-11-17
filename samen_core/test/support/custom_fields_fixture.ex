@@ -41,7 +41,17 @@ defmodule SamenCore.Support.CustomFields.Widget do
     attribute(:custom, :map, public?: true)
   end
 
+  # ARCH-26: a reveal action and nothing else (still no vaulted field) — so the pii_declared bag key's
+  # operator-WITH-a-grant posture can be exercised (`pii_resolution_bag_planes_test.exs`). Without a declared
+  # reveal action `PiiResolution` can never grant a reveal, whatever the checker says.
+  pii do
+    reveal(:reveal_widget)
+  end
+
   actions do
     defaults([:read, :destroy, create: :*, update: :*])
+
+    action :reveal_widget, :string do
+    end
   end
 end

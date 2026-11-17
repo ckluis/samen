@@ -641,17 +641,16 @@ defmodule Samen.AuditChain do
         {:ok, :no_anchor}
 
       {:ok, %{seq: sealed_seq, hash: sealed_hash}} ->
-        live_at_seq =
+        # ONE statement, so both values come from a single snapshot: a concurrent delete cannot land between
+        # "what is at the sealed seq" and "what is the head". (`max` of the CASE is the hash at `sealed_seq`,
+        # or NULL when no row sits there; `seq` is unique per org chain.)
+        {head_seq, live_at_seq} =
           r.one(
             from(e in Entry,
-              where: e.org_id == ^org_id and e.seq == ^sealed_seq,
-              select: e.hash,
-              limit: 1
+              where: e.org_id == ^org_id,
+              select: {max(e.seq), max(fragment("CASE WHEN ? = ? THEN ? END", e.seq, ^sealed_seq, e.hash))}
             )
           )
-
-        head_seq =
-          r.one(from(e in Entry, where: e.org_id == ^org_id, select: max(e.seq)))
 
         cond do
           is_nil(live_at_seq) or is_nil(head_seq) or head_seq < sealed_seq ->

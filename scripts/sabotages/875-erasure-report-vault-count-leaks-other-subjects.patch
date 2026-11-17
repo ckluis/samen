@@ -1,0 +1,19 @@
+# SABOTAGE: the erasure report counts other subjects' active vault rows as this subject's
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/erasure_branches_test.exs
+# MUST_FAIL: vault tier counts only the erased subject
+diff --git a/samen_core/lib/samen/erasure.ex b/samen_core/lib/samen/erasure.ex
+index 872c1e28..f6679df2 100644
+--- a/samen_core/lib/samen/erasure.ex
++++ b/samen_core/lib/samen/erasure.ex
+@@ -542,7 +542,7 @@ defmodule Samen.Erasure do
+   defp build_tiers(subject_id, attestation, sealed, redaction_details, rollup_report, file_report, blind_index_report, custom_bag_report, record_bag_report, repo, disposition) do
+     remaining_active =
+       repo.aggregate(
+-        from(v in VaultRow, where: v.subject_id == ^subject_id and v.state == "active"),
++        from(v in VaultRow, where: v.subject_id != ^subject_id and v.state == "active"),
+         :count
+       )
+ 

@@ -11,6 +11,20 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Mutation gate: the security core (ARCH-26)
+
+- **The tier-1 watch-list now covers the rest of the security core: 12 -> 23 modules, 166 -> 401 mutants.** Added, by
+  guarantee: vault (`Samen.Vault` key-absence scanners, `Samen.Kms.Crypto`), plane-aware masking
+  (`Samen.Api.PiiResolution`), org scoping (`Samen.Policy.OrgScope`), operator grants (`Samen.Reveal.Grants`,
+  `Samen.Reveal`, `Samen.BreakGlass`), erasure (`Samen.Erasure`) and the audit hash chain (`Samen.AuditChain`,
+  `.Writer`, `.Canonical`). Every survivor is closed by a test (new files `vault_key_column_scan_test`,
+  `pii_resolution_planes_test`, `pii_resolution_bag_planes_test`, `policy/org_scope_test`, `reveal_grants_windows_test`,
+  `erasure_branches_test`, `audit_chain_{canonical,writer,branches}_test`, plus additions to `break_glass_test` and
+  `observability/reveal_span_test`) or by a proven-equivalent ledger row (6; `Grants.write_audit/3` now takes atom keys only and raises on any other, so its string-key row is gone, and `verify_anchor` reads head and sealed-seq hash in one statement). Sabotages 870-876 promote the most
+  important sole-killer mutants. `Samen.AI.MaskedPayloadScan` moves into test support so `ai/verbs_test.exs` no longer
+  needs another test module loaded first, and the `Widget` fixture declares a reveal action so the operator-with-grant
+  custom-bag posture is provable.
+
 ### Kernel honest reads (samen_core)
 
 - **Swallow ratchet over `samen_core/lib`.** The pure scanner moves to `Samen.Lint.Swallow` (samen_core); `Samen.Web.Reads.SwallowLint`

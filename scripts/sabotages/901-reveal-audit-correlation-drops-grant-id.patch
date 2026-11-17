@@ -1,0 +1,20 @@
+# SABOTAGE: write_audit/3 correlates a lifecycle row by the request id alone, so the grant id is lost from 
+#   the chain
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_grants_windows_test.exs
+# MUST_FAIL: the correlation id is the grant id, else the request id, else none
+diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+index f302d5dd..8e3eb5cd 100644
+--- a/samen_core/lib/samen/reveal/grants.ex
++++ b/samen_core/lib/samen/reveal/grants.ex
+@@ -785,7 +785,7 @@ defmodule Samen.Reveal.Grants do
+       event_type: "grant_lifecycle",
+       subject_id: attrs[:subject_id],
+       actor_id: attrs[:actor_id],
+-      correlation_id: attrs[:grant_id] || attrs[:request_id],
++      correlation_id: attrs[:request_id],
+       detail:
+         "event=#{attrs[:event]} " <> "#{(attrs[:detail] || "") |> String.trim()}",
+       occurred_at: DateTime.utc_now() |> DateTime.truncate(:microsecond)

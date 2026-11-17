@@ -893,7 +893,7 @@ comparable cold-`pr` figure; the probes are no longer the long pole of the first
 **3. Diff-scaled Actions timeouts (Gate P5 N2).** `scripts/ci actions plan pr --selection --base <ref>` asks each
 sharded, un-sliced step's own lister (`shard_list`/`shard_total`) how many items this diff selects and sets
 `timeout = min(360, max(history, 5·ceil(2·selected·shard_each_s / 60 / 5)))` — twice the lane-seconds at the manifest's
-conservative per-item rate (32 s per sabotage patch, 6 s per mutant), never below the `actions_timeouts.tsv` value, never
+conservative per-item rate (32 s per sabotage patch, 6 s per mutant; raised to 20 s for `mutation_changed` after a 74-mutant selection ran at 18.4 s each on Actions and was cancelled at the 15 min it had been sized to), never below the `actions_timeouts.tsv` value, never
 over GitHub's 360. The PR workflow's `plan` job passes the PR base and now sets up the pinned toolchain (`mutate.sh
 --list` runs the mutation engine); a lister that fails or has no count line REFUSES the plan (the job it sizes would fail
 the same way). The plain `actions plan` (no flag) is unchanged. SELTMO: 3 selected → the 15 min floor; 100 → 110; 5,000 →

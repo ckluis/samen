@@ -1,0 +1,19 @@
+# SABOTAGE: OrgScope.reject no longer rejects NULL-org rows
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/policy/org_scope_test.exs
+# MUST_FAIL: a foreign-org row is rejected and the actor
+diff --git a/samen_core/lib/samen/policy/org_scope.ex b/samen_core/lib/samen/policy/org_scope.ex
+index 687d4ffa..c24676d8 100644
+--- a/samen_core/lib/samen/policy/org_scope.ex
++++ b/samen_core/lib/samen/policy/org_scope.ex
+@@ -62,7 +62,7 @@ defmodule Samen.Policy.OrgScope do
+   def reject(actor, _context, _opts) do
+     case actor_org_id(actor) do
+       nil -> expr(true)
+-      org_id -> expr(org_id != ^org_id or is_nil(org_id))
++      org_id -> expr(org_id != ^org_id and is_nil(org_id))
+     end
+   end
+ 

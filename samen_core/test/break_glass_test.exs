@@ -111,6 +111,26 @@ defmodule Samen.BreakGlassTest do
       assert {:ok, %{count: 1}} = LocalAudit.verify_chain(path: path)
     end
 
+    test "the breadth-ledger row of a break-glass reveal is MARKED break-glass; an ordinary record is not (ARCH-26)",
+         %{path: path} do
+      op = operator()
+      {subject_id, masked} = vaulted("dana@example.com")
+
+      assert {:ok, %{plaintext: "dana@example.com"}} =
+               BreakGlass.reveal(req(op, subject_id, masked, %{local_audit_path: path}))
+
+      ledger = fn operator_id ->
+        @repo.all(from(l in Samen.BreakGlass.RevealLedgerRow, where: l.operator_id == ^operator_id, select: l.break_glass))
+      end
+
+      assert ledger.(op.id) == [true]
+
+      # POSITIVE CONTROL: a plain budget record (no break-glass flag) is NOT marked, so the marker discriminates.
+      plain = "op-plain-#{System.unique_integer([:positive])}"
+      assert {:ok, 1} = Budget.record_and_check(%{operator_id: plain, subject_id: subj(), repo: @repo})
+      assert ledger.(plain) == [false]
+    end
+
     test "RED: break-glass with NO reason refuses (clause (a) red path)", %{path: path} do
       op = operator()
       {subject_id, masked} = vaulted("bob@example.com")

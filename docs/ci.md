@@ -296,7 +296,7 @@ one of the target's modules — aliases expanded, exact names, never a submodule
 (repeating one is an error, different ones intersect):
 `--app`, `--file`, `--family`, `--changed [<ref>]`, `--shard i/n`, `--list`, `--list-targets`, `--corpus`
 (targets derived from sabotage headers: a soak, not a gate step), `--emit-patches <dir>`, `--targets`,
-`--ledger`. Ends `MUTATION GATE: ALL PASSED`. Full watch-list ≈ 15 min: use the driver (`mutation_changed`
+`--ledger`. Ends `MUTATION GATE: ALL PASSED`. Full watch-list ≈ 47 min serial (401 mutants / 23 modules, measured after ARCH-26; was ≈ 15 min at 166): use the driver (`mutation_changed`
 in `pr`, six slices nightly) or `--shard`/`--file` chunks.
 
 Never weaken it: (1) baseline green before scoring; (2) a kill is a NAMED test failure — a non-zero exit
@@ -365,7 +365,7 @@ name a file that never left a laptop by what it is, not where it was. Placeholde
   `scripts/ci actions plan pr --selection --base <PR base>` (it needs the toolchain: `mutate.sh --list` runs the
   mutation engine): it asks each such step's own lister how many items this diff selects and sets
   `timeout = min(360, max(history value, 5 * ceil(2 * selected * shard_each_s / 60 / 5)))` — twice the lane-seconds at
-  the manifest's conservative per-item rate (`shard_each_s`: 32 s per sabotage patch, 6 s per mutant), never below the
+  the manifest's conservative per-item rate (`shard_each_s`: 32 s per sabotage patch, 20 s per mutant for `mutation_changed`), never below the
   history value, never over GitHub's ceiling. A lister that fails or has no count line REFUSES the plan. Without
   `--selection` (a local `actions plan`) the history value alone applies. Not distinguished: guard vs ordinary
   patches (one rate; the 2x margin and the cap carry it).

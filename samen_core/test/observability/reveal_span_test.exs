@@ -138,6 +138,21 @@ defmodule Samen.Observability.RevealSpanTest do
     refute inspect(attrs(s)) =~ "Alice"
   end
 
+  test "a boolean or nil reason is not a reason CODE: only a real atom reaches the span (ARCH-26)" do
+    for reason <- [true, false, nil] do
+      {:ok, _} =
+        Reveal.reveal("operator-1", @masked, :reveal_email, RevealPerson,
+          repo: :unused,
+          vault: OkVault,
+          grant: ApproveAll,
+          reason: reason
+        )
+
+      assert [s] = reveal_spans()
+      refute Map.has_key?(attrs(s), :reason), "#{inspect(reason)} reached the span as a reason"
+    end
+  end
+
   describe "subject_id / grant_id are shape-checked opaque ids (ADR-052 §2.1.2 item 5)" do
     defp span_ids(subject_id, grant_id) do
       {:ok, _} =
@@ -158,6 +173,11 @@ defmodule Samen.Observability.RevealSpanTest do
       ulid = "01J9ZQ8X4M5N6P7R8S9T0V1W2X"
       assert span_ids(uuid, ulid) == %{subject_id: uuid, grant_id: ulid}
       assert span_ids(42, uuid) == %{subject_id: "42", grant_id: uuid}
+    end
+
+    test "an integer key of 0 reaches the span; a negative one does not (ARCH-26)" do
+      assert span_ids(0, 7) == %{subject_id: "0", grant_id: "7"}
+      assert span_ids(-1, -7) == %{}
     end
 
     test "a free string under the old length cap never reaches the span" do

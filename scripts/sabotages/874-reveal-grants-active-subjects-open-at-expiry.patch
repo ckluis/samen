@@ -1,0 +1,19 @@
+# SABOTAGE: a reveal window still authorizes plaintext at the exact instant it expires (batch path)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_grants_windows_test.exs
+# MUST_FAIL: closed at the exact expiry instant
+diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+index 774a20a7..ea7766f4 100644
+--- a/samen_core/lib/samen/reveal/grants.ex
++++ b/samen_core/lib/samen/reveal/grants.ex
+@@ -731,7 +731,7 @@ defmodule Samen.Reveal.Grants do
+             g.requestor_id == ^requestor_id and
+             g.granted_by != g.requestor_id and
+             is_nil(g.revoked_at) and
+-            g.expires_at > ^now,
++            g.expires_at >= ^now,
+         select: g.subject_id,
+         distinct: true
+       )

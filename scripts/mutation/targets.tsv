@@ -52,3 +52,34 @@ samen_core/lib/samen/replay/resolver.ex	samen_core	test/replay/player_test.exs
 # --- replay player authorization (ADR-052 P3): watching is impersonating — the chokepoint every
 # --- list, open and frame batch re-checks; a silent weakening shows a replay to the wrong viewer
 samen_web/lib/samen/web/replay/access.ex	samen_web	test/samen/web/replay_player_test.exs
+# --- ARCH-26 security core (vault): the subject-key scanners that PROVE crypto-shred / PITR key absence / no
+# --- cross-subject decrypt. A scanner that silently reports clean certifies a shred that did not happen.
+samen_core/lib/samen/vault.ex	samen_core	test/red_path_vault_scan_test.exs test/vault_pitr_test.exs test/post_shred_oracle_test.exs test/shred_key_material_test.exs test/vault_key_column_scan_test.exs
+# --- the envelope-crypto core (ADR-001 §2): DEK wrap/unwrap, field AEAD, the DEK-derived pseudonym key. The
+# --- mutable sites are the HKDF loop bounds and the salt default (see ledger for the proven-equivalent ones).
+samen_core/lib/samen/kms/crypto.ex	samen_core	test/crypto_test.exs
+# --- plane-aware masking (CLAUDE.md "Per-plane masking"): the ONE resolver every read goes through. A weakened
+# --- branch is a plaintext leak to the operator plane or a token in the DOM (derived: sabotage TEST_FILES 24/225/480; 23 lives in pawchart)
+samen_core/lib/samen/api/pii_resolution.ex	samen_core	test/impersonation_masking_test.exs test/custom_fields_masking_test.exs test/ai/ai_prompt_masking_test.exs test/replay/resolver_batch_test.exs test/pii_resolution_planes_test.exs test/pii_resolution_bag_planes_test.exs
+# --- org scoping of reads (CLAUDE.md "Reads: org-scoped"): the FilterCheck every tenant-plane resource authorizes
+# --- reads through. `filter` is the allow side, `reject` the deny side; an org-less actor must be fail-closed on both.
+samen_core/lib/samen/policy/org_scope.ex	samen_core	test/policy/org_scope_test.exs
+# --- operator reveal grants (T1.6): what an operator-class actor needs before plaintext is unlocked. `active?` /
+# --- `active_windows` are the deny-on-read gate (requestor-bound, distinct-party, unrevoked, expires_at > now) and
+# --- `granted?`/`granted_many` are the seam the resolver consults. A silent weakening is a plaintext unlock.
+samen_core/lib/samen/reveal/grants.ex	samen_core	test/reveal_grants_test.exs test/reveal_grants_windows_test.exs test/reveal_grant_seam_test.exs test/reveal_grant_db_check_test.exs test/reveal_grant_property_test.exs test/reveal_grant_same_tx_test.exs test/reveal_auto_revoke_test.exs test/reveal_approver_test.exs test/suspension_asymmetry_test.exs
+# --- the reveal seam (T1.5/T1.6/T4.2): the ONE gate before the vault decrypt — aggregate / fleet actors never cross
+# --- it, only a declared reveal action can, and the default checker denies. (derived: sabotage TEST_FILES 734)
+samen_core/lib/samen/reveal.ex	samen_core	test/reveal_test.exs test/reveal_fleet_refusal_test.exs test/reveal_grant_seam_test.exs test/aggregate_mutual_exclusion_test.exs
+# --- break-glass (T4.4): the budgeted, time-boxed emergency path that can unlock plaintext without a prior grant.
+# --- (derived: sabotage TEST_FILES 734)
+samen_core/lib/samen/break_glass.ex	samen_core	test/break_glass_test.exs test/suspension_asymmetry_test.exs
+# --- erasure / crypto-shred (ADR-002, ADR-001): the orchestration whose REPORT is the proof a subject is gone. A
+# --- weakened branch reports a tier erased that was not, or marks a failed shred done. (derived: sabotage TEST_FILES 740)
+samen_core/lib/samen/erasure.ex	samen_core	test/erasure_test.exs test/erasure_branches_test.exs test/erasure_retry_after_rollback_test.exs test/post_shred_oracle_test.exs
+# --- the audit hash chain (ADR-002 §2): `verify` / `verify_page` decide valid vs tampered, `append` links the chain,
+# --- the Writer is the one path that seals an aud_event into it, and Canonical is what gets hashed. A weakened branch
+# --- reads a tampered chain as intact. (derived: sabotage TEST_FILES 207/209/650/696/710)
+samen_core/lib/samen/audit_chain.ex	samen_core	test/audit_chain_branches_test.exs test/audit_chain_test.exs test/audit_chain_bounded_verify_test.exs test/audit_chain_concurrency_test.exs test/audit_chain_oracle_test.exs test/audit_chain_verify_sweep_test.exs test/reveal_ledger_read_signal_test.exs
+samen_core/lib/samen/audit_chain/writer.ex	samen_core	test/audit_chain_writer_test.exs test/audit_writer_callers_test.exs test/audit_chain_test.exs test/honest_kernel_reads_test.exs
+samen_core/lib/samen/audit_chain/canonical.ex	samen_core	test/audit_chain_canonical_test.exs test/audit_chain_test.exs

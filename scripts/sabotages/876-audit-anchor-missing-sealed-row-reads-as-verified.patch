@@ -1,0 +1,19 @@
+# SABOTAGE: a deleted sealed row with rows beyond it verifies against the anchor
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/audit_chain_branches_test.exs
+# MUST_FAIL: verified / no anchor / diverged / truncated
+diff --git a/samen_core/lib/samen/audit_chain.ex b/samen_core/lib/samen/audit_chain.ex
+index 03ff8d2..b0a1b99 100644
+--- a/samen_core/lib/samen/audit_chain.ex
++++ b/samen_core/lib/samen/audit_chain.ex
+@@ -653,7 +653,7 @@ defmodule Samen.AuditChain do
+           )
+ 
+         cond do
+-          is_nil(live_at_seq) or is_nil(head_seq) or head_seq < sealed_seq ->
++          is_nil(live_at_seq) and is_nil(head_seq) or head_seq < sealed_seq ->
+             {:error, :truncated_below_anchor}
+ 
+           live_at_seq != sealed_hash ->
