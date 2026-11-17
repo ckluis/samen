@@ -50,6 +50,7 @@ GEN_PROBE_LABEL=""
 GEN_PROBE_RESTORED=1 # 1 = nothing pending (guards double-fire + spurious no-op calls)
 GEN_PROBE_PRIVATE="" # the probe's private registry copy ("" = shared mode)
 GEN_PROBE_SCRATCH="" # this probe's scratch-dir stem (_gen_<x>_scratch)
+GEN_PROBE_HEX_HOME="" # this probe's private HEX_HOME ("" = none made)
 
 # gen_probe_scratch_stem <probe-relative-path> — the `_gen_<x>_scratch` stem the probe mktemp's under REPO_ROOT.
 gen_probe_scratch_stem() {
@@ -61,11 +62,39 @@ gen_probe_scratch_stem() {
   esac
 }
 
+# gen_probe_make_hex_home — a PRIVATE HEX_HOME for this probe (stdout: its path).
+#
+# The probes run `mix deps.get` in a freshly generated app (no mix.lock, so Hex resolves against the registry and then
+# persists its registry cache with an IN-PLACE `:ets.tab2file` onto `$HEX_HOME/cache.ets`, no temp file, no rename).
+# Probes run concurrently (and so may another session or an unrelated `mix deps.get` step), and two of them persisting
+# at the same moment kill the loser's Hex.Registry.Server with `{:error, :eaccess}` — a failed probe that is not a
+# product failure. The registry cache is therefore never shared: each probe gets its own HEX_HOME, seeded with the
+# downloaded package tarballs (`packages/`, content-addressed, so nothing is re-downloaded) and `hex.config`, but NOT
+# `cache.ets` (the very file that is raced; copying it while another process writes it could even seed a torn file —
+# Hex rebuilds its registry cache from the network instead). Nothing is written back to the shared home. Seeded with an
+# APFS clone (`cp -c`) where available, a plain copy otherwise.
+gen_probe_make_hex_home() {
+  local src="${HEX_HOME:-$HOME/.hex}" dst
+  dst="$(mktemp -d "${TMPDIR:-/tmp}/samen_ci_hex_home.XXXXXX")" || return 1
+  if [[ -d "$src/packages" ]]; then
+    cp -cR "$src/packages" "$dst/packages" 2>/dev/null || cp -R "$src/packages" "$dst/packages" || true
+  fi
+  if [[ -f "$src/hex.config" ]]; then cp "$src/hex.config" "$dst/hex.config" || true; fi
+  printf '%s\n' "$dst"
+}
+
 gen_probe_restore() {
   if [[ "$GEN_PROBE_RESTORED" == 1 ]]; then
     return 0
   fi
   GEN_PROBE_RESTORED=1
+
+  # the private Hex home goes first, on every path this trap covers (SIGINT/SIGTERM/ERR/EXIT): it can never be left behind
+  # by a later failure in this function
+  if [[ -n "$GEN_PROBE_HEX_HOME" ]]; then
+    rm -rf "$GEN_PROBE_HEX_HOME"
+    GEN_PROBE_HEX_HOME=""
+  fi
 
   local post_sha
   if [[ -n "$GEN_PROBE_PRIVATE" ]]; then
@@ -130,6 +159,11 @@ run_gen_probe() {
   local -x SAMEN_GEN_DEPS_CACHE="${SAMEN_GEN_DEPS_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/samen/gen_deps}"
   local -x SAMEN_GEN_DEPS_CACHE_HELPER="$REPO_ROOT/scripts/gen_deps_cache.py"
   if [[ "$SAMEN_GEN_DEPS_CACHE" == off ]]; then unset SAMEN_GEN_DEPS_CACHE_HELPER; fi
+  # a private HEX_HOME for this probe's `mix deps.get` (see gen_probe_make_hex_home): GEN_PROBE_SHARED_HEX=1 keeps the
+  # shared one (only for reproducing the collision, never set in ci.sh or by the driver)
+  if [[ "${GEN_PROBE_SHARED_HEX:-0}" != 1 ]]; then
+    GEN_PROBE_HEX_HOME="$(gen_probe_make_hex_home)" || { echo "==> $label: cannot make a private HEX_HOME" >&2; return 1; }
+  fi
   GEN_PROBE_RESTORED=0
 
   # GEN_PROBE_GUARD_DISABLE_TRAP=1 skips installing the interrupt trap while keeping
@@ -143,6 +177,8 @@ run_gen_probe() {
   echo ""
   echo "==> Running $label"
   local code=0
+  # HEX_HOME is exported to the probe (and its generated app's `mix deps.get`) only when a private one was made
+  if [[ -n "$GEN_PROBE_HEX_HOME" ]]; then local -x HEX_HOME="$GEN_PROBE_HEX_HOME"; fi
   if [[ -n "$GEN_PROBE_PRIVATE" ]]; then
     (cd "$REPO_ROOT/samen_core" && SAMEN_ABBREV_REGISTRY="$GEN_PROBE_PRIVATE" mix run "$probe_rel") || code=$?
   else

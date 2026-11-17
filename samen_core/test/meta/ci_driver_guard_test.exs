@@ -210,6 +210,14 @@ defmodule Samen.Meta.CiDriverGuardTest.GenProbeIsolation do
   end
 end
 
+defmodule Samen.Meta.CiDriverGuardTest.GenHexIsolation do
+  use ExUnit.Case, async: true
+
+  test "GENHEX each gen probe gets its own HEX_HOME so concurrent mix deps.get cannot race on cache.ets" do
+    Samen.Meta.CiDriverGuard.run_case!("GENHEX")
+  end
+end
+
 defmodule Samen.Meta.CiDriverGuardTest.NarrowedInputs do
   use ExUnit.Case, async: true
 
