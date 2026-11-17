@@ -1,0 +1,22 @@
+# SABOTAGE: Vault.Change checks bindings even for a %Masked{} equal to the stored value
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault_change_integration_test.exs
+# MUST_FAIL: re-setting the record's OWN %Masked{} succeeds and costs ZERO vault queries
+diff --git a/samen_core/lib/samen/vault/change.ex b/samen_core/lib/samen/vault/change.ex
+index bbf70a8e..989fee51 100644
+--- a/samen_core/lib/samen/vault/change.ex
++++ b/samen_core/lib/samen/vault/change.ex
+@@ -68,9 +68,8 @@ defmodule Samen.Vault.Change do
+       Enum.reduce(fields, {[], []}, fn field, {plain, masked} ->
+         case fetch_plaintext(changeset, field.name) do
+           {:set, %Masked{token: token}} ->
+-            if token == current_token(changeset, field),
+-              do: {plain, masked},
+-              else: {plain, [{field, token} | masked]}
++            _ = current_token(changeset, field)
++            {plain, [{field, token} | masked]}
+ 
+           {:set, nil} ->
+             {plain, masked}

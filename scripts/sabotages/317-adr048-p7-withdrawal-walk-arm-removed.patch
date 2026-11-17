@@ -14,7 +14,7 @@
 diff --git a/samen_core/lib/samen/erasure.ex b/samen_core/lib/samen/erasure.ex
 --- a/samen_core/lib/samen/erasure.ex
 +++ b/samen_core/lib/samen/erasure.ex
-@@ -408,10 +408,10 @@ defmodule Samen.Erasure do
+@@ -618,11 +618,11 @@ defmodule Samen.Erasure do
        # each cited run's transcript through the SAME accepted `:advance` chokepoint, which
        # re-projects the ledger into the index. Doing the ledger first therefore leaves the
        # stamp as the LAST word on those rows. `nil` is the same recorded no-op as below.
@@ -22,7 +22,8 @@ diff --git a/samen_core/lib/samen/erasure.ex b/samen_core/lib/samen/erasure.ex
 +      |> Ecto.Multi.run(:fold_ledger, fn _repo, _changes ->
          case subject_ref do
            ref when is_binary(ref) ->
--            {:ok, Samen.AI.Agent.Compaction.withdraw(ref, repo: repo)}
+             # `{:error, {:fold_ledger_unavailable, _, _}}` aborts + rolls back the tx: the marker survives, the retry resumes
+-            Samen.AI.Agent.Compaction.withdraw(ref, repo: repo)
 +            {:ok, %{runs_walked: 0, folds_withdrawn: 0, rounds: 0, halted: :fixpoint}}
  
            nil ->

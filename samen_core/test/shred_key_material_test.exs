@@ -121,8 +121,10 @@ defmodule Samen.ShredKeyMaterialTest do
     assert Samen.Kms.FileBacked.key_material_present?(s) == false
 
     # Seal the vault rows (the DB-tier witness) via the full erasure orchestration
-    # so erased?/1's "no active vault rows" clause is satisfied too.
-    {:ok, _} = Erasure.shred(s, repo: @repo)
+    # so erased?/1's "no active vault rows" clause is satisfied too. The key was destroyed
+    # OUT OF BAND (`Vault.shred/1` above), so no resume marker exists: `shred/2` refuses that
+    # state unless the operator acknowledges it (see `erasure_resumable_test.exs`).
+    {:ok, _} = Erasure.shred(s, repo: @repo, acknowledge_lost_reference: true)
     assert Erasure.erased?(s, repo: @repo)
     assert {:ok, :no_plaintext} = Vault.scan_no_plaintext(s, @repo)
   end

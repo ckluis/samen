@@ -1,0 +1,20 @@
+# SABOTAGE: the completing transaction no longer deletes the resume marker, so a finished erasure still 
+#   looks unfinished
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/erasure_resumable_test.exs
+# MUST_FAIL: POSITIVE CONTROL: an uninterrupted erasure withdraws the ledger and the sources, and leaves no marker
+diff --git a/samen_core/lib/samen/erasure.ex b/samen_core/lib/samen/erasure.ex
+index 837b6c6a..1d0a5df1 100644
+--- a/samen_core/lib/samen/erasure.ex
++++ b/samen_core/lib/samen/erasure.ex
+@@ -619,7 +619,7 @@ defmodule Samen.Erasure do
+       # commits or rolls back WITH the arms above, so the marker survives exactly while some arm has not durably run.
+       |> Ecto.Multi.delete_all(
+         :clear_pending,
+-        from(p in Report, where: p.subject_id == ^subject_id and p.outcome == ^@pending_outcome)
++        from(p in Report, where: p.subject_id == ^subject_id and p.outcome == "never_pending")
+       )
+       # STEP 5 (built here, needs step 2/3/3b/3c results) — the erasure report.
+       |> Ecto.Multi.run(:report, fn repo, changes ->

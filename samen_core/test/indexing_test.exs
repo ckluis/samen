@@ -780,6 +780,39 @@ defmodule Samen.IndexingTest do
       assert [[true, ^oid, _]] = slow_index_state()
     end
 
+    # CREATE INDEX CONCURRENTLY releases its session lock BEFORE the transaction that flips indisvalid
+    # commits. A migrator that wins the lock in that window reads the old (invalid) row, and a DROP then
+    # waits on the build's uncommitted row update and fails "tuple concurrently updated" (observed once, and
+    # reproduced by polling LOCK + look against back-to-back builds). The window is microseconds wide, so
+    # this holds it open: a second session has flipped the abandoned index valid and not committed.
+    test "an index whose valid flag is being committed by another session is left alone (lock released before commit)" do
+      assert {:error, _} = @repo.query("CREATE UNIQUE INDEX CONCURRENTLY ix_slow_idx ON ix_slow ((id / 1000))")
+      assert [[false, oid, _]] = slow_index_state()
+
+      {:ok, finisher} = Postgrex.start_link(Keyword.take(@repo.config(), [:hostname, :port, :username, :password, :database, :socket_dir, :socket]))
+      Postgrex.query!(finisher, "BEGIN", [])
+      Postgrex.query!(finisher, "UPDATE pg_index SET indisvalid = true WHERE indexrelid = 'ix_slow_idx'::regclass", [])
+
+      {:ok, sup} = Task.Supervisor.start_link()
+
+      task =
+        Task.Supervisor.async_nolink(sup, fn ->
+          Ecto.Migrator.run(@repo, [{29_990_101_000_020, Samen.IndexingTest.DropOnlyMigration}], :up,
+            all: true,
+            log: false,
+            migration_lock: false
+          )
+        end)
+
+      # With the guard the migrator returns at once. Without it, its DROP waits on the finisher's row.
+      result = Task.yield(task, 5_000)
+      Postgrex.query!(finisher, "COMMIT", [])
+      if result == nil, do: Task.shutdown(task, :brutal_kill)
+
+      assert {:ok, [_]} = result
+      assert [[true, ^oid, _]] = slow_index_state()
+    end
+
     test "positive control: a genuinely abandoned invalid index is still dropped" do
       assert {:error, _} = @repo.query("CREATE UNIQUE INDEX CONCURRENTLY ix_slow_idx ON ix_slow ((id / 1000))")
       assert [[false, _, _]] = slow_index_state()
