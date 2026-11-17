@@ -204,12 +204,19 @@ defmodule Samen.Automation.RunWorker do
   # `:gone` is the ONLY definite "the record is not there". By event:
   #   * `destroyed` -- a real destroy removes the row, so absence is expected. The envelope is values-free (INV-1)
   #     and carries no snapshot, so there is nothing to evaluate gates against: a workflow with NO conditions still
-  #     fires (its actions need no subject values), one WITH conditions is skipped `:no_subject_record` (an empty
-  #     subject passes every `neq` / `not_in` / `is_nil` gate, so judging them would be a guess).
+  #     fires (its actions need no subject values); conditions that read only event metadata (`changed`) are judged
+  #     as usual; one that reads an attribute value is skipped `:no_subject_record` (an empty subject passes every
+  #     `neq` / `not_in` / `is_nil` gate, so judging them would be a guess).
   #   * anything else (`created` / `updated` / manual) -- the subject was deleted between the event and this run:
   #     fail closed, skipped `:no_subject_record`, never executed against nothing.
   defp absent_subject(:gone, definition, %{"event" => "destroyed"}) do
-    if Definition.conditions(definition) in [nil, []], do: {:ok, %{}}, else: {:skip, :no_subject_record}
+    conditions = Definition.conditions(definition)
+
+    # Conditions that read only event metadata (`changed`, e.g. an archive's `archived_at`) need no record and are
+    # judged by the gate as usual; one that reads an attribute value cannot be judged without it (fail closed).
+    if Condition.valid?(conditions) and not Enum.any?(Condition.parse(conditions), &Condition.needs_subject_values?/1),
+      do: {:ok, %{}},
+      else: {:skip, :no_subject_record}
   end
 
   defp absent_subject(:gone, _definition, _args), do: {:skip, :no_subject_record}

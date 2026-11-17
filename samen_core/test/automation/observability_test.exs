@@ -592,6 +592,46 @@ defmodule Samen.Automation.ObservabilityTest do
     assert [%{state: :skipped, error_kind: :no_subject_record}] = runs_for(org, gated.id)
   end
 
+  test "a destroyed run whose conditions read only event metadata (`changed`) is judged on them and fires; one needing an attribute value (alone or mixed in) is skipped :no_subject_record" do
+    org = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+    changed_cond = %{"attribute" => "priority", "op" => "changed", "values" => []}
+    attr_cond = %{"attribute" => "priority", "op" => "neq", "values" => ["urgent"]}
+
+    meta_only = create_workflow!(org, owner, event: :destroyed, conditions: [changed_cond], actions: @notify)
+    attr_only = create_workflow!(org, owner, event: :destroyed, conditions: [attr_cond], actions: @notify)
+    mixed = create_workflow!(org, owner, event: :destroyed, conditions: [changed_cond, attr_cond], actions: @notify)
+
+    run = fn wf, changed ->
+      args = wf |> subject_args(org, Ash.UUID.generate(), "destroyed") |> Map.put("changed", changed)
+      assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: args})
+    end
+
+    # RED on the previous round: a soft destroy (archive) names the stamped attribute in `changed`; the condition is satisfied
+    run.(meta_only, ["priority"])
+    assert notified(org, owner) == 1
+    assert [%{state: :succeeded}] = runs_for(org, meta_only.id)
+
+    # POSITIVE CONTROL: the metadata condition is really evaluated (not waved through): unmet when the attribute is not in `changed`
+    run.(meta_only, ["tags"])
+    assert notified(org, owner) == 1
+    assert [_, %{state: :skipped, error_kind: :conditions_unmet}] = runs_for(org, meta_only.id)
+
+    run.(attr_only, ["priority"])
+    run.(mixed, ["priority"])
+    assert notified(org, owner) == 1
+    assert [%{state: :skipped, error_kind: :no_subject_record}] = runs_for(org, attr_only.id)
+    assert [%{state: :skipped, error_kind: :no_subject_record}] = runs_for(org, mixed.id)
+  end
+
+  test "Condition.needs_subject_values?/1 fails closed: only `changed` is metadata-only, every other operator (and an unknown one) needs the record" do
+    refute Samen.Automation.Condition.needs_subject_values?(%{attribute: "a", op: :changed, values: []})
+
+    for op <- ~w(eq neq in not_in gt gte lt lte is_nil not_nil)a ++ [:some_future_op] do
+      assert Samen.Automation.Condition.needs_subject_values?(%{attribute: "a", op: op, values: []}), "#{op}"
+    end
+  end
+
   test "RED: a subject read that FAILS is retried (Oban error, run left queued) instead of skipping the run for good; the last attempt finalizes it; a healed read fires (control)" do
     org = Ash.UUID.generate()
     owner = Ash.UUID.generate()
