@@ -37,7 +37,7 @@ Use the driver; never hand-segment `ci.sh`, never background a run and poll it (
 - Counts are generated (`scripts/counts --write`, never by hand): <!--count:sabotages-->968<!--/count--> sabotages
   (driver red paths `scripts/ci_test.sh` <!--count:driver_sabotages-->496–973<!--/count-->), watch-list <!--count:watchlist_modules-->23<!--/count-->
   modules / <!--count:watchlist_mutants-->447<!--/count--> mutants, corpus <!--count:corpus_targets-->323<!--/count--> targets /
-  <!--count:corpus_mutants-->5,879<!--/count--> mutants.
+  <!--count:corpus_mutants-->5,876<!--/count--> mutants.
 - Toolchain floor `.tool-versions` (Elixir 1.20.4 / OTP 29.1.1); the `toolchain` step fails on older — raise the pin
   when upgrading. Prerequisite: Postgres WITH `pgvector` (`brew install pgvector`; ADR-043 §7.1/M3) — else the
   samen_core suite fails at setup with "pgvector not installed".
