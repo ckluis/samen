@@ -263,8 +263,10 @@ defmodule Samen.Migration.ExpandContract do
   of the build, a step that drops the name if it is invalid and ABANDONED. A VALID index of that
   name is never touched, and neither is one another session is building right now (that build is
   `indisvalid = false` too): the step first takes the table's `SHARE UPDATE EXCLUSIVE` lock, which
-  a running `CREATE INDEX CONCURRENTLY` holds for its whole duration, so it WAITS for the build to
-  finish and then sees it valid. Call it from a migration that disabled the DDL transaction; it is
+  a running `CREATE INDEX CONCURRENTLY` holds until its last step, so it WAITS for the build to
+  finish and then sees it valid. The build drops that lock just BEFORE it commits the valid flag, so
+  an invalid row whose updater is still in progress in our snapshot is a build finishing, and is left
+  alone too. Call it from a migration that disabled the DDL transaction; it is
   a no-op on `down`.
   """
   def drop_invalid_index(table, name) do
@@ -277,7 +279,14 @@ defmodule Samen.Migration.ExpandContract do
 
         # Lock FIRST, then look: a check-then-drop without the lock is a race (the build can start,
         # or finish, between the look and the drop). Holding SHARE UPDATE EXCLUSIVE excludes every
-        # concurrent build on the table, so an index invalid under it is genuinely abandoned. The
+        # concurrent build on the table, so an index invalid under it is genuinely abandoned, with ONE
+        # exception: CREATE INDEX CONCURRENTLY releases its session lock BEFORE the transaction that flips
+        # `indisvalid` commits. In that window we hold the lock and still read the old, invalid row, but a
+        # build is finishing it: a DROP would wait on its uncommitted row update and then fail with
+        # "tuple concurrently updated". An invalid row whose `xmax` is a transaction not yet visible in
+        # our snapshot (still in progress) is that finishing build; an abandoned build's updater is aborted,
+        # which a snapshot reports as visible, so it is still dropped. The xid8 epoch is taken from the
+        # snapshot's xmin (an updater straddling an epoch boundary reads as visible: the old behaviour). The
         # drop is therefore a plain DROP INDEX inside this transaction (the CONCURRENTLY form
         # cannot run in one and would release the lock first); its brief ACCESS EXCLUSIVE upgrade
         # is bounded by lock_timeout and fails loudly rather than queueing every reader behind it.
@@ -295,6 +304,10 @@ defmodule Samen.Migration.ExpandContract do
                       JOIN pg_class c ON c.oid = i.indexrelid
                       JOIN pg_namespace n ON n.oid = c.relnamespace
                      WHERE c.relname = $1 AND i.indrelid = to_regclass($2) AND NOT i.indisvalid
+                      AND (i.xmax::text = '0' OR pg_visible_in_snapshot(
+                            (((pg_snapshot_xmin(pg_current_snapshot())::text::bigint >> 32) << 32)
+                              | i.xmax::text::bigint)::text::xid8,
+                            pg_current_snapshot()))
                     """,
                     [iname, q_ident(tname)]
                   )
