@@ -1,0 +1,22 @@
+# SABOTAGE: MovementBackfill answers {:ok, zero summary} when a read fails: a failed price read reads as 
+#   'nothing to backfill'
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/honest_billing_reads_test.exs
+# MUST_FAIL: the price read fails -> {:error, :unavailable}, nothing seeded, reported by name
+diff --git a/samen_core/lib/samen/billing/movement_backfill.ex b/samen_core/lib/samen/billing/movement_backfill.ex
+index ccbc8e88..635744bd 100644
+--- a/samen_core/lib/samen/billing/movement_backfill.ex
++++ b/samen_core/lib/samen/billing/movement_backfill.ex
+@@ -88,8 +88,8 @@ defmodule Samen.Billing.MovementBackfill do
+     # `{:error, :unavailable}` and on record, never `{:ok, %{seeded: 0, skipped: 0}}` and never a seed priced at
+     # 0 MRR because the price read failed. Rows already seeded stay (each is skipped by `has_movement?/3` on a re-run).
+     e ->
+-      Samen.Observability.Failure.report_write(:movement_backfill, org_id_of(opts), e)
+-      {:error, :unavailable}
++      _ = e
++      {:ok, %{seeded: 0, skipped: 0}}
+   end
+ 
+   defp org_id_of(opts), do: opts |> Keyword.get(:org_id) |> then(&if(is_binary(&1), do: &1))

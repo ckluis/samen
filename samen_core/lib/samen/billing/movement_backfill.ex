@@ -34,7 +34,7 @@ defmodule Samen.Billing.MovementBackfill do
       )
       # => {:ok, %{seeded: n, skipped: m}}
 
-  Returns a summary; best-effort per subscription (one bad row never aborts the run).
+  Returns a summary; a failed read or seed is `{:error, :unavailable}` (reported, never a zero summary or a wrong-MRR seed) and the run is safe to repeat.
   """
 
   require Ash.Query
@@ -43,7 +43,7 @@ defmodule Samen.Billing.MovementBackfill do
 
   @doc """
   Seed one synthetic `:new` movement per revenue-active subscription with no prior
-  `mov` row, for the given org. Returns `{:ok, %{seeded:, skipped:}}`.
+  `mov` row, for the given org. Returns `{:ok, %{seeded:, skipped:}}` or `{:error, :unavailable}`.
 
   Required opts:
 
@@ -77,17 +77,22 @@ defmodule Samen.Billing.MovementBackfill do
             {seeded, skipped + 1}
 
           true ->
-            case seed_new(event_resource, org_id, sub, prices_by_plan, as_of) do
-              :ok -> {seeded + 1, skipped}
-              :error -> {seeded, skipped + 1}
-            end
+            :ok = seed_new(event_resource, org_id, sub, prices_by_plan, as_of)
+            {seeded + 1, skipped}
         end
       end)
 
     {:ok, %{seeded: seeded, skipped: skipped}}
   rescue
-    _ -> {:ok, %{seeded: 0, skipped: 0}}
+    # ONE honest answer for any failed read or seed below (none of them rescues on its own): the run is
+    # `{:error, :unavailable}` and on record, never `{:ok, %{seeded: 0, skipped: 0}}` and never a seed priced at
+    # 0 MRR because the price read failed. Rows already seeded stay (each is skipped by `has_movement?/3` on a re-run).
+    e ->
+      Samen.Observability.Failure.report_write(:movement_backfill, org_id_of(opts), e)
+      {:error, :unavailable}
   end
+
+  defp org_id_of(opts), do: opts |> Keyword.get(:org_id) |> then(&if(is_binary(&1), do: &1))
 
   defp active_subscriptions(subscription_resource, org_id) do
     active = MovementClassifier.active_statuses()
@@ -97,8 +102,6 @@ defmodule Samen.Billing.MovementBackfill do
     |> Ash.Query.filter(org_id == ^org_id)
     |> Ash.Query.filter(status in ^active)
     |> Ash.read!(authorize?: false)
-  rescue
-    _ -> []
   end
 
   # Org-pinned (S15): the subscription is unique already, but the explicit org filter
@@ -108,12 +111,7 @@ defmodule Samen.Billing.MovementBackfill do
     |> Ash.Query.filter(org_id == ^org_id and subscription_id == ^subscription_id)
     |> Ash.Query.limit(1)
     |> Ash.read!(authorize?: false)
-    |> case do
-      [] -> false
-      _ -> true
-    end
-  rescue
-    _ -> true
+    |> Enum.any?()
   end
 
   defp seed_new(event_resource, org_id, sub, prices_by_plan, as_of) do
@@ -142,8 +140,6 @@ defmodule Samen.Billing.MovementBackfill do
     |> Ash.create!(authorize?: false)
 
     :ok
-  rescue
-    _ -> :error
   end
 
   # ADR-036 §4.5(1): Price.unit_amount_cents is now the Money attribute
@@ -156,7 +152,5 @@ defmodule Samen.Billing.MovementBackfill do
     |> Ash.Query.filter(interval == :monthly and active == true)
     |> Ash.read!(authorize?: false)
     |> Map.new(&{&1.plan_id, Samen.Type.Money.cents(&1.unit_amount)})
-  rescue
-    _ -> %{}
   end
 end

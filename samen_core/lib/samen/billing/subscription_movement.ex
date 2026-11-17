@@ -89,17 +89,32 @@ defmodule Samen.Billing.SubscriptionMovement do
             reason: reason_for(before_state, after_state)
           )
 
-        {:error, _reason} ->
-          :ok
+        {:error, reason} ->
+          # the classifier refused this (before, after) pair: no row, and on record (never a silent skip)
+          Samen.Observability.Failure.report_write(:subscription_movement_classify, org_id, reason)
       end
     end
 
     :ok
   rescue
-    # Best-effort belt: introspection/classification/append never aborts the write.
-    _ -> :ok
+    # Best-effort by contract (the subscription write is the load-bearing fact), but never silent: ONE failed
+    # introspection / price read / classification / append skips the row AND is on record. Nothing below rescues
+    # on its own, so a failed price read can no longer record a wrong-MRR (0) movement and a failed prior-active
+    # read can no longer book a reactivation as a :new.
+    e ->
+      Samen.Observability.Failure.report_write(:subscription_movement_append, changeset_org(changeset), e)
+      :ok
   catch
-    _, _ -> :ok
+    kind, reason ->
+      Samen.Observability.Failure.report_write(:subscription_movement_append, changeset_org(changeset), {kind, reason})
+      :ok
+  end
+
+  defp changeset_org(changeset) do
+    case Ash.Changeset.get_attribute(changeset, :org_id) do
+      org when is_binary(org) -> org
+      _ -> nil
+    end
   end
 
   # Resolve the subscription's contributed MRR for a {status, plan_id} — the plan's
@@ -153,12 +168,7 @@ defmodule Samen.Billing.SubscriptionMovement do
     |> Ash.Query.filter(kind in [:new, :reactivation])
     |> Ash.Query.limit(1)
     |> Ash.read!(authorize?: false)
-    |> case do
-      [] -> false
-      _ -> true
-    end
-  rescue
-    _ -> false
+    |> Enum.any?()
   end
 
   # Monthly active prices keyed by plan_id, for this org — the MRR source.
@@ -174,8 +184,6 @@ defmodule Samen.Billing.SubscriptionMovement do
     |> Ash.Query.filter(interval == :monthly and active == true)
     |> Ash.read!(authorize?: false)
     |> Map.new(&{&1.plan_id, Samen.Type.Money.cents(&1.unit_amount)})
-  rescue
-    _ -> %{}
   end
 
   # A price/plan change while active is a :price_change reason; else a status change.
@@ -217,8 +225,6 @@ defmodule Samen.Billing.SubscriptionMovement do
     |> Ash.create!(authorize?: false)
 
     :ok
-  rescue
-    _ -> :ok
   end
 
   defp status_of(nil), do: nil
@@ -249,7 +255,5 @@ defmodule Samen.Billing.SubscriptionMovement do
         end
       end
     )
-  rescue
-    _ -> nil
   end
 end
