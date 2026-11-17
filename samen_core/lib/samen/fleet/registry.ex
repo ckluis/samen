@@ -468,12 +468,9 @@ defmodule Samen.Fleet.Registry do
           true -> {:ok, credential}
         end
 
-      {:error, %Ash.Error.Invalid{}} ->
-        # the PRESENTED kid could not even be cast (not a UUID): the presenter's problem, an unknown kid like any other
-        _ = Crypto.dummy_verify_ed25519(signing_input)
-        {:error, :unknown_kid}
-
-      {:error, error} ->
+      # (an `Ash.Error.Invalid` is the PRESENTED kid failing to cast, e.g. not a UUID: the presenter's problem, so it
+      # falls through to the unknown-kid arm below, dummy verify included)
+      {:error, error} when not is_struct(error, Ash.Error.Invalid) ->
         # A lookup that FAILED is not an unknown kid: answering it as one would charge a genuine app's heartbeat to the
         # forged-signature bucket, rate-limit it and raise :heartbeat_rejected during an outage. Report it (value-free)
         # and answer a distinct outcome the HTTP surface maps to 503 + Retry-After.
