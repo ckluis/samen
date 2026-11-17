@@ -483,7 +483,7 @@ defmodule Samen.AI.AgentIngressTest do
         refute actual =~ "qQ1wW2eE3rR4tT5yY6uU7iI8"
       end
     end
-    test "RED against pre-A11: a packed-label-opener flood renders well under the pre-fix cost" do
+    test "RED against pre-A11: a packed-label-opener flood renders at least four times cheaper than redacting the full binary" do
       # The exact "packed-labels-4096-htmlopen" bait from V14 attempt-3's verdict
       # (the UXD remediation's T14 verifier verdict, unpublished run notes;
       # `strongest_attack` / `iii_independent_performance_table`): "api_key=" + 4096 bytes of
@@ -495,16 +495,29 @@ defmodule Samen.AI.AgentIngressTest do
       block = "api_key=" <> junk <> " "
       input = block |> String.duplicate(div(65536, byte_size(block)) + 1) |> binary_part(0, 65536)
 
-      # warm run — regex compilation / first-call effects are not the thing under test
-      ToolResult.render({:ok, %{note: input}}, actor: %{})
+      # Both sides are timed in THIS run, on this machine, under whatever else it is doing: the unbounded
+      # computation (`pre_fix_reference/1`, i.e. `Secrets.redact/1` over the full 64KB, what the code did
+      # before A11) against the real render. An absolute bound (it was `< 50ms`, against 140ms measured
+      # once) fails on a loaded machine — 76ms at a load average of 19 — without the code being any slower.
+      # The best of several runs is compared, so a scheduler pause in one run moves neither side.
+      best_ms = fn fun ->
+        fun.()
 
-      {us, _result} = :timer.tc(fn -> ToolResult.render({:ok, %{note: input}}, actor: %{}) end)
-      ms = us / 1000.0
+        1..7
+        |> Enum.map(fn _ -> fun |> :timer.tc() |> elem(0) end)
+        |> Enum.min()
+        |> Kernel./(1000.0)
+      end
 
-      assert ms < 50.0,
-             "render_scalar/2 took #{Float.round(ms, 2)}ms on a 64KB packed-label-opener " <>
-               "flood; pre-A11 this cost ~140ms because Secrets.redact/1 ran on the FULL raw " <>
-               "binary before truncating to 500 bytes"
+      unbounded = best_ms.(fn -> pre_fix_reference(input) end)
+      actual = best_ms.(fn -> ToolResult.render({:ok, %{note: input}}, actor: %{}) end)
+
+      # Measured here at about 11ms against 149ms (13x). Four times is the bound: far from both the
+      # measured ratio and from 1x, which is what the pre-A11 code gives.
+      assert actual * 4 < unbounded,
+             "render_scalar/2 took #{Float.round(actual, 2)}ms on a 64KB packed-label-opener flood against " <>
+               "#{Float.round(unbounded, 2)}ms for redacting the full binary; pre-A11 the two were the same " <>
+               "work because Secrets.redact/1 ran on the FULL raw binary before truncating to 500 bytes"
     end
 
     # The redacted MATCH can itself start close enough to the 500-byte cut that the outer

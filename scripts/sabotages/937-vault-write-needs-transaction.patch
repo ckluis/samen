@@ -1,0 +1,22 @@
+# SABOTAGE: A vault-routing write outside any transaction is not refused up front, so the vault rows and 
+#   the domain row commit before the guard can undo them
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault/vault_write_guard_no_transaction_test.exs
+# MUST_FAIL: a vault-routing create is refused before any vault insert or row write
+# MUST_FAIL: bulk_create transaction: false refuses each record and writes nothing
+# MUST_FAIL: a later hook that swaps in a foreign %Masked{} cannot leave the row durable
+diff --git a/samen_core/lib/samen/vault/change.ex b/samen_core/lib/samen/vault/change.ex
+index 889b50a6..91a4f657 100644
+--- a/samen_core/lib/samen/vault/change.ex
++++ b/samen_core/lib/samen/vault/change.ex
+@@ -58,7 +58,7 @@ defmodule Samen.Vault.Change do
+   # reaches the data layer outside a transaction (an action declared `transaction? false`, a bulk
+   # `transaction: false`) is refused here, before a vault insert or a row write.
+   defp guarded_route(changeset, fields) do
+-    if changeset.action_type in [:create, :update] and not repo!(changeset).in_transaction?() do
++    if changeset.action_type in [:create, :update] and not repo!(changeset).in_transaction?() and false do
+       Ash.Changeset.add_error(changeset,
+         field: :vault,
+         message:
