@@ -573,6 +573,7 @@ defmodule PawChart.ReadsHonestFailureP4Test do
       refute conn.resp_body =~ "result"
       assert length(Regex.scan(~r/read=pawchart_mcp_key_lookup/, log)) == 1
       refute log =~ "sk_mcp_probe_key"
+      refute log =~ PawChartWeb.Api.McpKeyResolver.digest("sk_mcp_probe_key")
     end
   end
 end

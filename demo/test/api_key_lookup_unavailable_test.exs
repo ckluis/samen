@@ -42,6 +42,27 @@ defmodule Demo.ApiKeyLookupUnavailableTest do
     refute log =~ String.slice(raw, 0, 6)
   end
 
+  test "a key that RESOLVES but whose membership load FAILS is 503 too, reported once under its own name", %{raw: raw} do
+    # the lookup itself (key_api_key) is intact: only the membership table the actor is built from is broken
+    table = AshPostgres.DataLayer.Info.table(Demo.Identity.Membership)
+    Ecto.Adapters.SQL.query!(Demo.Repo, "ALTER TABLE #{table} RENAME TO #{table}_broken", [])
+
+    log = capture_log(fn -> send(self(), {:conn, api_get("/contacts", raw)}) end)
+    assert_received {:conn, conn}
+
+    assert conn.status == 503
+    assert [retry] = Plug.Conn.get_resp_header(conn, "retry-after")
+    assert String.to_integer(retry) > 0
+    assert conn.halted
+    refute Map.has_key?(conn.private, :samen_api_actor)
+    refute conn.resp_body =~ "Guarded"
+
+    assert length(Regex.scan(~r/read=demo_api_key_membership_load/, log)) == 1
+    refute log =~ "read=demo_api_key_lookup"
+    refute log =~ raw
+    refute log =~ DemoWeb.Api.KeyAuthPlug.digest(raw)
+  end
+
   test "controls: an unknown key is NOT 503 (actor-less, nothing served), a good key is 200 with the row", %{raw: raw} do
     log = capture_log(fn -> send(self(), {:unknown, api_get("/contacts", "sk_unknown")}) end)
     assert_received {:unknown, unknown}

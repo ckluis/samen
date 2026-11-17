@@ -10,7 +10,7 @@ defmodule Samen.Web.AI.McpPlug do
       import Samen.Web.Router
 
       samen_mcp_route(
-        actor_resolver: {MyWeb.Api.KeyAuthPlug, :resolve_scope, []},
+        actor_resolver: {MyWeb.Api.McpKeyResolver, :resolve_scope, []},
         tool_opts: [domains: [MyApp.Crm], repo: MyApp.Repo,
                     approval_resource: MyApp.Primitives.Approval,
                     kinds: MyApp.approval_kinds()]
@@ -127,7 +127,7 @@ defmodule Samen.Web.AI.McpPlug do
     conn
     |> put_resp_header("retry-after", Integer.to_string(Samen.Web.Api.KeyCheckUnavailable.retry_after_seconds()))
     |> put_resp_header("content-type", "application/json")
-    |> send_resp(503, Jason.encode!(error_envelope(nil, -32_002, "service unavailable")))
+    |> send_resp(503, Jason.encode!(error_envelope(nil, -32_603, "service unavailable")))
     |> halt()
   end
 
