@@ -161,7 +161,8 @@ defmodule Mix.Tasks.Samen.Verify.SameOrgFk do
   # which varies across Ash versions) and match the module name — the same robust
   # approach the scope-review used.
   defp uses_org_scope?(resource) do
-    # A resource without the policy authorizer has no policies (the verifier flags it); a policy read that FAILS
+    # A resource without the policy authorizer has no policies and is EXCLUDED from the org-scoped set (the verifier
+    # does not examine it, and does not flag it); a policy read that FAILS
     # on a resource that has one fails the task instead of reading as "no OrgScope".
     if Ash.Policy.Authorizer in Ash.Resource.Info.authorizers(resource) do
       resource
