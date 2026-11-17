@@ -1,0 +1,22 @@
+# SABOTAGE: DeliveryWorker answers :not_found when the endpoint lookup FAILS: the delivery is discarded for 
+#   good
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_c_test.exs
+# MUST_FAIL: the lookup fails -> a retried, reported error, never a permanent discard
+diff --git a/samen_core/lib/samen/webhook/delivery_worker.ex b/samen_core/lib/samen/webhook/delivery_worker.ex
+index 7b77dc61..0c9603ea 100644
+--- a/samen_core/lib/samen/webhook/delivery_worker.ex
++++ b/samen_core/lib/samen/webhook/delivery_worker.ex
+@@ -157,8 +157,8 @@ defmodule Samen.Webhook.DeliveryWorker do
+     e ->
+       # A lookup that FAILED (an outage, an unwired endpoint module) is not "the endpoint was deleted": answering
+       # :not_found made `perform/1` DISCARD the delivery for good. It is a transient, reported error, so Oban retries.
+-      Samen.Observability.Failure.report(:webhook_delivery_load_endpoint, nil, e)
+-      {:error, :endpoint_unavailable}
++      _ = e
++      {:error, :not_found}
+   end
+ 
+   defp load_endpoint(_id, nil) do

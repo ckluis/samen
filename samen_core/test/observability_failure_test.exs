@@ -69,6 +69,7 @@ defmodule Samen.Observability.FailureTest do
   # with an unlisted name fails, telling its author to decide: a write goes through `report_write/3`; only a failed
   # READ (a lookup, a probe, a scan, a resolve) is listed here.
   @read_ops ~w(
+    webhook_delivery_load_endpoint webhook_delivery_repo webhook_ingest_repo
     action_effect action_tool_schema agent_fetch_turn agent_health_probe agent_health_repo_running
     agent_load_approval agent_pending_turn agent_refuse_vt_args agent_run_tool agent_validate_args
     ai_catalog_custom_objects ai_catalog_grounding ai_catalog_object_fields ai_catalog_schema ai_catalog_table_entry

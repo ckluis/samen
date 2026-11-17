@@ -29,6 +29,12 @@ defmodule Samen.Lint.KernelSwallow do
   @roots ["samen_core/lib"]
 
   @reviewed %{
+    {"samen_core/lib/samen/webhook/payload.ex", :allowlisted_fields} =>
+      {1, "fc34072590cb09ca",
+       "AshJsonApi's show_fields/1 raises ArgumentError only for a module that is not a Spark DSL (no JSON:API block); an empty allowlist is then the exact, fail-CLOSED answer (nothing auto-published); any other failure is not rescued"},
+    {"samen_core/lib/samen/webhook/payload.ex", :declared_abbrev} =>
+      {1, "848313246b5847d0",
+       "Samen.Info.abbrev/1 raises ArgumentError only for a module that is not a Spark DSL (a plain struct); nil (no abbrev, only the pii_ storage guard applies) is its documented answer; any other failure is not rescued"},
     {"samen_core/lib/samen/billing/ash_checkout_mirror.ex", :safe_feature_atom} =>
       {1, "e1de1bd8d249449e",
        "String.to_existing_atom/1 raises ArgumentError only for a name that is not an existing atom; nil (skip that feature key, never mint an atom from a plan's feature map) is the exact answer, documented in the moduledoc"},
@@ -139,10 +145,7 @@ defmodule Samen.Lint.KernelSwallow do
     "samen_core/lib/samen/tracer.ex" => 3,
     "samen_core/lib/samen/transformers/materialize_pii.ex" => 1,
     "samen_core/lib/samen/versioning/select_for_version.ex" => 1,
-    "samen_core/lib/samen/webhook/delivery_worker.ex" => 2,
-    "samen_core/lib/samen/webhook/event.ex" => 1,
-    "samen_core/lib/samen/webhook/ingest_worker.ex" => 2,
-    "samen_core/lib/samen/webhook/payload.ex" => 3
+    "samen_core/lib/samen/webhook/event.ex" => 1
   }
 
   @error_arm_baseline %{
@@ -164,7 +167,7 @@ defmodule Samen.Lint.KernelSwallow do
   # has to raise this number too (and `SwallowLintTest` compares it with the merge base, so it can only go down). Lower
   # it together with the baseline when a swallow is converted; never raise it.
   @ceilings %{
-    rescue: %{"samen_core/lib" => 159},
+    rescue: %{"samen_core/lib" => 152},
     error_arm: %{"samen_core/lib" => 19}
   }
 

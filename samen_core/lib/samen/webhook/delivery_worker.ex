@@ -154,9 +154,11 @@ defmodule Samen.Webhook.DeliveryWorker do
       row -> {:ok, row}
     end
   rescue
-    _ ->
-      # No real Ash resource wired — this is the seam for host apps.
-      {:error, :not_found}
+    e ->
+      # A lookup that FAILED (an outage, an unwired endpoint module) is not "the endpoint was deleted": answering
+      # :not_found made `perform/1` DISCARD the delivery for good. It is a transient, reported error, so Oban retries.
+      Samen.Observability.Failure.report(:webhook_delivery_load_endpoint, nil, e)
+      {:error, :endpoint_unavailable}
   end
 
   defp load_endpoint(_id, nil) do
@@ -226,7 +228,10 @@ defmodule Samen.Webhook.DeliveryWorker do
         String.to_existing_atom("Elixir.#{repo_str}")
     end
   rescue
-    _ -> nil
+    e ->
+      # an unresolvable repo is `:no_repo` (a retried error, never a delivery); on record by name
+      Samen.Observability.Failure.report(:webhook_delivery_repo, nil, e)
+      nil
   end
 
   # Hook for the host app — returns the table module for webhook endpoint rows.
