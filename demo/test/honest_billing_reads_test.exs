@@ -89,6 +89,54 @@ defmodule Demo.HonestBillingReadsTest do
     end
   end
 
+  describe "MovementBackfill — one unreadable subscription is skipped and counted, not a stop or a silent skip" do
+    test "RED: the seed of one subscription fails -> it is counted in failed and reported, the others are still seeded" do
+      {org, cust, plan} = fixture("hb-backfill-poison")
+      good = mk_sub(org, cust, plan)
+      bad = mk_sub(org, cust, plan)
+      wipe(org.id)
+
+      # the ledger refuses exactly the poison subscription (a constraint, so the append raises for that row only)
+      Repo.query!("ALTER TABLE mov_subscription_event ADD CONSTRAINT poison_row CHECK (mov_subscription_id <> '#{bad.id}')")
+
+      log =
+        capture_log(fn ->
+          assert {:ok, %{seeded: 1, skipped: 0, failed: 1}} = backfill(org, Price)
+        end)
+
+      assert log =~ "write=movement_backfill_row"
+      assert [%{mrr_delta_cents: 9_900}] = rows(good.id)
+      assert rows(bad.id) == []
+    end
+
+    test "POSITIVE CONTROL: with every row readable, failed is 0 and a re-run skips what was seeded" do
+      {org, cust, plan} = fixture("hb-backfill-clean")
+      sub = mk_sub(org, cust, plan)
+      wipe(org.id)
+
+      assert {:ok, %{seeded: 1, skipped: 0, failed: 0}} = backfill(org, Price)
+      assert {:ok, %{seeded: 0, skipped: 1, failed: 0}} = backfill(org, Price)
+      assert length(rows(sub.id)) == 1
+    end
+
+    test "RED: a failed read of the snapshot itself (the active subscriptions) is {:error, :unavailable}" do
+      {org, _cust, _plan} = fixture("hb-backfill-snapshot")
+
+      log =
+        capture_log(fn ->
+          assert {:error, :unavailable} =
+                   MovementBackfill.from_snapshot(
+                     org_id: org.id,
+                     subscription_resource: Demo.NoSuchSubscription,
+                     event_resource: SubscriptionEvent,
+                     price_resource: Price
+                   )
+        end)
+
+      assert log =~ "write=movement_backfill"
+    end
+  end
+
   describe "SubscriptionMovement — a failed price read records no wrong-MRR movement, and says so" do
     # The Subscription's own change already appends the real row; a SECOND change instance with an unreadable
     # price resource is run on the same write, so a swallow would add a zero-MRR second row.
