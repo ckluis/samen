@@ -530,6 +530,100 @@ defmodule Samen.Automation.ObservabilityTest do
     assert notified(org, owner) == 1
   end
 
+  defp subject_args(wf, org, record_id, event) do
+    %{
+      "workflow_id" => to_string(wf.id),
+      "org_id" => org,
+      "resource_key" => @target_key,
+      "record_id" => record_id,
+      "event" => event,
+      "event_id" => Ash.UUID.generate(),
+      "trigger_kind" => "resource_event",
+      "depth" => 0,
+      "chain" => []
+    }
+  end
+
+  @notify [%{"kind" => "notify", "recipient" => "owner", "event_type" => "workflow.fired"}]
+
+  test "RED: a created/updated run whose subject was DELETED before the run skips :no_subject_record (it ran its gates against %{}); the live subject fires (control)" do
+    org = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+
+    wf =
+      create_workflow!(org, owner,
+        conditions: [%{"attribute" => "priority", "op" => "neq", "values" => ["urgent"]}],
+        actions: @notify
+      )
+
+    target = create_target!(org)
+
+    # POSITIVE CONTROL: the record is there -> the neq gate passes on its real value and the run fires
+    assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: subject_args(wf, org, to_string(target.id), "created")})
+    assert notified(org, owner) == 1
+
+    # RED: the record id names nothing (deleted between the event and the run), for both record events
+    for event <- ["created", "updated"] do
+      assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: subject_args(wf, org, Ash.UUID.generate(), event)})
+    end
+
+    assert notified(org, owner) == 1
+    assert [%{state: :succeeded}, %{state: :skipped, error_kind: :no_subject_record}, %{state: :skipped, error_kind: :no_subject_record}] = runs_for(org, wf.id)
+  end
+
+  test "a destroyed run's subject is expected to be gone: a workflow without conditions fires, one with conditions skips :no_subject_record (no snapshot to judge them on)" do
+    org = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+    plain = create_workflow!(org, owner, event: :destroyed, conditions: [], actions: @notify)
+
+    gated =
+      create_workflow!(org, owner,
+        event: :destroyed,
+        conditions: [%{"attribute" => "priority", "op" => "neq", "values" => ["urgent"]}],
+        actions: @notify
+      )
+
+    assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: subject_args(plain, org, Ash.UUID.generate(), "destroyed")})
+    assert notified(org, owner) == 1
+    assert [%{state: :succeeded}] = runs_for(org, plain.id)
+
+    assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: subject_args(gated, org, Ash.UUID.generate(), "destroyed")})
+    assert notified(org, owner) == 1
+    assert [%{state: :skipped, error_kind: :no_subject_record}] = runs_for(org, gated.id)
+  end
+
+  test "RED: a subject read that FAILS is retried (Oban error, run left queued) instead of skipping the run for good; the last attempt finalizes it; a healed read fires (control)" do
+    org = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+    wf = create_workflow!(org, owner, conditions: [], actions: @notify)
+    target = create_target!(org)
+    args = subject_args(wf, org, to_string(target.id), "created")
+    table = AshPostgres.DataLayer.Info.table(Target)
+
+    job = fn attempt -> %Oban.Job{args: args, attempt: attempt, max_attempts: 3} end
+
+    TestRepo.query!("ALTER TABLE #{table} RENAME TO #{table}_unreadable")
+
+    ExUnit.CaptureLog.capture_log(fn ->
+      # not the last attempt: retryable, nothing finalized, nothing fired
+      assert {:error, :unavailable} = Samen.Automation.RunWorker.perform(job.(1))
+      assert [%{state: :queued}] = runs_for(org, wf.id)
+      assert notified(org, owner) == 0
+
+      # the last attempt: terminal, visible on the run
+      assert :ok = Samen.Automation.RunWorker.perform(job.(3))
+      assert [%{state: :skipped, error_kind: :internal_error}] = runs_for(org, wf.id)
+    end)
+
+    TestRepo.query!("ALTER TABLE #{table}_unreadable RENAME TO #{table}")
+
+    # POSITIVE CONTROL: a retry against a healed read fires (a fresh workflow run: the first is already terminal)
+    wf2 = create_workflow!(org, owner, conditions: [], actions: @notify)
+    assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: subject_args(wf2, org, to_string(target.id), "created"), attempt: 2, max_attempts: 3})
+    assert notified(org, owner) == 1
+    assert [%{state: :succeeded}] = runs_for(org, wf2.id)
+  end
+
   defmodule CompensatedOk do
     @moduledoc false
     @behaviour Samen.Automation.Action

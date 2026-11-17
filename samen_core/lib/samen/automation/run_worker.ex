@@ -66,14 +66,14 @@ defmodule Samen.Automation.RunWorker do
   }
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: args}) do
+  def perform(%Oban.Job{args: args} = job) do
     case Automation.workflow_module() do
       nil -> :ok
-      workflow_mod -> run(workflow_mod, args)
+      workflow_mod -> run(workflow_mod, args, job)
     end
   end
 
-  defp run(workflow_mod, args) do
+  defp run(workflow_mod, args, job) do
     case load_workflow(workflow_mod, args["workflow_id"]) do
       {:ok, wf} ->
         # T162. The workflow row is still loaded — but ONLY for the live checks
@@ -83,9 +83,15 @@ defmodule Samen.Automation.RunWorker do
         {_source, definition} = Definition.resolve(args, wf)
 
         run_row = RunRecord.open!(wf, args)
-        result = execute(wf, definition, args, run_row)
-        Breaker.check!(wf)
-        result
+
+        case execute(wf, definition, args, run_row) do
+          {:retry, reason} ->
+            retry_or_finalize(run_row, reason, job)
+
+          result ->
+            Breaker.check!(wf)
+            result
+        end
 
       {:skip, reason} ->
         # No workflow context to attribute a Run row to (missing id / already
@@ -100,6 +106,18 @@ defmodule Samen.Automation.RunWorker do
     end
   end
 
+  # A subject read that FAILED (`{:error, :unavailable}`) is not a verdict on the run: while Oban still has attempts
+  # the job errors (backoff + retry; the Run row stays queued and the retry upserts onto it by `dispatch_key`).
+  # Only the LAST attempt finalizes the run, skipped `:internal_error`, so it never stays queued forever.
+  defp retry_or_finalize(run_row, reason, %Oban.Job{attempt: attempt, max_attempts: max}) do
+    if attempt < max do
+      {:error, reason}
+    else
+      RunRecord.skip!(run_row, :internal_error)
+      :ok
+    end
+  end
+
   # `wf` is the LIVE row (kill-switch, owner, org — ADR-039 §8.4/§4.5); `definition`
   # is the PINNED rule (conditions + actions + resource_key — T162). Keeping them as
   # two separate arguments is deliberate: it is what stops a later edit here from
@@ -111,6 +129,9 @@ defmodule Samen.Automation.RunWorker do
          :ok <- conditions_gate(definition, subject_map, args) do
       fire(wf, definition, subject_map, owner, args, run_row)
     else
+      {:retry, _reason} = retry ->
+        retry
+
       # kill_switch/owner_actor/reread_subject/conditions_gate only ever
       # produce {:skip, reason} — no `{:error, _}` branch here (would be
       # provably-dead code; the type checker with --warnings-as-errors
@@ -163,7 +184,9 @@ defmodule Samen.Automation.RunWorker do
       true ->
         with {:ok, resource} <- resolve_resource(resource_key),
              {:ok, eligible} <- NonPiiPredicates.eligible_names(resource_key) do
-          load_eligible(resource, record_id, eligible)
+          resource
+          |> load_eligible(record_id, eligible)
+          |> absent_subject(definition, args)
         else
           # An unresolvable resource or an unclassifiable one (`eligible_names/1` answered its default-deny) is not an
           # empty subject: `neq` / `not_in` / `is_nil` gates all pass against one. Skip, exactly as `load_eligible/3`.
@@ -178,7 +201,31 @@ defmodule Samen.Automation.RunWorker do
   defp reread_reason(:error), do: :unresolvable_resource
   defp reread_reason({:error, _kind, _key, _msg}), do: :unclassifiable_resource
 
+  # `:gone` is the ONLY definite "the record is not there". By event:
+  #   * `destroyed` -- a real destroy removes the row, so absence is expected. The envelope is values-free (INV-1)
+  #     and carries no snapshot, so there is nothing to evaluate gates against: a workflow with NO conditions still
+  #     fires (its actions need no subject values), one WITH conditions is skipped `:no_subject_record` (an empty
+  #     subject passes every `neq` / `not_in` / `is_nil` gate, so judging them would be a guess).
+  #   * anything else (`created` / `updated` / manual) -- the subject was deleted between the event and this run:
+  #     fail closed, skipped `:no_subject_record`, never executed against nothing.
+  defp absent_subject(:gone, definition, %{"event" => "destroyed"}) do
+    if Definition.conditions(definition) in [nil, []], do: {:ok, %{}}, else: {:skip, :no_subject_record}
+  end
+
+  defp absent_subject(:gone, _definition, _args), do: {:skip, :no_subject_record}
+  defp absent_subject(other, _definition, _args), do: other
+
   defp load_eligible(resource, record_id, eligible) do
+    case Ecto.UUID.cast(record_id) do
+      {:ok, _} -> read_eligible(resource, record_id, eligible)
+      # A malformed id can never name a row, however often it is retried: definite, terminal.
+      :error ->
+        Samen.Observability.Failure.report(:run_worker_load_eligible, nil, :malformed_record_id)
+        {:skip, :internal_error}
+    end
+  end
+
+  defp read_eligible(resource, record_id, eligible) do
     eligible_atoms =
       eligible
       |> MapSet.to_list()
@@ -191,14 +238,14 @@ defmodule Samen.Automation.RunWorker do
     |> Ash.read!(authorize?: false)
     |> case do
       [record | _] -> {:ok, Map.take(record, eligible_atoms)}
-      [] -> {:ok, %{}}
+      [] -> :gone
     end
   rescue
     e ->
-      # A subject that could not be READ is not an empty subject: `neq` / `not_in` / `is_nil` (and a workflow with
-      # no conditions) all pass against one, so the run is skipped (and the failure reported) rather than fired.
+      # A subject that could not be READ is not an empty subject (every `neq` / `not_in` / `is_nil` gate passes
+      # against one) and not a final answer either: reported, and retried while attempts remain.
       Samen.Observability.Failure.report(:run_worker_load_eligible, nil, e)
-      {:skip, :internal_error}
+      {:retry, :unavailable}
   end
 
   defp conditions_gate(definition, subject_map, args) do
