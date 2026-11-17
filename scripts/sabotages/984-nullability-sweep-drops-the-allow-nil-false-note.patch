@@ -1,0 +1,19 @@
+# SABOTAGE: the nullability sweep stops noting a non-sort allow_nil? false attribute over a nullable column
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/indexing_test.exs
+# MUST_FAIL: every other attribute is a NOTE in both directions (never a violation), one line per resource and direction
+diff --git a/samen_core/lib/mix/tasks/samen.verify.indexes.ex b/samen_core/lib/mix/tasks/samen.verify.indexes.ex
+index af622868..1e31f41a 100644
+--- a/samen_core/lib/mix/tasks/samen.verify.indexes.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.indexes.ex
+@@ -217,7 +217,7 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
+             {attribute.name, attribute.allow_nil?}
+           end
+ 
+-        lie_nil = for {name, false} <- mismatches, name not in sort_attrs, do: name
++        lie_nil = for {name, false} <- mismatches, name in sort_attrs, do: name
+         lie_not_nil = for {name, true} <- mismatches, do: name
+ 
+         [

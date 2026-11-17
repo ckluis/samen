@@ -1,4 +1,4 @@
-# SABOTAGE: the index verifier no longer notes a non-nil sort attribute over a nullable column
+# SABOTAGE: the index verifier no longer reports a non-nil sort attribute over a nullable column
 #
 # Flips the named test(s).
 # APP: samen_core
