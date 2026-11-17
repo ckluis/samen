@@ -1,0 +1,21 @@
+# SABOTAGE: Vault.reveal checks the field only after the subject's DEK was unwrapped
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault_dek_reuse_test.exs
+# MUST_FAIL: a reveal that asserts the wrong field is refused BEFORE any unwrap
+diff --git a/samen_core/lib/samen/vault.ex b/samen_core/lib/samen/vault.ex
+index ce066ad4..f8fb8b65 100644
+--- a/samen_core/lib/samen/vault.ex
++++ b/samen_core/lib/samen/vault.ex
+@@ -379,8 +379,8 @@ defmodule Samen.Vault do
+ 
+       %VaultRow{subject_id: subject_id, ciphertext: ciphertext} = row ->
+         with :ok <- bind_subject(asserted_subject_id, subject_id),
+-             :ok <- bind_field(asserted_field, row),
+-             {:ok, dek} <- unwrap_dek(subject_id, deks) do
++             {:ok, dek} <- unwrap_dek(subject_id, deks),
++             :ok <- bind_field(asserted_field, row) do
+           do_decrypt(dek, ciphertext)
+         end
+     end

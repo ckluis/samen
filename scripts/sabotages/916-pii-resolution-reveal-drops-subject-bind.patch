@@ -1,0 +1,24 @@
+# SABOTAGE: PiiResolution stops asserting the holding record's subject on reveal: a planted foreign token 
+#   reveals
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/pii_resolution_token_binding_test.exs
+# MUST_FAIL: tenant plane: the planted value is
+# MUST_FAIL: impersonation: ••••
+# MUST_FAIL: operator WITH a grant on the holder: still
+# MUST_FAIL: AI egress with the host opt-in and a live grant: the planted value stays
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+index 05dcfcb5..55b07db1 100644
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -428,7 +428,8 @@ defmodule Samen.Api.PiiResolution do
+   # declared vault + logical name): a token minted for another subject or field is refused by the
+   # vault BEFORE any key is unwrapped, and renders as the masked/absent value on every plane.
+   defp vault_opts(opts, subject_id, vault_field) do
+-    bind = [subject_id: subject_id, field: vault_field]
++    _ = subject_id
++    bind = [field: vault_field]
+ 
+     case Keyword.get(opts, :__vault_rows) do
+       rows when is_map(rows) and map_size(rows) > 0 ->

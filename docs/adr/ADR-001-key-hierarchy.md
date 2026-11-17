@@ -203,6 +203,50 @@ network KMS. Within ONE `Samen.Api.PiiResolution.resolve/4` call the vault now u
   must evict on every node before it is acknowledged) and its own ADR. Within a call the window between the unwrap and
   the last decrypt is one request, and every later call unwraps afresh, so crypto-shred stays immediate.
 
+### 6.2 · Addendum 2026-11-15 — token binding (evaluation 2026-11-13)
+
+A vault token is an opaque FK. Before this addendum nothing tied it to the record holding it: a tenant who obtained
+another subject's token (tokens are stored "token-only downstream" by design: domain rows, Versions, `aud_event`, the CDC
+mirror, backups) could write it into a vaulted field of their own record (form, CSV cell, inbound mail) and
+`PiiResolution` revealed that subject's plaintext, across orgs; a plaintext that merely started with `vt_` was also stored
+unencrypted. Rules, in force from this date:
+
+- **Write.** A raw string written to a vault field is ALWAYS plaintext and is freshly encrypted (`VaultField.cast_input/2`
+  wraps it; there is no `vt_` special case). Only an internal `%Samen.Masked{}` means "already vaulted", and no external
+  decoder can produce one. `VaultField.dump_to_native/2` persists only token-shaped values (`Samen.Vault.token?/1`:
+  `vt_` + 32 lowercase hex). `Samen.Vault.Change` (injected into every `pii do` resource) checks every `%Masked{}` that
+  differs from the stored value in ONE query (`Vault.check_bindings/3`): the row's subject must be this record's primary
+  key and its vault and field must be the field's own; otherwise the write is refused (field + reason, never the token),
+  nothing is stored, and `Failure.report_write(:vault_token_unbound)` records the reason. A create without an explicit
+  primary key cannot carry a `%Masked{}`; an id-preserving move must pass the PK. An upsert-create on a PII resource is
+  refused (the subject would be a generated UUID, not the existing row's key): at build time when the action or
+  `for_create` is an upsert, and, because inside the action Ash marks every create an upsert, by an `after_action` that
+  compares the written row's primary key with the vault subject for a call-site `Ash.create(cs, upsert?: true)`; the error
+  rolls back the action transaction, vault rows included (same repo). The guard rolls back ITSELF (`repo.rollback/1`), so
+  it does not depend on the caller leaving Ash's `rollback_on_error?` at its default; and a create/update on a PII resource
+  that reaches the data layer with NO transaction open (an action declared `transaction? false`, a bulk `transaction: false`)
+  is refused in the `before_action`, before any vault insert or row write, because by then the writes would already be
+  committed. The same `after_action` refuses a vault attribute a
+  later hook changed after `Vault.Change` approved it. Atomic writes of a vault field are refused by Ash itself.
+- **Read.** `Vault.reveal/3` takes `field: {vault, name}` beside `subject_id:`; both are checked BEFORE any DEK is
+  unwrapped. `PiiResolution` asserts the holding record's primary key and the field on every value, admits to the DEK memo
+  only rows whose `{subject, vault, field}` match what their holder expects (a foreign subject's key is never unwrapped),
+  renders a mismatch masked/absent on every plane, and reports it once per call per record and field (the log line names
+  resource, field and record id; telemetry and logs carry no token or value). The report is capped at 20 records PER REASON
+  per call (a cap across reasons would let a flood of `foreign_subject` hide the only `field_mismatch`); whatever the cap
+  cuts is reported once per reason as `read=vault_token_unbound_truncated … suppressed=<n>` (log line, and a telemetry
+  event on `[:samen, :core, :read, :error]` whose `count` is the suppressed number), so a truncation is never silent. The webhook signing-secret reveal asserts
+  the endpoint's id and field; a mismatch is permanent and is discarded, not retried. `Samen.Reveal.reveal/5` requires
+  `:subject_id` (`{:error, :subject_required}`) and forwards `:field`.
+- **Unchanged.** The memo key stays `{adapter, subject_id}` (`unwrap/1` keeps arity 1); the cipher and its AAD are not
+  changed (binding subject and field into the AEAD AAD is a separate, one-way decision, deferred); `pii_vault` gains no
+  `org_id` (a subject is a UUID primary key, and Credential has no org); internal scans (oracle, CDC, replay) stay unbound.
+- **Existing data.** `mix samen.verify.vault_token_binding` (`Samen.Vault.BindingScan`) reports cells that do not belong
+  to their record: `foreign_subject`, `field_mismatch`, `dangling_token`, `non_token_value`, `shared_token`. It is report
+  only, with no `--fix`: NULLing a cell is destructive, and re-minting a foreign subject's plaintext into another record
+  would launder it past the owner's erasure. Proof: `vault_token_input_test.exs`, `vault_change_integration_test.exs`,
+  `pii_resolution_token_binding_test.exs`, `vault_dek_reuse_test.exs`, `verify_vault_token_binding_test.exs`; sabotages 905-921.
+
 ---
 
 ## 7 · What a PITR restore of the app-Postgres can and cannot resurrect (summary table)
