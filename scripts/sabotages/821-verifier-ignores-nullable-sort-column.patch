@@ -3,17 +3,17 @@
 # Flips the named test(s).
 # APP: samen_core
 # TEST_FILES: test/indexing_test.exs
-# MUST_FAIL: the verifier notes it (advisory, not a violation); making the column NOT NULL clears the note
+# MUST_FAIL: a SORT attribute that says non-nil over a nullable column is a violation; making the column NOT NULL clears it
 diff --git a/samen_core/lib/mix/tasks/samen.verify.indexes.ex b/samen_core/lib/mix/tasks/samen.verify.indexes.ex
-index d040f11d..ddab6edc 100644
+index 662d32d0..e18f97c5 100644
 --- a/samen_core/lib/mix/tasks/samen.verify.indexes.ex
 +++ b/samen_core/lib/mix/tasks/samen.verify.indexes.ex
-@@ -165,7 +165,7 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
+@@ -160,7 +160,7 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
          :ok == ensure_repo_started(repo),
          attr <- spec.logical -- [:org_id, :id],
          %{allow_nil?: false} <- [Ash.Resource.Info.attribute(resource, attr)],
 -        Samen.Indexing.column_not_null(resource, attr, repo: repo) == {:ok, false} do
 +        Samen.Indexing.column_not_null(resource, attr, repo: repo) == {:ok, :never} do
-       "#{inspect(resource)} (#{spec.table}): attribute #{inspect(attr)} is `allow_nil? false` but the " <>
+       "#{inspect(resource)} (#{spec.table}): sort attribute #{inspect(attr)} is `allow_nil? false` but the " <>
          "database column is nullable — its ascending keyset cursor gets no index bound. " <>
          "Next: a migration that backfills the NULLs and sets the column NOT NULL " <>

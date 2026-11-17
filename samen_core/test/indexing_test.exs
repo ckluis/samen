@@ -133,6 +133,10 @@ defmodule Samen.IndexingTest.Ranked do
     uuid_primary_key(:id)
     attribute(:org_id, :uuid, allow_nil?: false, public?: true)
     attribute(:rank, :integer, allow_nil?: false, public?: true)
+    # not a sort attribute: says non-nil over a nullable column (a NOTE) ...
+    attribute(:note, :string, allow_nil?: false, public?: true)
+    # ... and nil-able over a NOT NULL column (the reverse direction, also a NOTE)
+    attribute(:tag, :string, allow_nil?: true, public?: true)
   end
 
   actions do
@@ -691,25 +695,49 @@ defmodule Samen.IndexingTest do
     end
   end
 
-  describe "a sort attribute that says non-nil over a nullable column (WP12)" do
+  describe "an attribute that says one thing about NULL over a column that says another" do
     alias Samen.IndexingTest.{Ranked, RankedDomain}
 
     @ranked %{Ranked => :rank}
 
     setup do
-      @repo.query!("CREATE TABLE ix_ranked (id uuid PRIMARY KEY, org_id uuid NOT NULL, rank integer)")
+      @repo.query!(
+        "CREATE TABLE ix_ranked (id uuid PRIMARY KEY, org_id uuid NOT NULL, rank integer, note text, tag text NOT NULL DEFAULT 'x')"
+      )
+
       @repo.query!("CREATE INDEX i ON ix_ranked (org_id, rank, id)")
       :ok
     end
 
-    test "the verifier notes it (advisory, not a violation); making the column NOT NULL clears the note" do
+    test "a SORT attribute that says non-nil over a nullable column is a violation; making the column NOT NULL clears it" do
       opts = [domains: [RankedDomain], keyset_sorts: @ranked]
-      assert Indexes.violations(opts) == []
-      assert [note] = Indexes.notes(opts)
-      assert note =~ "Samen.IndexingTest.Ranked (ix_ranked): attribute :rank is `allow_nil? false`"
-      assert note =~ "database column is nullable"
+      assert [violation] = Indexes.violations(opts)
+      assert violation =~ "Samen.IndexingTest.Ranked (ix_ranked): sort attribute :rank is `allow_nil? false`"
+      assert violation =~ "database column is nullable"
+      assert violation =~ "ExpandContract.set_not_null"
+
+      # the sort attribute is not repeated as a note
+      refute Enum.any?(Indexes.notes(opts), &(&1 =~ ":rank"))
 
       @repo.query!("ALTER TABLE ix_ranked ALTER COLUMN rank SET NOT NULL")
+      assert Indexes.violations(opts) == []
+    end
+
+    test "every other attribute is a NOTE in both directions (never a violation), one line per resource and direction" do
+      opts = [domains: [RankedDomain], keyset_sorts: @ranked]
+      @repo.query!("ALTER TABLE ix_ranked ALTER COLUMN rank SET NOT NULL")
+      assert Indexes.violations(opts) == []
+
+      notes = Indexes.notes(opts)
+      assert [nil_note] = Enum.filter(notes, &(&1 =~ "`allow_nil? false` but the database column is nullable"))
+      assert nil_note =~ "Samen.IndexingTest.Ranked (ix_ranked): :note"
+      assert nil_note =~ "not a keyset sort attribute"
+      assert [not_nil_note] = Enum.filter(notes, &(&1 =~ "`allow_nil? true` but the database column is NOT NULL"))
+      assert not_nil_note =~ "Samen.IndexingTest.Ranked (ix_ranked): :tag"
+      assert length(notes) == 2
+
+      # POSITIVE CONTROL: once both columns agree with their attributes there is nothing left to say
+      @repo.query!("ALTER TABLE ix_ranked ALTER COLUMN note SET NOT NULL, ALTER COLUMN tag DROP NOT NULL")
       assert Indexes.notes(opts) == []
     end
   end

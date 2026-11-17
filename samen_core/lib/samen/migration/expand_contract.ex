@@ -387,6 +387,84 @@ defmodule Samen.Migration.ExpandContract do
   end
 
   @doc """
+  Make an existing nullable column `NOT NULL` without a long `ACCESS EXCLUSIVE` scan — the contract-phase counterpart of
+  `add_nullable_column/4`, for a column whose resource says `allow_nil? false` (see `mix samen.verify.indexes`).
+
+  Runs OUTSIDE the DDL transaction (`@disable_ddl_transaction true`, enforced like `chunked_backfill/4`): inside one, the
+  `ACCESS EXCLUSIVE` lock the constraint add takes would be held through the validation scan, which is exactly what this
+  avoids. The steps, each its own committed statement:
+
+    1. optional `:backfill` (see below), in short `chunk_size` batches;
+    2. a hard stop: if any NULL is left, RAISE naming the table, column and count — a column with no correct value is
+       never filled with an invented one, and nothing was changed to the column's definition;
+    3. `ADD CONSTRAINT <t>_<c>_nn_chk CHECK (<c> IS NOT NULL) NOT VALID` (brief lock, no scan);
+    4. `VALIDATE CONSTRAINT` (scan under `SHARE UPDATE EXCLUSIVE`: reads and writes continue);
+    5. `ALTER COLUMN <c> SET NOT NULL` (Postgres 12+ trusts the validated check and does not rescan);
+    6. `DROP CONSTRAINT` (the column's own NOT NULL now says it).
+
+  A re-run after an interruption is safe: a leftover check from step 3-5 is dropped first, and a column already `NOT NULL`
+  passes straight through. `drop_not_null/3` is the reverse (it does not undo a backfill).
+
+  ## Options
+
+    * `:caller` — REQUIRED, the migration module (`__MODULE__`).
+    * `:backfill` — a SQL expression (a LITERAL in the migration, never derived from a resource at run time) the NULL rows
+      are set to, e.g. `"COALESCE(pmp_label, pmp_provider_plan_ref)"`. Only rows for which it is non-NULL are touched, so
+      a row it cannot answer for stays NULL and trips step 2 instead of being papered over.
+    * `:chunk_size` — backfill batch size (default 5_000).
+  """
+  def set_not_null(repo, table, column, opts \\ []) do
+    caller = Keyword.fetch!(opts, :caller)
+    __require_disabled_ddl_transaction__!(caller)
+
+    tname = table_name(table)
+    cname = to_string(column)
+    check = not_null_check_name(tname, cname)
+    chunk_size = Keyword.get(opts, :chunk_size, 5_000)
+
+    case Keyword.get(opts, :backfill) do
+      nil -> :ok
+      expr when is_binary(expr) -> backfill_nulls(repo, tname, cname, expr, chunk_size)
+    end
+
+    %{rows: [[remaining]]} = repo.query!("SELECT count(*) FROM #{q_ident(tname)} WHERE #{q_ident(cname)} IS NULL")
+
+    if remaining > 0 do
+      raise RuntimeError,
+            "set_not_null/4: #{tname}.#{cname} still has #{remaining} NULL row(s) and no correct value to give them. " <>
+              "The column was not altered. Fix or remove those rows (or pass `backfill:` an expression that is right for them), " <>
+              "then run the migration again."
+    end
+
+    repo.query!("ALTER TABLE #{q_ident(tname)} DROP CONSTRAINT IF EXISTS #{q_ident(check)}")
+    repo.query!("ALTER TABLE #{q_ident(tname)} ADD CONSTRAINT #{q_ident(check)} CHECK (#{q_ident(cname)} IS NOT NULL) NOT VALID")
+    repo.query!("ALTER TABLE #{q_ident(tname)} VALIDATE CONSTRAINT #{q_ident(check)}")
+    repo.query!("ALTER TABLE #{q_ident(tname)} ALTER COLUMN #{q_ident(cname)} SET NOT NULL")
+    repo.query!("ALTER TABLE #{q_ident(tname)} DROP CONSTRAINT #{q_ident(check)}")
+    :ok
+  end
+
+  @doc "The reverse of `set_not_null/4`: `ALTER COLUMN … DROP NOT NULL` (a backfill is not undone). Needs the same `:caller`."
+  def drop_not_null(repo, table, column, opts \\ []) do
+    __require_disabled_ddl_transaction__!(Keyword.fetch!(opts, :caller))
+    repo.query!("ALTER TABLE #{q_ident(table_name(table))} ALTER COLUMN #{q_ident(to_string(column))} DROP NOT NULL")
+    :ok
+  end
+
+  # Each batch is its own committed statement; the batch predicate excludes rows the expression cannot answer for, so a
+  # row that stays NULL never makes the loop spin.
+  defp backfill_nulls(repo, tname, cname, expr, chunk_size) do
+    sql =
+      "UPDATE #{q_ident(tname)} SET #{q_ident(cname)} = (#{expr}) WHERE ctid IN (" <>
+        "SELECT ctid FROM #{q_ident(tname)} WHERE #{q_ident(cname)} IS NULL AND (#{expr}) IS NOT NULL LIMIT #{chunk_size})"
+
+    %{num_rows: n} = repo.query!(sql, [])
+    if n >= chunk_size, do: backfill_nulls(repo, tname, cname, expr, chunk_size), else: :ok
+  end
+
+  defp not_null_check_name(tname, cname), do: String.slice(tname <> "_" <> cname, 0, 56) <> "_nn_chk"
+
+  @doc """
   Create the `samen_migration_meta` table (idempotent). Call from a bootstrap
   migration alongside `create_catalog_tables/0`.
   """

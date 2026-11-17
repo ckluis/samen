@@ -384,6 +384,87 @@ defmodule Samen.MigrationExpandContractTest do
   end
 
   # ---------------------------------------------------------------------------
+  # set_not_null/4 — CHECK NOT VALID -> VALIDATE -> SET NOT NULL -> drop the check
+  # ---------------------------------------------------------------------------
+
+  describe "set_not_null/4 and drop_not_null/4" do
+    defmodule NnMig do
+      def __migration__, do: [disable_ddl_transaction: true]
+    end
+
+    setup do
+      Samen.TestSandbox.shared!(Repo)
+      Repo.query!("CREATE TABLE nn_t (id serial PRIMARY KEY, a text, b text)")
+      :ok
+    end
+
+    defp nullable?(column),
+      do: Repo.query!("SELECT is_nullable FROM information_schema.columns WHERE table_name = 'nn_t' AND column_name = $1", [column]).rows == [["YES"]]
+
+    defp check_constraints,
+      do: Repo.query!("SELECT conname FROM pg_constraint WHERE conrelid = 'nn_t'::regclass AND contype = 'c'").rows
+
+    test "refuses when the DDL transaction is NOT disabled (the check's ACCESS EXCLUSIVE would span the scan)" do
+      assert_raise RuntimeError, ~r/REQUIRE `@disable_ddl_transaction true`/, fn ->
+        ExpandContract.set_not_null(Repo, :nn_t, :a, caller: TxEnabledMigForNn)
+      end
+    end
+
+    test "a column with no NULLs becomes NOT NULL and leaves no check constraint behind" do
+      Repo.query!("INSERT INTO nn_t (a, b) VALUES ('x', 'y'), ('z', 'w')")
+      assert nullable?("a")
+      assert :ok = ExpandContract.set_not_null(Repo, :nn_t, :a, caller: NnMig)
+      refute nullable?("a")
+      assert nullable?("b")
+      assert check_constraints() == []
+      assert {:error, %Postgrex.Error{}} = Repo.query("INSERT INTO nn_t (a) VALUES (NULL)")
+    end
+
+    test "a backfill expression fills the NULLs it can answer for, in batches" do
+      Repo.query!("INSERT INTO nn_t (a, b) SELECT NULL, 'from-b-' || g FROM generate_series(1, 25) g")
+      assert :ok = ExpandContract.set_not_null(Repo, :nn_t, :a, caller: NnMig, backfill: "b", chunk_size: 10)
+      refute nullable?("a")
+      assert Repo.query!("SELECT count(*) FROM nn_t WHERE a = b").rows == [[25]]
+    end
+
+    test "RED PATH: a NULL the backfill cannot answer for STOPS the migration, naming the count, and changes nothing" do
+      Repo.query!("INSERT INTO nn_t (a, b) VALUES (NULL, 'has-b'), (NULL, NULL), (NULL, NULL), ('keep', 'k')")
+
+      error =
+        assert_raise RuntimeError, ~r/nn_t\.a still has 2 NULL row\(s\) and no correct value/, fn ->
+          ExpandContract.set_not_null(Repo, :nn_t, :a, caller: NnMig, backfill: "b", chunk_size: 1)
+        end
+
+      assert error.message =~ "The column was not altered"
+      assert nullable?("a")
+      assert check_constraints() == []
+      # the row the expression could answer for WAS filled (idempotent re-run), the unanswerable ones were not invented
+      assert Repo.query!("SELECT count(*) FROM nn_t WHERE a IS NULL").rows == [[2]]
+      assert Repo.query!("SELECT a FROM nn_t WHERE b = 'has-b'").rows == [["has-b"]]
+    end
+
+    test "a leftover check from an interrupted run is replaced, and an already NOT NULL column passes through" do
+      Repo.query!("INSERT INTO nn_t (a) VALUES ('x')")
+      Repo.query!("ALTER TABLE nn_t ADD CONSTRAINT nn_t_a_nn_chk CHECK (a IS NOT NULL) NOT VALID")
+      assert :ok = ExpandContract.set_not_null(Repo, :nn_t, :a, caller: NnMig)
+      assert check_constraints() == []
+      assert :ok = ExpandContract.set_not_null(Repo, :nn_t, :a, caller: NnMig)
+      refute nullable?("a")
+    end
+
+    test "drop_not_null/4 is the reverse" do
+      assert :ok = ExpandContract.set_not_null(Repo, :nn_t, :a, caller: NnMig)
+      refute nullable?("a")
+      assert :ok = ExpandContract.drop_not_null(Repo, :nn_t, :a, caller: NnMig)
+      assert nullable?("a")
+    end
+  end
+
+  defmodule TxEnabledMigForNn do
+    def __migration__, do: [disable_ddl_transaction: false]
+  end
+
+  # ---------------------------------------------------------------------------
   # (c) Carve-outs run live: CONCURRENTLY build survives + chunked backfill fills
   # ---------------------------------------------------------------------------
 
