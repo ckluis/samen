@@ -83,6 +83,8 @@ defmodule Samen.AI.AgentFoldSourceTest do
     defdelegate update(cs), to: SamenCore.TestRepo
     defdelegate exists?(q), to: SamenCore.TestRepo
     defdelegate delete_all(q), to: SamenCore.TestRepo
+    # `shred/2` refuses inside a caller's transaction (review S2), so it asks the repo; delegated, not stubbed
+    defdelegate in_transaction?(), to: SamenCore.TestRepo
     def transaction(multi) do
       SamenCore.TestRepo.transaction(
         Ecto.Multi.run(multi, :forced_tier_failure, fn _repo, _changes ->
