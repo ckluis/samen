@@ -29,6 +29,18 @@ defmodule Samen.Lint.KernelSwallow do
   @roots ["samen_core/lib"]
 
   @reviewed %{
+    {"samen_core/lib/samen/replay/decoder.ex", :existing_atom} =>
+      {1, "a50587893bc4a03e",
+       "String.to_existing_atom/1 raises ArgumentError only for a name that is not an existing atom; nil (never an atom minted from a stored string) is the exact answer"},
+    {"samen_core/lib/samen/replay/frame_schema.ex", :existing_atom?} =>
+      {1, "32f1ebea56bcdcdc",
+       "String.to_existing_atom/1 raises ArgumentError only for a name that is not an existing atom; `false` (not a known key) is the exact answer, and it fails closed (the frame is invalid)"},
+    {"samen_core/lib/samen/replay/sanitizer.ex", :existing_atom?} =>
+      {1, "bb288b2d27a84544",
+       "String.to_existing_atom/1 raises ArgumentError only for a name that is not an existing atom; `false` (not a known key) is the exact answer, and it fails closed (the key is not kept)"},
+    {"samen_core/lib/samen/replay/monitor.ex", :start_finalize} =>
+      {1, "18d1f9bd2a93adea",
+       "Task.Supervisor.async_nolink raises RuntimeError exactly when the supervisor is at max_children; the caller treats the TAGGED :max_children as a deferral (the session stays buffered for the next sweep), never as a persisted or discarded session"},
     {"samen_core/lib/samen/webhook/payload.ex", :allowlisted_fields} =>
       {1, "fc34072590cb09ca",
        "AshJsonApi's show_fields/1 raises ArgumentError only for a module that is not a Spark DSL (no JSON:API block); an empty allowlist is then the exact, fail-CLOSED answer (nothing auto-published); any other failure is not rescued"},
@@ -117,22 +129,15 @@ defmodule Samen.Lint.KernelSwallow do
     "samen_core/lib/samen/notifications/engine.ex" => 1,
     "samen_core/lib/samen/notifications/status_change.ex" => 2,
     "samen_core/lib/samen/observability/job_spans.ex" => 4,
-    "samen_core/lib/samen/observability/live_events.ex" => 2,
     "samen_core/lib/samen/observability/live_telemetry.ex" => 4,
-    "samen_core/lib/samen/observability/param_filter.ex" => 2,
     "samen_core/lib/samen/pii/classification.ex" => 1,
     "samen_core/lib/samen/pii/info.ex" => 2,
     "samen_core/lib/samen/pii_classify.ex" => 1,
-    "samen_core/lib/samen/replay.ex" => 2,
     "samen_core/lib/samen/replay/buffer.ex" => 7,
-    "samen_core/lib/samen/replay/capture.ex" => 6,
-    "samen_core/lib/samen/replay/decoder.ex" => 2,
-    "samen_core/lib/samen/replay/frame_schema.ex" => 1,
-    "samen_core/lib/samen/replay/monitor.ex" => 1,
-    "samen_core/lib/samen/replay/player.ex" => 3,
+    "samen_core/lib/samen/replay/capture.ex" => 2,
     "samen_core/lib/samen/replay/resolver.ex" => 9,
     "samen_core/lib/samen/replay/row_guard.ex" => 1,
-    "samen_core/lib/samen/replay/sanitizer.ex" => 3,
+    "samen_core/lib/samen/replay/sanitizer.ex" => 2,
     "samen_core/lib/samen/reveal/grants.ex" => 2,
     "samen_core/lib/samen/scopes/identity/notify.ex" => 1,
     "samen_core/lib/samen/scopes/marketing/blueprint.ex" => 2,
@@ -167,7 +172,7 @@ defmodule Samen.Lint.KernelSwallow do
   # has to raise this number too (and `SwallowLintTest` compares it with the merge base, so it can only go down). Lower
   # it together with the baseline when a swallow is converted; never raise it.
   @ceilings %{
-    rescue: %{"samen_core/lib" => 152},
+    rescue: %{"samen_core/lib" => 134},
     error_arm: %{"samen_core/lib" => 19}
   }
 

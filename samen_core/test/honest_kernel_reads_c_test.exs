@@ -72,4 +72,60 @@ defmodule Samen.HonestKernelReadsCTest do
       assert :ok = IngestWorker.perform(%Oban.Job{args: %{"repo" => inspect(Repo)}})
     end
   end
+
+  describe "Replay.Player.load — a failed read is not 'no such replay'" do
+    defp tenant(org), do: %Samen.Scope{actor: %{org_id: org, plane: :tenant, role: :admin}}
+
+    test "RED: a read that fails is {:error, :unavailable}, reported by name (it answered :not_found)" do
+      broken = %Samen.Scope{actor: :not_an_actor}
+
+      log =
+        capture_log(fn ->
+          assert {:error, :unavailable} = Samen.Replay.Player.load(broken, Ecto.UUID.generate())
+        end)
+
+      assert log =~ "read=replay_player_load"
+    end
+
+    test "POSITIVE CONTROL: an absent id and a malformed id are still :not_found" do
+      assert {:error, :not_found} = Samen.Replay.Player.load(tenant(Ecto.UUID.generate()), Ecto.UUID.generate())
+      assert {:error, :not_found} = Samen.Replay.Player.load(tenant(Ecto.UUID.generate()), "not-a-uuid")
+    end
+  end
+
+  describe "Observability.ParamFilter — a filter that fails is [FILTERED] and on record" do
+    test "RED: a filter that raises filters the whole value, and says so by name; no param value reaches the log" do
+      log =
+        capture_log(fn ->
+          wrapped = fn _event, _measurements, metadata, _config -> send(self(), {:printed, metadata}) end
+
+          Application.put_env(:phoenix, :filter_parameters, {:keep, ["id" | "improper"]})
+
+          try do
+            Samen.Observability.ParamFilter.handle_event(
+              [:phoenix, :endpoint, :stop],
+              %{},
+              %{params: %{"secret" => "jane.doe@example.com"}},
+              {wrapped, nil}
+            )
+          after
+            Application.delete_env(:phoenix, :filter_parameters)
+          end
+        end)
+
+      assert_received {:printed, %{params: "[FILTERED]"}}
+      assert log =~ "read=param_filter"
+      refute log =~ "jane.doe@example.com"
+    end
+
+    test "POSITIVE CONTROL: a well-formed keep-list filters per key and reports nothing" do
+      log =
+        capture_log(fn ->
+          assert %{"id" => "7", "secret" => "[FILTERED]"} =
+                   Samen.Observability.ParamFilter.filter_values(%{"id" => "7", "secret" => "x"}, {:keep, ["id"]})
+        end)
+
+      refute log =~ "param_filter"
+    end
+  end
 end

@@ -523,6 +523,21 @@ defmodule Samen.Web.ReplayPlayerTest do
       assert audit_rows() == []
     end
 
+    test "an unavailable load renders the kit error state, never 'No such replay'; a missing replay still says so", ctx do
+      admin = user!(ctx.org, :admin)
+      socket = tenant_player(ctx.org, ctx.replay_id, admin.id)
+      assert socket.assigns.state == :open
+
+      unavailable = page(%{assigns: Map.put(socket.assigns, :state, :unavailable)})
+      assert unavailable =~ ~s(id="replay-unavailable")
+      assert unavailable =~ "could not be loaded"
+      refute unavailable =~ "No such replay"
+
+      missing = page(%{assigns: Map.put(socket.assigns, :state, :not_found)})
+      assert missing =~ "No such replay in this org."
+      refute missing =~ ~s(id="replay-unavailable")
+    end
+
     test "fail closed: no org, no plane, no pinned org set" do
       admin_org = Ash.UUID.generate()
       admin = user!(admin_org, :admin)

@@ -129,6 +129,7 @@ defmodule Samen.Web.Replay.PlayerLive do
       |> show(0)
     else
       {:auth, {:error, reason}} -> socket |> clear() |> assign(state: :denied, deny_reason: reason)
+      {:load, {:error, :unavailable}} -> socket |> clear() |> assign(state: :unavailable)
       {:load, _} -> socket |> clear() |> assign(state: :not_found)
       {:audit, _} -> socket |> clear() |> assign(state: :audit_failed)
     end
@@ -242,6 +243,8 @@ defmodule Samen.Web.Replay.PlayerLive do
             <div class="wrap"><div class="card" id="replay-connecting" style="padding:22px 20px;color:var(--muted)">Loading replay…</div></div>
           <% @state == :not_found -> %>
             <div class="wrap"><div class="card" id="replay-not-found" style="padding:22px 20px;color:var(--muted)">No such replay in this org.</div></div>
+          <% @state == :unavailable -> %>
+            <div class="wrap"><.error_state id="replay-unavailable" body="This replay could not be loaded right now. Try again in a moment." /></div>
           <% @state == :audit_failed -> %>
             <div class="wrap"><div class="card" id="replay-audit-failed" style="padding:22px 20px;color:var(--red)">This replay could not be opened: the access could not be recorded.</div></div>
           <% true -> %>

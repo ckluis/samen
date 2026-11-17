@@ -1,0 +1,22 @@
+# SABOTAGE: Replay.Player.load answers :not_found when the session read FAILS: a failed read reads as no 
+#   such replay
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_c_test.exs
+# MUST_FAIL: a read that fails is {:error, :unavailable}, reported by name (it answered :not_found)
+diff --git a/samen_core/lib/samen/replay/player.ex b/samen_core/lib/samen/replay/player.ex
+index 320e16ff..5e22481d 100644
+--- a/samen_core/lib/samen/replay/player.ex
++++ b/samen_core/lib/samen/replay/player.ex
+@@ -116,8 +116,8 @@ defmodule Samen.Replay.Player do
+   end
+ 
+   defp unavailable(:load, scope, reason) do
+-    Samen.Observability.Failure.report(:replay_player_load, scope, reason)
+-    {:error, :unavailable}
++    _ = {scope, reason}
++    {:error, :not_found}
+   end
+ 
+   # A stored row arrives as TEXT (`Frame`'s `stored_kind` / `stored_payload`), so a row written
