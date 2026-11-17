@@ -559,6 +559,26 @@ and passes; Driftwood runs it as gate step 16b.
 **Fix:** read live truth from the primary repo; if the module genuinely is an analytics
 report, mark it `@cdc_analytics_read true` (an explicit, reviewable claim).
 
+### `mix samen.verify.movement_continuity`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.movement_continuity.ex`):
+
+```text
+subscription <id>: unseeded (revenue-active at <n> cents, no ledger row)
+subscription <id>: bad_origin (first row starts from <n> cents)
+subscription <id>: chain_break at row <k> (before <n> != previous after <m>)
+subscription <id>: stale_tail (ledger ends at <n> cents, current MRR <m>)
+FAIL: samen.verify.movement_continuity discovered no resource carrying the SubscriptionMovement change ... (fail-closed).
+```
+
+**Meaning:** the `mov` ledger of a subscription has a hole. `SubscriptionMovement` is best-effort: when its price read, the
+classifier or the append fails, no row is written and the failure is only reported. The rows carry `mrr_before_cents` and
+`mrr_after_cents`, so a skipped movement shows as a broken chain, a last `mrr_after_cents` that is not the live MRR, or an
+active subscription with no row. A price edited outside a subscription write is reported as `stale_tail` as well.
+**Fix:** report-only (no `--fix`; the output is ids and cents). Find the failed write in the log
+(`write=subscription_movement_append`), repair its cause, and re-derive the history by decision: `MovementBackfill.from_snapshot/1`
+seeds an `unseeded` subscription; a broken chain on a subscription that already has rows is reviewed, not rewritten.
+
 ### `mix samen.verify.vault_token_binding`
 
 **Errors** (`samen_core/lib/mix/tasks/samen.verify.vault_token_binding.ex`):
