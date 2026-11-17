@@ -568,7 +568,9 @@ defmodule Samen.Automation.ObservabilityTest do
     end
 
     assert notified(org, owner) == 1
-    assert [%{state: :succeeded}, %{state: :skipped, error_kind: :no_subject_record}, %{state: :skipped, error_kind: :no_subject_record}] = runs_for(org, wf.id)
+    # `inserted_at` has second resolution, so the order of runs created in the same second is not defined: compare as a set
+    assert [{:skipped, :no_subject_record}, {:skipped, :no_subject_record}, {:succeeded, nil}] =
+             org |> runs_for(wf.id) |> Enum.map(&{&1.state, &1.error_kind}) |> Enum.sort()
   end
 
   test "a destroyed run's subject is expected to be gone: a workflow without conditions fires, one with conditions skips :no_subject_record (no snapshot to judge them on)" do
@@ -615,7 +617,8 @@ defmodule Samen.Automation.ObservabilityTest do
     # POSITIVE CONTROL: the metadata condition is really evaluated (not waved through): unmet when the attribute is not in `changed`
     run.(meta_only, ["tags"])
     assert notified(org, owner) == 1
-    assert [_, %{state: :skipped, error_kind: :conditions_unmet}] = runs_for(org, meta_only.id)
+    assert [{:skipped, :conditions_unmet}, {:succeeded, nil}] =
+             org |> runs_for(meta_only.id) |> Enum.map(&{&1.state, &1.error_kind}) |> Enum.sort()
 
     run.(attr_only, ["priority"])
     run.(mixed, ["priority"])
@@ -963,6 +966,83 @@ defmodule Samen.Automation.ObservabilityTest do
     log = ExUnit.CaptureLog.capture_log(fn -> advance.(changeset, ghost) end)
     assert [%{args: %{"org_id" => ^org}}] = dispatches.()
     assert log =~ "write=schedule_advance_enqueue_skipped"
+  end
+
+  test "RED: via the real AshOban scan, an unresolvable org leaves next_fire_at unchanged and enqueues nothing; a resolvable org advances and enqueues one (control)" do
+    require Ecto.Query
+
+    org = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+    past = DateTime.utc_now() |> DateTime.add(-120, :second) |> DateTime.truncate(:second)
+
+    wf =
+      Workflow
+      |> Ash.Changeset.for_create(:create, %{
+        org_id: org,
+        name: "wf-#{System.unique_integer([:positive])}",
+        status: :active,
+        trigger_kind: :schedule,
+        resource_key: @target_key,
+        schedule_cron: "* * * * *",
+        next_fire_at: past,
+        conditions: [],
+        actions: @notify,
+        owner_id: owner
+      })
+      |> Ash.create!(authorize?: false)
+
+    table = AshPostgres.DataLayer.Info.table(Workflow)
+    wf_id = Ecto.UUID.dump!(wf.id)
+    [id_col] = for %{name: :id} = attr <- Ash.Resource.Info.attributes(Workflow), do: to_string(attr.source || attr.name)
+    [fire_col] = for %{name: :next_fire_at} = attr <- Ash.Resource.Info.attributes(Workflow), do: to_string(attr.source || attr.name)
+
+    persisted_fire_at = fn ->
+      %{rows: [[at]]} = TestRepo.query!("SELECT #{fire_col} FROM #{table} WHERE #{id_col} = $1", [wf_id])
+      at
+    end
+
+    dispatches = fn ->
+      Oban.Job
+      |> Ecto.Query.where([j], j.worker == "Samen.Automation.DispatchWorker")
+      |> TestRepo.all()
+      |> Enum.filter(&(&1.args["trigger_kind"] == "schedule" and &1.args["workflow_id"] == to_string(wf.id)))
+    end
+
+    before = persisted_fire_at.()
+    assert dispatches.() == []
+
+    # the org cannot be resolved inside the real update: the scan read does not select org_id, so the hook reloads the
+    # row by id, and an AFTER UPDATE trigger makes the row vanish from that reload (the "deleted between the scan and the
+    # update" shape: the reload answers no row, so no org)
+    TestRepo.query!("""
+    CREATE FUNCTION zz_vanish_after_update() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      DELETE FROM #{table} WHERE #{id_col} = NEW.#{id_col};
+      RETURN NULL;
+    END $$
+    """)
+
+    TestRepo.query!("CREATE TRIGGER zz_vanish AFTER UPDATE ON #{table} FOR EACH ROW EXECUTE FUNCTION zz_vanish_after_update()")
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        AshOban.Test.schedule_and_run_triggers(Workflow, drain_queues?: true)
+      end)
+
+    TestRepo.query!("DROP TRIGGER zz_vanish ON #{table}")
+
+    # the real :dispatch_due hook ran and refused (so this is not a scan that never reached the update) ...
+    assert log =~ "write=schedule_advance_enqueue_skipped"
+    # ... and the real action path rolled the update back (the trigger's delete with it): the fire is neither advanced
+    # nor lost, and nothing was enqueued
+    assert persisted_fire_at.() == before
+    assert dispatches.() == []
+
+    # POSITIVE CONTROL: the org resolves again -> the SAME due fire advances and enqueues exactly one dispatch
+    AshOban.Test.schedule_and_run_triggers(Workflow, drain_queues?: true)
+
+    assert DateTime.compare(DateTime.from_naive!(persisted_fire_at.(), "Etc/UTC"), DateTime.from_naive!(before, "Etc/UTC")) == :gt
+    assert [%{args: %{"org_id" => ^org}}] = dispatches.()
   end
 
   test "RED: a schedule advance whose org cannot be resolved FAILS the step (so the update rolls back and the fire retries) instead of returning ok; a resolvable org returns ok (control)" do
