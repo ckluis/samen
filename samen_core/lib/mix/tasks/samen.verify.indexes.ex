@@ -207,36 +207,30 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
         _ -> []
       end
 
-    with true <- repo != nil,
-         :ok <- ensure_repo_started(repo),
-         {:ok, %{rows: rows}} when rows != [] <-
-           repo.query(
-             "SELECT column_name, is_nullable FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2",
-             [schema, table]
-           ) do
-      nullable = Map.new(rows, fn [column, is_nullable] -> {column, is_nullable == "YES"} end)
+    case column_nullability(repo, schema, table) do
+      {:ok, nullable} ->
+        mismatches =
+          for attribute <- Ash.Resource.Info.attributes(resource),
+              attribute.primary_key? != true,
+              {:ok, column_nullable?} <- [Map.fetch(nullable, to_string(attribute.source || attribute.name))],
+              attribute.allow_nil? != column_nullable? do
+            {attribute.name, attribute.allow_nil?}
+          end
 
-      mismatches =
-        for attribute <- Ash.Resource.Info.attributes(resource),
-            attribute.primary_key? != true,
-            {:ok, column_nullable?} <- [Map.fetch(nullable, to_string(attribute.source || attribute.name))],
-            attribute.allow_nil? != column_nullable? do
-          {attribute.name, attribute.allow_nil?}
-        end
+        lie_nil = for {name, false} <- mismatches, name not in sort_attrs, do: name
+        lie_not_nil = for {name, true} <- mismatches, do: name
 
-      lie_nil = for {name, false} <- mismatches, name not in sort_attrs, do: name
-      lie_not_nil = for {name, true} <- mismatches, do: name
+        [
+          {lie_nil,
+           "`allow_nil? false` but the database column is nullable (not a keyset sort attribute: no index impact; " <>
+             "the backfill needs a value decision, so this is the host's)"},
+          {lie_not_nil, "`allow_nil? true` but the database column is NOT NULL (the resource accepts a NULL the database refuses)"}
+        ]
+        |> Enum.reject(fn {names, _} -> names == [] end)
+        |> Enum.map(fn {names, what} ->
+          "#{inspect(resource)} (#{table}): #{Enum.map_join(Enum.sort(names), ", ", &inspect/1)} — #{what}"
+        end)
 
-      [
-        {lie_nil, "`allow_nil? false` but the database column is nullable (not a keyset sort attribute: no index impact; " <>
-                    "the backfill needs a value decision, so this is the host's)"},
-        {lie_not_nil, "`allow_nil? true` but the database column is NOT NULL (the resource accepts a NULL the database refuses)"}
-      ]
-      |> Enum.reject(fn {names, _} -> names == [] end)
-      |> Enum.map(fn {names, what} ->
-        "#{inspect(resource)} (#{table}): #{Enum.map_join(Enum.sort(names), ", ", &inspect/1)} — #{what}"
-      end)
-    else
       # the catalog read FAILED (an org-scoped resource's unreadable table is also a violation of `violations/1`): say so
       # by name instead of letting an advisory sweep that could not run read as "no mismatches"
       {:error, reason} ->
@@ -244,8 +238,29 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
         []
 
       # no repo, or a table the live database does not have: nothing to compare
-      _ ->
+      :absent ->
         []
+    end
+  end
+
+  # `{:ok, %{column => nullable?}}`, `{:error, reason}` for a read that failed, `:absent` for a resource with no repo or
+  # a table the live database does not have.
+  defp column_nullability(nil, _schema, _table), do: :absent
+
+  defp column_nullability(repo, schema, table) do
+    case ensure_repo_started(repo) do
+      :ok ->
+        case repo.query(
+               "SELECT column_name, is_nullable FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2",
+               [schema, table]
+             ) do
+          {:ok, %{rows: []}} -> :absent
+          {:ok, %{rows: rows}} -> {:ok, Map.new(rows, fn [column, is_nullable] -> {column, is_nullable == "YES"} end)}
+          {:error, reason} -> {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
