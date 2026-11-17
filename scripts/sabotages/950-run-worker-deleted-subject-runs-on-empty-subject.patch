@@ -5,11 +5,11 @@
 # TEST_FILES: test/automation/observability_test.exs
 # MUST_FAIL: a created/updated run whose subject was DELETED before the run skips
 diff --git a/samen_core/lib/samen/automation/run_worker.ex b/samen_core/lib/samen/automation/run_worker.ex
-index ed1d8676..03e4144c 100644
+index 726bdb3..eaa52d5 100644
 --- a/samen_core/lib/samen/automation/run_worker.ex
 +++ b/samen_core/lib/samen/automation/run_worker.ex
-@@ -212,7 +212,7 @@ defmodule Samen.Automation.RunWorker do
-     if Definition.conditions(definition) in [nil, []], do: {:ok, %{}}, else: {:skip, :no_subject_record}
+@@ -219,7 +219,7 @@ defmodule Samen.Automation.RunWorker do
+       else: {:skip, :no_subject_record}
    end
  
 -  defp absent_subject(:gone, _definition, _args), do: {:skip, :no_subject_record}

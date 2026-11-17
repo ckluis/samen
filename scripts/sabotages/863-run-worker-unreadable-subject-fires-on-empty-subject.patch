@@ -1,9 +1,9 @@
-# SABOTAGE: an unreadable subject runs the workflow against an empty subject, which passes neq gates
+# SABOTAGE: a malformed record id runs the workflow against an empty subject, which passes neq gates
 #
 # Flips the named test(s).
 # APP: samen_core
 # TEST_FILES: test/automation/observability_test.exs
-# MUST_FAIL: a subject that cannot be READ skips the run
+# MUST_FAIL: a malformed record id skips the run
 diff --git a/samen_core/lib/samen/automation/run_worker.ex b/samen_core/lib/samen/automation/run_worker.ex
 index ed1d8676..4890267e 100644
 --- a/samen_core/lib/samen/automation/run_worker.ex

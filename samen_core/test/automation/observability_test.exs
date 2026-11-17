@@ -449,7 +449,7 @@ defmodule Samen.Automation.ObservabilityTest do
     end)
   end
 
-  test "RED: a subject that cannot be READ skips the run instead of reading as an empty subject " <>
+  test "RED: a malformed record id skips the run instead of reading as an empty subject " <>
          "(which every neq / not_in / is_nil gate passes); the readable subject fires (control)" do
     org = Ash.UUID.generate()
     owner = Ash.UUID.generate()
@@ -477,14 +477,14 @@ defmodule Samen.Automation.ObservabilityTest do
     end
 
     ExUnit.CaptureLog.capture_log(fn ->
-      assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: args.("not-a-uuid")})
+      assert :ok = Samen.Automation.RunWorker.perform(run_job(args.("not-a-uuid")))
     end)
 
     assert notified(org, owner) == 0
     assert [%{state: :skipped, error_kind: :internal_error}] = runs_for(org, wf.id)
 
     # POSITIVE CONTROL: the same workflow against the readable record fires
-    assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: args.(to_string(target.id))})
+    assert :ok = Samen.Automation.RunWorker.perform(run_job(args.(to_string(target.id))))
     assert notified(org, owner) == 1
   end
 
@@ -518,7 +518,7 @@ defmodule Samen.Automation.ObservabilityTest do
     # `Nope.Missing` does not resolve at all.
     for key <- ["String", "Nope.Missing"] do
       ExUnit.CaptureLog.capture_log(fn ->
-        assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: args.(key)})
+        assert :ok = Samen.Automation.RunWorker.perform(run_job(args.(key)))
       end)
     end
 
@@ -526,7 +526,7 @@ defmodule Samen.Automation.ObservabilityTest do
     assert [%{state: :skipped, error_kind: :internal_error}, %{state: :skipped, error_kind: :internal_error}] = runs_for(org, wf.id)
 
     # POSITIVE CONTROL: the same workflow and record under the real resource key fires
-    assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: args.(@target_key)})
+    assert :ok = Samen.Automation.RunWorker.perform(run_job(args.(@target_key)))
     assert notified(org, owner) == 1
   end
 
@@ -559,12 +559,12 @@ defmodule Samen.Automation.ObservabilityTest do
     target = create_target!(org)
 
     # POSITIVE CONTROL: the record is there -> the neq gate passes on its real value and the run fires
-    assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: subject_args(wf, org, to_string(target.id), "created")})
+    assert :ok = Samen.Automation.RunWorker.perform(run_job(subject_args(wf, org, to_string(target.id), "created")))
     assert notified(org, owner) == 1
 
     # RED: the record id names nothing (deleted between the event and the run), for both record events
     for event <- ["created", "updated"] do
-      assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: subject_args(wf, org, Ash.UUID.generate(), event)})
+      assert :ok = Samen.Automation.RunWorker.perform(run_job(subject_args(wf, org, Ash.UUID.generate(), event)))
     end
 
     assert notified(org, owner) == 1
@@ -585,11 +585,11 @@ defmodule Samen.Automation.ObservabilityTest do
         actions: @notify
       )
 
-    assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: subject_args(plain, org, Ash.UUID.generate(), "destroyed")})
+    assert :ok = Samen.Automation.RunWorker.perform(run_job(subject_args(plain, org, Ash.UUID.generate(), "destroyed")))
     assert notified(org, owner) == 1
     assert [%{state: :succeeded}] = runs_for(org, plain.id)
 
-    assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: subject_args(gated, org, Ash.UUID.generate(), "destroyed")})
+    assert :ok = Samen.Automation.RunWorker.perform(run_job(subject_args(gated, org, Ash.UUID.generate(), "destroyed")))
     assert notified(org, owner) == 1
     assert [%{state: :skipped, error_kind: :no_subject_record}] = runs_for(org, gated.id)
   end
@@ -606,7 +606,7 @@ defmodule Samen.Automation.ObservabilityTest do
 
     run = fn wf, changed ->
       args = wf |> subject_args(org, Ash.UUID.generate(), "destroyed") |> Map.put("changed", changed)
-      assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: args})
+      assert :ok = Samen.Automation.RunWorker.perform(run_job(args))
     end
 
     # RED on the previous round: a soft destroy (archive) names the stamped attribute in `changed`; the condition is satisfied
@@ -735,7 +735,7 @@ defmodule Samen.Automation.ObservabilityTest do
         "chain" => []
       }
 
-      ExUnit.CaptureLog.capture_log(fn -> assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: args}) end)
+      ExUnit.CaptureLog.capture_log(fn -> assert :ok = Samen.Automation.RunWorker.perform(run_job(args)) end)
       [run] = runs_for(org, wf.id)
       run
     end
@@ -855,7 +855,7 @@ defmodule Samen.Automation.ObservabilityTest do
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: args})
+          assert :ok = Samen.Automation.RunWorker.perform(run_job(args))
         end)
 
       [run] = runs_for(org, wf.id)
@@ -1132,6 +1132,10 @@ defmodule Samen.Automation.ObservabilityTest do
   end
 
   defp drain, do: Oban.drain_queue(queue: :automation, with_recursion: true)
+
+  # A bare `%Oban.Job{}` defaults to `attempt: 0, max_attempts: 20`, so a subject read that RAISES would be retried
+  # forever and never reach the last-attempt finalize. Production numbering starts at 1 with the worker's `max_attempts: 3`.
+  defp run_job(args), do: %Oban.Job{args: args, attempt: 1, max_attempts: 3}
 
   defp runs_for(org, workflow_id) do
     Run
