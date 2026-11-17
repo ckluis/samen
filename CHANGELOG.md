@@ -11,6 +11,19 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Vault: one KMS unwrap per subject per resolve call (ARCH-2)
+
+- **`Samen.Api.PiiResolution` unwraps each subject's DEK once per call, not once per vaulted value.** A page of N rows x M
+  vaulted fields over S subjects costs S `Samen.Kms.unwrap/1` calls instead of N x M. `Samen.Vault.unwrap_subjects/1`
+  builds a `Samen.Vault.DekMemo` (redacting `Inspect`) from only the rows the plane will decrypt; it lives in the call's
+  `opts` and nowhere else, so there is no cross-call reuse and a subject shredded between calls is masked on the next. The
+  shred check is the unwrap, so within one call it runs once per subject: a subject shredded mid-call can still be
+  served for the rest of that call. `Vault.reveal/3` has no audit or breadth ledger (the audited `Reveal`/`BreakGlass`
+  paths never take a memo). A failed unwrap denies only that subject. The memo and `prefetch/4` opts are single-use
+  (never stored; a memo from another process is ignored; call sites pinned by `vault_dek_call_site_scan_test.exs`)
+  and the new `deks:` option is documented on `reveal/3`. The KMS behaviour is unchanged. A cross-request cache stays out of scope (ADR-001 section 6.1). Proof: `vault_dek_reuse_test.exs`,
+  sabotages 887-890.
+
 ### Mutation gate: the security core (ARCH-26)
 
 - **The tier-1 watch-list now covers the rest of the security core: 12 -> 23 modules, 166 -> 401 mutants.** Added, by

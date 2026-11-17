@@ -163,7 +163,15 @@ defmodule Samen.Api.PiiResolution do
   grant revoked or an operator suspended in between takes effect there. `resolve/4` calls
   this itself; a caller that resolves the same `records` one at a time (the replay resolver,
   inside a per-record reveal span) prefetches once and passes the returned `opts` to each
-  call. Idempotent on already-prefetched `opts`.
+  call WITHIN THE SAME FUNCTION CALL. Idempotent on already-prefetched `opts`.
+
+  CONTRACT: the returned `opts` are SINGLE-USE. They carry raw DEKs (`Samen.Vault.DekMemo`) and
+  the ciphertext rows. Use them only inside the function that called `prefetch/4`, for the
+  `resolve/4` calls of the same batch. Never put them in a LiveView assign, process or
+  GenServer state, ETS, a job argument or a cache, and never hand them to another process or
+  across a call boundary: the shred check is the unwrap, so stored opts would keep serving
+  plaintext for a subject shredded after they were built. Call `prefetch/4` again per batch.
+  `Samen.VaultDekCallSiteScanTest` pins the allowed call sites.
   """
   @spec prefetch(list(struct()), module(), map() | nil, keyword()) :: keyword()
   def prefetch(records, resource, actor, opts) when is_list(records) do
@@ -189,10 +197,13 @@ defmodule Samen.Api.PiiResolution do
             uniq: true,
             do: token
 
+      rows = vault_rows(tokens, opts)
+
       Keyword.merge(opts,
         __prefetched: true,
         __grants: grants,
-        __vault_rows: vault_rows(tokens, opts),
+        __vault_rows: rows,
+        __vault_deks: vault_deks(rows, opts),
         __bag_ctx: bag_context(resource, records, plane, actor, opts)
       )
     end
@@ -264,6 +275,19 @@ defmodule Samen.Api.PiiResolution do
   rescue
     # A failed prefetch only costs the per-value read it would have saved.
     _ -> %{}
+  end
+
+  # One KMS unwrap per SUBJECT of the rows this call will decrypt (ARCH-2). `rows` holds only
+  # tokens `decrypts?/5` admitted, so a denied field never unwraps. The memo lives in this
+  # call's `opts` and nowhere else; a failed unwrap is held as an error (see the vault).
+  defp vault_deks(rows, _opts) when map_size(rows) == 0, do: nil
+
+  defp vault_deks(rows, opts) do
+    vault = Keyword.get(opts, :vault, Samen.Vault)
+
+    if Code.ensure_loaded?(vault) and function_exported?(vault, :unwrap_subjects, 1),
+      do: vault.unwrap_subjects(rows),
+      else: nil
   end
 
   defp resolve_pii_fields(record, fields, plane, resource, reveal_action, actor, opts) do
@@ -386,8 +410,14 @@ defmodule Samen.Api.PiiResolution do
 
   defp vault_opts(opts) do
     case Keyword.get(opts, :__vault_rows) do
-      rows when is_map(rows) and map_size(rows) > 0 -> [prefetched: rows]
-      _ -> []
+      rows when is_map(rows) and map_size(rows) > 0 ->
+        case Keyword.get(opts, :__vault_deks) do
+          nil -> [prefetched: rows]
+          deks -> [prefetched: rows, deks: deks]
+        end
+
+      _ ->
+        []
     end
   end
 

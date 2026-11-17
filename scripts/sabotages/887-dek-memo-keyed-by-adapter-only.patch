@@ -1,0 +1,21 @@
+# SABOTAGE: The DEK memo is keyed by adapter only, so one subject's key is served for another subject's row
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault_dek_reuse_test.exs
+# MUST_FAIL: a memo built for subject A is not used for subject B's row
+diff --git a/samen_core/lib/samen/vault/dek_memo.ex b/samen_core/lib/samen/vault/dek_memo.ex
+index db624cbc..eea63d9d 100644
+--- a/samen_core/lib/samen/vault/dek_memo.ex
++++ b/samen_core/lib/samen/vault/dek_memo.ex
+@@ -28,8 +28,8 @@ defmodule Samen.Vault.DekMemo do
+ 
+   @doc false
+   @spec fetch(t(), module(), String.t()) :: {:ok, {:ok, binary()} | {:error, term()}} | :error
+-  def fetch(%__MODULE__{entries: entries}, adapter, subject_id),
+-    do: Map.fetch(entries, {adapter, subject_id})
++  def fetch(%__MODULE__{entries: entries}, adapter, _subject_id),
++    do: Enum.find_value(entries, :error, fn {{^adapter, _}, v} -> {:ok, v}; _ -> nil end)
+ 
+   defimpl Inspect do
+     def inspect(%Samen.Vault.DekMemo{entries: entries}, _opts),

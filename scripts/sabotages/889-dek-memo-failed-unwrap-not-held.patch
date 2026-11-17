@@ -1,0 +1,22 @@
+# SABOTAGE: A failed unwrap is dropped from the memo, so every value of the failed subject retries the KMS
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault_dek_reuse_test.exs
+# MUST_FAIL: a failing subject denies only its own values
+diff --git a/samen_core/lib/samen/vault.ex b/samen_core/lib/samen/vault.ex
+index 0e291af0..9eff426c 100644
+--- a/samen_core/lib/samen/vault.ex
++++ b/samen_core/lib/samen/vault.ex
+@@ -264,7 +264,10 @@ defmodule Samen.Vault do
+       end)
+       |> Enum.uniq()
+ 
+-    entries = Map.new(subjects, &{{adapter, &1}, adapter.unwrap(&1)})
++    entries =
++      subjects
++      |> Map.new(&{{adapter, &1}, adapter.unwrap(&1)})
++      |> Map.filter(fn {_, r} -> match?({:ok, _}, r) end)
+ 
+     DekMemo.new(entries)
+   end

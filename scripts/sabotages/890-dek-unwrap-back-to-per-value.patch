@@ -1,0 +1,19 @@
+# SABOTAGE: The memo is built but never handed to reveal, so the unwrap count is per value again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault_dek_reuse_test.exs
+# MUST_FAIL: N x M values over S subjects cost exactly S unwraps
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+index da1e3136..dfd9d341 100644
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -408,7 +408,7 @@ defmodule Samen.Api.PiiResolution do
+       rows when is_map(rows) and map_size(rows) > 0 ->
+         case Keyword.get(opts, :__vault_deks) do
+           nil -> [prefetched: rows]
+-          deks -> [prefetched: rows, deks: deks]
++          _deks -> [prefetched: rows]
+         end
+ 
+       _ ->

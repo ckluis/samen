@@ -1,0 +1,19 @@
+# SABOTAGE: A new unwrap_subjects( call site outside the pinned allow-list
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault_dek_call_site_scan_test.exs
+# MUST_FAIL: the real tree has no call site outside the allow-list
+diff --git a/samen_core/lib/samen/replay/resolver.ex b/samen_core/lib/samen/replay/resolver.ex
+index 4b97a974..449ab87f 100644
+--- a/samen_core/lib/samen/replay/resolver.ex
++++ b/samen_core/lib/samen/replay/resolver.ex
+@@ -145,6 +145,8 @@ defmodule Samen.Replay.Resolver do
+ 
+   # The PiiResolution options for one batch: the viewer's repo/grant/vault, plus what
+   # `PiiResolution.prefetch/4` read ONCE for all the batch's rows. Lives for this call only.
++  def stash_deks(rows), do: Samen.Vault.unwrap_subjects(rows)
++
+   defp batch_opts(rows, mod, actor, opts) do
+     base = Keyword.merge([repo: repo(mod, opts)], Keyword.take(opts, [:grant, :vault]))
+     PiiResolution.prefetch(rows, mod, actor, base)
