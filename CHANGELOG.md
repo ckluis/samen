@@ -11,6 +11,26 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Fixed: kernel phase C review (verifier evasion, billing ledger gaps, replay unavailable card)
+
+- **Fixed: `agent_coverage` could miss an agent-loop re-entry through a decoy `@attr` value.** One rescue covered every
+  value of `@k`, so `@k :lists` placed before `@k Samen.AI.Agent` made `source_reenters_loop?/1` read false. Each value is
+  now decided on its own, without a rescue.
+- **Fixed: `ai_prompt_masking` crashed on a `defmodule __MODULE__.X` in a tool's source file** (`Module.concat/1` raises
+  `FunctionClauseError`, not the `ArgumentError` the narrowed rescue named). The parts are guarded instead.
+- **Added: `mix samen.verify.movement_continuity` (`Samen.Billing.MovementContinuity`).** A skipped `mov` row used to
+  leave only a failure report; the ledger now has a check: each subscription's rows must chain (`mrr_before_cents` equals
+  the previous `mrr_after_cents`, the first starts from 0), the last `mrr_after_cents` must equal the live MRR, and a
+  revenue-active subscription must have a row. Report only, ids and cents only, wired for the demo host.
+- **Documented, measured: which failures roll the subscription write back.** `SubscriptionMovement` is best-effort only
+  for failures that send no SQL (an unresolvable price resource, a classifier refusal, a validation error): the
+  subscription write stands and no row is written. A failing SQL statement inside the write's transaction aborts it, so
+  the subscription write is rolled back too (`demo/test/movement_continuity_test.exs`).
+- **Fixed: `MovementBackfill.from_snapshot/1`** declares `{:error, :unavailable}` in its `@spec`, and one unreadable
+  subscription no longer stops the whole run: it is skipped, counted in `failed` and reported; `{:error, :unavailable}`
+  is only for a failed read of the snapshot itself.
+- **Fixed: the replay player's `:unavailable` arm is now driven through the real load path** (test and sabotage).
+
 ### Fixed: an erasure that failed after the key shred is resumable (AI derived context is withdrawn on the retry)
 
 - **Fixed: `Samen.Erasure.shred/2` could report completion while AI runs citing the subject were never withdrawn.** The

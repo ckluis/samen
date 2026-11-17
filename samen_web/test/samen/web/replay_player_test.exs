@@ -538,6 +538,32 @@ defmodule Samen.Web.ReplayPlayerTest do
       refute missing =~ ~s(id="replay-unavailable")
     end
 
+    test "RED: a load that really fails (the frame read) opens as :unavailable, renders the error card, and leaks no id or reason", ctx do
+      admin = user!(ctx.org, :admin)
+
+      # Positive control through the same seam: unbroken, the replay opens.
+      assert tenant_player(ctx.org, ctx.replay_id, admin.id).assigns.state == :open
+
+      # Break the frame read for real (the session read still succeeds): DDL is transactional, so the sandbox restores it.
+      Repo.query!("ALTER TABLE replay_frame RENAME TO replay_frame_gone")
+
+      {socket, log} =
+        try do
+          ExUnit.CaptureLog.with_log(fn -> tenant_player(ctx.org, ctx.replay_id, admin.id) end)
+        after
+          Repo.query!("ALTER TABLE replay_frame_gone RENAME TO replay_frame")
+        end
+
+      assert log =~ "read=replay_player_load"
+      assert socket.assigns.state == :unavailable
+      html = page(socket)
+      assert html =~ ~s(id="replay-unavailable")
+      refute html =~ "No such replay"
+      refute html =~ ctx.replay_id
+      refute html =~ "replay_frame"
+      refute html =~ "undefined_table"
+    end
+
     test "fail closed: no org, no plane, no pinned org set" do
       admin_org = Ash.UUID.generate()
       admin = user!(admin_org, :admin)
