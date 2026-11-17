@@ -47,14 +47,20 @@ defmodule PawChart.OperatorSortColumnsNotNullTest do
     assert Indexes.violations(opts()) == []
   end
 
-  test "the NOT NULL is real: a plan without a name and a ticket without a subject are refused by the database" do
-    org = Ecto.UUID.generate()
+  test "the NOT NULL is real: a plan without a name and a ticket without a subject are each refused by the database, naming that column" do
+    org = Ecto.UUID.dump!(Ecto.UUID.generate())
+    plan = "INSERT INTO pmp_plan (pmp_org_id, pmp_name, pmp_inserted_at, pmp_updated_at) VALUES ($1, $2, now(), now())"
+    ticket = "INSERT INTO pqk_ticket (pqk_org_id, pqk_subject, pqk_inserted_at, pqk_updated_at) VALUES ($1, $2, now(), now())"
 
-    assert {:error, %Postgrex.Error{postgres: %{code: :not_null_violation}}} =
-             Ecto.Adapters.SQL.query(
-               PawChart.Repo,
-               "INSERT INTO pmp_plan (pmp_org_id, pmp_inserted_at, pmp_updated_at) VALUES ($1, now(), now())",
-               [Ecto.UUID.dump!(org)]
-             )
+    # each insert is pinned to ITS column: any other missing NOT NULL column would name another one
+    assert {:error, %Postgrex.Error{postgres: %{code: :not_null_violation, column: "pmp_name"}}} =
+             Ecto.Adapters.SQL.query(PawChart.Repo, plan, [org, nil])
+
+    assert {:error, %Postgrex.Error{postgres: %{code: :not_null_violation, column: "pqk_subject"}}} =
+             Ecto.Adapters.SQL.query(PawChart.Repo, ticket, [org, nil])
+
+    # POSITIVE CONTROL: the same two inserts WITH a value succeed, so the refusals above are about the NULL and nothing else
+    assert {:ok, %{num_rows: 1}} = Ecto.Adapters.SQL.query(PawChart.Repo, plan, [org, "Basic"])
+    assert {:ok, %{num_rows: 1}} = Ecto.Adapters.SQL.query(PawChart.Repo, ticket, [org, "Printer on fire"])
   end
 end

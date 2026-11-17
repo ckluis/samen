@@ -427,7 +427,7 @@ defmodule Samen.MigrationExpandContractTest do
       assert Repo.query!("SELECT count(*) FROM nn_t WHERE a = b").rows == [[25]]
     end
 
-    test "RED PATH: a NULL the backfill cannot answer for STOPS the migration, naming the count, and changes nothing" do
+    test "RED PATH: a NULL the backfill cannot answer for STOPS the migration, naming the count, and leaves the column's definition untouched (the answerable rows stay backfilled)" do
       Repo.query!("INSERT INTO nn_t (a, b) VALUES (NULL, 'has-b'), (NULL, NULL), (NULL, NULL), ('keep', 'k')")
 
       error =
@@ -435,12 +435,119 @@ defmodule Samen.MigrationExpandContractTest do
           ExpandContract.set_not_null(Repo, :nn_t, :a, caller: NnMig, backfill: "b", chunk_size: 1)
         end
 
-      assert error.message =~ "The column was not altered"
+      # what the message says is what happened: the definition is untouched AND the backfill is reported as committed
+      assert error.message =~ "definition was NOT altered"
+      assert error.message =~ "temporary check constraint was dropped again"
+      assert error.message =~ "HAVE been filled and stay filled"
+      assert error.message =~ ~s(SELECT * FROM "nn_t" WHERE "a" IS NULL)
+      refute error.message =~ "changes nothing"
       assert nullable?("a")
+      # and nothing is left behind: the temporary check is gone
       assert check_constraints() == []
-      # the row the expression could answer for WAS filled (idempotent re-run), the unanswerable ones were not invented
+      # the row the expression could answer for WAS filled (committed), the unanswerable ones were not invented
       assert Repo.query!("SELECT count(*) FROM nn_t WHERE a IS NULL").rows == [[2]]
       assert Repo.query!("SELECT a FROM nn_t WHERE b = 'has-b'").rows == [["has-b"]]
+    end
+
+    test "the check goes on FIRST: a NULL written DURING the backfill is refused by the database, not counted-then-missed" do
+      Repo.query!("CREATE TABLE nn_log (outcome text)")
+
+      # a backfill expression that tries to slip a NULL row in while the backfill runs (the window between the count and
+      # the constraint that the old order left open); `RETURN v` leaves the expression otherwise equal to `b`
+      Repo.query!("""
+      CREATE FUNCTION nn_slip(v text) RETURNS text LANGUAGE plpgsql AS $$
+      BEGIN
+        BEGIN
+          INSERT INTO nn_t (a, b) VALUES (NULL, 'slipped-in');
+          INSERT INTO nn_log VALUES ('accepted');
+        EXCEPTION WHEN check_violation THEN
+          INSERT INTO nn_log VALUES ('refused');
+        END;
+        RETURN v;
+      END $$
+      """)
+
+      Repo.query!("INSERT INTO nn_t (a, b) VALUES (NULL, 'has-b')")
+      assert :ok = ExpandContract.set_not_null(Repo, :nn_t, :a, caller: NnMig, backfill: "nn_slip(b)", chunk_size: 10)
+
+      outcomes = Repo.query!("SELECT DISTINCT outcome FROM nn_log").rows
+      assert outcomes == [["refused"]], "the NULL insert during the backfill must be refused, got #{inspect(outcomes)}"
+      assert Repo.query!("SELECT count(*) FROM nn_t WHERE b = 'slipped-in'").rows == [[0]]
+      refute nullable?("a")
+      assert check_constraints() == []
+    end
+
+    test "CONTROL: without the check a NULL written during the same backfill IS accepted (so the refusal above is the check's)" do
+      Repo.query!("CREATE TABLE nn_log (outcome text)")
+
+      Repo.query!("""
+      CREATE FUNCTION nn_slip(v text) RETURNS text LANGUAGE plpgsql AS $$
+      BEGIN
+        BEGIN
+          INSERT INTO nn_t (a, b) VALUES (NULL, 'slipped-in');
+          INSERT INTO nn_log VALUES ('accepted');
+        EXCEPTION WHEN check_violation THEN
+          INSERT INTO nn_log VALUES ('refused');
+        END;
+        RETURN v;
+      END $$
+      """)
+
+      Repo.query!("INSERT INTO nn_t (a, b) VALUES (NULL, 'has-b')")
+      Repo.query!("UPDATE nn_t SET a = nn_slip(b) WHERE a IS NULL")
+      assert Repo.query!("SELECT DISTINCT outcome FROM nn_log").rows == [["accepted"]]
+    end
+
+    test "a NULL the backfill cannot answer for raises even when other rows were backfilled first, and a re-run after the data fix completes" do
+      Repo.query!("INSERT INTO nn_t (a, b) VALUES (NULL, 'has-b'), (NULL, NULL)")
+      assert_raise RuntimeError, ~r/still has 1 NULL row/, fn -> ExpandContract.set_not_null(Repo, :nn_t, :a, caller: NnMig, backfill: "b") end
+      assert check_constraints() == []
+
+      Repo.query!("UPDATE nn_t SET b = 'fixed' WHERE b IS NULL")
+      assert :ok = ExpandContract.set_not_null(Repo, :nn_t, :a, caller: NnMig, backfill: "b")
+      refute nullable?("a")
+      assert check_constraints() == []
+    end
+
+    test "a re-run after EACH interruption point completes and leaves no constraint behind" do
+      # (i) interrupted after step 1: the NOT VALID check is on, nothing else happened
+      Repo.query!("INSERT INTO nn_t (a, b) VALUES ('x', 'y')")
+      Repo.query!("ALTER TABLE nn_t ADD CONSTRAINT nn_t_a_nn_chk CHECK (a IS NOT NULL) NOT VALID")
+      assert :ok = ExpandContract.set_not_null(Repo, :nn_t, :a, caller: NnMig)
+      refute nullable?("a")
+      assert check_constraints() == []
+      Repo.query!("ALTER TABLE nn_t ALTER COLUMN a DROP NOT NULL")
+
+      # (ii) interrupted mid-backfill: some rows filled, the NOT VALID check on, NULLs remain that the expression can answer for
+      Repo.query!("DELETE FROM nn_t")
+      Repo.query!("INSERT INTO nn_t (a, b) SELECT CASE WHEN g <= 5 THEN 'done' END, 'from-b-' || g FROM generate_series(1, 12) g")
+      Repo.query!("ALTER TABLE nn_t ADD CONSTRAINT nn_t_a_nn_chk CHECK (a IS NOT NULL) NOT VALID")
+      assert :ok = ExpandContract.set_not_null(Repo, :nn_t, :a, caller: NnMig, backfill: "b", chunk_size: 3)
+      refute nullable?("a")
+      assert check_constraints() == []
+      Repo.query!("ALTER TABLE nn_t ALTER COLUMN a DROP NOT NULL")
+
+      # (iii) interrupted after VALIDATE (a VALID check on a still-nullable column)
+      Repo.query!("ALTER TABLE nn_t ADD CONSTRAINT nn_t_a_nn_chk CHECK (a IS NOT NULL) NOT VALID")
+      Repo.query!("ALTER TABLE nn_t VALIDATE CONSTRAINT nn_t_a_nn_chk")
+      assert nullable?("a")
+      assert :ok = ExpandContract.set_not_null(Repo, :nn_t, :a, caller: NnMig)
+      refute nullable?("a")
+      assert check_constraints() == []
+    end
+
+    test "chunk_size and lock_timeout are validated before anything is touched" do
+      for bad <- [0, -1, "5", nil] do
+        assert_raise ArgumentError, ~r/:chunk_size must be a positive integer/, fn ->
+          ExpandContract.set_not_null(Repo, :nn_t, :a, caller: NnMig, chunk_size: bad)
+        end
+      end
+
+      assert_raise ArgumentError, ~r/:lock_timeout must look like/, fn ->
+        ExpandContract.set_not_null(Repo, :nn_t, :a, caller: NnMig, lock_timeout: "5s'; DROP TABLE nn_t; --")
+      end
+
+      assert check_constraints() == []
     end
 
     test "a leftover check from an interrupted run is replaced, and an already NOT NULL column passes through" do
@@ -457,6 +564,48 @@ defmodule Samen.MigrationExpandContractTest do
       refute nullable?("a")
       assert :ok = ExpandContract.drop_not_null(Repo, :nn_t, :a, caller: NnMig)
       assert nullable?("a")
+    end
+  end
+
+  # The ACCESS EXCLUSIVE statements of set_not_null/4 run under lock_timeout. LIVE: a held lock on a committed table (a
+  # second, real connection; the sandbox would deadlock a two-connection scenario), released by the test, never by time.
+  describe "set_not_null/4 lock_timeout (live)" do
+    defmodule NnLiveMig do
+      def __migration__, do: [disable_ddl_transaction: true]
+    end
+
+    test "a blocked lock aborts the step, says what it left (nothing), and a re-run after the lock is released completes" do
+      Samen.TestSandbox.auto!(Repo)
+      {a, b} = start_raw_conns()
+
+      try do
+        Postgrex.query!(a, "DROP TABLE IF EXISTS nn_live", [])
+        Postgrex.query!(a, "CREATE TABLE nn_live (id serial PRIMARY KEY, a text)", [])
+        Postgrex.query!(a, "INSERT INTO nn_live (a) VALUES ('x')", [])
+
+        holder = spawn_lock_holder(b, "nn_live")
+
+        error =
+          assert_raise RuntimeError, ~r/could not get the lock on nn_live within the lock timeout/, fn ->
+            ExpandContract.set_not_null(Repo, :nn_live, :a, caller: NnLiveMig, lock_timeout: "300ms")
+          end
+
+        assert error.message =~ "nothing was changed"
+        assert error.message =~ "Run the migration again"
+
+        release_lock_holder(holder)
+
+        # the timed-out step rolled back as a whole: no constraint, column still nullable
+        assert Postgrex.query!(a, "SELECT conname FROM pg_constraint WHERE conrelid = 'nn_live'::regclass AND contype = 'c'", []).rows == []
+        assert Postgrex.query!(a, "SELECT is_nullable FROM information_schema.columns WHERE table_name = 'nn_live' AND column_name = 'a'", []).rows == [["YES"]]
+
+        # CONTROL: the very same call with the lock free completes, so the abort above was the held lock and nothing else
+        assert :ok = ExpandContract.set_not_null(Repo, :nn_live, :a, caller: NnLiveMig, lock_timeout: "300ms")
+        assert Postgrex.query!(a, "SELECT is_nullable FROM information_schema.columns WHERE table_name = 'nn_live' AND column_name = 'a'", []).rows == [["NO"]]
+        assert Postgrex.query!(a, "SELECT conname FROM pg_constraint WHERE conrelid = 'nn_live'::regclass AND contype = 'c'", []).rows == []
+      after
+        drop_and_stop({a, b}, "nn_live")
+      end
     end
   end
 

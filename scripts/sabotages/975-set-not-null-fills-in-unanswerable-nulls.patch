@@ -4,17 +4,17 @@
 # Flips the named test(s).
 # APP: samen_core
 # TEST_FILES: test/migration_expand_contract_test.exs
-# MUST_FAIL: RED PATH: a NULL the backfill cannot answer for STOPS the migration, naming the count, and changes nothing
+# MUST_FAIL: RED PATH: a NULL the backfill cannot answer for STOPS the migration, naming the count, and leaves the column's definition untouched (the answerable rows stay backfilled)
 diff --git a/samen_core/lib/samen/migration/expand_contract.ex b/samen_core/lib/samen/migration/expand_contract.ex
-index d7ce3018..ffea599d 100644
+index dbd315ee..ab226df8 100644
 --- a/samen_core/lib/samen/migration/expand_contract.ex
 +++ b/samen_core/lib/samen/migration/expand_contract.ex
-@@ -429,7 +429,7 @@ defmodule Samen.Migration.ExpandContract do
- 
-     %{rows: [[remaining]]} = repo.query!("SELECT count(*) FROM #{q_ident(tname)} WHERE #{q_ident(cname)} IS NULL")
+@@ -456,7 +456,7 @@ defmodule Samen.Migration.ExpandContract do
+     # 3. a NULL with no correct value stops the migration, and takes the check away with it
+     %{rows: [[remaining]]} = repo.query!("SELECT count(*) FROM #{qt} WHERE #{qc} IS NULL")
  
 -    if remaining > 0 do
 +    if remaining > 1_000_000_000 do
-       raise RuntimeError,
-             "set_not_null/4: #{tname}.#{cname} still has #{remaining} NULL row(s) and no correct value to give them. " <>
-               "The column was not altered. Fix or remove those rows (or pass `backfill:` an expression that is right for them), " <>
+       left_behind =
+         "the temporary check constraint #{check} is still on #{tname} (it refuses new NULLs; the next run drops it first)"
+ 
