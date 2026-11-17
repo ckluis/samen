@@ -82,8 +82,8 @@ defmodule Mix.Tasks.Samen.Verify.AiPromptMaskingToolChecksTest do
       assert Enum.any?(V.tool_schema_boundedness_violations(), &(&1 =~ "compile-time constant"))
     end
 
-    test "RED: a tool whose source cannot be read is a violation (the static-schema rule is unverifiable), never inert", ctx do
-      # compiled in memory: no source file on disk to scan
+    test "RED: a tool whose tool_schema body cannot be found in its source is a violation (the static-schema rule is unverifiable), never inert", ctx do
+      # compiled in memory with the TEST FILE as its source: that file has no `defmodule SourcelessTool`, so the body is not found
       Module.create(
         SourcelessTool,
         quote do
@@ -100,7 +100,43 @@ defmodule Mix.Tasks.Samen.Verify.AiPromptMaskingToolChecksTest do
 
     test "a bounded, static tool def is NOT flagged (the check is not blanket-failing)", ctx do
       register(%{"bounded_ok" => BoundedTool}, ctx)
-      refute Enum.any?(V.tool_schema_boundedness_violations(), &(&1 =~ "bounded_ok"))
+      refute Enum.any?(V.tool_schema_boundedness_violations(), &(&1 =~ "BoundedTool"))
+    end
+
+    test "RED (S2): a `defmodule __MODULE__.X` ahead of the tool module in its source does not crash the verifier", ctx do
+      dir = Path.join(System.tmp_dir!(), "s2_dynamic_defmodule_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      file = Path.join(dir, "dyn.ex")
+
+      File.write!(file, """
+      defmodule S2DecoyOuter do
+        defmodule __MODULE__.Inner do
+          def x, do: 1
+        end
+      end
+
+      defmodule S2StaticTool do
+        def kind, do: :s2_static
+        def tool_schema, do: %{name: "s2_static"}
+        def effect, do: :read
+      end
+      """)
+
+      Code.compile_file(file)
+
+      on_exit(fn ->
+        for m <- [S2DecoyOuter, S2DecoyOuter.Inner, S2StaticTool] do
+          :code.purge(m)
+          :code.delete(m)
+        end
+
+        File.rm_rf!(dir)
+      end)
+
+      register(%{"s2_static" => S2StaticTool}, ctx)
+      violations = V.tool_schema_boundedness_violations()
+      # positive control: the tool's own body is found and is static, so it carries no violation
+      refute Enum.any?(violations, &(&1 =~ "S2StaticTool"))
     end
   end
 

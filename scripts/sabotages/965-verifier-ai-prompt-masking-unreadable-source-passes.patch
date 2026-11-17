@@ -4,7 +4,7 @@
 # Flips the named test(s).
 # APP: samen_core
 # TEST_FILES: test/ai/ai_prompt_masking_tool_checks_test.exs
-# MUST_FAIL: a tool whose source cannot be read is a violation
+# MUST_FAIL: a tool whose tool_schema body cannot be found in its source is a violation
 diff --git a/samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex b/samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex
 index a60f250b..42e79b65 100644
 --- a/samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex

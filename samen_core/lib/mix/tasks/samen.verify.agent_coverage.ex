@@ -546,10 +546,7 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
   # as the `__aliases__` clause above. (No rename to check here: a bare atom literal is
   # never subject to `alias ..., as:` resolution.)
   defp agent_kernel_alias?(mod, _env) when is_atom(mod) and mod not in [nil, true, false] do
-    parts = mod |> Module.split() |> Enum.map(&String.to_atom/1)
-    agent_module_parts?(parts)
-  rescue
-    ArgumentError -> false
+    atom_kernel?(mod)
   end
 
   # `@k` used as a call target (`@k.start(...)`, `apply(@k, :start, [...])`) — A9, closing
@@ -570,16 +567,21 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
         resolves_to_kernel?(parts, env, %{})
 
       mod when is_atom(mod) and mod not in [nil, true, false] ->
-        mod |> Module.split() |> Enum.map(&String.to_atom/1) |> agent_module_parts?()
+        atom_kernel?(mod)
 
       _ ->
         false
     end)
-  rescue
-    ArgumentError -> false
   end
 
   defp agent_kernel_alias?(_, _env), do: false
+
+  # Decided PER VALUE and without a rescue: an atom that is not an Elixir module (`:lists`) is simply not the
+  # kernel, so a decoy value recorded for the same `@k` can never hide a later kernel alias.
+  defp atom_kernel?(mod) do
+    String.starts_with?(Atom.to_string(mod), "Elixir.") and
+      mod |> Module.split() |> Enum.map(&String.to_atom/1) |> agent_module_parts?()
+  end
 
   # Shared "is this the agent kernel, fully-qualified or as bare `Agent`" predicate — used
   # both by `agent_kernel_alias?/2` above and by `resolves_to_kernel?/3` at every step of

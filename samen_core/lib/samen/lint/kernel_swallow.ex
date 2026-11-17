@@ -32,15 +32,9 @@ defmodule Samen.Lint.KernelSwallow do
     {"samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex", :alias_bindings} =>
       {1, "02d9c199936e0922",
        "Module.split/1 raises ArgumentError only for a non-Elixir atom (`:lists`), which binds no alias: [] is the exact answer, and the lexical alias scan is otherwise unaffected"},
-    {"samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex", :agent_kernel_alias?} =>
-      {2, "776b9c1d10580e97",
-       "Module.split/1 raises ArgumentError only for a non-Elixir atom (`:lists`), which is not the agent kernel: false is the exact answer; a genuine kernel alias never raises"},
     {"samen_core/lib/mix/tasks/samen.verify.prefixes.ex", :abbrev_for_resource} =>
       {1, "86db75e4fafd8744",
        "Spark raises ArgumentError only when get_opt is called on a module that is not a DSL; nil (no declared abbrev) is the documented answer there, any other failure is not rescued"},
-    {"samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex", :concat_or_nil} =>
-      {1, "6a085548cd0d07f5",
-       "Module.concat/1 raises ArgumentError only for a part that is neither an atom nor a binary (a dynamic AST alias such as `__MODULE__.Foo`), which names no module here: nil is the exact answer"},
     {"samen_core/lib/samen/replay/decoder.ex", :existing_atom} =>
       {1, "a50587893bc4a03e",
        "String.to_existing_atom/1 raises ArgumentError only for a name that is not an existing atom; nil (never an atom minted from a stored string) is the exact answer"},
@@ -52,7 +46,7 @@ defmodule Samen.Lint.KernelSwallow do
        "String.to_existing_atom/1 raises ArgumentError only for a name that is not an existing atom; `false` (not a known key) is the exact answer, and it fails closed (the key is not kept)"},
     {"samen_core/lib/samen/replay/monitor.ex", :start_finalize} =>
       {1, "18d1f9bd2a93adea",
-       "Task.Supervisor.async_nolink raises RuntimeError exactly when the supervisor is at max_children; the caller treats the TAGGED :max_children as a deferral (the session stays buffered for the next sweep), never as a persisted or discarded session"},
+       "Task.Supervisor.async_nolink raises RuntimeError exactly when the supervisor is at max_children; the caller drops that session (frees its buffer row via Buffer.take/1) and counts it as :dropped in the [:samen, :replay, :session] telemetry; it never waits, never persists and never retries"},
     {"samen_core/lib/samen/webhook/payload.ex", :allowlisted_fields} =>
       {1, "fc34072590cb09ca",
        "AshJsonApi's show_fields/1 raises ArgumentError only for a module that is not a Spark DSL (no JSON:API block); an empty allowlist is then the exact, fail-CLOSED answer (nothing auto-published); any other failure is not rescued"},

@@ -351,8 +351,6 @@ defmodule Mix.Tasks.Samen.Verify.AiPromptMasking do
 
   # An AST alias whose parts cannot be concatenated (`__MODULE__.Foo`, a dynamic part) names no module here: nil.
   defp concat_or_nil(parts) do
-    Module.concat(parts)
-  rescue
-    ArgumentError -> nil
+    if Enum.all?(parts, &is_atom/1), do: Module.concat(parts)
   end
 end
