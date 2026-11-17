@@ -522,16 +522,27 @@ subject's **own** DEK. Then:
 > | crash / failure | state | retry |
 > |---|---|---|
 > | before the marker commits | key live, nothing written | fail-closed `{:erasure_pending_failed, _}`; nothing destroyed |
-> | after the marker, before/during `Kms.shred` | key live (or `{:kms_shred_failed, _}`, which drops the marker) | recomputes the ref, refreshes the one marker, shreds |
+> | after the marker, before/during `Kms.shred` | key live (or `{:kms_shred_failed, _}`, which KEEPS the marker: `Kms.shred/1` does not promise the key survived an error) | recomputes the ref, refreshes the one marker, shreds |
 > | after the shred, at ANY of steps 2–5 (`seal_vault` … `aud_event`) | key gone, transaction rolled back, marker intact | `:shredded` + marker → same ref, `:performed`; every arm idempotent; report equals an uninterrupted run's |
 > | after the commit | complete, marker deleted | `:shredded` + earlier completed report → the old idempotent `already_shredded` re-run |
 > | key `:shredded`, NO marker, NO completed report (pre-fix crash, out-of-band `Kms.shred`) | the ref is unrecoverable | `{:error, {:shred_reference_lost, report}}` plus an `operator_action_required` report; never `:no_pseudonym`. `acknowledge_lost_reference: true` is the operator override and discloses `unavailable` |
 >
-> **What is persisted, and why that does not undo the erasure.** The marker holds the SAME value the index rows
-> (`afs_subject_ref`) hold permanently by design: `HMAC(psk_S, subject_id)`, hex, keyed off a key that is destroyed
-> by the time the marker is ever read. Without that key it links to nothing, and it is deleted when the erasure
-> completes. No PII and no key material is stored. `latest_report/2` ignores `"pending"` rows; `Erasure.pending/1`
-> lists unfinished erasures for the operator.
+> **What is persisted, and what that costs.** The marker holds the SAME pseudonym the index rows (`afs_subject_ref`)
+> hold permanently by design: `HMAC(psk_S, subject_id)`, hex, keyed off a key that is destroyed by the time the marker
+> is ever read. No plaintext PII and no key material is stored. But the marker row also stores `era_subject_id = S`
+> next to that pseudonym, so **for as long as the marker exists it re-links S to the retained fold-source rows**
+> (which runs cited S, and when), with no key needed. That is personal data under GDPR for the marker's lifetime,
+> and permanently so in any backup or WAL/PITR segment that covers the window. On a clean run the window is
+> milliseconds; on a stuck erasure it is unbounded. It is deleted in the transaction that completes the erasure.
+> What is not wired, by design: nothing retries a stuck erasure that is not TTL-expired (a DSAR or manual
+> erasure). Mitigation: `Erasure.report_stuck/1` runs on every `Retention.sweep/2` and logs/emits (value-free, no
+> subject id, no pseudonym) one `erasure_stuck_marker` event per marker older than 15 minutes, so an operator
+> re-runs `shred/2`. Changing what the marker stores would not help: anything that lets the retry find the rows
+> also links them. `shred/2` refuses (`{:error, :erasure_in_transaction}`) inside a caller's transaction, because
+> the marker must commit before the key is destroyed. `latest_report/2` ignores `"pending"` rows; `Erasure.pending/1`
+> lists unfinished erasures. A citing run the walk cannot open (outage, read error) fails the seal transaction
+> (`{:fold_ledger_unavailable, run_id, kind}`) and keeps the marker; only an absent run or one whose own key is
+> shredded is skipped.
 
 **The walk** (`Samen.AI.Agent.Compaction.withdraw/2`, illustrative name), registered as an ADR-046
 **erasure arm keyed on `subject_id`**, so `mix samen.verify.erasure_completeness` **discovers** it:

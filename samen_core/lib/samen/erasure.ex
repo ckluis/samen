@@ -469,6 +469,30 @@ defmodule Samen.Erasure do
     )
   end
 
+  @stuck_after_seconds 900
+
+  @doc """
+  Report every erasure whose resume marker is older than `:max_age_seconds` (default #{@stuck_after_seconds}) — a stuck
+  erasure. While a marker exists it links the subject id to the pseudonym that keys the retained fold-source rows
+  (and it persists in backups taken meanwhile), so a marker that does not clear is both an unfinished erasure and a
+  re-linkage: an operator must see it. Value-free: one `Samen.Observability.Failure` log line + telemetry per stuck
+  marker, carrying no subject id and no pseudonym. Returns the number reported. Called on every `Samen.Retention.sweep/2`.
+
+  Options: `:repo`, `:now` (default `DateTime.utc_now/0`), `:max_age_seconds`.
+  """
+  @spec report_stuck(keyword()) :: non_neg_integer()
+  def report_stuck(opts \\ []) do
+    now = Keyword.get(opts, :now) || DateTime.utc_now()
+    cutoff = DateTime.add(now, -Keyword.get(opts, :max_age_seconds, @stuck_after_seconds), :second)
+    stuck = Enum.filter(pending(opts), &(DateTime.compare(&1.recorded_at, cutoff) == :lt))
+    Enum.each(stuck, fn _ -> Samen.Observability.Failure.report_write(:erasure_stuck_marker, nil, :marker_not_cleared) end)
+    length(stuck)
+  rescue
+    e ->
+      Samen.Observability.Failure.report(:erasure_pending_read, nil, e)
+      0
+  end
+
   # The STEP 0 pseudonym read and its DISPOSITION TABLE (ADR-048 §7.3; the C4 ruling in
   # `_orch-runs/.../nodes/C4R/work/fail-closed.md`):
   #
@@ -706,7 +730,8 @@ defmodule Samen.Erasure do
           detail:
             "outcome=#{outcome} vault_sealed=#{sealed} non_pii_redacted=#{redacted} " <>
               "attestation_id=#{attestation[:attestation_id] || "none"} " <>
-              "derived_summary_invalidation=#{derived_summary_invalidation(disposition)}",
+              "derived_summary_invalidation=#{derived_summary_invalidation(disposition)}" <>
+              acknowledged_detail(disposition),
           occurred_at: now
         })
       end)

@@ -196,6 +196,9 @@ defmodule Samen.Retention do
         %{resource: spec.resource, action: spec.action, swept: swept, archived: archived}
       end)
 
+    # A resume marker that has not cleared is a stuck erasure (and a re-linkage): surface it on every sweep.
+    _ = Samen.Erasure.report_stuck(Keyword.take(opts, [:repo, :now]))
+
     total = Enum.reduce(by_spec, 0, &(&1.swept + &2))
     archived_total = Enum.reduce(by_spec, 0, &(&1.archived + &2))
 

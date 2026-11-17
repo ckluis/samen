@@ -482,6 +482,36 @@ defmodule Samen.ErasureResumableTest do
     refute Enum.any?(pending, &(&1.subject_id == done))
   end
 
+  describe "a stuck erasure is reported (review S3)" do
+    test "a marker older than the age is reported value-free; a fresh one is not" do
+      old = "erz-stuck-#{System.unique_integer([:positive])}"
+      fresh = "erz-fresh-#{System.unique_integer([:positive])}"
+      @repo.insert!(%Report{subject_id: old, outcome: "pending", tiers: %{"pending" => %{"subject_ref" => "abcd1234feed"}}, recorded_at: DateTime.add(DateTime.utc_now(), -3600, :second)})
+      put_marker!(fresh, "beef5678cafe")
+
+      log = capture_log(fn -> assert Erasure.report_stuck(repo: @repo) == 1 end)
+      assert log =~ "erasure_stuck_marker"
+      refute log =~ old
+      refute log =~ fresh
+      refute log =~ "abcd1234feed"
+      refute log =~ "beef5678cafe"
+    end
+
+    test "POSITIVE CONTROL: with only fresh markers nothing is reported" do
+      put_marker!("erz-fresh-#{System.unique_integer([:positive])}", "beef5678cafe")
+      log = capture_log(fn -> assert Erasure.report_stuck(repo: @repo) == 0 end)
+      refute log =~ "erasure_stuck_marker"
+    end
+
+    test "Retention.sweep surfaces it on every sweep" do
+      sid = "erz-stuck-#{System.unique_integer([:positive])}"
+      @repo.insert!(%Report{subject_id: sid, outcome: "pending", tiers: %{"pending" => %{"subject_ref" => "abcd1234feed"}}, recorded_at: DateTime.add(DateTime.utc_now(), -3600, :second)})
+      log = capture_log(fn -> Samen.Retention.sweep([], repo: @repo) end)
+      assert log =~ "erasure_stuck_marker"
+      refute log =~ sid
+    end
+  end
+
   test "a pending marker is not a report: latest_report ignores it, and a marker newer than a completed report does not shadow it" do
     {sid, s, _run} = seed!()
     assert {:ok, %{report: done}} = Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id)
@@ -532,6 +562,28 @@ defmodule Samen.ErasureResumableTest do
 
       assert audit.detail =~ "acknowledged_lost_reference=true"
       assert audit.detail =~ "derived_summary_invalidation=unavailable"
+    end
+
+    test "the override is also recorded on the tamper-evident chain row; an ordinary erasure's chain row is not" do
+      chain_detail = fn sid, org ->
+        @repo.one(
+          from(e in Samen.AuditChain.Entry,
+            where: e.org_id == ^org and e.subject_id == ^sid and e.event_type == "erasure",
+            select: e.detail
+          )
+        )
+      end
+
+      {sid, s, _run} = seed!()
+      assert {:ok, _} = Kms.shred(sid)
+      assert {:ok, _} = Erasure.shred(sid, repo: @repo, org_id: s.actor.org_id, acknowledge_lost_reference: true)
+      assert chain_detail.(sid, s.actor.org_id) =~ "acknowledged_lost_reference=true"
+
+      {sid2, s2, _} = seed!()
+      assert {:ok, _} = Erasure.shred(sid2, repo: @repo, org_id: s2.actor.org_id)
+      detail = chain_detail.(sid2, s2.actor.org_id)
+      assert detail =~ "derived_summary_invalidation=performed"
+      refute detail =~ "acknowledged_lost_reference"
     end
 
     test "an ordinary (non-overridden) erasure's audit row does not carry the acknowledgement" do
