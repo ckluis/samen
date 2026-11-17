@@ -1435,9 +1435,10 @@ case_GENHEXRO() {
   : > "$hx/packages/hexpm/seed.tar"
   cat > "$B/mix" <<'STUB'
 #!/usr/bin/env bash
-# GR_DIRTY: the probe modifies the committed registry; GR_RO: it plants a read-only directory under its private HEX_HOME
+# GR_DIRTY: the probe modifies the committed registry; GR_RO: it plants a read-only directory under its PRIVATE HEX_HOME
+# (never under the shared source one: a read-only dir there would outlive the case and defeat the temp-dir cleanup)
 if [[ -n "${GR_DIRTY:-}" ]]; then echo '{"abbrevs": {"tampered": 1}}' > priv/abbrev_registry.json; fi
-if [[ -n "${GR_RO:-}" ]]; then mkdir -p "$HEX_HOME/ro/sub"; : > "$HEX_HOME/ro/sub/f"; chmod 0555 "$HEX_HOME/ro/sub" "$HEX_HOME/ro"; fi
+if [[ -n "${GR_RO:-}" && "$HEX_HOME" == *samen_ci_hex_home.* ]]; then mkdir -p "$HEX_HOME/ro/sub"; : > "$HEX_HOME/ro/sub/f"; chmod 0555 "$HEX_HOME/ro/sub" "$HEX_HOME/ro"; fi
 exit 0
 STUB
   cat > "$B/rm" <<'STUB'
