@@ -29,6 +29,18 @@ defmodule Samen.Lint.KernelSwallow do
   @roots ["samen_core/lib"]
 
   @reviewed %{
+    {"samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex", :alias_bindings} =>
+      {1, "02d9c199936e0922",
+       "Module.split/1 raises ArgumentError only for a non-Elixir atom (`:lists`), which binds no alias: [] is the exact answer, and the lexical alias scan is otherwise unaffected"},
+    {"samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex", :agent_kernel_alias?} =>
+      {2, "776b9c1d10580e97",
+       "Module.split/1 raises ArgumentError only for a non-Elixir atom (`:lists`), which is not the agent kernel: false is the exact answer; a genuine kernel alias never raises"},
+    {"samen_core/lib/mix/tasks/samen.verify.prefixes.ex", :abbrev_for_resource} =>
+      {1, "86db75e4fafd8744",
+       "Spark raises ArgumentError only when get_opt is called on a module that is not a DSL; nil (no declared abbrev) is the documented answer there, any other failure is not rescued"},
+    {"samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex", :concat_or_nil} =>
+      {1, "6a085548cd0d07f5",
+       "Module.concat/1 raises ArgumentError only for a part that is neither an atom nor a binary (a dynamic AST alias such as `__MODULE__.Foo`), which names no module here: nil is the exact answer"},
     {"samen_core/lib/samen/replay/decoder.ex", :existing_atom} =>
       {1, "a50587893bc4a03e",
        "String.to_existing_atom/1 raises ArgumentError only for a name that is not an existing atom; nil (never an atom minted from a stored string) is the exact answer"},
@@ -77,12 +89,6 @@ defmodule Samen.Lint.KernelSwallow do
 
   @baseline %{
     "samen_core/lib/mix/tasks/samen.doctor.ex" => 1,
-    "samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex" => 4,
-    "samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex" => 2,
-    "samen_core/lib/mix/tasks/samen.verify.catalog_parity.ex" => 1,
-    "samen_core/lib/mix/tasks/samen.verify.pii_classify.ex" => 2,
-    "samen_core/lib/mix/tasks/samen.verify.prefixes.ex" => 1,
-    "samen_core/lib/mix/tasks/samen.verify.same_org_fk.ex" => 1,
     "samen_core/lib/mix/tasks/samen.verify.tool_actor_identity.ex" => 1,
     "samen_core/lib/samen/adapter_conformance_case.ex" => 6,
     "samen_core/lib/samen/aggregate/extension.ex" => 2,
@@ -172,7 +178,7 @@ defmodule Samen.Lint.KernelSwallow do
   # has to raise this number too (and `SwallowLintTest` compares it with the merge base, so it can only go down). Lower
   # it together with the baseline when a swallow is converted; never raise it.
   @ceilings %{
-    rescue: %{"samen_core/lib" => 134},
+    rescue: %{"samen_core/lib" => 123},
     error_arm: %{"samen_core/lib" => 19}
   }
 

@@ -82,6 +82,22 @@ defmodule Mix.Tasks.Samen.Verify.AiPromptMaskingToolChecksTest do
       assert Enum.any?(V.tool_schema_boundedness_violations(), &(&1 =~ "compile-time constant"))
     end
 
+    test "RED: a tool whose source cannot be read is a violation (the static-schema rule is unverifiable), never inert", ctx do
+      # compiled in memory: no source file on disk to scan
+      Module.create(
+        SourcelessTool,
+        quote do
+          def kind, do: :sourceless
+          def tool_schema, do: %{name: "sourceless"}
+          def effect, do: :read
+        end,
+        Macro.Env.location(__ENV__)
+      )
+
+      register(%{"sourceless" => SourcelessTool}, ctx)
+      assert Enum.any?(V.tool_schema_boundedness_violations(), &(&1 =~ "SourcelessTool" and &1 =~ "unverifiable"))
+    end
+
     test "a bounded, static tool def is NOT flagged (the check is not blanket-failing)", ctx do
       register(%{"bounded_ok" => BoundedTool}, ctx)
       refute Enum.any?(V.tool_schema_boundedness_violations(), &(&1 =~ "bounded_ok"))

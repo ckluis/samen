@@ -647,7 +647,8 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
   # --- (3) the agent-run resource carries a retention :shred spec ------------------------
 
   defp retention_violations do
-    specs = safe(fn -> Samen.Erasure.default_specs()[:retention_specs] || [] end, [])
+    # No rescue: a retention-spec read that fails fails the task (non-zero), it is not "no spec covers the run".
+    specs = Samen.Erasure.default_specs()[:retention_specs] || []
 
     covered? =
       Enum.any?(specs, fn spec ->
@@ -832,9 +833,4 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
     Code.ensure_loaded?(module) and function_exported?(module, fun, arity)
   end
 
-  defp safe(fun, default) do
-    fun.()
-  rescue
-    _ -> default
-  end
 end

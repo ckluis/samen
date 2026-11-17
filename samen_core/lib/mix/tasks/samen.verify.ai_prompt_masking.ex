@@ -83,7 +83,13 @@ defmodule Mix.Tasks.Samen.Verify.AiPromptMasking do
   end
 
   defp tool_schema_violations(mod) do
-    schema = safe(fn -> mod.tool_schema() end, :not_a_tool)
+    schema =
+      try do
+        mod.tool_schema()
+      rescue
+        # a tool whose schema cannot be built is a violation below, named by the exception module (never :ok)
+        e -> {:tool_schema_raised, e.__struct__}
+      end
 
     bounded =
       cond do
@@ -108,8 +114,8 @@ defmodule Mix.Tasks.Samen.Verify.AiPromptMasking do
   end
 
   # Staticness — an AST scan of the module's own source (its compile-time path): the
-  # `tool_schema/0` body may not call into Ash/Repo/Application (tenant-data reads). If the
-  # source is unreadable, this is inert (green-and-real), like the other defensive seams.
+  # `tool_schema/0` body may not call into Ash/Repo/Application (tenant-data reads). A module whose
+  # source cannot be read or whose body cannot be found is a VIOLATION (the rule is unverifiable), never inert.
   defp tool_schema_staticness_violations(mod) do
     with path when is_binary(path) <- source_path(mod),
          true <- File.regular?(path),
@@ -123,7 +129,9 @@ defmodule Mix.Tasks.Samen.Verify.AiPromptMasking do
         []
       end
     else
-      _ -> []
+      _ ->
+        ["#{inspect(mod)}: the `tool_schema/0` source could not be read or its body not found — the static-schema " <>
+           "rule (ADR-047 §4.2) is unverifiable, so it is not passed."]
     end
   end
 
@@ -208,8 +216,6 @@ defmodule Mix.Tasks.Samen.Verify.AiPromptMasking do
       src when is_binary(src) -> src
       _ -> nil
     end
-  rescue
-    _ -> nil
   end
 
   # The body AST of `mod`'s `def tool_schema` clause (arity 0), or nil — scoped to `mod`'s
@@ -236,7 +242,7 @@ defmodule Mix.Tasks.Samen.Verify.AiPromptMasking do
     {_ast, block} =
       Macro.prewalk(ast, nil, fn
         {:defmodule, _, [{:__aliases__, _, parts}, [do: block]]} = node, nil ->
-          if safe(fn -> Module.concat(parts) end, nil) == mod, do: {node, block}, else: {node, nil}
+          if concat_or_nil(parts) == mod, do: {node, block}, else: {node, nil}
 
         node, acc ->
           {node, acc}
@@ -343,9 +349,10 @@ defmodule Mix.Tasks.Samen.Verify.AiPromptMasking do
     end
   end
 
-  defp safe(fun, default) do
-    fun.()
+  # An AST alias whose parts cannot be concatenated (`__MODULE__.Foo`, a dynamic part) names no module here: nil.
+  defp concat_or_nil(parts) do
+    Module.concat(parts)
   rescue
-    _ -> default
+    ArgumentError -> nil
   end
 end
