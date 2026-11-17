@@ -35,11 +35,21 @@ defmodule Samen.Billing.SubscriptionMovement do
 
   ## Best-effort by contract (the A4 emit pattern)
 
-  This is BEST-EFFORT, exactly like `StatusChange` → `Engine.emit/1`: an append
-  failure (event resource unwired, DB hiccup, unresolvable org) NEVER aborts the
-  primary subscription write. The subscription state is the load-bearing fact; the
-  `mov` row rides alongside. All work is wrapped so nothing here can raise into the
-  transaction result.
+  This is BEST-EFFORT, exactly like `StatusChange` → `Engine.emit/1`: a failure
+  that sends no SQL (event or price resource unwired or unresolvable, a classifier
+  refusal, a validation or `MatchError`) does not abort the primary subscription
+  write: no row is appended, the failure is reported, and the write stands.
+
+  A failure that IS a failing SQL statement (a price or prior-movement read, or the
+  append, rejected by Postgres) runs inside the subscription's own transaction and
+  aborts it, so the subscription write is rolled back with it; rescuing the exception
+  cannot revive an aborted transaction. (Measured in
+  `demo/test/movement_continuity_test.exs`: an unresolvable price resource leaves the
+  write standing, a renamed price table rolls it back.)
+
+  A skipped row leaves a gap in the ledger. `Samen.Billing.MovementContinuity` and
+  `mix samen.verify.movement_continuity` find it (a broken before/after chain, a last
+  `mrr_after_cents` that is not the live MRR, or an active subscription with no row).
 
   A `:noop` movement (no revenue change — e.g. a `past_due → active` cure at the same
   price, or a metadata-only update) is STILL recorded as a `:noop` row, so the ledger
@@ -97,10 +107,11 @@ defmodule Samen.Billing.SubscriptionMovement do
 
     :ok
   rescue
-    # Best-effort by contract (the subscription write is the load-bearing fact), but never silent: ONE failed
+    # Best-effort by contract (a failure that sent no SQL leaves the subscription write standing; a failing SQL statement
+    # has already aborted the enclosing transaction and rolls the write back, see the moduledoc), but never silent: ONE failed
     # introspection / price read / classification / append skips the row AND is on record. Nothing below rescues
     # on its own, so a failed price read can no longer record a wrong-MRR (0) movement and a failed prior-active
-    # read can no longer book a reactivation as a :new.
+    # read can no longer book a reactivation as a :new. The skipped row is found by `MovementContinuity`.
     e ->
       Samen.Observability.Failure.report_write(:subscription_movement_append, changeset_org(changeset), e)
       :ok
