@@ -92,6 +92,7 @@ defmodule Samen.Billing.MovementContinuity do
     resource
     |> Ash.Query.ensure_selected([:status, :plan_id, :org_id])
     |> scope_org(org_id)
+    # authz-scope: system-plane verifier sweep over every org (org-less by design; narrowed by :org_id when given), reads ids and cents only
     |> Ash.read!(authorize?: false)
   end
 
@@ -100,6 +101,7 @@ defmodule Samen.Billing.MovementContinuity do
     |> Ash.Query.ensure_selected([:subscription_id, :mrr_before_cents, :mrr_after_cents, :occurred_at, :inserted_at, :org_id])
     |> scope_org(org_id)
     |> Ash.Query.sort(inserted_at: :asc, occurred_at: :asc, id: :asc)
+    # authz-scope: system-plane verifier sweep over every org (org-less by design; narrowed by :org_id when given), reads ids and cents only
     |> Ash.read!(authorize?: false)
     |> Enum.group_by(& &1.subscription_id)
   end
@@ -109,6 +111,7 @@ defmodule Samen.Billing.MovementContinuity do
     |> Ash.Query.ensure_selected([:plan_id, :unit_amount, :interval, :active, :org_id])
     |> Ash.Query.filter(interval == :monthly and active == true)
     |> scope_org(org_id)
+    # authz-scope: system-plane verifier sweep over every org (org-less by design; narrowed by :org_id when given), reads ids and cents only
     |> Ash.read!(authorize?: false)
     |> Map.new(&{{&1.org_id, &1.plan_id}, Samen.Type.Money.cents(&1.unit_amount)})
   end
