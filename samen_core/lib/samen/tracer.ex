@@ -292,7 +292,18 @@ defmodule Samen.Tracer do
 
     otel.with_span(tracer, name, %{}, fn _span_ctx ->
       Process.put(done, :started)
-      result = fun.()
+
+      # the BODY's exception is kept: if the span's own cleanup also raises, that one replaces it on the way out, and
+      # `guarded/2` re-raises this one instead (the job's failure is the cause, the plumbing's is only a report)
+      result =
+        try do
+          fun.()
+        rescue
+          e ->
+            Process.put(done, {:raised, e, __STACKTRACE__})
+            reraise e, __STACKTRACE__
+        end
+
       Process.put(done, {:done, result})
       result
     end)
@@ -311,7 +322,12 @@ defmodule Samen.Tracer do
             Samen.Observability.Failure.report_write(:job_span_finish, nil, e)
             result
 
-          # the body started and raised: re-raise it. It is never run a second time.
+          # the body raised (and the span's cleanup may have raised too): the BODY's exception wins. It is never run
+          # a second time.
+          {:raised, body_exception, body_stacktrace} ->
+            reraise body_exception, body_stacktrace
+
+          # the body started and did not return (nor raise): re-raise what we hold. It is never run a second time.
           :started ->
             reraise e, __STACKTRACE__
 

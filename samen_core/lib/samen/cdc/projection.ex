@@ -143,6 +143,9 @@ defmodule Samen.Cdc.Projection do
       `%Samen.NonPii.Entry{}` or maps with `:table_name`/`:column_name`/`:cleared_by`/
       `:reviewed_by`). Bypasses the DB registry lookup — used by tests. When absent,
       the live `Samen.NonPii.entries/0` registry is consulted (fail-closed to `[]`).
+    * `:repo` — the repo the live registry is read through (default: the configured repo).
+      An unreadable registry is reported (`cdc_projection_non_pii_entries`) and reads as `[]`,
+      so every freeform column stays refused.
   """
   @spec classify_columns(module(), keyword()) :: [column()]
   def classify_columns(resource, opts \\ []) do

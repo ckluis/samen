@@ -1,0 +1,21 @@
+# SABOTAGE: the plumbing's exception is re-raised instead of the job body's when both raise
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_e_test.exs
+# MUST_FAIL: RED: a body that raises while the span's CLEANUP also raises
+diff --git a/samen_core/lib/samen/tracer.ex b/samen_core/lib/samen/tracer.ex
+index 4088cddc..9a010b65 100644
+--- a/samen_core/lib/samen/tracer.ex
++++ b/samen_core/lib/samen/tracer.ex
+@@ -324,8 +324,8 @@ defmodule Samen.Tracer do
+ 
+           # the body raised (and the span's cleanup may have raised too): the BODY's exception wins. It is never run
+           # a second time.
+-          {:raised, body_exception, body_stacktrace} ->
+-            reraise body_exception, body_stacktrace
++          {:raised, _body_exception, _body_stacktrace} ->
++            reraise e, __STACKTRACE__
+ 
+           # the body started and did not return (nor raise): re-raise what we hold. It is never run a second time.
+           :started ->

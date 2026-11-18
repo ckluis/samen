@@ -1,0 +1,20 @@
+# SABOTAGE: a foreign subject's token is dropped from the silent denial set, so a fact about the data is 
+#   reported as an outage
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_e_test.exs
+# MUST_FAIL: another SUBJECT's token (:subject_mismatch) is masked and not reported
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+index 118dd194..5d60c9a6 100644
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -415,7 +415,7 @@ defmodule Samen.Api.PiiResolution do
+     if impersonated?(actor), do: masked, else: forbidden(label)
+   end
+ 
+-  @reveal_denials [:shredded, :not_found, :subject_mismatch, :field_mismatch]
++  @reveal_denials [:shredded, :not_found, :field_mismatch]
+ 
+   defp reveal_plaintext(%Masked{} = masked, {subject_id, vault_field}, actor, opts) do
+     vault = Keyword.get(opts, :vault, Samen.Vault)

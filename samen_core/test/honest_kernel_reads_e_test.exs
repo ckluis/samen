@@ -48,10 +48,29 @@ defmodule Samen.HonestKernelReadsETest do
     def granted?(_), do: false
   end
 
-  # The vault-row prefetch (`repo.all`) fails with a database error; a single-row read still works.
+  # What a real driver / Ash error looks like to a reporter: its message interpolates the very values it was
+  # processing (a plaintext, a vault token). A report that logged `Exception.message/1` or `inspect/1` of it would leak.
+  @leak "Secret-7731"
+  @leak_token "vt_leak7731abcdef"
+
+  defmodule LeakyError do
+    @moduledoc false
+    defexception [:message]
+  end
+
+  # A vault whose reveal FAILS with an error that carries a plaintext marker and a token.
+  defmodule LeakyVault do
+    @moduledoc false
+    def reveal(_masked, _repo, _opts),
+      do: {:error, %Samen.HonestKernelReadsETest.LeakyError{message: "reveal refused for #{"Secret-7731"} token=#{"vt_leak7731abcdef"}"}}
+  end
+
+  # The vault-row prefetch (`repo.all`) fails with a database error whose message carries the bound tokens and a
+  # value (as a Postgrex error with its parameters does); a single-row read still works.
   defmodule PrefetchDownRepo do
     @moduledoc false
-    def all(_query), do: raise(DBConnection.ConnectionError, "connection not available")
+    def message(tokens), do: "connection not available params=#{Enum.join(tokens, ",")} tier=#{"Secret-7731"}"
+    def all(_query), do: raise(DBConnection.ConnectionError, message(Process.get(:leak_tokens, [])))
     def get(schema, id), do: SamenCore.TestRepo.get(schema, id)
   end
 
@@ -70,9 +89,21 @@ defmodule Samen.HonestKernelReadsETest do
     end
   end
 
+  # Tracing plumbing whose span cleanup raises as well as the body.
+  defmodule CleanupFailingOtel do
+    @moduledoc false
+    def with_span(_tracer, _name, _attrs, fun) do
+      fun.(:ctx)
+    after
+      raise RuntimeError, "span cleanup refused"
+    end
+  end
+
+  # The catalog read fails with a database error whose message carries an org-shaped value, a key and a token.
   defmodule CatalogDownRepo do
     @moduledoc false
-    def all(_query), do: raise(DBConnection.ConnectionError, "connection not available")
+    def message, do: "connection not available org=#{"alice@example.com"} key=care_note token=#{"vt_leak7731abcdef"} tier=gold"
+    def all(_query), do: raise(DBConnection.ConnectionError, message())
   end
 
   # --- fixtures ------------------------------------------------------------------------------------------
@@ -124,11 +155,35 @@ defmodule Samen.HonestKernelReadsETest do
       # 3 rows x 3 fields fail; ONE log line and ONE event
       assert count(log, "pii_resolution_reveal") == 1
       assert log =~ "cause=unavailable"
+      # the org is named (the actor is known at the reveal site)
+      assert log =~ "org=#{actor.org_id}"
       assert [%{cause: "unavailable"}] = drain_failures(:pii_resolution_reveal)
 
-      # the report carries neither a plaintext nor a token (both appear in `inspect` of the values it could have leaked)
       refute log =~ "SECRET"
       refute log =~ "vt_"
+    end
+
+    test "RED: a reveal that fails with an error CARRYING a value and a token is reported by module name only (never message, value or token)" do
+      [o | _] = page()
+      actor = %{plane: :tenant, org_id: Ash.UUID.generate()}
+      msg = Exception.message(elem(LeakyVault.reveal(nil, nil, []), 1))
+      # the injected failure really carries what a leak would show
+      assert msg =~ @leak and msg =~ @leak_token
+
+      log =
+        capture_log(fn ->
+          [out] = PiiResolution.resolve([record(o)], Person, actor, repo: Repo, vault: LeakyVault)
+          assert %Masked{} = out.full_name
+        end)
+
+      assert count(log, "pii_resolution_reveal") == 1
+      assert log =~ "cause=Samen.HonestKernelReadsETest.LeakyError"
+      assert log =~ "org=#{actor.org_id}"
+      refute log =~ @leak
+      refute log =~ @leak_token
+      refute log =~ msg
+      assert [%{cause: "Samen.HonestKernelReadsETest.LeakyError"} = meta] = drain_failures(:pii_resolution_reveal)
+      refute inspect(meta) =~ @leak
     end
 
     test "RED: the same outage on an operator WITH a grant still omits the field (fail closed unchanged), reported once" do
@@ -175,12 +230,72 @@ defmodule Samen.HonestKernelReadsETest do
     end
   end
 
+  describe "PiiResolution.resolve — every denial that is a FACT ABOUT THE DATA stays masked and SILENT" do
+    defp resolve_quiet(rec) do
+      actor = %{plane: :tenant, org_id: Ash.UUID.generate()}
+      log = capture_log(fn -> send(self(), {:out, PiiResolution.resolve([rec], Person, actor, repo: Repo)}) end)
+      assert_received {:out, [out]}
+      {out, log}
+    end
+
+    defp assert_silent(log) do
+      refute log =~ "pii_resolution_reveal"
+      assert drain_failures(:pii_resolution_reveal) == []
+    end
+
+    test "a token with NO vault row (:not_found) is masked and not reported" do
+      [o | _] = page()
+      rec = struct(Person, %{id: o.id, full_name: Masked.new("vt_no_such_row_7731", :full_name)})
+      assert {:error, :not_found} = Vault.reveal(rec.full_name, Repo, subject_id: o.id, field: {:pii_name, :full_name})
+
+      {out, log} = resolve_quiet(rec)
+      assert %Masked{} = out.full_name
+      assert_silent(log)
+    end
+
+    test "another SUBJECT's token (:subject_mismatch) is masked and not reported" do
+      [o | _] = page()
+      rec = struct(Person, %{id: Ash.UUID.generate(), full_name: Masked.new(elem(o.vals.full_name, 0), :full_name)})
+      assert {:error, :subject_mismatch} = Vault.reveal(rec.full_name, Repo, subject_id: rec.id, field: {:pii_name, :full_name})
+
+      {out, log} = resolve_quiet(rec)
+      assert %Masked{} = out.full_name
+      assert_silent(log)
+    end
+
+    test "another FIELD's token (:field_mismatch) is masked and not reported" do
+      [o | _] = page()
+      rec = struct(Person, %{id: o.id, full_name: Masked.new(elem(o.vals.emails, 0), :full_name)})
+      assert {:error, :field_mismatch} = Vault.reveal(rec.full_name, Repo, subject_id: o.id, field: {:pii_name, :full_name})
+
+      {out, log} = resolve_quiet(rec)
+      assert %Masked{} = out.full_name
+      assert_silent(log)
+    end
+
+    test "POSITIVE CONTROL: the same tenant resolution with the KMS down DOES report (the silence above is the denial, not a dead reporter)" do
+      [o | _] = page()
+      Samen.Kms.FileBacked.simulate_outage(true)
+
+      {out, log} = resolve_quiet(record(o))
+      assert %Masked{} = out.full_name
+      assert count(log, "pii_resolution_reveal") == 1
+      assert [%{cause: "unavailable"}] = drain_failures(:pii_resolution_reveal)
+    end
+  end
+
   # --- PiiResolution: a failed vault-row prefetch -----------------------------------------------------------
 
   describe "PiiResolution.prefetch — a failed vault-row prefetch is reported once" do
     test "RED: the prefetch read fails -> ONE report by name; the value is still the correct one (per-value read)" do
       owners = page()
       actor = %{plane: :tenant, org_id: Ash.UUID.generate()}
+      tokens = for o <- owners, {_name, {token, _plain}} <- o.vals, do: token
+      Process.put(:leak_tokens, tokens)
+      msg = PrefetchDownRepo.message(tokens)
+      # the injected failure really carries what a leak would show: the bound tokens and a value
+      assert_raise DBConnection.ConnectionError, msg, fn -> PrefetchDownRepo.all(nil) end
+      assert msg =~ "vt_" and msg =~ @leak
 
       log =
         capture_log(fn ->
@@ -194,7 +309,11 @@ defmodule Samen.HonestKernelReadsETest do
       assert [%{cause: "DBConnection.ConnectionError"}] = drain_failures(:pii_resolution_vault_rows)
       refute log =~ "SECRET"
       refute log =~ "vt_"
+      refute log =~ @leak
       refute log =~ "connection not available"
+      for token <- tokens, do: refute(log =~ token)
+      refute log =~ msg
+      assert log =~ "org=#{actor.org_id}"
     end
 
     test "POSITIVE CONTROL: the healthy repo prefetches without a report" do
@@ -250,8 +369,15 @@ defmodule Samen.HonestKernelReadsETest do
       assert count(log, "pii_resolution_declared_keys") == 1
       assert log =~ "cause=DBConnection.ConnectionError"
       assert [%{cause: "DBConnection.ConnectionError"}] = drain_failures(:pii_resolution_declared_keys)
+      msg = CatalogDownRepo.message()
+      # the injected failure really carries what a leak would show
+      assert msg =~ @secret and msg =~ "vt_" and msg =~ "gold"
       refute log =~ @secret
       refute log =~ "gold"
+      refute log =~ "vt_"
+      refute log =~ "connection not available"
+      refute log =~ msg
+      assert log =~ "org=#{org}"
     end
 
     test "POSITIVE CONTROL: a readable catalog masks only the declared key and reports nothing" do
@@ -372,6 +498,18 @@ defmodule Samen.HonestKernelReadsETest do
       end
 
       assert :counters.get(c2, 1) == 1
+    end
+
+    test "RED: a body that raises while the span's CLEANUP also raises: the BODY's exception wins, the job ran once" do
+      for meta <- [%{}, %{"trace_context" => []}] do
+        c = counter()
+
+        assert_raise RuntimeError, "job failed", fn ->
+          Tracer.__with_job_span__("job", meta, fn -> bump(c) && raise(RuntimeError, "job failed") end, CleanupFailingOtel)
+        end
+
+        assert :counters.get(c, 1) == 1
+      end
     end
 
     test "RED: tracing that fails BEFORE the body runs the body once, untraced, and reports by name (no message)" do

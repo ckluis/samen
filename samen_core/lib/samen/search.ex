@@ -60,7 +60,9 @@ defmodule Samen.Search do
 
   An empty/blank term, an org with no registered index, a resource with no registered
   non-PII field, or a resource the caller did not offer → `[]`. There is no
-  "match-all" default and no full-table dump.
+  "match-all" default and no full-table dump. An UNREADABLE registry (or an unreadable
+  resource) is not one of those: `query/3` raises, so an outage is never answered as "no
+  results"; callers handle the raise (`Samen.Web.Reads.Guard`, `SearchRecords`'s text arm).
 
   ## The tsvector
 

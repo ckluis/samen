@@ -353,7 +353,7 @@ defmodule Samen.Api.PiiResolution do
     # keeps the value masked (`••••`) — fail-closed, no plaintext egress.
     if Keyword.get(opts, :grant_egress?, false) and
          operator_granted?(record, label, resource, reveal_action, actor, opts) === true do
-      reveal_plaintext(masked, binding_of(resource, record, label, opts), opts) || masked
+      reveal_plaintext(masked, binding_of(resource, record, label, opts), actor, opts) || masked
     else
       masked
     end
@@ -365,12 +365,12 @@ defmodule Samen.Api.PiiResolution do
       :tenant ->
         # Tenant owns its own org's PII → clear, no grant. Fail closed on shred/KMS:
         # a failed decrypt leaves the masked value (`••••`), never raises a leak.
-        reveal_plaintext(masked, binding_of(resource, record, label, opts), opts) || masked
+        reveal_plaintext(masked, binding_of(resource, record, label, opts), actor, opts) || masked
 
       :operator ->
         cond do
           operator_granted?(record, label, resource, reveal_action, actor, opts) ->
-            reveal_plaintext(masked, binding_of(resource, record, label, opts), opts) ||
+            reveal_plaintext(masked, binding_of(resource, record, label, opts), actor, opts) ||
               masked_or_forbidden(masked, label, actor)
 
           # IMPERSONATION UI posture (T4.1; doc §control: "personal data renders ••••
@@ -417,7 +417,7 @@ defmodule Samen.Api.PiiResolution do
 
   @reveal_denials [:shredded, :not_found, :subject_mismatch, :field_mismatch]
 
-  defp reveal_plaintext(%Masked{} = masked, {subject_id, vault_field}, opts) do
+  defp reveal_plaintext(%Masked{} = masked, {subject_id, vault_field}, actor, opts) do
     vault = Keyword.get(opts, :vault, Samen.Vault)
 
     case Keyword.get(opts, :repo) do
@@ -438,7 +438,7 @@ defmodule Samen.Api.PiiResolution do
           # Anything else (a KMS outage, a decrypt failure, an unknown error) is a failed read: the value stays masked
           # (never revealed), and the failure is reported once per call, by name, carrying only the reason atom.
           other ->
-            report_reveal_failure(opts, other)
+            report_reveal_failure(opts, actor, other)
             nil
         end
     end
@@ -447,13 +447,20 @@ defmodule Samen.Api.PiiResolution do
   # ONE report per prefetched call (an atomics flag in the call's opts), however many values fail: a KMS outage on a
   # 1000-row page is one log line, not 3000. The reason is reported by `Failure` as an atom name or "unknown" — never
   # a value, never a token.
-  defp report_reveal_failure(opts, other) do
+  defp report_reveal_failure(opts, actor, other) do
     # (`prefetch/4` always sets the flag; a fresh one reports, so a caller without it is never silent)
     flag = Keyword.get(opts, :__reveal_reported) || :atomics.new(1, [])
 
     if :atomics.compare_exchange(flag, 1, 0, 1) == :ok do
-      reason = with {:error, reason} when is_atom(reason) <- other, do: reason
-      Samen.Observability.Failure.report(:pii_resolution_reveal, nil, reason)
+      # an atom reason reports its name, an error struct its MODULE name (`Failure.causes/1`, never the message), else "unknown"
+      reason =
+        case other do
+          {:error, reason} when is_atom(reason) -> reason
+          {:error, %{__struct__: _} = error} -> error
+          _ -> :unknown
+        end
+
+      Samen.Observability.Failure.report(:pii_resolution_reveal, actor, reason)
     end
 
     :ok
