@@ -33,7 +33,10 @@ defmodule Mix.Tasks.Samen.Verify.RevealOrgs do
         )
 
       {:error, :unavailable} ->
-        Samen.Verifier.halt_if_violations(@task_name, ["the pending reveal requests could not be read"])
+        IO.puts("")
+        IO.puts("FAIL: #{@task_name} could not read the pending reveal requests — an unreadable check must not pass (fail-closed).")
+        IO.puts("")
+        :erlang.halt(1)
     end
   end
 end

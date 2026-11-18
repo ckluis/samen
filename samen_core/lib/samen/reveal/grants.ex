@@ -486,7 +486,6 @@ defmodule Samen.Reveal.Grants do
 
   # Only the engine wiring a caller can pass (the tests do): the approval store the engine reads and writes.
   defp wiring_opts(opts) when is_map(opts), do: opts |> Map.take([:approval_resource]) |> Map.to_list()
-  defp wiring_opts(opts) when is_list(opts), do: Keyword.take(opts, [:approval_resource])
 
   @doc false
   # Public (not private) so `Samen.Reveal.ApprovalHandler.on_approve/2` — the registered
