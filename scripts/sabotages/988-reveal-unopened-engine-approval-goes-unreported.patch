@@ -1,0 +1,21 @@
+# SABOTAGE: Reveal.Grants drops the error of the parallel pii_reveal approval it could not open, so a 
+#   waiting request is missing from the approver queue without a trace
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_d_test.exs
+# MUST_FAIL: RED: the approvals read fails -> the request still stands, and the missing approval is reported by name
+diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+index 810c22b2..28932346 100644
+--- a/samen_core/lib/samen/reveal/grants.ex
++++ b/samen_core/lib/samen/reveal/grants.ex
+@@ -197,8 +197,7 @@ defmodule Samen.Reveal.Grants do
+       # Any other failure leaves the request WITHOUT its pending approval, so an approver surface lists "nothing
+       # pending" for a request that is waiting. The request itself stands (its row and `requested` audit are already
+       # committed; `approve/2` reopens the approval idempotently), but the gap is reported, never silent.
+-      {:error, reason} ->
+-        Samen.Observability.Failure.report_write(:reveal_open_engine_approval, org_id, reason)
++      {:error, _} ->
+         :ok
+     end
+   rescue
