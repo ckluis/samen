@@ -201,7 +201,11 @@ defmodule Samen.Tracer do
       Ecto.Changeset.put_change(changeset, :meta, new_meta)
     end
   rescue
-    _ -> changeset
+    # Tracing is not essential to the job: it is enqueued without a parent link. But the lost link is REPORTED (by name
+    # and exception module, never the changeset), not silent.
+    e ->
+      Samen.Observability.Failure.report_write(:trace_context_inject, nil, e)
+      changeset
   end
 
   @doc """
@@ -263,27 +267,61 @@ defmodule Samen.Tracer do
     end
   end
 
+  # The job body runs EXACTLY ONCE. A failure of the tracing plumbing BEFORE the body starts runs the body untraced
+  # (reported); a failure AFTER the body finished returns the body's result (reported); and a body that raised
+  # re-raises: it is never run a second time (a retry of a job is Oban's decision, not the tracer's).
   @doc false
-  def __with_job_span__(name, meta, fun) when is_map(meta) do
-    # Attach the W3C parent context (only) and keep the token for restoration.
-    token = attach_job_trace_context(meta)
+  def __with_job_span__(name, meta, fun, otel \\ :otel_tracer)
 
-    tracer = :opentelemetry.get_application_tracer(__MODULE__)
+  def __with_job_span__(name, meta, fun, otel) when is_map(meta) do
+    guarded(fun, fn done ->
+      token = attach_job_trace_context(meta)
 
-    try do
-      :otel_tracer.with_span(tracer, name, %{}, fn _span_ctx -> fun.() end)
-    after
-      :otel_ctx.detach(token)
-    end
-  rescue
-    _ ->
-      fun.()
+      try do
+        run_span(name, fun, otel, done)
+      after
+        :otel_ctx.detach(token)
+      end
+    end)
   end
 
-  def __with_job_span__(name, _meta, fun) do
+  def __with_job_span__(name, _meta, fun, otel), do: guarded(fun, fn done -> run_span(name, fun, otel, done) end)
+
+  defp run_span(name, fun, otel, done) do
     tracer = :opentelemetry.get_application_tracer(__MODULE__)
-    :otel_tracer.with_span(tracer, name, %{}, fn _span_ctx -> fun.() end)
-  rescue
-    _ -> fun.()
+
+    otel.with_span(tracer, name, %{}, fn _span_ctx ->
+      Process.put(done, :started)
+      result = fun.()
+      Process.put(done, {:done, result})
+      result
+    end)
+  end
+
+  defp guarded(fun, traced) do
+    done = {__MODULE__, make_ref()}
+
+    try do
+      traced.(done)
+    rescue
+      e ->
+        case Process.get(done) do
+          # the body ran and finished; the tracing plumbing failed afterwards: its result stands
+          {:done, result} ->
+            Samen.Observability.Failure.report_write(:job_span_finish, nil, e)
+            result
+
+          # the body started and raised: re-raise it. It is never run a second time.
+          :started ->
+            reraise e, __STACKTRACE__
+
+          # the tracing plumbing failed before the body started: run the body untraced
+          nil ->
+            Samen.Observability.Failure.report_write(:job_span_setup, nil, e)
+            fun.()
+        end
+    after
+      Process.delete(done)
+    end
   end
 end

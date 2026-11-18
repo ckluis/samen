@@ -237,7 +237,7 @@ defmodule Samen.Cdc.Projection do
   defp non_pii_cleared_set(nil, _opts), do: MapSet.new()
 
   defp non_pii_cleared_set(table, opts) do
-    (Keyword.get(opts, :non_pii_entries) || safe_registry_entries())
+    (Keyword.get(opts, :non_pii_entries) || safe_registry_entries(opts))
     |> Enum.filter(fn e ->
       to_string(e.table_name) == table and e.cleared_by != e.reviewed_by
     end)
@@ -245,11 +245,18 @@ defmodule Samen.Cdc.Projection do
     |> MapSet.new()
   end
 
-  defp safe_registry_entries do
-    NonPii.entries()
+  # An unreadable registry fails CLOSED to `[]` (no clearances: every freeform column stays refused, nothing is
+  # opened), but the mirror that shrank because of it is REPORTED by name, once per classification, so it is not
+  # mistaken for a deliberate default-deny.
+  defp safe_registry_entries(opts) do
+    NonPii.entries(Keyword.take(opts, [:repo]))
   rescue
-    _ -> []
+    e ->
+      Samen.Observability.Failure.report(:cdc_projection_non_pii_entries, nil, e)
+      []
   catch
-    :exit, _ -> []
+    :exit, reason ->
+      Samen.Observability.Failure.report(:cdc_projection_non_pii_entries, nil, reason)
+      []
   end
 end

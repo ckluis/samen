@@ -1,0 +1,20 @@
+# SABOTAGE: a tracing failure after the job finished runs the job again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_e_test.exs
+# MUST_FAIL: RED: tracing that fails AFTER the body finished
+diff --git a/samen_core/lib/samen/tracer.ex b/samen_core/lib/samen/tracer.ex
+index bd6cd43d..1278eac1 100644
+--- a/samen_core/lib/samen/tracer.ex
++++ b/samen_core/lib/samen/tracer.ex
+@@ -309,7 +309,8 @@ defmodule Samen.Tracer do
+           # the body ran and finished; the tracing plumbing failed afterwards: its result stands
+           {:done, result} ->
+             Samen.Observability.Failure.report_write(:job_span_finish, nil, e)
+-            result
++            _ = result
++            fun.()
+ 
+           # the body started and raised: re-raise it. It is never run a second time.
+           :started ->

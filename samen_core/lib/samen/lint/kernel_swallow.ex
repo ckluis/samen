@@ -77,6 +77,27 @@ defmodule Samen.Lint.KernelSwallow do
     {"samen_core/lib/samen/api/pii_resolution.ex", :table_name} =>
       {1, "e7b81d12cc48f77e",
        "AshPostgres.DataLayer.Info.table/1 returns nil for a resource without a table and raises only for a module that is not a Spark resource; nil is the INDETERMINATE answer, which bag_context/5 turns into :mask_all — the whole custom bag is masked on every masking plane, never emitted in the clear"},
+    {"samen_core/lib/samen/feature_flags/cache.ex", :lookup} =>
+      {1, "a00d815c30b6517c",
+       ":ets.lookup raises ArgumentError only when the named table does not exist; :no_table is the exact answer, and its caller starts the table owner and loads the flag (a failure of THAT is reported and reads OFF) — no read has failed"},
+    {"samen_core/lib/samen/auth/org_actor.ex", :authorized_org_ids} =>
+      {1, "8dec17dbf590e324",
+       "the LEGACY shape of authorized_org_ids_result/2: a raised read answers [] (no org: deny, fail closed — never an org the credential was not shown to hold) and is logged by name and exception module (report/2, never the message or a value); a caller that must tell an outage from 'no org' uses the tagged authorized_org_ids_result/2"},
+    {"samen_core/lib/samen/auth/org_actor.ex", :resolve} =>
+      {1, "21b85f2b299a7589",
+       "the LEGACY shape of resolve_result/3: a raised read answers :error (no actor: deny, fail closed — never an actor the credential was not shown to hold) and is logged by name and exception module (report/2, never the message or a value); a caller that must tell an outage from a denial uses the tagged resolve_result/3"},
+    {"samen_core/lib/samen/catalog.ex", :destination_table} =>
+      {1, "56231105dbe1ce2d",
+       "AshPostgres.DataLayer.Info.table/1 returns nil for a resource on another data layer and raises only for a module that is not a Spark resource (Ash rejects such a relationship destination at compile time): nil (no physical table to record for that relationship) is the exact answer, and nothing is read from the database"},
+    {"samen_core/lib/samen/catalog.ex", :has_postgres_table?} =>
+      {1, "85f6e8d53606e3bc",
+       "AshPostgres.DataLayer.Info.table/1 returns nil for a resource on another data layer and raises only for a module that is not a Spark resource: false (no physical table) is the exact answer, and nothing is read from the database"},
+    {"samen_core/lib/samen/cdc/projection.ex", :table_name} =>
+      {1, "1dfd9df7807e27b9",
+       "AshPostgres.DataLayer.Info.table/1 returns nil for a resource on another data layer and raises only for a module that is not a Spark resource: nil (no table) means no table-scoped non_pii! clearance applies, so every freeform column stays refused (default-deny) — never an opened projection"},
+    {"samen_core/lib/samen/search.ex", :existing_attribute} =>
+      {1, "894cc28a4af210b6",
+       "String.to_existing_atom/1 raises ArgumentError only for a name that is not an existing atom; nil (a registered field that is not an attribute of the resource is never searched, and no atom is minted from registry data) is the exact, fail-closed answer"},
     {"samen_core/lib/samen/replay/resolver.ex", :repo} =>
       {1, "be3694e4bcedc7a2",
        "AshPostgres.DataLayer.Info.repo/2 returns nil for a resource on another data layer (nothing to raise); it raises only for a module that is not a Spark resource, or a repo function that itself raises: nil (no repo, so the value stays masked — never decrypted) is the fail-closed answer"},
@@ -121,10 +142,7 @@ defmodule Samen.Lint.KernelSwallow do
     "samen_core/lib/samen/aggregate/extension.ex" => 2,
     "samen_core/lib/samen/analytics.ex" => 1,
     "samen_core/lib/samen/analytics/sources.ex" => 1,
-    "samen_core/lib/samen/auth/org_actor.ex" => 2,
     "samen_core/lib/samen/backup/verification.ex" => 1,
-    "samen_core/lib/samen/catalog.ex" => 2,
-    "samen_core/lib/samen/cdc/projection.ex" => 3,
     "samen_core/lib/samen/clone.ex" => 1,
     "samen_core/lib/samen/context/info.ex" => 1,
     "samen_core/lib/samen/context/transformers/no_storage.ex" => 1,
@@ -132,8 +150,6 @@ defmodule Samen.Lint.KernelSwallow do
     "samen_core/lib/samen/custom_fields/change.ex" => 1,
     "samen_core/lib/samen/data_map.ex" => 1,
     "samen_core/lib/samen/delivery/provider_conformance_case.ex" => 2,
-    "samen_core/lib/samen/feature_flags.ex" => 1,
-    "samen_core/lib/samen/feature_flags/cache.ex" => 1,
     "samen_core/lib/samen/files.ex" => 1,
     "samen_core/lib/samen/fleet/attention.ex" => 1,
     "samen_core/lib/samen/fleet/nonce_cache.ex" => 1,
@@ -159,10 +175,8 @@ defmodule Samen.Lint.KernelSwallow do
     "samen_core/lib/samen/scopes/marketing/blueprint.ex" => 2,
     "samen_core/lib/samen/scopes/marketing/send_worker.ex" => 1,
     "samen_core/lib/samen/scopes/support/sla_breach_worker.ex" => 1,
-    "samen_core/lib/samen/search.ex" => 3,
     "samen_core/lib/samen/sequences.ex" => 1,
     "samen_core/lib/samen/test_sandbox.ex" => 1,
-    "samen_core/lib/samen/tracer.ex" => 3,
     "samen_core/lib/samen/transformers/materialize_pii.ex" => 1,
     "samen_core/lib/samen/versioning/select_for_version.ex" => 1,
     "samen_core/lib/samen/webhook/event.ex" => 1
@@ -183,7 +197,7 @@ defmodule Samen.Lint.KernelSwallow do
   # has to raise this number too (and `SwallowLintTest` compares it with the merge base, so it can only go down). Lower
   # it together with the baseline when a swallow is converted; never raise it.
   @ceilings %{
-    rescue: %{"samen_core/lib" => 84},
+    rescue: %{"samen_core/lib" => 69},
     error_arm: %{"samen_core/lib" => 15}
   }
 

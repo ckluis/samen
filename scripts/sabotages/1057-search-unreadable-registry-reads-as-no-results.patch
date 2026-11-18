@@ -1,0 +1,19 @@
+# SABOTAGE: an unreadable search registry reads as no results
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_e_test.exs
+# MUST_FAIL: RED: an unreadable registry raises
+diff --git a/samen_core/lib/samen/search.ex b/samen_core/lib/samen/search.ex
+index 13af406d..56b4bba3 100644
+--- a/samen_core/lib/samen/search.ex
++++ b/samen_core/lib/samen/search.ex
+@@ -223,6 +223,8 @@ defmodule Samen.Search do
+     |> Ash.Query.new()
+     |> Ash.Query.do_filter(expr(enabled == true))
+     |> Ash.read!(scope: scope)
++  rescue
++    _ -> []
+   end
+ 
+   # The registry stores `resource_name` as the module's inspect form

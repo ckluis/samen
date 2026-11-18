@@ -1,0 +1,19 @@
+# SABOTAGE: a job body that raised is run a second time by the tracer
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_e_test.exs
+# MUST_FAIL: RED: a job body that RAISES is run once
+diff --git a/samen_core/lib/samen/tracer.ex b/samen_core/lib/samen/tracer.ex
+index bd6cd43d..62bee728 100644
+--- a/samen_core/lib/samen/tracer.ex
++++ b/samen_core/lib/samen/tracer.ex
+@@ -313,7 +313,7 @@ defmodule Samen.Tracer do
+ 
+           # the body started and raised: re-raise it. It is never run a second time.
+           :started ->
+-            reraise e, __STACKTRACE__
++            fun.()
+ 
+           # the tracing plumbing failed before the body started: run the body untraced
+           nil ->

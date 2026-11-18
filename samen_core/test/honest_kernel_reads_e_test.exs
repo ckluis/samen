@@ -13,9 +13,14 @@ defmodule Samen.HonestKernelReadsETest do
   alias Samen.Api.PiiResolution
   alias Samen.CustomFields
   alias Samen.Masked
+  alias Samen.Tracer
   alias Samen.Vault
   alias SamenCore.Support.CrmScopeFixture.Person
+  alias Samen.FeatureFlags
+  alias Samen.FeatureFlags.{Cache, Decision}
   alias SamenCore.Support.CustomFields.Widget
+  alias SamenCore.Support.{UnreadableFlag, UnreadableSearchIndex}
+  alias SamenCore.Support.NotificationFixture.SearchIndex
   alias SamenCore.TestRepo, as: Repo
 
   setup do
@@ -51,6 +56,20 @@ defmodule Samen.HonestKernelReadsETest do
   end
 
   # The custom-field catalog read (`repo.all`) fails with a database error.
+  # Stand-ins for :otel_tracer whose plumbing fails: before the body starts, and after it finished.
+  defmodule SetupFailingOtel do
+    @moduledoc false
+    def with_span(_tracer, _name, _attrs, _fun), do: raise(RuntimeError, "span setup refused for cohort tier=Secret-7731")
+  end
+
+  defmodule FinishFailingOtel do
+    @moduledoc false
+    def with_span(_tracer, _name, _attrs, fun) do
+      fun.(:ctx)
+      raise RuntimeError, "span export refused"
+    end
+  end
+
   defmodule CatalogDownRepo do
     @moduledoc false
     def all(_query), do: raise(DBConnection.ConnectionError, "connection not available")
@@ -76,7 +95,7 @@ defmodule Samen.HonestKernelReadsETest do
 
   defp page, do: Enum.map(1..3, fn i -> owner!("row#{i}") end)
 
-  defp count(log, name), do: length(Regex.scan(~r/read failed read=#{name} /, log))
+  defp count(log, name), do: length(Regex.scan(~r/(read|write) failed (read|write)=#{name} /, log))
 
   defp drain_failures(name, acc \\ []) do
     receive do
@@ -248,6 +267,243 @@ defmodule Samen.HonestKernelReadsETest do
 
       refute log =~ "pii_resolution_declared_keys"
       assert drain_failures(:pii_resolution_declared_keys) == []
+    end
+  end
+
+  # --- FeatureFlags: a flag that could not be LOADED is OFF (closed) and says so --------------------------------
+
+  describe "FeatureFlags — a failed flag load fails OFF (never on) AND is reported by name" do
+    defp flag_name, do: "e.flag.#{System.unique_integer([:positive])}"
+
+    test "RED: an unreadable flag table -> OFF (kill_switch, unchanged), ONE report by name, no query or value" do
+      name = flag_name()
+      owner = Ash.UUID.generate()
+
+      log =
+        capture_log(fn ->
+          assert %Decision{on: false, reason: :kill_switch} =
+                   FeatureFlags.evaluate(name, Ash.UUID.generate(), flag_module: UnreadableFlag, owner_org_id: owner)
+        end)
+
+      assert count(log, "feature_flag_load") == 1
+      assert log =~ "cause=Ash.Error.Unknown"
+      refute log =~ name
+      assert [%{cause: "Ash.Error.Unknown"} | _] = drain_failures(:feature_flag_load)
+    end
+
+    test "RED: a loader that RAISES -> OFF, reported by exception module, the exception message (which holds a value) never logged" do
+      name = flag_name()
+      loader = fn _ -> raise RuntimeError, "loader refused for cohort tier=Secret-7731" end
+
+      log = capture_log(fn -> assert %Decision{on: false} = FeatureFlags.evaluate(name, "org", loader: loader) end)
+
+      assert count(log, "feature_flag_load") == 1
+      assert log =~ "cause=RuntimeError"
+      refute log =~ "Secret-7731"
+    end
+
+    test "POSITIVE CONTROL: a readable flag is ON and an unconfigured owner is a documented OFF; neither is reported" do
+      name = flag_name()
+      on = %{name: name, enabled: true, rollout_pct: 100, stage: nil, target_rules: [], variants: %{}}
+
+      log =
+        capture_log(fn ->
+          assert %Decision{on: true} = FeatureFlags.evaluate(name, "org", loader: fn _ -> {:ok, on} end)
+
+          Cache.invalidate_all()
+          assert %Decision{on: false, reason: :kill_switch} = FeatureFlags.evaluate(flag_name(), "org", flag_module: UnreadableFlag, owner_org_id: nil)
+          assert %Decision{on: false, reason: :kill_switch} = FeatureFlags.evaluate(flag_name(), "org", loader: fn _ -> {:ok, nil} end)
+        end)
+
+      refute log =~ "feature_flag_load"
+      assert drain_failures(:feature_flag_load) == []
+    end
+
+    test "RED: an assignment emitter that raises costs only the event: the decision stays ON and the lost write is reported" do
+      name = flag_name()
+      on = %{name: name, enabled: true, rollout_pct: 100, stage: nil, target_rules: [], variants: %{"a" => 1}}
+      emit = fn _payload -> raise RuntimeError, "emit refused for cohort tier=Secret-7731" end
+
+      log =
+        capture_log(fn ->
+          assert %Decision{on: true, variant: :a} = FeatureFlags.evaluate(name, "org", loader: fn _ -> {:ok, on} end, emit: emit)
+        end)
+
+      assert log =~ "write failed write=feature_flag_assignment_emit"
+      assert log =~ "cause=RuntimeError"
+      refute log =~ "Secret-7731"
+
+      # POSITIVE CONTROL: a working emitter on the same flag reports nothing
+      control =
+        capture_log(fn ->
+          assert %Decision{on: true, variant: :a} = FeatureFlags.evaluate(flag_name(), "org", loader: fn _ -> {:ok, on} end, emit: fn _ -> :ok end)
+        end)
+
+      refute control =~ "feature_flag_assignment_emit"
+    end
+  end
+
+  # --- Tracer: tracing plumbing never runs a job twice, and its failures are reported ---------------------------
+
+  describe "Tracer.with_job_span — the job body runs exactly once" do
+    defp counter, do: :counters.new(1, [])
+    defp bump(c), do: :counters.add(c, 1, 1)
+
+    test "RED: a job body that RAISES is run once and its exception propagates (it was run a second time before)" do
+      c = counter()
+
+      assert_raise RuntimeError, "job failed", fn ->
+        Tracer.__with_job_span__("job", %{}, fn ->
+          bump(c)
+          raise RuntimeError, "job failed"
+        end)
+      end
+
+      assert :counters.get(c, 1) == 1
+
+      # the meta-carrying clause is the same
+      c2 = counter()
+
+      assert_raise RuntimeError, fn ->
+        Tracer.__with_job_span__("job", %{"trace_context" => []}, fn ->
+          bump(c2)
+          raise RuntimeError, "job failed"
+        end)
+      end
+
+      assert :counters.get(c2, 1) == 1
+    end
+
+    test "RED: tracing that fails BEFORE the body runs the body once, untraced, and reports by name (no message)" do
+      c = counter()
+
+      log =
+        capture_log(fn ->
+          assert :done == Tracer.__with_job_span__("job", %{}, fn -> bump(c) && :done end, SetupFailingOtel)
+        end)
+
+      assert :counters.get(c, 1) == 1
+      assert log =~ "write failed write=job_span_setup"
+      assert log =~ "cause=RuntimeError"
+      refute log =~ "Secret-7731"
+    end
+
+    test "RED: tracing that fails AFTER the body finished returns the body's result, once, and reports" do
+      c = counter()
+
+      log =
+        capture_log(fn ->
+          assert :done == Tracer.__with_job_span__("job", %{"trace_context" => []}, fn -> bump(c) && :done end, FinishFailingOtel)
+        end)
+
+      assert :counters.get(c, 1) == 1
+      assert log =~ "write failed write=job_span_finish"
+    end
+
+    test "POSITIVE CONTROL: healthy tracing returns the body's result once and reports nothing" do
+      c = counter()
+      log = capture_log(fn -> assert :done == Tracer.__with_job_span__("job", %{}, fn -> bump(c) && :done end) end)
+      assert :counters.get(c, 1) == 1
+      refute log =~ "job_span"
+    end
+  end
+
+  describe "Tracer.inject_trace_context — a lost trace link is reported, the job is still enqueued" do
+    test "RED: a changeset whose meta cannot take the context comes back unchanged and the lost link is reported; a normal one is stamped" do
+      broken = Ecto.Changeset.change(%Oban.Job{}, meta: "not a map")
+      healthy = Oban.Job.new(%{a: 1}, worker: "W", queue: :default)
+
+      log =
+        capture_log(fn ->
+          :otel_tracer.with_span(:opentelemetry.get_application_tracer(__MODULE__), "e.enqueue", %{}, fn _ ->
+            assert ^broken = Tracer.inject_trace_context(broken)
+
+            # POSITIVE CONTROL inside the same span: a changeset that can take it is stamped
+            assert %{"trace_context" => [_ | _]} = Ecto.Changeset.get_field(Tracer.inject_trace_context(healthy), :meta)
+          end)
+        end)
+
+      assert count(log, "trace_context_inject") == 1
+      refute log =~ "not a map"
+    end
+  end
+
+  # --- Search: an unreadable registry is not "nothing is searchable" ------------------------------------------
+
+  describe "Search.query — a registry that cannot be read raises instead of answering []" do
+    defp search_scope(org),
+      do: %Samen.Scope{actor: %{id: "u:#{org}", org_id: org, role: :member, plane: :tenant}}
+
+    defp search_opts(index),
+      do: [resources: [SamenCore.Support.Archivable.Widget], search_index: index, repo: Repo]
+
+    test "RED: an unreadable registry raises (the callers report it) — it used to read as [], 'no results'" do
+      org = Ash.UUID.generate()
+      assert_raise Ash.Error.Unknown, fn -> Samen.Search.query(search_scope(org), "invoice", search_opts(UnreadableSearchIndex)) end
+    end
+
+    test "POSITIVE CONTROL: a readable registry with nothing registered is an honest []" do
+      assert [] == Samen.Search.query(search_scope(Ash.UUID.generate()), "invoice", search_opts(SearchIndex))
+    end
+
+    test "RED at the caller: the search_records tool says its text arm is in ERROR (reported), not that it found nothing" do
+      org = Ash.UUID.generate()
+      key = Samen.Automation.Actions.SearchRecords
+      previous = Application.get_env(:samen_core, key)
+      Application.put_env(:samen_core, key, search: search_opts(UnreadableSearchIndex))
+
+      on_exit(fn ->
+        if previous, do: Application.put_env(:samen_core, key, previous), else: Application.delete_env(:samen_core, key)
+      end)
+
+      ctx = %Samen.Automation.Context{
+        org_id: org,
+        workflow_id: nil,
+        subject_ref: "samen:test",
+        actor: search_scope(org),
+        origin: {:agent, "r"}
+      }
+
+      log =
+        capture_log(fn ->
+          assert {:ok, %{text_search: "error", hits: hits}} = key.run(%{"query" => "invoice", "limit" => 5}, ctx)
+          assert Enum.all?(hits, &(&1["via"] != "text"))
+        end)
+
+      assert count(log, "search_records_text") == 1
+    end
+  end
+
+  # --- CDC projection: an unreadable non_pii! registry shrinks the mirror, and says so -----------------------------
+
+  describe "Cdc.Projection — an unreadable non_pii! registry fails closed AND is reported" do
+    @patient SamenCore.Support.Clinical.Patient
+    @column "pat_job_title"
+
+    defp projected(opts), do: @patient |> Samen.Cdc.Projection.project(opts) |> Enum.map(&elem(&1, 0))
+
+    test "RED: the registry read fails -> the cleared column is NOT mirrored (closed, unchanged), ONE report by name" do
+      table = Samen.Cdc.Projection.table_name(@patient)
+
+      assert {:ok, _} =
+               Samen.NonPii.register(%{
+                 table_name: table,
+                 column_name: @column,
+                 cleared_by: "alice@example.com",
+                 reviewed_by: "bob@example.com",
+                 reason: "reviewed as non-PII operational text",
+                 subject_column: "id",
+                 repo: Repo
+               })
+
+      # POSITIVE CONTROL: with the registry readable the cleared column IS mirrored, and nothing is reported
+      control = capture_log(fn -> assert @column in projected(repo: Repo) end)
+      refute control =~ "cdc_projection_non_pii_entries"
+
+      log = capture_log(fn -> refute @column in projected(repo: CatalogDownRepo) end)
+
+      assert count(log, "cdc_projection_non_pii_entries") == 1
+      assert log =~ "cause=DBConnection.ConnectionError"
     end
   end
 end

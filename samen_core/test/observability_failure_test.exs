@@ -69,7 +69,7 @@ defmodule Samen.Observability.FailureTest do
   # with an unlisted name fails, telling its author to decide: a write goes through `report_write/3`; only a failed
   # READ (a lookup, a probe, a scan, a resolve) is listed here.
   @read_ops ~w(
-    live_events_compute param_filter pii_classify_registry pii_resolution_declared_keys pii_resolution_reveal pii_resolution_vault_rows replay_allowed_beam replay_decode_frame replay_flag_on replay_keep replay_player_list replay_player_load replay_pseudonym replay_resolver_prefetch replay_resolver_read replay_resolver_records replay_resolver_resolve replay_resolver_shredded replay_sanitize
+    live_events_compute cdc_projection_non_pii_entries feature_flag_cache_get feature_flag_cache_start feature_flag_evaluate feature_flag_evaluate_config feature_flag_load param_filter pii_classify_registry pii_resolution_declared_keys pii_resolution_reveal pii_resolution_vault_rows replay_allowed_beam replay_decode_frame replay_flag_on replay_keep replay_player_list replay_player_load replay_pseudonym replay_resolver_prefetch replay_resolver_read replay_resolver_records replay_resolver_resolve replay_resolver_shredded replay_sanitize
     webhook_delivery_load_endpoint webhook_delivery_repo webhook_ingest_repo
     action_effect action_tool_schema agent_fetch_turn agent_health_probe agent_health_repo_running
     agent_load_approval agent_pending_turn agent_refuse_vt_args agent_run_tool agent_validate_args
