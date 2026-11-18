@@ -506,6 +506,9 @@ defmodule Samen.Reveal.Grants do
       # nothing filed recently: nothing to look up (and no approvals read to fail on its behalf)
       case if(refs == [], do: {:ok, MapSet.new()}, else: Samen.Approvals.subject_refs_with_approval(org, "pii_reveal", refs, opts)) do
         {:ok, opened} ->
+          # test seam: runs between the scan and the re-opens, i.e. exactly where a concurrent reader's open lands
+          Keyword.get(opts, :after_orphan_scan, fn -> :ok end).()
+
           for req <- requests, Samen.Reveal.ApprovalHandler.subject_ref(req) not in opened do
             reopen_orphan(req, org)
           end

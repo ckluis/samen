@@ -444,52 +444,30 @@ defmodule Samen.Reveal.ApproverTest do
       assert approvals_for(org_a, req) == 1
     end
 
-    test "RED: CONCURRENT readers (real parallel connections, committed writes) converge on ONE approval: the engine's unique pending index" do
-      Samen.TestSandbox.auto!(@repo)
+    test "RED: a reader whose scan went stale (another reader opened the approval after it) converges on that ONE approval, with no failed open" do
       org_a = org()
-      req_id = Ecto.UUID.generate()
-      now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+      req = file_orphan(org_a)
 
-      @repo.insert_all("rvq_reveal_request", [
-        %{
-          rvq_id: Ecto.UUID.dump!(req_id),
-          rvq_subject_id: subj(),
-          rvq_requestor_id: actor(),
-          rvq_reason: "ticket 309: race",
-          rvq_status: "pending",
-          rvq_org_id: Ecto.UUID.dump!(org_a),
-          rvq_inserted_at: now,
-          rvq_updated_at: now
-        }
-      ])
+      attrs = %{
+        org_id: org_a,
+        kind: "pii_reveal",
+        subject_ref: Samen.Reveal.ApprovalHandler.subject_ref(req),
+        requested_by: req.requestor_id
+      }
 
-      on_exit(fn ->
-        @repo.delete_all(from(a in "apv_approval", where: a.apv_org_id == ^Ecto.UUID.dump!(org_a)))
-        @repo.delete_all(from(q in "rvq_reveal_request", where: q.rvq_id == ^Ecto.UUID.dump!(req_id)))
-      end)
+      # the other reader opens the approval AFTER this reader's scan saw none and BEFORE its re-open
+      winner = fn -> assert {:ok, _} = Approvals.request(attrs) end
 
-      gate = self()
-
-      results =
+      log =
         capture_log(fn ->
-          tasks =
-            for _ <- 1..8 do
-              Task.async(fn ->
-                receive do
-                  :go -> Grants.pending_for_org_result(org_a, repo: @repo)
-                end
-              end)
-            end
-
-          for t <- tasks, do: send(t.pid, :go)
-          send(gate, {:results, Task.await_many(tasks, 30_000)})
+          assert {:ok, [_]} = Grants.pending_for_org_result(org_a, repo: @repo, after_orphan_scan: winner)
         end)
 
-      # no reader's re-open failed: the loser of the race returned the winner's approval (idempotent), it did not error
-      refute results =~ "reveal_open_engine_approval"
-      assert_received {:results, outcomes}
-      assert Enum.all?(outcomes, &match?({:ok, [_]}, &1))
-      assert @repo.aggregate(from(a in "apv_approval", where: a.apv_org_id == ^Ecto.UUID.dump!(org_a)), :count) == 1
+      # the loser's re-open returned the winner's pending approval: it neither failed nor opened a second one
+      refute log =~ "reveal_open_engine_approval"
+      {:ok, pending} = Approvals.list_pending(org_a, "pii_reveal")
+      assert length(pending) == 1
+      assert approvals_for(org_a, req) == 1
     end
 
     test "RED: a failed re-open is reported and the rest of the queue still lists; healed, the next read recovers it" do
