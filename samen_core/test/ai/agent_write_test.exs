@@ -743,6 +743,32 @@ defmodule Samen.AI.AgentWriteTest do
     end
   end
 
+  describe "an approval that cannot be READ at the execution seam is unavailable, not 'not found'" do
+    test "RED: the approvals store fails -> :approval_unavailable (nothing executed); a row that names nothing stays :approval_not_found" do
+      {_s, _run, target, approval, _new_owner} = propose!()
+      {:ok, turn_id} = WriteProposal.parse_subject_ref(approval.subject_ref)
+      actor = %{actor: approver_id(approval.org_id)}
+
+      # POSITIVE CONTROL: a healthy store with an id that names no row is the honest :approval_not_found
+      assert {:error, :approval_not_found} = Agent.execute_approved(turn_id, %{id: Ash.UUID.generate()}, actor)
+
+      previous = Application.get_env(:samen_core, Samen.Approvals)
+
+      Application.put_env(:samen_core, Samen.Approvals,
+        approval_resource: SamenCore.Support.UnreadableApproval,
+        repo: SamenCore.TestRepo
+      )
+
+      on_exit(fn -> Application.put_env(:samen_core, Samen.Approvals, previous) end)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, :approval_unavailable} = Agent.execute_approved(turn_id, approval, actor)
+      end)
+
+      assert reload_target!(target.id).owner_id == nil
+    end
+  end
+
   # ── budgets + cancellation ──────────────────────────────────────────────────────────
 
   describe "the request a resumed run sends (ADR-047 §5.2a: park → approve → resume, from real loop state)" do

@@ -86,12 +86,10 @@ defmodule Samen.Lint.KernelSwallow do
     "samen_core/lib/mix/tasks/samen.verify.tool_actor_identity.ex" => 1,
     "samen_core/lib/samen/adapter_conformance_case.ex" => 6,
     "samen_core/lib/samen/aggregate/extension.ex" => 2,
-    "samen_core/lib/samen/aggregate/query_budget.ex" => 1,
     "samen_core/lib/samen/analytics.ex" => 1,
     "samen_core/lib/samen/analytics/sources.ex" => 1,
     "samen_core/lib/samen/api/pii_resolution.ex" => 4,
     "samen_core/lib/samen/api_contract.ex" => 3,
-    "samen_core/lib/samen/approvals.ex" => 1,
     "samen_core/lib/samen/auth/org_actor.ex" => 2,
     "samen_core/lib/samen/backup/verification.ex" => 1,
     "samen_core/lib/samen/catalog.ex" => 2,
@@ -138,7 +136,6 @@ defmodule Samen.Lint.KernelSwallow do
     "samen_core/lib/samen/replay/resolver.ex" => 9,
     "samen_core/lib/samen/replay/row_guard.ex" => 1,
     "samen_core/lib/samen/replay/sanitizer.ex" => 2,
-    "samen_core/lib/samen/reveal/grants.ex" => 2,
     "samen_core/lib/samen/scopes/identity/notify.ex" => 1,
     "samen_core/lib/samen/scopes/marketing/blueprint.ex" => 2,
     "samen_core/lib/samen/scopes/marketing/send_worker.ex" => 1,
@@ -154,14 +151,12 @@ defmodule Samen.Lint.KernelSwallow do
   }
 
   @error_arm_baseline %{
-    "samen_core/lib/samen/approvals.ex" => 1,
     "samen_core/lib/samen/custom_objects.ex" => 1,
     "samen_core/lib/samen/fleet/registry.ex" => 3,
     "samen_core/lib/samen/identity/invite.ex" => 1,
     "samen_core/lib/samen/non_pii.ex" => 1,
     "samen_core/lib/samen/operator_plane.ex" => 3,
     "samen_core/lib/samen/replay/resolver.ex" => 1,
-    "samen_core/lib/samen/reveal/grants.ex" => 1,
     "samen_core/lib/samen/scopes/marketing/blueprint.ex" => 2,
     "samen_core/lib/samen/sequences/receipt_lookup.ex" => 1,
     "samen_core/lib/samen/support/inbound/ingest.ex" => 2,
@@ -172,8 +167,8 @@ defmodule Samen.Lint.KernelSwallow do
   # has to raise this number too (and `SwallowLintTest` compares it with the merge base, so it can only go down). Lower
   # it together with the baseline when a swallow is converted; never raise it.
   @ceilings %{
-    rescue: %{"samen_core/lib" => 123},
-    error_arm: %{"samen_core/lib" => 19}
+    rescue: %{"samen_core/lib" => 119},
+    error_arm: %{"samen_core/lib" => 17}
   }
 
   def roots, do: @roots
