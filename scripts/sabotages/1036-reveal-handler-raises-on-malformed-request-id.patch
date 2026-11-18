@@ -1,0 +1,20 @@
+# SABOTAGE: a malformed request id in an approval subject_ref reaches the request lookup and raises out of 
+#   reject and cancel
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_approver_test.exs
+# MUST_FAIL: is rejected and cancelled without raising
+diff --git a/samen_core/lib/samen/reveal/approval_handler.ex b/samen_core/lib/samen/reveal/approval_handler.ex
+index d550ad2a..dc0aaa5d 100644
+--- a/samen_core/lib/samen/reveal/approval_handler.ex
++++ b/samen_core/lib/samen/reveal/approval_handler.ex
+@@ -63,7 +63,7 @@ defmodule Samen.Reveal.ApprovalHandler do
+   defp parse_subject_ref(@subject_ref_prefix <> request_id = ref) do
+     case Ecto.UUID.cast(request_id) do
+       {:ok, uuid} -> {:ok, uuid}
+-      :error -> {:error, {:bad_subject_ref, ref}}
++      :error -> {:ok, request_id}
+     end
+   end
+ 

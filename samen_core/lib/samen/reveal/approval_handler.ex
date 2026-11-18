@@ -59,7 +59,14 @@ defmodule Samen.Reveal.ApprovalHandler do
     end
   end
 
-  defp parse_subject_ref(@subject_ref_prefix <> request_id), do: {:ok, request_id}
+  # A ref whose suffix is not a UUID names no request (the lookup would raise a cast error out of the decision).
+  defp parse_subject_ref(@subject_ref_prefix <> request_id = ref) do
+    case Ecto.UUID.cast(request_id) do
+      {:ok, uuid} -> {:ok, uuid}
+      :error -> {:error, {:bad_subject_ref, ref}}
+    end
+  end
+
   defp parse_subject_ref(other), do: {:error, {:bad_subject_ref, other}}
 
   defp fetch_request(repo, request_id) do

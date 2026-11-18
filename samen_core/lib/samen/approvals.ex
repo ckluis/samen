@@ -110,8 +110,9 @@ defmodule Samen.Approvals do
   end
 
   @doc """
-  Cancel `approval_id` (the requester withdraws). `pending → cancelled`, audited. No
-  handler runs. Returns `{:ok, approval}` or `{:error, term()}`.
+  Cancel `approval_id` (the requester withdraws). `pending → cancelled`, audited, and the registered handler's
+  OPTIONAL `on_cancel/2` runs in the same transaction (a kind without the hook runs nothing; an error from the hook
+  rolls the cancel back). Returns `{:ok, approval}` or `{:error, term()}`.
   """
   @spec cancel(term(), term(), keyword()) :: {:ok, struct()} | {:error, term()}
   def cancel(approval_id, actor, opts \\ []) do

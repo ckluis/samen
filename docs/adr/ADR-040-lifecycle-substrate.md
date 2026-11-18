@@ -267,24 +267,32 @@ Reveal grants become a **client**, not a rewrite. What changes and what provably
    `Samen.Approvals.request/2` with the request's own `inserted_at` as `requested_at`. **What is
    guaranteed, and how:** the re-open runs in one transaction that first takes the request's row
    lock and then re-checks, under it, that the request is still `pending` AND has no approval in
-   any state; only then does it open one. Every decision takes the same lock first (and the
-   pending-approval unique index still makes two re-openers converge on one approval), so a
+   any state; only then does it open one. Every `Grants` decision takes the same lock first, so two re-openers
+   are serialised by it (the second sees the first one's approval in its any-state check and opens
+   nothing; the pending-approval unique index is only the backstop for an opener that does not take
+   the lock, and there is none for reveal), so a
    request decided between the scan and the re-open is seen as decided by the re-open and is not
    revived, whichever lane (org, no org, none: the engine-less path) its approval was filed in.
    The original open in `request/1` takes the same lock and runs the same check, so a late first
    open cannot land after a decision either. The lock order is request row, then approval row;
-   a decision made by calling `Samen.Approvals.approve/3` directly on the approval (not through
-   `Grants`) takes them the other way round, so under contention with a `Grants` decision on the
+   a decision made by calling `Samen.Approvals.approve/3`, `reject/3` or `cancel/3` directly on the
+   approval (not through `Grants`) takes them the other way round, so under contention with a `Grants` decision on the
    same request Postgres may abort one of the two with a deadlock error (fail-closed: nothing is
-   committed by the aborted side). A re-open that fails is reported (`reveal_open_engine_approval`)
+   committed by the aborted side). A lock timeout or deadlock abort on a `Grants.approve/2` /
+   `deny/2` decision is answered `{:error, :unavailable}` and reported (`reveal_decision_lock`),
+   matched on the Postgres error code and never retried. A grant for a request is decisive that it
+   was decided: `do_approve/4` refuses (`{:error, :already_granted}`, under the lock) a request that
+   has one, whatever its `rvq_status` says, so no path mints a second grant; the queue leaves out
+   (and reports, `reveal_pending_decided`) a pending approval whose request is no longer
+   `pending`, and does not close it (a read does not write). A re-open that fails is reported (`reveal_open_engine_approval`)
    and counted: the queue answers `{:partial, rows, n}` (`n` pending requests it could not
    surface; `RevealApprovalsLive` shows "n pending reveal request(s) could not be shown"), never
    `{:ok, rows}` for a list it knows is incomplete; an orphan scan that cannot run makes the
    queue `{:error, :unavailable}`. Rows that predate the columns are backfilled by the retrofit
    migrations (literal SQL, batched; `mix samen.gen.reveal_requests` writes them for an app
    generated earlier): `rvq_org_id` from the request's engine approval, `rvq_status` from the
-   approvals, grants and recorded denials on file; a request whose records disagree, or that
-   has none, is left `pending` and counted in the migration's output; one with no approval and
+   approvals, grants and recorded denials on file (a grant is decisive: `approved`); a grant-less
+   request whose records disagree, or that has none, is left `pending` and counted in the migration's output; one with no approval and
    no org stays NULL and is named by `mix samen.verify.reveal_orgs` (a NOTE), never given a
    guessed org.
    Residual: a request older than the window whose open failed is not recovered by a queue read.

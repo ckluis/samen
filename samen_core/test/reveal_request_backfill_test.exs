@@ -6,7 +6,7 @@ defmodule Samen.RevealRequestBackfillTest do
 
     * `rvq_org_id` is derived from the request's engine approval only; a request with no approval keeps NULL (no guess);
     * `rvq_status` is derived from what is on record: approved / rejected / cancelled approval, a grant, a recorded
-      denial; a request whose records DISAGREE, and one with none, stay `pending`;
+      denial; a request whose records DISAGREE and that has no grant, and one with none, stay `pending`; a grant is decisive (`approved`);
     * more rows than one batch (5,000) are all done and the loop ends (the `:where` predicate stops matching);
     * the index is built, the temporary approvals index is gone, the migration re-runs and rolls back cleanly;
     * the task's output for a prefix is byte-identical to the committed migration of the host that uses it.
@@ -114,7 +114,11 @@ defmodule Samen.RevealRequestBackfillTest do
     denial_only = request("denial") |> tap(&denial(&1, "denial"))
     global_approved = request("global") |> tap(&approval(&1, "approved", nil))
     conflict = request("conflict") |> tap(&approval(&1, "approved", o1)) |> tap(&approval(&1, "rejected", o1))
+    conflict_rejected_cancelled = request("conflict3") |> tap(&approval(&1, "rejected", o2)) |> tap(&approval(&1, "cancelled", o2))
+    # a GRANT is decisive: access was given, so these are approved however the other records disagree (leaving them
+    # pending would let an approver mint a second grant)
     conflict_grant_denial = request("conflict2") |> tap(&grant/1) |> tap(&denial(&1, "conflict2"))
+    conflict_granted = request("conflict4") |> tap(&approval(&1, "approved", o1)) |> tap(&approval(&1, "rejected", o1)) |> tap(&grant/1)
     pending_with_approval = request("pending") |> tap(&approval(&1, "pending", o4))
     no_records = request("none")
     revived = request("revived") |> tap(&approval(&1, "approved", o1)) |> tap(&approval(&1, "pending", o1))
@@ -136,14 +140,19 @@ defmodule Samen.RevealRequestBackfillTest do
     assert row(global_approved) == {"approved", nil}
     assert row(revived) == {"approved", o1}
 
-    # nothing is guessed: records that disagree, no records, and a request that is truly pending stay pending
+    assert row(conflict_grant_denial) == {"approved", nil}
+    assert row(conflict_granted) == {"approved", o1}
+
+    # nothing is guessed: grant-less records that disagree, no records, and a request that is truly pending stay pending
     assert row(conflict) == {"pending", o1}
-    assert row(conflict_grant_denial) == {"pending", nil}
+    assert row(conflict_rejected_cancelled) == {"pending", o2}
     assert row(no_records) == {"pending", nil}
     assert row(pending_with_approval) == {"pending", o4}
 
-    # ... and the two that disagree are SAID, with their count
+    # ... and the two that disagree are SAID, with their count; the notice never tells the operator to approve
     assert output =~ "2 pending request(s) have records that disagree"
+    refute output =~ "approve"
+    refute output =~ "Grants.deny"
 
     assert [[5001]] = q("SELECT count(*) FROM rvq_reveal_request WHERE rvq_subject_id = 'bulk' AND rvq_status = 'approved'")
 

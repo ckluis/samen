@@ -1,4 +1,4 @@
-# SABOTAGE: the re-open does not re-check, under the row lock, that the request is still pending with no 
+# SABOTAGE: the re-open does not re-check, under the row lock, that the request is still pending with no  
 #   approval, so a request decided after the scan is revived
 #
 # Flips the named test(s).
@@ -6,20 +6,28 @@
 # TEST_FILES: test/reveal_approver_test.exs
 # MUST_FAIL: a request DECIDED between the scan and the re-open gets no second approval
 diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
-index f2445010..f5d2d468 100644
+index ae1abc97..b1ea5d20 100644
 --- a/samen_core/lib/samen/reveal/grants.ex
 +++ b/samen_core/lib/samen/reveal/grants.ex
-@@ -237,11 +237,11 @@ defmodule Samen.Reveal.Grants do
- 
-   defp open_if_undecided(req, org_id, r, wiring) do
+@@ -239,10 +239,10 @@ defmodule Samen.Reveal.Grants do
      case lock_request(r, req.id) do
--      %RevealRequest{status: "pending"} ->
-+      %RevealRequest{} ->
-         ref = Samen.Reveal.ApprovalHandler.subject_ref(req)
+       # the lane the approval would be filed in must be the request's own: a request that carries an org is never
+       # opened in another org's lane (one with no org is opened wherever it was filed)
+-      %RevealRequest{status: "pending", org_id: row_org} = locked when not is_nil(row_org) ->
++      %RevealRequest{org_id: row_org} = locked when not is_nil(row_org) ->
+         if Ecto.UUID.cast(org_id) == {:ok, row_org}, do: open_pending(locked, org_id, wiring), else: {:ok, :skipped}
  
-         with {:ok, opened} <- Samen.Approvals.subject_refs_with_approval(org_id, "pii_reveal", [ref], wiring) do
--          if ref in opened, do: {:ok, :skipped}, else: request_engine_approval(req, org_id, wiring)
-+          if ref in MapSet.new(), do: {:ok, :skipped}, else: request_engine_approval(req, org_id, wiring)
-         end
+-      %RevealRequest{status: "pending"} = locked ->
++      %RevealRequest{} = locked ->
+         open_pending(locked, org_id, wiring)
  
        # decided (or cancelled): there is no approval to open
+@@ -259,7 +259,7 @@ defmodule Samen.Reveal.Grants do
+     ref = Samen.Reveal.ApprovalHandler.subject_ref(req)
+ 
+     with {:ok, opened} <- Samen.Approvals.subject_refs_with_approval(org_id, "pii_reveal", [ref], wiring) do
+-      if ref in opened, do: {:ok, :skipped}, else: request_engine_approval(req, org_id, wiring)
++      if ref in MapSet.new(), do: {:ok, :skipped}, else: request_engine_approval(req, org_id, wiring)
+     end
+   end
+ 

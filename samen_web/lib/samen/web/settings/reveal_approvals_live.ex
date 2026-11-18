@@ -53,6 +53,9 @@ defmodule Samen.Web.Settings.RevealApprovalsLive do
   alias Samen.Web.Reads.Guard
   alias Samen.Web.Settings.Reads
 
+  # `Grants.approve/2` / `deny/2` answers these when the request was decided before this decision got the lock
+  @already_decided [:not_pending, :already_granted]
+
   @impl true
   def mount(params, session, socket) do
     socket = Samen.Web.Live.assign_mount(socket, session)
@@ -177,6 +180,9 @@ defmodule Samen.Web.Settings.RevealApprovalsLive do
       {:error, :self_approval} ->
         {:noreply, notice(socket, "Self-approval is refused — a distinct party must approve.")}
 
+      {:error, reason} when reason in @already_decided ->
+        {:noreply, already_decided(socket, org_id, user_id)}
+
       {:error, _reason} ->
         {:noreply, notice(socket, "Could not approve the reveal request.")}
     end
@@ -190,10 +196,18 @@ defmodule Samen.Web.Settings.RevealApprovalsLive do
          |> notice("Reveal request denied — no grant was issued.")
          |> load(org_id, user_id)}
 
+      {:error, reason} when reason in @already_decided ->
+        {:noreply, already_decided(socket, org_id, user_id)}
+
       {:error, _reason} ->
         {:noreply, notice(socket, "Could not deny the reveal request.")}
     end
   end
+
+  # The request is decided already (another approver, another tab, a stale row): say so and reload, so the queue shows
+  # what the record says instead of keeping a row nobody can decide.
+  defp already_decided(socket, org_id, user_id),
+    do: socket |> notice("This reveal request was already decided.") |> load(org_id, user_id)
 
   defp notice(socket, msg), do: assign(socket, decision_notice: msg)
 

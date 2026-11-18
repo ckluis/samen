@@ -237,12 +237,13 @@ defmodule Samen.Reveal.Grants do
 
   defp open_if_undecided(req, org_id, r, wiring) do
     case lock_request(r, req.id) do
-      %RevealRequest{status: "pending"} ->
-        ref = Samen.Reveal.ApprovalHandler.subject_ref(req)
+      # the lane the approval would be filed in must be the request's own: a request that carries an org is never
+      # opened in another org's lane (one with no org is opened wherever it was filed)
+      %RevealRequest{status: "pending", org_id: row_org} = locked when not is_nil(row_org) ->
+        if Ecto.UUID.cast(org_id) == {:ok, row_org}, do: open_pending(locked, org_id, wiring), else: {:ok, :skipped}
 
-        with {:ok, opened} <- Samen.Approvals.subject_refs_with_approval(org_id, "pii_reveal", [ref], wiring) do
-          if ref in opened, do: {:ok, :skipped}, else: request_engine_approval(req, org_id, wiring)
-        end
+      %RevealRequest{status: "pending"} = locked ->
+        open_pending(locked, org_id, wiring)
 
       # decided (or cancelled): there is no approval to open
       %RevealRequest{} ->
@@ -251,6 +252,14 @@ defmodule Samen.Reveal.Grants do
       # the row is gone
       nil ->
         {:ok, :skipped}
+    end
+  end
+
+  defp open_pending(%RevealRequest{} = req, org_id, wiring) do
+    ref = Samen.Reveal.ApprovalHandler.subject_ref(req)
+
+    with {:ok, opened} <- Samen.Approvals.subject_refs_with_approval(org_id, "pii_reveal", [ref], wiring) do
+      if ref in opened, do: {:ok, :skipped}, else: request_engine_approval(req, org_id, wiring)
     end
   end
 
@@ -283,6 +292,24 @@ defmodule Samen.Reveal.Grants do
     r.one(from(q in RevealRequest, where: q.id == ^request_id, lock: "FOR UPDATE"))
   end
 
+  # Postgres aborting a decision on the request lock (`lock_not_available`: a lock timeout; `deadlock_detected`) is a
+  # decision that did NOT happen, not a crash: the transaction already rolled back whole, so it is reported by name and
+  # answered `{:error, :unavailable}`. Matched on the structured error code only, and never retried; any other error
+  # keeps raising.
+  defp reporting_lock_abort(org_id, fun) do
+    fun.()
+  rescue
+    e in Postgrex.Error ->
+      case e do
+        %Postgrex.Error{postgres: %{code: code}} when code in [:lock_not_available, :deadlock_detected] ->
+          Samen.Observability.Failure.report_write(:reveal_decision_lock, org_id, code)
+          {:error, :unavailable}
+
+        _ ->
+          reraise e, __STACKTRACE__
+      end
+  end
+
   # Under the lock: `:ok` while the request is still pending, else why not.
   defp lock_pending(r, request_id) do
     case lock_request(r, request_id) do
@@ -290,6 +317,16 @@ defmodule Samen.Reveal.Grants do
       %RevealRequest{} -> {:error, :not_pending}
       nil -> {:error, :request_not_found}
     end
+  end
+
+  # A grant for this request is the strongest record that it was decided (access was given). A request that still says
+  # `pending` next to a grant (a legacy row whose records disagreed, a decision by a node that predates `rvq_status`)
+  # is NOT given a second grant: `{:error, :already_granted}`, under the request's lock, and nothing is closed or
+  # rewritten on the way.
+  defp refuse_existing_grant(r, request_id) do
+    if r.exists?(from(g in RevealGrant, where: g.request_id == ^request_id)),
+      do: {:error, :already_granted},
+      else: :ok
   end
 
   @doc false
@@ -417,13 +454,15 @@ defmodule Samen.Reveal.Grants do
     # request pending-or-decided, never half way. A request that is no longer `pending` is refused (`:not_pending`)
     # BEFORE an approval is opened for it, so a decided request is never given a second approval to approve.
     result =
-      r.transaction(fn ->
-        with :ok <- lock_pending(r, req.id),
-             {:ok, grant} <- decide_through_engine(approval_attrs, req, granted_by, engine_opts, opts, r) do
-          grant
-        else
-          {:error, reason} -> r.rollback(reason)
-        end
+      reporting_lock_abort(Map.get(opts, :org_id), fn ->
+        r.transaction(fn ->
+          with :ok <- lock_pending(r, req.id),
+               {:ok, grant} <- decide_through_engine(approval_attrs, req, granted_by, engine_opts, opts, r) do
+            grant
+          else
+            {:error, reason} -> r.rollback(reason)
+          end
+        end)
       end)
 
     case result do
@@ -487,7 +526,9 @@ defmodule Samen.Reveal.Grants do
       # path) mints no grant, so a second approval of one request is refused (`:not_pending`) and rolls back with
       # everything else. The same lock serialises this against an approval open (`open_engine_approval/4`) and a deny.
       |> Ecto.Multi.run(:request, fn multi_repo, _changes ->
-        with :ok <- lock_pending(multi_repo, req.id), do: {:ok, :locked}
+        with :ok <- lock_pending(multi_repo, req.id),
+             :ok <- refuse_existing_grant(multi_repo, req.id),
+             do: {:ok, :locked}
       end)
       |> Ecto.Multi.insert(:grant, grant_changeset(grant_attrs))
       # PP-13 (B6 residual close): route the approve-moment `granted` event through
@@ -737,7 +778,8 @@ defmodule Samen.Reveal.Grants do
   # projecting ONLY token/id/metadata fields — never a vault value.
   defp enrich_pending(approval, r) do
     with {:ok, request_id} <- parse_subject_ref(approval.subject_ref),
-         %RevealRequest{} = req <- r.get(RevealRequest, request_id) do
+         %RevealRequest{} = req <- r.get(RevealRequest, request_id),
+         :ok <- still_pending(req, approval) do
       %{
         approval_id: to_string(approval.id),
         request_id: to_string(req.id),
@@ -760,7 +802,21 @@ defmodule Samen.Reveal.Grants do
       nil ->
         Samen.Observability.Failure.report(:reveal_pending_enrich, approval.org_id, :request_row_missing)
         nil
+
+      # The request is already decided (approved, denied or cancelled), so this approval can never be decided: the
+      # request row is the source of truth for "decided" (ADR-040 §4.7), and an approval a decision can only refuse
+      # must not sit in the queue. It is left out and reported by name (it is NOT closed here: a read does not write,
+      # and the stray approval is the evidence of how it came to be; `Samen.Approvals.cancel/3` closes it deliberately).
+      :request_decided ->
+        nil
     end
+  end
+
+  defp still_pending(%RevealRequest{status: "pending"}, _approval), do: :ok
+
+  defp still_pending(%RevealRequest{}, approval) do
+    Samen.Observability.Failure.report(:reveal_pending_decided, approval.org_id, :request_decided)
+    :request_decided
   end
 
   defp parse_subject_ref("samen:reveal.request:" <> id), do: {:ok, id}
@@ -796,23 +852,25 @@ defmodule Samen.Reveal.Grants do
     # Under the request's row lock, like every decision: a request that is no longer `pending` cannot be denied (it was
     # approved, denied or cancelled already), and no approval is opened for it just to be rejected.
     result =
-      r.transaction(fn ->
-        with :ok <- lock_pending(r, req.id) do
-          case reject_through_engine(approval_attrs, denied_by, r, req.id) do
-            :ok ->
-              record_denial(r, req, denied_by, org_id)
-              {:ok, req}
+      reporting_lock_abort(org_id, fn ->
+        r.transaction(fn ->
+          with :ok <- lock_pending(r, req.id) do
+            case reject_through_engine(approval_attrs, denied_by, r, req.id) do
+              :ok ->
+                record_denial(r, req, denied_by, org_id)
+                {:ok, req}
 
-            # nothing was decided: the engine's refusal audit (and an approval it just opened) stay, as before
-            {:error, :self_approval} = refused ->
-              refused
+              # nothing was decided: the engine's refusal audit (and an approval it just opened) stay, as before
+              {:error, :self_approval} = refused ->
+                refused
 
-            {:error, reason} ->
-              r.rollback(reason)
+              {:error, reason} ->
+                r.rollback(reason)
+            end
+          else
+            {:error, reason} -> r.rollback(reason)
           end
-        else
-          {:error, reason} -> r.rollback(reason)
-        end
+        end)
       end)
 
     case result do

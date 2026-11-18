@@ -1,20 +1,20 @@
 # SABOTAGE: the status backfill marks a request approved although other records say it was denied, guessing 
-#   between records that disagree
+#    between records that disagree
 #
 # Flips the named test(s).
 # APP: samen_core
 # TEST_FILES: test/reveal_request_backfill_test.exs
 # MUST_FAIL: the retrofit derives org and status from the records, never guesses, and is repeatable
 diff --git a/samen_core/priv/test_repo/migrations/20261118100001_reveal_request_backfill.exs b/samen_core/priv/test_repo/migrations/20261118100001_reveal_request_backfill.exs
-index 72dd168c..76bdf1ae 100644
+index 4d7d7b77..1b382660 100644
 --- a/samen_core/priv/test_repo/migrations/20261118100001_reveal_request_backfill.exs
 +++ b/samen_core/priv/test_repo/migrations/20261118100001_reveal_request_backfill.exs
-@@ -71,7 +71,7 @@ defmodule SamenCore.TestRepo.Migrations.RevealRequestBackfill do
-     pending_only = "rvq_status = 'pending'"
- 
+@@ -73,7 +73,7 @@ defmodule SamenCore.TestRepo.Migrations.RevealRequestBackfill do
+     # a grant for the request is decisive: access was given, whatever else the records say (approving it again
+     # would issue a second grant), so it is `approved` even where the other records disagree
      chunked_backfill(repo(), "rvq_reveal_request", "rvq_status = 'approved'",
--      where: "#{pending_only} AND #{approved()} AND NOT #{denied()} AND NOT #{cancelled()}"
-+      where: "#{pending_only} AND #{approved()}"
+-      where: "#{pending_only} AND (#{@granted} OR (#{approved()} AND NOT #{denied()} AND NOT #{cancelled()}))"
++      where: "#{pending_only} AND (#{@granted} OR #{approved()})"
      )
  
      chunked_backfill(repo(), "rvq_reveal_request", "rvq_status = 'denied'",

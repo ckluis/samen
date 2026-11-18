@@ -346,6 +346,10 @@ defmodule Samen.Reveal.ApproverTest do
       req_a = file_orphan(org_a)
       req_b = file_orphan(org_b)
 
+      # the scan itself is org-scoped (the re-open's own org check is a second line, not the first)
+      assert {:ok, [seen]} = Grants.orphan_candidates(org_a, @repo, [])
+      assert seen.id == req_a.id
+
       capture_log(fn ->
         assert [row_a] = Grants.pending_for_org(org_a, repo: @repo)
         assert row_a.request_id == req_a.id
@@ -573,6 +577,134 @@ defmodule Samen.Reveal.ApproverTest do
       # the refused approval rolled back with everything else: it is still pending, and a reject cannot overwrite the decision
       assert {:ok, _} = Approvals.reject(stray.id, actor())
       assert @repo.get!(RevealRequest, req.id).status == "approved"
+    end
+
+    test "RED: a LEGACY request that has a grant but still says pending is refused a second grant, and nothing is opened or closed on the way" do
+      org_a = org()
+      {:ok, req} = Grants.request(%{subject_id: subj(), requestor_id: actor(), reason: "ticket 316", org_id: org_a})
+      assert {:ok, _} = Grants.approve(req.id, %{granted_by: actor(), org_id: org_a, repo: @repo})
+
+      # records that disagreed, left pending by the backfill: a grant on file, the request still `pending`
+      @repo.update_all(from(q in RevealRequest, where: q.id == ^req.id), set: [status: "pending"])
+      grants_before = @repo.all(from(g in RevealGrant, where: g.request_id == ^req.id))
+      refs_before = approvals_for(org_a, req)
+
+      assert {:error, :already_granted} = Grants.approve(req.id, %{granted_by: actor(), org_id: org_a, repo: @repo})
+      assert @repo.all(from(g in RevealGrant, where: g.request_id == ^req.id)) == grants_before
+      # the approval the attempt opened rolled back with it: no new pending approval, the request is exactly as it was
+      assert {:ok, []} = Approvals.list_pending(org_a, "pii_reveal")
+      assert approvals_for(org_a, req) == refs_before
+      assert @repo.get!(RevealRequest, req.id).status == "pending"
+
+      # the engine path of a stray pending approval is refused the same way, under the same lock
+      assert {:ok, stray} =
+               Approvals.request(%{
+                 org_id: org_a,
+                 kind: "pii_reveal",
+                 subject_ref: Samen.Reveal.ApprovalHandler.subject_ref(req),
+                 requested_by: req.requestor_id
+               })
+
+      assert {:error, :already_granted} = Approvals.approve(stray.id, actor())
+      assert [_one] = @repo.all(from(g in RevealGrant, where: g.request_id == ^req.id))
+
+      # positive control: a request WITHOUT a grant is approved as before
+      {:ok, fresh} = Grants.request(%{subject_id: subj(), requestor_id: actor(), reason: "ticket 317", org_id: org_a})
+      assert {:ok, _} = Grants.approve(fresh.id, %{granted_by: actor(), org_id: org_a, repo: @repo})
+    end
+
+    test "RED: a stray pending approval of a decided request is left out of the queue and reported once; a live request is listed and silent" do
+      org_a = org()
+      {:ok, decided} = Grants.request(%{subject_id: subj(), requestor_id: actor(), reason: "ticket 318", org_id: org_a})
+      {:ok, live} = Grants.request(%{subject_id: subj(), requestor_id: actor(), reason: "ticket 319", org_id: org_a})
+      assert {:ok, _} = Grants.approve(decided.id, %{granted_by: actor(), org_id: org_a, repo: @repo})
+
+      assert {:ok, stray} =
+               Approvals.request(%{
+                 org_id: org_a,
+                 kind: "pii_reveal",
+                 subject_ref: Samen.Reveal.ApprovalHandler.subject_ref(decided),
+                 requested_by: decided.requestor_id
+               })
+
+      log =
+        capture_log(fn ->
+          assert {:ok, [%{request_id: listed}]} = Grants.pending_for_org_result(org_a, repo: @repo)
+          assert listed == live.id
+        end)
+
+      assert log =~ "read=reveal_pending_decided"
+      assert log =~ "cause=request_decided"
+      assert length(Regex.scan(~r/read=reveal_pending_decided/, log)) == 1
+
+      # it is NOT closed by a read: the approval is still pending, the request still approved
+      assert {:ok, pending} = Approvals.list_pending(org_a, "pii_reveal")
+      assert stray.id in Enum.map(pending, & &1.id)
+      assert @repo.get!(RevealRequest, decided.id).status == "approved"
+
+      # closed deliberately (through the cancel path), it is no longer reported: the report was about the stray, not the live row
+      assert {:ok, _} = Approvals.cancel(stray.id, actor())
+      quiet = capture_log(fn -> assert {:ok, [_]} = Grants.pending_for_org_result(org_a, repo: @repo) end)
+      refute quiet =~ "reveal_pending_decided"
+      assert @repo.get!(RevealRequest, decided.id).status == "approved"
+    end
+
+    test "RED: a re-open never files a request that carries an org in ANOTHER org's lane (checked under the lock)" do
+      org_a = org()
+      org_b = org()
+      req = file_orphan(org_a)
+
+      capture_log(fn -> assert Grants.reopen_orphan(req, org_b, @repo, []) == :skipped end)
+      assert approvals_for(org_b, req) == 0
+      assert approvals_for(org_a, req) == 0
+
+      # positive control: its own org opens it
+      capture_log(fn -> assert Grants.reopen_orphan(req, org_a, @repo, []) == :reopened end)
+      assert approvals_for(org_a, req) == 1
+    end
+
+    defmodule CancelHook do
+      @moduledoc false
+      @behaviour Samen.Approvals.Handler
+      def on_approve(_approval, _ctx), do: {:ok, %{}}
+      def on_cancel(approval, _ctx), do: Process.get({:cancel_hook, approval.subject_ref}, :ok)
+    end
+
+    test "a cancel hook that errors, or returns something unexpected, rolls the cancel back (a clean hook is the positive control)" do
+      org_a = org()
+      kinds = [kinds: %{"cancel_probe" => {:operator, CancelHook}}]
+      open = fn tag ->
+        {:ok, a} = Approvals.request(%{org_id: org_a, kind: "cancel_probe", subject_ref: "probe:#{tag}", requested_by: actor()}, kinds)
+        a
+      end
+      state = fn a -> elem(Approvals.list_pending(org_a, "cancel_probe", kinds), 1) |> Enum.any?(&(&1.id == a.id)) end
+
+      refused = open.("refused")
+      Process.put({:cancel_hook, refused.subject_ref}, {:error, :hook_says_no})
+      assert {:error, :hook_says_no} = Approvals.cancel(refused.id, "rq", kinds)
+      assert state.(refused), "the cancel rolled back: still pending"
+
+      odd = open.("odd")
+      Process.put({:cancel_hook, odd.subject_ref}, :surprise)
+      assert {:error, {:bad_handler_return, :surprise}} = Approvals.cancel(odd.id, "rq", kinds)
+      assert state.(odd)
+
+      clean = open.("clean")
+      assert {:ok, %{state: :cancelled}} = Approvals.cancel(clean.id, "rq", kinds)
+      refute state.(clean)
+    end
+
+    test "a pii_reveal approval whose subject_ref is not a request id is rejected and cancelled without raising" do
+      org_a = org()
+
+      for {decide, ref} <- [reject: "samen:reveal.request:not-a-uuid", cancel: "samen:reveal.request:"] do
+        assert {:ok, approval} = Approvals.request(%{org_id: org_a, kind: "pii_reveal", subject_ref: ref, requested_by: actor()})
+
+        case decide do
+          :reject -> assert {:ok, %{state: :rejected}} = Approvals.reject(approval.id, actor())
+          :cancel -> assert {:ok, %{state: :cancelled}} = Approvals.cancel(approval.id, actor())
+        end
+      end
     end
 
     test "every path that decides a reveal request writes its terminal status on the request itself" do

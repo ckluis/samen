@@ -195,4 +195,59 @@ defmodule Driftwood.RevealApproverLiveTest do
     assert {:error, _} = OperatorReveal.reveal_cdl(operator_id, driver_id)
     assert Grants.pending_for_org(org_id, repo: Driftwood.Repo) == []
   end
+
+  test "ALREADY DECIDED: approving or denying a stale row says so, reloads the queue and mints nothing", %{scenario: s} do
+    import Ecto.Query
+    org_id = s.org_id
+    driver_id = to_string(s.compliant_driver_id)
+    admin = seed_member!(org_id, :admin)
+    other_admin = seed_member!(org_id, :admin)
+
+    {:ok, approved_req} = OperatorReveal.request_reveal("op-stale-a", driver_id, "ticket 70: stale approve", org_id)
+    {:ok, denied_req} = OperatorReveal.request_reveal("op-stale-d", driver_id, "ticket 71: stale deny", org_id)
+
+    # this tab loaded the queue: both rows are in it (positive control)
+    socket = approver_socket(settings_mount(), org_id, admin.id)
+    assert Enum.sort(Enum.map(socket.assigns.pending, & &1.request_id)) == Enum.sort([approved_req.id, denied_req.id])
+
+    # another approver decides both while this tab still shows them
+    assert {:ok, _} = Grants.approve(approved_req.id, %{granted_by: other_admin.id, org_id: org_id, repo: Driftwood.Repo})
+    assert {:ok, _} = Grants.deny(denied_req.id, %{denied_by: other_admin.id, org_id: org_id, repo: Driftwood.Repo})
+
+    {:noreply, after_approve} = RevealApprovalsLive.handle_event("approve", %{"request" => approved_req.id}, socket)
+    assert after_approve.assigns.decision_notice =~ "already decided"
+    refute after_approve.assigns.decision_notice =~ "Could not"
+    assert after_approve.assigns.pending == []
+
+    {:noreply, after_deny} = RevealApprovalsLive.handle_event("deny", %{"request" => denied_req.id}, socket)
+    assert after_deny.assigns.decision_notice =~ "already decided"
+    assert after_deny.assigns.pending == []
+
+    assert [_one] = Driftwood.Repo.all(from(g in Samen.Reveal.RevealGrant, where: g.request_id == ^approved_req.id))
+  end
+
+  test "STRAY APPROVAL: a pending approval of a decided request is not in the queue (and not a dead row the admin cannot decide)", %{scenario: s} do
+    org_id = s.org_id
+    driver_id = to_string(s.compliant_driver_id)
+    admin = seed_member!(org_id, :admin)
+    other_admin = seed_member!(org_id, :admin)
+
+    {:ok, decided} = OperatorReveal.request_reveal("op-stray-1", driver_id, "ticket 72: decided", org_id)
+    {:ok, live} = OperatorReveal.request_reveal("op-stray-2", driver_id, "ticket 73: live", org_id)
+    assert {:ok, _} = Grants.approve(decided.id, %{granted_by: other_admin.id, org_id: org_id, repo: Driftwood.Repo})
+
+    # data from before the status was written: a pending approval opened on top of the decided request
+    assert {:ok, _stray} =
+             Samen.Approvals.request(%{
+               org_id: org_id,
+               kind: "pii_reveal",
+               subject_ref: Samen.Reveal.ApprovalHandler.subject_ref(decided),
+               requested_by: decided.requestor_id
+             })
+
+    html = render_framework(RevealApprovalsLive, settings_mount(), [org_id, admin.id])
+    refute html =~ "approve-btn-#{decided.id}"
+    # positive control: the live request is listed
+    assert html =~ "approve-btn-#{live.id}"
+  end
 end

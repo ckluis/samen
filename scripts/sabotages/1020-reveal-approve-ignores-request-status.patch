@@ -1,4 +1,4 @@
-# SABOTAGE: the grant insert does not check the request is still pending, so a stray approval of a decided 
+# SABOTAGE: the grant insert does not check the request is still pending, so a stray approval of a decided  
 #   request is approved into a second grant
 #
 # Flips the named test(s).
@@ -6,15 +6,17 @@
 # TEST_FILES: test/reveal_approver_test.exs
 # MUST_FAIL: a stray pending approval of a decided request (data from before the status was written) cannot be approved into a second grant
 diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
-index f2445010..be684cf4 100644
+index ae1abc97..489093f1 100644
 --- a/samen_core/lib/samen/reveal/grants.ex
 +++ b/samen_core/lib/samen/reveal/grants.ex
-@@ -487,7 +487,7 @@ defmodule Samen.Reveal.Grants do
+@@ -526,9 +526,7 @@ defmodule Samen.Reveal.Grants do
        # path) mints no grant, so a second approval of one request is refused (`:not_pending`) and rolls back with
        # everything else. The same lock serialises this against an approval open (`open_engine_approval/4`) and a deny.
        |> Ecto.Multi.run(:request, fn multi_repo, _changes ->
--        with :ok <- lock_pending(multi_repo, req.id), do: {:ok, :locked}
-+        with :ok <- (lock_request(multi_repo, req.id); :ok), do: {:ok, :locked}
+-        with :ok <- lock_pending(multi_repo, req.id),
+-             :ok <- refuse_existing_grant(multi_repo, req.id),
+-             do: {:ok, :locked}
++        {:ok, :locked}
        end)
        |> Ecto.Multi.insert(:grant, grant_changeset(grant_attrs))
        # PP-13 (B6 residual close): route the approve-moment `granted` event through

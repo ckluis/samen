@@ -8,9 +8,9 @@ defmodule SamenCore.TestRepo.Migrations.RevealRequestBackfill do
       names it, and no org is guessed.
 
     * `rvq_status` — a request that is still `pending` but was decided is marked with what the records say:
-      `approved` (an approved approval or a grant for the request), `denied` (a rejected approval or the recorded
-      "reveal request denied by approver" event), `cancelled` (a cancelled approval). A request whose records
-      DISAGREE (say approved and denied) or that has none stays `pending`: it is counted in this migration's
+      `approved` (an approved approval or a grant for the request; a grant is decisive, since access was given), `denied` (a rejected approval or the recorded
+      "reveal request denied by approver" event), `cancelled` (a cancelled approval). A request with NO grant whose
+      records DISAGREE (say approved and denied) or that has none stays `pending`: it is counted in this migration's
       output and nothing is guessed.
     * the `(org, inserted_at, id)` index the queue's orphan scan reads, built `CONCURRENTLY` (an INVALID leftover
       of the same name is dropped first).
@@ -70,8 +70,10 @@ defmodule SamenCore.TestRepo.Migrations.RevealRequestBackfill do
 
     pending_only = "rvq_status = 'pending'"
 
+    # a grant for the request is decisive: access was given, whatever else the records say (approving it again
+    # would issue a second grant), so it is `approved` even where the other records disagree
     chunked_backfill(repo(), "rvq_reveal_request", "rvq_status = 'approved'",
-      where: "#{pending_only} AND #{approved()} AND NOT #{denied()} AND NOT #{cancelled()}"
+      where: "#{pending_only} AND (#{@granted} OR (#{approved()} AND NOT #{denied()} AND NOT #{cancelled()}))"
     )
 
     chunked_backfill(repo(), "rvq_reveal_request", "rvq_status = 'denied'",
@@ -91,7 +93,7 @@ defmodule SamenCore.TestRepo.Migrations.RevealRequestBackfill do
     if undecided > 0 do
       IO.puts(
         "reveal request backfill: #{undecided} pending request(s) have records that disagree about how they were " <>
-          "decided; left pending, not guessed (decide each by id: Samen.Reveal.Grants.approve/2 or deny/2)"
+          "decided and no grant on file; left pending, not guessed: review each one's approvals and audit before it is decided"
       )
     end
 
