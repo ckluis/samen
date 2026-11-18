@@ -358,6 +358,77 @@ defmodule Samen.Web.MailboxSyncTest do
       assert [%{subject_key: "crm.person"}] = mail_rows(org_id)
     end
 
+    test "RED: a message whose address no query can carry does not stop the mailbox: it is reported once, the rest of the page syncs and the cursor advances",
+         %{org_id: org_id} do
+      cfg = config(org_id)
+      connection = connect!(org_id, cfg)
+
+      FakeProvider.deliver_to_inbox([
+        inbound("stranger@poison\0.test", external_id: "ext-poison"),
+        inbound(Seeds.contact_email(), external_id: "ext-good")
+      ])
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, %{synced: 2, failed: 0, cursor: cursor}} = Mailbox.sync(connection, cfg)
+          assert cursor != nil
+        end)
+
+      assert log =~ "read=mailbox_unqueryable_address"
+      assert length(Regex.scan(~r/read=mailbox_unqueryable_address/, log)) == 1
+      refute log =~ "poison"
+
+      # the poison message is recorded UNANCHORED (nothing it names can match), the good one threads onto the person
+      rows = mail_rows(org_id)
+      assert Enum.map(rows, & &1.subject_key) |> Enum.sort() == [nil, "crm.person"]
+
+      # CONTROL: the cursor moved, so the next sync does not meet the poison message again (and reports nothing)
+      next_log = ExUnit.CaptureLog.capture_log(fn -> assert {:ok, %{synced: 0}} = Mailbox.sync(connection, cfg) end)
+      refute next_log =~ "mailbox_unqueryable_address"
+    end
+
+    test "RED: a provider message id no query can carry is counted failed and reported; the rest of the page syncs",
+         %{org_id: org_id} do
+      cfg = config(org_id)
+      connection = connect!(org_id, cfg)
+
+      FakeProvider.deliver_to_inbox([
+        inbound(Seeds.contact_email(), external_id: "ext-\0poison"),
+        inbound(Seeds.contact_email(), external_id: "ext-good")
+      ])
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, %{synced: 1, failed: 1}} = Mailbox.sync(connection, cfg)
+        end)
+
+      assert log =~ "read=mailbox_unqueryable_external_id"
+      assert [%{subject_key: "crm.person"}] = mail_rows(org_id)
+    end
+
+    test "RED: send/3 whose timeline record fails after the provider sent says the mail WAS sent", %{org_id: org_id} do
+      healthy = config(org_id)
+      connection = connect!(org_id, healthy)
+      broken = %{healthy | person_resource: UnreadableMailRecord}
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:sent_but_unrecorded, {:match_unavailable, :read_failed}}} =
+                   Mailbox.send(%{to: Seeds.contact_email(), body: "hi"}, connection, broken)
+        end)
+
+      assert log =~ "read=mailbox_match"
+      # it really left: the provider holds the message, and nothing is on the timeline yet
+      assert [%Message{direction: :outbound}] = FakeProvider.sent()
+      assert mail_rows(org_id) == []
+
+      # CONTROL: a send that records is still {:ok, record}; a send the provider refuses is NOT "sent_but_unrecorded"
+      assert {:ok, %{direction: :outbound}} = Mailbox.send(%{to: Seeds.contact_email(), body: "hi"}, connection, healthy)
+
+      assert {:error, :not_configured} =
+               Mailbox.send(%{to: Seeds.contact_email()}, connection, config(org_id, %{configured: false}))
+    end
+
     test "RED: a connection row that cannot be advanced is reported (the {:ok, connection} it returns is the OLD row)", %{
       org_id: org_id
     } do
