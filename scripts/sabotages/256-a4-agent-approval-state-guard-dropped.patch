@@ -15,10 +15,10 @@
 # MUST_FAIL: a FORGED bare-map approval refuses
 # MUST_FAIL: an APPROVED approval belonging to ANOTHER org
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
-index e46c98f2..5692c71f 100644
+index 7bfc5263..482365af 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -2932,47 +2932,14 @@ defmodule Samen.AI.Agent do
+@@ -2939,51 +2939,14 @@ defmodule Samen.AI.Agent do
    # caller who reached this seam directly, holding nothing but the id, sees `:pending` and
    # is refused.
    defp verify_approval(approval, %Run{} = run, turn_row, approver_id) do
@@ -59,6 +59,10 @@ index e46c98f2..5692c71f 100644
 -          true ->
 -            {:ok, loaded}
 -        end
+-
+-      # A read that FAILED is not "no such approval": the write is refused either way, but the turn row names the cause.
+-      {:error, :unavailable} ->
+-        {:error, :approval_unavailable}
 -
 -      _ ->
 -        {:error, :approval_not_found}

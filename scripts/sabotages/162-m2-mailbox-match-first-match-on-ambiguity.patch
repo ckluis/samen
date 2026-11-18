@@ -11,10 +11,10 @@
 # MUST_FAIL: M2 PERSON ambiguity: TWO org people sharing a counterparty address
 # MUST_FAIL: M2 COMPANY-DOMAIN ambiguity: TWO org companies sharing a domain
 diff --git a/samen_core/lib/samen/mailbox/match.ex b/samen_core/lib/samen/mailbox/match.ex
-index f26f277..81a064f 100644
+index ff9df9c..425b3cf 100644
 --- a/samen_core/lib/samen/mailbox/match.ex
 +++ b/samen_core/lib/samen/mailbox/match.ex
-@@ -118,11 +118,7 @@ defmodule Samen.Mailbox.Match do
+@@ -121,11 +121,7 @@ defmodule Samen.Mailbox.Match do
          # record. A guess is not an honest match.
          config
          |> candidate_people()
@@ -27,7 +27,7 @@ index f26f277..81a064f 100644
      end
    end
  
-@@ -210,12 +206,9 @@ defmodule Samen.Mailbox.Match do
+@@ -209,12 +205,9 @@ defmodule Samen.Mailbox.Match do
          config.company_resource
          |> Ash.Query.new()
          |> Ash.Query.filter(org_id == ^config.org_id and domain == ^dom)
@@ -40,5 +40,5 @@ index f26f277..81a064f 100644
 -        end
 +        |> List.first()
      end
-   rescue
-     _ -> nil
+   end
+ 

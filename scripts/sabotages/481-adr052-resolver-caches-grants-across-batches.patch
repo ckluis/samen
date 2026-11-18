@@ -6,10 +6,10 @@
 # TEST_FILES: test/replay/resolver_batch_test.exs
 # MUST_FAIL: deny-on-read survives batching
 diff --git a/samen_core/lib/samen/replay/resolver.ex b/samen_core/lib/samen/replay/resolver.ex
-index 4b97a97..60152af 100644
+index 37ae906..ef8bf32 100644
 --- a/samen_core/lib/samen/replay/resolver.ex
 +++ b/samen_core/lib/samen/replay/resolver.ex
-@@ -147,7 +147,18 @@ defmodule Samen.Replay.Resolver do
+@@ -156,7 +156,18 @@ defmodule Samen.Replay.Resolver do
    # `PiiResolution.prefetch/4` read ONCE for all the batch's rows. Lives for this call only.
    defp batch_opts(rows, mod, actor, opts) do
      base = Keyword.merge([repo: repo(mod, opts)], Keyword.take(opts, [:grant, :vault]))
@@ -27,5 +27,5 @@ index 4b97a97..60152af 100644
 +        prefetched
 +    end
    rescue
-     # A failed prefetch costs only the per-record reads it would have saved.
-     _ -> Keyword.merge([repo: repo(mod, opts)], Keyword.take(opts, [:grant, :vault]))
+     # A failed prefetch costs only the per-record reads it would have saved (each record still resolves on its own).
+     e ->
