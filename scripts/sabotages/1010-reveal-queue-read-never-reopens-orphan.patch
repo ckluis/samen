@@ -7,15 +7,15 @@
 # MUST_FAIL: an orphan is invisible to the queue
 # MUST_FAIL: the recovered request can be DENIED end to end
 diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
-index 2db7bcc0..d7d26fe1 100644
+index f2445010..0cb5d312 100644
 --- a/samen_core/lib/samen/reveal/grants.ex
 +++ b/samen_core/lib/samen/reveal/grants.ex
-@@ -509,7 +509,7 @@ defmodule Samen.Reveal.Grants do
-           # test seam: runs between the scan and the re-opens, i.e. exactly where a concurrent reader's open lands
-           Keyword.get(opts, :after_orphan_scan, fn -> :ok end).()
- 
--          for req <- requests, Samen.Reveal.ApprovalHandler.subject_ref(req) not in opened do
-+          for req <- Enum.take(requests, 0), Samen.Reveal.ApprovalHandler.subject_ref(req) not in opened do
-             reopen_orphan(req, org)
-           end
- 
+@@ -622,7 +622,7 @@ defmodule Samen.Reveal.Grants do
+   defp recover_orphans(org_id, r, opts) when is_binary(org_id) do
+     with {:ok, org} <- Ecto.UUID.cast(org_id),
+          {:ok, orphans} <- orphan_candidates(org, r, opts) do
+-      {:ok, Enum.count(orphans, &(reopen_orphan(&1, org, r, opts) == :failed))}
++      {:ok, Enum.count(Enum.take(orphans, 0), &(reopen_orphan(&1, org, r, opts) == :failed))}
+     else
+       # not a UUID: no org the engine could hold an approval for, so nothing to recover
+       :error -> {:ok, 0}

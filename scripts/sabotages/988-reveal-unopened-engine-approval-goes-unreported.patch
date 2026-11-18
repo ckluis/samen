@@ -6,12 +6,12 @@
 # TEST_FILES: test/honest_kernel_reads_d_test.exs
 # MUST_FAIL: RED: the approvals read fails -> the request still stands, and the missing approval is reported by name
 diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
-index 2db7bcc0..50946574 100644
+index f244501..a4fa531 100644
 --- a/samen_core/lib/samen/reveal/grants.ex
 +++ b/samen_core/lib/samen/reveal/grants.ex
-@@ -217,7 +217,6 @@ defmodule Samen.Reveal.Grants do
-       # unique index) before it lists. The failure is reported here by name, once; a re-open that fails again is
-       # reported by the read that tried it.
+@@ -226,7 +226,6 @@ defmodule Samen.Reveal.Grants do
+       # read of that org re-opens a missing approval (`recover_orphans/3`) before it lists. The failure is reported
+       # here by name; a queue read that still cannot open one says so in its result (`{:partial, rows, n}`).
        {:error, reason} ->
 -        Samen.Observability.Failure.report_write(:reveal_open_engine_approval, org_id, reason)
          {:error, reason}

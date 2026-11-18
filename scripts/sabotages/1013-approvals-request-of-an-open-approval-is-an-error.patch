@@ -1,10 +1,10 @@
-# SABOTAGE: Approvals.request errors on an already-pending approval instead of returning it, so a queue 
-#   reader that lost the open race fails its re-open
+# SABOTAGE: Approvals.request errors on an already-pending approval instead of returning it, so an approver's
+#   decision on a request whose approval is already open fails
 #
 # Flips the named test(s).
 # APP: samen_core
 # TEST_FILES: test/reveal_approver_test.exs
-# MUST_FAIL: a reader whose scan went stale (another reader opened the approval after it) converges on that ONE approval
+# MUST_FAIL: now the read re-opens it and the approver can APPROVE it end to end
 diff --git a/samen_core/lib/samen/approvals.ex b/samen_core/lib/samen/approvals.ex
 index 3242444d..2eb11b51 100644
 --- a/samen_core/lib/samen/approvals.ex

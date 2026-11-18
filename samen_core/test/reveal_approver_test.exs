@@ -514,6 +514,20 @@ defmodule Samen.Reveal.ApproverTest do
       assert approvals_for(org_a, req) == 0
     end
 
+    test "RED: a LEGACY request (approval decided, status still pending) is not re-opened: the re-open checks approvals in any state" do
+      org_a = org()
+      {:ok, req} = Grants.request(%{subject_id: subj(), requestor_id: actor(), reason: "ticket 314", org_id: org_a})
+      assert {:ok, _} = Grants.approve(req.id, %{granted_by: actor(), org_id: org_a, repo: @repo})
+
+      # a row from before the status was written: the approval says decided, the request says pending
+      @repo.update_all(from(q in RevealRequest, where: q.id == ^req.id), set: [status: "pending"])
+      assert approvals_for(org_a, req) == 1
+
+      capture_log(fn -> assert Grants.reopen_orphan(@repo.get!(RevealRequest, req.id), org_a, @repo, []) == :skipped end)
+      assert {:ok, []} = Approvals.list_pending(org_a, "pii_reveal")
+      assert approvals_for(org_a, req) == 1
+    end
+
     test "RED: a decision filed in ANOTHER lane (no org) still decides the request; org A's queue never re-opens it" do
       org_a = org()
       req = file_orphan(org_a)
@@ -538,6 +552,27 @@ defmodule Samen.Reveal.ApproverTest do
 
       assert [_one] = @repo.all(from(g in RevealGrant, where: g.request_id == ^req.id))
       assert {:ok, []} = Approvals.list_pending(org_a, "pii_reveal")
+    end
+
+    test "RED: a stray pending approval of a decided request (data from before the status was written) cannot be approved into a second grant" do
+      org_a = org()
+      {:ok, req} = Grants.request(%{subject_id: subj(), requestor_id: actor(), reason: "ticket 315", org_id: org_a})
+      assert {:ok, _} = Grants.approve(req.id, %{granted_by: actor(), org_id: org_a, repo: @repo})
+
+      # an approval opened on top of the decided request, the way the old recovery did
+      assert {:ok, stray} =
+               Approvals.request(%{
+                 org_id: org_a,
+                 kind: "pii_reveal",
+                 subject_ref: Samen.Reveal.ApprovalHandler.subject_ref(req),
+                 requested_by: req.requestor_id
+               })
+
+      assert {:error, :not_pending} = Approvals.approve(stray.id, actor())
+      assert [_one] = @repo.all(from(g in RevealGrant, where: g.request_id == ^req.id))
+      # the refused approval rolled back with everything else: it is still pending, and a reject cannot overwrite the decision
+      assert {:ok, _} = Approvals.reject(stray.id, actor())
+      assert @repo.get!(RevealRequest, req.id).status == "approved"
     end
 
     test "every path that decides a reveal request writes its terminal status on the request itself" do

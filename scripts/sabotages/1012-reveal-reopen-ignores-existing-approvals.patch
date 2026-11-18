@@ -1,0 +1,20 @@
+# SABOTAGE: the re-open does not look for an approval in any state, so a request whose decided approval its 
+#   status never recorded is re-opened
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_approver_test.exs
+# MUST_FAIL: a LEGACY request (approval decided, status still pending) is not re-opened
+diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+index f2445010..53b55af7 100644
+--- a/samen_core/lib/samen/reveal/grants.ex
++++ b/samen_core/lib/samen/reveal/grants.ex
+@@ -241,7 +241,7 @@ defmodule Samen.Reveal.Grants do
+         ref = Samen.Reveal.ApprovalHandler.subject_ref(req)
+ 
+         with {:ok, opened} <- Samen.Approvals.subject_refs_with_approval(org_id, "pii_reveal", [ref], wiring) do
+-          if ref in opened, do: {:ok, :skipped}, else: request_engine_approval(req, org_id, wiring)
++          if ref in MapSet.new(), do: {:ok, :skipped}, else: request_engine_approval(req, org_id, wiring)
+         end
+ 
+       # decided (or cancelled): there is no approval to open

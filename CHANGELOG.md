@@ -35,7 +35,7 @@ All notable changes to Samen are recorded here. The format follows
   not revived; the recovered approval keeps the request's own `requested_at`. A failed re-open is reported AND the
   queue answers **`{:partial, rows, n}`** (`RevealApprovalsLive` says "n pending reveal request(s) could not be
   shown"; `pending_for_org/2` raises), and an orphan scan that cannot run makes the queue `{:error, :unavailable}`.
-  Sabotages 1010-1013 and 1016-1024.
+  Sabotages 1010-1013 and 1016-1026.
 - **Upgrade (apps generated before this change): run `mix samen.gen.reveal_requests`, then `mix ecto.migrate`.** A
   generated app is a copy that depends on `samen_core` by path: the new `RevealRequest` schema selects `rvq_org_id`, so
   an app on the old table fails every reveal read and write with `undefined_column` until it has the column. The task

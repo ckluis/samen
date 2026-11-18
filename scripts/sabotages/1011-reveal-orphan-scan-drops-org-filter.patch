@@ -6,15 +6,15 @@
 # TEST_FILES: test/reveal_approver_test.exs
 # MUST_FAIL: org A's queue read never re-opens or shows org B's orphan
 diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
-index c70b012f..5289fa53 100644
+index f2445010..b6bf84e7 100644
 --- a/samen_core/lib/samen/reveal/grants.ex
 +++ b/samen_core/lib/samen/reveal/grants.ex
-@@ -491,7 +491,7 @@ defmodule Samen.Reveal.Grants do
-       requests =
-         r.all(
-           from(q in RevealRequest,
--            where: q.org_id == ^org and q.status == "pending" and q.inserted_at >= ^cutoff,
-+            where: q.status == "pending" and q.inserted_at >= ^cutoff,
-             order_by: [desc: q.inserted_at, desc: q.id],
-             limit: ^@orphan_scan_limit
-           )
+@@ -643,7 +643,7 @@ defmodule Samen.Reveal.Grants do
+     requests =
+       r.all(
+         from(q in RevealRequest,
+-          where: q.org_id == ^org and q.status == "pending" and q.inserted_at >= ^cutoff,
++          where: q.status == "pending" and q.inserted_at >= ^cutoff,
+           order_by: [desc: q.inserted_at, desc: q.id],
+           limit: ^@orphan_scan_limit
+         )
