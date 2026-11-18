@@ -42,7 +42,12 @@ defmodule Samen.Web.OwnLogTest do
         end
       end)
 
-    global = ExUnit.CaptureLog.capture_log(fn -> send(other2, :go) && assert_receive(:foreign_logged_2) end)
+    global =
+      ExUnit.CaptureLog.capture_log(fn ->
+        send(other2, :go)
+        assert_receive :foreign_logged_2
+      end)
+
     assert global =~ "foreign-process-line-2"
   end
 
