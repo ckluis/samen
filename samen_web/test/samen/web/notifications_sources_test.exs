@@ -194,6 +194,54 @@ defmodule Samen.Web.NotificationsSourcesTest do
     assert notifications(org_id, "escalation_step") == []
   end
 
+  defp sla_escalations(ticket_id) do
+    Samen.WebTest.Automation.Escalation
+    |> Ash.Query.filter(kind == "sla_breach")
+    |> Ash.Query.filter(dedupe_key == ^to_string(ticket_id))
+    |> Ash.read!(authorize?: false)
+  end
+
+  test "RED sla_breach: an escalation whose lookup FAILS once is not lost -- the breach stays un-flagged, is reported as a write failure, and the next tick opens exactly one; later ticks never duplicate it" do
+    org_id = Ash.UUID.generate()
+    ticket = seed_breachable_ticket!(org_id)
+    table = "wes_escalation"
+
+    Samen.WebTest.Repo.query!("ALTER TABLE #{table} RENAME TO #{table}_unreadable")
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        run_breach_worker!()
+      end)
+
+    Samen.WebTest.Repo.query!("ALTER TABLE #{table}_unreadable RENAME TO #{table}")
+
+    # the failure is reported (write kind), not a debug line, and the attention is not dropped by flagging the ticket
+    assert log =~ "write=sla_breach_escalation"
+    refute breached?(ticket.id)
+    assert sla_escalations(ticket.id) == []
+
+    # the lookup is healthy again: the next tick opens exactly one escalation and flags the ticket
+    run_breach_worker!()
+    assert breached?(ticket.id)
+    assert [_one] = sla_escalations(ticket.id)
+
+    # POSITIVE CONTROL: later ticks are no-ops, never a duplicate
+    run_breach_worker!()
+    run_breach_worker!()
+    assert [_one] = sla_escalations(ticket.id)
+  end
+
+  test "GREEN sla_breach: the healthy path opens exactly one escalation and never a duplicate on later ticks" do
+    org_id = Ash.UUID.generate()
+    ticket = seed_breachable_ticket!(org_id)
+
+    run_breach_worker!()
+    run_breach_worker!()
+
+    assert breached?(ticket.id)
+    assert [_one] = sla_escalations(ticket.id)
+  end
+
   # ---------------------------------------------------------------------------
   # SOURCE 2 · chat mentions (@handle on the plaintext, pre-vault)
   # ---------------------------------------------------------------------------

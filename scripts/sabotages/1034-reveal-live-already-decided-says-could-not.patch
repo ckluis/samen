@@ -1,0 +1,20 @@
+# SABOTAGE: the approver LiveView does not map an already-decided refusal, so a stale row stays with a 
+#   generic error
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/reveal_approver_live_test.exs
+# MUST_FAIL: ALREADY DECIDED: approving or denying a stale row says so
+diff --git a/samen_web/lib/samen/web/settings/reveal_approvals_live.ex b/samen_web/lib/samen/web/settings/reveal_approvals_live.ex
+index 249e5f2d..ed06c93b 100644
+--- a/samen_web/lib/samen/web/settings/reveal_approvals_live.ex
++++ b/samen_web/lib/samen/web/settings/reveal_approvals_live.ex
+@@ -54,7 +54,7 @@ defmodule Samen.Web.Settings.RevealApprovalsLive do
+   alias Samen.Web.Settings.Reads
+ 
+   # `Grants.approve/2` / `deny/2` answers these when the request was decided before this decision got the lock
+-  @already_decided [:not_pending, :already_granted]
++  @already_decided []
+ 
+   @impl true
+   def mount(params, session, socket) do

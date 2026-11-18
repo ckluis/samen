@@ -175,9 +175,14 @@ defmodule Samen.Replay.Sanitizer do
   defp guarded(fun) do
     fun.()
   rescue
-    _ -> %Dropped{kind: :sanitizer_error}
+    # Fail closed (nothing of the value is stored) and reported by name + exception module, never the value.
+    e ->
+      Samen.Observability.Failure.report(:replay_sanitize, nil, e)
+      %Dropped{kind: :sanitizer_error}
   catch
-    _, _ -> %Dropped{kind: :sanitizer_error}
+    kind, _reason ->
+      Samen.Observability.Failure.report(:replay_sanitize, nil, kind)
+      %Dropped{kind: :sanitizer_error}
   end
 
   defp stream_count(streams) do

@@ -73,11 +73,11 @@ defmodule Samen.BreakGlass.ReconcileWorker do
     Reconciliation.emit_unanchored_signal()
   rescue
     e ->
-      Samen.Observability.Failure.report(:break_glass_unanchored_signal, nil, e)
+      Samen.Observability.Failure.report_write(:break_glass_unanchored_signal, nil, e)
       0
   catch
     kind, _value ->
-      Samen.Observability.Failure.report(:break_glass_unanchored_signal, nil, kind)
+      Samen.Observability.Failure.report_write(:break_glass_unanchored_signal, nil, kind)
       0
   end
 end

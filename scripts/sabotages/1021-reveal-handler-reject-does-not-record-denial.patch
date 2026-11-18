@@ -1,0 +1,20 @@
+# SABOTAGE: rejecting a reveal approval through the engine does not mark the request denied, so a denied 
+#   request still reads as pending
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_approver_test.exs
+# MUST_FAIL: every path that decides a reveal request writes its terminal status on the request itself
+diff --git a/samen_core/lib/samen/reveal/approval_handler.ex b/samen_core/lib/samen/reveal/approval_handler.ex
+index 73d58f7e..224ed591 100644
+--- a/samen_core/lib/samen/reveal/approval_handler.ex
++++ b/samen_core/lib/samen/reveal/approval_handler.ex
+@@ -46,7 +46,7 @@ defmodule Samen.Reveal.ApprovalHandler do
+   # A rejection / cancellation of the approval is a decision on the request: its `rvq_status` records it in the same
+   # transaction (and under the request's row lock), so "decided" is a fact of the request row.
+   @impl true
+-  def on_reject(approval, ctx), do: close(approval, ctx, "denied")
++  def on_reject(_approval, _ctx), do: :ok
+ 
+   @impl true
+   def on_cancel(approval, ctx), do: close(approval, ctx, "cancelled")

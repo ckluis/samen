@@ -119,6 +119,7 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
       empty ++
         Enum.map(unclassified, fn {_resource, reason} -> "cannot inspect: #{reason}" end) ++
         Enum.flat_map(resources, &check(&1, Map.merge(exempt, unmounted), spec_opts)) ++
+        nullable_sort_violations(resources, Map.merge(exempt, unmounted), spec_opts) ++
         stale_exemptions(exempt, resources) ++
         stale_unmounted(unmounted, resources, spec_opts)
     end
@@ -144,21 +145,15 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
     end
   end
 
-  @doc """
-  Advisory lines (never violations) for `opts[:domains]`: a sort attribute that says `allow_nil? false`
-  over a database column that still accepts NULL. The page is still correct (the ascending cursor
-  bound is decided from the column, see `Samen.Indexing.column_not_null/3`) but it loses the seek and
-  the schema no longer says what the resource does. Not a violation: fixing it is a data migration
-  (backfill, then SET NOT NULL) that a host owns, and the verifier must not block on it.
-  """
-  @spec notes(keyword()) :: [String.t()]
-  def notes(opts) do
-    unmounted = Keyword.get(opts, :unmounted, %{})
-    spec_opts = Keyword.take(opts, [:keyset_sorts])
-    {resources, _} = Samen.Indexing.org_scoped(Keyword.get(opts, :domains, []))
-
+  # A sort attribute that says `allow_nil? false` over a database column that still accepts NULL is a VIOLATION: the
+  # ascending keyset cursor gets no index bound over a nullable column (`Samen.Indexing.column_not_null/3`), so the
+  # page loses the seek, and the schema no longer says what the resource does. It was an advisory note (WP12) while
+  # hosts still carried the mismatch; the pawchart operator mount was the last, and its migration sets the columns NOT
+  # NULL, so it is now a gate. A column whose nullability cannot be read is not reported here (`check/3` already
+  # reports a table it cannot inspect).
+  defp nullable_sort_violations(resources, exempt, spec_opts) do
     for resource <- resources,
-        not Map.has_key?(unmounted, resource),
+        not Map.has_key?(exempt, resource),
         {:ok, spec} <- [Samen.Indexing.spec(resource, spec_opts)],
         repo = repo(resource),
         repo != nil,
@@ -166,10 +161,106 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
         attr <- spec.logical -- [:org_id, :id],
         %{allow_nil?: false} <- [Ash.Resource.Info.attribute(resource, attr)],
         Samen.Indexing.column_not_null(resource, attr, repo: repo) == {:ok, false} do
-      "#{inspect(resource)} (#{spec.table}): attribute #{inspect(attr)} is `allow_nil? false` but the " <>
+      "#{inspect(resource)} (#{spec.table}): sort attribute #{inspect(attr)} is `allow_nil? false` but the " <>
         "database column is nullable — its ascending keyset cursor gets no index bound. " <>
         "Next: a migration that backfills the NULLs and sets the column NOT NULL " <>
-        "(or make the attribute `allow_nil? true` if NULLs are legitimate)."
+        "(`Samen.Migration.ExpandContract.set_not_null/3`), or make the attribute `allow_nil? true` if NULLs are legitimate."
+    end
+  end
+
+  @doc """
+  Advisory lines (never violations) for `opts[:domains]`: every stored attribute of every Postgres resource whose
+  `allow_nil?` disagrees with the live column (`information_schema.columns.is_nullable`), one line per resource and
+  direction. The sort attributes of org-scoped resources are NOT repeated here: that direction is a violation
+  (`violations/1`). What remains is `allow_nil? false` over a nullable column that no keyset page sorts by (no index
+  impact, but the schema still lies) and the reverse, `allow_nil? true` over a NOT NULL column (the resource accepts a
+  NULL the database refuses). Not violations: closing the first is a data migration that needs a VALUE for the NULLs
+  (a missing foreign key has none), which a host owns.
+  """
+  @spec notes(keyword()) :: [String.t()]
+  def notes(opts) do
+    unmounted = Keyword.get(opts, :unmounted, %{})
+    spec_opts = Keyword.take(opts, [:keyset_sorts])
+    domains = Keyword.get(opts, :domains, [])
+    {org_scoped, _} = Samen.Indexing.org_scoped(domains)
+
+    resources =
+      for domain <- domains,
+          resource <- Ash.Domain.Info.resources(domain),
+          AshPostgres.DataLayer.Info.table(resource) not in [nil, ""],
+          not Map.has_key?(unmounted, resource),
+          uniq: true,
+          do: resource
+
+    Enum.flat_map(resources, &nullability_notes(&1, org_scoped, spec_opts))
+  end
+
+  defp nullability_notes(resource, org_scoped, spec_opts) do
+    repo = repo(resource)
+    table = AshPostgres.DataLayer.Info.table(resource)
+    schema = AshPostgres.DataLayer.Info.schema(resource) || "public"
+
+    sort_attrs =
+      with true <- resource in org_scoped, {:ok, spec} <- Samen.Indexing.spec(resource, spec_opts) do
+        spec.logical
+      else
+        _ -> []
+      end
+
+    case column_nullability(repo, schema, table) do
+      {:ok, nullable} ->
+        mismatches =
+          for attribute <- Ash.Resource.Info.attributes(resource),
+              attribute.primary_key? != true,
+              {:ok, column_nullable?} <- [Map.fetch(nullable, to_string(attribute.source || attribute.name))],
+              attribute.allow_nil? != column_nullable? do
+            {attribute.name, attribute.allow_nil?}
+          end
+
+        lie_nil = for {name, false} <- mismatches, name not in sort_attrs, do: name
+        lie_not_nil = for {name, true} <- mismatches, do: name
+
+        [
+          {lie_nil,
+           "`allow_nil? false` but the database column is nullable (not a keyset sort attribute: no index impact; " <>
+             "the backfill needs a value decision, so this is the host's)"},
+          {lie_not_nil, "`allow_nil? true` but the database column is NOT NULL (the resource accepts a NULL the database refuses)"}
+        ]
+        |> Enum.reject(fn {names, _} -> names == [] end)
+        |> Enum.map(fn {names, what} ->
+          "#{inspect(resource)} (#{table}): #{Enum.map_join(Enum.sort(names), ", ", &inspect/1)} — #{what}"
+        end)
+
+      # the catalog read FAILED (an org-scoped resource's unreadable table is also a violation of `violations/1`): say so
+      # by name instead of letting an advisory sweep that could not run read as "no mismatches"
+      {:error, reason} ->
+        Samen.Observability.Failure.report(:nullability_sweep, nil, reason)
+        []
+
+      # no repo, or a table the live database does not have: nothing to compare
+      :absent ->
+        []
+    end
+  end
+
+  # `{:ok, %{column => nullable?}}`, `{:error, reason}` for a read that failed, `:absent` for a resource with no repo or
+  # a table the live database does not have.
+  defp column_nullability(nil, _schema, _table), do: :absent
+
+  defp column_nullability(repo, schema, table) do
+    case ensure_repo_started(repo) do
+      :ok ->
+        case repo.query(
+               "SELECT column_name, is_nullable FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2",
+               [schema, table]
+             ) do
+          {:ok, %{rows: []}} -> :absent
+          {:ok, %{rows: rows}} -> {:ok, Map.new(rows, fn [column, is_nullable] -> {column, is_nullable == "YES"} end)}
+          {:error, reason} -> {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

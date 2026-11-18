@@ -1,19 +1,19 @@
-# SABOTAGE: an unreadable subject runs the workflow against an empty subject, which passes neq gates
+# SABOTAGE: a malformed record id runs the workflow against an empty subject, which passes neq gates
 #
 # Flips the named test(s).
 # APP: samen_core
 # TEST_FILES: test/automation/observability_test.exs
-# MUST_FAIL: a subject that cannot be READ skips the run
+# MUST_FAIL: a malformed record id skips the run
 diff --git a/samen_core/lib/samen/automation/run_worker.ex b/samen_core/lib/samen/automation/run_worker.ex
-index c119ace9..8fd50ae8 100644
+index ed1d8676..4890267e 100644
 --- a/samen_core/lib/samen/automation/run_worker.ex
 +++ b/samen_core/lib/samen/automation/run_worker.ex
-@@ -190,7 +190,7 @@ defmodule Samen.Automation.RunWorker do
-       # A subject that could not be READ is not an empty subject: `neq` / `not_in` / `is_nil` (and a workflow with
-       # no conditions) all pass against one, so the run is skipped (and the failure reported) rather than fired.
-       Samen.Observability.Failure.report(:run_worker_load_eligible, nil, e)
--      {:skip, :internal_error}
-+      {:ok, %{}}
+@@ -221,7 +221,7 @@ defmodule Samen.Automation.RunWorker do
+       # A malformed id can never name a row, however often it is retried: definite, terminal.
+       :error ->
+         Samen.Observability.Failure.report(:run_worker_load_eligible, nil, :malformed_record_id)
+-        {:skip, :internal_error}
++        {:ok, %{}}
+     end
    end
  
-   defp conditions_gate(definition, subject_map, args) do

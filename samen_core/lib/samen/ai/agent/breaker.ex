@@ -523,7 +523,7 @@ defmodule Samen.AI.Agent.Breaker do
     :ok
   rescue
     e ->
-      Samen.Observability.Failure.report(:breaker_audit, nil, e)
+      Samen.Observability.Failure.report_write(:breaker_audit, nil, e)
       :ok
   end
 end

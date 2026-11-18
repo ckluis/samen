@@ -69,17 +69,18 @@ defmodule Samen.Replay.Player do
     |> Ash.read(scope: scope)
     |> case do
       {:ok, sessions} -> {:ok, Enum.map(sessions, &meta/1)}
-      {:error, _} -> {:error, :unavailable}
+      {:error, reason} -> unavailable(:list, scope, reason)
     end
   rescue
-    _ -> {:error, :unavailable}
+    e -> unavailable(:list, scope, e)
   end
 
   @doc """
-  Load one session and its decoded frames under the viewer's scope. `{:ok, %{session, frames}}`
-  or `{:error, :not_found}` (absent, another org's, or unreadable — indistinguishable).
+  Load one session and its decoded frames under the viewer's scope. `{:ok, %{session, frames}}`,
+  `{:error, :not_found}` (absent, another org's, or a malformed id) or `{:error, :unavailable}` when the
+  read itself FAILED (a DB error, a raise): a screen says "could not load", never "no such replay".
   """
-  @spec load(Samen.Scope.t(), String.t()) :: {:ok, map()} | {:error, :not_found}
+  @spec load(Samen.Scope.t(), String.t()) :: {:ok, map()} | {:error, :not_found | :unavailable}
   def load(%Samen.Scope{} = scope, id) when is_binary(id) do
     with {:ok, _} <- Ecto.UUID.cast(id),
          {:ok, [session]} <-
@@ -98,13 +99,26 @@ defmodule Samen.Replay.Player do
       _ = load_view(session.view)
       {:ok, %{session: meta(session), frames: Enum.map(frames, &decode/1)}}
     else
-      _ -> {:error, :not_found}
+      # a row that is absent / another org's reads as an empty set, and a malformed id fails the cast
+      {:ok, _} -> {:error, :not_found}
+      :error -> {:error, :not_found}
+      {:error, reason} -> unavailable(:load, scope, reason)
     end
   rescue
-    _ -> {:error, :not_found}
+    e -> unavailable(:load, scope, e)
   end
 
   def load(_scope, _id), do: {:error, :not_found}
+
+  defp unavailable(:list, scope, reason) do
+    Samen.Observability.Failure.report(:replay_player_list, scope, reason)
+    {:error, :unavailable}
+  end
+
+  defp unavailable(:load, scope, reason) do
+    Samen.Observability.Failure.report(:replay_player_load, scope, reason)
+    {:error, :unavailable}
+  end
 
   # A stored row arrives as TEXT (`Frame`'s `stored_kind` / `stored_payload`), so a row written
   # past `RowGuard` with a kind outside the closed set, or a payload that is not an object,
@@ -166,7 +180,10 @@ defmodule Samen.Replay.Player do
       _ -> false
     end
   rescue
-    _ -> false
+    # an unreadable beam is "not allowed" (never loaded), and on record
+    e ->
+      Samen.Observability.Failure.report(:replay_allowed_beam, nil, e)
+      false
   end
 
   # The same for the resources a frame's `$record`s name (their attribute names are the

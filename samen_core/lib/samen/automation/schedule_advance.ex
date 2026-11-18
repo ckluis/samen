@@ -28,14 +28,15 @@ defmodule Samen.Automation.ScheduleAdvance do
       case resolve_org_id(cs, result) do
         nil ->
           # No org to dispatch under (the reload failed and was reported): a dispatch with a blank org would be
-          # rejected downstream and leave no Run row at all, so none is enqueued; the next scheduled fire retries.
+          # rejected downstream and leave no Run row at all. Returning an error rolls the whole update back, so
+          # `next_fire_at` is NOT advanced and the scan retries this fire (it is never silently lost).
           Samen.Observability.Failure.report_write(:schedule_advance_enqueue_skipped, nil, :no_org)
+          {:error, :org_unresolved}
 
         org_id ->
           enqueue_dispatch(result, org_id)
+          {:ok, result}
       end
-
-      {:ok, result}
     end)
   end
 

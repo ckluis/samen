@@ -24,19 +24,21 @@
 # TEST_FILES: test/ai/agent_fold_source_test.exs
 # MUST_FAIL: D-01 DISCLOSURE: a STEP 0 read of {:error, :shredded}
 diff --git a/samen_core/lib/samen/erasure.ex b/samen_core/lib/samen/erasure.ex
+index e91f22ef..9ab4123d 100644
 --- a/samen_core/lib/samen/erasure.ex
 +++ b/samen_core/lib/samen/erasure.ex
-@@ -615,11 +615,11 @@
-   end
+@@ -800,12 +800,12 @@ defmodule Samen.Erasure do
+   defp acknowledged_detail(_), do: ""
  
    defp derived_summary_invalidation(:performed), do: "performed"
 -  defp derived_summary_invalidation(:shredded), do: "unavailable"
 +  defp derived_summary_invalidation(:shredded), do: "performed"
+   defp derived_summary_invalidation(:lost_acknowledged), do: "unavailable"
    defp derived_summary_invalidation(:absent), do: "not_applicable"
  
    defp derived_summary_reason(:performed), do: nil
 -  defp derived_summary_reason(:shredded), do: "pseudonym_shredded"
 +  defp derived_summary_reason(:shredded), do: nil
+   defp derived_summary_reason(:lost_acknowledged), do: "shred_reference_lost_acknowledged"
    defp derived_summary_reason(:absent), do: "no_dek"
  
-   # ---------------------------------------------------------------------------

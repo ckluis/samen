@@ -11,11 +11,14 @@ defmodule <%= module %>.Repo.Migrations.RevealGrants do
       add(:rvq_resource, :text)
       add(:rvq_action, :text)
       add(:rvq_status, :text, null: false, default: "pending")
+      # The tenant org the request's engine approval is filed under (NULL = none supplied); the queue's orphan scan reads it.
+      add(:rvq_org_id, :uuid)
       timestamps(type: :utc_datetime_usec, inserted_at: :rvq_inserted_at, updated_at: :rvq_updated_at)
     end
 
     create(index(:rvq_reveal_request, [:rvq_subject_id]))
     create(index(:rvq_reveal_request, [:rvq_requestor_id]))
+    create(index(:rvq_reveal_request, [:rvq_org_id, :rvq_inserted_at, :rvq_id], name: "rvq_reveal_request_org_inserted_at_id_idx"))
 
     create table(:rvg_reveal_grant, primary_key: false) do
       add(:rvg_id, :uuid, primary_key: true, null: false, default: fragment("gen_random_uuid()"))

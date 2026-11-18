@@ -182,7 +182,7 @@ defmodule Samen.Automation.Health do
     :ok
   rescue
     e ->
-      Samen.Observability.Failure.report(:health_audit_switch, nil, e)
+      Samen.Observability.Failure.report_write(:health_audit_switch, nil, e)
       :ok
   end
 

@@ -1,0 +1,22 @@
+# SABOTAGE: the agent's load_approval rescue files a raising approvals read as :approval_not_found and says 
+#   nothing
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_write_test.exs
+# MUST_FAIL: RED: an approvals read that RAISES past the wiring is :approval_unavailable and reported by name
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index a9834350..ae628107 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -2998,8 +2998,8 @@ defmodule Samen.AI.Agent do
+     Samen.Approvals.get(id)
+   rescue
+     e ->
+-      Samen.Observability.Failure.report(:agent_load_approval, nil, e)
+-      {:error, :unavailable}
++      _ = e
++      {:error, :approval_not_found}
+   end
+ 
+   defp approval_id_of(%{id: id}) when is_binary(id), do: id

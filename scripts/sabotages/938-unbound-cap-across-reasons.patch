@@ -1,0 +1,19 @@
+# SABOTAGE: The unbound-token report caps across reasons, so a flood of one reason silently drops the only 
+#   record of another
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/pii_resolution_token_binding_test.exs
+# MUST_FAIL: S2: the cap is per reason
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+index a75872f5..b88ca1fa 100644
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -486,6 +486,7 @@ defmodule Samen.Api.PiiResolution do
+       end
+     end)
+     |> Enum.uniq()
++    |> Enum.take(@max_unbound_reports)
+     |> Enum.group_by(fn {reason, _record_id, _field} -> reason end)
+     |> Enum.sort_by(fn {reason, _triples} -> reason end)
+     |> Enum.each(fn {reason, triples} ->

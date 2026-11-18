@@ -27,10 +27,11 @@ defmodule Samen.AuditChain.Writer do
 
   ## Atomicity and nesting
 
-  Outside a transaction the event and its chain entry commit together or not at all (the write opens its own
-  transaction). Inside a caller's transaction that transaction is the unit: `write/2` returns `{:error, _}` and a
-  caller that grants, opens or approves something MUST roll back on it (Ecto does not nest rollbacks, so a
-  rollback here would poison a caller that tolerates the error). An unavailable chain (the existence probe
+  The event and its chain entry are one unit on every path. Outside a transaction the write opens its own; inside a
+  caller's transaction it runs in a SAVEPOINT, so an `{:error, _}` leaves neither row behind even when the caller
+  tolerates the error and goes on (Ecto does not nest plain rollbacks, so only a savepoint can undo this pair
+  without poisoning the caller's transaction). A caller that grants, opens or approves something must still roll
+  back on `{:error, _}`: the audit failure means the action is unaudited. An unavailable chain (the existence probe
   failed) writes nothing in either case.
 
   ## Where it plugs in
@@ -72,13 +73,11 @@ defmodule Samen.AuditChain.Writer do
   @spec write(module(), map()) :: {:ok, map()} | {:error, term}
   def write(repo, attrs) when is_atom(repo) and is_map(attrs) do
     with :ok <- Samen.PiiReasonScan.check(get(attrs, :detail), "audit detail") do
-      # Atomic: an `aud_event` without its chain entry never commits. Outside a transaction the insert and the
-      # chain append share one of their own. INSIDE a caller's transaction the caller's is the unit (Ecto does not
-      # nest rollbacks: a nested `rollback` would poison the caller's transaction even when it tolerates the
-      # error), so there this returns `{:error, _}` and a caller that must be atomic rolls back on it. The probe
-      # runs BEFORE any insert, so an unavailable chain writes nothing in either case.
+      # Atomic: an `aud_event` without its chain entry never persists. Outside a transaction the insert and the
+      # chain append share one of their own; inside a caller's, they share a savepoint (see `in_savepoint/2`). The
+      # probe runs BEFORE any insert, so an unavailable chain writes nothing in either case.
       if repo.in_transaction?() do
-        do_write(repo, attrs)
+        in_savepoint(repo, fn -> do_write(repo, attrs) end)
       else
         case repo.transaction(fn ->
                case do_write(repo, attrs) do
@@ -90,6 +89,28 @@ defmodule Samen.AuditChain.Writer do
           {:error, reason} -> {:error, reason}
         end
       end
+    end
+  end
+
+  # Inside a caller's transaction the pair runs in a SAVEPOINT (Ecto has no nested rollback: `repo.rollback` in a
+  # nested `transaction` poisons the caller's). A returned `{:error, _}` (the chain append failed AFTER the event
+  # insert: a subject key that cannot be unwrapped, a rejected row) rolls back TO the savepoint, so the caller's
+  # transaction never holds an event without its chain entry even when the caller tolerates the error and goes on.
+  # A raised DB error aborts the caller's transaction as a whole (25P02), which rolls the pair back with it. The
+  # savepoint takes no lock of its own; the advisory lock the append takes is taken at the same point as before.
+  defp in_savepoint(repo, fun) do
+    sp = "samen_audit_write_#{System.unique_integer([:positive])}"
+    repo.query!("SAVEPOINT " <> sp)
+
+    case fun.() do
+      {:ok, _} = ok ->
+        repo.query!("RELEASE SAVEPOINT " <> sp)
+        ok
+
+      {:error, _} = error ->
+        repo.query!("ROLLBACK TO SAVEPOINT " <> sp)
+        repo.query!("RELEASE SAVEPOINT " <> sp)
+        error
     end
   end
 

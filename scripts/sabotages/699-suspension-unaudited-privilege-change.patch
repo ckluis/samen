@@ -13,7 +13,7 @@ index 1e485e4b..d1c2f15d 100644
 @@ -255,7 +255,7 @@ defmodule Samen.OperatorPlane.Suspension do
  
        {:error, reason} ->
-         Samen.Observability.Failure.report(:suspension_audit, attrs.org_id, reason)
+         Samen.Observability.Failure.report_write(:suspension_audit, attrs.org_id, reason)
 -        {:error, :audit_unavailable}
 +        {:ok, :unaudited}
      end

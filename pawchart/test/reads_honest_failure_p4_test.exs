@@ -536,17 +536,44 @@ defmodule PawChart.ReadsHonestFailureP4Test do
   # ===========================================================================
 
   describe "mcp key lookup" do
-    test "a key lookup that FAILS is :error (closed) and reported by name; a healthy lookup of an unknown key is silent" do
+    test "a key lookup that FAILS is {:error, :unavailable} (closed, 503 at the plug) and reported by name; a healthy lookup of an unknown key is :error and silent" do
       alias PawChartWeb.Api.McpKeyResolver
 
       log = capture_log(fn -> assert :error = McpKeyResolver.resolve_scope("some-unknown-key") end)
       refute log =~ "mcp_key_lookup"
 
       break_select!("pok_api_key", "pok_token_digest")
-      log = capture_log(fn -> assert :error = McpKeyResolver.resolve_scope("some-unknown-key") end)
+      log = capture_log(fn -> assert {:error, :unavailable} = McpKeyResolver.resolve_scope("some-unknown-key") end)
 
       assert log =~ "read=pawchart_mcp_key_lookup"
       refute log =~ "some-unknown-key"
+    end
+
+    test "through the MCP plug: a failed lookup is 503 + Retry-After (not 401) and not served; unknown key is 401" do
+      opts = Samen.Web.AI.McpPlug.init(actor_resolver: {PawChartWeb.Api.McpKeyResolver, :resolve_scope, []}, tool_opts: [])
+
+      request = fn key ->
+        Plug.Test.conn(:post, "/mcp", Jason.encode!(%{"jsonrpc" => "2.0", "id" => 1, "method" => "tools/list"}))
+        |> Plug.Conn.put_req_header("authorization", "Bearer " <> key)
+        |> Samen.Web.AI.McpPlug.call(opts)
+      end
+
+      # CONTROL: an unknown key is 401
+      assert request.("sk_mcp_probe_key").status == 401
+
+      break_select!("pok_api_key", "pok_token_digest")
+      log = capture_log(fn -> send(self(), {:conn, request.("sk_mcp_probe_key")}) end)
+      assert_received {:conn, conn}
+
+      assert conn.status == 503
+      assert conn.halted
+      assert [retry] = Plug.Conn.get_resp_header(conn, "retry-after")
+      assert String.to_integer(retry) > 0
+      refute conn.resp_body =~ "sk_mcp_probe_key"
+      refute conn.resp_body =~ "result"
+      assert length(Regex.scan(~r/read=pawchart_mcp_key_lookup/, log)) == 1
+      refute log =~ "sk_mcp_probe_key"
+      refute log =~ PawChartWeb.Api.McpKeyResolver.digest("sk_mcp_probe_key")
     end
   end
 end

@@ -1,0 +1,19 @@
+# SABOTAGE: VaultField.dump_to_native persists any vt_-prefixed string instead of only minted-token-shaped 
+#   ones
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault/vault_token_input_test.exs
+# MUST_FAIL: dump_to_native persists only token-shaped values
+diff --git a/samen_core/lib/samen/type/vault_field.ex b/samen_core/lib/samen/type/vault_field.ex
+index a657cf08..1ef586a3 100644
+--- a/samen_core/lib/samen/type/vault_field.ex
++++ b/samen_core/lib/samen/type/vault_field.ex
+@@ -95,6 +95,6 @@ defmodule Samen.Type.VaultField do
+   # "vt_"-prefixed plaintext is NOT one: it would sit unencrypted in a column the oracle and
+   # the CDC mirror treat as token-only.
+   defp dump_token(token, _constraints) do
+-    if Samen.Vault.token?(token), do: {:ok, token}, else: :error
++    if String.starts_with?(token, "vt_"), do: {:ok, token}, else: :error
+   end
+ end
