@@ -6,14 +6,15 @@
 # TEST_FILES: test/ai/agent_write_test.exs
 # MUST_FAIL: RED: the approvals store fails -> :approval_unavailable (nothing executed); a row that names nothing stays :approval_not_found
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
-index 7bfc5263..993d2236 100644
+index a9834350..993d2236 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -2978,9 +2978,6 @@ defmodule Samen.AI.Agent do
+@@ -2978,10 +2978,6 @@ defmodule Samen.AI.Agent do
          end
  
        # A read that FAILED is not "no such approval": the write is refused either way, but the turn row names the cause.
--      {:error, :unavailable} ->
+-      # (`:approvals_unavailable` is the miswired-engine sibling: a configured resource whose repo cannot be resolved.)
+-      {:error, reason} when reason in [:unavailable, :approvals_unavailable] ->
 -        {:error, :approval_unavailable}
 -
        _ ->
