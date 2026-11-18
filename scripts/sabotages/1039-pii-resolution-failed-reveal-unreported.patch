@@ -1,0 +1,20 @@
+# SABOTAGE: a failed reveal (KMS outage) stays masked but goes unreported
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_e_test.exs
+# MUST_FAIL: RED: a KMS outage masks the whole page on the tenant plane
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+index 8d8dac9a..285a9d09 100644
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -437,8 +437,7 @@ defmodule Samen.Api.PiiResolution do
+ 
+           # Anything else (a KMS outage, a decrypt failure, an unknown error) is a failed read: the value stays masked
+           # (never revealed), and the failure is reported once per call, by name, carrying only the reason atom.
+-          other ->
+-            report_reveal_failure(opts, other)
++          _other ->
+             nil
+         end
+     end

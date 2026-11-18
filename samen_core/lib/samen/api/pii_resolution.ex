@@ -201,7 +201,7 @@ defmodule Samen.Api.PiiResolution do
             do: {token, expected_binding(resource, vaults, record, name), {subject_of(resource, record), name}}
 
       tokens = decrypting |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
-      rows = vault_rows(tokens, opts)
+      rows = vault_rows(tokens, actor, opts)
 
       # A token binds only to the {subject, vault, field} of the record/field that holds it. Only
       # rows matching what the holder expects reach the DEK memo, so a foreign subject's key is
@@ -221,6 +221,7 @@ defmodule Samen.Api.PiiResolution do
         __vault_rows: rows,
         __vault_deks: vault_deks(admitted, opts),
         __vault_vaults: vaults,
+        __reveal_reported: :atomics.new(1, []),
         __bag_ctx: bag_context(resource, records, plane, actor, opts)
       )
     end
@@ -280,9 +281,12 @@ defmodule Samen.Api.PiiResolution do
     end
   end
 
-  defp vault_rows([], _opts), do: %{}
+  defp vault_rows([], _actor, _opts), do: %{}
 
-  defp vault_rows(tokens, opts) do
+  # A failed prefetch only costs the per-value read it would have saved (`Vault.reveal/3` reads the row itself when
+  # the prefetched map does not hold it), so the call carries on, but the failure is REPORTED, once per call, by name.
+  # The report is value-free (`Failure`: the operation, the org, the exception module): no token, no value.
+  defp vault_rows(tokens, actor, opts) do
     vault = Keyword.get(opts, :vault, Samen.Vault)
     repo = Keyword.get(opts, :repo)
 
@@ -290,8 +294,9 @@ defmodule Samen.Api.PiiResolution do
       do: vault.prefetch_rows(tokens, repo),
       else: %{}
   rescue
-    # A failed prefetch only costs the per-value read it would have saved.
-    _ -> %{}
+    e ->
+      Samen.Observability.Failure.report(:pii_resolution_vault_rows, actor, e)
+      %{}
   end
 
   # One KMS unwrap per SUBJECT of the rows this call will decrypt (ARCH-2). `rows` holds only
@@ -410,6 +415,8 @@ defmodule Samen.Api.PiiResolution do
     if impersonated?(actor), do: masked, else: forbidden(label)
   end
 
+  @reveal_denials [:shredded, :not_found, :subject_mismatch, :field_mismatch]
+
   defp reveal_plaintext(%Masked{} = masked, {subject_id, vault_field}, opts) do
     vault = Keyword.get(opts, :vault, Samen.Vault)
 
@@ -420,10 +427,36 @@ defmodule Samen.Api.PiiResolution do
 
       repo ->
         case vault.reveal(masked, repo, vault_opts(opts, subject_id, vault_field)) do
-          {:ok, plaintext} -> plaintext
-          _ -> nil
+          {:ok, plaintext} ->
+            plaintext
+
+          # A denial that is a fact about the DATA (the subject was shredded, the row is gone, the token belongs to
+          # another subject or field; the foreign-token cases are also reported by `report_unbound/4`): masked, not a failure.
+          {:error, reason} when reason in @reveal_denials ->
+            nil
+
+          # Anything else (a KMS outage, a decrypt failure, an unknown error) is a failed read: the value stays masked
+          # (never revealed), and the failure is reported once per call, by name, carrying only the reason atom.
+          other ->
+            report_reveal_failure(opts, other)
+            nil
         end
     end
+  end
+
+  # ONE report per prefetched call (an atomics flag in the call's opts), however many values fail: a KMS outage on a
+  # 1000-row page is one log line, not 3000. The reason is reported by `Failure` as an atom name or "unknown" — never
+  # a value, never a token.
+  defp report_reveal_failure(opts, other) do
+    # (`prefetch/4` always sets the flag; a fresh one reports, so a caller without it is never silent)
+    flag = Keyword.get(opts, :__reveal_reported) || :atomics.new(1, [])
+
+    if :atomics.compare_exchange(flag, 1, 0, 1) == :ok do
+      reason = with {:error, reason} when is_atom(reason) <- other, do: reason
+      Samen.Observability.Failure.report(:pii_resolution_reveal, nil, reason)
+    end
+
+    :ok
   end
 
   # Every reveal asserts the subject (the holding record's primary key) and the field (its
@@ -595,7 +628,7 @@ defmodule Samen.Api.PiiResolution do
             :mask_all
 
           true ->
-            case pii_declared_keys(repo, table, org_ids) do
+            case pii_declared_keys(repo, table, org_ids, actor) do
               # The catalog query FAILED — we cannot enumerate the key set → fail closed.
               :error -> :mask_all
               # Determinate: the org declares no pii_declared bag key → nothing to mask.
@@ -619,7 +652,7 @@ defmodule Samen.Api.PiiResolution do
   # Returns `%{org_id => MapSet.t(key)}` (possibly empty — a DETERMINATE "no pii_declared
   # keys") on success, or `:error` when the catalog could not be read — the caller fails
   # CLOSED on `:error`, never conflating "read it, none declared" with "could not read".
-  defp pii_declared_keys(repo, table, org_ids) do
+  defp pii_declared_keys(repo, table, org_ids, actor) do
     Enum.reduce(org_ids, %{}, fn org_id, acc ->
       keys =
         org_id
@@ -630,7 +663,11 @@ defmodule Samen.Api.PiiResolution do
       if MapSet.size(keys) == 0, do: acc, else: Map.put(acc, org_id, keys)
     end)
   rescue
-    _ -> :error
+    # The catalog could not be read: the caller masks the WHOLE bag (fail closed), and the failure is reported by name
+    # (value-free), once per resolve call, so a masked bag is never mistaken for a deliberate one.
+    e ->
+      Samen.Observability.Failure.report(:pii_resolution_declared_keys, actor, e)
+      :error
   end
 
   defp resolve_bag_keys(record, :skip, _plane, _resource, _reveal_action, _actor, _opts), do: record

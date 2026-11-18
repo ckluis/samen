@@ -71,6 +71,12 @@ defmodule Samen.Lint.KernelSwallow do
     {"samen_core/lib/samen/no_plaintext_pii.ex", :safe_name} =>
       {1, "662a59cf525fc730",
        "tier.tier_name/0 raises only for a module that is not a tier; the name is a LABEL on the finding, and the crash of that very tier is already a fail-closed :violation (run_tier/2), so :unknown_tier changes no verdict"},
+    {"samen_core/lib/samen/api/pii_resolution.ex", :ash_postgres_repo} =>
+      {1, "b6837f16a1747c85",
+       "AshPostgres.DataLayer.Info.repo/2 returns nil for a resource on another data layer (nothing to raise); it raises only for a module that is not a Spark resource, or a repo function that itself raises: nil falls through to the configured :vault_repo, and with no repo at all the value stays masked — never decrypted"},
+    {"samen_core/lib/samen/api/pii_resolution.ex", :table_name} =>
+      {1, "e7b81d12cc48f77e",
+       "AshPostgres.DataLayer.Info.table/1 returns nil for a resource without a table and raises only for a module that is not a Spark resource; nil is the INDETERMINATE answer, which bag_context/5 turns into :mask_all — the whole custom bag is masked on every masking plane, never emitted in the clear"},
     {"samen_core/lib/samen/replay/resolver.ex", :repo} =>
       {1, "be3694e4bcedc7a2",
        "AshPostgres.DataLayer.Info.repo/2 returns nil for a resource on another data layer (nothing to raise); it raises only for a module that is not a Spark resource, or a repo function that itself raises: nil (no repo, so the value stays masked — never decrypted) is the fail-closed answer"},
@@ -115,7 +121,6 @@ defmodule Samen.Lint.KernelSwallow do
     "samen_core/lib/samen/aggregate/extension.ex" => 2,
     "samen_core/lib/samen/analytics.ex" => 1,
     "samen_core/lib/samen/analytics/sources.ex" => 1,
-    "samen_core/lib/samen/api/pii_resolution.ex" => 4,
     "samen_core/lib/samen/api_contract.ex" => 3,
     "samen_core/lib/samen/auth/org_actor.ex" => 2,
     "samen_core/lib/samen/backup/verification.ex" => 1,
@@ -179,7 +184,7 @@ defmodule Samen.Lint.KernelSwallow do
   # has to raise this number too (and `SwallowLintTest` compares it with the merge base, so it can only go down). Lower
   # it together with the baseline when a swallow is converted; never raise it.
   @ceilings %{
-    rescue: %{"samen_core/lib" => 91},
+    rescue: %{"samen_core/lib" => 87},
     error_arm: %{"samen_core/lib" => 15}
   }
 

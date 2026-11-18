@@ -1,0 +1,19 @@
+# SABOTAGE: a shredded subject is reported as a failed reveal
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_e_test.exs
+# MUST_FAIL: a SHREDDED subject is a fact about the data
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+index 8d8dac9a..ccbf8626 100644
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -415,7 +415,7 @@ defmodule Samen.Api.PiiResolution do
+     if impersonated?(actor), do: masked, else: forbidden(label)
+   end
+ 
+-  @reveal_denials [:shredded, :not_found, :subject_mismatch, :field_mismatch]
++  @reveal_denials [:not_found, :subject_mismatch, :field_mismatch]
+ 
+   defp reveal_plaintext(%Masked{} = masked, {subject_id, vault_field}, opts) do
+     vault = Keyword.get(opts, :vault, Samen.Vault)
