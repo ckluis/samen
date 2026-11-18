@@ -175,19 +175,40 @@ defmodule Samen.Reveal.Grants do
   end
 
   defp open_engine_approval(%RevealRequest{} = req, org_id) do
-    Samen.Approvals.request(%{
-      # PP-11: carry the target tenant org onto the parallel `pii_reveal` approval so its
-      # governance-audit rows (approval_requested/approved) also ride the TENANT chain, not
-      # `__global__`. Nil preserves the pre-PP-11 org-less operator-chain behavior.
-      org_id: org_id,
-      kind: "pii_reveal",
-      subject_ref: Samen.Reveal.ApprovalHandler.subject_ref(req),
-      requested_by: req.requestor_id
-    })
+    result =
+      Samen.Approvals.request(%{
+        # PP-11: carry the target tenant org onto the parallel `pii_reveal` approval so its
+        # governance-audit rows (approval_requested/approved) also ride the TENANT chain, not
+        # `__global__`. Nil preserves the pre-PP-11 org-less operator-chain behavior.
+        org_id: org_id,
+        kind: "pii_reveal",
+        subject_ref: Samen.Reveal.ApprovalHandler.subject_ref(req),
+        requested_by: req.requestor_id
+      })
 
-    :ok
+    case result do
+      {:ok, _approval} ->
+        :ok
+
+      # an unwired host has no engine: the RevealRequest row alone is the record (documented above)
+      {:error, :no_approvals_module} ->
+        :ok
+
+      # Any other failure leaves the request WITHOUT its pending approval. The request itself stands (its row and
+      # `requested` audit are already committed) and `approve/2`/`deny/2`, given the REQUEST ID, reopen the approval
+      # idempotently. But the approver queue (`pending_for_org_result/2`, and so `RevealApprovalsLive`) lists ENGINE
+      # approvals only and refuses a request id it did not list: an approver cannot reach this request from the UI,
+      # and nothing re-opens the approval on its own (a `RevealRequest` carries no org, so a sweep cannot find an
+      # org's orphans). The gap is therefore only REPORTED here, once, by name; closing it is a design decision
+      # (persist the org on the request and reopen from the queue read, or fail the request so it can be re-filed).
+      {:error, reason} ->
+        Samen.Observability.Failure.report_write(:reveal_open_engine_approval, org_id, reason)
+        :ok
+    end
   rescue
-    _ -> :ok
+    e ->
+      Samen.Observability.Failure.report_write(:reveal_open_engine_approval, org_id, e)
+      :ok
   end
 
   # ==========================================================================
@@ -416,11 +437,14 @@ defmodule Samen.Reveal.Grants do
       {:error, :no_approvals_module} ->
         {:ok, []}
 
-      {:error, _} ->
+      {:error, reason} ->
+        Samen.Observability.Failure.report(:reveal_pending_for_org, org_id, reason)
         {:error, :unavailable}
     end
   rescue
-    _ -> {:error, :unavailable}
+    e ->
+      Samen.Observability.Failure.report(:reveal_pending_for_org, org_id, e)
+      {:error, :unavailable}
   end
 
   # Join a pending `pii_reveal` approval to its governed RevealRequest (via subject_ref),
@@ -440,7 +464,16 @@ defmodule Samen.Reveal.Grants do
         requested_at: approval.requested_at
       }
     else
-      _ -> nil
+      # A pending approval that names no request (a garbled subject_ref, or a RevealRequest row that is gone) cannot be
+      # approved here, so it is left out of the queue — but an approver must be able to learn that a pending approval
+      # went missing from the list, so each one is reported (by name; the ids stay out of the report).
+      :error ->
+        Samen.Observability.Failure.report(:reveal_pending_enrich, approval.org_id, :unparseable_subject_ref)
+        nil
+
+      nil ->
+        Samen.Observability.Failure.report(:reveal_pending_enrich, approval.org_id, :request_row_missing)
+        nil
     end
   end
 
@@ -799,7 +832,7 @@ defmodule Samen.Reveal.Grants do
         result
 
       {:error, reason} ->
-        Samen.Observability.Failure.report(:reveal_audit_chain, attrs[:org_id], reason)
+        Samen.Observability.Failure.report_write(:reveal_audit_chain, attrs[:org_id], reason)
         if Keyword.get(opts, :strict, false), do: {:error, reason}, else: result
     end
   end

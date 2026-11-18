@@ -185,7 +185,9 @@ defmodule Samen.Webhook.Payload do
         try do
           apply(info_mod, :show_fields, [resource]) || []
         rescue
-          _ -> []
+          # `show_fields/1` raises ArgumentError only for a module that is not a Spark DSL (no AshJsonApi block);
+          # any OTHER failure is no longer an empty allowlist, it propagates.
+          ArgumentError -> []
         end
       else
         []
@@ -208,7 +210,9 @@ defmodule Samen.Webhook.Payload do
   defp declared_abbrev(resource) do
     Samen.Info.abbrev(resource)
   rescue
-    _ -> nil
+    # Spark raises ArgumentError exactly for a module that is not a Spark DSL (a plain struct): "no abbrev" is the
+    # documented answer there. Any other failure propagates instead of reading as "no abbrev".
+    ArgumentError -> nil
   end
 
   # A6 fix (Gate-6 / extraction-retro A6): a "storage name" is a bare storage
@@ -248,7 +252,7 @@ defmodule Samen.Webhook.Payload do
       try do
         apply(AshJsonApi.Resource.Info, :type, [resource]) || default_type(resource)
       rescue
-        _ -> default_type(resource)
+        ArgumentError -> default_type(resource)
       end
     else
       default_type(resource)

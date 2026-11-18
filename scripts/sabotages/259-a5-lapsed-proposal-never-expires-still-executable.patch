@@ -28,7 +28,7 @@ index e46c98f2..eb0034a3 100644
 -          {:ok, expired}
 -
 -        {:error, error} ->
--          Samen.Observability.Failure.report(:agent_expire_parked, run.org_id, error)
+-          Samen.Observability.Failure.report_write(:agent_expire_parked, run.org_id, error)
 -          {:error, :expiry_incomplete}
 -      end
 -    else

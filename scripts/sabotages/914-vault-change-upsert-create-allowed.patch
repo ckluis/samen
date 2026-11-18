@@ -1,0 +1,18 @@
+# SABOTAGE: Vault.Change no longer refuses an upsert-create on a PII resource
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault_change_integration_test.exs
+# MUST_FAIL: an upsert-create on a PII resource is refused
+diff --git a/samen_core/lib/samen/vault/change.ex b/samen_core/lib/samen/vault/change.ex
+index 889b50a6..a69fd12b 100644
+--- a/samen_core/lib/samen/vault/change.ex
++++ b/samen_core/lib/samen/vault/change.ex
+@@ -48,7 +48,6 @@ defmodule Samen.Vault.Change do
+ 
+     cond do
+       fields == [] -> changeset
+-      upsert?(changeset) -> refuse_upsert(changeset)
+       true -> Ash.Changeset.before_action(changeset, fn cs -> guarded_route(cs, fields) end)
+     end
+   end

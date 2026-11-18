@@ -1,0 +1,18 @@
+# SABOTAGE: The unbound-token report cuts at the cap without reporting how many it suppressed
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/pii_resolution_token_binding_test.exs
+# MUST_FAIL: S2: the cap is per reason
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+index a75872f5..d6273a29 100644
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -502,6 +502,7 @@ defmodule Samen.Api.PiiResolution do
+   end
+ 
+   defp report_truncated(_resource, _reason, 0), do: :ok
++  defp report_truncated(_resource, _reason, _suppressed), do: :ok
+ 
+   defp report_truncated(resource, reason, suppressed) do
+     Logger.error(

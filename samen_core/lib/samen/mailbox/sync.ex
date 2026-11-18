@@ -93,7 +93,12 @@ defmodule Samen.Mailbox.Sync do
   `{:error, {:dedupe_unavailable, reason}}` and the cursor is NOT advanced — the next
   sync re-reads the same page. "I could not check" is never treated as "not a
   duplicate": a missed sync round is recoverable, a duplicated customer-visible
-  conversation on a CRM timeline is not.
+  conversation on a CRM timeline is not. The CRM match reads abort the same way, with
+  `{:error, {:match_unavailable, :read_failed}}` (anchoring a message to nothing is just as permanent).
+
+  A failure tied to ONE message is not an outage and never aborts: an address or external id no query can
+  carry (a NUL byte, invalid UTF-8) is answered without a query (an address matches no company, and is
+  reported; an unqueryable external id is counted in `:failed` and reported), so the rest of the page syncs.
   """
   @spec sync(struct(), Config.t()) :: {:ok, map()} | {:error, term()}
   def sync(connection, %Config{} = config) do
@@ -119,6 +124,11 @@ defmodule Samen.Mailbox.Sync do
           # ABORT the batch and leave the cursor where it was — a missed sync round is
           # recoverable; a duplicated customer-visible conversation is not.
           {:error, {:dedupe_unavailable, _} = reason} ->
+            {:halt, {:error, reason}}
+
+          # Likewise when the CRM match read failed: recording the message now would anchor it to NOTHING for good
+          # (its external id then dedupes every later sync). Abort, leave the cursor, re-read the page next time.
+          {:error, {:match_unavailable, _} = reason} ->
             {:halt, {:error, reason}}
 
           # A WRITE failure is not a duplication risk: count it honestly and continue.
@@ -152,8 +162,19 @@ defmodule Samen.Mailbox.Sync do
   `attrs` accepts `:to` (address or list), `:subject`, `:body`. The provider's
   receipt supplies the `external_id` used to dedupe the copy a later `fetch/3`
   returns from the Sent folder. Returns the persisted (outbound) mail record.
+
+  **An error before the provider call means nothing was sent** (`:not_configured`, a provider error).
+  **`{:error, {:sent_but_unrecorded, reason}}` means the email WAS sent**: the provider accepted it and only
+  recording it on the CRM timeline failed (`reason` is `{:dedupe_unavailable, _}`, `{:match_unavailable, _}` or
+  the write error). The caller must NOT resend (the customer would get a duplicate): the copy in the provider's
+  Sent folder is recorded and anchored by a later `sync/2`. `{:error, :duplicate_message}` also means it was
+  sent, and its record already exists.
   """
-  @spec send(map(), struct(), Config.t()) :: {:ok, struct()} | {:error, term()}
+  @spec send(map(), struct(), Config.t()) ::
+          {:ok, struct()}
+          | {:error, {:sent_but_unrecorded, term()}}
+          | {:error, :duplicate_message}
+          | {:error, term()}
   def send(attrs, connection, %Config{} = config) when is_map(attrs) do
     message = %Message{
       direction: :outbound,
@@ -171,7 +192,7 @@ defmodule Samen.Mailbox.Sync do
       case record(message, connection, config) do
         {:ok, record} -> {:ok, record}
         :duplicate -> {:error, :duplicate_message}
-        {:error, reason} -> {:error, reason}
+        {:error, reason} -> {:error, {:sent_but_unrecorded, reason}}
       end
     end
   end
@@ -179,7 +200,22 @@ defmodule Samen.Mailbox.Sync do
   # ---------------------------------------------------------------------------
   # Recording one message
 
-  defp record(%Message{} = message, connection, %Config{} = config) do
+  # An external id no query can carry (NUL byte / invalid UTF-8) can neither be looked up nor stored: the message
+  # is counted as failed and REPORTED, and the batch moves on. (Aborting would re-read it first on every run and
+  # stall the mailbox behind one provider message: a deterministic failure is not an outage.)
+  defp record(%Message{external_id: external_id} = message, connection, %Config{} = config)
+       when is_binary(external_id) do
+    if Match.queryable?(external_id) do
+      do_record(message, connection, config)
+    else
+      Samen.Observability.Failure.report(:mailbox_unqueryable_external_id, config.org_id, :unqueryable_external_id)
+      {:error, :unqueryable_external_id}
+    end
+  end
+
+  defp record(%Message{} = message, connection, %Config{} = config), do: do_record(message, connection, config)
+
+  defp do_record(%Message{} = message, connection, %Config{} = config) do
     case duplicate?(message, config) do
       {:ok, true} -> :duplicate
       {:ok, false} -> create_record(message, connection, config)
@@ -189,10 +225,25 @@ defmodule Samen.Mailbox.Sync do
 
   defp create_record(%Message{} = message, connection, %Config{} = config) do
     counterparty = Message.counterparty(message)
+
+    with {:ok, person, company} <- match(counterparty, config) do
+      {subject_key, subject_id} = anchor(person, company)
+      insert_record(message, connection, config, counterparty, subject_key, subject_id, company)
+    end
+  end
+
+  # The CRM match reads. A failed read is `{:error, {:match_unavailable, :read_failed}}` (reported), never "no match".
+  defp match(counterparty, config) do
     person = Match.person_for_address(counterparty, config)
     company = Match.company_for(person, counterparty, config)
-    {subject_key, subject_id} = anchor(person, company)
+    {:ok, person, company}
+  rescue
+    e ->
+      Samen.Observability.Failure.report(:mailbox_match, config.org_id, e)
+      {:error, {:match_unavailable, :read_failed}}
+  end
 
+  defp insert_record(message, connection, config, counterparty, subject_key, subject_id, company) do
     config.message_resource
     |> Ash.Changeset.for_create(:create, %{
       org_id: config.org_id,
@@ -242,12 +293,16 @@ defmodule Samen.Mailbox.Sync do
   defp anchor(nil, company), do: {"crm.company", company.id}
   defp anchor(person, _company), do: {"crm.person", person.id}
 
-  defp touch_connection(connection, cursor, _config) do
+  defp touch_connection(connection, cursor, config) do
     connection
     |> Ash.Changeset.for_update(:update, %{cursor: cursor, last_synced_at: now()})
     |> Ash.update(authorize?: false)
   rescue
-    _ -> {:ok, connection}
+    # The cursor did not advance, so the next sync re-reads this page (the dedupe makes that a no-op). Reported, since
+    # the `{:ok, connection}` below is the OLD row, not an update.
+    e ->
+      Samen.Observability.Failure.report_write(:mailbox_touch_connection, config.org_id, e)
+      {:ok, connection}
   end
 
   defp ensure_configured(%Config{} = config) do

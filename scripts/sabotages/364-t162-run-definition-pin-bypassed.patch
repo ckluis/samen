@@ -37,8 +37,8 @@
 diff --git a/samen_core/lib/samen/automation/run_worker.ex b/samen_core/lib/samen/automation/run_worker.ex
 --- a/samen_core/lib/samen/automation/run_worker.ex
 +++ b/samen_core/lib/samen/automation/run_worker.ex
-@@ -75,11 +75,11 @@ defmodule Samen.Automation.RunWorker do
-   defp run(workflow_mod, args) do
+@@ -76,11 +76,11 @@ defmodule Samen.Automation.RunWorker do
+   defp run(workflow_mod, args, job) do
      case load_workflow(workflow_mod, args["workflow_id"]) do
        {:ok, wf} ->
 -        # T162. The workflow row is still loaded — but ONLY for the live checks
@@ -51,6 +51,6 @@ diff --git a/samen_core/lib/samen/automation/run_worker.ex b/samen_core/lib/same
 +        # still records the pin (RunRecord reads the args), so the log claims one
 +        # definition ran while another did.
 +        {_source, definition} = {:pinned, Definition.snapshot(wf)}
-
+ 
          run_row = RunRecord.open!(wf, args)
-         result = execute(wf, definition, args, run_row)
+ 

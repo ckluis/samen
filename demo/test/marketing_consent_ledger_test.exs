@@ -163,7 +163,7 @@ defmodule Demo.MarketingConsentLedgerTest do
                    sub |> Ash.Changeset.for_update(:update, %{status: :unsubscribed}) |> Ash.update(authorize?: false)
         end)
 
-      assert log =~ "read=consent_change_"
+      assert log =~ "write=consent_change_"
       heal.()
 
       # the opt-out did not commit without its ledger entry
@@ -194,7 +194,7 @@ defmodule Demo.MarketingConsentLedgerTest do
         |> Ash.create(authorize?: false)
 
       log = ExUnit.CaptureLog.capture_log(fn -> assert {:error, _} = unsubscribe_with(sub, String) end)
-      assert log =~ "read=consent_change_"
+      assert log =~ "write=consent_change_"
       assert %{status: :active} = Ash.get!(Subscriber, sub.id, authorize?: false)
 
       # POSITIVE CONTROL: with a usable event resource the same update lands

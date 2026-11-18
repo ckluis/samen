@@ -321,7 +321,10 @@ defmodule Demo.PrimitivesScopeVaultRoutingTest do
 
   test "VaultField last-line guard refuses raw plaintext write for notification (red path)" do
     # The guard that protects notification rendered_body and webhook signing_secret.
-    assert {:ok, "vt_realtoken"} = Samen.Type.VaultField.dump_to_native("vt_realtoken", [])
+    minted = Samen.Vault.generate_token()
+    assert {:ok, ^minted} = Samen.Type.VaultField.dump_to_native(minted, [])
+    # a "vt_"-prefixed string that is not a minted token is plaintext, not a token
+    assert :error == Samen.Type.VaultField.dump_to_native("vt_realtoken", [])
 
     # Raw plaintext must be rejected.
     assert :error == Samen.Type.VaultField.dump_to_native("Dear Alice, your invoice is ready.", [])

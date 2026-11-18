@@ -1,0 +1,19 @@
+# SABOTAGE: the MCP plug reads a resolver's failed key lookup as a bad key (401) instead of 503 + 
+#   Retry-After
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/ai/mcp_plug_test.exs
+# MUST_FAIL: a resolver whose key lookup FAILED ⇒ 503 + Retry-After, halted, no key echoed, NOT served
+diff --git a/samen_web/lib/samen/web/ai/mcp_plug.ex b/samen_web/lib/samen/web/ai/mcp_plug.ex
+index 22747d12..bc5d9987 100644
+--- a/samen_web/lib/samen/web/ai/mcp_plug.ex
++++ b/samen_web/lib/samen/web/ai/mcp_plug.ex
+@@ -119,7 +119,6 @@ defmodule Samen.Web.AI.McpPlug do
+   defp resolve_actor(_other, _raw), do: :unauthorized
+ 
+   defp normalize_actor({:ok, scope}) when not is_nil(scope), do: {:ok, scope}
+-  defp normalize_actor({:error, :unavailable}), do: :unavailable
+   defp normalize_actor(_), do: :unauthorized
+ 
+   # The key could not be CHECKED: 503 + Retry-After, no key material in the body, request not served.

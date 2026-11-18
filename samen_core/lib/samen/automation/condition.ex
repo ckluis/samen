@@ -110,6 +110,19 @@ defmodule Samen.Automation.Condition do
     Enum.all?(conditions, &matches?(&1, subject, changed))
   end
 
+  # The ONE classification of which operators read the subject's values. Only `:changed` is metadata-only (it reads the
+  # envelope's `changed` list). Every other operator, and any operator this list does not name, reads the record: a new
+  # operator can never silently default to "metadata only" (fail closed).
+  @metadata_only_ops [:changed]
+
+  @doc """
+  Does this parsed condition read an attribute VALUE of the subject record? `false` only for the operators that read the
+  event metadata alone (`changed`); an unknown operator counts as needing the record.
+  """
+  @spec needs_subject_values?(condition()) :: boolean()
+  def needs_subject_values?(%{op: op}), do: op not in @metadata_only_ops
+  def needs_subject_values?(_), do: true
+
   @doc "Does a single parsed condition match the subject?"
   @spec matches?(condition(), map(), [String.t()]) :: boolean()
   def matches?(condition, subject, changed \\ [])

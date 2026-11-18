@@ -1,0 +1,19 @@
+# SABOTAGE: latest_report returns the pending resume marker as if it were an erasure report
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/erasure_resumable_test.exs
+# MUST_FAIL: a pending marker is not a report: latest_report ignores it, and a marker newer than a completed report does not shadow it
+diff --git a/samen_core/lib/samen/erasure.ex b/samen_core/lib/samen/erasure.ex
+index 837b6c6a..31556fd5 100644
+--- a/samen_core/lib/samen/erasure.ex
++++ b/samen_core/lib/samen/erasure.ex
+@@ -823,7 +823,7 @@ defmodule Samen.Erasure do
+     r.one(
+       from(rep in Report,
+         # a "pending" resume marker is not a report (it has no tiers/attestation to read)
+-        where: rep.subject_id == ^subject_id and rep.outcome != ^@pending_outcome,
++        where: rep.subject_id == ^subject_id,
+         order_by: [desc: rep.recorded_at],
+         limit: 1
+       )

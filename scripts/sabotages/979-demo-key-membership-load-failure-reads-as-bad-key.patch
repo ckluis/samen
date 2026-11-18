@@ -1,0 +1,19 @@
+# SABOTAGE: the demo key plug answers a failed membership load as an actor-less error instead of 503
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_key_lookup_unavailable_test.exs
+# MUST_FAIL: a key that RESOLVES but whose membership load FAILS is 503 too
+diff --git a/demo/lib/demo_web/api/key_auth_plug.ex b/demo/lib/demo_web/api/key_auth_plug.ex
+index ad5a011c..43bcad94 100644
+--- a/demo/lib/demo_web/api/key_auth_plug.ex
++++ b/demo/lib/demo_web/api/key_auth_plug.ex
+@@ -194,7 +194,7 @@ defmodule DemoWeb.Api.KeyAuthPlug do
+ 
+       {:error, error} ->
+         Samen.Observability.Failure.report(:demo_api_key_membership_load, nil, error)
+-        :unavailable
++        :error
+ 
+       _ ->
+         :error

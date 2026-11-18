@@ -1,0 +1,20 @@
+# SABOTAGE: the resume marker is not committed before the key shred, so a failed marker write no longer 
+#   aborts the erasure
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/erasure_resumable_test.exs
+# MUST_FAIL: a failed marker write aborts BEFORE the key is destroyed
+diff --git a/samen_core/lib/samen/erasure.ex b/samen_core/lib/samen/erasure.ex
+index 837b6c6a..f7725ffa 100644
+--- a/samen_core/lib/samen/erasure.ex
++++ b/samen_core/lib/samen/erasure.ex
+@@ -330,7 +330,7 @@ defmodule Samen.Erasure do
+   defp resolve_reference(subject_id, r, acknowledge?) do
+     case pseudonym_ref(subject_id) do
+       {:ok, ref, :performed} when is_binary(ref) ->
+-        case record_pending(subject_id, ref, r) do
++        case Process.get(:__no_marker, :ok) do
+           :ok -> {:ok, ref, :performed}
+           {:error, reason} -> {:error, {:erasure_pending_failed, reason}}
+         end

@@ -59,7 +59,7 @@ defmodule Samen.Sequences.ReceiptLookup do
   (carrying `person_id` — the actual recipient identity `Suppression.suppress/2`
   keys on).
   """
-  @spec build(module(), module()) :: (String.t() -> {:ok, map()} | :not_found)
+  @spec build(module(), module()) :: (String.t() -> {:ok, map()} | :not_found | {:error, :unavailable})
   def build(step_send_module, enrollment_module)
       when is_atom(step_send_module) and is_atom(enrollment_module) do
     fn provider_message_id -> lookup(step_send_module, enrollment_module, provider_message_id) end
@@ -72,15 +72,22 @@ defmodule Samen.Sequences.ReceiptLookup do
          {:ok, enrollment} <- Sequences.fetch_by_id(enrollment_module, send_row.enrollment_id) do
       {:ok, %{send_id: send_row.id, org_id: send_row.org_id, subscriber_id: enrollment.person_id}}
     else
-      _ -> :not_found
+      # a send/enrollment that is genuinely absent (or an enrollment with no id) is an unmatched event
+      {:error, reason} when reason in [:not_found, :missing_id] ->
+        :not_found
+
+      # Any other failure is a READ that failed, not "no such send": the bounce would match nothing and the recipient
+      # would keep receiving steps. Reported, and its own answer (Deliverability retries it, then the DLQ).
+      {:error, reason} ->
+        Samen.Observability.Failure.report(:sequence_receipt_lookup, nil, reason)
+        {:error, :unavailable}
     end
   rescue
-    # A host whose StepSend schema doesn't (yet) carry provider_message_id, or
-    # any other read hiccup, degrades to "couldn't match" — never a crash of
-    # the webhook worker (mirrors MarketingReceiptLookup's own posture; an
-    # unmatched event goes to the DLQ via Samen.Delivery.Deliverability, it
-    # never takes the pipeline down).
-    _ -> :not_found
+    # A host whose StepSend schema doesn't (yet) carry provider_message_id raises here: a miswired lookup, not an
+    # unmatched event — reported and unavailable, never a crash of the webhook worker.
+    e ->
+      Samen.Observability.Failure.report(:sequence_receipt_lookup, nil, e)
+      {:error, :unavailable}
   end
 
   defp fetch_send(step_send_module, provider_message_id) do

@@ -18,7 +18,7 @@ FAIL: <task name> found N violation(s):
 
 On success each prints `<task name>: OK — no violations found.` Step numbers below are the
 generated app's <!--count:gate_steps_app-->18<!--/count-->-step `ci.sh` (emitted by `mix samen.gen.app`; the `--api` variant has <!--count:gate_steps_app_api-->19<!--/count-->); Driftwood's
-<!--count:gate_steps_driftwood-->20<!--/count-->-step and PawChart's <!--count:gate_steps_pawchart-->17<!--/count-->-step gates run the same tiers in the same order. There are <!--count:verifiers-->27<!--/count--> `samen.verify.*` tasks in
+<!--count:gate_steps_driftwood-->20<!--/count-->-step and PawChart's <!--count:gate_steps_pawchart-->17<!--/count-->-step gates run the same tiers in the same order. There are <!--count:verifiers-->29<!--/count--> `samen.verify.*` tasks in
 total; each has an entry below (`doc_recipes_test.exs` enforces it).
 
 ---
@@ -558,6 +558,55 @@ task prints `Nothing to lint — never-read-current is vacuously satisfied (tier
 and passes; Driftwood runs it as gate step 16b.
 **Fix:** read live truth from the primary repo; if the module genuinely is an analytics
 report, mark it `@cdc_analytics_read true` (an explicit, reviewable claim).
+
+### `mix samen.verify.movement_continuity`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.movement_continuity.ex`):
+
+```text
+subscription <id>: unseeded (revenue-active at <n> cents, no ledger row)
+subscription <id>: bad_origin (first row starts from <n> cents)
+subscription <id>: chain_break at row <k> (before <n> != previous after <m>)
+subscription <id>: stale_tail (ledger ends at <n> cents, current MRR <m>)
+FAIL: samen.verify.movement_continuity discovered no resource carrying the SubscriptionMovement change ... (fail-closed).
+```
+
+**Meaning:** the `mov` ledger of a subscription has a hole. `SubscriptionMovement` is best-effort: when its price read, the
+classifier or the append fails, no row is written and the failure is only reported. The rows carry `mrr_before_cents` and
+`mrr_after_cents`, so a skipped movement shows as a broken chain, a last `mrr_after_cents` that is not the live MRR, or an
+active subscription with no row. A price edited outside a subscription write is reported as `stale_tail` as well.
+**Fix:** report-only (no `--fix`; the output is ids and cents). Find the failed write in the log
+(`write=subscription_movement_append`), repair its cause, and re-derive the history by decision: `MovementBackfill.from_snapshot/1`
+seeds an `unseeded` subscription; a broken chain on a subscription that already has rows is reviewed, not rewritten.
+
+### `mix samen.verify.vault_token_binding`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.vault_token_binding.ex`):
+
+```text
+foreign_subject: <Resource>.<field> record <id>
+field_mismatch: <Resource>.<field> record <id>
+dangling_token: <Resource>.<field> record <id>
+non_token_value: <Resource>.<field> record <id>
+shared_token: <Resource>.<field> record <id>
+FAIL: samen.verify.vault_token_binding discovered ZERO resources ... A vacuous check must not pass (fail-closed).
+```
+
+**Meaning:** a vault column holds a value that does not belong to the record, vault and field
+that holds it: another subject's token, another field's token, a token with no `pii_vault`
+row, plaintext at rest, or one token in several cells. `Samen.Vault.Change` refuses these on
+write and `PiiResolution` renders them masked on read, so a hit is data written before the
+binding or by a path that bypassed Ash. The output never contains a token or a value.
+**Fix:** report-only by design (no `--fix`): review each record. Never re-mint a foreign
+subject's plaintext into the record (that launders it past the owner's erasure); clear the cell
+through a reviewed change, and re-enter plaintext values through the governed update.
+
+A `non_token_value` cell (legacy plaintext that starts with `vt_`) also blocks every update of that record on a
+**versioned** resource, with the changeset error `vault column(s) :field hold a legacy non-token value ...`. It is
+fail-closed on purpose and never auto-fixed. **Remediate:** list the rows with this task, then update each record once,
+setting EVERY field the error names to its plaintext (`Ash.update` of the governed action); the new write mints real
+tokens, and the version row records the token, not the value. Unversioned resources are not blocked, but the cell stays
+flagged until re-entered the same way.
 
 ### `mix samen.verify.ai_prompt_masking`
 

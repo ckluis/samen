@@ -1,0 +1,20 @@
+# SABOTAGE: a shredded key with no recorded reference completes as if nothing needed withdrawing instead of 
+#   failing loudly
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/erasure_resumable_test.exs
+# MUST_FAIL: fails loudly with a tagged error and an operator report; never :no_pseudonym, never a success
+diff --git a/samen_core/lib/samen/erasure.ex b/samen_core/lib/samen/erasure.ex
+index 837b6c6a..ba99d4cf 100644
+--- a/samen_core/lib/samen/erasure.ex
++++ b/samen_core/lib/samen/erasure.ex
+@@ -395,7 +395,7 @@ defmodule Samen.Erasure do
+         cond do
+           completed_report?(subject_id, r) -> {:ok, nil, :shredded}
+           acknowledge? -> {:ok, nil, :lost_acknowledged}
+-          true -> lost_reference(subject_id, r)
++          true -> {:ok, nil, :shredded}
+         end
+     end
+   rescue

@@ -1051,5 +1051,34 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
       assert log =~ "read=driftwood_api_key_lookup"
       refute log =~ "some-unknown-key"
     end
+
+    test "a key lookup that FAILS answers 503 + Retry-After and halts (never 'bad key', never served); unknown key is not 503" do
+      conn = Plug.Test.conn(:get, "/") |> put_req_header("authorization", "Bearer sk_lookup_probe_key")
+
+      # CONTROL: healthy lookup of an unknown key is the actor-less path: not halted, no 503
+      healthy = DriftwoodWeb.Api.KeyAuthPlug.call(conn, [])
+      refute healthy.halted
+      refute healthy.status == 503
+
+      break_select!("dak_api_key", "dak_token_digest")
+      log = capture_log(fn -> send(self(), {:conn, DriftwoodWeb.Api.KeyAuthPlug.call(conn, [])}) end)
+      assert_received {:conn, failed}
+
+      assert failed.status == 503
+      assert failed.halted
+      assert [retry] = get_resp_header(failed, "retry-after")
+      assert String.to_integer(retry) > 0
+      assert %{"errors" => [%{"status" => "503"}]} = Jason.decode!(failed.resp_body)
+      refute failed.resp_body =~ "sk_lookup_probe_key"
+      refute Map.has_key?(failed.private, :samen_api_actor)
+      assert length(Regex.scan(~r/read=driftwood_api_key_lookup/, log)) == 1
+      refute log =~ "sk_lookup_probe_key"
+      refute log =~ DriftwoodWeb.Api.KeyAuthPlug.digest("sk_lookup_probe_key")
+
+      # RECOVERY: the same request is served again once the table is healthy
+      unbreak_select!("dak_api_key", "dak_token_digest")
+      recovered = DriftwoodWeb.Api.KeyAuthPlug.call(conn, [])
+      refute recovered.halted
+    end
   end
 end

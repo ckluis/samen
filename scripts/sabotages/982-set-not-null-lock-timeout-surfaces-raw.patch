@@ -1,0 +1,20 @@
+# SABOTAGE: set_not_null no longer recognises a lock timeout, so it surfaces a raw Postgrex error that says 
+#   nothing about what was left behind
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/migration_expand_contract_test.exs
+# MUST_FAIL: a blocked lock aborts the step, says what it left (nothing), and a re-run after the lock is released completes
+diff --git a/samen_core/lib/samen/migration/expand_contract.ex b/samen_core/lib/samen/migration/expand_contract.ex
+index dbd315ee..c348c274 100644
+--- a/samen_core/lib/samen/migration/expand_contract.ex
++++ b/samen_core/lib/samen/migration/expand_contract.ex
+@@ -511,7 +511,7 @@ defmodule Samen.Migration.ExpandContract do
+   rescue
+     e in Postgrex.Error ->
+       case e do
+-        %Postgrex.Error{postgres: %{code: :lock_not_available}} ->
++        %Postgrex.Error{postgres: %{code: :never_matches}} ->
+           raise RuntimeError,
+                 "set_not_null/4: could not get the lock on #{tname} within the lock timeout; this step was rolled back " <>
+                   "as a whole: #{left_behind}. Run the migration again when the table is quiet."

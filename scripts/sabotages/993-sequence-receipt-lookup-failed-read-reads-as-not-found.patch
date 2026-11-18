@@ -1,0 +1,23 @@
+# SABOTAGE: Sequences.ReceiptLookup answers :not_found for a failed read, so a sequence bounce is filed as 
+#   an unmatched event
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_d_test.exs
+# MUST_FAIL: RED: the sequence lookup's read fails -> {:error, :unavailable}, reported (it answered :not_found)
+diff --git a/samen_core/lib/samen/sequences/receipt_lookup.ex b/samen_core/lib/samen/sequences/receipt_lookup.ex
+index ccbe48a0..b5f445a7 100644
+--- a/samen_core/lib/samen/sequences/receipt_lookup.ex
++++ b/samen_core/lib/samen/sequences/receipt_lookup.ex
+@@ -78,9 +78,8 @@ defmodule Samen.Sequences.ReceiptLookup do
+ 
+       # Any other failure is a READ that failed, not "no such send": the bounce would match nothing and the recipient
+       # would keep receiving steps. Reported, and its own answer (Deliverability retries it, then the DLQ).
+-      {:error, reason} ->
+-        Samen.Observability.Failure.report(:sequence_receipt_lookup, nil, reason)
+-        {:error, :unavailable}
++      {:error, _} ->
++        :not_found
+     end
+   rescue
+     # A host whose StepSend schema doesn't (yet) carry provider_message_id raises here: a miswired lookup, not an

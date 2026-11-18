@@ -1,0 +1,21 @@
+# SABOTAGE: a configured approval resource whose repo cannot be resolved reads as an unwired host, so 
+#   Reveal.Grants.approve falls back to its engine-less path
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_d_test.exs
+# MUST_FAIL: RED: a configured resource that fails repo introspection is {:error, :approvals_unavailable}, reported
+# MUST_FAIL: RED: an unresolvable approvals repo refuses the approval instead of granting without the engine
+diff --git a/samen_core/lib/samen/approvals.ex b/samen_core/lib/samen/approvals.ex
+index 79c5e7f5..0716b960 100644
+--- a/samen_core/lib/samen/approvals.ex
++++ b/samen_core/lib/samen/approvals.ex
+@@ -477,7 +477,7 @@ defmodule Samen.Approvals do
+   rescue
+     e ->
+       Samen.Observability.Failure.report(:approval_res_repo, nil, e)
+-      {:error, :approvals_unavailable}
++      {:ok, nil}
+   end
+ 
+   defp event_for(:approve), do: "approval_approved"

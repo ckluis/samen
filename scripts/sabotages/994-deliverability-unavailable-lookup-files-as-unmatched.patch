@@ -1,0 +1,20 @@
+# SABOTAGE: Deliverability files an unavailable receipt lookup as :no_matching_receipt, the answer for a 
+#   message that was never sent
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_d_test.exs
+# MUST_FAIL: RED: Deliverability files a failed lookup as :receipt_lookup_unavailable, never :no_matching_receipt
+diff --git a/samen_core/lib/samen/delivery/deliverability.ex b/samen_core/lib/samen/delivery/deliverability.ex
+index 1ccb1fb7..125a056f 100644
+--- a/samen_core/lib/samen/delivery/deliverability.ex
++++ b/samen_core/lib/samen/delivery/deliverability.ex
+@@ -88,7 +88,7 @@ defmodule Samen.Delivery.Deliverability do
+       {:ok, receipt} -> handle_matched(event, receipt, repo, opts)
+       :not_found -> {:error, :no_matching_receipt}
+       # the lookup's read FAILED: not "no such send" (a bounce must never be filed as unmatched because the table was down)
+-      {:error, :unavailable} -> {:error, :receipt_lookup_unavailable}
++      {:error, :unavailable} -> {:error, :no_matching_receipt}
+     end
+   end
+ 
