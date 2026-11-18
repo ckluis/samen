@@ -1,0 +1,19 @@
+# SABOTAGE: Sync.touch_connection swallows a failed cursor update without a report
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/mailbox_sync_test.exs
+# MUST_FAIL: RED: a connection row that cannot be advanced is reported
+diff --git a/samen_core/lib/samen/mailbox/sync.ex b/samen_core/lib/samen/mailbox/sync.ex
+index 2f9477f3..f49fa33a 100644
+--- a/samen_core/lib/samen/mailbox/sync.ex
++++ b/samen_core/lib/samen/mailbox/sync.ex
+@@ -270,7 +270,7 @@ defmodule Samen.Mailbox.Sync do
+     # The cursor did not advance, so the next sync re-reads this page (the dedupe makes that a no-op). Reported, since
+     # the `{:ok, connection}` below is the OLD row, not an update.
+     e ->
+-      Samen.Observability.Failure.report_write(:mailbox_touch_connection, config.org_id, e)
++      _ = {e, config}
+       {:ok, connection}
+   end
+ 
