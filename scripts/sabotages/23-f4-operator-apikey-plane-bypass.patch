@@ -7,15 +7,15 @@
 # TEST_FILES: test/operator_plane_masking_test.exs
 # MUST_FAIL: operator API-KEY actor (no grant) → owner PII is ABSENT
 diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
-index 05dcfcb5..28210d56 100644
+index 118dd194..c3075440 100644
 --- a/samen_core/lib/samen/api/pii_resolution.ex
 +++ b/samen_core/lib/samen/api/pii_resolution.ex
-@@ -377,7 +377,7 @@ defmodule Samen.Api.PiiResolution do
+@@ -384,7 +384,7 @@ defmodule Samen.Api.PiiResolution do
            # absent unless a reveal grant covers it"). No grant → ABSENT (the serializer
            # omits %Ash.ForbiddenField{}).
            true ->
 -            forbidden(label)
-+            reveal_plaintext(masked, binding_of(resource, record, label, opts), opts) || forbidden(label)
++            reveal_plaintext(masked, binding_of(resource, record, label, opts), actor, opts) || forbidden(label)
          end
  
        _ ->
