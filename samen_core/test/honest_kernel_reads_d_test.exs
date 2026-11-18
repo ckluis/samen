@@ -290,6 +290,45 @@ defmodule Samen.HonestKernelReadsDTest do
     end
   end
 
+  describe "NoPlaintextPii.Context — a verifier that cannot read its inputs says so" do
+    alias Samen.NoPlaintextPii.Context
+
+    defmodule DownRegistryRepo do
+      def all(_query), do: raise(DBConnection.ConnectionError, "connection not available")
+    end
+
+    test "RED: an unreadable non-PII registry grants no exemption AND is reported by name" do
+      previous = Application.get_env(:samen_core, :non_pii_repo)
+      Application.put_env(:samen_core, :non_pii_repo, DownRegistryRepo)
+      on_exit(fn -> restore_env(:non_pii_repo, previous) end)
+
+      log =
+        capture_log(fn ->
+          context = Context.build(resources: [], deps: [])
+          assert context.non_pii_exempt == MapSet.new()
+        end)
+
+      assert log =~ "read=no_plaintext_pii_registry"
+      assert log =~ "cause=DBConnection.ConnectionError"
+    end
+
+    test "POSITIVE CONTROL: a readable registry builds silently" do
+      assert capture_log(fn -> Context.build(resources: [], deps: []) end) == ""
+    end
+
+    test "RED: a resource whose table cannot be determined fails the build instead of dropping out of the sweep" do
+      assert_raise ArgumentError, fn -> Context.build(resources: [NotAResource], deps: []) end
+    end
+
+    test "POSITIVE CONTROL: a Postgres resource contributes its vault-routed columns; a non-Postgres one is exactly 'no table'" do
+      context = Context.build(resources: [Approval, SamenCore.Support.SignalsFixture.Thing], deps: [])
+      assert %MapSet{} = context.vault_routed
+    end
+  end
+
+  defp restore_env(key, nil), do: Application.delete_env(:samen_core, key)
+  defp restore_env(key, value), do: Application.put_env(:samen_core, key, value)
+
   # Replace the approvals engine wiring for this test only (restored on exit).
   defp put_approvals_env(config) do
     previous = Application.get_env(:samen_core, Samen.Approvals)

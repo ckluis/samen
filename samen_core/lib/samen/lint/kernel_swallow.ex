@@ -68,6 +68,9 @@ defmodule Samen.Lint.KernelSwallow do
     {"samen_core/lib/samen/delivery/webhook_dispatch.ex", :safe_atom} =>
       {1, "43b8d623939c4410",
        "String.to_existing_atom/1 raises ArgumentError only for a name that is not an existing atom; an unknown provider or event kind is the bounded :unhandled, which Deliverability no-ops (never a mint, never a success claim)"},
+    {"samen_core/lib/samen/no_plaintext_pii.ex", :safe_name} =>
+      {1, "662a59cf525fc730",
+       "tier.tier_name/0 raises only for a module that is not a tier; the name is a LABEL on the finding, and the crash of that very tier is already a fail-closed :violation (run_tier/2), so :unknown_tier changes no verdict"},
     {"samen_core/lib/samen/ai/chokepoint.ex", :charlist_sentinel?} =>
       {1, "0b17c23d9eddf284",
        "List.to_string/1 raises only for a list that is not chardata; a vt sentinel is a UTF-8 binary and can only be spelled by valid chardata, so for such a list `false` (no sentinel) is the exact answer — the element-wise allowlist (`safe_segment?/1`) still applies to it"},
@@ -126,10 +129,6 @@ defmodule Samen.Lint.KernelSwallow do
     "samen_core/lib/samen/metrics/contention_handlers.ex" => 1,
     "samen_core/lib/samen/migration.ex" => 1,
     "samen_core/lib/samen/migration/expand_contract.ex" => 1,
-    "samen_core/lib/samen/no_plaintext_pii.ex" => 1,
-    "samen_core/lib/samen/no_plaintext_pii/context.ex" => 4,
-    "samen_core/lib/samen/no_plaintext_pii/tiers/log_telemetry.ex" => 1,
-    "samen_core/lib/samen/no_plaintext_pii/tiers/vault_declarations.ex" => 1,
     "samen_core/lib/samen/notifications/engine.ex" => 1,
     "samen_core/lib/samen/notifications/status_change.ex" => 2,
     "samen_core/lib/samen/observability/job_spans.ex" => 4,
@@ -171,7 +170,7 @@ defmodule Samen.Lint.KernelSwallow do
   # has to raise this number too (and `SwallowLintTest` compares it with the merge base, so it can only go down). Lower
   # it together with the baseline when a swallow is converted; never raise it.
   @ceilings %{
-    rescue: %{"samen_core/lib" => 114},
+    rescue: %{"samen_core/lib" => 107},
     error_arm: %{"samen_core/lib" => 16}
   }
 
