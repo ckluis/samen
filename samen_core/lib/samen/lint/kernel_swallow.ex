@@ -71,6 +71,21 @@ defmodule Samen.Lint.KernelSwallow do
     {"samen_core/lib/samen/no_plaintext_pii.ex", :safe_name} =>
       {1, "662a59cf525fc730",
        "tier.tier_name/0 raises only for a module that is not a tier; the name is a LABEL on the finding, and the crash of that very tier is already a fail-closed :violation (run_tier/2), so :unknown_tier changes no verdict"},
+    {"samen_core/lib/samen/replay/resolver.ex", :repo} =>
+      {1, "be3694e4bcedc7a2",
+       "AshPostgres.DataLayer.Info.repo/2 raises only for a resource with no AshPostgres data layer, which has no repo to read: nil (no repo, so the value stays masked — never decrypted) is the exact answer"},
+    {"samen_core/lib/samen/replay/resolver.ex", :ref_attribute} =>
+      {1, "0de297393d69e1cc",
+       "the vault/plan introspection raises only for a module that is no longer a resource (or has no replay plan): :code_changed is exactly that fact, it renders `[changed]`, and nothing resolves"},
+    {"samen_core/lib/samen/replay/resolver.ex", :build_struct} =>
+      {1, "6e7f9bdb6c0fb164",
+       "struct/2 raises only for a struct whose enforced keys the stored row lacks, i.e. the code changed under the recording: a :code_changed placeholder is exactly that fact and no stored value reaches the render"},
+    {"samen_core/lib/samen/replay/resolver.ex", :dropped} =>
+      {1, "f0004dfcb7a5dd80",
+       "struct/1 raises only for a struct with enforced keys and no default; the dropped value was never data, so nil (nothing) is the exact answer"},
+    {"samen_core/lib/samen/replay/row_guard.ex", :check} =>
+      {1, "55ebcd6e8afb4706",
+       "a frame-schema validator that raises REFUSES the payload: the guard hands the caller the same changeset refusal it gives an invalid frame, never :ok — fail closed, and the caller handles the error"},
     {"samen_core/lib/samen/ai/chokepoint.ex", :charlist_sentinel?} =>
       {1, "0b17c23d9eddf284",
        "List.to_string/1 raises only for a list that is not chardata; a vt sentinel is a UTF-8 binary and can only be spelled by valid chardata, so for such a list `false` (no sentinel) is the exact answer — the element-wise allowlist (`safe_segment?/1`) still applies to it"},
@@ -136,9 +151,6 @@ defmodule Samen.Lint.KernelSwallow do
     "samen_core/lib/samen/pii_classify.ex" => 1,
     "samen_core/lib/samen/replay/buffer.ex" => 7,
     "samen_core/lib/samen/replay/capture.ex" => 2,
-    "samen_core/lib/samen/replay/resolver.ex" => 9,
-    "samen_core/lib/samen/replay/row_guard.ex" => 1,
-    "samen_core/lib/samen/replay/sanitizer.ex" => 2,
     "samen_core/lib/samen/scopes/identity/notify.ex" => 1,
     "samen_core/lib/samen/scopes/marketing/blueprint.ex" => 2,
     "samen_core/lib/samen/scopes/marketing/send_worker.ex" => 1,
@@ -158,7 +170,6 @@ defmodule Samen.Lint.KernelSwallow do
     "samen_core/lib/samen/identity/invite.ex" => 1,
     "samen_core/lib/samen/non_pii.ex" => 1,
     "samen_core/lib/samen/operator_plane.ex" => 3,
-    "samen_core/lib/samen/replay/resolver.ex" => 1,
     "samen_core/lib/samen/scopes/marketing/blueprint.ex" => 2,
     "samen_core/lib/samen/support/inbound/ingest.ex" => 2,
     "samen_core/lib/samen/support/inbound/threading.ex" => 2
@@ -168,8 +179,8 @@ defmodule Samen.Lint.KernelSwallow do
   # has to raise this number too (and `SwallowLintTest` compares it with the merge base, so it can only go down). Lower
   # it together with the baseline when a swallow is converted; never raise it.
   @ceilings %{
-    rescue: %{"samen_core/lib" => 103},
-    error_arm: %{"samen_core/lib" => 16}
+    rescue: %{"samen_core/lib" => 91},
+    error_arm: %{"samen_core/lib" => 15}
   }
 
   def roots, do: @roots

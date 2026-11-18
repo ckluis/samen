@@ -329,6 +329,127 @@ defmodule Samen.HonestKernelReadsDTest do
   defp restore_env(key, nil), do: Application.delete_env(:samen_core, key)
   defp restore_env(key, value), do: Application.put_env(:samen_core, key, value)
 
+  describe "Replay.Resolver — a failure while resolving is fail-closed AND reported" do
+    alias Samen.Replay.{Ref, Resolver}
+    alias SamenCore.Support.AutomationFixture.Subject
+
+    defmodule DenyGrant do
+      def granted?(_ctx), do: false
+    end
+
+    defmodule RaisingGrant do
+      def granted?(_ctx), do: raise("grant store down")
+    end
+
+    defmodule RaisingKms do
+      def attest(_subject), do: raise("kms down")
+    end
+
+    @email "phase.d.secret@example.com"
+
+    defp subject!(org) do
+      Subject
+      |> Ash.Changeset.for_create(:create, %{org_id: org, title: "d", email: @email})
+      |> Ash.create!(authorize?: false)
+    end
+
+    defp tree(subject),
+      do: %{email: %Ref{resource: "SamenCore.Support.AutomationFixture.Subject", pk: subject.id, attribute: "email", label: "email"}}
+
+    defp operator(org),
+      do: %Samen.Scope{
+        actor: %{
+          id: Ash.UUID.generate(),
+          org_id: org,
+          role: :member,
+          plane: :operator,
+          impersonation: %{session_id: Ash.UUID.generate()}
+        }
+      }
+
+    defp tenant(org), do: %Samen.Scope{actor: %{org_id: org, plane: :tenant, role: :admin}}
+
+    setup do
+      Samen.Kms.FileBacked.simulate_outage(false)
+      previous = Application.get_env(:samen_core, :kms_adapter)
+      Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
+      on_exit(fn -> restore_env(:kms_adapter, previous) end)
+      org = Ash.UUID.generate()
+      %{org: org, subject: subject!(org)}
+    end
+
+    test "RED: a grant store that raises -> the prefetch and the per-record resolve are reported, the value stays masked", ctx do
+      log =
+        capture_log(fn ->
+          %{value: v} = Resolver.resolve(tree(ctx.subject), operator(ctx.org), grant: RaisingGrant)
+          refute inspect(v) =~ @email
+          assert to_string(v.email) == "••••"
+        end)
+
+      assert log =~ "read=replay_resolver_resolve"
+      assert log =~ "read=replay_resolver_prefetch"
+    end
+
+    test "RED: a KMS that cannot attest never claims 'shredded' and is reported", ctx do
+      Application.put_env(:samen_core, :kms_adapter, RaisingKms)
+
+      log =
+        capture_log(fn ->
+          %{value: v, refs: [ref]} = Resolver.resolve(tree(ctx.subject), operator(ctx.org), grant: DenyGrant)
+          assert ref.outcome == :masked
+          assert to_string(v.email) == "••••"
+        end)
+
+      assert log =~ "read=replay_resolver_shredded"
+    end
+
+    test "RED: a record read that FAILS is reported (it renders [gone] like a deleted record, silently before)", ctx do
+      log =
+        capture_log(fn ->
+          # a resource whose table does not exist: the read is a REAL database error, not a policy refusal
+          unreadable = %{email: %Ref{resource: "SamenCore.Support.UnreadableSend", pk: Ash.UUID.generate(), attribute: "email", label: "email"}}
+          %{refs: [ref]} = Resolver.resolve(unreadable, tenant(ctx.org))
+          assert ref.outcome in [:gone, :code_changed]
+        end)
+
+      assert log =~ "read=replay_resolver_records"
+    end
+
+    test "POSITIVE CONTROL: healthy resolves, a deny, a deleted record and another org's viewer report nothing", ctx do
+      quiet =
+        capture_log(fn ->
+          assert %{refs: [%{outcome: :clear}]} = Resolver.resolve(tree(ctx.subject), tenant(ctx.org))
+          assert %{refs: [%{outcome: :masked}]} = Resolver.resolve(tree(ctx.subject), operator(ctx.org), grant: DenyGrant)
+          # another org's viewer: the row is out of scope, which is exactly what "gone" means
+          assert %{refs: [%{outcome: :gone}]} = Resolver.resolve(tree(ctx.subject), tenant(Ash.UUID.generate()))
+          Ash.destroy!(ctx.subject, authorize?: false)
+          assert %{refs: [%{outcome: :gone}]} = Resolver.resolve(tree(ctx.subject), tenant(ctx.org))
+        end)
+
+      refute quiet =~ "replay_resolver"
+    end
+  end
+
+  describe "Replay.Sanitizer — an assign the walker cannot handle is dropped AND reported" do
+    alias Samen.Replay.{Dropped, Sanitizer}
+
+    test "RED: the dropped assign is reported by name, with no value in the log" do
+      log =
+        capture_log(fn ->
+          out = Sanitizer.assigns(%{bad: [?a | :improper_sentinel_value], good: 1})
+          assert out.bad == %Dropped{kind: :sanitizer_error}
+          assert out.good == 1
+        end)
+
+      assert log =~ "read=replay_sanitize"
+      refute log =~ "improper_sentinel_value"
+    end
+
+    test "POSITIVE CONTROL: a walkable assign is kept and nothing is reported" do
+      assert capture_log(fn -> assert %{good: 1} = Sanitizer.assigns(%{good: 1}) end) == ""
+    end
+  end
+
   # Replace the approvals engine wiring for this test only (restored on exit).
   defp put_approvals_env(config) do
     previous = Application.get_env(:samen_core, Samen.Approvals)
