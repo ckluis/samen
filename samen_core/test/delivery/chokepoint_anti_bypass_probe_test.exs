@@ -108,22 +108,18 @@ defmodule Samen.Delivery.ChokepointAntiBypassProbeTest do
   # tests run concurrently races other suites that snapshot/copy the lib
   # directory, e.g. `chokepoint_test.exs`'s sabotage harness).
   defp scan_paths(extra_roots \\ []) do
+    # `Samen.SourceScan`, never `Path.wildcard`/`File.*`: those are one call each into the node's single file-server
+    # process, and this scan (~1,100 files) took 60 s under a loaded machine (see `Samen.SourceScan`).
     (@app_lib_globs ++ @generator_template_globs)
-    |> Enum.flat_map(fn rel_glob ->
-      Path.wildcard(Path.join(@repo_root, rel_glob))
-    end)
+    |> Enum.flat_map(fn rel_glob -> Samen.SourceScan.dirs(@repo_root, rel_glob) end)
     |> Kernel.++(extra_roots)
-    |> Enum.filter(&File.dir?/1)
-    |> Enum.flat_map(fn dir ->
-      Path.wildcard(Path.join(dir, "**/*.{ex,eex}"))
-    end)
+    |> Enum.flat_map(fn dir -> Samen.SourceScan.files(dir, [".ex", ".eex"]) end)
     |> Enum.reject(&(&1 in @excluded_files))
   end
 
   defp offending_deliver_calls(paths) do
     for path <- paths,
-        File.regular?(path),
-        {line, idx} <- path |> File.read!() |> String.split("\n") |> Enum.with_index(1),
+        {line, idx} <- path |> Samen.SourceScan.read!() |> String.split("\n") |> Enum.with_index(1),
         [_, receiver] <- [Regex.run(@deliver_call_re, line) || [nil, nil]],
         not is_nil(receiver),
         receiver not in @known_non_adapter_receivers do
@@ -153,7 +149,7 @@ defmodule Samen.Delivery.ChokepointAntiBypassProbeTest do
       # to prove the real adapter.deliver(...) call is genuinely there.
       offenders =
         for {line, idx} <-
-              chokepoint_path |> File.read!() |> String.split("\n") |> Enum.with_index(1),
+              chokepoint_path |> Samen.SourceScan.read!() |> String.split("\n") |> Enum.with_index(1),
             [_, receiver] <- [Regex.run(@deliver_call_re, line) || [nil, nil]],
             not is_nil(receiver) do
           {idx, receiver}
@@ -167,9 +163,9 @@ defmodule Samen.Delivery.ChokepointAntiBypassProbeTest do
       # function were ever renamed/removed, or grew a real adapter dispatch,
       # this fails loudly rather than the exclusion quietly widening.
       lifecycle_src =
-        File.read!(Path.join(@repo_root, "samen_core/lib/samen/delivery/lifecycle.ex"))
+        Samen.SourceScan.read!(Path.join(@repo_root, "samen_core/lib/samen/delivery/lifecycle.ex"))
 
-      webhook_src = File.read!(Path.join(@repo_root, "samen_core/lib/samen/webhook.ex"))
+      webhook_src = Samen.SourceScan.read!(Path.join(@repo_root, "samen_core/lib/samen/webhook.ex"))
 
       assert lifecycle_src =~ ~r/def deliver\(event, opts/,
              "Lifecycle.deliver/2 must remain the enqueue-only event API this exclusion documents"

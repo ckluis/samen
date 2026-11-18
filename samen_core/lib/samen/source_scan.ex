@@ -17,6 +17,33 @@ defmodule Samen.SourceScan do
   @spec files(Path.t(), [String.t()]) :: [Path.t()]
   def files(dir, exts) when is_list(exts), do: dir |> walk(exts) |> Enum.sort()
 
+  @doc """
+  The directories `Path.wildcard(Path.join(root, rel))` names, for a `rel` whose only wildcards are whole `*` segments
+  (`"samen_core/lib"`, `"spikes/*/lib"`), found without the file server. Sorted; an absent directory is absent.
+  """
+  @spec dirs(Path.t(), Path.t()) :: [Path.t()]
+  def dirs(root, rel) do
+    rel
+    |> Path.split()
+    |> Enum.reduce([root], fn
+      "*", acc -> Enum.flat_map(acc, &subdirs/1)
+      segment, acc -> Enum.map(acc, &Path.join(&1, segment))
+    end)
+    |> Enum.filter(&dir?/1)
+    |> Enum.sort()
+  end
+
+  defp subdirs(dir) do
+    case :prim_file.list_dir(dir) do
+      {:ok, names} -> for name <- Enum.map(names, &to_string/1), not String.starts_with?(name, "."), do: Path.join(dir, name)
+      {:error, _} -> []
+    end
+  end
+
+  defp dir?(path) do
+    match?({:ok, info} when elem(info, 2) == :directory, :prim_file.read_file_info(path))
+  end
+
   @doc "`File.read!/1` without the file-server round trip."
   @spec read!(Path.t()) :: binary()
   def read!(file) do

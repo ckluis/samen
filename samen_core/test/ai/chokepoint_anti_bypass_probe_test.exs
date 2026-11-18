@@ -71,17 +71,16 @@ defmodule Samen.AI.ChokepointAntiBypassProbeTest do
 
   defp scan_paths(extra_roots \\ []) do
     (@app_lib_globs ++ @generator_template_globs)
-    |> Enum.flat_map(fn rel_glob -> Path.wildcard(Path.join(@repo_root, rel_glob)) end)
+    # `Samen.SourceScan`, never `Path.wildcard`/`File.*`: one file-server call each, 60 s under a loaded machine
+    |> Enum.flat_map(fn rel_glob -> Samen.SourceScan.dirs(@repo_root, rel_glob) end)
     |> Kernel.++(extra_roots)
-    |> Enum.filter(&File.dir?/1)
-    |> Enum.flat_map(fn dir -> Path.wildcard(Path.join(dir, "**/*.{ex,eex}")) end)
+    |> Enum.flat_map(fn dir -> Samen.SourceScan.files(dir, [".ex", ".eex"]) end)
     |> Enum.reject(&(&1 in @allowed_files))
   end
 
   defp all_offenders(paths) do
     for path <- paths,
-        File.regular?(path),
-        offender <- offenders_in_source(File.read!(path), Path.relative_to(path, @repo_root)) do
+        offender <- offenders_in_source(Samen.SourceScan.read!(path), Path.relative_to(path, @repo_root)) do
       offender
     end
   end
@@ -108,7 +107,7 @@ defmodule Samen.AI.ChokepointAntiBypassProbeTest do
 
       found =
         chokepoint
-        |> File.read!()
+        |> Samen.SourceScan.read!()
         |> offenders_in_source("chokepoint.ex")
         |> Enum.any?(fn {_l, _line, kind} -> kind == :literal end)
 
