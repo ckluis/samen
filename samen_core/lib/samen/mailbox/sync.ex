@@ -121,6 +121,11 @@ defmodule Samen.Mailbox.Sync do
           {:error, {:dedupe_unavailable, _} = reason} ->
             {:halt, {:error, reason}}
 
+          # Likewise when the CRM match read failed: recording the message now would anchor it to NOTHING for good
+          # (its external id then dedupes every later sync). Abort, leave the cursor, re-read the page next time.
+          {:error, {:match_unavailable, _} = reason} ->
+            {:halt, {:error, reason}}
+
           # A WRITE failure is not a duplication risk: count it honestly and continue.
           {:error, _reason} ->
             {:cont, {acc, skipped, failed + 1}}
@@ -189,10 +194,25 @@ defmodule Samen.Mailbox.Sync do
 
   defp create_record(%Message{} = message, connection, %Config{} = config) do
     counterparty = Message.counterparty(message)
+
+    with {:ok, person, company} <- match(counterparty, config) do
+      {subject_key, subject_id} = anchor(person, company)
+      insert_record(message, connection, config, counterparty, subject_key, subject_id, company)
+    end
+  end
+
+  # The CRM match reads. A failed read is `{:error, {:match_unavailable, :read_failed}}` (reported), never "no match".
+  defp match(counterparty, config) do
     person = Match.person_for_address(counterparty, config)
     company = Match.company_for(person, counterparty, config)
-    {subject_key, subject_id} = anchor(person, company)
+    {:ok, person, company}
+  rescue
+    e ->
+      Samen.Observability.Failure.report(:mailbox_match, config.org_id, e)
+      {:error, {:match_unavailable, :read_failed}}
+  end
 
+  defp insert_record(message, connection, config, counterparty, subject_key, subject_id, company) do
     config.message_resource
     |> Ash.Changeset.for_create(:create, %{
       org_id: config.org_id,
@@ -242,12 +262,16 @@ defmodule Samen.Mailbox.Sync do
   defp anchor(nil, company), do: {"crm.company", company.id}
   defp anchor(person, _company), do: {"crm.person", person.id}
 
-  defp touch_connection(connection, cursor, _config) do
+  defp touch_connection(connection, cursor, config) do
     connection
     |> Ash.Changeset.for_update(:update, %{cursor: cursor, last_synced_at: now()})
     |> Ash.update(authorize?: false)
   rescue
-    _ -> {:ok, connection}
+    # The cursor did not advance, so the next sync re-reads this page (the dedupe makes that a no-op). Reported, since
+    # the `{:ok, connection}` below is the OLD row, not an update.
+    e ->
+      Samen.Observability.Failure.report_write(:mailbox_touch_connection, config.org_id, e)
+      {:ok, connection}
   end
 
   defp ensure_configured(%Config{} = config) do

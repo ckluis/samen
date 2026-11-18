@@ -319,6 +319,58 @@ defmodule Samen.Web.MailboxSyncTest do
     assert matched.id == company.id
   end
 
+  # Honest reads (kernel phase D): a CRM match read that FAILED is not "no match". Recording the message then would
+  # anchor it to nothing for good (its external id dedupes every later sync).
+  describe "a failed CRM match read" do
+    alias Samen.WebTest.UnreadableMailRecord
+
+    test "RED: person_for_address/company_for raise on an unreadable CRM instead of answering nil", %{org_id: org_id} do
+      broken = %{config(org_id) | person_resource: UnreadableMailRecord, company_resource: UnreadableMailRecord}
+
+      assert_raise Ash.Error.Unknown, fn -> Samen.Mailbox.Match.person_for_address(Seeds.contact_email(), broken) end
+      assert_raise Ash.Error.Unknown, fn -> Samen.Mailbox.Match.company_for(%{company_id: Ash.UUID.generate()}, "x@y.invalid", broken) end
+      assert_raise Ash.Error.Unknown, fn -> Samen.Mailbox.Match.company_for(%{company_id: nil}, "x@y.invalid", broken) end
+
+      # POSITIVE CONTROL: the same calls against the readable CRM resolve (the raise is the failed read, not the call)
+      healthy = config(org_id)
+      assert Samen.Mailbox.Match.person_for_address(Seeds.contact_email(), healthy) != nil
+    end
+
+    test "RED: sync aborts with {:match_unavailable, _}, records nothing and keeps the cursor; the same page then syncs", %{
+      org_id: org_id
+    } do
+      healthy = config(org_id)
+      connection = connect!(org_id, healthy)
+      FakeProvider.deliver_to_inbox([inbound(Seeds.contact_email())])
+
+      broken = %{healthy | person_resource: UnreadableMailRecord}
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:match_unavailable, :read_failed}} = Mailbox.sync(connection, broken)
+        end)
+
+      assert log =~ "read=mailbox_match"
+      assert mail_rows(org_id) == []
+
+      # nothing was lost: the cursor did not move, so the healthy sync reads the same page and threads it
+      assert {:ok, %{synced: 1}} = Mailbox.sync(connection, healthy)
+      assert [%{subject_key: "crm.person"}] = mail_rows(org_id)
+    end
+
+    test "RED: a connection row that cannot be advanced is reported (the {:ok, connection} it returns is the OLD row)", %{
+      org_id: org_id
+    } do
+      cfg = config(org_id)
+      connection = connect!(org_id, cfg)
+      FakeProvider.deliver_to_inbox([inbound(Seeds.contact_email())])
+      not_a_row = %{id: connection.id, external_account_id: connection.external_account_id, cursor: nil}
+
+      log = ExUnit.CaptureLog.capture_log(fn -> assert {:ok, %{synced: 1}} = Mailbox.sync(not_a_row, cfg) end)
+      assert log =~ "write=mailbox_touch_connection"
+    end
+  end
+
   test "matching is address-NORMALIZED (case/whitespace), not string-identical", %{
     org_id: org_id,
     person: person

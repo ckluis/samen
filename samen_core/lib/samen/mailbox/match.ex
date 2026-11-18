@@ -101,6 +101,9 @@ defmodule Samen.Mailbox.Match do
   @doc """
   Find the org's CRM `Person` whose vaulted `emails` contains `address`. Returns
   the resolved record or `nil`. `nil` person resource ⇒ matching disabled ⇒ `nil`.
+
+  `nil` always means "no unique match". A candidate read that FAILS raises (it is never `nil`): a message
+  threaded onto nothing because the CRM could not be read is recorded unanchored for good.
   """
   @spec person_for_address(term(), Config.t()) :: struct() | nil
   def person_for_address(_address, %Config{person_resource: nil}), do: nil
@@ -155,8 +158,6 @@ defmodule Samen.Mailbox.Match do
       |> Ash.read!(authorize?: false)
 
     PiiResolution.resolve(records, config.person_resource, %{plane: :tenant}, repo: config.repo)
-  rescue
-    _ -> []
   end
 
   # A `%Samen.Masked{}` (or anything that is not a resolved composite) yields NO
@@ -190,8 +191,6 @@ defmodule Samen.Mailbox.Match do
     |> Ash.Query.limit(1)
     |> Ash.read!(authorize?: false)
     |> List.first()
-  rescue
-    _ -> nil
   end
 
   defp company_by_id(_person, _config), do: nil
@@ -217,8 +216,6 @@ defmodule Samen.Mailbox.Match do
           _ -> nil
         end
     end
-  rescue
-    _ -> nil
   end
 
   defp first_binary(values) do

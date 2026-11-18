@@ -122,8 +122,6 @@ defmodule Samen.Lint.KernelSwallow do
     "samen_core/lib/samen/fleet/report/schema.ex" => 1,
     "samen_core/lib/samen/gen/app.ex" => 1,
     "samen_core/lib/samen/jobs/queue_parity.ex" => 1,
-    "samen_core/lib/samen/mailbox/match.ex" => 3,
-    "samen_core/lib/samen/mailbox/sync.ex" => 1,
     "samen_core/lib/samen/marketing/consent_change.ex" => 2,
     "samen_core/lib/samen/metrics.ex" => 1,
     "samen_core/lib/samen/metrics/contention_handlers.ex" => 1,
@@ -170,7 +168,7 @@ defmodule Samen.Lint.KernelSwallow do
   # has to raise this number too (and `SwallowLintTest` compares it with the merge base, so it can only go down). Lower
   # it together with the baseline when a swallow is converted; never raise it.
   @ceilings %{
-    rescue: %{"samen_core/lib" => 107},
+    rescue: %{"samen_core/lib" => 103},
     error_arm: %{"samen_core/lib" => 16}
   }
 
