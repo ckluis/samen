@@ -25,6 +25,9 @@ defmodule Samen.Reveal.RevealRequest do
     field(:resource, :string, source: :rvq_resource)
     field(:action, :string, source: :rvq_action)
     field(:status, :string, source: :rvq_status, default: "pending")
+    # The tenant org the request's `pii_reveal` engine approval is filed under. NULL = none was supplied (or the row
+    # predates the column and had no approval to derive it from); such a row is never guessed an org.
+    field(:org_id, :binary_id, source: :rvq_org_id)
 
     # Explicit (not `timestamps/1`) so the LOGICAL field names stay
     # `inserted_at`/`updated_at` while STORAGE is abbrev-prefixed (`rvq_*`).

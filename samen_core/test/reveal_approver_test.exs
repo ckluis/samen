@@ -239,4 +239,324 @@ defmodule Samen.Reveal.ApproverTest do
       assert Enum.any?(events, fn e -> e.actor_id == denier and e.detail =~ "denied" end)
     end
   end
+
+  # ==========================================================================
+  # S6 — a request whose engine approval failed to open is recovered by the queue read
+  # ==========================================================================
+
+  describe "orphaned request (its engine approval failed to open) — recovered by pending_for_org_result/2" do
+    import ExUnit.CaptureLog
+
+    alias Samen.Approvals
+    alias Samen.Reveal.RevealRequest
+
+    # File a request while the approvals read is broken: the request commits, its approval does not open.
+    defp file_orphan(org_id, attrs \\ %{}) do
+      previous = Application.get_env(:samen_core, Samen.Approvals)
+
+      Application.put_env(:samen_core, Samen.Approvals,
+        approval_resource: SamenCore.Support.UnreadableApproval,
+        repo: @repo
+      )
+
+      try do
+        capture_log(fn ->
+          assert {:ok, req} =
+                   Grants.request(
+                     Map.merge(
+                       %{subject_id: subj(), requestor_id: actor(), reason: "ticket 301: orphan", org_id: org_id},
+                       attrs
+                     )
+                   )
+
+          send(self(), {:orphan, req})
+        end)
+      after
+        Application.put_env(:samen_core, Samen.Approvals, previous)
+      end
+
+      assert_received {:orphan, req}
+      req
+    end
+
+    defp approvals_for(org_id, req) do
+      {:ok, set} = Approvals.subject_refs_with_approval(org_id, "pii_reveal", [Samen.Reveal.ApprovalHandler.subject_ref(req)])
+      MapSet.size(set)
+    end
+
+    test "the request persists the org its engine approval is filed under; a non-UUID org is NULL, never a failure" do
+      org_a = org()
+      {:ok, req} = Grants.request(%{subject_id: subj(), requestor_id: actor(), reason: "ticket 302", org_id: org_a})
+      assert @repo.get!(RevealRequest, req.id).org_id == org_a
+
+      {:ok, no_org} = Grants.request(%{subject_id: subj(), requestor_id: actor(), reason: "ticket 303"})
+      assert @repo.get!(RevealRequest, no_org.id).org_id == nil
+
+      capture_log(fn ->
+        assert {:ok, bad} = Grants.request(%{subject_id: subj(), requestor_id: actor(), reason: "ticket 304", org_id: "not-a-uuid"})
+        assert @repo.get!(RevealRequest, bad.id).org_id == nil
+      end)
+    end
+
+    test "RED before the fix: an orphan is invisible to the queue; now the read re-opens it and the approver can APPROVE it end to end" do
+      org_a = org()
+      req = file_orphan(org_a)
+      assert approvals_for(org_a, req) == 0, "the open failed: no approval exists"
+      assert {:ok, []} = Approvals.list_pending(org_a, "pii_reveal")
+
+      log = capture_log(fn -> assert {:ok, [_]} = Grants.pending_for_org_result(org_a, repo: @repo) end)
+      assert log =~ "write=reveal_recover_engine_approval"
+      assert approvals_for(org_a, req) == 1
+
+      assert [row] = Grants.pending_for_org(org_a, repo: @repo)
+      assert row.request_id == req.id and row.org_id == org_a
+
+      approver = actor()
+      assert {:ok, grant} = Grants.approve(row.request_id, %{granted_by: approver, org_id: org_a, repo: @repo})
+      assert Grants.active?(req.requestor_id, req.subject_id)
+      assert grant.request_id == req.id
+      assert Grants.pending_for_org(org_a, repo: @repo) == []
+    end
+
+    test "the recovered request can be DENIED end to end, minting no grant" do
+      org_a = org()
+      req = file_orphan(org_a)
+      capture_log(fn -> assert [_] = Grants.pending_for_org(org_a, repo: @repo) end)
+
+      assert {:ok, _} = Grants.deny(req.id, %{denied_by: actor(), org_id: org_a, repo: @repo})
+      assert Grants.pending_for_org(org_a, repo: @repo) == []
+      refute Grants.active?(req.requestor_id, req.subject_id)
+    end
+
+    test "a healthy request is not reported as recovered (positive control: nothing to recover is silent)" do
+      org_a = org()
+      {:ok, _} = Grants.request(%{subject_id: subj(), requestor_id: actor(), reason: "ticket 305", org_id: org_a})
+      quiet = capture_log(fn -> assert [_] = Grants.pending_for_org(org_a, repo: @repo) end)
+      refute quiet =~ "reveal_recover_engine_approval"
+    end
+
+    test "RED: org A's queue read never re-opens or shows org B's orphan; org B's own read does (positive control)" do
+      org_a = org()
+      org_b = org()
+      req_a = file_orphan(org_a)
+      req_b = file_orphan(org_b)
+
+      capture_log(fn ->
+        assert [row_a] = Grants.pending_for_org(org_a, repo: @repo)
+        assert row_a.request_id == req_a.id
+      end)
+
+      assert approvals_for(org_a, req_a) == 1
+      # org A's read touched ONLY org A: B's orphan still has no approval anywhere
+      assert approvals_for(org_b, req_b) == 0
+      assert {:ok, []} = Approvals.list_pending(org_b, "pii_reveal")
+
+      capture_log(fn -> assert [_] = Grants.pending_for_org(org_b, repo: @repo) end)
+      assert approvals_for(org_b, req_b) == 1
+      assert approvals_for(org_a, req_b) == 0
+    end
+
+    test "RED: a request that already has an approval in a TERMINAL state is never re-opened (approved, rejected, cancelled)" do
+      org_a = org()
+
+      for decide <- [:approve, :reject, :cancel] do
+        {:ok, req} = Grants.request(%{subject_id: subj(), requestor_id: actor(), reason: "ticket 306 #{decide}", org_id: org_a})
+        {:ok, [approval]} = Approvals.list_pending(org_a, "pii_reveal") |> then(fn {:ok, l} -> {:ok, Enum.filter(l, &(&1.subject_ref == Samen.Reveal.ApprovalHandler.subject_ref(req)))} end)
+
+        case decide do
+          :approve -> {:ok, _, _} = Approvals.approve(approval.id, actor())
+          :reject -> {:ok, _} = Approvals.reject(approval.id, actor())
+          :cancel -> {:ok, _} = Approvals.cancel(approval.id, req.requestor_id)
+        end
+      end
+
+      quiet = capture_log(fn -> assert {:ok, []} = Grants.pending_for_org_result(org_a, repo: @repo) end)
+      refute quiet =~ "reveal_recover_engine_approval"
+      assert {:ok, []} = Approvals.list_pending(org_a, "pii_reveal")
+    end
+
+    test "a request older than the scan window is not re-opened (bounded look); a fresh one is" do
+      org_a = org()
+      old = file_orphan(org_a)
+      fresh = file_orphan(org_a)
+      stale_at = DateTime.add(DateTime.utc_now(), -30 * 86_400, :second)
+      @repo.update_all(from(q in RevealRequest, where: q.id == ^old.id), set: [inserted_at: stale_at])
+
+      capture_log(fn -> assert [_] = Grants.pending_for_org(org_a, repo: @repo) end)
+      assert approvals_for(org_a, fresh) == 1
+      assert approvals_for(org_a, old) == 0
+    end
+
+    test "the window edge is INCLUSIVE: a request filed exactly one window ago is still scanned, one microsecond older is not" do
+      org_a = org()
+      on_edge = file_orphan(org_a)
+      past_edge = file_orphan(org_a)
+      now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+      edge = DateTime.add(now, -14 * 86_400, :second)
+      @repo.update_all(from(q in RevealRequest, where: q.id == ^on_edge.id), set: [inserted_at: edge])
+      @repo.update_all(from(q in RevealRequest, where: q.id == ^past_edge.id), set: [inserted_at: DateTime.add(edge, -1, :microsecond)])
+
+      capture_log(fn -> assert {:ok, [_]} = Grants.pending_for_org_result(org_a, repo: @repo, now: now) end)
+      assert approvals_for(org_a, on_edge) == 1
+      assert approvals_for(org_a, past_edge) == 0
+    end
+
+    test "the scan is limit-bounded: a full scan is reported as bounded and never reads past the limit" do
+      org_a = org()
+      limit = Grants.orphan_scan_limit()
+      now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+      rows =
+        for i <- 1..limit do
+          %{
+            rvq_id: Ecto.UUID.bingenerate(),
+            rvq_subject_id: subj(),
+            rvq_requestor_id: "bulk",
+            rvq_reason: "ticket 307",
+            rvq_status: "pending",
+            rvq_org_id: Ecto.UUID.dump!(org_a),
+            rvq_inserted_at: DateTime.add(now, -i, :second),
+            rvq_updated_at: now
+          }
+        end
+
+      @repo.insert_all("rvq_reveal_request", rows)
+      extra = file_orphan(org_a)
+      @repo.update_all(from(q in RevealRequest, where: q.id == ^extra.id), set: [inserted_at: DateTime.add(now, -(limit + 5), :second)])
+
+      log = capture_log(fn -> assert {:ok, _} = Grants.pending_for_org_result(org_a, repo: @repo) end)
+      assert log =~ "read=reveal_orphan_scan"
+      assert log =~ "cause=bounded"
+      # the request beyond the limit is NOT claimed seen
+      assert approvals_for(org_a, extra) == 0
+    end
+
+    test "RED: repeated readers open ONE approval for the orphan, never a second (a second read finds the first's)" do
+      org_a = org()
+      req = file_orphan(org_a)
+
+      capture_log(fn ->
+        for _ <- 1..4, do: assert({:ok, [_]} = Grants.pending_for_org_result(org_a, repo: @repo))
+      end)
+
+      {:ok, pending} = Approvals.list_pending(org_a, "pii_reveal")
+      assert length(pending) == 1
+      assert approvals_for(org_a, req) == 1
+    end
+
+    test "RED: CONCURRENT readers (real parallel connections, committed writes) converge on ONE approval: the engine's unique pending index" do
+      Samen.TestSandbox.auto!(@repo)
+      org_a = org()
+      req_id = Ecto.UUID.generate()
+      now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+      @repo.insert_all("rvq_reveal_request", [
+        %{
+          rvq_id: Ecto.UUID.dump!(req_id),
+          rvq_subject_id: subj(),
+          rvq_requestor_id: actor(),
+          rvq_reason: "ticket 309: race",
+          rvq_status: "pending",
+          rvq_org_id: Ecto.UUID.dump!(org_a),
+          rvq_inserted_at: now,
+          rvq_updated_at: now
+        }
+      ])
+
+      on_exit(fn ->
+        @repo.delete_all(from(a in "apv_approval", where: a.apv_org_id == ^Ecto.UUID.dump!(org_a)))
+        @repo.delete_all(from(q in "rvq_reveal_request", where: q.rvq_id == ^Ecto.UUID.dump!(req_id)))
+      end)
+
+      gate = self()
+
+      results =
+        capture_log(fn ->
+          tasks =
+            for _ <- 1..8 do
+              Task.async(fn ->
+                receive do
+                  :go -> Grants.pending_for_org_result(org_a, repo: @repo)
+                end
+              end)
+            end
+
+          for t <- tasks, do: send(t.pid, :go)
+          send(gate, {:results, Task.await_many(tasks, 30_000)})
+        end)
+
+      # no reader's re-open failed: the loser of the race returned the winner's approval (idempotent), it did not error
+      refute results =~ "reveal_open_engine_approval"
+      assert_received {:results, outcomes}
+      assert Enum.all?(outcomes, &match?({:ok, [_]}, &1))
+      assert @repo.aggregate(from(a in "apv_approval", where: a.apv_org_id == ^Ecto.UUID.dump!(org_a)), :count) == 1
+    end
+
+    test "RED: a failed re-open is reported and the rest of the queue still lists; healed, the next read recovers it" do
+      org_a = org()
+      {:ok, healthy} = Grants.request(%{subject_id: subj(), requestor_id: actor(), reason: "ticket 308", org_id: org_a})
+      orphan = file_orphan(org_a)
+
+      registry = Application.get_env(:samen_core, Samen.Approvals.Registry)
+      Application.put_env(:samen_core, Samen.Approvals.Registry, kinds: %{})
+
+      log =
+        try do
+          capture_log(fn ->
+            assert {:ok, [row]} = Grants.pending_for_org_result(org_a, repo: @repo)
+            assert row.request_id == healthy.id
+          end)
+        after
+          Application.put_env(:samen_core, Samen.Approvals.Registry, registry)
+        end
+
+      assert log =~ "write=reveal_open_engine_approval"
+      refute log =~ "reveal_recover_engine_approval"
+      assert approvals_for(org_a, orphan) == 0
+
+      capture_log(fn -> assert {:ok, [_, _]} = Grants.pending_for_org_result(org_a, repo: @repo) end)
+      assert approvals_for(org_a, orphan) == 1
+    end
+
+    test "RED: an orphan scan that cannot read the approvals is {:error, :unavailable} (reported), never a queue claiming to be complete" do
+      org_a = org()
+      _orphan = file_orphan(org_a)
+      previous = Application.get_env(:samen_core, Samen.Approvals)
+      healthy = Grants.pending_for_org_result(org_a, repo: @repo, approval_resource: SamenCore.Support.UnreadableApproval)
+
+      log =
+        capture_log(fn ->
+          assert {:error, :unavailable} =
+                   Grants.pending_for_org_result(org_a, repo: @repo, approval_resource: SamenCore.Support.UnreadableApproval)
+        end)
+
+      assert log =~ "read=reveal_orphan_scan"
+      assert previous == Application.get_env(:samen_core, Samen.Approvals)
+      assert {:error, :unavailable} = healthy
+      # POSITIVE CONTROL: the same org on the healthy engine answers
+      capture_log(fn -> assert {:ok, [_]} = Grants.pending_for_org_result(org_a, repo: @repo) end)
+    end
+
+    test "a request with no org and no approval is NAMED (never given a guessed org); a no-org request WITH a global approval is not" do
+      {:ok, with_approval} = Grants.request(%{subject_id: subj(), requestor_id: actor(), reason: "ticket 310 a"})
+      unopened = file_orphan(nil, %{reason: "ticket 310 b"})
+      closed = file_orphan(nil, %{reason: "ticket 310 c"})
+      @repo.update_all(from(q in RevealRequest, where: q.id == ^closed.id), set: [status: "closed"])
+      attributed = file_orphan(org(), %{reason: "ticket 310 d"})
+      {:ok, ids} = Grants.unattributed_requests(repo: @repo)
+
+      # only a NO-org AND still-pending request counts: an org-bearing orphan is the queue's to recover, a closed one is done
+      refute to_string(attributed.id) in ids
+      refute to_string(closed.id) in ids
+
+      assert to_string(unopened.id) in ids
+      refute to_string(with_approval.id) in ids
+      assert @repo.get!(RevealRequest, unopened.id).org_id == nil
+
+      # the NOTE task prints it, exit 0
+      out = ExUnit.CaptureIO.capture_io(fn -> Mix.Tasks.Samen.Verify.RevealOrgs.run([]) end)
+      assert out =~ "NOTE"
+      assert out =~ to_string(unopened.id)
+    end
+  end
 end

@@ -22,6 +22,13 @@ All notable changes to Samen are recorded here. The format follows
   agent's execution seam names an unreadable approval `:approval_unavailable`.
 - **Fixed: `Reveal.Grants`** reports a parallel `pii_reveal` approval it could not open, a failed pending list, and a
   pending approval dropped from the queue because its request row is gone.
+- **Fixed: a reveal request whose engine approval failed to open is recovered, not only reported (S6).** The request now
+  persists its org (`rvq_org_id`, nullable, additive migration `20261118100000` in every host and the test repo, backfilled
+  from the request's engine approval, plus the `(org, inserted_at, id)` index; a row with no approval stays NULL and
+  `mix samen.verify.reveal_orgs` names it). `pending_for_org_result/2` re-opens, idempotently, the missing approval of the
+  org's recent pending requests (14 days, at most 200, newest first) before it lists; a request that already has an
+  approval in any state is never re-opened, a failed re-open is reported and the rest of the queue is returned, and an
+  orphan scan that cannot run makes the queue `{:error, :unavailable}`. Sabotages 1010-1013.
 - **Changed: `QueryBudget.over_threshold?/2` raises on an unreadable ledger** instead of answering `false` ("under
   budget"). `record/1` and `check/2` keep their documented fail-open posture but report by name instead of inspecting
   the exception.

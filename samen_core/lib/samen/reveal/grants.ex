@@ -125,10 +125,14 @@ defmodule Samen.Reveal.Grants do
           resource: attrs[:resource] && to_string(attrs[:resource]),
           action: attrs[:action] && to_string(attrs[:action]),
           status: "pending",
+          # The org the engine approval below is filed under, persisted so a queue read can find the request again
+          # and re-open a missing approval. A value that is not a UUID is no org the engine could file under either
+          # (its `org_id` is a uuid), so it stays NULL rather than failing the request (T35: never blocks).
+          org_id: cast_org(attrs[:org_id]),
           inserted_at: now,
           updated_at: now
         },
-        [:subject_id, :requestor_id, :reason, :resource, :action, :status, :inserted_at, :updated_at]
+        [:subject_id, :requestor_id, :reason, :resource, :action, :status, :org_id, :inserted_at, :updated_at]
       )
       |> Ecto.Changeset.validate_required([:subject_id, :requestor_id, :reason])
 
@@ -168,12 +172,24 @@ defmodule Samen.Reveal.Grants do
       # Never blocks/fails the reveal request itself: an unwired host, an unregistered
       # kind, or any other engine hiccup here must not regress `request/1`'s pre-T35
       # contract (RevealRequest write + `requested` audit, unconditionally).
-      open_engine_approval(req, attrs[:org_id])
+      _ = open_engine_approval(req, attrs[:org_id])
 
       {:ok, req}
     end
   end
 
+  defp cast_org(org_id) when is_binary(org_id) do
+    case Ecto.UUID.cast(org_id) do
+      {:ok, uuid} -> uuid
+      :error -> nil
+    end
+  end
+
+  defp cast_org(_), do: nil
+
+  # Opens (idempotently: `Approvals.request/2` returns the pending approval a concurrent caller already opened) the
+  # `pii_reveal` approval of `req`. `:ok` = an approval exists (or the host has no engine); `{:error, _}` = it could
+  # not be opened, already reported by name.
   defp open_engine_approval(%RevealRequest{} = req, org_id) do
     result =
       Samen.Approvals.request(%{
@@ -195,20 +211,19 @@ defmodule Samen.Reveal.Grants do
         :ok
 
       # Any other failure leaves the request WITHOUT its pending approval. The request itself stands (its row and
-      # `requested` audit are already committed) and `approve/2`/`deny/2`, given the REQUEST ID, reopen the approval
-      # idempotently. But the approver queue (`pending_for_org_result/2`, and so `RevealApprovalsLive`) lists ENGINE
-      # approvals only and refuses a request id it did not list: an approver cannot reach this request from the UI,
-      # and nothing re-opens the approval on its own (a `RevealRequest` carries no org, so a sweep cannot find an
-      # org's orphans). The gap is therefore only REPORTED here, once, by name; closing it is a design decision
-      # (persist the org on the request and reopen from the queue read, or fail the request so it can be re-filed).
+      # `requested` audit are already committed). The approver queue (`pending_for_org_result/2`, and so
+      # `RevealApprovalsLive`) lists ENGINE approvals, so the request carries its org (`rvq_org_id`) and every queue
+      # read of that org re-opens a missing approval (`recover_orphans/3`, idempotent on the engine's pending-approval
+      # unique index) before it lists. The failure is reported here by name, once; a re-open that fails again is
+      # reported by the read that tried it.
       {:error, reason} ->
         Samen.Observability.Failure.report_write(:reveal_open_engine_approval, org_id, reason)
-        :ok
+        {:error, reason}
     end
   rescue
     e ->
       Samen.Observability.Failure.report_write(:reveal_open_engine_approval, org_id, e)
-      :ok
+      {:error, e}
   end
 
   # ==========================================================================
@@ -427,15 +442,21 @@ defmodule Samen.Reveal.Grants do
   def pending_for_org_result(org_id, opts \\ []) do
     r = Keyword.get(opts, :repo, repo())
 
-    case Samen.Approvals.list_pending(org_id, "pii_reveal", opts) do
-      {:ok, approvals} ->
-        {:ok,
-         approvals
-         |> Enum.map(&enrich_pending(&1, r))
-         |> Enum.reject(&is_nil/1)}
-
+    # A request whose engine approval failed to open is invisible to the list below (it lists ENGINE approvals), so the
+    # org's missing approvals are re-opened first. If the scan for them failed, the list could silently omit a pending
+    # request: the queue is then unavailable, never a list that claims to be complete.
+    with :ok <- recover_orphans(org_id, r, opts),
+         {:ok, approvals} <- Samen.Approvals.list_pending(org_id, "pii_reveal", opts) do
+      {:ok,
+       approvals
+       |> Enum.map(&enrich_pending(&1, r))
+       |> Enum.reject(&is_nil/1)}
+    else
       {:error, :no_approvals_module} ->
         {:ok, []}
+
+      {:error, :orphan_scan_unavailable} ->
+        {:error, :unavailable}
 
       {:error, reason} ->
         Samen.Observability.Failure.report(:reveal_pending_for_org, org_id, reason)
@@ -444,6 +465,113 @@ defmodule Samen.Reveal.Grants do
   rescue
     e ->
       Samen.Observability.Failure.report(:reveal_pending_for_org, org_id, e)
+      {:error, :unavailable}
+  end
+
+  # How far back, and how many requests, one queue read looks at when it hunts for a request with no engine approval.
+  # A request is only ever orphaned by an open that failed at filing time, so the scan is a bounded look at the org's
+  # RECENT requests (newest first, `(rvq_org_id, rvq_inserted_at, rvq_id)` serves it), not a read of its whole history
+  # on every render. A scan that fills its limit says so (reported once per read): older requests are not claimed seen.
+  @orphan_window_days 14
+  @orphan_scan_limit 200
+
+  @doc false
+  def orphan_scan_limit, do: @orphan_scan_limit
+
+  # Re-opens, for `org_id`, the `pii_reveal` approval of every recent request that has NO approval in any state.
+  # A request with an approval (pending, or already approved / rejected / cancelled) is never touched: a decided
+  # request is not re-opened, and `Approvals.request/2` is idempotent on the pending-approval unique index, so two
+  # concurrent readers converge on one approval. Returns `:ok`, or `{:error, :orphan_scan_unavailable}` when the scan
+  # itself could not run (reported). A failed re-open is reported by `open_engine_approval/2` and leaves the rest of
+  # the read intact.
+  defp recover_orphans(org_id, r, opts) when is_binary(org_id) do
+    with {:ok, org} <- Ecto.UUID.cast(org_id) do
+      cutoff = opts |> Keyword.get(:now, DateTime.utc_now()) |> DateTime.add(-@orphan_window_days * 86_400, :second)
+
+      requests =
+        r.all(
+          from(q in RevealRequest,
+            where: q.org_id == ^org and q.status == "pending" and q.inserted_at >= ^cutoff,
+            order_by: [desc: q.inserted_at, desc: q.id],
+            limit: ^@orphan_scan_limit
+          )
+        )
+
+      if length(requests) >= @orphan_scan_limit do
+        Samen.Observability.Failure.report(:reveal_orphan_scan, org, :bounded)
+      end
+
+      refs = Enum.map(requests, &Samen.Reveal.ApprovalHandler.subject_ref/1)
+
+      # nothing filed recently: nothing to look up (and no approvals read to fail on its behalf)
+      case if(refs == [], do: {:ok, MapSet.new()}, else: Samen.Approvals.subject_refs_with_approval(org, "pii_reveal", refs, opts)) do
+        {:ok, opened} ->
+          for req <- requests, Samen.Reveal.ApprovalHandler.subject_ref(req) not in opened do
+            case open_engine_approval(req, org) do
+              :ok -> Samen.Observability.Failure.report_write(:reveal_recover_engine_approval, org, :reopened)
+              {:error, _} -> :ok
+            end
+          end
+
+          :ok
+
+        {:error, :no_approvals_module} ->
+          :ok
+
+        {:error, reason} ->
+          Samen.Observability.Failure.report(:reveal_orphan_scan, org, reason)
+          {:error, :orphan_scan_unavailable}
+      end
+    else
+      # not a UUID: no org the engine could hold an approval for, so nothing to recover
+      :error -> :ok
+    end
+  rescue
+    e ->
+      Samen.Observability.Failure.report(:reveal_orphan_scan, org_id, e)
+      {:error, :orphan_scan_unavailable}
+  end
+
+  defp recover_orphans(_org_id, _r, _opts), do: :ok
+
+  @doc """
+  The reveal requests this host cannot recover: pending, filed with NO org (`rvq_org_id` NULL: a row from before the
+  column that had no engine approval to take its org from, or a request filed without one) and with no plane-global
+  engine approval either. No org-scoped queue read can find such a request, so it is SURFACED here (by
+  `mix samen.verify.reveal_orgs`) instead of being given a guessed org. Newest first, at most `limit` (default
+  #{@orphan_scan_limit}). `{:ok, ids}`, `{:ok, []}` on an unwired host (nothing was opened that could be missing), or
+  `{:error, :unavailable}` when the read failed (reported).
+  """
+  @spec unattributed_requests(keyword()) :: {:ok, [String.t()]} | {:error, :unavailable}
+  def unattributed_requests(opts \\ []) do
+    r = Keyword.get(opts, :repo, repo())
+    limit = Keyword.get(opts, :limit, @orphan_scan_limit)
+
+    requests =
+      r.all(
+        from(q in RevealRequest,
+          where: is_nil(q.org_id) and q.status == "pending",
+          order_by: [desc: q.inserted_at, desc: q.id],
+          limit: ^limit
+        )
+      )
+
+    refs = Enum.map(requests, &Samen.Reveal.ApprovalHandler.subject_ref/1)
+
+    case if(refs == [], do: {:ok, MapSet.new()}, else: Samen.Approvals.subject_refs_with_approval(nil, "pii_reveal", refs, opts)) do
+      {:ok, opened} ->
+        {:ok, for(req <- requests, Samen.Reveal.ApprovalHandler.subject_ref(req) not in opened, do: to_string(req.id))}
+
+      {:error, :no_approvals_module} ->
+        {:ok, []}
+
+      {:error, reason} ->
+        Samen.Observability.Failure.report(:reveal_orphan_scan, nil, reason)
+        {:error, :unavailable}
+    end
+  rescue
+    e ->
+      Samen.Observability.Failure.report(:reveal_orphan_scan, nil, e)
       {:error, :unavailable}
   end
 

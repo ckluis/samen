@@ -241,6 +241,25 @@ Reveal grants become a **client**, not a rewrite. What changes and what provably
    existing reveal-grant goldens). An unwired host fails closed
    (`{:error, :no_approvals_module}`) — never a silent single-party grant.
 
+5. **The approval that failed to open is recovered, not only reported (S6).** Opening the
+   engine approval in `request/1` never blocks the request (item 1; contract T35), so a failed
+   open leaves a pending `RevealRequest` with no approval, and the approver queue
+   (`Grants.pending_for_org_result/2`) lists engine approvals only. The recovery path is
+   therefore: (a) the request row persists the org its approval is filed under (`rvq_org_id`,
+   nullable, additive; a value that is not a UUID is stored NULL, never a failure); (b) every
+   queue read of an org first scans that org's recent pending requests (the last 14 days, at
+   most 200, newest first, `(rvq_org_id, rvq_inserted_at, rvq_id)` index; a scan that fills its
+   limit is reported as `bounded`) for the ones with **no approval in any state** and re-opens
+   each through `Samen.Approvals.request/2`, whose pending-approval unique index makes
+   concurrent readers converge on one approval. A request that has an approval (pending,
+   approved, rejected, cancelled) is never re-opened, so a decided request is never revived.
+   A re-open that fails is reported (`reveal_open_engine_approval`) and the rest of the queue is
+   returned; an orphan scan that cannot run makes the queue `{:error, :unavailable}`, never a
+   list that claims to be complete. Rows that predate the column are backfilled in the
+   migration (literal SQL) from the request's engine approval; one with no approval and no org
+   stays NULL and is named by `mix samen.verify.reveal_orgs` (a NOTE), never given a guessed org.
+   Residual: a request older than the window whose open failed is not recovered by a queue read.
+
 ## 5 · E6 — Soft-delete core + adoption (spec §E6; T36, T37)
 
 ### 5.1 Semantics in one paragraph

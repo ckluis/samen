@@ -183,6 +183,36 @@ defmodule Samen.Approvals do
     end
   end
 
+  @doc """
+  Which of `subject_refs` already have an approval of `kind` for `org_id` in ANY state (pending, approved, rejected,
+  cancelled) — the "was an approval ever opened for it" read a recovery sweep needs. Org-pinned like `list_pending/3`
+  (`org_filter/2`): another org's approval for the same ref never counts. Returns `{:ok, MapSet}` of the refs that
+  have one, `{:error, :no_approvals_module}` on an unwired host, or `{:error, :unavailable}` when the read FAILED (an
+  outage is never "none of them has an approval": the caller would open duplicates on top of an unreadable table).
+  """
+  @spec subject_refs_with_approval(term(), String.t(), [String.t()], keyword()) ::
+          {:ok, MapSet.t(String.t())} | {:error, term()}
+  def subject_refs_with_approval(org_id, kind, subject_refs, opts \\ []) when is_binary(kind) and is_list(subject_refs) do
+    with {:ok, {res, _repo}} <- wiring(opts) do
+      query =
+        res
+        |> Ash.Query.filter(kind == ^kind and subject_ref in ^subject_refs)
+        |> org_filter(org_id)
+        |> Ash.Query.select([:subject_ref])
+
+      # authz-scope: org-pinned one clause down via org_filter/2 (binary org => org_id == ^org_id;
+      # nil => is_nil(org_id), the deliberate GLOBAL lane) — a cross-clause pin the static check cannot see
+      case Ash.read(query, authorize?: false) do
+        {:ok, approvals} ->
+          {:ok, MapSet.new(approvals, & &1.subject_ref)}
+
+        {:error, reason} ->
+          Samen.Observability.Failure.report(:approval_subject_refs, org_id, reason)
+          {:error, :unavailable}
+      end
+    end
+  end
+
   # ==========================================================================
   # Decision core (approve/reject) — one transaction, handler in-tx, then audit.
   # ==========================================================================

@@ -1,0 +1,20 @@
+# SABOTAGE: the orphan scan reads every org's pending requests, so one org's queue read re-opens another 
+#   org's approval under the wrong org
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_approver_test.exs
+# MUST_FAIL: org A's queue read never re-opens or shows org B's orphan
+diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+index c70b012f..5289fa53 100644
+--- a/samen_core/lib/samen/reveal/grants.ex
++++ b/samen_core/lib/samen/reveal/grants.ex
+@@ -491,7 +491,7 @@ defmodule Samen.Reveal.Grants do
+       requests =
+         r.all(
+           from(q in RevealRequest,
+-            where: q.org_id == ^org and q.status == "pending" and q.inserted_at >= ^cutoff,
++            where: q.status == "pending" and q.inserted_at >= ^cutoff,
+             order_by: [desc: q.inserted_at, desc: q.id],
+             limit: ^@orphan_scan_limit
+           )
