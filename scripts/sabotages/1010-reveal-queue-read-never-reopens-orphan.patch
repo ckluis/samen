@@ -7,13 +7,13 @@
 # MUST_FAIL: an orphan is invisible to the queue
 # MUST_FAIL: the recovered request can be DENIED end to end
 diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
-index 4635588c..3291646a 100644
+index 2db7bcc0..d7d26fe1 100644
 --- a/samen_core/lib/samen/reveal/grants.ex
 +++ b/samen_core/lib/samen/reveal/grants.ex
-@@ -506,7 +506,7 @@ defmodule Samen.Reveal.Grants do
-       # nothing filed recently: nothing to look up (and no approvals read to fail on its behalf)
-       case if(refs == [], do: {:ok, MapSet.new()}, else: Samen.Approvals.subject_refs_with_approval(org, "pii_reveal", refs, opts)) do
-         {:ok, opened} ->
+@@ -509,7 +509,7 @@ defmodule Samen.Reveal.Grants do
+           # test seam: runs between the scan and the re-opens, i.e. exactly where a concurrent reader's open lands
+           Keyword.get(opts, :after_orphan_scan, fn -> :ok end).()
+ 
 -          for req <- requests, Samen.Reveal.ApprovalHandler.subject_ref(req) not in opened do
 +          for req <- Enum.take(requests, 0), Samen.Reveal.ApprovalHandler.subject_ref(req) not in opened do
              reopen_orphan(req, org)

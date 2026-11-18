@@ -6,7 +6,7 @@
 # TEST_FILES: test/honest_kernel_reads_d_test.exs
 # MUST_FAIL: RED: the approvals read fails -> the request still stands, and the missing approval is reported by name
 diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
-index 4635588c..557b31c9 100644
+index 2db7bcc0..50946574 100644
 --- a/samen_core/lib/samen/reveal/grants.ex
 +++ b/samen_core/lib/samen/reveal/grants.ex
 @@ -217,7 +217,6 @@ defmodule Samen.Reveal.Grants do
