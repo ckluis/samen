@@ -1,0 +1,20 @@
+# SABOTAGE: Match.domain/1 hands a NUL-byte address to the company-domain query, so one message halts the 
+#   mailbox's sync forever
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/mailbox_sync_test.exs
+# MUST_FAIL: RED: a message whose address no query can carry does not stop the mailbox
+diff --git a/samen_core/lib/samen/mailbox/match.ex b/samen_core/lib/samen/mailbox/match.ex
+index cb8ab787..8b75754a 100644
+--- a/samen_core/lib/samen/mailbox/match.ex
++++ b/samen_core/lib/samen/mailbox/match.ex
+@@ -67,7 +67,7 @@ defmodule Samen.Mailbox.Match do
+   """
+   @spec domain(term()) :: String.t() | nil
+   def domain(address) do
+-    with true <- queryable?(address),
++    with true <- is_binary(address),
+          norm when is_binary(norm) <- normalize(address),
+          [_local, dom] when dom != "" <- String.split(norm, "@") do
+       dom
