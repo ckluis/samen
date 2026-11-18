@@ -349,7 +349,11 @@ defmodule Samen.Migration.ExpandContract do
       supplied by the helper (`col IS NULL AND ctid range`), so the backfill only
       touches unset rows and is safe to re-run.
     * `opts` — `:column` (the column being backfilled, used in the WHERE null-guard),
-      `:chunk_size` (default 5_000), `:sleep_ms` (throttle between chunks, default 0).
+      `:chunk_size` (default 5_000), `:sleep_ms` (throttle between chunks, default 0), `:where` (a LITERAL SQL
+      predicate that REPLACES the `column IS NULL` guard, and then `:column` is not needed: the rows to touch, e.g. a
+      value that is only filled in for the rows it can be derived for, or a status that moves on). It must stop
+      matching a row once the `set_clause` has been applied to it, or the loop never ends; a row the set clause cannot
+      answer for must be excluded by the predicate itself.
 
   Returns `{:ok, total_updated}`.
   """
@@ -358,14 +362,20 @@ defmodule Samen.Migration.ExpandContract do
     __require_disabled_ddl_transaction__!(caller)
 
     tname = table_name(table)
-    column = opts |> Keyword.fetch!(:column) |> to_string()
+
+    predicate =
+      case Keyword.get(opts, :where) do
+        nil -> "#{q_ident(opts |> Keyword.fetch!(:column) |> to_string())} IS NULL"
+        where when is_binary(where) -> "(#{where})"
+      end
+
     chunk_size = Keyword.get(opts, :chunk_size, 5_000)
     sleep_ms = Keyword.get(opts, :sleep_ms, 0)
 
-    do_backfill_chunk(repo, tname, set_clause, column, chunk_size, sleep_ms, 0)
+    do_backfill_chunk(repo, tname, set_clause, predicate, chunk_size, sleep_ms, 0)
   end
 
-  defp do_backfill_chunk(repo, tname, set_clause, column, chunk_size, sleep_ms, acc) do
+  defp do_backfill_chunk(repo, tname, set_clause, predicate, chunk_size, sleep_ms, acc) do
     # Each chunk: its own committed statement (migration runs with
     # @disable_ddl_transaction true, so repo.query! autocommits). Bound the batch
     # with a subselect on ctid so a chunk is a small, short-lived write.
@@ -373,7 +383,7 @@ defmodule Samen.Migration.ExpandContract do
       "UPDATE #{q_ident(tname)} SET #{set_clause} " <>
         "WHERE ctid IN (" <>
         "SELECT ctid FROM #{q_ident(tname)} " <>
-        "WHERE #{q_ident(column)} IS NULL LIMIT #{chunk_size})"
+        "WHERE #{predicate} LIMIT #{chunk_size})"
 
     %{num_rows: n} = repo.query!(sql, [])
 
@@ -382,7 +392,7 @@ defmodule Samen.Migration.ExpandContract do
     if n < chunk_size or n == 0 do
       {:ok, acc + n}
     else
-      do_backfill_chunk(repo, tname, set_clause, column, chunk_size, sleep_ms, acc + n)
+      do_backfill_chunk(repo, tname, set_clause, predicate, chunk_size, sleep_ms, acc + n)
     end
   end
 

@@ -63,6 +63,39 @@ defmodule Driftwood.RevealApproverLiveTest do
     {:ok, scenario: scenario}
   end
 
+  test "PARTIAL: a pending request whose approval cannot be re-opened is SAID to be missing from the list, never hidden", %{scenario: s} do
+    import ExUnit.CaptureLog
+
+    org_id = s.org_id
+    admin = seed_member!(org_id, :admin)
+    registry = Application.get_env(:samen_core, Samen.Approvals.Registry)
+    Application.put_env(:samen_core, Samen.Approvals.Registry, kinds: %{})
+
+    partial =
+      try do
+        capture_log(fn ->
+          {:ok, _} = Grants.request(%{subject_id: "drv-partial", requestor_id: "op-partial", reason: "ticket 9: orphan", org_id: org_id})
+        end)
+
+        # the kind is still unregistered at render time: the re-open fails again
+        capture_log(fn -> send(self(), {:html, render_framework(RevealApprovalsLive, settings_mount(), [org_id, admin.id])}) end)
+        assert_received {:html, html}
+        html
+      after
+        Application.put_env(:samen_core, Samen.Approvals.Registry, registry)
+      end
+
+    assert partial =~ "reveal-approvals-partial"
+    assert partial =~ "1 pending reveal request(s) could not be shown"
+    refute partial =~ "No pending reveal requests"
+
+    # healed (the kind is registered again): the next load recovers it, lists it, and the notice is gone
+    capture_log(fn -> send(self(), {:html, render_framework(RevealApprovalsLive, settings_mount(), [org_id, admin.id])}) end)
+    assert_received {:html, healed}
+    assert healed =~ "op-partial"
+    refute healed =~ "reveal-approvals-partial"
+  end
+
   test "END-TO-END: operator requests → admin approves → operator unmasks; ledger shows the grant", %{scenario: s} do
     org_id = s.org_id
     driver_id = to_string(s.compliant_driver_id)

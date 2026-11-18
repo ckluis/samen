@@ -86,6 +86,7 @@ defmodule Samen.Web.Settings.RevealApprovalsLive do
         org_id: org_id,
         user_id: user_id,
         pending: [],
+        unrecovered: 0,
         pending_failed: false,
         role_failed: false,
         can_approve?: false,
@@ -98,19 +99,22 @@ defmodule Samen.Web.Settings.RevealApprovalsLive do
       {role, role_failed} = approver_role(mount, org_id, user_id)
 
       # A FAILED pending read is the error state (retry), never "No pending reveal requests".
-      {pending, pending_failed} =
+      {pending, unrecovered, pending_failed} =
         case Guard.run(:settings_reveal_pending, org_id, fn ->
                case Grants.pending_for_org_result(org_id, repo: mount.repo) do
-                 {:ok, rows} -> rows
+                 {:ok, rows} -> {rows, 0}
+                 # a list that is real but incomplete: shown, with the count of the requests it could not surface
+                 {:partial, rows, n} -> {rows, n}
                  {:error, :unavailable} -> raise "pending reveal read unavailable"
                end
              end) do
-          {:ok, rows} -> {rows, false}
-          {:error, _} -> {[], true}
+          {:ok, {rows, n}} -> {rows, n, false}
+          {:error, _} -> {[], 0, true}
         end
 
       assign(socket,
         pending: pending,
+        unrecovered: unrecovered,
         pending_failed: pending_failed,
         role_failed: role_failed,
         approver_role: role,
@@ -311,7 +315,12 @@ defmodule Samen.Web.Settings.RevealApprovalsLive do
                       <.error_state class="pending-error" body={Guard.message()} retry_event="retry_load" />
                     </td>
                   </tr>
-                  <tr :if={@pending == [] and not @pending_failed}>
+                  <tr :if={@unrecovered > 0} id="reveal-approvals-partial">
+                    <td colspan="6" style="color:var(--muted)">
+                      {@unrecovered} pending reveal request(s) could not be shown. This list is incomplete; reload to retry.
+                    </td>
+                  </tr>
+                  <tr :if={@pending == [] and @unrecovered == 0 and not @pending_failed}>
                     <td colspan="6" id="reveal-approvals-empty" style="color:var(--muted)">
                       No pending reveal requests for this org.
                     </td>

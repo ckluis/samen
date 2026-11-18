@@ -111,7 +111,7 @@ defmodule Samen.SourceScanTest do
       test/ai/chokepoint_anti_bypass_probe_test.exs
       test/aud_role_derivation_test.exs
     )
-    @file_server_scan ~r/\b(Path\.wildcard|File\.(read!?|regular\?|dir\?|ls!?|stat!?|lstat!?|exists\?))\(/
+    @file_server_scan ~r/(\b(Path\.wildcard|File\.(read!?|regular\?|dir\?|ls!?|stat!?|lstat!?|exists\?|stream!))|:filelib\.\w+)\(/
 
     defp file_server_scan_calls(source) do
       for {line, n} <- source |> String.split("\n") |> Enum.with_index(1),
@@ -130,7 +130,7 @@ defmodule Samen.SourceScanTest do
     end
 
     test "positive control: the matcher flags each stdlib call it guards against and spares the tmp-file helpers" do
-      for call <- ["Path.wildcard(x)", "File.read!(p)", "File.regular?(p)", "File.dir?(d)", "File.ls!(d)"] do
+      for call <- ["Path.wildcard(x)", "File.read!(p)", "File.regular?(p)", "File.dir?(d)", "File.ls!(d)", ":filelib.wildcard(x)", ":filelib.is_dir(d)", "File.stream!(p)"] do
         assert [_] = file_server_scan_calls("  y = " <> call), call
       end
 

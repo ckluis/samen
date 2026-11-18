@@ -172,7 +172,7 @@ defmodule Samen.Reveal.Grants do
       # Never blocks/fails the reveal request itself: an unwired host, an unregistered
       # kind, or any other engine hiccup here must not regress `request/1`'s pre-T35
       # contract (RevealRequest write + `requested` audit, unconditionally).
-      _ = open_engine_approval(req, attrs[:org_id])
+      _ = open_engine_approval(req, attrs[:org_id], r, [])
 
       {:ok, req}
     end
@@ -180,42 +180,51 @@ defmodule Samen.Reveal.Grants do
 
   defp cast_org(org_id) when is_binary(org_id) do
     case Ecto.UUID.cast(org_id) do
-      {:ok, uuid} -> uuid
-      :error -> nil
+      {:ok, uuid} ->
+        uuid
+
+      :error ->
+        # No org the engine could file under (its `org_id` is a uuid): the request is stored without one, and that is
+        # said now, by name, instead of being found later by `mix samen.verify.reveal_orgs`. The value stays out of
+        # the report.
+        Samen.Observability.Failure.report_write(:reveal_request_org_uncastable, nil, :not_a_uuid)
+        nil
     end
   end
 
   defp cast_org(_), do: nil
 
-  # Opens (idempotently: `Approvals.request/2` returns the pending approval a concurrent caller already opened) the
-  # `pii_reveal` approval of `req`. `:ok` = an approval exists (or the host has no engine); `{:error, _}` = it could
-  # not be opened, already reported by name.
-  defp open_engine_approval(%RevealRequest{} = req, org_id) do
+  # Opens the `pii_reveal` approval of `req`, once, and only while the request is still undecided. The whole step runs
+  # under a row lock on the request (`lock_request/2`, `FOR UPDATE`), the SAME lock every decision takes
+  # (`route_through_engine/4`, `deny/2`, `do_approve/4`, the handler's reject/cancel hooks): a request is either decided
+  # before this step looks (its `rvq_status` is terminal: nothing is opened) or after it has finished (the decision
+  # finds the approval it opened). Inside the lock: status still `pending` AND no approval of the request in ANY state,
+  # else nothing is opened.
+  #
+  # `{:ok, :created}` = it opened one; `{:ok, :skipped}` = nothing to open (the request is decided or gone, an approval
+  # already exists, or the host has no engine); `{:error, _}` = it could not be opened, already reported by name.
+  defp open_engine_approval(%RevealRequest{} = req, org_id, r, wiring) do
     result =
-      Samen.Approvals.request(%{
-        # PP-11: carry the target tenant org onto the parallel `pii_reveal` approval so its
-        # governance-audit rows (approval_requested/approved) also ride the TENANT chain, not
-        # `__global__`. Nil preserves the pre-PP-11 org-less operator-chain behavior.
-        org_id: org_id,
-        kind: "pii_reveal",
-        subject_ref: Samen.Reveal.ApprovalHandler.subject_ref(req),
-        requested_by: req.requestor_id
-      })
+      r.transaction(fn ->
+        case open_if_undecided(req, org_id, r, wiring) do
+          {:ok, outcome} -> outcome
+          {:error, reason} -> r.rollback(reason)
+        end
+      end)
 
     case result do
-      {:ok, _approval} ->
-        :ok
+      {:ok, outcome} ->
+        {:ok, outcome}
 
       # an unwired host has no engine: the RevealRequest row alone is the record (documented above)
       {:error, :no_approvals_module} ->
-        :ok
+        {:ok, :skipped}
 
       # Any other failure leaves the request WITHOUT its pending approval. The request itself stands (its row and
       # `requested` audit are already committed). The approver queue (`pending_for_org_result/2`, and so
       # `RevealApprovalsLive`) lists ENGINE approvals, so the request carries its org (`rvq_org_id`) and every queue
-      # read of that org re-opens a missing approval (`recover_orphans/3`, idempotent on the engine's pending-approval
-      # unique index) before it lists. The failure is reported here by name, once; a re-open that fails again is
-      # reported by the read that tried it.
+      # read of that org re-opens a missing approval (`recover_orphans/3`) before it lists. The failure is reported
+      # here by name; a queue read that still cannot open one says so in its result (`{:partial, rows, n}`).
       {:error, reason} ->
         Samen.Observability.Failure.report_write(:reveal_open_engine_approval, org_id, reason)
         {:error, reason}
@@ -224,6 +233,89 @@ defmodule Samen.Reveal.Grants do
     e ->
       Samen.Observability.Failure.report_write(:reveal_open_engine_approval, org_id, e)
       {:error, e}
+  end
+
+  defp open_if_undecided(req, org_id, r, wiring) do
+    case lock_request(r, req.id) do
+      %RevealRequest{status: "pending"} ->
+        ref = Samen.Reveal.ApprovalHandler.subject_ref(req)
+
+        with {:ok, opened} <- Samen.Approvals.subject_refs_with_approval(org_id, "pii_reveal", [ref], wiring) do
+          if ref in opened, do: {:ok, :skipped}, else: request_engine_approval(req, org_id, wiring)
+        end
+
+      # decided (or cancelled): there is no approval to open
+      %RevealRequest{} ->
+        {:ok, :skipped}
+
+      # the row is gone
+      nil ->
+        {:ok, :skipped}
+    end
+  end
+
+  defp request_engine_approval(req, org_id, wiring) do
+    result =
+      Samen.Approvals.request(
+        %{
+          # PP-11: carry the target tenant org onto the parallel `pii_reveal` approval so its
+          # governance-audit rows (approval_requested/approved) also ride the TENANT chain, not
+          # `__global__`. Nil preserves the pre-PP-11 org-less operator-chain behavior.
+          org_id: org_id,
+          kind: "pii_reveal",
+          subject_ref: Samen.Reveal.ApprovalHandler.subject_ref(req),
+          requested_by: req.requestor_id,
+          # a recovered approval keeps the request's own time, so the queue shows (and orders) it by when it was filed
+          requested_at: req.inserted_at
+        },
+        wiring
+      )
+
+    case result do
+      {:ok, _approval} -> {:ok, :created}
+      {:error, _} = err -> err
+    end
+  end
+
+  # The row lock every reveal decision and every approval open takes, held to the end of the surrounding transaction
+  # (callers run it inside `r.transaction/1`).
+  defp lock_request(r, request_id) do
+    r.one(from(q in RevealRequest, where: q.id == ^request_id, lock: "FOR UPDATE"))
+  end
+
+  # Under the lock: `:ok` while the request is still pending, else why not.
+  defp lock_pending(r, request_id) do
+    case lock_request(r, request_id) do
+      %RevealRequest{status: "pending"} -> :ok
+      %RevealRequest{} -> {:error, :not_pending}
+      nil -> {:error, :request_not_found}
+    end
+  end
+
+  @doc false
+  # Marks the request as decided (`"denied"` / `"cancelled"`) in the SAME transaction as the decision on its approval
+  # (the registered handler's `on_reject/2` / `on_cancel/2`). Under the request's row lock; only a still-`pending`
+  # request is changed, so a decision never overwrites an earlier one. A request that is gone is nothing to mark.
+  @spec close_request(module(), String.t(), String.t()) :: :ok
+  def close_request(r, request_id, status) when status in ["denied", "cancelled"] do
+    case lock_request(r, request_id) do
+      %RevealRequest{status: "pending"} -> mark_decided(r, request_id, status)
+      # already decided by an earlier decision: that one stands
+      %RevealRequest{} -> :ok
+      # no such request: nothing to mark
+      nil -> :ok
+    end
+  end
+
+  defp mark_decided(r, request_id, status) do
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+    {1, _} =
+      r.update_all(from(q in RevealRequest, where: q.id == ^request_id and q.status == "pending"),
+        set: [status: status, updated_at: now]
+      )
+
+    :ok
   end
 
   # ==========================================================================
@@ -321,8 +413,28 @@ defmodule Samen.Reveal.Grants do
       org_id: Map.get(opts, :org_id)
     ]
 
-    with {:ok, approval} <- Samen.Approvals.request(approval_attrs),
-         {:ok, _decided, meta} <- Samen.Approvals.approve(approval.id, granted_by, engine_opts) do
+    # One transaction under the request's row lock: the open of the approval and its decision see (and leave) the
+    # request pending-or-decided, never half way. A request that is no longer `pending` is refused (`:not_pending`)
+    # BEFORE an approval is opened for it, so a decided request is never given a second approval to approve.
+    result =
+      r.transaction(fn ->
+        with :ok <- lock_pending(r, req.id),
+             {:ok, grant} <- decide_through_engine(approval_attrs, req, granted_by, engine_opts, opts, r) do
+          grant
+        else
+          {:error, reason} -> r.rollback(reason)
+        end
+      end)
+
+    case result do
+      {:ok, grant} -> {:ok, grant}
+      {:error, _reason} = err -> err
+    end
+  end
+
+  defp decide_through_engine(approval_attrs, req, granted_by, engine_opts, opts, r) do
+    with {:ok, approval} <- Samen.Approvals.request(approval_attrs, wiring_opts(opts)),
+         {:ok, _decided, meta} <- Samen.Approvals.approve(approval.id, granted_by, engine_opts ++ wiring_opts(opts)) do
       {:ok, r.get!(RevealGrant, meta.grant_id)}
     else
       {:error, :no_approvals_module} ->
@@ -332,6 +444,10 @@ defmodule Samen.Reveal.Grants do
         err
     end
   end
+
+  # Only the engine wiring a caller can pass (the tests do): the approval store the engine reads and writes.
+  defp wiring_opts(opts) when is_map(opts), do: opts |> Map.take([:approval_resource]) |> Map.to_list()
+  defp wiring_opts(opts) when is_list(opts), do: Keyword.take(opts, [:approval_resource])
 
   @doc false
   # Public (not private) so `Samen.Reveal.ApprovalHandler.on_approve/2` — the registered
@@ -367,6 +483,12 @@ defmodule Samen.Reveal.Grants do
     # policy check), the whole thing rolls back — no grant, no audit, NO job.
     multi =
       Ecto.Multi.new()
+      # The request's row lock, then its status: a request that is no longer `pending` (decided by anyone, on any
+      # path) mints no grant, so a second approval of one request is refused (`:not_pending`) and rolls back with
+      # everything else. The same lock serialises this against an approval open (`open_engine_approval/4`) and a deny.
+      |> Ecto.Multi.run(:request, fn multi_repo, _changes ->
+        with :ok <- lock_pending(multi_repo, req.id), do: {:ok, :locked}
+      end)
       |> Ecto.Multi.insert(:grant, grant_changeset(grant_attrs))
       # PP-13 (B6 residual close): route the approve-moment `granted` event through
       # `write_audit/2` with the TENANT `org_id` (like Batch 6 already did for
@@ -392,6 +514,9 @@ defmodule Samen.Reveal.Grants do
           strict: true
         )
       end)
+      # the request records its own decision in the SAME transaction (`rvq_status`), so "decided" is a fact of the
+      # request row, not something inferred from the approvals table
+      |> Ecto.Multi.run(:decided, fn multi_repo, _changes -> {:ok, mark_decided(multi_repo, req.id, "approved")} end)
       |> Oban.insert(:auto_revoke, AutoRevokeWorker.new(%{grant_id: grant_id},
         scheduled_at: expires_at
       ))
@@ -428,6 +553,7 @@ defmodule Samen.Reveal.Grants do
   def pending_for_org(org_id, opts \\ []) do
     case pending_for_org_result(org_id, opts) do
       {:ok, rows} -> rows
+      {:partial, _rows, n} -> raise RuntimeError, "#{n} pending reveal request(s) could not be surfaced: not a complete list"
       {:error, reason} -> raise RuntimeError, "the pending reveal requests could not be read (#{inspect(reason)}): not an empty list"
     end
   end
@@ -435,22 +561,31 @@ defmodule Samen.Reveal.Grants do
   @doc """
   Tagged sibling of `pending_for_org/2`: `{:ok, rows}` — an EMPTY list is the honest "nothing
   pending" (and an unwired host, `:no_approvals_module`, is an honest empty too) — or
-  `{:error, :unavailable}` when the read itself FAILED (a DB error, a raise). A screen uses this
-  to show "could not load" instead of a false-clean "No pending reveal requests".
+  `{:error, :unavailable}` when the read itself FAILED (a DB error, a raise, an orphan scan that could not run). A
+  screen uses this to show "could not load" instead of a false-clean "No pending reveal requests".
+
+  `{:partial, rows, n}` when the list is real but INCOMPLETE: `n` pending requests of this org have no approval and
+  re-opening it failed (each reported by name). A screen shows `rows` and says `n` request(s) could not be shown; it
+  never treats a partial list as complete. `pending_for_org/2` raises on it.
   """
-  @spec pending_for_org_result(String.t(), keyword()) :: {:ok, [map()]} | {:error, :unavailable}
+  @spec pending_for_org_result(String.t(), keyword()) ::
+          {:ok, [map()]} | {:partial, [map()], pos_integer()} | {:error, :unavailable}
   def pending_for_org_result(org_id, opts \\ []) do
     r = Keyword.get(opts, :repo, repo())
 
     # A request whose engine approval failed to open is invisible to the list below (it lists ENGINE approvals), so the
     # org's missing approvals are re-opened first. If the scan for them failed, the list could silently omit a pending
     # request: the queue is then unavailable, never a list that claims to be complete.
-    with :ok <- recover_orphans(org_id, r, opts),
+    with {:ok, unrecovered} <- recover_orphans(org_id, r, opts),
          {:ok, approvals} <- Samen.Approvals.list_pending(org_id, "pii_reveal", opts) do
-      {:ok,
-       approvals
-       |> Enum.map(&enrich_pending(&1, r))
-       |> Enum.reject(&is_nil/1)}
+      rows =
+        approvals
+        |> Enum.map(&enrich_pending(&1, r))
+        |> Enum.reject(&is_nil/1)
+
+      # A request whose approval could not be re-opened is a pending request this list does not show: say so, never
+      # `{:ok, rows}` as if the queue were complete.
+      if unrecovered == 0, do: {:ok, rows}, else: {:partial, rows, unrecovered}
     else
       {:error, :no_approvals_module} ->
         {:ok, []}
@@ -478,68 +613,82 @@ defmodule Samen.Reveal.Grants do
   @doc false
   def orphan_scan_limit, do: @orphan_scan_limit
 
-  # Re-opens, for `org_id`, the `pii_reveal` approval of every recent request that has NO approval in any state.
-  # A request with an approval (pending, or already approved / rejected / cancelled) is never touched: a decided
-  # request is not re-opened, and `Approvals.request/2` is idempotent on the pending-approval unique index, so two
-  # concurrent readers converge on one approval. Returns `:ok`, or `{:error, :orphan_scan_unavailable}` when the scan
-  # itself could not run (reported). A failed re-open is reported by `open_engine_approval/2` and leaves the rest of
-  # the read intact.
+  # Re-opens, for `org_id`, the `pii_reveal` approval of every recent request that is still `pending` and has NO
+  # approval in any state. Returns `{:ok, n}`, `n` = the requests whose re-open FAILED (each reported by name by
+  # `open_engine_approval/4`; the caller says so in its result), or `{:error, :orphan_scan_unavailable}` when the scan
+  # itself could not run (reported). A request that is decided is never touched: it is not `pending`, and the re-open
+  # re-checks that under the request's row lock (`open_engine_approval/4`), so a request decided after the scan read it
+  # is skipped too. `Approvals.request/2` is idempotent on the pending-approval unique index.
   defp recover_orphans(org_id, r, opts) when is_binary(org_id) do
-    with {:ok, org} <- Ecto.UUID.cast(org_id) do
-      cutoff = opts |> Keyword.get(:now, DateTime.utc_now()) |> DateTime.add(-@orphan_window_days * 86_400, :second)
-
-      requests =
-        r.all(
-          from(q in RevealRequest,
-            where: q.org_id == ^org and q.status == "pending" and q.inserted_at >= ^cutoff,
-            order_by: [desc: q.inserted_at, desc: q.id],
-            limit: ^@orphan_scan_limit
-          )
-        )
-
-      if length(requests) >= @orphan_scan_limit do
-        Samen.Observability.Failure.report(:reveal_orphan_scan, org, :bounded)
-      end
-
-      refs = Enum.map(requests, &Samen.Reveal.ApprovalHandler.subject_ref/1)
-
-      # nothing filed recently: nothing to look up (and no approvals read to fail on its behalf)
-      case if(refs == [], do: {:ok, MapSet.new()}, else: Samen.Approvals.subject_refs_with_approval(org, "pii_reveal", refs, opts)) do
-        {:ok, opened} ->
-          # test seam: runs between the scan and the re-opens, i.e. exactly where a concurrent reader's open lands
-          Keyword.get(opts, :after_orphan_scan, fn -> :ok end).()
-
-          for req <- requests, Samen.Reveal.ApprovalHandler.subject_ref(req) not in opened do
-            reopen_orphan(req, org)
-          end
-
-          :ok
-
-        {:error, :no_approvals_module} ->
-          :ok
-
-        {:error, reason} ->
-          Samen.Observability.Failure.report(:reveal_orphan_scan, org, reason)
-          {:error, :orphan_scan_unavailable}
-      end
+    with {:ok, org} <- Ecto.UUID.cast(org_id),
+         {:ok, orphans} <- orphan_candidates(org, r, opts) do
+      {:ok, Enum.count(orphans, &(reopen_orphan(&1, org, r, opts) == :failed))}
     else
       # not a UUID: no org the engine could hold an approval for, so nothing to recover
-      :error -> :ok
+      :error -> {:ok, 0}
+      {:error, :orphan_scan_unavailable} = unavailable -> unavailable
+    end
+  end
+
+  defp recover_orphans(_org_id, _r, _opts), do: {:ok, 0}
+
+  @doc false
+  # The scan half of the recovery (public so a test can run the scan, change the world, and then run the re-opens, the
+  # interleaving no single-process call can reach): the org's pending requests of the last `@orphan_window_days` days
+  # (newest first, at most `@orphan_scan_limit`) that have no approval in any state, as of this read.
+  @spec orphan_candidates(String.t(), module(), keyword()) :: {:ok, [RevealRequest.t()]} | {:error, :orphan_scan_unavailable}
+  def orphan_candidates(org, r, opts) do
+    cutoff = opts |> Keyword.get(:now, DateTime.utc_now()) |> DateTime.add(-@orphan_window_days * 86_400, :second)
+
+    requests =
+      r.all(
+        from(q in RevealRequest,
+          where: q.org_id == ^org and q.status == "pending" and q.inserted_at >= ^cutoff,
+          order_by: [desc: q.inserted_at, desc: q.id],
+          limit: ^@orphan_scan_limit
+        )
+      )
+
+    if length(requests) >= @orphan_scan_limit do
+      Samen.Observability.Failure.report(:reveal_orphan_scan, org, :bounded)
+    end
+
+    refs = Enum.map(requests, &Samen.Reveal.ApprovalHandler.subject_ref/1)
+
+    # nothing filed recently: nothing to look up (and no approvals read to fail on its behalf)
+    case if(refs == [], do: {:ok, MapSet.new()}, else: Samen.Approvals.subject_refs_with_approval(org, "pii_reveal", refs, opts)) do
+      {:ok, opened} ->
+        {:ok, Enum.reject(requests, &(Samen.Reveal.ApprovalHandler.subject_ref(&1) in opened))}
+
+      {:error, :no_approvals_module} ->
+        {:ok, []}
+
+      {:error, reason} ->
+        Samen.Observability.Failure.report(:reveal_orphan_scan, org, reason)
+        {:error, :orphan_scan_unavailable}
     end
   rescue
     e ->
-      Samen.Observability.Failure.report(:reveal_orphan_scan, org_id, e)
+      Samen.Observability.Failure.report(:reveal_orphan_scan, org, e)
       {:error, :orphan_scan_unavailable}
   end
 
-  defp recover_orphans(_org_id, _r, _opts), do: :ok
+  @doc false
+  # The re-open half. `:reopened` = it opened the approval; `:skipped` = there was nothing to open any more (decided,
+  # or an approval appeared since the scan); `:failed` = it could not (already reported by name). A recovery is
+  # reported once, and only when one was made.
+  @spec reopen_orphan(RevealRequest.t(), String.t(), module(), keyword()) :: :reopened | :skipped | :failed
+  def reopen_orphan(req, org, r, opts) do
+    case open_engine_approval(req, org, r, Keyword.take(opts, [:approval_resource, :repo])) do
+      {:ok, :created} ->
+        Samen.Observability.Failure.report_write(:reveal_recover_engine_approval, org, :reopened)
+        :reopened
 
-  # One re-open. A failure is already reported by name by `open_engine_approval/2`; it does not stop the other
-  # re-opens or the queue read, and a recovery is reported once.
-  defp reopen_orphan(req, org) do
-    case open_engine_approval(req, org) do
-      :ok -> Samen.Observability.Failure.report_write(:reveal_recover_engine_approval, org, :reopened)
-      {:error, _reason} = failed -> failed
+      {:ok, :skipped} ->
+        :skipped
+
+      {:error, _reason} ->
+        :failed
     end
   end
 
@@ -644,19 +793,31 @@ defmodule Samen.Reveal.Grants do
       requested_by: req.requestor_id
     }
 
-    with {:ok, approval} <- Samen.Approvals.request(approval_attrs),
-         {:ok, _rejected} <- Samen.Approvals.reject(approval.id, denied_by) do
-      record_denial(r, req, denied_by, org_id)
-      {:ok, req}
-    else
-      # Unwired host (no engine): still record the denial on the chain — a denial that
-      # cannot transition an approval must never silently succeed as an unrecorded no-op.
-      {:error, :no_approvals_module} ->
-        record_denial(r, req, denied_by, org_id)
-        {:ok, req}
+    # Under the request's row lock, like every decision: a request that is no longer `pending` cannot be denied (it was
+    # approved, denied or cancelled already), and no approval is opened for it just to be rejected.
+    result =
+      r.transaction(fn ->
+        with :ok <- lock_pending(r, req.id) do
+          case reject_through_engine(approval_attrs, denied_by, r, req.id) do
+            :ok ->
+              record_denial(r, req, denied_by, org_id)
+              {:ok, req}
 
-      {:error, _} = err ->
-        err
+            # nothing was decided: the engine's refusal audit (and an approval it just opened) stay, as before
+            {:error, :self_approval} = refused ->
+              refused
+
+            {:error, reason} ->
+              r.rollback(reason)
+          end
+        else
+          {:error, reason} -> r.rollback(reason)
+        end
+      end)
+
+    case result do
+      {:ok, outcome} -> outcome
+      {:error, _} = err -> err
     end
   end
 
@@ -666,6 +827,19 @@ defmodule Samen.Reveal.Grants do
     case r.get(RevealRequest, request_id) do
       nil -> {:error, :request_not_found}
       %RevealRequest{} = req -> deny(req, opts)
+    end
+  end
+
+  # The engine rejects the approval; its handler (`Samen.Reveal.ApprovalHandler.on_reject/2`) marks the request
+  # `denied` in the same transaction. An unwired host (no engine) still records the denial and marks the request: a
+  # denial that cannot transition an approval must never silently succeed as an unrecorded no-op.
+  defp reject_through_engine(approval_attrs, denied_by, r, request_id) do
+    with {:ok, approval} <- Samen.Approvals.request(approval_attrs),
+         {:ok, _rejected} <- Samen.Approvals.reject(approval.id, denied_by) do
+      :ok
+    else
+      {:error, :no_approvals_module} -> mark_decided(r, request_id, "denied")
+      {:error, _} = err -> err
     end
   end
 

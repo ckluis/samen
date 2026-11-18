@@ -113,7 +113,18 @@ defmodule Samen.HonestKernelReadsDTest do
       # `approve/2` falls back to the engine-less `do_approve/4` ONLY on {:error, :no_approvals_module}; a miswired
       # engine must not read as that.
       put_approvals_env(approval_resource: NotAResource)
-      req = %Samen.Reveal.RevealRequest{id: Ecto.UUID.generate(), requestor_id: Ecto.UUID.generate()}
+      # a stored request: the decision locks its row before it reaches the engine
+      now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+      req =
+        Repo.insert!(%Samen.Reveal.RevealRequest{
+          subject_id: "subject-1",
+          requestor_id: Ecto.UUID.generate(),
+          reason: "support ticket 43",
+          status: "pending",
+          inserted_at: now,
+          updated_at: now
+        })
 
       capture_log(fn ->
         assert {:error, :approvals_unavailable} =

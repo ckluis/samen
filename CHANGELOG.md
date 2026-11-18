@@ -23,12 +23,30 @@ All notable changes to Samen are recorded here. The format follows
 - **Fixed: `Reveal.Grants`** reports a parallel `pii_reveal` approval it could not open, a failed pending list, and a
   pending approval dropped from the queue because its request row is gone.
 - **Fixed: a reveal request whose engine approval failed to open is recovered, not only reported (S6).** The request now
-  persists its org (`rvq_org_id`, nullable, additive migration `20261118100000` in every host and the test repo, backfilled
-  from the request's engine approval, plus the `(org, inserted_at, id)` index; a row with no approval stays NULL and
-  `mix samen.verify.reveal_orgs` names it). `pending_for_org_result/2` re-opens, idempotently, the missing approval of the
-  org's recent pending requests (14 days, at most 200, newest first) before it lists; a request that already has an
-  approval in any state is never re-opened, a failed re-open is reported and the rest of the queue is returned, and an
-  orphan scan that cannot run makes the queue `{:error, :unavailable}`. Sabotages 1010-1013.
+  persists its org (`rvq_org_id`, nullable; a non-UUID org is stored NULL and reported once as
+  `reveal_request_org_uncastable`) and **records its own decision**: `rvq_status` is `approved` / `denied` / `cancelled`,
+  written in the same transaction as the decision under a row lock on the request (`Grants.do_approve/4`,
+  `Grants.deny/2`, the handler's `on_reject/2` and the new optional `Approvals.Handler.on_cancel/2`, which
+  `Approvals.cancel/3` runs). `Grants.approve/2` / `deny/2` refuse a request that is no longer pending
+  (`{:error, :not_pending}`): no second approval, no second grant. `pending_for_org_result/2` re-opens, idempotently,
+  the missing approval of the org's recent requests that are still `pending` (14 days, at most 200, newest first;
+  decided requests do not use the bound) before it lists. The re-open re-checks under the request's row lock that the
+  request is still pending and has no approval in any state, so a request decided between the scan and the re-open is
+  not revived; the recovered approval keeps the request's own `requested_at`. A failed re-open is reported AND the
+  queue answers **`{:partial, rows, n}`** (`RevealApprovalsLive` says "n pending reveal request(s) could not be
+  shown"; `pending_for_org/2` raises), and an orphan scan that cannot run makes the queue `{:error, :unavailable}`.
+  Sabotages 1010-1013 and 1016-1024.
+- **Upgrade (apps generated before this change): run `mix samen.gen.reveal_requests`, then `mix ecto.migrate`.** A
+  generated app is a copy that depends on `samen_core` by path: the new `RevealRequest` schema selects `rvq_org_id`, so
+  an app on the old table fails every reveal read and write with `undefined_column` until it has the column. The task
+  writes two migrations of literal SQL for the app's approvals prefix (`--approvals-prefix`, default read from the
+  configured approvals resource; `--no-approvals` for a host with no engine): `rvq_org_id` under `expand_setup/0`, then,
+  outside the DDL transaction and in batches, the backfill of `rvq_org_id` (from the request's approval) and
+  `rvq_status` (from approvals, grants and recorded denials; a request whose records disagree, or that has none, stays
+  `pending` and is counted in the output) and the `(org, inserted_at, id)` index `CONCURRENTLY`. The committed `demo`,
+  `driftwood`, `pawchart`, `samen_web` and test-repo migrations (`20261118100000`, `20261118100001`) are its output.
+  `Migration.ExpandContract.chunked_backfill/4` gains a `:where` option (a literal predicate replacing the
+  `column IS NULL` guard) so a backfill can skip rows it cannot answer for.
 - **Changed: `QueryBudget.over_threshold?/2` raises on an unreadable ledger** instead of answering `false` ("under
   budget"). `record/1` and `check/2` keep their documented fail-open posture but report by name instead of inspecting
   the exception.

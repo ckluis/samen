@@ -129,6 +129,7 @@ defmodule Samen.Approvals do
             case transition(approval, :cancel, %{}, opts) do
               {:ok, cancelled} ->
                 audit!(repo, cancelled, "approval_cancelled", actor)
+                run_cancel_hook!(repo, cancelled, actor, opts)
                 cancelled
 
               {:error, reason} ->
@@ -136,6 +137,28 @@ defmodule Samen.Approvals do
             end
           end)
       end
+    end
+  end
+
+  # The handler's optional `on_cancel/2`, inside the cancel transaction (a kind with no registered handler, or a handler
+  # without the hook, has nothing to run). An error rolls the cancel back, like a failed `on_reject/2`.
+  defp run_cancel_hook!(repo, approval, actor, opts) do
+    case Registry.resolve(approval.kind, opts) do
+      {:ok, {_plane, handler}} ->
+        if exports?(handler, :on_cancel, 2) do
+          ctx = %{approval: approval, actor: actor, repo: repo, opts: opts}
+
+          case handler.on_cancel(approval, ctx) do
+            :ok -> :ok
+            {:error, reason} -> repo.rollback(reason)
+            other -> repo.rollback({:bad_handler_return, other})
+          end
+        else
+          :ok
+        end
+
+      {:error, :unregistered_kind} ->
+        :ok
     end
   end
 
@@ -344,7 +367,8 @@ defmodule Samen.Approvals do
       requested_by: to_actor_id(fetch(attrs, :requested_by)),
       reason: fetch(attrs, :reason),
       deadline_at: fetch(attrs, :deadline_at),
-      requested_at: now
+      # a caller re-opening an approval for something filed earlier (the reveal queue's recovery) keeps that time
+      requested_at: fetch(attrs, :requested_at) || now
     }
 
     result =

@@ -456,9 +456,11 @@ samen.verify.reveal_orgs: NOTE <n> pending reveal request(s) carry no org and ha
 **Meaning:** a pending `RevealRequest` has no org (`rvq_org_id` NULL: a row from before the column that had no engine
 approval to take its org from, or one filed without an org) and no plane-global approval either. The tenant approver
 queue recovers a missing approval only for the requests of the org it reads, so no queue can find these. The migration
-never guesses an org. This is a NOTE (exit 0); a read that cannot run is a violation (exit 1).
+never guesses an org. A request that was decided is never listed: its `rvq_status` is no longer `pending` (the decision
+writes it), so what is named here was never decided. This is a NOTE (exit 0); a read that cannot run is a violation
+(exit 1).
 **Fix:** decide each request by id: set `rvq_org_id` to the org it belongs to (the next queue read of that org re-opens its
-approval), or deny/close it.
+approval, and only while the request is still `pending`), or deny it with `Samen.Reveal.Grants.deny/2`.
 
 ---
 
