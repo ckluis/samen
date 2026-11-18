@@ -5,7 +5,7 @@
 # TEST_FILES: test/honest_kernel_reads_e_test.exs
 # MUST_FAIL: RED: a KMS outage masks the whole page on the tenant plane
 diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
-index 8d8dac9a..285a9d09 100644
+index 118dd194..e98c064c 100644
 --- a/samen_core/lib/samen/api/pii_resolution.ex
 +++ b/samen_core/lib/samen/api/pii_resolution.ex
 @@ -437,8 +437,7 @@ defmodule Samen.Api.PiiResolution do
@@ -13,7 +13,7 @@ index 8d8dac9a..285a9d09 100644
            # Anything else (a KMS outage, a decrypt failure, an unknown error) is a failed read: the value stays masked
            # (never revealed), and the failure is reported once per call, by name, carrying only the reason atom.
 -          other ->
--            report_reveal_failure(opts, other)
+-            report_reveal_failure(opts, actor, other)
 +          _other ->
              nil
          end

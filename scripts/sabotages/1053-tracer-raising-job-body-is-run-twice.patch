@@ -5,15 +5,16 @@
 # TEST_FILES: test/honest_kernel_reads_e_test.exs
 # MUST_FAIL: RED: a job body that RAISES is run once
 diff --git a/samen_core/lib/samen/tracer.ex b/samen_core/lib/samen/tracer.ex
-index bd6cd43d..62bee728 100644
+index 4088cddc..f7548c08 100644
 --- a/samen_core/lib/samen/tracer.ex
 +++ b/samen_core/lib/samen/tracer.ex
-@@ -313,7 +313,7 @@ defmodule Samen.Tracer do
- 
-           # the body started and raised: re-raise it. It is never run a second time.
-           :started ->
--            reraise e, __STACKTRACE__
+@@ -325,7 +325,8 @@ defmodule Samen.Tracer do
+           # the body raised (and the span's cleanup may have raised too): the BODY's exception wins. It is never run
+           # a second time.
+           {:raised, body_exception, body_stacktrace} ->
+-            reraise body_exception, body_stacktrace
++            _ = {body_exception, body_stacktrace}
 +            fun.()
  
-           # the tracing plumbing failed before the body started: run the body untraced
-           nil ->
+           # the body started and did not return (nor raise): re-raise what we hold. It is never run a second time.
+           :started ->
