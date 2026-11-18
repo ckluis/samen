@@ -28,6 +28,11 @@ defmodule Samen.HonestKernelReadsDTest do
     def aggregate(_query, _kind), do: raise(DBConnection.ConnectionError, "connection not available")
   end
 
+  defmodule RefusingWriteRepo do
+    # the exception message carries the cohort value it was binding, as an Ecto error does
+    def insert(_row), do: raise(RuntimeError, "insert refused for cohort tier=Secret-7731")
+  end
+
   defp request_attrs(org),
     do: %{
       org_id: org,
@@ -225,16 +230,14 @@ defmodule Samen.HonestKernelReadsDTest do
     end
 
     test "record/1 reports a failed write by name, without the exception message" do
-      key = %{resource: "R-d2", cohort_key: "tier=Pro"}
+      key = %{resource: "R-d2", cohort_key: "tier=Secret-7731", repo: RefusingWriteRepo}
 
-      log =
-        capture_log(fn ->
-          assert {:ok, %{count: 0, warned: false}} = QueryBudget.record(Map.put(key, :cohort_key, :not_a_binary_key))
-        end)
+      log = capture_log(fn -> assert {:ok, %{count: 0, warned: false}} = QueryBudget.record(key) end)
 
       assert log =~ "write=query_budget_record"
+      assert log =~ "cause=RuntimeError"
       # the exception interpolates the very value it choked on: it must not reach the log
-      refute log =~ "not_a_binary_key"
+      refute log =~ "Secret-7731"
     end
 
     test "check/2 fails open on an unreadable ledger (documented) but reports the read by name, without the message" do
