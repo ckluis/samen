@@ -507,10 +507,7 @@ defmodule Samen.Reveal.Grants do
       case if(refs == [], do: {:ok, MapSet.new()}, else: Samen.Approvals.subject_refs_with_approval(org, "pii_reveal", refs, opts)) do
         {:ok, opened} ->
           for req <- requests, Samen.Reveal.ApprovalHandler.subject_ref(req) not in opened do
-            case open_engine_approval(req, org) do
-              :ok -> Samen.Observability.Failure.report_write(:reveal_recover_engine_approval, org, :reopened)
-              {:error, _} -> :ok
-            end
+            reopen_orphan(req, org)
           end
 
           :ok
@@ -533,6 +530,15 @@ defmodule Samen.Reveal.Grants do
   end
 
   defp recover_orphans(_org_id, _r, _opts), do: :ok
+
+  # One re-open. A failure is already reported by name by `open_engine_approval/2`; it does not stop the other
+  # re-opens or the queue read, and a recovery is reported once.
+  defp reopen_orphan(req, org) do
+    case open_engine_approval(req, org) do
+      :ok -> Samen.Observability.Failure.report_write(:reveal_recover_engine_approval, org, :reopened)
+      {:error, _reason} = failed -> failed
+    end
+  end
 
   @doc """
   The reveal requests this host cannot recover: pending, filed with NO org (`rvq_org_id` NULL: a row from before the

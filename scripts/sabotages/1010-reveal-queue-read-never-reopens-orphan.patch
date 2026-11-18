@@ -7,7 +7,7 @@
 # MUST_FAIL: an orphan is invisible to the queue
 # MUST_FAIL: the recovered request can be DENIED end to end
 diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
-index c70b012f..e10fc5f4 100644
+index 4635588c..3291646a 100644
 --- a/samen_core/lib/samen/reveal/grants.ex
 +++ b/samen_core/lib/samen/reveal/grants.ex
 @@ -506,7 +506,7 @@ defmodule Samen.Reveal.Grants do
@@ -16,6 +16,6 @@ index c70b012f..e10fc5f4 100644
          {:ok, opened} ->
 -          for req <- requests, Samen.Reveal.ApprovalHandler.subject_ref(req) not in opened do
 +          for req <- Enum.take(requests, 0), Samen.Reveal.ApprovalHandler.subject_ref(req) not in opened do
-             case open_engine_approval(req, org) do
-               :ok -> Samen.Observability.Failure.report_write(:reveal_recover_engine_approval, org, :reopened)
-               {:error, _} -> :ok
+             reopen_orphan(req, org)
+           end
+ 
