@@ -11,6 +11,35 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Fixed: kernel phase D, honest reads (approvals, reveal, delivery lookups, verifier inputs, mailbox, replay)
+
+- **Fixed: a failed approvals read no longer reads as "none", "not found" or "unwired".** `Approvals.existing_pending`
+  answered `:none` (so `request/2` went on to write over an unreadable table); `fetch_approval` answered `:not_found`
+  for any failure (`get/2`, `cancel/3`, `approve/3`, and the agent's expiry withdrawal all read an outage as "already
+  gone"); a configured resource whose repo could not be resolved read as `:no_approvals_module`, which lets
+  `Reveal.Grants.approve/2` fall back to its engine-less path. They are now `{:error, :unavailable}` /
+  `{:error, :approvals_unavailable}`, reported; only a missing row (or an id that cannot name one) is `:not_found`. The
+  agent's execution seam names an unreadable approval `:approval_unavailable`.
+- **Fixed: `Reveal.Grants`** reports a parallel `pii_reveal` approval it could not open, a failed pending list, and a
+  pending approval dropped from the queue because its request row is gone.
+- **Changed: `QueryBudget.over_threshold?/2` raises on an unreadable ledger** instead of answering `false` ("under
+  budget"). `record/1` and `check/2` keep their documented fail-open posture but report by name instead of inspecting
+  the exception.
+- **Fixed: a failed send lookup no longer files a bounce or complaint as "no matching receipt".**
+  `MarketingReceiptLookup` and `Sequences.ReceiptLookup` answer `{:error, :unavailable}`; `Deliverability.handle_event/2`
+  returns `{:error, :receipt_lookup_unavailable}`.
+- **Fixed: `NoPlaintextPii.Context`** no longer drops a resource whose table cannot be determined from the sweep, nor
+  turns a failed dependency lookup into "no OTel, nothing to assert"; an unreadable non-PII registry (no exemptions) is
+  reported.
+- **Fixed: mailbox sync no longer anchors a message to nothing for good when the CRM match read fails.** `Match` reads
+  raise; `sync/2` aborts with `{:error, {:match_unavailable, :read_failed}}` and leaves the cursor, like an unavailable
+  dedupe lookup. A cursor update that fails is reported.
+- **Fixed: the replay resolver and sanitizer report** a failed record read, grant/vault prefetch, per-record resolve,
+  shred attestation or unwalkable assign (values unchanged: nothing resolves, nothing is claimed shredded).
+- **Fixed (test): `KitStatesTest` "host_nav_extra" flaked on another async test's log line.** `ExUnit.CaptureLog` sees
+  the whole node; `Samen.WebTest.OwnLog` keeps only the calling process's lines.
+- `kernel_swallow` ceilings: rescue 123 -> 91, error arms 19 -> 15. Sabotages 985-998.
+
 ### Fixed: kernel phase C review (verifier evasion, billing ledger gaps, replay unavailable card)
 
 - **Fixed: `agent_coverage` could miss an agent-loop re-entry through a decoy `@attr` value.** One rescue covered every

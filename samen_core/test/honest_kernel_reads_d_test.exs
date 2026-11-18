@@ -422,6 +422,9 @@ defmodule Samen.HonestKernelReadsDTest do
           assert %{refs: [%{outcome: :masked}]} = Resolver.resolve(tree(ctx.subject), operator(ctx.org), grant: DenyGrant)
           # another org's viewer: the row is out of scope, which is exactly what "gone" means
           assert %{refs: [%{outcome: :gone}]} = Resolver.resolve(tree(ctx.subject), tenant(Ash.UUID.generate()))
+          # a viewer who names no org is refused by the resource's policy: a refusal is "not yours to see", not a failure
+          no_org = %Samen.Scope{actor: %{org_id: nil, plane: :tenant, role: :admin}}
+          assert %{refs: [%{outcome: :gone}]} = Resolver.resolve(tree(ctx.subject), no_org)
           Ash.destroy!(ctx.subject, authorize?: false)
           assert %{refs: [%{outcome: :gone}]} = Resolver.resolve(tree(ctx.subject), tenant(ctx.org))
         end)
