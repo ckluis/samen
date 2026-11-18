@@ -165,8 +165,14 @@ defmodule Samen.HonestKernelReadsDTest do
     end
 
     test "POSITIVE CONTROL: nothing pending is an honest empty list; an unwired host is too" do
-      assert {:ok, []} = Samen.Reveal.Grants.pending_for_org_result(Ecto.UUID.generate())
-      assert {:ok, []} = Samen.Reveal.Grants.pending_for_org_result(Ecto.UUID.generate(), approval_resource: nil, repo: Repo)
+      org = Ecto.UUID.generate()
+      assert {:ok, []} = Samen.Reveal.Grants.pending_for_org_result(org)
+
+      # A host with NO approvals module configured: `list_pending` says so, and the queue is an honest empty list.
+      # (`approval_resource: nil` as an option would fall back to the configured fixture: only the env unwires it.)
+      put_approvals_env([])
+      assert {:error, :no_approvals_module} = Approvals.list_pending(org, "pii_reveal")
+      assert {:ok, []} = Samen.Reveal.Grants.pending_for_org_result(org)
     end
   end
 
@@ -218,7 +224,7 @@ defmodule Samen.HonestKernelReadsDTest do
       assert QueryBudget.over_threshold?(key)
     end
 
-    test "record/1 and check/2 failures are reported by name, without the exception message" do
+    test "record/1 reports a failed write by name, without the exception message" do
       key = %{resource: "R-d2", cohort_key: "tier=Pro"}
 
       log =
@@ -227,6 +233,25 @@ defmodule Samen.HonestKernelReadsDTest do
         end)
 
       assert log =~ "write=query_budget_record"
+      # the exception interpolates the very value it choked on: it must not reach the log
+      refute log =~ "not_a_binary_key"
+    end
+
+    test "check/2 fails open on an unreadable ledger (documented) but reports the read by name, without the message" do
+      key = %{resource: "R-d3", cohort_key: "tier=Pro"}
+      previous = Application.get_env(:samen_core, :query_budget_enforce)
+      on_exit(fn -> Application.put_env(:samen_core, :query_budget_enforce, previous) end)
+
+      # CONTROL: enforcement off never touches the ledger, so the same broken repo is silent
+      Application.put_env(:samen_core, :query_budget_enforce, false)
+      assert "" == capture_log(fn -> assert :ok = QueryBudget.check(key, repo: DownRepo) end)
+
+      Application.put_env(:samen_core, :query_budget_enforce, true)
+
+      log = capture_log(fn -> assert :ok = QueryBudget.check(key, repo: DownRepo) end)
+
+      assert log =~ "read=query_budget_check"
+      refute log =~ "connection not available"
     end
   end
 
