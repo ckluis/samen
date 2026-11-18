@@ -38,7 +38,7 @@ All notable changes to Samen are recorded here. The format follows
   shred attestation or unwalkable assign (values unchanged: nothing resolves, nothing is claimed shredded).
 - **Fixed (test): `KitStatesTest` "host_nav_extra" flaked on another async test's log line.** `ExUnit.CaptureLog` sees
   the whole node; `Samen.WebTest.OwnLog` keeps only the calling process's lines.
-- `kernel_swallow` ceilings: rescue 123 -> 91, error arms 19 -> 15. Sabotages 985-998.
+- `kernel_swallow` ceilings: rescue 123 -> 91, error arms 19 -> 15. Sabotages 985-1001.
 
 ### Fixed: kernel phase C review (verifier evasion, billing ledger gaps, replay unavailable card)
 
