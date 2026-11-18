@@ -73,16 +73,16 @@ defmodule Samen.Lint.KernelSwallow do
        "tier.tier_name/0 raises only for a module that is not a tier; the name is a LABEL on the finding, and the crash of that very tier is already a fail-closed :violation (run_tier/2), so :unknown_tier changes no verdict"},
     {"samen_core/lib/samen/replay/resolver.ex", :repo} =>
       {1, "be3694e4bcedc7a2",
-       "AshPostgres.DataLayer.Info.repo/2 raises only for a resource with no AshPostgres data layer, which has no repo to read: nil (no repo, so the value stays masked — never decrypted) is the exact answer"},
+       "AshPostgres.DataLayer.Info.repo/2 returns nil for a resource on another data layer (nothing to raise); it raises only for a module that is not a Spark resource, or a repo function that itself raises: nil (no repo, so the value stays masked — never decrypted) is the fail-closed answer"},
     {"samen_core/lib/samen/replay/resolver.ex", :ref_attribute} =>
       {1, "0de297393d69e1cc",
        "the vault/plan introspection raises only for a module that is no longer a resource (or has no replay plan): :code_changed is exactly that fact, it renders `[changed]`, and nothing resolves"},
     {"samen_core/lib/samen/replay/resolver.ex", :build_struct} =>
       {1, "6e7f9bdb6c0fb164",
-       "struct/2 raises only for a struct whose enforced keys the stored row lacks, i.e. the code changed under the recording: a :code_changed placeholder is exactly that fact and no stored value reaches the render"},
+       "a defensive guard: Kernel.struct/2 never checks @enforce_keys (only struct!/2 does) so a stored row cannot make it raise; only a module with a hand-written __struct__ that raises can, and that module is by definition not what was recorded: a :code_changed placeholder is the fail-closed answer and no stored value reaches the render"},
     {"samen_core/lib/samen/replay/resolver.ex", :dropped} =>
       {1, "f0004dfcb7a5dd80",
-       "struct/1 raises only for a struct with enforced keys and no default; the dropped value was never data, so nil (nothing) is the exact answer"},
+       "a defensive guard: Kernel.struct/1 never checks @enforce_keys (only struct!/1 does), so it raises only for a module with a hand-written __struct__ that raises; the dropped value was never data, so nil (nothing) is the fail-closed answer"},
     {"samen_core/lib/samen/replay/row_guard.ex", :check} =>
       {1, "55ebcd6e8afb4706",
        "a frame-schema validator that raises REFUSES the payload: the guard hands the caller the same changeset refusal it gives an invalid frame, never :ok — fail closed, and the caller handles the error"},

@@ -2978,7 +2978,8 @@ defmodule Samen.AI.Agent do
         end
 
       # A read that FAILED is not "no such approval": the write is refused either way, but the turn row names the cause.
-      {:error, :unavailable} ->
+      # (`:approvals_unavailable` is the miswired-engine sibling: a configured resource whose repo cannot be resolved.)
+      {:error, reason} when reason in [:unavailable, :approvals_unavailable] ->
         {:error, :approval_unavailable}
 
       _ ->

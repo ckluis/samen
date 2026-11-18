@@ -769,6 +769,51 @@ defmodule Samen.AI.AgentWriteTest do
     end
   end
 
+  describe "the execution seam names a miswired or raising approvals read for what it is" do
+    defmodule NotAResource do
+    end
+
+    defp with_approvals_env(config) do
+      previous = Application.get_env(:samen_core, Samen.Approvals)
+      Application.put_env(:samen_core, Samen.Approvals, config)
+      on_exit(fn -> Application.put_env(:samen_core, Samen.Approvals, previous) end)
+    end
+
+    test "RED: a configured approvals resource whose repo cannot be resolved is :approval_unavailable, never :approval_not_found" do
+      {_s, _run, target, approval, _new_owner} = propose!()
+      {:ok, turn_id} = WriteProposal.parse_subject_ref(approval.subject_ref)
+      actor = %{actor: approver_id(approval.org_id)}
+
+      # POSITIVE CONTROL: with the healthy wiring, an id that names no row is still the honest :approval_not_found
+      assert {:error, :approval_not_found} = Agent.execute_approved(turn_id, %{id: Ash.UUID.generate()}, actor)
+
+      with_approvals_env(approval_resource: NotAResource)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, :approval_unavailable} = Agent.execute_approved(turn_id, approval, actor)
+      end)
+
+      assert reload_target!(target.id).owner_id == nil
+    end
+
+    test "RED: an approvals read that RAISES past the wiring is :approval_unavailable and reported by name" do
+      {_s, _run, target, approval, _new_owner} = propose!()
+      {:ok, turn_id} = WriteProposal.parse_subject_ref(approval.subject_ref)
+      actor = %{actor: approver_id(approval.org_id)}
+
+      # a `:repo` option skips repo introspection, so `Ash.get` itself raises on a module that is no resource
+      with_approvals_env(approval_resource: NotAResource, repo: SamenCore.TestRepo)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, :approval_unavailable} = Agent.execute_approved(turn_id, approval, actor)
+        end)
+
+      assert log =~ "read=agent_load_approval"
+      assert reload_target!(target.id).owner_id == nil
+    end
+  end
+
   # ── budgets + cancellation ──────────────────────────────────────────────────────────
 
   describe "the request a resumed run sends (ADR-047 §5.2a: park → approve → resume, from real loop state)" do
