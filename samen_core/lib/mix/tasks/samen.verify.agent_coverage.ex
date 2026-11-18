@@ -546,10 +546,7 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
   # as the `__aliases__` clause above. (No rename to check here: a bare atom literal is
   # never subject to `alias ..., as:` resolution.)
   defp agent_kernel_alias?(mod, _env) when is_atom(mod) and mod not in [nil, true, false] do
-    parts = mod |> Module.split() |> Enum.map(&String.to_atom/1)
-    agent_module_parts?(parts)
-  rescue
-    ArgumentError -> false
+    atom_kernel?(mod)
   end
 
   # `@k` used as a call target (`@k.start(...)`, `apply(@k, :start, [...])`) — A9, closing
@@ -570,16 +567,21 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
         resolves_to_kernel?(parts, env, %{})
 
       mod when is_atom(mod) and mod not in [nil, true, false] ->
-        mod |> Module.split() |> Enum.map(&String.to_atom/1) |> agent_module_parts?()
+        atom_kernel?(mod)
 
       _ ->
         false
     end)
-  rescue
-    ArgumentError -> false
   end
 
   defp agent_kernel_alias?(_, _env), do: false
+
+  # Decided PER VALUE and without a rescue: an atom that is not an Elixir module (`:lists`) is simply not the
+  # kernel, so a decoy value recorded for the same `@k` can never hide a later kernel alias.
+  defp atom_kernel?(mod) do
+    String.starts_with?(Atom.to_string(mod), "Elixir.") and
+      mod |> Module.split() |> Enum.map(&String.to_atom/1) |> agent_module_parts?()
+  end
 
   # Shared "is this the agent kernel, fully-qualified or as bare `Agent`" predicate — used
   # both by `agent_kernel_alias?/2` above and by `resolves_to_kernel?/3` at every step of
@@ -647,7 +649,8 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
   # --- (3) the agent-run resource carries a retention :shred spec ------------------------
 
   defp retention_violations do
-    specs = safe(fn -> Samen.Erasure.default_specs()[:retention_specs] || [] end, [])
+    # No rescue: a retention-spec read that fails fails the task (non-zero), it is not "no spec covers the run".
+    specs = Samen.Erasure.default_specs()[:retention_specs] || []
 
     covered? =
       Enum.any?(specs, fn spec ->
@@ -832,9 +835,4 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
     Code.ensure_loaded?(module) and function_exported?(module, fun, arity)
   end
 
-  defp safe(fun, default) do
-    fun.()
-  rescue
-    _ -> default
-  end
 end

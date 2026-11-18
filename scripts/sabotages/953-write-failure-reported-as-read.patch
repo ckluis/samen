@@ -1,0 +1,19 @@
+# SABOTAGE: a failed audit write is reported through the 3-arity form, so it is counted as a read failure
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/observability_failure_test.exs
+# MUST_FAIL: no 3-arity Failure.report names a WRITE op
+diff --git a/samen_core/lib/samen/archival/audit.ex b/samen_core/lib/samen/archival/audit.ex
+index 1027d613..0e7ab66a 100644
+--- a/samen_core/lib/samen/archival/audit.ex
++++ b/samen_core/lib/samen/archival/audit.ex
+@@ -43,7 +43,7 @@ defmodule Samen.Archival.Audit do
+          }) do
+       {:ok, _} -> :ok
+       {:error, reason} ->
+-        Samen.Observability.Failure.report_write(:archival_audit, org, reason)
++        Samen.Observability.Failure.report(:archival_audit, org, reason)
+         {:error, :audit_unavailable}
+     end
+   end

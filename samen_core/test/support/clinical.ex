@@ -103,6 +103,14 @@ defmodule SamenCore.Support.Clinical.Patient do
     end
   end
 
+  # A non-PK identity so a call-site `upsert?: true` can conflict on an EXISTING row
+  # (`vault/vault_write_guard_test.exs`). The identity must NOT include `org_id` (`Samen.Clone` suffixes identity
+  # attributes with `_copy`, which an org id cannot take). It has no unique index in the test schema; that test creates
+  # one inside its sandbox transaction.
+  identities do
+    identity(:title, [:job_title])
+  end
+
   actions do
     defaults([:read, :destroy, create: :*, update: :*])
   end

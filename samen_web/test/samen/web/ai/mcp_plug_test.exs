@@ -59,6 +59,33 @@ defmodule Samen.Web.AI.McpPlugTest do
       assert conn.status == 401
     end
 
+    test "a resolver whose key lookup FAILED ⇒ 503 + Retry-After, halted, no key echoed, NOT served (401 stays for a bad key)" do
+      resolver = fn
+        "unreachable-store-token" -> {:error, :unavailable}
+        @token -> {:ok, %Samen.Scope{actor: %{id: "op1", org_id: Ash.UUID.generate(), role: :member, plane: :tenant}}}
+        _ -> :error
+      end
+
+      call = fn token ->
+        conn(:post, "/mcp", Jason.encode!(%{"method" => "tools/list", "id" => 1}))
+        |> put_req_header("authorization", "Bearer " <> token)
+        |> McpPlug.call(McpPlug.init(actor_resolver: resolver, tool_opts: []))
+      end
+
+      conn = call.("unreachable-store-token")
+      assert conn.status == 503
+      assert conn.halted
+      assert [retry] = get_resp_header(conn, "retry-after")
+      assert String.to_integer(retry) > 0
+      refute conn.resp_body =~ "unreachable-store-token"
+      assert %{"error" => %{"message" => "service unavailable"}} = body_json(conn)
+      refute Map.has_key?(body_json(conn), "result")
+
+      # controls
+      assert call.("wrong").status == 401
+      assert call.(@token).status == 200
+    end
+
     test "no resolver wired ⇒ 401 (fail-closed)" do
       conn =
         conn(:post, "/mcp", Jason.encode!(%{"method" => "tools/list", "id" => 1}))

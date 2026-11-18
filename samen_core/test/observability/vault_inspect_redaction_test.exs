@@ -67,10 +67,11 @@ defmodule Samen.Observability.VaultInspectRedactionTest do
     refute message =~ @secret
   end
 
-  test "already-vaulted values (a %Masked{} round-trip, a vt_ token, nil) pass through unwrapped" do
+  test "already-vaulted values (a %Masked{} round-trip, nil) pass through unwrapped; a vt_ string is plaintext" do
     masked = Masked.new("vt_abc", :emails)
     assert {:ok, ^masked} = Samen.Type.VaultField.cast_input(masked, [])
-    assert {:ok, "vt_abc"} = Samen.Type.VaultField.cast_input("vt_abc", [])
+    # A raw string is ALWAYS plaintext, a "vt_"-prefixed one included (input can never name a token).
+    assert {:ok, %Plaintext{value: "vt_abc"}} = Samen.Type.VaultField.cast_input("vt_abc", [])
     assert {:ok, nil} = Samen.Type.VaultField.cast_input(nil, [])
     assert {:ok, %Plaintext{value: "x"}} = Samen.Type.VaultField.cast_input("x", [])
   end

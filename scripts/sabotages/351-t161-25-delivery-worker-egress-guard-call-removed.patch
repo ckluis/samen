@@ -36,19 +36,20 @@
 # MUST_FAIL: #25 RED: an endpoint registered at IPv6 loopback is refused and never POSTed
 # MUST_FAIL: #25 RED: a public hostname whose resolver answers with a private address (DNS rebinding shape) is refused
 diff --git a/samen_core/lib/samen/webhook/delivery_worker.ex b/samen_core/lib/samen/webhook/delivery_worker.ex
+index ebff7538..e41d904b 100644
 --- a/samen_core/lib/samen/webhook/delivery_worker.ex
 +++ b/samen_core/lib/samen/webhook/delivery_worker.ex
-@@ -109,7 +109,8 @@
+@@ -109,7 +109,8 @@ defmodule Samen.Webhook.DeliveryWorker do
  
      with {:ok, endpoint} <- load_endpoint(endpoint_id, repo),
           {:ok, url} <- endpoint_url(endpoint),
 -         :ok <- egress_check(url),
 +         # SABOTAGE (issue #25 step 2): the egress guard step is GONE — the
 +         # org-registered URL is delivered VERBATIM.
-          {:ok, secret} <- reveal_secret(endpoint, repo),
+          {:ok, secret} <- reveal_secret(endpoint, endpoint_id, repo),
           {:ok, _} <- deliver(url, body, secret) do
        :ok
-@@ -176,17 +177,6 @@
+@@ -179,17 +180,6 @@ defmodule Samen.Webhook.DeliveryWorker do
      end
    end
  

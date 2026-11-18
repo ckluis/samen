@@ -49,9 +49,12 @@ defmodule Samen.Api.PiiResolution do
 
   use Ash.Resource.Preparation
 
+  require Logger
+
   alias Samen.Masked
   alias Samen.Pii.Info
   alias Samen.Reveal
+  alias Samen.Vault
 
   # --- Ash preparation face -------------------------------------------------
 
@@ -189,21 +192,35 @@ defmodule Samen.Api.PiiResolution do
             do: {record, name, value}
 
       grants = grant_decisions(masked, plane, resource, reveal_action, actor, opts)
+      vaults = Map.new(fields, fn %Samen.Pii.Attribute{name: name, vault: vault} -> {name, to_string(vault)} end)
 
-      tokens =
+      decrypting =
         for {record, name, %Masked{token: token}} <- masked,
             is_binary(token),
             decrypts?(plane, record, name, grants, opts),
-            uniq: true,
-            do: token
+            do: {token, expected_binding(resource, vaults, record, name), {subject_of(resource, record), name}}
 
+      tokens = decrypting |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
       rows = vault_rows(tokens, opts)
+
+      # A token binds only to the {subject, vault, field} of the record/field that holds it. Only
+      # rows matching what the holder expects reach the DEK memo, so a foreign subject's key is
+      # never unwrapped; `reveal/3` re-checks the same binding per value (defence in depth).
+      expected = Enum.group_by(decrypting, &elem(&1, 0), &elem(&1, 1))
+
+      admitted =
+        Map.filter(rows, fn {token, row} ->
+          Enum.any?(Map.get(expected, token, []), fn {subject, vault_field} -> Vault.bound?(row, subject, vault_field) end)
+        end)
+
+      report_unbound(rows, decrypting, actor, resource)
 
       Keyword.merge(opts,
         __prefetched: true,
         __grants: grants,
         __vault_rows: rows,
-        __vault_deks: vault_deks(rows, opts),
+        __vault_deks: vault_deks(admitted, opts),
+        __vault_vaults: vaults,
         __bag_ctx: bag_context(resource, records, plane, actor, opts)
       )
     end
@@ -331,7 +348,7 @@ defmodule Samen.Api.PiiResolution do
     # keeps the value masked (`••••`) — fail-closed, no plaintext egress.
     if Keyword.get(opts, :grant_egress?, false) and
          operator_granted?(record, label, resource, reveal_action, actor, opts) === true do
-      reveal_plaintext(masked, opts) || masked
+      reveal_plaintext(masked, binding_of(resource, record, label, opts), opts) || masked
     else
       masked
     end
@@ -343,12 +360,13 @@ defmodule Samen.Api.PiiResolution do
       :tenant ->
         # Tenant owns its own org's PII → clear, no grant. Fail closed on shred/KMS:
         # a failed decrypt leaves the masked value (`••••`), never raises a leak.
-        reveal_plaintext(masked, opts) || masked
+        reveal_plaintext(masked, binding_of(resource, record, label, opts), opts) || masked
 
       :operator ->
         cond do
           operator_granted?(record, label, resource, reveal_action, actor, opts) ->
-            reveal_plaintext(masked, opts) || masked_or_forbidden(masked, label, actor)
+            reveal_plaintext(masked, binding_of(resource, record, label, opts), opts) ||
+              masked_or_forbidden(masked, label, actor)
 
           # IMPERSONATION UI posture (T4.1; doc §control: "personal data renders ••••
           # by default"): under an impersonation session the operator sees the tenant's
@@ -392,7 +410,7 @@ defmodule Samen.Api.PiiResolution do
     if impersonated?(actor), do: masked, else: forbidden(label)
   end
 
-  defp reveal_plaintext(%Masked{} = masked, opts) do
+  defp reveal_plaintext(%Masked{} = masked, {subject_id, vault_field}, opts) do
     vault = Keyword.get(opts, :vault, Samen.Vault)
 
     case Keyword.get(opts, :repo) do
@@ -401,25 +419,104 @@ defmodule Samen.Api.PiiResolution do
         nil
 
       repo ->
-        case vault.reveal(masked, repo, vault_opts(opts)) do
+        case vault.reveal(masked, repo, vault_opts(opts, subject_id, vault_field)) do
           {:ok, plaintext} -> plaintext
           _ -> nil
         end
     end
   end
 
-  defp vault_opts(opts) do
+  # Every reveal asserts the subject (the holding record's primary key) and the field (its
+  # declared vault + logical name): a token minted for another subject or field is refused by the
+  # vault BEFORE any key is unwrapped, and renders as the masked/absent value on every plane.
+  defp vault_opts(opts, subject_id, vault_field) do
+    bind = [subject_id: subject_id, field: vault_field]
+
     case Keyword.get(opts, :__vault_rows) do
       rows when is_map(rows) and map_size(rows) > 0 ->
         case Keyword.get(opts, :__vault_deks) do
-          nil -> [prefetched: rows]
-          deks -> [prefetched: rows, deks: deks]
+          nil -> [prefetched: rows] ++ bind
+          deks -> [prefetched: rows, deks: deks] ++ bind
         end
 
       _ ->
-        []
+        bind
     end
   end
+
+  # {subject_id, {vault_name, field_name}} the holding record expects for `label`.
+  defp binding_of(resource, record, label, opts) do
+    vaults =
+      case Keyword.get(opts, :__vault_vaults) do
+        %{} = vaults -> vaults
+        _ -> resource |> Info.pii_attributes() |> Map.new(fn %Samen.Pii.Attribute{name: n, vault: v} -> {n, to_string(v)} end)
+      end
+
+    expected_binding(resource, vaults, record, label)
+  end
+
+  defp expected_binding(resource, vaults, record, name) do
+    {subject_of(resource, record), {Map.get(vaults, name), to_string(name)}}
+  end
+
+  # The vault subject of a record is its primary key (`Samen.Vault.Change` mints under it).
+  defp subject_of(resource, record) do
+    pk =
+      case Ash.Resource.Info.primary_key(resource) do
+        [pk | _] -> pk
+        [] -> :id
+      end
+
+    to_string(Map.get(record, pk))
+  end
+
+  # One report per distinct {reason, record, field} per call, at most @max_unbound_reports PER REASON (a cap
+  # across reasons let 20 `foreign_subject` hide the only `field_mismatch`), so an operator can find the row
+  # without running the verifier: the log line carries resource, field and record id (the record's primary key,
+  # i.e. its vault subject). Never a token, never a value. Anything cut by the cap is itself reported, once per
+  # reason: a `vault_token_unbound_truncated` log line and telemetry event whose count is the suppressed number.
+  @max_unbound_reports 20
+
+  defp report_unbound(rows, decrypting, actor, resource) do
+    decrypting
+    |> Enum.flat_map(fn {token, {subject, vault_field}, {record_id, field}} ->
+      case Map.get(rows, token) do
+        nil -> []
+        row -> if Vault.bound?(row, subject, vault_field), do: [], else: [{unbound_reason(row, subject), record_id, field}]
+      end
+    end)
+    |> Enum.uniq()
+    |> Enum.group_by(fn {reason, _record_id, _field} -> reason end)
+    |> Enum.sort_by(fn {reason, _triples} -> reason end)
+    |> Enum.each(fn {reason, triples} ->
+      {reported, suppressed} = Enum.split(triples, @max_unbound_reports)
+
+      Enum.each(reported, fn {reason, record_id, field} ->
+        Samen.Observability.Failure.report(:read, :vault_token_unbound, actor, reason,
+          locate: [resource: resource, field: field, record: record_id]
+        )
+      end)
+
+      report_truncated(resource, reason, length(suppressed))
+    end)
+  end
+
+  defp report_truncated(_resource, _reason, 0), do: :ok
+
+  defp report_truncated(resource, reason, suppressed) do
+    Logger.error(
+      "[Samen.Core] read failed read=vault_token_unbound_truncated resource=#{inspect(resource)} " <>
+        "cause=#{reason} suppressed=#{suppressed} cap=#{@max_unbound_reports}"
+    )
+
+    :telemetry.execute([:samen, :core, :read, :error], %{count: suppressed}, %{
+      read: :vault_token_unbound_truncated,
+      cause: Atom.to_string(reason)
+    })
+  end
+
+  defp unbound_reason(%{subject_id: subject}, subject), do: :field_mismatch
+  defp unbound_reason(_row, _subject), do: :foreign_subject
 
   # The verdict `prefetch/4` read for this value in THIS call, else ask the checker now.
   defp operator_granted?(record, label, resource, reveal_action, actor, opts) do

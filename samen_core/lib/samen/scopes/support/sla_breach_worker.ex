@@ -23,10 +23,10 @@ defmodule Samen.Scopes.Support.SlaBreachWorker do
   `dedupe_key: ticket_id`, `deadline_at: breach_at`, `chain: nil` — the default
   single-step org chain, preserving the org-recipient notification this worker
   always sent). The escalation primitive now owns the attention/chain-walking;
-  this worker owns ONLY the domain truth (the breach itself). Best-effort: an
-  unwired/failing escalation call never aborts or reverts the breach flip
-  (mirrors `Samen.Billing.Dunning`'s "never re-decides, never aborts the main
-  path" posture for its own escalation calls).
+  this worker owns ONLY the domain truth (the breach itself). The flag flip, its
+  audit row and the escalation commit in ONE transaction: an escalation that cannot
+  be opened (`{:error, :unavailable}`, a raise) rolls the flip back, is reported as a
+  write failure, and the next tick retries -- the attention is never silently lost.
 
   ## Why SQL rather than Ash actions
 
@@ -178,36 +178,61 @@ defmodule Samen.Scopes.Support.SlaBreachWorker do
         :error -> id_bin
       end
 
-    case repo.query(update_sql, [id_param]) do
-      {:ok, %{num_rows: n}} when n > 0 ->
-        # Emit the audit event. Build a minimal ticket map for the audit writer.
-        ticket = %{id: id_bin, org_id: org_id_bin, sla_breach_at: breach_at_str}
-        Samen.Scopes.Support.Audit.ticket_breached(repo, ticket, breach_at_str)
+    # The flag, its audit row and the escalation commit TOGETHER: an escalation that could not be opened (its
+    # active-escalation lookup failed: `{:error, :unavailable}`) rolls the flag back, so the next tick finds the
+    # ticket un-flagged and retries. Flagging first and dropping the failure lost the attention for good.
+    result =
+      repo.transaction(fn ->
+        case repo.query(update_sql, [id_param]) do
+          {:ok, %{num_rows: n}} when n > 0 ->
+            # Emit the audit event. Build a minimal ticket map for the audit writer.
+            ticket = %{id: id_bin, org_id: org_id_bin, sla_breach_at: breach_at_str}
+            Samen.Scopes.Support.Audit.ticket_breached(repo, ticket, breach_at_str)
 
-        # WS-A A4 event source (design §2.3; fixes H-9): the breach is no longer a
-        # SILENT state flip. ADR-039 §7.4 (T41): attention now routes through the
-        # E5 escalation primitive instead of a bespoke direct notify — Escalate.open
-        # is idempotent-by-dedupe (a concurrent duplicate tick just advances the
-        # SAME escalation, never opens a second one) and, with chain: nil, sends
-        # the SAME org-recipient in_app notification this worker always sent (the
-        # default single-step org chain), best-effort (never aborts the flip).
-        escalate_breach(org_id_bin, id_bin, breach_at_native)
+            # WS-A A4 event source (design §2.3; fixes H-9): the breach is no longer a
+            # SILENT state flip. ADR-039 §7.4 (T41): attention routes through the
+            # E5 escalation primitive instead of a bespoke direct notify — Escalate.open
+            # is idempotent-by-dedupe (a concurrent duplicate tick just advances the
+            # SAME escalation, never opens a second one) and, with chain: nil, sends
+            # the SAME org-recipient in_app notification this worker always sent (the
+            # default single-step org chain).
+            case escalate_breach(org_id_bin, id_bin, breach_at_native) do
+              :ok -> :marked
+              {:error, reason} -> repo.rollback({:escalation_unavailable, reason})
+            end
 
-        Logger.info(
-          "[SlaBreachWorker] marked ticket #{id_bin} as breached (breach_at=#{breach_at_str})"
-        )
+          {:ok, %{num_rows: 0}} ->
+            # Already marked by a concurrent tick — idempotent, ignore.
+            :already_marked
 
-      {:ok, %{num_rows: 0}} ->
-        # Already marked by a concurrent tick — idempotent, ignore.
+          {:error, reason} ->
+            repo.rollback({:update_failed, reason})
+        end
+      end)
+
+    case result do
+      {:ok, :marked} ->
+        Logger.info("[SlaBreachWorker] marked ticket #{id_bin} as breached (breach_at=#{breach_at_str})")
+
+      {:ok, :already_marked} ->
         :ok
 
-      {:error, reason} ->
+      {:error, {:update_failed, reason}} ->
         Logger.error("[SlaBreachWorker] UPDATE failed for #{id_bin}: #{inspect(reason)}")
+
+      {:error, {:escalation_unavailable, reason}} ->
+        # The breach stays un-flagged (rolled back) so the next tick retries; reported, never a debug line.
+        Samen.Observability.Failure.report_write(:sla_breach_escalation, org_id_bin, reason)
+
+      {:error, reason} ->
+        # The transaction was rolled back by something else (an Ash action inside `Escalate.open` rolls its own
+        # failed read back through the shared connection): nothing committed, the next tick retries. Same report.
+        Samen.Observability.Failure.report_write(:sla_breach_escalation, org_id_bin, reason)
     end
   end
 
-  # Best-effort — an unwired/failing escalation call must NEVER surface as a
-  # worker failure (the breach flip + audit above already committed).
+  # An escalation that could not be opened is an ERROR to the caller (which rolls the breach flag back), never a
+  # swallowed `:ok`: the attention it carries must not be lost.
   defp escalate_breach(org_id_bin, id_bin, breach_at_native) do
     case Samen.Automation.Escalate.open(%{
            org_id: org_id_bin,
@@ -217,17 +242,11 @@ defmodule Samen.Scopes.Support.SlaBreachWorker do
            deadline_at: to_deadline(breach_at_native),
            chain: nil
          }) do
-      {:ok, _escalation} ->
-        :ok
-
-      {:error, reason} ->
-        Logger.debug("[SlaBreachWorker] escalation open skipped for #{id_bin}: #{inspect(reason)}")
-        :ok
+      {:ok, _escalation} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   rescue
-    e ->
-      Logger.warning("[SlaBreachWorker] escalation open raised for #{id_bin}: #{Exception.message(e)}")
-      :ok
+    e -> {:error, e}
   end
 
   # Normalize whatever the DB handed back for the untyped breach_col select

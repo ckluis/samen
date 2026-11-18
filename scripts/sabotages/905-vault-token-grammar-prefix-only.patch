@@ -1,0 +1,18 @@
+# SABOTAGE: Vault.token?/1 accepts any vt_-prefixed string instead of the minted grammar
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault_test.exs
+# MUST_FAIL: anything else is not: prefix-only
+diff --git a/samen_core/lib/samen/vault.ex b/samen_core/lib/samen/vault.ex
+index 4598edfe..3096674a 100644
+--- a/samen_core/lib/samen/vault.ex
++++ b/samen_core/lib/samen/vault.ex
+@@ -624,6 +624,6 @@ defmodule Samen.Vault do
+   column as plaintext at rest.
+   """
+   @spec token?(term()) :: boolean()
+-  def token?(value) when is_binary(value), do: Regex.match?(@token_shape, value)
++  def token?(value) when is_binary(value), do: String.starts_with?(value, "vt_")
+   def token?(_other), do: false
+ end

@@ -193,7 +193,7 @@ defmodule Samen.AI.AgentWithdrawalWalkTest do
 
     # POSITIVE CONTROL: with the shipped bound the walk finishes by FIXPOINT — it halted
     # because it ran out of new folds, not because it hit the cap.
-    report = Compaction.withdraw(ref, repo: TestRepo)
+    assert {:ok, report} = Compaction.withdraw(ref, repo: TestRepo)
 
     assert report.halted == :fixpoint
     assert report.runs_walked == 1
@@ -203,7 +203,7 @@ defmodule Samen.AI.AgentWithdrawalWalkTest do
     # THE BOUND IS CONSULTED, not decorative: starve it and the walk halts on the cap. A
     # build whose `@withdraw_max_rounds` were ignored would pass the control above and fail
     # here, so the boundedness claim is refutable rather than asserted.
-    starved = Compaction.withdraw(ref, repo: TestRepo, max_rounds: 0)
+    assert {:ok, starved} = Compaction.withdraw(ref, repo: TestRepo, max_rounds: 0)
     assert starved.halted == :round_bound
   end
 end

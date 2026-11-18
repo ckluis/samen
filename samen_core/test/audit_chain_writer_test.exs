@@ -45,4 +45,52 @@ defmodule Samen.AuditChain.WriterTest do
       assert_raise FunctionClauseError, fn -> apply(Writer, :write, args) end
     end
   end
+
+  describe "the event and its chain entry are one unit (both rows or neither)" do
+    # The chain append fails AFTER the `aud_event` insert: a subject payload with no subject to key it under is a
+    # validation error that is returned, never raised, so a caller's transaction survives it.
+    defp failing_second_statement(subject), do: attrs(%{subject_id: subject, subject_payload: "x"}) |> Map.put(:subject_id, nil) |> Map.put(:detail, "orphan-probe-" <> subject)
+
+    defp events_with_detail(detail),
+      do: @repo.query!("SELECT count(*) FROM aud_event WHERE aud_detail = $1", [detail]).rows |> hd() |> hd()
+
+    test "outside a transaction a failed chain append leaves no orphan aud_event" do
+      refute @repo.in_transaction?()
+      a = failing_second_statement("out-#{System.unique_integer([:positive])}")
+      assert {:error, :subject_payload_requires_subject_id} = Writer.write(@repo, a)
+      assert events_with_detail(a.detail) == 0
+    end
+
+    test "inside a caller's transaction that tolerates the error, a failed chain append leaves no orphan aud_event" do
+      a = failing_second_statement("in-#{System.unique_integer([:positive])}")
+
+      assert {:ok, :tolerated} =
+               @repo.transaction(fn ->
+                 assert @repo.in_transaction?()
+                 assert {:error, :subject_payload_requires_subject_id} = Writer.write(@repo, a)
+                 assert events_with_detail(a.detail) == 0
+                 :tolerated
+               end)
+
+      assert events_with_detail(a.detail) == 0
+    end
+
+    test "control: the healthy path writes both rows, inside and outside a transaction, and a later write still chains" do
+      org = Ecto.UUID.generate()
+      count = fn -> @repo.query!("SELECT count(*) FROM aud_chain WHERE ach_org_id = $1", [org]).rows |> hd() |> hd() end
+
+      assert {:ok, %{aud_event: %{id: id1}, chain: %{seq: 0, aud_id: id1}}} =
+               Writer.write(@repo, attrs(%{org_id: org, detail: "healthy-out"}))
+
+      assert {:ok, {:ok, %{aud_event: %{id: id2}, chain: %{seq: 1, aud_id: id2}}}} =
+               @repo.transaction(fn ->
+                 a = failing_second_statement("mid-#{System.unique_integer([:positive])}") |> Map.put(:org_id, org)
+                 assert {:error, _} = Writer.write(@repo, a)
+                 Writer.write(@repo, attrs(%{org_id: org, detail: "healthy-in"}))
+               end)
+
+      assert count.() == 2
+      assert events_with_detail("healthy-out") == 1 and events_with_detail("healthy-in") == 1
+    end
+  end
 end
