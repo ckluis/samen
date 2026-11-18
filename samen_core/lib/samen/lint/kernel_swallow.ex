@@ -59,6 +59,15 @@ defmodule Samen.Lint.KernelSwallow do
     {"samen_core/lib/samen/billing/webhook_dispatch.ex", :safe_atom} =>
       {1, "43b8d623939c4410",
        "String.to_existing_atom/1 raises ArgumentError only for a name that is not an existing atom; an unknown event kind is the bounded :unhandled, which the reconciler ignores (never a mint, never a success claim)"},
+    {"samen_core/lib/samen/delivery/throttle.ex", :safe_to_string} =>
+      {1, "b970d136135b4c9c",
+       "List.to_string/1 raises only for a list that is not chardata (a header name that is not a string); \"\" (no such header) is the exact answer — a pure parse of a header name, no read is involved"},
+    {"samen_core/lib/samen/delivery/throttle.ex", :rfc1123} =>
+      {1, "3fdfc53a35af2d63",
+       ":httpd_util.convert_request_date (and String.to_charlist/1) raise only for a Retry-After value that is not a date; :error (no usable date) is the exact answer, which the caller turns into the default backoff — a pure parse of an untrusted header value, no read is involved"},
+    {"samen_core/lib/samen/delivery/webhook_dispatch.ex", :safe_atom} =>
+      {1, "43b8d623939c4410",
+       "String.to_existing_atom/1 raises ArgumentError only for a name that is not an existing atom; an unknown provider or event kind is the bounded :unhandled, which Deliverability no-ops (never a mint, never a success claim)"},
     {"samen_core/lib/samen/ai/chokepoint.ex", :charlist_sentinel?} =>
       {1, "0b17c23d9eddf284",
        "List.to_string/1 raises only for a list that is not chardata; a vt sentinel is a UTF-8 binary and can only be spelled by valid chardata, so for such a list `false` (no sentinel) is the exact answer — the element-wise allowlist (`safe_segment?/1`) still applies to it"},
@@ -100,10 +109,7 @@ defmodule Samen.Lint.KernelSwallow do
     "samen_core/lib/samen/crm/account_link.ex" => 2,
     "samen_core/lib/samen/custom_fields/change.ex" => 1,
     "samen_core/lib/samen/data_map.ex" => 1,
-    "samen_core/lib/samen/delivery/marketing_receipt_lookup.ex" => 1,
     "samen_core/lib/samen/delivery/provider_conformance_case.ex" => 2,
-    "samen_core/lib/samen/delivery/throttle.ex" => 2,
-    "samen_core/lib/samen/delivery/webhook_dispatch.ex" => 1,
     "samen_core/lib/samen/feature_flags.ex" => 1,
     "samen_core/lib/samen/feature_flags/cache.ex" => 1,
     "samen_core/lib/samen/files.ex" => 1,
@@ -142,7 +148,6 @@ defmodule Samen.Lint.KernelSwallow do
     "samen_core/lib/samen/scopes/support/sla_breach_worker.ex" => 1,
     "samen_core/lib/samen/search.ex" => 3,
     "samen_core/lib/samen/sequences.ex" => 1,
-    "samen_core/lib/samen/sequences/receipt_lookup.ex" => 1,
     "samen_core/lib/samen/test_sandbox.ex" => 1,
     "samen_core/lib/samen/tracer.ex" => 3,
     "samen_core/lib/samen/transformers/materialize_pii.ex" => 1,
@@ -158,7 +163,6 @@ defmodule Samen.Lint.KernelSwallow do
     "samen_core/lib/samen/operator_plane.ex" => 3,
     "samen_core/lib/samen/replay/resolver.ex" => 1,
     "samen_core/lib/samen/scopes/marketing/blueprint.ex" => 2,
-    "samen_core/lib/samen/sequences/receipt_lookup.ex" => 1,
     "samen_core/lib/samen/support/inbound/ingest.ex" => 2,
     "samen_core/lib/samen/support/inbound/threading.ex" => 2
   }
@@ -167,8 +171,8 @@ defmodule Samen.Lint.KernelSwallow do
   # has to raise this number too (and `SwallowLintTest` compares it with the merge base, so it can only go down). Lower
   # it together with the baseline when a swallow is converted; never raise it.
   @ceilings %{
-    rescue: %{"samen_core/lib" => 119},
-    error_arm: %{"samen_core/lib" => 17}
+    rescue: %{"samen_core/lib" => 114},
+    error_arm: %{"samen_core/lib" => 16}
   }
 
   def roots, do: @roots

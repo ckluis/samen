@@ -12,7 +12,8 @@ defmodule Samen.HonestKernelReadsDTest do
   alias Samen.Aggregate.QueryBudget
   alias Samen.Approvals
   alias SamenCore.Support.ApprovalsFixture.Approval
-  alias SamenCore.Support.UnreadableApproval
+  alias SamenCore.Support.OutreachFixture.{Enrollment, StepSend}
+  alias SamenCore.Support.{UnreadableApproval, UnreadableSend}
   alias SamenCore.TestRepo, as: Repo
 
   setup do
@@ -226,6 +227,66 @@ defmodule Samen.HonestKernelReadsDTest do
         end)
 
       assert log =~ "write=query_budget_record"
+    end
+  end
+
+  describe "receipt lookups — a failed read is not 'no such send' (a bounce must not be filed as unmatched)" do
+    alias Samen.Delivery.{Deliverability, MarketingReceiptLookup, ProviderEvent}
+    alias Samen.Sequences.ReceiptLookup, as: SequenceLookup
+
+    defp bounce(pmi),
+      do: %ProviderEvent{
+        provider: :postmark,
+        event_id: "evt-#{System.unique_integer([:positive])}",
+        kind: :bounce,
+        provider_message_id: pmi,
+        occurred_at: DateTime.utc_now(),
+        payload: %{}
+      }
+
+    test "RED: the marketing lookup's read fails -> {:error, :unavailable}, reported (it answered :not_found)" do
+      log =
+        capture_log(fn ->
+          assert {:error, :unavailable} = MarketingReceiptLookup.build(UnreadableSend).("pmi-1")
+        end)
+
+      assert log =~ "read=marketing_receipt_lookup"
+    end
+
+    test "RED: the sequence lookup's read fails -> {:error, :unavailable}, reported (it answered :not_found)" do
+      log =
+        capture_log(fn ->
+          assert {:error, :unavailable} = SequenceLookup.build(UnreadableSend, Enrollment).("pmi-1")
+        end)
+
+      assert log =~ "read=sequence_receipt_lookup"
+    end
+
+    test "RED: Deliverability files a failed lookup as :receipt_lookup_unavailable, never :no_matching_receipt" do
+      capture_log(fn ->
+        assert {:error, :receipt_lookup_unavailable} =
+                 Deliverability.handle_event(bounce("pmi-1"),
+                   repo: Repo,
+                   receipt_lookup: MarketingReceiptLookup.build(UnreadableSend)
+                 )
+      end)
+    end
+
+    test "POSITIVE CONTROL: a send that does not exist is still :not_found / :no_matching_receipt, and nothing is reported" do
+      quiet =
+        capture_log(fn ->
+          assert :not_found = MarketingReceiptLookup.build(StepSend).("no-such-pmi")
+          assert :not_found = SequenceLookup.build(StepSend, Enrollment).("no-such-pmi")
+          assert :not_found = SequenceLookup.build(StepSend, Enrollment).(nil)
+
+          assert {:error, :no_matching_receipt} =
+                   Deliverability.handle_event(bounce("no-such-pmi"),
+                     repo: Repo,
+                     receipt_lookup: SequenceLookup.build(StepSend, Enrollment)
+                   )
+        end)
+
+      refute quiet =~ "receipt_lookup"
     end
   end
 
