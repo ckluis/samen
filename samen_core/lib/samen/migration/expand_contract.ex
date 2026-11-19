@@ -255,6 +255,50 @@ defmodule Samen.Migration.ExpandContract do
   end
 
   @doc """
+  `CREATE UNIQUE INDEX CONCURRENTLY` on one column of a table that may already hold rows (same carve-out
+  rules as `concurrent_index/3`: `@disable_ddl_transaction true`, a literal `:name`, a same-named INVALID
+  leftover dropped first).
+
+  Before the build it counts the values that already appear more than once and, if there are any, RAISES
+  naming the table and column and how to list them. It deletes nothing and prints no value (a column of
+  credential digests must not reach a log): removing duplicates is a decision for a person, and a unique
+  build over them would only fail late and leave an INVALID index behind.
+  """
+  def concurrent_unique_index(table, column, opts) do
+    name = Keyword.fetch!(opts, :name)
+    caller = Keyword.fetch!(opts, :caller)
+    __require_disabled_ddl_transaction__!(caller)
+    tname = table_name(table)
+    cname = to_string(column)
+
+    Ecto.Migration.execute(
+      fn ->
+        repo = Ecto.Migration.repo()
+
+        %{rows: [[values, rows]]} =
+          repo.query!(
+            "SELECT count(*), COALESCE(sum(n), 0) FROM " <>
+              "(SELECT count(*) AS n FROM #{q_ident(tname)} WHERE #{q_ident(cname)} IS NOT NULL " <>
+              "GROUP BY #{q_ident(cname)} HAVING count(*) > 1) d"
+          )
+
+        if values > 0 do
+          raise RuntimeError,
+                "cannot build the unique index #{name}: #{tname}.#{cname} holds #{values} value(s) that appear " <>
+                  "more than once (#{rows} rows). Nothing was changed and nothing was deleted. List them with " <>
+                  "SELECT #{cname}, count(*) FROM #{tname} GROUP BY #{cname} HAVING count(*) > 1, " <>
+                  "resolve the duplicates deliberately, then run this migration again."
+        end
+
+        :ok
+      end,
+      fn -> :ok end
+    )
+
+    concurrent_index(table, [column], Keyword.merge(opts, unique: true, name: name))
+  end
+
+  @doc """
   Drop a same-named INVALID index on `table` before a `CREATE INDEX CONCURRENTLY IF NOT EXISTS`.
 
   A concurrent build that fails (a duplicate under `UNIQUE`, a deadlock, a cancel) leaves the

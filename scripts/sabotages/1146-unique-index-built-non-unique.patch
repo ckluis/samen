@@ -1,0 +1,19 @@
+# SABOTAGE: concurrent_unique_index builds a plain index, so a duplicate digest still inserts.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/migration_unique_index_test.exs
+# MUST_FAIL: builds a unique index on a populated table
+diff --git a/samen_core/lib/samen/migration/expand_contract.ex b/samen_core/lib/samen/migration/expand_contract.ex
+index d536845f..850996a3 100644
+--- a/samen_core/lib/samen/migration/expand_contract.ex
++++ b/samen_core/lib/samen/migration/expand_contract.ex
+@@ -295,7 +295,7 @@ defmodule Samen.Migration.ExpandContract do
+       fn -> :ok end
+     )
+ 
+-    concurrent_index(table, [column], Keyword.merge(opts, unique: true, name: name))
++    concurrent_index(table, [column], Keyword.merge(opts, unique: false, name: name))
+   end
+ 
+   @doc """

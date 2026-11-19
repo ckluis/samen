@@ -1,0 +1,20 @@
+# SABOTAGE: pawchart's retrofit builds a plain index on the operator/MCP API-key digest, so a duplicate 
+#   digest still inserts.
+#
+# Flips the named test(s).
+# APP: pawchart
+# TEST_FILES: test/api_key_digest_unique_test.exs
+# MUST_FAIL: pok_api_key: a duplicate digest is refused by the database
+diff --git a/pawchart/priv/repo/migrations/20261119120000_api_key_digest_unique.exs b/pawchart/priv/repo/migrations/20261119120000_api_key_digest_unique.exs
+index 18a085cd..519ba74d 100644
+--- a/pawchart/priv/repo/migrations/20261119120000_api_key_digest_unique.exs
++++ b/pawchart/priv/repo/migrations/20261119120000_api_key_digest_unique.exs
+@@ -15,7 +15,7 @@ defmodule PawChart.Repo.Migrations.ApiKeyDigestUnique do
+   @disable_migration_lock true
+ 
+   def up do
+-    concurrent_unique_index(:pok_api_key, :pok_token_digest, name: "pok_api_key_token_digest_uidx")
++    concurrent_index(:pok_api_key, :pok_token_digest, name: "pok_api_key_token_digest_uidx")
+   end
+ 
+   def down do
