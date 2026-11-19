@@ -6,14 +6,14 @@
 # TEST_FILES: test/automation/observability_test.exs
 # MUST_FAIL: RED: a failed action is logged by its bounded error_kind
 diff --git a/samen_core/lib/samen/automation/run_worker.ex b/samen_core/lib/samen/automation/run_worker.ex
-index 3729d326..5d084d97 100644
+index 1ce5ce7d..15884388 100644
 --- a/samen_core/lib/samen/automation/run_worker.ex
 +++ b/samen_core/lib/samen/automation/run_worker.ex
-@@ -309,7 +309,7 @@ defmodule Samen.Automation.RunWorker do
-         RunRecord.fail!(run_row, outcomes, error_kind)
-         # Bounded error_kind ONLY: the raw reason is Reactor's error, whose step arguments carry the whole Context
-         # (the webhook secret, the actor, the subject values), so it is never inspected into a log line.
--        Logger.warning("[Automation.RunWorker] workflow #{wf.id} action(s) failed: error_kind=#{error_kind}")
+@@ -312,7 +312,7 @@ defmodule Samen.Automation.RunWorker do
+         # answer a non-atom kind (a tuple or string carrying a value), which must neither be interpolated (it raises, and
+         # Oban retries the job, re-running the actions) nor printed.
+         bounded = RunRecord.safe_error_kind(error_kind || :action_failed)
+-        Logger.warning("[Automation.RunWorker] workflow #{wf.id} action(s) failed: error_kind=#{bounded}")
 +        Logger.warning("[Automation.RunWorker] workflow #{wf.id} action(s) failed: #{inspect(reason)}")
          :ok
      end
