@@ -1,0 +1,19 @@
+# SABOTAGE: the reclaim cancels the approval but leaves the proposal stamps on the reused turn row
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_transcript_write_test.exs
+# MUST_FAIL: RED: a failed park followed by a PROVIDER ERROR at the retry leaves no pending approval
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index d0db6310..41aa04be 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -970,7 +970,7 @@ defmodule Samen.AI.Agent do
+             {:error, reason} -> repo.rollback(reason)
+           end
+ 
+-          meta = row.meta |> Map.drop(["approval_id", "awaiting_approval"]) |> bounded_meta()
++          meta = row.meta |> Map.drop([]) |> bounded_meta()
+ 
+           row
+           |> Ash.Changeset.for_update(:decide, %{meta: meta})
