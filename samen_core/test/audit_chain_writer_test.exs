@@ -93,4 +93,85 @@ defmodule Samen.AuditChain.WriterTest do
       assert events_with_detail("healthy-out") == 1 and events_with_detail("healthy-in") == 1
     end
   end
+
+  describe "the savepoint holds on EVERY exit, and its own statements honour the error contract" do
+    # A KMS adapter that RAISES or EXITS in `unwrap/1`, which `AuditChain.append` calls AFTER the `aud_event` insert when
+    # a `subject_payload` is given: a non-DB failure, so Postgres does not abort the transaction.
+    defmodule Hostile do
+      @moduledoc false
+      def unwrap(_subject), do: apply(:erlang, :get, [{__MODULE__, :mode}]) |> go()
+      defp go(:raise), do: raise("kms adapter blew up")
+      defp go(:exit), do: exit(:kms_gone)
+      defp go(:throw), do: throw(:kms_thrown)
+    end
+
+    defp with_hostile_kms(mode, fun) do
+      previous = Application.get_env(:samen_core, :kms_adapter)
+      Process.put({Hostile, :mode}, mode)
+      Application.put_env(:samen_core, :kms_adapter, Hostile)
+
+      try do
+        fun.()
+      after
+        if previous, do: Application.put_env(:samen_core, :kms_adapter, previous), else: Application.delete_env(:samen_core, :kms_adapter)
+      end
+    end
+
+    defp payload_attrs(tag), do: attrs(%{subject_payload: "payload", detail: "hostile-#{tag}-#{System.unique_integer([:positive])}"})
+
+    test "RED: a non-DB raise, exit or throw after the event insert leaves no orphan aud_event in a caller that rescues and goes on" do
+      for {mode, catcher} <- [raise: :error, exit: :exit, throw: :throw] do
+        a = payload_attrs(mode)
+
+        assert {:ok, :carried_on} =
+                 @repo.transaction(fn ->
+                   # control: the injected failure really is raised, by the adapter, from inside the chain append
+                   assert_hostile(mode, catcher, fn -> with_hostile_kms(mode, fn -> Samen.AuditChain.append(Map.put(a, :aud_id, Ecto.UUID.generate()), repo: @repo) end) end)
+
+                   caught = assert_hostile(mode, catcher, fn -> with_hostile_kms(mode, fn -> Writer.write(@repo, a) end) end)
+                   assert caught
+                   assert @repo.in_transaction?()
+                   assert events_with_detail(a.detail) == 0, "the #{mode} left an aud_event without its chain entry"
+                   :carried_on
+                 end)
+
+        assert events_with_detail(a.detail) == 0
+      end
+    end
+
+    defp assert_hostile(mode, catcher, fun) do
+      outcome =
+        try do
+          fun.()
+          :no_raise
+        catch
+          kind, reason -> {kind, reason}
+        end
+
+      assert {^catcher, _} = outcome, "the #{mode} adapter did not fire as a #{catcher}"
+      true
+    end
+
+    test "RED: a caller whose transaction is already aborted gets {:error, :audit_chain_unavailable} and a report, not a raised 25P02" do
+      a = attrs(%{detail: "aborted-#{System.unique_integer([:positive])}"})
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          # the caller's transaction was aborted by its own failed statement: it stays aborted (the commit becomes a rollback)
+          assert {:error, :rollback} =
+                   @repo.transaction(fn ->
+                     assert_raise Postgrex.Error, fn -> @repo.query!("SELECT 1/0") end
+                     assert {:error, :audit_chain_unavailable} = Writer.write(@repo, a)
+                     :answered
+                   end)
+        end)
+
+      assert log =~ "write failed write=audit_chain_savepoint"
+      assert events_with_detail(a.detail) == 0
+
+      # control: the same write in a healthy transaction lands
+      assert {:ok, {:ok, _}} = @repo.transaction(fn -> Writer.write(@repo, a) end)
+      assert events_with_detail(a.detail) == 1
+    end
+  end
 end
