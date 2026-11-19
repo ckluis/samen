@@ -1,4 +1,4 @@
-# SABOTAGE: a host action's non-JSON meta reaches the jsonb outcome, so the finalize fails and the Run 
+# SABOTAGE: a host action's non-JSON meta reaches the jsonb outcome, so the finalize fails and the Run
 #   stays running
 #
 # Flips the named test(s).

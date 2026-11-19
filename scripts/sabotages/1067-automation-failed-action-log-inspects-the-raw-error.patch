@@ -1,4 +1,4 @@
-# SABOTAGE: the failed-action log line inspects Reactor's raw error, which carries the webhook secret and 
+# SABOTAGE: the failed-action log line inspects Reactor's raw error, which carries the webhook secret and
 #   the subject
 #
 # Flips the named test(s).

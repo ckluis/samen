@@ -1,4 +1,4 @@
-# SABOTAGE: a turn commit reveals the vault a second time to write its transcript, so a blip mid-turn fails 
+# SABOTAGE: a turn commit reveals the vault a second time to write its transcript, so a blip mid-turn fails
 #   the commit
 #
 # Flips the named test(s).

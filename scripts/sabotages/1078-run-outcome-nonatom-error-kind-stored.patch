@@ -1,4 +1,4 @@
-# SABOTAGE: a non-atom action error kind is no longer bounded in the stored run outcome (the finalize fails 
+# SABOTAGE: a non-atom action error kind is no longer bounded in the stored run outcome (the finalize fails
 #   and the run stays running)
 #
 # Flips the named test(s).

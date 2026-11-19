@@ -1,4 +1,4 @@
-# SABOTAGE: a failed Run finalize logs the exception message (which carries the run's values) instead of 
+# SABOTAGE: a failed Run finalize logs the exception message (which carries the run's values) instead of
 #   reporting by name
 #
 # Flips the named test(s).

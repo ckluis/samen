@@ -1,4 +1,4 @@
-# SABOTAGE: an ETS ArgumentError is quiet even while the buffer table exists, so a damaged counter row 
+# SABOTAGE: an ETS ArgumentError is quiet even while the buffer table exists, so a damaged counter row
 #   reads as no replay
 #
 # Flips the named test(s).

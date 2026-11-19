@@ -1,4 +1,4 @@
-# SABOTAGE: a replay buffer take that FAILED answers :error, which the monitor counts as a deliberate 
+# SABOTAGE: a replay buffer take that FAILED answers :error, which the monitor counts as a deliberate
 #   discard
 #
 # Flips the named test(s).
