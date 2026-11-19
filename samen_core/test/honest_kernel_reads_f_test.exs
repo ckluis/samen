@@ -22,8 +22,7 @@ defmodule Samen.HonestKernelReadsFTest do
     :ok
   end
 
-  # Take a table away INSIDE the test's sandbox transaction (DDL is transactional in Postgres, rolled back at the
-  # end of the test): every read of it then fails with a real `undefined_table` database error.
+  # The raw message of the error `fun` raises: proof that an injected failure is real, and what a report must NOT repeat.
   defp raw_message(fun) do
     fun.()
     flunk("the read was expected to fail")
@@ -32,6 +31,8 @@ defmodule Samen.HonestKernelReadsFTest do
     e -> Exception.message(e)
   end
 
+  # Take a table away INSIDE the test's sandbox transaction (DDL is transactional in Postgres, rolled back at the
+  # end of the test): every read of it then fails with a real `undefined_table` database error.
   defp hide_table!(table), do: Repo.query!("ALTER TABLE #{table} RENAME TO #{table}_hidden_by_test")
 
   describe "agent Breaker.check_start/2: a run log that cannot be counted is not 'under the rate limit'" do
@@ -295,15 +296,16 @@ defmodule Samen.HonestKernelReadsFTest do
       assert log =~ "write=replay_buffer"
       :ets.insert(Buffer.table(), {:sessions, 0})
 
-      # a frame row that is not a frame: take's sort raises ArgumentError (elem/2), table present
+      # a frame row that is not a frame: take's sort raises ArgumentError (elem/2), table present. No leak refute here:
+      # an ETS/elem ArgumentError message carries no value, so no marker could reach the report and such a refute could
+      # not fail. The reports above are the ones that prove names-only (their exceptions print the damaged row).
       Buffer.stop(self())
       id3 = open_session!()
-      :ets.insert(Buffer.table(), {{:frame, id3, 1}, "not a frame #{@marker}"})
+      :ets.insert(Buffer.table(), {{:frame, id3, 1}, "not a frame"})
       assert_raise ArgumentError, fn -> Enum.sort_by(["not a frame"], &elem(&1, 0)) end
 
       log = capture_log(fn -> assert Buffer.take(id3) == {:error, :unavailable} end)
       assert log =~ "read=replay_buffer"
-      refute log =~ @marker
     end
 
     test "RED: a telemetry event whose capture raises stays total (:ok, the handler is not detached) and is reported by name, without the event data" do
@@ -380,7 +382,9 @@ defmodule Samen.HonestKernelReadsFTest do
     end
 
     # The wide event goes out although its pseudonym or trace ids could not be computed: a telemetry handler on the
-    # event the sinks listen on proves the emission itself.
+    # event the sinks listen on proves the emission itself. The handler is GLOBAL and `assert_received` takes the first
+    # matching message, so this is sound only because the module is `async: false` and nothing else emits a wide event
+    # while it runs.
     defp collect_wide_events! do
       ref = make_ref()
       test = self()
