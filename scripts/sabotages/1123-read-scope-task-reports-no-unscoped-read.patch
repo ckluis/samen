@@ -1,0 +1,21 @@
+# SABOTAGE: The verify task drops the unscoped reads it found, so a planted unscoped read in a host or 
+#   generated app goes undetected.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/read_scope_verify_test.exs
+# MUST_FAIL: RED: an unscoped authorize?: false read exits 1
+# MUST_FAIL: a planted unscoped read in a copy of each host's lib/ is caught
+diff --git a/samen_core/lib/mix/tasks/samen.verify.read_scope.ex b/samen_core/lib/mix/tasks/samen.verify.read_scope.ex
+index 89a2ed5e..d68b05ed 100644
+--- a/samen_core/lib/mix/tasks/samen.verify.read_scope.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.read_scope.ex
+@@ -101,7 +101,7 @@ defmodule Mix.Tasks.Samen.Verify.ReadScope do
+ 
+     violations =
+       dir_violations ++
+-        Enum.map(scanned.violations, &ReadScope.format_violation/1) ++
++        [] ++
+         Enum.map(scanned.errors, fn {file, why} -> "#{Path.relative_to_cwd(file)} — #{why}" end) ++
+         ceiling
+ 

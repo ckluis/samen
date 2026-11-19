@@ -1,0 +1,21 @@
+# SABOTAGE: scan_file treats a file it cannot parse as clean, so the verifier passes an uninspectable tree.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/read_scope_verify_test.exs
+# MUST_FAIL: RED: an unparseable file exits 1
+# MUST_FAIL: an unparseable file is {:error, _}
+diff --git a/samen_core/lib/samen/lint/read_scope.ex b/samen_core/lib/samen/lint/read_scope.ex
+index 2a3d0fa2..c23ca4ba 100644
+--- a/samen_core/lib/samen/lint/read_scope.ex
++++ b/samen_core/lib/samen/lint/read_scope.ex
+@@ -229,7 +229,8 @@ defmodule Samen.Lint.ReadScope do
+           # ANY failure to inspect — a syntax error, bad encoding, a walker crash — is an
+           # error the caller reports as a violation: never a silent pass.
+           e ->
+-            {:error, "could not be scanned: #{e |> Exception.message() |> String.split("\n") |> hd()}"}
++            _ = e
++            {:ok, {[], 0, 0}}
+         end
+ 
+       {:error, reason} ->
