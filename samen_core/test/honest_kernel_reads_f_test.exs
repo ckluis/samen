@@ -240,6 +240,49 @@ defmodule Samen.HonestKernelReadsFTest do
       refute log =~ @marker
     end
 
+    test "RED: an ETS ArgumentError with the table PRESENT (a damaged counter, a non-frame row) is reported and answers the failure value; only an ABSENT table is quiet" do
+      with_buffer!()
+
+      # POSITIVE CONTROL: the same calls on healthy rows answer their healthy values and report nothing
+      healthy = open_session!()
+
+      log =
+        capture_log(fn ->
+          assert Buffer.record(self(), :render, %{}, true) == :ok
+          assert {:ok, ^healthy} = Buffer.session(self())
+          assert Buffer.sessions() == [{healthy, self()}]
+        end)
+
+      refute log =~ "replay_buffer"
+      assert {:ok, _, [_], %{interactions: 1}} = Buffer.take(healthy)
+      Buffer.stop(self())
+
+      # the damaged counter row: a non-integer counter element makes update_counter raise ArgumentError, table present
+      id = open_session!()
+      :ets.insert(Buffer.table(), {{:ctr, id}, 0, 0, :x, 0})
+      assert_raise ArgumentError, fn -> :ets.update_counter(Buffer.table(), {:ctr, id}, {4, 1}) end
+
+      log = capture_log(fn -> assert Buffer.record(self(), :event, %{}, true) == :error end)
+      assert log =~ "write=replay_buffer"
+
+      # the damaged sessions row (open's counter)
+      :ets.insert(Buffer.table(), {:sessions, :x})
+      assert_raise ArgumentError, fn -> :ets.update_counter(Buffer.table(), :sessions, {2, 1}) end
+      log = capture_log(fn -> assert Buffer.open(self(), %{}, %{max_sessions: 10, max_frames: 1, max_bytes: 1}) == :error end)
+      assert log =~ "write=replay_buffer"
+      :ets.insert(Buffer.table(), {:sessions, 0})
+
+      # a frame row that is not a frame: take's sort raises ArgumentError (elem/2), table present
+      Buffer.stop(self())
+      id3 = open_session!()
+      :ets.insert(Buffer.table(), {{:frame, id3, 1}, "not a frame #{@marker}"})
+      assert_raise ArgumentError, fn -> Enum.sort_by(["not a frame"], &elem(&1, 0)) end
+
+      log = capture_log(fn -> assert Buffer.take(id3) == {:error, :unavailable} end)
+      assert log =~ "read=replay_buffer"
+      refute log =~ @marker
+    end
+
     test "RED: a telemetry event whose capture raises stays total (:ok, the handler is not detached) and is reported by name, without the event data" do
       with_buffer!()
       event = [:phoenix, :live_view, :handle_event, :start]

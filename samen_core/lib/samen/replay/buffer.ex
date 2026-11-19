@@ -205,14 +205,17 @@ defmodule Samen.Replay.Buffer do
     end)
   end
 
-  # Every public function is total (see the moduledoc): a raise would reach the LiveView that records. ETS raises
-  # ArgumentError exactly when the table does not exist (capture is not running) or a row was removed by the
-  # session's end, so that is the quiet `missing` answer; ANY other exception is a failure of the buffer itself,
-  # which is reported (names only, never a frame or a value) and answers `failed`.
+  # Every public function is total (see the moduledoc): a raise would reach the LiveView that records. The quiet `missing`
+  # answer is for ONE situation only: the table does not exist (capture is not running), which is what `table_exists?/0`
+  # decides. No function here can raise ArgumentError for a merely missing row while the table is there: `take/1`, the only
+  # remover of a session's rows, runs after the recording process is DOWN (the monitor), and `stop/1` removes only the
+  # process row. So an ArgumentError with the table present is a failure of the buffer itself (a damaged counter row, a row
+  # that is not a frame), and like any other exception it is reported (names only, never a frame or a value) and answers
+  # `failed`.
   defp guarded(kind, missing, failed, fun) do
     fun.()
   rescue
-    ArgumentError -> missing
+    e in ArgumentError -> if table_exists?(), do: report(kind, e, failed), else: missing
     e -> report(kind, e, failed)
   end
 
