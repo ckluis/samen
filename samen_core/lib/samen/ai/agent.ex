@@ -3252,22 +3252,35 @@ defmodule Samen.AI.Agent do
       {:error, :unavailable}
   end
 
+  # Cancelling a parked run withdraws its approval AND terminates the run in ONE transaction. A withdrawal that FAILED (not
+  # one that was unnecessary: already decided, absent, engine not wired) rolls the cancel back and answers the caller
+  # `{:error, :unavailable}` — `:cancelled` with the approval still decidable is a human executing a write the tenant just
+  # withdrew (the same rule `on_proposal_expired/1` holds).
   defp cancel_parked(%Run{} = run) do
     run = reload!(run)
-    _ = withdraw_pending_approval(run, transcript_state(run))
+    state = transcript_state(run)
+    repo = repo!()
 
-    run =
-      run
-      |> Ash.Changeset.for_update(:request_cancel, %{})
-      |> Ash.update!(authorize?: false)
+    result =
+      repo.transaction(fn ->
+        if withdrawal_failed?(withdraw_pending_approval(run, state)), do: repo.rollback(:approval_withdrawal_failed)
 
-    run =
-      run
-      |> Ash.Changeset.for_update(:cancel, %{})
-      |> Ash.update!(authorize?: false)
+        run
+        |> Ash.Changeset.for_update(:request_cancel, %{})
+        |> Ash.update!(authorize?: false)
+        |> Ash.Changeset.for_update(:cancel, %{})
+        |> Ash.update!(authorize?: false)
+      end)
 
-    log_terminal(run)
-    {:ok, run}
+    case result do
+      {:ok, cancelled} ->
+        log_terminal(cancelled)
+        {:ok, cancelled}
+
+      {:error, reason} ->
+        Samen.Observability.Failure.report_write(:agent_cancel_parked, run.org_id, reason)
+        {:error, :unavailable}
+    end
   end
 
   defp withdraw_pending_approval(%Run{} = run, state) do
@@ -3294,7 +3307,8 @@ defmodule Samen.AI.Agent do
          {:ok, approvals} <- Samen.Approvals.list_pending(run.org_id, WriteProposal.kind()) do
       approvals
       |> Enum.filter(fn approval -> WriteProposal.parse_subject_ref(approval.subject_ref) == {:ok, turn.id} end)
-      |> Enum.map(&Samen.Approvals.cancel(&1.id, WriteProposal.requester_principal_id()))
+      # lazy: stop at the first failed cancel (inside a caller's transaction a failed one has already poisoned it)
+      |> Stream.map(&Samen.Approvals.cancel(&1.id, WriteProposal.requester_principal_id()))
       |> Enum.find(:ok, &withdrawal_failed?/1)
     else
       # no proposed turn row: nothing was parked behind an approval

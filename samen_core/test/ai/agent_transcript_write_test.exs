@@ -878,6 +878,37 @@ defmodule Samen.AI.AgentTranscriptWriteTest do
     end
   end
 
+  describe "cancelling a parked run withdraws its approval or does not cancel" do
+    test "control: a healthy cancel withdraws the approval and terminates the run" do
+      {s, run, _target, approval} = propose!()
+
+      assert {:ok, %{state: :cancelled}} = Agent.cancel(s, run.id)
+      assert {:ok, %{state: :cancelled}} = Approvals.get(approval.id)
+      assert pending_approvals(s) == []
+    end
+
+    test "RED: a withdrawal that FAILS rolls the cancel back and answers :unavailable" do
+      {s, run, _target, approval} = propose!()
+      install_cancel_trigger!()
+
+      {result, log} = with_log(fn -> Agent.cancel(s, run.id) end)
+
+      assert {:error, :unavailable} = result
+      assert log =~ "write failed write=agent_cancel_parked"
+      assert Enum.find(runs_of(s), &(&1.id == run.id)).state == :awaiting_approval
+      assert Enum.find(runs_of(s), &(&1.id == run.id)).cancel_requested_at == nil
+      assert {:ok, %{state: :pending}} = Approvals.get(approval.id)
+      assert [_] = pending_approvals(s)
+    end
+
+    test "control: an approval that is already decided is nothing to withdraw, the cancel still lands" do
+      {s, run, _target, approval} = propose!()
+      assert {:ok, %{state: :cancelled}} = Approvals.cancel(approval.id, Agent.WriteProposal.requester_principal_id())
+
+      assert {:ok, %{state: :cancelled}} = Agent.cancel(s, run.id)
+    end
+  end
+
   describe "a halt never depends on the approvals engine (fail-closed, not fail-open)" do
     # Review 4: the end-of-run withdrawal made a halt scan the org's approvals; an unreadable approvals store then made
     # the halt RAISE and be lost. A halt or a kill on a turn with no prior proposal must land regardless.
