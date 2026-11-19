@@ -467,9 +467,13 @@ defmodule Samen.AI.Agent do
       boundary (fail-closed; A2);
     * `{:error, reason, run}` — a provider/chokepoint error (bounded, EG6-normalized);
       the run is terminal `:failed` with a bounded `error_kind`;
+    * `{:error, :transcript_unavailable, run}` — the turn's transcript could not be written because the
+      prior views could not be read back from the vault: the write was refused (the stored transcript is
+      untouched) and the run is terminal `:failed`;
     * `{:error, reason}` — the run could not start (`:org_scope_required`,
       `:invalid_goal`, `:invalid_budgets`, A2's breaker refusals — `:killed`,
-      `:rate_tripped`, `:provider_tripped` — and A3's tool-resolution refusals:
+      `:rate_tripped`, `:provider_tripped`, and `:unavailable` when the run log cannot be COUNTED
+      (fail-closed) — and A3's tool-resolution refusals:
       `:invalid_tools` for a declared kind that is unregistered or not opted in,
       `:tools_not_supported` for a declared `effect: :write` tool before A4;
       nothing is persisted for a refusal).
@@ -527,7 +531,7 @@ defmodule Samen.AI.Agent do
   create's own transaction** (the `EventCapture` idiom: the job exists iff the row
   committed; a lost/failed enqueue is recovered by the `:agent_turn_due` watchdog).
   Returns `{:ok, run}` (the `:queued` cursor) or the same start refusals as `run/4`
-  (`{:error, :killed | :rate_tripped | :provider_tripped | …}` — nothing persisted).
+  (`{:error, :killed | :rate_tripped | :provider_tripped | :unavailable | …}` — nothing persisted).
 
   A per-run `:hooks` opt (UXD-08, T21-verdict.json) is persisted on the row (`arn_hooks`)
   and re-resolved by the durable worker at each execution batch — it fires exactly as it
