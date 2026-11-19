@@ -96,11 +96,14 @@ defmodule Samen.AuditChain.Writer do
   # nested `transaction` poisons the caller's). The pair is undone on EVERY way out of `fun`:
   #   * a returned `{:error, _}` (the chain append failed AFTER the event insert: a subject key that cannot be
   #     unwrapped, a rejected row) rolls back TO the savepoint;
-  #   * a RAISE, EXIT or THROW (a KMS adapter that raises in `unwrap/1`, a crypto failure) does too, and is then re-raised
-  #     unchanged. A raised DB error already aborted the caller's transaction (25P02); the rollback to the savepoint also
-  #     un-aborts it, so a caller that rescues and goes on has neither row and a usable transaction. A non-DB raise does
-  #     NOT abort Postgres, so without this the `aud_event` stayed behind, unchained, in a transaction the caller then
-  #     committed.
+  #   * a RAISE, EXIT or THROW (a KMS adapter that raises in `unwrap/1`, a crypto failure) does too (best effort), and is
+  #     then re-raised unchanged. A non-DB raise does NOT abort Postgres, so without this the `aud_event` stayed behind,
+  #     unchained, in a transaction the caller then committed. A raise from a DB error OUTSIDE `AuditChain.append`'s own
+  #     nested transaction (the plain event insert) is undone by the rollback to the savepoint, which also clears the
+  #     aborted state. A raise INSIDE `append`'s nested transaction (the advisory-lock query, `do_append`) leaves the
+  #     caller's transaction FAILED: DBConnection refuses every further query, so the rollback to the savepoint itself
+  #     fails (reported once more as `audit_chain_savepoint`), the original exception is re-raised, and the caller's
+  #     commit becomes a rollback. That is the safe direction; the second report is accepted, not suppressed.
   # The savepoint statements are `query/2`s, not `query!/2`s, and a failure of one is the same
   # `{:error, :audit_chain_unavailable}` (reported by name) the existence probe answers: an already-aborted caller
   # transaction, or a dropped connection, is an error tuple, never a raised 25P02 that hides the reason. The savepoint takes
