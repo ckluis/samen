@@ -211,12 +211,20 @@ defmodule Samen.Automation.RunRecord do
     write_failed
   )a)
 
-  defp safe_error_kind(nil), do: nil
-  defp safe_error_kind(k) when is_atom(k) do
+  @known_kind_names Enum.map(@known_error_kinds, &Atom.to_string/1)
+
+  @doc """
+  The bounded `error_kind` the Run row stores for ANY value an action answered: a known atom as itself, everything else
+  (an unrecognized atom, a tuple, a string, a map) `:action_failed`. The one bound, shared with the worker's log line.
+  """
+  @spec safe_error_kind(term()) :: atom() | nil
+  def safe_error_kind(nil), do: nil
+
+  def safe_error_kind(k) when is_atom(k) do
     if MapSet.member?(@known_error_kinds, k), do: k, else: :action_failed
   end
 
-  defp safe_error_kind(_), do: :action_failed
+  def safe_error_kind(_), do: :action_failed
 
   # Outcomes must stay bounded (ids/enums/numbers only, ADR-039 §5.1) — the
   # PERSISTENCE boundary, so this is default-DENY (an explicit key ALLOWLIST),
@@ -237,9 +245,25 @@ defmodule Samen.Automation.RunRecord do
     outcomes
     |> Enum.filter(&plain_map?/1)
     |> Enum.map(&Map.take(&1, @allowed_outcome_keys ++ @allowed_outcome_keys_str))
+    |> Enum.map(&bound_outcome_kind/1)
   end
 
   defp bounded_outcomes(_), do: []
+
+  # A host action may answer ANY term as its error kind (`{:upstream_rejected, "jane@example.test"}`). A tuple cannot be
+  # encoded into the jsonb outcome (the whole finalize failed, leaving the run `:running` for good) and a string would
+  # persist whatever value it carries: only an atom (developer-chosen) or a known kind name survives; the rest is the
+  # same `:action_failed` the run's own `error_kind` column gets.
+  defp bound_outcome_kind(outcome) do
+    Enum.reduce(["error_kind", :error_kind], outcome, fn key, acc ->
+      case acc do
+        %{^key => kind} when is_atom(kind) -> acc
+        %{^key => kind} when is_binary(kind) -> if kind in @known_kind_names, do: acc, else: Map.put(acc, key, :action_failed)
+        %{^key => _other} -> Map.put(acc, key, :action_failed)
+        _ -> acc
+      end
+    end)
+  end
 
   defp plain_map?(%{__struct__: _}), do: false
   defp plain_map?(m) when is_map(m), do: true

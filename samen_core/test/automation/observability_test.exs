@@ -184,6 +184,80 @@ defmodule Samen.Automation.ObservabilityTest do
     refute log =~ "Reactor.Argument"
   end
 
+  defmodule TallyThenFail do
+    @moduledoc false
+    @behaviour Samen.Automation.Action
+    def kind, do: :zz_tally
+    def validate(config, _key), do: {:ok, config}
+
+    def run(_config, _ctx) do
+      :counters.add(:persistent_term.get({__MODULE__, :ran}), 1, 1)
+      {:ok, %{}}
+    end
+  end
+
+  defmodule NonAtomFails do
+    @moduledoc false
+    @behaviour Samen.Automation.Action
+    def kind, do: :zz_nonatom
+    def validate(config, _key), do: {:ok, config}
+    def run(_config, _ctx), do: {:error, {:upstream_rejected, "jane.doe-marker-5521@example.test"}}
+  end
+
+  test "RED: a host action failing with a NON-ATOM error does not raise out of the worker (no Oban retry, no re-run of the earlier action, no value in the log or the job errors); an atom error behaves the same (control)" do
+    marker = "jane.doe-marker-5521@example.test"
+    prev = Application.get_env(:samen_core, Samen.Automation.Action)
+
+    Application.put_env(:samen_core, Samen.Automation.Action,
+      extra: %{"zz_tally" => TallyThenFail, "zz_nonatom" => NonAtomFails, "zz_fail" => Samen.Automation.ObservabilityTest.AlwaysFails}
+    )
+
+    ran = :counters.new(1, [])
+    :persistent_term.put({TallyThenFail, :ran}, ran)
+
+    on_exit(fn ->
+      :persistent_term.erase({TallyThenFail, :ran})
+      restore(:samen_core, Samen.Automation.Action, prev)
+    end)
+
+    # the injected failure really carries the marker, and interpolating it raises with the marker in the message
+    assert {:error, {:upstream_rejected, ^marker}} = NonAtomFails.run(%{}, nil)
+    assert_raise Protocol.UndefinedError, ~r/#{marker}/, fn -> apply(&to_string/1, [{:upstream_rejected, marker}]) end
+
+    owner = Ash.UUID.generate()
+
+    # one org per firing: a second workflow of the same org would also fire on the next target
+    fire = fn failing_kind ->
+      org = Ash.UUID.generate()
+      :counters.put(ran, 1, 0)
+      wf = create_workflow!(org, owner, conditions: [], actions: [%{"kind" => "zz_tally"}, %{"kind" => failing_kind}])
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          create_target!(org)
+          assert %{failure: 0, discard: 0, snoozed: 0} = drain()
+        end)
+
+      {org, wf, log, :counters.get(ran, 1)}
+    end
+
+    # POSITIVE CONTROL: an atom error — the job finishes, the earlier action ran once, the Run row is failed
+    {control_org, control_wf, control_log, control_ran} = fire.("zz_fail")
+    assert control_ran == 1
+    assert control_log =~ "error_kind=write_failed"
+    assert [%{state: :failed, error_kind: :write_failed}] = runs_for(control_org, control_wf.id)
+
+    # RED: the non-atom error has the SAME outcome, bounded to :action_failed
+    {org, wf, log, ran_count} = fire.("zz_nonatom")
+    assert ran_count == 1, "a retry re-ran the earlier action"
+    assert log =~ "error_kind=action_failed"
+    refute log =~ marker
+    assert [%{state: :failed, error_kind: :action_failed}] = runs_for(org, wf.id)
+
+    %{rows: rows} = TestRepo.query!("select errors::text from oban_jobs")
+    refute Enum.any?(rows, fn [errors] -> errors =~ marker end), "the marker reached oban_jobs.errors"
+  end
+
   test "row 3 — a non-matching condition -> Run row :skipped/:conditions_unmet, never :running" do
     org = Ash.UUID.generate()
     owner = Ash.UUID.generate()

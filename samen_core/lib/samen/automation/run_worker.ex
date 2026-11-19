@@ -307,9 +307,12 @@ defmodule Samen.Automation.RunWorker do
       {:error, reason} ->
         {outcomes, error_kind} = extract_failure(reason)
         RunRecord.fail!(run_row, outcomes, error_kind)
-        # Bounded error_kind ONLY: the raw reason is Reactor's error, whose step arguments carry the whole Context
-        # (the webhook secret, the actor, the subject values), so it is never inspected into a log line.
-        Logger.warning("[Automation.RunWorker] workflow #{wf.id} action(s) failed: error_kind=#{error_kind}")
+        # Bounded error_kind ONLY, the SAME value the Run row stores: the raw reason is Reactor's error, whose step
+        # arguments carry the whole Context (the webhook secret, the actor, the subject values), and a host action may
+        # answer a non-atom kind (a tuple or string carrying a value), which must neither be interpolated (it raises, and
+        # Oban retries the job, re-running the actions) nor printed.
+        bounded = RunRecord.safe_error_kind(error_kind || :action_failed)
+        Logger.warning("[Automation.RunWorker] workflow #{wf.id} action(s) failed: error_kind=#{bounded}")
         :ok
     end
   end
