@@ -24,6 +24,14 @@ defmodule Samen.HonestKernelReadsFTest do
 
   # Take a table away INSIDE the test's sandbox transaction (DDL is transactional in Postgres, rolled back at the
   # end of the test): every read of it then fails with a real `undefined_table` database error.
+  defp raw_message(fun) do
+    fun.()
+    flunk("the read was expected to fail")
+  rescue
+    e in ExUnit.AssertionError -> reraise e, __STACKTRACE__
+    e -> Exception.message(e)
+  end
+
   defp hide_table!(table), do: Repo.query!("ALTER TABLE #{table} RENAME TO #{table}_hidden_by_test")
 
   describe "agent Breaker.check_start/2: a run log that cannot be counted is not 'under the rate limit'" do
@@ -61,6 +69,7 @@ defmodule Samen.HonestKernelReadsFTest do
       assert {:error, :not_found} = Samen.AI.Agent.cancel(scope, Ash.UUID.generate())
 
       hide_table!("ai_agent_run")
+      assert raw_message(fn -> Ash.read!(Samen.AI.Agent.Run, authorize?: false) end) =~ "ai_agent_run", "the raw error must name the table"
 
       log =
         capture_log(fn -> assert {:error, :unavailable} = Samen.AI.Agent.cancel(scope, Ash.UUID.generate()) end)
@@ -91,6 +100,7 @@ defmodule Samen.HonestKernelReadsFTest do
       assert :ok = RunWorker.perform(run_job(Ash.UUID.generate()))
 
       hide_table!("awf_workflow")
+      assert raw_message(fn -> Ash.read!(Workflow, authorize?: false) end) =~ "awf_workflow", "the raw error must name the table"
 
       org = Ash.UUID.generate()
       log = capture_log(fn -> assert {:error, :unavailable} = RunWorker.perform(run_job(Ash.UUID.generate(), org)) end)
@@ -140,6 +150,7 @@ defmodule Samen.HonestKernelReadsFTest do
       opts = [run_module: SamenCore.Support.AutomationFixture.Run, repo: Repo]
 
       hide_table!("sar_run")
+      assert raw_message(fn -> Ash.count!(SamenCore.Support.AutomationFixture.Run, authorize?: false) end) =~ "sar_run", "the raw error must name the table"
 
       log = capture_log(fn -> assert :ok = Samen.Automation.Breaker.check!(wf, opts) end)
 
@@ -318,28 +329,37 @@ defmodule Samen.HonestKernelReadsFTest do
   describe "observability telemetry handlers: a handler failure is total AND on record" do
     alias Samen.Observability.{JobSpans, LiveTelemetry}
 
-    test "RED: a job span that cannot be started or ended is reported by name (write), never raised, never with the job data; a well-formed job is silent (control)" do
+    defp job_span_probe! do
       good = %{id: System.unique_integer([:positive]), worker: "W", queue: "q", attempt: 1, meta: %{}}
       bad = "not a job #{@marker}"
-
-      # POSITIVE CONTROL: a well-formed job starts and ends its span without a report
-      log =
-        capture_log(fn ->
-          assert :ok = JobSpans.handle_event([:oban, :job, :start], %{}, %{job: good}, %{})
-          assert :ok = JobSpans.handle_event([:oban, :job, :stop], %{}, %{job: good}, %{})
-        end)
-
-      refute log =~ "job_span_"
-
       assert_raise BadMapError, ~r/#{@marker}/, fn -> apply(Map, :get, [bad, :meta]) end
+      {good, bad}
+    end
 
-      log =
-        capture_log(fn ->
-          assert :ok = JobSpans.handle_event([:oban, :job, :start], %{}, %{job: bad}, %{})
-          assert :ok = JobSpans.handle_event([:oban, :job, :stop], %{}, %{job: bad}, %{})
-        end)
+    test "RED: a job span that cannot be started is reported by name (write), never raised, never with the job data; a well-formed job is silent (control)" do
+      {good, bad} = job_span_probe!()
+
+      # POSITIVE CONTROL: a well-formed job starts its span without a report
+      log = capture_log(fn -> assert :ok = JobSpans.handle_event([:oban, :job, :start], %{}, %{job: good}, %{}) end)
+      refute log =~ "job_span_"
+      JobSpans.handle_event([:oban, :job, :stop], %{}, %{job: good}, %{})
+
+      log = capture_log(fn -> assert :ok = JobSpans.handle_event([:oban, :job, :start], %{}, %{job: bad}, %{}) end)
 
       assert log =~ "write=job_span_start"
+      refute log =~ @marker
+    end
+
+    test "RED: a job span that cannot be ended is reported by name (write), never raised, never with the job data; a well-formed job is silent (control)" do
+      {good, bad} = job_span_probe!()
+
+      # POSITIVE CONTROL: a well-formed job ends its span without a report
+      JobSpans.handle_event([:oban, :job, :start], %{}, %{job: good}, %{})
+      log = capture_log(fn -> assert :ok = JobSpans.handle_event([:oban, :job, :stop], %{}, %{job: good}, %{}) end)
+      refute log =~ "job_span_"
+
+      log = capture_log(fn -> assert :ok = JobSpans.handle_event([:oban, :job, :stop], %{}, %{job: bad}, %{}) end)
+
       assert log =~ "write=job_span_end"
       refute log =~ @marker
     end
@@ -359,16 +379,54 @@ defmodule Samen.HonestKernelReadsFTest do
       refute log =~ @marker
     end
 
-    test "RED: an actor pseudonym that cannot be computed and a current span that cannot be read are each reported by name; the event still goes out" do
+    # The wide event goes out although its pseudonym or trace ids could not be computed: a telemetry handler on the
+    # event the sinks listen on proves the emission itself.
+    defp collect_wide_events! do
+      ref = make_ref()
+      test = self()
+      id = {__MODULE__, ref}
+      :telemetry.attach(id, Samen.WideEvent.telemetry_event(), fn _e, _m, meta, _c -> send(test, {ref, meta}) end, nil)
+      on_exit(fn -> :telemetry.detach(id) end)
+      ref
+    end
+
+    defmodule PseudonymKms do
+      def pseudonym(_subject, _subject_again), do: {:ok, "pseudonym-f-0001"}
+    end
+
+    test "RED: an actor pseudonym that cannot be computed is reported by name and the event still goes out without an actor id" do
       event = [:phoenix, :live_view, :mount, :stop]
-      meta = %{socket: %{view: __MODULE__, assigns: %{samen_tenant_principal: "u-#{System.unique_integer([:positive])}"}}}
       kms = :"Elixir.Kms#{@marker}"
 
+      # POSITIVE CONTROL: a working KMS puts the actor id on the very same event, silently
+      control_ref = collect_wide_events!()
+      principal = "u-#{System.unique_integer([:positive])}"
+      meta = %{socket: %{view: __MODULE__, assigns: %{samen_tenant_principal: principal}}}
+
+      log = capture_log(fn -> assert :ok = LiveTelemetry.handle_event(event, %{}, meta, %{kms: PseudonymKms}) end)
+
+      refute log =~ "live_telemetry_pseudonym"
+      assert_received {^control_ref, %{actor_id: "pseudonym-f-0001"}}
+
+      assert_raise UndefinedFunctionError, ~r/#{@marker}/, fn -> kms.pseudonym("p", "p") end
+
+      ref = collect_wide_events!()
+      # a second principal: the first one's pseudonym is memoized in this process
+      meta = put_in(meta.socket.assigns.samen_tenant_principal, "u-#{System.unique_integer([:positive])}")
+
       log = capture_log(fn -> assert :ok = LiveTelemetry.handle_event(event, %{}, meta, %{kms: kms}) end)
+
       assert log =~ "read=live_telemetry_pseudonym"
       refute log =~ @marker
+      assert_received {^ref, emitted}
+      refute Map.get(emitted, :actor_id)
+    end
 
+    test "RED: a current span that cannot be read is reported by name and the event still goes out without trace ids" do
+      event = [:phoenix, :live_view, :mount, :stop]
       assert_raise Protocol.UndefinedError, ~r/#{@marker}/, fn -> to_string({:damaged, @marker}) end
+
+      ref = collect_wide_events!()
 
       log =
         capture_log(fn ->
@@ -383,6 +441,8 @@ defmodule Samen.HonestKernelReadsFTest do
 
       assert log =~ "read=live_telemetry_trace"
       refute log =~ @marker
+      assert_received {^ref, emitted}
+      refute Map.get(emitted, :trace_id)
     end
   end
 end

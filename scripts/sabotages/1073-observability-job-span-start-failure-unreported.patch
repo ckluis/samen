@@ -3,7 +3,7 @@
 # Flips the named test(s).
 # APP: samen_core
 # TEST_FILES: test/honest_kernel_reads_f_test.exs
-# MUST_FAIL: RED: a job span that cannot be started or ended is reported
+# MUST_FAIL: RED: a job span that cannot be started is reported
 diff --git a/samen_core/lib/samen/observability/job_spans.ex b/samen_core/lib/samen/observability/job_spans.ex
 index 57c220ff..d35f4046 100644
 --- a/samen_core/lib/samen/observability/job_spans.ex

@@ -3,7 +3,7 @@
 # Flips the named test(s).
 # APP: samen_core
 # TEST_FILES: test/honest_kernel_reads_f_test.exs
-# MUST_FAIL: RED: an actor pseudonym that cannot be computed
+# MUST_FAIL: RED: a current span that cannot be read is reported
 diff --git a/samen_core/lib/samen/observability/live_telemetry.ex b/samen_core/lib/samen/observability/live_telemetry.ex
 index 097cf117..209a769a 100644
 --- a/samen_core/lib/samen/observability/live_telemetry.ex
