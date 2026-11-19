@@ -3256,20 +3256,25 @@ defmodule Samen.AI.Agent do
   # one that was unnecessary: already decided, absent, engine not wired) rolls the cancel back and answers the caller
   # `{:error, :unavailable}` — `:cancelled` with the approval still decidable is a human executing a write the tenant just
   # withdrew (the same rule `on_proposal_expired/1` holds).
+  #
+  # LOCK ORDER: run row first, then the approval — the order the expiry sweep takes (`:expire_due` updates the run, and its
+  # `after_action` withdraws the approval). The opposite order let a concurrent cancel and expiry deadlock. The run is
+  # re-read under its `FOR UPDATE` lock: a run the expiry (or a resume) finished first is no longer parked, and the
+  # cancel answers `{:error, :already_terminal}` instead of cancelling a terminal run. Any failed update inside the
+  # transaction rolls it back and answers `{:error, :unavailable}` (reported by name): this function never raises.
   defp cancel_parked(%Run{} = run) do
-    run = reload!(run)
-    state = transcript_state(run)
     repo = repo!()
 
     result =
       repo.transaction(fn ->
-        if withdrawal_failed?(withdraw_pending_approval(run, state)), do: repo.rollback(:approval_withdrawal_failed)
-
-        run
-        |> Ash.Changeset.for_update(:request_cancel, %{})
-        |> Ash.update!(authorize?: false)
-        |> Ash.Changeset.for_update(:cancel, %{})
-        |> Ash.update!(authorize?: false)
+        with {:ok, locked} <- lock_parked(run),
+             :ok <- withdraw_for_cancel(locked),
+             {:ok, requested} <- run_update(locked, :request_cancel),
+             {:ok, cancelled} <- run_update(requested, :cancel) do
+          cancelled
+        else
+          {:error, reason} -> repo.rollback(reason)
+        end
       end)
 
     case result do
@@ -3277,10 +3282,45 @@ defmodule Samen.AI.Agent do
         log_terminal(cancelled)
         {:ok, cancelled}
 
+      {:error, :already_terminal} ->
+        {:error, :already_terminal}
+
       {:error, reason} ->
         Samen.Observability.Failure.report_write(:agent_cancel_parked, run.org_id, reason)
         {:error, :unavailable}
     end
+  rescue
+    e ->
+      Samen.Observability.Failure.report_write(:agent_cancel_parked, run.org_id, e)
+      {:error, :unavailable}
+  end
+
+  defp lock_parked(%Run{} = run) do
+    require Ash.Query
+
+    Run
+    |> Ash.Query.filter(id == ^run.id)
+    |> Ash.Query.ensure_selected([:org_id, :transcript])
+    |> Ash.Query.lock(:for_update)
+    |> Ash.read(authorize?: false)
+    |> case do
+      {:ok, [%Run{state: :awaiting_approval} = locked | _]} -> {:ok, locked}
+      {:ok, [%Run{} | _]} -> {:error, :already_terminal}
+      {:ok, []} -> {:error, :run_not_found}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp withdraw_for_cancel(%Run{} = locked) do
+    if withdrawal_failed?(withdraw_pending_approval(locked, transcript_state(locked))),
+      do: {:error, :approval_withdrawal_failed},
+      else: :ok
+  end
+
+  defp run_update(%Run{} = run, action) do
+    run
+    |> Ash.Changeset.for_update(action, %{})
+    |> Ash.update(authorize?: false)
   end
 
   defp withdraw_pending_approval(%Run{} = run, state) do

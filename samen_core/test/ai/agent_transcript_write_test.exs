@@ -419,6 +419,14 @@ defmodule Samen.AI.AgentTranscriptWriteTest do
       id
     end
 
+    defp drain_sql(acc) do
+      receive do
+        {:sql, q} -> drain_sql([q | acc])
+      after
+        0 -> Enum.reverse(acc)
+      end
+    end
+
     defp propose! do
       s = new_scope()
 
@@ -899,6 +907,58 @@ defmodule Samen.AI.AgentTranscriptWriteTest do
       assert Enum.find(runs_of(s), &(&1.id == run.id)).cancel_requested_at == nil
       assert {:ok, %{state: :pending}} = Approvals.get(approval.id)
       assert [_] = pending_approvals(s)
+    end
+
+    test "RED: a FAILING run update inside the cancel rolls the withdrawal back and answers :unavailable, never raises" do
+      {s, run, _target, approval} = propose!()
+
+      Ecto.Adapters.SQL.query!(SamenCore.TestRepo, """
+      CREATE FUNCTION cp_fail_run_cancel() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.cancel_requested_at IS NOT NULL THEN RAISE EXCEPTION 'cp run update refused'; END IF;
+        RETURN NEW;
+      END $$
+      """)
+
+      Ecto.Adapters.SQL.query!(
+        SamenCore.TestRepo,
+        "CREATE TRIGGER cp_fail_run_cancel BEFORE UPDATE ON ai_agent_run FOR EACH ROW EXECUTE FUNCTION cp_fail_run_cancel()"
+      )
+
+      {result, log} = with_log(fn -> Agent.cancel(s, run.id) end)
+
+      assert {:error, :unavailable} = result
+      assert log =~ "write failed write=agent_cancel_parked"
+      assert Enum.find(runs_of(s), &(&1.id == run.id)).state == :awaiting_approval
+      # the approval withdrawal ran BEFORE the failed update, in the same transaction: it is rolled back with it
+      assert {:ok, %{state: :pending}} = Approvals.get(approval.id)
+    end
+
+    test "the cancel takes the RUN row lock before it touches the approval (the expiry sweep's order: no deadlock)" do
+      {s, run, _target, _approval} = propose!()
+      parent = self()
+      handler = "cp-lock-order-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach(
+        handler,
+        [:samen_core, :test_repo, :query],
+        fn _e, _m, %{query: q}, _ -> send(parent, {:sql, q}) end,
+        nil
+      )
+
+      try do
+        assert {:ok, %{state: :cancelled}} = Agent.cancel(s, run.id)
+      after
+        :telemetry.detach(handler)
+      end
+
+      queries = drain_sql([])
+      run_lock = Enum.find_index(queries, &(&1 =~ ~s(FROM "ai_agent_run") and &1 =~ "FOR UPDATE"))
+      first_approval = Enum.find_index(queries, &(&1 =~ "_approval" and &1 =~ ~r/UPDATE|FOR UPDATE/))
+
+      assert is_integer(run_lock), "no FOR UPDATE on the run row was issued: #{inspect(queries)}"
+      assert is_integer(first_approval), "no approval write was issued"
+      assert run_lock < first_approval
     end
 
     test "control: an approval that is already decided is nothing to withdraw, the cancel still lands" do
