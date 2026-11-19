@@ -1,9 +1,9 @@
-# SABOTAGE: an expiry reveals the vault a third time to write its line
+# SABOTAGE: an expiry reveals the vault a second time to write its line
 #
 # Flips the named test(s).
 # APP: samen_core
 # TEST_FILES: test/ai/agent_transcript_write_test.exs
-# MUST_FAIL: RED: an expiry reads the vault twice
+# MUST_FAIL: RED: an expiry reads the vault once
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
 index 049a1655..6baeaba8 100644
 --- a/samen_core/lib/samen/ai/agent.ex
