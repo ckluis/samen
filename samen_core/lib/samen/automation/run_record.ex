@@ -270,10 +270,13 @@ defmodule Samen.Automation.RunRecord do
   end
 
   # `meta` is the one outcome field a host action fills with its own terms (`ActionStep.bounded/1` only drops `:detail`).
-  # The column is jsonb, so a tuple, a pid, a function, an invalid-UTF-8 binary or a nested term made the whole finalize
-  # fail, leaving the run `:running` for good. Only scalar values survive (a string, number, boolean, nil or atom, under
-  # an atom or string key); everything else is dropped, and a `meta` that is not a map is dropped whole. Values that
-  # already were scalars are stored unchanged.
+  # The column is jsonb, so a tuple, a pid, a function or an invalid-UTF-8 binary made the whole finalize fail, leaving
+  # the run `:running` for good. Only scalar values survive (a string, number, boolean, nil or atom, under an atom or
+  # string key); everything else is dropped, and a `meta` that is not a map is dropped whole. That includes JSON-safe
+  # NESTED values (a list of maps such as `search_records`' `hits`), which would have been stored: they go by policy,
+  # not because they break the finalize. ADR-039 section 5.1 bounds an outcome to ids, enums and numbers, and nothing
+  # reads a stored outcome's `meta` (undo uses the in-memory reactor value). Values that already were scalars are stored
+  # unchanged.
   defp bound_outcome_meta(outcome) do
     Enum.reduce(["meta", :meta], outcome, fn key, acc ->
       case acc do
