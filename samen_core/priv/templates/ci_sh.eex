@@ -98,6 +98,13 @@ echo "--- step 13/18: mix samen.verify.same_org_fk"
 mix samen.verify.same_org_fk
 echo "    PASSED"
 
+# read_scope (T132/S15): no `authorize?: false` read in this app's lib/ bypasses org scoping — a bare one
+# returns EVERY org's rows. Pin it with an org_id/id filter, or mark a deliberately org-less read
+# `# authz-scope: <why-safe>` and raise the ceiling below by one (a conscious, reviewed change).
+echo "--- step 13a/18: mix samen.verify.read_scope (read-scope lint)"
+mix samen.verify.read_scope --max-sanctioned 0
+echo "    PASSED"
+
 # ARCH-4: every org-scoped resource has a btree index (org_id, <keyset sort>, id) in the live DB,
 # so an org-scoped keyset page is an index scan, not a sequential scan. A resource added without
 # its index turns this red; `mix samen.gen.indexes` writes the migration.

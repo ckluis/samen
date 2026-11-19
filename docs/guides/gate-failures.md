@@ -419,6 +419,27 @@ create/update actions (exactly what the error message prints).
 
 ---
 
+## Step 13a — `mix samen.verify.read_scope`
+
+**Error** (`samen_core/lib/mix/tasks/samen.verify.read_scope.ex`, scanner `samen_core/lib/samen/lint/read_scope.ex`):
+
+```text
+UNSCOPED `authorize?: false` READ(S) (T132 defense-in-depth): ...
+lib/<app>/x.ex:42 — fun/1
+lib/<app>/y.ex — could not be scanned: ...
+N reads carry a `# authz-scope:` marker, over the ceiling of M (--max-sanctioned) ...
+```
+
+**Meaning:** tenant isolation is Ash policy (`OrgScope`) and `authorize?: false` turns it off, so a direct read with it and no
+`org_id`/`id` narrowing returns every org's rows. This runs in every host (`demo`, `driftwood`, `pawchart`) and every generated
+app, over that app's own `lib/`. A file it cannot read or parse, a missing or empty source dir, and more `# authz-scope:` markers
+than the ceiling in `ci.sh` all fail: it never passes on a tree it could not inspect.
+**Fix:** pin the read with an `org_id`/`id` filter (or a by-id `Ash.get`, or a scalar aggregate). A read that is deliberately
+org-less (a system sweep, a pre-auth credential lookup) takes a `# authz-scope: <why it is safe>` marker on the read and a ceiling
+raised by one in `ci.sh`. Run it by hand: `mix samen.verify.read_scope [--source-dirs lib] [--max-sanctioned N]`.
+
+---
+
 ## Step 13b — `mix samen.verify.indexes`
 
 **Error** (`samen_core/lib/mix/tasks/samen.verify.indexes.ex`):

@@ -145,6 +145,35 @@ defmodule Samen.Gen.TemplatesParityTest do
     end
   end
 
+  # D3 phase 1: tenant isolation is Ash policy only, and `authorize?: false` turns it off — so EVERY
+  # generated app's ci.sh must run the read-scope lint over its OWN lib/ (the reference hosts do), and
+  # the app as emitted must PASS it with EXACTLY the sanction ceiling its ci.sh pins (the API-key
+  # auth-step lookup is the one org-less read a fresh api app carries). Asserted on the RENDERED output,
+  # so a template edit that drops the step, adds an unscoped read, or drifts the ceiling fails here even
+  # after a golden re-capture.
+  test "every generated ci.sh runs samen.verify.read_scope, and the rendered lib/ passes it at EXACTLY the pinned ceiling (D3 phase 1)" do
+    for {set, files} <- render_all() do
+      ci = files["ci.sh"]
+      assert is_binary(ci), "#{set} emitted no ci.sh — the read-scope guard has nothing to check"
+
+      lib_sources = for {path, src} <- files, String.starts_with?(path, "lib/"), String.ends_with?(path, ".ex"), do: {path, src}
+      assert lib_sources != [], "#{set} emitted no lib/*.ex"
+
+      {violations, sanctioned} =
+        Enum.reduce(lib_sources, {[], 0}, fn {path, src}, {v, s} ->
+          {viol, _gov, sanc} = Samen.Lint.ReadScope.scan_source(src, path)
+          {v ++ viol, s + sanc}
+        end)
+
+      assert violations == [],
+             "#{set}: the generated lib/ FAILS its own read-scope lint: #{inspect(violations)}"
+
+      assert ci =~ "mix samen.verify.read_scope --max-sanctioned #{sanctioned}\n",
+             "#{set}/ci.sh must run the read-scope lint pinned at the measured #{sanctioned} sanction(s) — " <>
+               "an `authorize?: false` read added to a generated app would otherwise bypass org scoping unnoticed"
+    end
+  end
+
   # T60 framework-first guard: EVERY generated app's operator-mount migration must EMIT the
   # chat offline-escalation dedupe partial-unique index. This is stronger than the byte-golden
   # (which would silently accept a regenerated index-less golden): if a future template edit

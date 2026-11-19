@@ -200,6 +200,7 @@ own output (`--- step N/M: …`); this is the headless/web shape, in order:
 9b  samen.verify.oban_queues            15  samen.verify.aggregate_privacy
 16  samen.verify.ai_prompt_masking      17  mix test (default suite)
 18  anti-tautology probe (vault path)
+13a samen.verify.read_scope (the `authorize?: false` read-scope lint over the app's own `lib/`; `--api` apps carry one sanction, the API-key auth-step lookup)
 ```
 
 ## Red paths (must-fail) + anti-tautology probe

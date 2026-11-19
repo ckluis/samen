@@ -202,6 +202,12 @@ the scratch DB); verticals and demo: `MIX_ENV=test bash ci.sh` in their director
 gate). CI compiles with `--warnings-as-errors` and a framework/adapter `lib/` warning fails (a path dep's
 warnings never fail a dependant's compile, so each project's lib is compiled by its own step) — keep zero warnings.
 
+The read-scope lint (`Samen.Lint.ReadScope`: a direct `authorize?: false` read with no `org_id`/`id` narrowing returns every
+org's rows) runs in every host and every generated app as the `ci.sh` step `mix samen.verify.read_scope --max-sanctioned N` over that
+app's own `lib/` (the `demo`, `driftwood`, `pawchart` and `samen_web` steps, the generated-app probes); `samen_web`'s suite also
+sweeps all five framework and vertical trees together. An unreadable or unparseable file, a missing or empty source dir, and more
+`# authz-scope:` markers than the pinned ceiling fail it. Run it by hand from any app: `mix samen.verify.read_scope`.
+
 Dialyzer (`scripts/dialyzer_gate.sh [app…]`, the ten `dialyzer_*` steps, one at a time, 2-3 GB each):
 any warning not in that project's `.dialyzer_ignore.exs` fails, and so does an UNUSED ignore entry. Every
 entry says why it is a false positive or deliberate code; fix a new warning or add it WITH its reason,
