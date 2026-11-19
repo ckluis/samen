@@ -904,6 +904,10 @@ defmodule Samen.AI.Agent do
         {:done, run}
 
       true ->
+        # BEFORE anything else this attempt does (agent resolution, a terminal, the loop's kill/budget/cancel checks,
+        # the transcript reveal, hooks, the provider call): see `reclaim_failed_park!/1`
+        reclaim_failed_park!(run)
+
         with {:ok, agent_mod} <- resolve_agent(run),
              {:ok, scope} <- owner_scope(run) do
           definition = agent_mod.definition()
@@ -935,6 +939,56 @@ defmodule Samen.AI.Agent do
         end
     end
   end
+
+  # A park that failed leaves a `:running` run with a pending write approval. `WriteProposal.open/1` and the turn row's
+  # `:proposed` + `meta["approval_id"]` stamp each commit in their own transaction BEFORE `park_run!/6` writes the
+  # transcript, so a park that fails (its vault store unwraps the run's KMS key) strands both. The retry REUSES that row
+  # (`find_or_reuse_turn/3`) and calls the provider again; the model may answer differently, so the old approval would
+  # outlive the run, or sit beside a new one. This is the one point every later path of the retried attempt passes
+  # through, so the stale approval is cancelled HERE, by its id, and the stamps are cleared in the SAME transaction.
+  # A run legitimately parked behind an approval is `:awaiting_approval`, which `execute_batch/1` never gets this far
+  # with; the distinguishing fact is `:running` AND a reused row that carries an `approval_id`. An approval that is no
+  # longer pending (decided, cancelled, expired) is nothing to cancel. A cancellation that FAILS raises: no provider
+  # call or tool has run in this attempt, so the job simply retries and nothing is replayed.
+  defp reclaim_failed_park!(%Run{state: :running} = run) do
+    require Ash.Query
+
+    stale =
+      Turn
+      |> Ash.Query.filter(run_id == ^run.id and turn_index == ^(run.current_turn + 1) and status == :proposed)
+      |> Ash.Query.limit(1)
+      |> Ash.read!(authorize?: false)
+
+    with [%{meta: %{"approval_id" => approval_id}} = row] when is_binary(approval_id) <- stale do
+      repo = repo!()
+
+      result =
+        repo.transaction(fn ->
+          case Samen.Approvals.cancel(approval_id, WriteProposal.requester_principal_id()) do
+            {:ok, _approval} -> :ok
+            {:error, reason} when reason in [:not_pending, :not_found] -> :ok
+            {:error, reason} -> repo.rollback(reason)
+          end
+
+          meta = row.meta |> Map.drop(["approval_id", "awaiting_approval"]) |> bounded_meta()
+
+          row
+          |> Ash.Changeset.for_update(:decide, %{meta: meta})
+          |> Ash.update!(authorize?: false)
+        end)
+
+      with {:error, reason} <- result,
+           do: raise("run #{run.id}: a failed park's approval could not be cancelled: #{inspect(reason)}")
+    end
+
+    :ok
+  rescue
+    e ->
+      Samen.Observability.Failure.report_write(:agent_reclaim_failed_park, run.org_id, e)
+      reraise e, __STACKTRACE__
+  end
+
+  defp reclaim_failed_park!(_run), do: :ok
 
   # The worker's opts: the host-configured agent provider override (tests point this at
   # Samen.AI.Provider.Scripted — the cross-process script seam), else Samen.AI's own
@@ -2039,23 +2093,15 @@ defmodule Samen.AI.Agent do
   # state with the bounded kind `:hook_halted` and the bounded reason on the turn row —
   # never `{:ok, answer}`, never a partial answer promoted out of the transcript.
   defp halt_run(%Run{} = run, turn_row, kind, reason) do
-    {:ok, run} =
-      repo!().transaction(fn ->
-        # a reused turn row can still be `:proposed` behind a pending approval: withdraw BEFORE it is finalized
-        # (the withdrawal finds the approval through the `:proposed` row)
-        withdraw_approvals!(run)
+    if turn_row do
+      finalize_turn!(turn_row, %{
+        status: :failed,
+        error_kind: to_string(safe_error_kind(kind)),
+        meta: bounded_meta(Map.put(turn_row.meta || %{}, "hook_reason", reason))
+      })
+    end
 
-        if turn_row do
-          finalize_turn!(turn_row, %{
-            status: :failed,
-            error_kind: to_string(safe_error_kind(kind)),
-            meta: bounded_meta(Map.put(turn_row.meta || %{}, "hook_reason", reason))
-          })
-        end
-
-        terminal!(run, :fail, kind)
-      end)
-
+    run = terminal!(run, :fail, kind)
     log_terminal(run)
     {:error, safe_error_kind(kind), run}
   end
@@ -3961,55 +4007,10 @@ defmodule Samen.AI.Agent do
 
   # :fail and :cancel transition from :queued OR :running; :exhaust is loop-only (the
   # loop always runs post-begin!, so an exhaust on a :queued row cannot arise).
-  #
-  # A run that ends terminal can own a write proposal: the approval is opened (and the turn row stamped
-  # `:proposed`) in transactions of their own BEFORE `park_run!/6` writes the transcript, so a park that fails (its
-  # store unwraps the run's KMS key) leaves the run `:running` with a pending approval. If that run is then ended
-  # (the retry's top-of-turn reveal fails, a kill, a hook halt, a budget), the approval would stay decidable on a
-  # dead run and nothing would ever expire it. So EVERY terminal withdraws the approval the run owns and finalizes
-  # its `:proposed` turn row, in the SAME transaction as the terminal write; a withdrawal that fails rolls the
-  # terminal back (the run stays resumable) instead of stranding the approval.
   defp terminal!(%Run{} = run, action, kind) do
-    {:ok, ended} =
-      repo!().transaction(fn ->
-        withdraw_proposal!(run, kind)
-
-        run
-        |> Ash.Changeset.for_update(action, %{error_kind: to_string(safe_error_kind(kind))})
-        |> Ash.update!(authorize?: false)
-      end)
-
-    ended
-  end
-
-  defp withdraw_approvals!(%Run{} = run) do
-    # `list_pending/3` reads a nil org as the GLOBAL lane, so the run must carry its org
-    run = if is_binary(run.org_id), do: run, else: reload!(run)
-
-    if withdrawal_failed?(withdraw_by_turn(run)),
-      do: raise("run #{run.id} not ended: its pending approval could not be withdrawn")
-
     run
-  end
-
-  defp withdraw_proposal!(%Run{} = run, kind) do
-    run = withdraw_approvals!(run)
-
-    case pending_turn(run) do
-      {:ok, turn_row} ->
-        finalize_turn!(turn_row, %{
-          status: :failed,
-          error_kind: to_string(safe_error_kind(kind)),
-          meta: bounded_meta(Map.put(turn_row.meta || %{}, "withdrawn", true))
-        })
-
-      # no proposed turn row: nothing was parked behind an approval
-      {:error, :turn_not_found} ->
-        :ok
-
-      {:error, :unavailable} ->
-        raise "run #{run.id} not ended: its proposed turn row could not be read"
-    end
+    |> Ash.Changeset.for_update(action, %{error_kind: to_string(safe_error_kind(kind))})
+    |> Ash.update!(authorize?: false)
   end
 
   defp terminal_logged!(%Run{} = run, kind) do

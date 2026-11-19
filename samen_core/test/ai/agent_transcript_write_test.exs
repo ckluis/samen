@@ -576,8 +576,13 @@ defmodule Samen.AI.AgentTranscriptWriteTest do
     # run's KMS key) rolls back only the park. The approval stays `pending`, the turn row `:proposed`, the run `:running`.
     defp assert_no_stranded_proposal!(scope, run, approval) do
       assert pending_approvals(scope) == [], "a failed run left a pending approval"
-      assert Enum.filter(turns_of(run), &(&1.status == :proposed)) == [], "a failed run left a :proposed turn row"
       assert {:ok, %{state: :cancelled}} = Approvals.get(approval.id)
+
+      # the retry's start cleared the proposal stamps off the reused row (it no longer names a cancelled approval)
+      for turn <- turns_of(run) do
+        refute Map.has_key?(turn.meta || %{}, "approval_id"), "a turn row still names the cancelled approval"
+        refute Map.has_key?(turn.meta || %{}, "awaiting_approval"), "a turn row is still marked awaiting_approval"
+      end
     end
 
     # A proposing turn whose transcript STORE (the park) fails: the exception escapes, the run is left `:running`
@@ -669,6 +674,196 @@ defmodule Samen.AI.AgentTranscriptWriteTest do
       assert failed.id == row.id and row.state == :failed and row.error_kind == "hook_halted"
       assert_no_stranded_proposal!(scope, row, approval)
       assert [%{status: :failed, error_kind: "hook_halted", meta: %{"hook_reason" => "operator_stop"}}] = turns_of(row)
+    end
+  end
+
+  describe "a retry after a failed park reclaims the stale approval at its start" do
+    # The retried attempt REUSES the `:proposed` row that names the approval. `execute_batch/1` cancels that approval by
+    # id and clears the row's proposal stamps BEFORE anything else the attempt does, so every later path (provider
+    # error, cancel flag, a text answer, a new proposal) starts from a clean row.
+    defp put_agent_env!(kv) do
+      previous = Application.get_env(:samen_core, Samen.AI.Agent, [])
+      Application.put_env(:samen_core, Samen.AI.Agent, Keyword.merge(previous, kv))
+      on_exit(fn -> Application.put_env(:samen_core, Samen.AI.Agent, previous) end)
+    end
+
+    defp worker_provider!, do: put_agent_env!(provider: scripted_provider())
+
+    defp target_of(scope),
+      do: Target |> Ash.Query.filter(org_id == ^scope.actor.org_id) |> Ash.read!(authorize?: false) |> hd()
+
+    defp propose_call(target),
+      do:
+        {:tool_call, "assign_record_owner",
+         %{"resource" => "SamenCore.Support.AutomationFixture.Target", "id" => target.id, "user_id" => Ash.UUID.generate()},
+         %{input_tokens: 40, output_tokens: 10}}
+
+    # run `fun` with the approvals engine pointed at a store whose reads fail, restoring the wiring afterwards
+    defp with_unreadable_approvals(fun) do
+      previous = Application.get_env(:samen_core, Samen.Approvals)
+
+      Application.put_env(:samen_core, Samen.Approvals,
+        approval_resource: SamenCore.Support.UnreadableApproval,
+        repo: SamenCore.TestRepo
+      )
+
+      try do
+        capture_log(fn -> send(self(), {:result, fun.()}) end)
+        assert_received {:result, result}
+        result
+      after
+        Application.put_env(:samen_core, Samen.Approvals, previous)
+      end
+    end
+
+    test "RED: a failed park followed by a PROVIDER ERROR at the retry leaves no pending approval, and the run keeps the provider's kind" do
+      worker_provider!()
+      scope = new_scope()
+      {run, approval} = strand!(scope)
+
+      script([{:error, :provider_error, %{input_tokens: 9, output_tokens: 2}}])
+      assert {:error, :provider_error, failed} = Agent.execute_batch(run)
+      assert Scripted.remaining() == [], "the planned provider error was never reached"
+
+      [row] = runs_of(scope)
+      assert failed.id == row.id and row.state == :failed and row.error_kind == "provider_error"
+      assert_no_stranded_proposal!(scope, row, approval)
+      assert [%{status: :failed, error_kind: "provider_error"}] = turns_of(row)
+    end
+
+    test "RED: a failed park followed by the CANCEL FLAG at the retry leaves no pending approval" do
+      worker_provider!()
+      scope = new_scope()
+      {run, approval} = strand!(scope)
+
+      assert {:ok, %{cancel_requested_at: at}} = Agent.cancel(scope, run.id)
+      assert at != nil, "the cancel flag was never set"
+      assert {:error, :cancelled, failed} = Agent.execute_batch(run)
+
+      [row] = runs_of(scope)
+      assert failed.id == row.id and row.state == :cancelled
+      assert_no_stranded_proposal!(scope, row, approval)
+    end
+
+    test "RED: a failed park followed by a TEXT answer at the retry completes the run and cancels the old approval" do
+      worker_provider!()
+      scope = new_scope()
+      {run, approval} = strand!(scope)
+
+      script([{:final, "nothing to assign after all"}])
+      assert {:ok, %{answer: _}} = Agent.execute_batch(run)
+      assert Scripted.remaining() == [], "the retry never called the provider"
+
+      [row] = runs_of(scope)
+      assert row.state == :succeeded
+      assert_no_stranded_proposal!(scope, row, approval)
+      assert [%{status: :done}] = turns_of(row)
+    end
+
+    test "RED: a failed park followed by a NEW proposal at the retry leaves exactly one pending approval, and approving it runs the tool once", %{updates: updates} do
+      worker_provider!()
+      scope = new_scope()
+      {run, old} = strand!(scope)
+      target = target_of(scope)
+
+      script([propose_call(target), {:final, "assigned"}])
+      assert {:awaiting_approval, parked} = Agent.execute_batch(run)
+      refute F3FlakyKms.armed?()
+
+      [row] = runs_of(scope)
+      assert parked.id == row.id and row.state == :awaiting_approval
+      assert {:ok, %{state: :cancelled}} = Approvals.get(old.id)
+      assert [fresh] = pending_approvals(scope)
+      assert fresh.id != old.id
+      assert [%{status: :proposed, meta: %{"approval_id" => id}}] = turns_of(row)
+      assert id == to_string(fresh.id)
+
+      before = updates(updates)
+      assert {:ok, %{state: :approved}, %{executed: "assign_record_owner"}} = Approvals.approve(fresh.id, approver_id(scope.actor.org_id))
+      assert updates(updates) - before >= 1
+      assert owner_of(target) != nil
+      # the cancelled one stays cancelled: it can never execute
+      assert {:error, :not_pending} = Approvals.approve(old.id, approver_id(scope.actor.org_id))
+    end
+
+    test "control: an :awaiting_approval run's pending approval is untouched by an unrelated run and by a duplicate job in the same org" do
+      worker_provider!()
+      {s, parked, _target, approval} = propose!()
+
+      script([{:final, "unrelated"}])
+      assert {:ok, %{answer: "unrelated"}} = run_scripted(Plain, s, "something else")
+
+      assert {:done, _} = Agent.execute_batch(parked)
+      assert [pending] = pending_approvals(s)
+      assert pending.id == approval.id
+      assert {:ok, %{state: :pending}} = Approvals.get(approval.id)
+      assert Enum.find(runs_of(s), &(&1.id == parked.id)).state == :awaiting_approval
+      assert [%{status: :proposed, meta: %{"approval_id" => id}}] = turns_of(parked)
+      assert id == to_string(approval.id)
+    end
+
+    test "RED: a failed cancellation raises before any provider call, reports by name, and the next attempt heals" do
+      worker_provider!()
+      scope = new_scope()
+      {run, approval} = strand!(scope)
+      script([{:final, "answer after the heal"}])
+
+      log =
+        capture_log(fn ->
+          previous = Application.get_env(:samen_core, Samen.Approvals)
+
+          Application.put_env(:samen_core, Samen.Approvals,
+            approval_resource: SamenCore.Support.UnreadableApproval,
+            repo: SamenCore.TestRepo
+          )
+
+          try do
+            assert_raise RuntimeError, ~r/approval could not be cancelled/, fn -> Agent.execute_batch(run) end
+          after
+            Application.put_env(:samen_core, Samen.Approvals, previous)
+          end
+        end)
+
+      assert log =~ "write failed write=agent_reclaim_failed_park"
+      assert Scripted.remaining() != [], "a provider call happened before the cancellation"
+      assert {:ok, %{state: :pending}} = Approvals.get(approval.id)
+      assert [%{status: :proposed, meta: %{"approval_id" => _}}] = turns_of(run)
+
+      # the retry (Oban's next attempt) finds the engine healthy and completes
+      assert {:ok, %{answer: _}} = Agent.execute_batch(run)
+      [row] = runs_of(scope)
+      assert row.state == :succeeded
+      assert_no_stranded_proposal!(scope, row, approval)
+    end
+  end
+
+  describe "a halt never depends on the approvals engine (fail-closed, not fail-open)" do
+    # Review 4: the end-of-run withdrawal made a halt scan the org's approvals; an unreadable approvals store then made
+    # the halt RAISE and be lost. A halt or a kill on a turn with no prior proposal must land regardless.
+    test "RED: a hook halt on a FRESH turn lands although the approvals store is unreadable" do
+      scope = new_scope()
+      put_agent_env!(hooks: [F3Halter])
+      script([{:final, "never reached"}])
+
+      assert {:error, :hook_halted, failed} = with_unreadable_approvals(fn -> run_scripted(Plain, scope, "goal") end)
+      assert failed.state == :failed and failed.error_kind == "hook_halted"
+      assert [%{status: :failed, error_kind: "hook_halted"}] = turns_of(failed)
+    end
+
+    test "RED: the kill switch lands on a run with an in-flight turn row although the approvals store is unreadable" do
+      worker_provider!()
+      scope = new_scope()
+      assert {:ok, started} = Agent.start(Plain, scope, "goal", provider: scripted_provider())
+      assert {:ok, run} = Agent.fetch_run(started.id)
+
+      # a worker that died after creating its turn row, before the provider answered: the row is `:proposed`, with no approval
+      Turn
+      |> Ash.Changeset.for_create(:record, %{org_id: scope.actor.org_id, run_id: run.id, turn_index: 1, status: :proposed})
+      |> Ash.create!(authorize?: false)
+
+      Samen.AI.Agent.Breaker.kill(:operator)
+      assert {:error, :killed, failed} = with_unreadable_approvals(fn -> Agent.execute_batch(run) end)
+      assert failed.state == :failed and failed.error_kind == "killed"
     end
   end
 
