@@ -22,6 +22,17 @@ defmodule SamenCore.ReadScopeVerifyTest do
   @repo_root Path.expand("../../", __DIR__)
   @corpus Path.join([__DIR__, "fixtures", "read_scope_corpus"])
 
+  # A plain scratch dir OUTSIDE the repo, removed on exit. ExUnit's :tmp_dir names a directory after the test (quotes,
+  # parentheses) inside samen_core/tmp and never deletes it; copies left there once broke a `find | xargs` gate scan.
+  defp scratch! do
+    dir = Path.join(System.tmp_dir!(), "read_scope_verify_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+
+    on_exit(fn -> File.rm_rf!(dir) end)
+
+    dir
+  end
+
   defp run_task(args) do
     System.cmd("mix", ["samen.verify.read_scope" | args],
       cd: @project_dir,
@@ -47,6 +58,18 @@ defmodule SamenCore.ReadScopeVerifyTest do
   end
 
   @tag :exit_code
+  test "RED: a positional argument is refused, never silently ignored (it would scan `lib` instead of what was named)" do
+    {out, code} = run_task([Path.join(@corpus, "leak")])
+    assert code != 0, out
+    assert out =~ "unexpected argument"
+    assert out =~ "--source-dirs"
+
+    # positive control: the same dir named with the flag is scanned
+    {out, code} = run_task(["--source-dirs", Path.join(@corpus, "leak")])
+    assert code == 1 and out =~ "leak.ex:3", out
+  end
+
+  @tag :exit_code
   test "RED: an unparseable file exits 1 — a file the lint could not inspect is never a pass" do
     {out, code} = run_task(["--source-dirs", Path.join(@corpus, "unparseable")])
     assert code == 1, out
@@ -66,22 +89,22 @@ defmodule SamenCore.ReadScopeVerifyTest do
   end
 
   describe "scan/2 (fail-closed on anything it cannot inspect)" do
-    @tag :tmp_dir
-    test "a source dir that does not exist is a violation", %{tmp_dir: tmp} do
+    test "a source dir that does not exist is a violation" do
+      tmp = scratch!()
       missing = Path.join(tmp, "nope")
       assert %{violations: [v]} = Task.scan([missing])
       assert v =~ "does not exist"
     end
 
-    @tag :tmp_dir
-    test "a dir with no .ex file is a violation (nothing was inspected)", %{tmp_dir: tmp} do
+    test "a dir with no .ex file is a violation (nothing was inspected)" do
+      tmp = scratch!()
       File.write!(Path.join(tmp, "notes.txt"), "no elixir here")
       assert %{violations: [v], files: 0} = Task.scan([tmp])
       assert v =~ "no .ex file found"
     end
 
-    @tag :tmp_dir
-    test "an unreadable file is a violation, and the readable sibling is still scanned", %{tmp_dir: tmp} do
+    test "an unreadable file is a violation, and the readable sibling is still scanned" do
+      tmp = scratch!()
       File.write!(Path.join(tmp, "ok.ex"), File.read!(Path.join([@corpus, "clean", "clean.ex"])))
       locked = Path.join(tmp, "locked.ex")
       File.write!(locked, "defmodule Locked do\nend\n")
@@ -96,6 +119,33 @@ defmodule SamenCore.ReadScopeVerifyTest do
         end
       after
         File.chmod!(locked, 0o644)
+      end
+    end
+
+    test "an unlistable subdirectory and a dangling symlink are violations, never silently skipped; the readable sibling is still scanned" do
+      tmp = scratch!()
+      File.write!(Path.join(tmp, "ok.ex"), File.read!(Path.join([@corpus, "clean", "clean.ex"])))
+
+      # positive control: the same tree with nothing wrong passes
+      assert %{violations: [], governed_reads: 3} = Task.scan([tmp])
+
+      locked = Path.join(tmp, "locked_dir")
+      File.mkdir_p!(locked)
+      File.write!(Path.join(locked, "hidden.ex"), "defmodule Hidden do\nend\n")
+      File.chmod!(locked, 0o000)
+      :ok = File.ln_s(Path.join(tmp, "no_such_target.ex"), Path.join(tmp, "dangling.ex"))
+
+      try do
+        # root can list a 000 directory; only assert that branch when the OS enforces it
+        if match?({:error, _}, :prim_file.list_dir(locked)) do
+          assert %{violations: violations, governed_reads: 3} = Task.scan([tmp])
+          assert Enum.any?(violations, &(&1 =~ "locked_dir: could not be inspected")), inspect(violations)
+        end
+
+        assert %{violations: violations, governed_reads: 3} = Task.scan([tmp])
+        assert Enum.any?(violations, &(&1 =~ "dangling.ex: could not be inspected")), inspect(violations)
+      after
+        File.chmod!(locked, 0o755)
       end
     end
 
@@ -128,27 +178,34 @@ defmodule SamenCore.ReadScopeVerifyTest do
 
         ci = File.read!(Path.join([@repo_root, to_string(host), "ci.sh"]))
 
-        assert ci =~ "mix samen.verify.read_scope --max-sanctioned #{sanctioned}\n",
-               "#{host}/ci.sh must run the read-scope lint with the exact measured ceiling"
+        # a WHOLE, uncommented, unindented command line: a `# mix …` comment, an `if false; then` body or a trailing
+        # `|| true` must not satisfy it
+        assert ci =~ ~r/^mix samen\.verify\.read_scope --max-sanctioned #{sanctioned}$/m,
+               "#{host}/ci.sh must run the read-scope lint (a whole, uncommented line) with the exact measured ceiling"
       end
     end
 
-    @tag :tmp_dir
-    test "a planted unscoped read in a copy of each host's lib/ is caught (the pristine copy passes)", %{tmp_dir: tmp} do
+    test "a planted unscoped read scanned with each host's lib/ is caught (the pristine lib passes)" do
+      # A plain scratch dir OUTSIDE the repo, removed on exit: ExUnit's :tmp_dir names a directory after the test
+      # (quotes, parentheses) and never deletes it, and copies of three hosts' trees then lingered under samen_core/tmp.
+      # No copy is needed: the plant is the only new file, scanned beside the real lib/.
+      scratch = Path.join(System.tmp_dir!(), "read_scope_plant_#{System.unique_integer([:positive])}")
+      on_exit(fn -> File.rm_rf!(scratch) end)
+      File.mkdir_p!(scratch)
+
+      File.write!(Path.join(scratch, "zz_planted.ex"), """
+      defmodule ZzPlanted.Leak do
+        def every_orgs_rows(resource), do: Ash.read!(resource, authorize?: false)
+      end
+      """)
+
       for {host, ceiling} <- @hosts do
-        copy = Path.join(tmp, to_string(host))
-        File.cp_r!(Path.join([@repo_root, to_string(host), "lib"]), copy)
+        lib = Path.join([@repo_root, to_string(host), "lib"])
 
-        # positive control: the pristine copy is clean
-        assert %{violations: []} = Task.scan([copy], ceiling)
+        # positive control: the pristine lib is clean at its ceiling
+        assert %{violations: []} = Task.scan([lib], ceiling)
 
-        File.write!(Path.join(copy, "zz_planted.ex"), """
-        defmodule ZzPlanted.Leak do
-          def every_orgs_rows(resource), do: Ash.read!(resource, authorize?: false)
-        end
-        """)
-
-        assert %{unscoped: 1, violations: violations} = Task.scan([copy], ceiling)
+        assert %{unscoped: 1, violations: violations} = Task.scan([lib, scratch], ceiling)
         assert Enum.any?(violations, &(&1 =~ "zz_planted.ex:2 — every_orgs_rows/1")), "#{host}: #{inspect(violations)}"
       end
     end

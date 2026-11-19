@@ -27,8 +27,9 @@ defmodule Mix.Tasks.Samen.Verify.ReadScope do
 
   Exits 0 only when every file was inspected and every governed read is pinned or sanctioned,
   1 otherwise (via `Samen.Verifier`, `:erlang.halt/1`). It FAILS — never passes — on a
-  source dir that does not exist, a dir with no `.ex` file (nothing was inspected), and a file
-  that cannot be read or parsed.
+  source dir that does not exist, a dir with no `.ex` file (nothing was inspected), a file
+  that cannot be read or parsed, a subdirectory that cannot be listed, a dangling symlink, and a
+  positional argument (only `--source-dirs` and `--max-sanctioned` exist).
   """
   use Mix.Task
 
@@ -38,8 +39,17 @@ defmodule Mix.Tasks.Samen.Verify.ReadScope do
 
   @impl Mix.Task
   def run(args) do
-    {opts, _rest} =
+    {opts, rest} =
       OptionParser.parse!(args, strict: [source_dirs: [:string, :keep], max_sanctioned: :integer])
+
+    # A positional argument is never a source dir: `mix samen.verify.read_scope apps/x/lib` used to scan `lib` and pass
+    # while the caller believed apps/x/lib was checked.
+    if rest != [] do
+      Mix.raise(
+        "#{@task_name}: unexpected argument(s) #{inspect(rest)} — name a source dir with --source-dirs <dir> " <>
+          "(the default is lib)"
+      )
+    end
 
     dirs =
       case Keyword.get_values(opts, :source_dirs) do
@@ -71,17 +81,23 @@ defmodule Mix.Tasks.Samen.Verify.ReadScope do
   def scan(dirs, max_sanctioned \\ nil) do
     {files, dir_violations} =
       Enum.reduce(dirs, {[], []}, fn dir, {files, viol} ->
-        found = if File.dir?(dir), do: Samen.SourceScan.files(dir, [".ex"]), else: []
+        {found, walk_errors} = if File.dir?(dir), do: Samen.SourceScan.files_checked(dir, [".ex"]), else: {[], []}
+
+        # a directory that cannot be listed (permissions) or an entry that cannot be stat'ed (a dangling symlink) is a
+        # violation: the walk would otherwise leave its whole subtree out without a word
+        unlistable =
+          for {path, reason} <- walk_errors,
+              do: "#{path}: could not be inspected (#{inspect(reason)}) — anything under it was not scanned"
 
         cond do
           not File.dir?(dir) ->
             {files, viol ++ ["#{dir}: source dir does not exist — nothing was inspected"]}
 
-          found == [] ->
+          found == [] and unlistable == [] ->
             {files, viol ++ ["#{dir}: no .ex file found — nothing was inspected"]}
 
           true ->
-            {files ++ found, viol}
+            {files ++ found, viol ++ unlistable}
         end
       end)
 
