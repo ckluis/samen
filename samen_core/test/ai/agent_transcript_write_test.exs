@@ -672,6 +672,41 @@ defmodule Samen.AI.AgentTranscriptWriteTest do
     end
   end
 
+  describe "the public reader transcript_views/1" do
+    defp finished_run! do
+      scope = new_scope()
+      script([{:final, "done"}])
+      assert {:ok, _} = run_scripted(Plain, scope, "goal #{@goal_marker}")
+      hd(runs_of(scope))
+    end
+
+    test "control: a readable transcript answers its views and reports nothing" do
+      run = finished_run!()
+      log = capture_log(fn -> assert {:ok, %{goal: _, ui_view: [_ | _], llm_view: [_ | _]}} = Agent.transcript_views(run) end)
+      refute log =~ "agent_transcript_views"
+    end
+
+    test "RED: a failed reveal is reported by name, and the reader still answers :transcript_unavailable" do
+      run = finished_run!()
+
+      F3FlakyKms.fail_next!(run.id, 1)
+      log = capture_log(fn -> assert {:error, :transcript_unavailable} = Agent.transcript_views(run) end)
+      refute F3FlakyKms.armed?(), "the planned reveal failure never fired"
+
+      assert log =~ "read failed read=agent_transcript_views"
+      assert log =~ "unavailable"
+      refute log =~ @goal_marker
+    end
+
+    test "a SHREDDED run is still quiet: the sanctioned end of an erased run is not a failure" do
+      run = finished_run!()
+
+      F3FlakyKms.fail_next!(run.id, 1, :shredded)
+      log = capture_log(fn -> assert {:error, :transcript_unavailable} = Agent.transcript_views(run) end)
+      refute log =~ "agent_transcript_views"
+    end
+  end
+
   describe "a key that is gone is not an outage" do
     test "control: a run SHREDDED between turns ends :transcript_unavailable, quiet" do
       scope = new_scope()

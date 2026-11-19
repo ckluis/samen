@@ -3723,7 +3723,13 @@ defmodule Samen.AI.Agent do
       %Samen.Masked{} = masked ->
         case Samen.Vault.reveal(masked, repo!(), subject_id: run.id) do
           {:ok, json} -> decode_transcript_views(json)
-          {:error, _reason} -> {:error, :transcript_unavailable}
+          {:error, reason} ->
+            # the UI-facing reader: same gone/outage split as `reveal_failed/2`, its own op name (a literal: the
+            # `Failure.report` guard enumerates names), and the same `:transcript_unavailable` answer
+            if reason not in @transcript_gone_reasons,
+              do: Samen.Observability.Failure.report(:agent_transcript_views, run.org_id, reason)
+
+            {:error, :transcript_unavailable}
         end
 
       _ ->
