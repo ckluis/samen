@@ -4003,8 +4003,12 @@ defmodule Samen.AI.Agent do
           meta: bounded_meta(Map.put(turn_row.meta || %{}, "withdrawn", true))
         })
 
-      _ ->
+      # no proposed turn row: nothing was parked behind an approval
+      {:error, :turn_not_found} ->
         :ok
+
+      {:error, :unavailable} ->
+        raise "run #{run.id} not ended: its proposed turn row could not be read"
     end
   end
 
