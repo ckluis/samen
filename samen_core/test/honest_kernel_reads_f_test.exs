@@ -160,6 +160,35 @@ defmodule Samen.HonestKernelReadsFTest do
       assert Ash.get!(Workflow, wf.id, authorize?: false).disabled_by_operator_at == nil
     end
 
+    test "RED: a trip WRITE that fails is reported as the trip write, not as the count read; the count read keeps its own name" do
+      prev = Application.get_env(:samen_core, :automation_rate_limit)
+      Application.put_env(:samen_core, :automation_rate_limit, -1)
+      on_exit(fn -> if prev, do: Application.put_env(:samen_core, :automation_rate_limit, prev), else: Application.delete_env(:samen_core, :automation_rate_limit) end)
+
+      org = Ash.UUID.generate()
+      wf = org |> workflow!() |> reload_with_org!()
+      opts = [run_module: SamenCore.Support.AutomationFixture.Run, repo: Repo]
+
+      # (1) the kill UPDATE answers {:error, _}: the workflow table is gone, the run log is readable
+      hide_table!("awf_workflow")
+      assert raw_message(fn -> Ash.read!(Workflow, authorize?: false) end) =~ "awf_workflow", "the raw error must name the table"
+
+      log = capture_log(fn -> assert :ok = Samen.Automation.Breaker.check!(wf, opts) end)
+
+      assert log =~ "write failed write=automation_breaker_trip org=#{org} "
+      refute log =~ "automation_breaker_count"
+      refute log =~ "awf_workflow"
+
+      # (2) the kill path RAISES (a workflow value that cannot be killed): still the trip write, never the count read
+      forged = %{id: wf.id, org_id: org}
+      assert raw_message(fn -> forged.disabled_by_operator_at end) =~ "disabled_by_operator_at"
+
+      log = capture_log(fn -> assert :ok = Samen.Automation.Breaker.check!(forged, opts) end)
+
+      assert log =~ "write failed write=automation_breaker_trip org=#{org} cause=KeyError"
+      refute log =~ "automation_breaker_count"
+    end
+
     test "control: the readable count over the limit trips the workflow's kill-switch" do
       prev = Application.get_env(:samen_core, :automation_rate_limit)
       Application.put_env(:samen_core, :automation_rate_limit, -1)

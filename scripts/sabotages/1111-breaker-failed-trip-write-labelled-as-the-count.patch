@@ -1,0 +1,19 @@
+# SABOTAGE: an {:error, _} from the kill write is reported under the count read's name
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_f_test.exs
+# MUST_FAIL: a trip WRITE that fails is reported as the trip write
+diff --git a/samen_core/lib/samen/automation/breaker.ex b/samen_core/lib/samen/automation/breaker.ex
+index 3ba803a3..1d556be8 100644
+--- a/samen_core/lib/samen/automation/breaker.ex
++++ b/samen_core/lib/samen/automation/breaker.ex
+@@ -83,7 +83,7 @@ defmodule Samen.Automation.Breaker do
+            |> Ash.Changeset.for_update(:operator_kill, %{reason: :rate_tripped}, authorize?: false)
+            |> Ash.update(authorize?: false) do
+         {:ok, _wf} -> audit_trip(wf, count, opts)
+-        {:error, reason} -> Samen.Observability.Failure.report_write(:automation_breaker_trip, wf.org_id, reason)
++        {:error, reason} -> Samen.Observability.Failure.report(:automation_breaker_count, wf.org_id, reason)
+       end
+     end
+ 

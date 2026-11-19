@@ -24,7 +24,6 @@ defmodule Samen.Automation.Breaker do
   silent either — it is reported (`automation_breaker_count`) and the next run counts again.
   """
 
-  require Logger
   require Ash.Query
   import Ash.Query
 
@@ -46,16 +45,23 @@ defmodule Samen.Automation.Breaker do
   @spec check!(struct(), keyword()) :: :ok
   def check!(wf, opts \\ []) do
     case Automation.run_module(opts) do
-      nil -> :ok
-      run_mod -> maybe_trip(run_mod, wf, opts)
+      nil ->
+        :ok
+
+      run_mod ->
+        # Two different failures, two different names: a count that cannot be READ (`automation_breaker_count`, a read)
+        # and a trip that could not be WRITTEN (`automation_breaker_trip`, a write: the workflow keeps running past its
+        # limit). One wide `rescue` over both labelled the second as the first.
+        with {:ok, count} <- count_runs(run_mod, wf),
+             true <- count > limit() do
+          trip(wf, count, opts)
+        else
+          _ -> :ok
+        end
     end
-  rescue
-    e ->
-      Samen.Observability.Failure.report(:automation_breaker_count, wf.org_id, e)
-      :ok
   end
 
-  defp maybe_trip(run_mod, wf, opts) do
+  defp count_runs(run_mod, wf) do
     since = DateTime.add(DateTime.utc_now(), -@window_seconds, :second)
 
     count =
@@ -64,11 +70,11 @@ defmodule Samen.Automation.Breaker do
       |> filter(inserted_at >= ^since)
       |> Ash.count!(authorize?: false)
 
-    if count > limit() do
-      trip(wf, count, opts)
-    else
-      :ok
-    end
+    {:ok, count}
+  rescue
+    e ->
+      Samen.Observability.Failure.report(:automation_breaker_count, wf.org_id, e)
+      :error
   end
 
   defp trip(wf, count, opts) do
@@ -76,15 +82,16 @@ defmodule Samen.Automation.Breaker do
       case wf
            |> Ash.Changeset.for_update(:operator_kill, %{reason: :rate_tripped}, authorize?: false)
            |> Ash.update(authorize?: false) do
-        {:ok, _wf} ->
-          audit_trip(wf, count, opts)
-
-        {:error, reason} ->
-          Logger.warning("[Automation.Breaker] trip write failed for #{wf.id}: #{inspect(reason)}")
+        {:ok, _wf} -> audit_trip(wf, count, opts)
+        {:error, reason} -> Samen.Observability.Failure.report_write(:automation_breaker_trip, wf.org_id, reason)
       end
     end
 
     :ok
+  rescue
+    e ->
+      Samen.Observability.Failure.report_write(:automation_breaker_trip, wf.org_id, e)
+      :ok
   end
 
   defp audit_trip(wf, count, opts) do
