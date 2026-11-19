@@ -193,6 +193,7 @@ own output (`--- step N/M: …`); this is the headless/web shape, in order:
 3   samen.verify.prefixes               11  samen.verify.tnt_catalog
 4   samen.verify.pii_reads              12  samen.verify.tnt_boundary
 5   samen.verify.pii_classify           13  samen.verify.same_org_fk
+                                        13a samen.verify.read_scope
 6   samen.verify.no_plaintext_pii       13b samen.verify.erasure_completeness
 7   samen.verify.migrations             14  samen.verify.no_pii_columns
 8   samen.verify.sink_schema (+ replay_schema, signals_no_pii)
@@ -200,8 +201,9 @@ own output (`--- step N/M: …`); this is the headless/web shape, in order:
 9b  samen.verify.oban_queues            15  samen.verify.aggregate_privacy
 16  samen.verify.ai_prompt_masking      17  mix test (default suite)
 18  anti-tautology probe (vault path)
-13a samen.verify.read_scope (the `authorize?: false` read-scope lint over the app's own `lib/`; `--api` apps carry one sanction, the API-key auth-step lookup)
 ```
+
+Step 13a is the `authorize?: false` read-scope lint over the app's own `lib/`; `--api` apps carry one sanction, the API-key auth-step lookup.
 
 ## Red paths (must-fail) + anti-tautology probe
 

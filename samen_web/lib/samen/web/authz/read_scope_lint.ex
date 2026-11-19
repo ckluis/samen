@@ -15,9 +15,9 @@ defmodule Samen.Web.Authz.ReadScopeLint do
   alias Samen.Web.Authz.UnscopedReadError
 
   # Basenames skipped: seed / fixture harnesses whose authorize?: false reads run under
-  # a system actor at setup, not a tenant request (no cross-tenant surface to leak), and the
-  # scanner / its sweep themselves.
-  @skip_basenames ~w(factory.ex red_path.ex read_scope_lint.ex read_scope.ex)
+  # a system actor at setup, not a tenant request (no cross-tenant surface to leak), and this sweep
+  # itself. The scanner (`Samen.Lint.ReadScope`) is swept like any other file: it holds no read call.
+  @skip_basenames ~w(factory.ex red_path.ex read_scope_lint.ex)
 
   @doc """
   The `.ex` source files under lint: everything beneath `samen_core/lib`,
