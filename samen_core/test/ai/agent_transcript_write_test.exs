@@ -17,6 +17,15 @@ defmodule F3TestAgents do
   end
 end
 
+defmodule F3Halter do
+  @moduledoc false
+  @behaviour Samen.AI.Agent.Hook
+
+  @impl true
+  def call(:before_completion, _ctx), do: {:halt, :operator_stop}
+  def call(_point, _ctx), do: :ok
+end
+
 defmodule F3FlakyKms do
   @moduledoc """
   A `Samen.Kms` adapter that delegates to the real one, COUNTS every REVEAL's `unwrap/1` per subject, and can fail ONE planned
@@ -636,6 +645,29 @@ defmodule Samen.AI.AgentTranscriptWriteTest do
       [row] = runs_of(scope)
       assert failed.id == row.id and row.state == :failed and row.error_kind == "killed"
       assert_no_stranded_proposal!(scope, row, approval)
+    end
+  end
+
+  describe "a hook halt on a retried, parked-then-failed turn" do
+    test "RED: a failed park followed by a hook halt at the retry leaves no pending approval on the failed run" do
+      scope = new_scope()
+      {run, approval} = strand!(scope)
+
+      prior = Application.get_env(:samen_core, Samen.AI.Agent)
+      Application.put_env(:samen_core, Samen.AI.Agent, Keyword.put(prior || [], :hooks, [F3Halter]))
+
+      on_exit(fn ->
+        if prior,
+          do: Application.put_env(:samen_core, Samen.AI.Agent, prior),
+          else: Application.delete_env(:samen_core, Samen.AI.Agent)
+      end)
+
+      assert {:error, :hook_halted, failed} = Agent.execute_batch(run)
+
+      [row] = runs_of(scope)
+      assert failed.id == row.id and row.state == :failed and row.error_kind == "hook_halted"
+      assert_no_stranded_proposal!(scope, row, approval)
+      assert [%{status: :failed, error_kind: "hook_halted", meta: %{"hook_reason" => "operator_stop"}}] = turns_of(row)
     end
   end
 
