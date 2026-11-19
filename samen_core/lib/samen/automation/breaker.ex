@@ -52,29 +52,23 @@ defmodule Samen.Automation.Breaker do
         # Two different failures, two different names: a count that cannot be READ (`automation_breaker_count`, a read)
         # and a trip that could not be WRITTEN (`automation_breaker_trip`, a write: the workflow keeps running past its
         # limit). One wide `rescue` over both labelled the second as the first.
-        with {:ok, count} <- count_runs(run_mod, wf),
-             true <- count > limit() do
-          trip(wf, count, opts)
-        else
-          _ -> :ok
-        end
+        count = count_runs(run_mod, wf)
+        if is_integer(count) and count > limit(), do: trip(wf, count, opts), else: :ok
     end
   end
 
   defp count_runs(run_mod, wf) do
     since = DateTime.add(DateTime.utc_now(), -@window_seconds, :second)
 
-    count =
-      run_mod
-      |> filter(workflow_id == ^wf.id)
-      |> filter(inserted_at >= ^since)
-      |> Ash.count!(authorize?: false)
-
-    {:ok, count}
+    run_mod
+    |> filter(workflow_id == ^wf.id)
+    |> filter(inserted_at >= ^since)
+    |> Ash.count!(authorize?: false)
   rescue
     e ->
+      # reported by name; `:unreadable` is not a count, so nothing trips (the next run counts again)
       Samen.Observability.Failure.report(:automation_breaker_count, wf.org_id, e)
-      :error
+      :unreadable
   end
 
   defp trip(wf, count, opts) do
