@@ -169,11 +169,24 @@ defmodule Samen.AI.Catalog do
   """
   @spec schema(keyword()) :: map()
   def schema(opts \\ []) do
-    dict(resources(opts))
+    case schema_result(opts) do
+      {:ok, schema} -> schema
+      {:error, :unavailable} -> %{"tables" => []}
+    end
+  end
+
+  @doc """
+  `schema/1` that does NOT turn a failure into an empty catalogue: `{:ok, schema}`, or `{:error, :unavailable}` when the
+  resource list itself could not be resolved (reported as `ai_catalog_schema`). For a caller that can answer the failure
+  honestly (the MCP `browse` tool), an empty `%{"tables" => []}` would tell the model the host has no tables.
+  """
+  @spec schema_result(keyword()) :: {:ok, map()} | {:error, :unavailable}
+  def schema_result(opts \\ []) do
+    {:ok, dict(resources(opts))}
   rescue
     e ->
       Samen.Observability.Failure.report(:ai_catalog_schema, nil, e)
-      %{"tables" => []}
+      {:error, :unavailable}
   end
 
   defp resources(opts) do
@@ -206,36 +219,64 @@ defmodule Samen.AI.Catalog do
   def custom_objects(nil, _opts), do: []
 
   def custom_objects(org_id, opts) when is_binary(org_id) do
-    repo = Keyword.get(opts, :repo)
-
-    org_id
-    |> CustomObjects.list_objects(repo)
-    |> Enum.filter(& &1.tnt_enabled)
-    |> Enum.map(fn object ->
-      %{
-        object_key: object.tnt_object_key,
-        label: object.tnt_label,
-        fields: object_fields(org_id, object.tnt_object_key, repo)
-      }
-    end)
-  rescue
-    e ->
-      Samen.Observability.Failure.report(:ai_catalog_custom_objects, org_id, e)
-      []
+    case custom_objects_result(org_id, opts) do
+      {:ok, objects} -> objects
+      {:error, :unavailable} -> []
+    end
   end
 
   def custom_objects(_org_id, _opts), do: []
 
-  defp object_fields(org_id, object_key, repo) do
-    org_id
-    |> CustomObjects.list_object_fields(object_key, repo)
-    |> Enum.map(fn %FieldRow{} = f ->
-      %{name: f.tnt_field_name, type: f.tnt_type, pii: f.tnt_pii_declared}
+  @doc """
+  `custom_objects/2` that does NOT turn a failed lookup into "no custom objects": `{:ok, objects}`, or
+  `{:error, :unavailable}` when the object list OR any object's field list could not be read (reported as
+  `ai_catalog_custom_objects` / `ai_catalog_object_fields`). A `nil` or non-binary org has none: `{:ok, []}`.
+  """
+  @spec custom_objects_result(String.t() | nil, keyword()) :: {:ok, [map()]} | {:error, :unavailable}
+  def custom_objects_result(org_id, opts \\ [])
+
+  def custom_objects_result(org_id, opts) when is_binary(org_id) do
+    repo = Keyword.get(opts, :repo)
+
+    objects =
+      org_id
+      |> CustomObjects.list_objects(repo)
+      |> Enum.filter(& &1.tnt_enabled)
+
+    Enum.reduce_while(objects, {:ok, []}, fn object, {:ok, acc} ->
+      case object_fields(org_id, object.tnt_object_key, repo) do
+        {:ok, fields} ->
+          {:cont, {:ok, [%{object_key: object.tnt_object_key, label: object.tnt_label, fields: fields} | acc]}}
+
+        {:error, :unavailable} ->
+          {:halt, {:error, :unavailable}}
+      end
     end)
+    |> case do
+      {:ok, acc} -> {:ok, Enum.reverse(acc)}
+      {:error, :unavailable} = error -> error
+    end
+  rescue
+    e ->
+      Samen.Observability.Failure.report(:ai_catalog_custom_objects, org_id, e)
+      {:error, :unavailable}
+  end
+
+  def custom_objects_result(_org_id, _opts), do: {:ok, []}
+
+  defp object_fields(org_id, object_key, repo) do
+    fields =
+      org_id
+      |> CustomObjects.list_object_fields(object_key, repo)
+      |> Enum.map(fn %FieldRow{} = f ->
+        %{name: f.tnt_field_name, type: f.tnt_type, pii: f.tnt_pii_declared}
+      end)
+
+    {:ok, fields}
   rescue
     e ->
       Samen.Observability.Failure.report(:ai_catalog_object_fields, org_id, e)
-      []
+      {:error, :unavailable}
   end
 
   @doc """
@@ -247,7 +288,15 @@ defmodule Samen.AI.Catalog do
   """
   @spec grounding(term(), keyword()) :: map()
   def grounding(scope, opts \\ []) do
-    %{schema: schema(opts), custom_objects: custom_objects(org_id_of(scope), opts)}
+    # A half that FAILED is left OUT, not sent as an empty one: `schema: %{"tables" => []}` / `custom_objects: []` tell the
+    # model the host has no tables or objects, an absent key says nothing. Grounding stays enrichment and never blocks a
+    # completion (the chokepoint's own scrub is the gate), so this is the honest degrade rather than an error.
+    [schema: schema_result(opts), custom_objects: custom_objects_result(org_id_of(scope), opts)]
+    |> Enum.flat_map(fn
+      {key, {:ok, value}} -> [{key, value}]
+      {_key, {:error, :unavailable}} -> []
+    end)
+    |> Map.new()
   rescue
     e ->
       Samen.Observability.Failure.report(:ai_catalog_grounding, nil, e)

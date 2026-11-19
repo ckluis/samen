@@ -1,0 +1,20 @@
+# SABOTAGE: a domain whose resources cannot be listed contributes none, so an existing resource reads as 
+#   unknown
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/mcp_test.exs
+# MUST_FAIL: a domain whose resources cannot be listed answers {:error, :unavailable}
+diff --git a/samen_core/lib/samen/ai/mcp.ex b/samen_core/lib/samen/ai/mcp.ex
+index 6b753ba0..2583f8e7 100644
+--- a/samen_core/lib/samen/ai/mcp.ex
++++ b/samen_core/lib/samen/ai/mcp.ex
+@@ -601,7 +601,7 @@ defmodule Samen.AI.Mcp do
+   rescue
+     e ->
+       Samen.Observability.Failure.report(:mcp_domain_resources, nil, e)
+-      {:error, :unavailable}
++      {:ok, []}
+   end
+ 
+   defp safe_table_name(resource) do
