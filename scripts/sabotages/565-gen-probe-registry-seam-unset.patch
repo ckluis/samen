@@ -6,12 +6,12 @@
 # TEST_FILES: test/meta/ci_driver_guard_test.exs
 # MUST_FAIL: GENPROBE the gen probes run on a private registry copy and sweep only their own scratch dirs
 diff --git a/scripts/gen_probe_guard.sh b/scripts/gen_probe_guard.sh
-index 0918321..bb7e54c 100755
+index 3e269ed..774204e 100755
 --- a/scripts/gen_probe_guard.sh
 +++ b/scripts/gen_probe_guard.sh
-@@ -134,7 +134,7 @@ run_gen_probe() {
-   echo "==> Running $label"
-   local code=0
+@@ -180,7 +180,7 @@ run_gen_probe() {
+   # HEX_HOME is exported to the probe (and its generated app's `mix deps.get`) only when a private one was made
+   if [[ -n "$GEN_PROBE_HEX_HOME" ]]; then local -x HEX_HOME="$GEN_PROBE_HEX_HOME"; fi
    if [[ -n "$GEN_PROBE_PRIVATE" ]]; then
 -    (cd "$REPO_ROOT/samen_core" && SAMEN_ABBREV_REGISTRY="$GEN_PROBE_PRIVATE" mix run "$probe_rel") || code=$?
 +    (cd "$REPO_ROOT/samen_core" && mix run "$probe_rel") || code=$?

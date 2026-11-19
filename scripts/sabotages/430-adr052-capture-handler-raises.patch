@@ -7,10 +7,10 @@
 # TEST_FILES: test/replay/capture_test.exs
 # MUST_FAIL: the event handler survives garbage metadata and stays attached
 diff --git a/samen_core/lib/samen/replay/capture.ex b/samen_core/lib/samen/replay/capture.ex
-index ec8a229..76f29ca 100644
+index 9450a35c..eeb3c349 100644
 --- a/samen_core/lib/samen/replay/capture.ex
 +++ b/samen_core/lib/samen/replay/capture.ex
-@@ -89,12 +89,9 @@ defmodule Samen.Replay.Capture do
+@@ -101,18 +101,9 @@ defmodule Samen.Replay.Capture do
  
    @doc false
    def handle_event(event, _measurements, metadata, _config) do
@@ -18,9 +18,15 @@ index ec8a229..76f29ca 100644
      capture(event, metadata)
      :ok
 -  rescue
--    _ -> :ok
+-    # `:telemetry` detaches a handler that raises, so this boundary stays total; the event is not recorded and that
+-    # is on record (value-free: the exception module only, never a param or the event name).
+-    e ->
+-      Samen.Observability.Failure.report_write(:replay_capture_event, nil, e)
+-      :ok
 -  catch
--    _, _ -> :ok
+-    kind, reason ->
+-      Samen.Observability.Failure.report_write(:replay_capture_event, nil, {kind, reason})
+-      :ok
    end
  
    defp capture([:phoenix, :live_view, :handle_event, :start], %{socket: socket, event: ev} = meta) do

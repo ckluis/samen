@@ -1,0 +1,19 @@
+# SABOTAGE: a shredded subject is reported as a read failure instead of the quiet end of an erased run
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_transcript_write_test.exs
+# MUST_FAIL: control: a run SHREDDED between turns
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 3e79bac6..6ce49a3e 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -3674,7 +3674,7 @@ defmodule Samen.AI.Agent do
+   # `:kms_key_dir`, an unmounted volume, an in-memory store after a restart), which is a disaster to report, not an
+   # erasure. Anything else (a KMS outage, a decrypt failure) is reported by name, value-free; the run's outcome is the
+   # same clean `:transcript_unavailable` failure either way.
+-  @transcript_gone_reasons [:shredded, :not_found]
++  @transcript_gone_reasons [:not_found]
+ 
+   defp reveal_failed(%Run{} = run, reason) do
+     if reason not in @transcript_gone_reasons,

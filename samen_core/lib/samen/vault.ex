@@ -49,7 +49,7 @@ defmodule Samen.Vault do
   available only via `reveal/3`.
 
   **The last-line guard is fail-closed:** `Samen.Type.VaultField.dump_to_native/2`
-  refuses to persist anything that is not already a `vt_*` token, so even a bug
+  refuses to persist anything that is not a token-shaped value (`token?/1`), so even a bug
   that skipped `Samen.Vault.Change` cannot write plaintext to the domain column —
   the insert fails instead.
 
@@ -148,31 +148,6 @@ defmodule Samen.Vault do
     end
   end
 
-  @doc """
-  Materialize a domain struct read OUTSIDE the Ash type path (e.g. a raw
-  non-Ash query that returns the token string in the field): replace each
-  vault-routed field that still holds a raw `vt_*` token with `%Masked{}`.
-
-  The normal Ash read path does NOT need this — `Samen.Type.VaultField.cast_stored/2`
-  already presents `%Masked{}`. This helper is only for callers holding a struct
-  whose vault fields are still raw token strings. Already-`%Masked{}` and `nil`
-  fields are left unchanged. No-op if the resource has no pii_attributes.
-  """
-  @spec materialize(struct(), module()) :: struct()
-  def materialize(record, resource_module) do
-    pii_fields = Samen.Pii.Info.fields(resource_module)
-
-    Enum.reduce(pii_fields, record, fn field, acc ->
-      case Map.get(acc, field.name) do
-        "vt_" <> _ = token ->
-          Map.put(acc, field.name, Masked.new(token, field.name))
-
-        _ ->
-          acc
-      end
-    end)
-  end
-
   # =====================================================================
   # THE SINGLE REVEAL CHOKEPOINT — the only path that returns plaintext.
   # =====================================================================
@@ -210,6 +185,9 @@ defmodule Samen.Vault do
     * `:subject_id` — the subject the caller asserts this reveal is ABOUT. When
       present it is bound to the token's real subject (see step 2). When absent
       (raw internal callers, e.g. oracle scans), no bind is applied.
+    * `:field` — `{vault_name, field_name}` (strings or atoms): the vault and logical field the
+      caller expects this token to be FOR. Checked next to the subject bind, BEFORE any DEK is
+      unwrapped; a token minted for another field is `{:error, :field_mismatch}`. Absent = no check.
     * `:prefetched` — a `prefetch_rows/2` map; a row in it is used instead of a repo read.
     * `:deks` — a `Samen.Vault.DekMemo` from `unwrap_subjects/1`. SINGLE-USE: it holds raw
       DEKs and is valid only inside the resolve call that built it. Never store it (assign,
@@ -221,15 +199,73 @@ defmodule Samen.Vault do
   """
   @spec reveal(Masked.t(), Ecto.Repo.t(), keyword()) ::
           {:ok, binary()}
-          | {:error, :subject_mismatch | :shredded | :unavailable | :not_found | term}
+          | {:error, :subject_mismatch | :field_mismatch | :shredded | :unavailable | :not_found | term}
   def reveal(%Masked{token: token}, repo, opts \\ []) do
     reveal_token(
       token,
       repo,
-      Keyword.get(opts, :subject_id),
+      {Keyword.get(opts, :subject_id), Keyword.get(opts, :field)},
       Keyword.get(opts, :prefetched),
       Keyword.get(opts, :deks)
     )
+  end
+
+  @doc """
+  Does the vault row `row` (a `%VaultRow{}`, or nil) belong to `subject_id` and to the
+  `{vault_name, field_name}` field? The in-memory twin of `check_bindings/3` for rows a caller
+  already holds (`Samen.Api.PiiResolution` uses it to admit only matching rows to the DEK memo,
+  so a foreign subject's key is never unwrapped).
+  """
+  @spec bound?(struct() | nil, String.t(), {term(), term()}) :: boolean()
+  def bound?(%VaultRow{} = row, subject_id, {vault, field}) do
+    row.subject_id == subject_id and row.vault_name == to_string(vault) and
+      row.field_name == to_string(field)
+  end
+
+  def bound?(_row, _subject_id, _expected), do: false
+
+  @doc """
+  Are `pairs` (`[{field, token}]`, `field` anything with `:name` and `:vault`, i.e. a
+  `Samen.Pii.Info.Field`) all bound to `subject_id`? ONE query for all tokens.
+
+  A token is bound when its vault row's `subject_id` equals `subject_id` (the record's primary
+  key), its `vault_name` equals the field's vault and its `field_name` equals the field's
+  logical name: exactly what `store_fields/4` wrote. Returns `:ok` or
+  `{:error, [{field_name, :not_found | :foreign_subject | :field_mismatch}]}`; the failures never
+  carry a token. Used by `Samen.Vault.Change` for every `%Masked{}` a write sets that differs
+  from the stored value.
+  """
+  @spec check_bindings([{map(), String.t()}], String.t(), Ecto.Repo.t()) ::
+          :ok | {:error, [{atom(), :not_found | :foreign_subject | :field_mismatch}]}
+  def check_bindings([], _subject_id, _repo), do: :ok
+
+  def check_bindings(pairs, subject_id, repo) when is_list(pairs) do
+    tokens = pairs |> Enum.map(fn {_field, token} -> token end) |> Enum.filter(&is_binary/1) |> Enum.uniq()
+
+    rows =
+      case tokens do
+        [] -> %{}
+        _ -> repo.all(from(r in VaultRow, where: r.token in ^tokens)) |> Map.new(&{&1.token, &1})
+      end
+
+    failures =
+      for {field, token} <- pairs,
+          reason = binding_failure(Map.get(rows, token), subject_id, field),
+          reason != nil,
+          do: {field.name, reason}
+
+    if failures == [], do: :ok, else: {:error, failures}
+  end
+
+  # nil = bound. Order matters: a missing row, then another subject's, then the right subject
+  # but another vault/field.
+  defp binding_failure(nil, _subject_id, _field), do: :not_found
+
+  defp binding_failure(%VaultRow{subject_id: subject}, subject_id, _field) when subject != subject_id,
+    do: :foreign_subject
+
+  defp binding_failure(%VaultRow{vault_name: vault, field_name: name}, _subject_id, field) do
+    if vault == to_string(field.vault) and name == to_string(field.name), do: nil, else: :field_mismatch
   end
 
   @doc """
@@ -311,13 +347,14 @@ defmodule Samen.Vault do
 
   defp unwrap_dek(subject_id, _no_memo), do: Kms.adapter().unwrap(subject_id)
 
-  defp reveal_token(token, repo, asserted_subject_id, prefetched, deks) do
+  defp reveal_token(token, repo, {asserted_subject_id, asserted_field}, prefetched, deks) do
     case fetch_row(token, repo, prefetched) do
       nil ->
         {:error, :not_found}
 
-      %VaultRow{subject_id: subject_id, ciphertext: ciphertext} ->
+      %VaultRow{subject_id: subject_id, ciphertext: ciphertext} = row ->
         with :ok <- bind_subject(asserted_subject_id, subject_id),
+             :ok <- bind_field(asserted_field, row),
              {:ok, dek} <- unwrap_dek(subject_id, deks) do
           do_decrypt(dek, ciphertext)
         end
@@ -343,6 +380,16 @@ defmodule Samen.Vault do
   defp bind_subject(nil, _real), do: :ok
   defp bind_subject(same, same), do: :ok
   defp bind_subject(_asserted, _real), do: {:error, :subject_mismatch}
+
+  # The same accountability bind for the FIELD: a token minted for another vault/field is not
+  # this field's value. Also BEFORE the DEK is touched; `nil` = no assertion (internal scans).
+  defp bind_field(nil, _row), do: :ok
+
+  defp bind_field({vault, field}, %VaultRow{vault_name: vault_name, field_name: field_name}) do
+    if vault_name == to_string(vault) and field_name == to_string(field),
+      do: :ok,
+      else: {:error, :field_mismatch}
+  end
 
   # The ONLY call site of Crypto.decrypt/2 for a vault read. A second decrypt
   # path anywhere else is a structural violation caught by the C3 pii_reads verifier
@@ -480,7 +527,7 @@ defmodule Samen.Vault do
 
   # :decryptable | :clean | {:failed, reason}
   defp probe_token(token, repo) do
-    case reveal_token(token, repo, nil, nil, nil) do
+    case reveal_token(token, repo, {nil, nil}, nil, nil) do
       {:ok, _plaintext} ->
         :decryptable
 
@@ -612,4 +659,18 @@ defmodule Samen.Vault do
   def generate_token do
     "vt_" <> (:crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower))
   end
+
+  @token_shape ~r/\Avt_[0-9a-f]{32}\z/
+
+  @doc """
+  Is `value` shaped like a token `generate_token/0` mints (`"vt_"` + 32 lowercase hex)?
+
+  A grammar check ONLY: it says nothing about whether a `pii_vault` row exists or whom it
+  belongs to (that is `check_bindings/3`). `Samen.Type.VaultField.dump_to_native/2` persists
+  only token-shaped values, and `Samen.Vault.BindingScan` reads any other value in a vault
+  column as plaintext at rest.
+  """
+  @spec token?(term()) :: boolean()
+  def token?(value) when is_binary(value), do: Regex.match?(@token_shape, value)
+  def token?(_other), do: false
 end

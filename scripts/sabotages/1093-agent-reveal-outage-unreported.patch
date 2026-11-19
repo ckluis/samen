@@ -1,0 +1,19 @@
+# SABOTAGE: a KMS outage at the top of a turn is not reported (only a gone key is)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_transcript_write_test.exs
+# MUST_FAIL: control: a KMS outage (:unavailable) is NOT gone
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 3e79bac..64deb90 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -3677,7 +3677,7 @@ defmodule Samen.AI.Agent do
+   @transcript_gone_reasons [:shredded, :not_found]
+ 
+   defp reveal_failed(%Run{} = run, reason) do
+-    if reason not in @transcript_gone_reasons,
++    if reason in @transcript_gone_reasons,
+       do: Samen.Observability.Failure.report(:agent_transcript_reveal, run.org_id, reason)
+ 
+     {:error, :transcript_unavailable}

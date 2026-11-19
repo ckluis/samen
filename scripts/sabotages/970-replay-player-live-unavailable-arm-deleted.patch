@@ -1,0 +1,18 @@
+# SABOTAGE: PlayerLive drops its {:error, :unavailable} arm: a failed load reads as No such replay
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/replay_player_test.exs
+# MUST_FAIL: a load that really fails (the frame read) opens as :unavailable, renders the error card, and leaks no id or reason
+diff --git a/samen_web/lib/samen/web/replay/player_live.ex b/samen_web/lib/samen/web/replay/player_live.ex
+index 580a7cba..d636b018 100644
+--- a/samen_web/lib/samen/web/replay/player_live.ex
++++ b/samen_web/lib/samen/web/replay/player_live.ex
+@@ -129,7 +129,6 @@ defmodule Samen.Web.Replay.PlayerLive do
+       |> show(0)
+     else
+       {:auth, {:error, reason}} -> socket |> clear() |> assign(state: :denied, deny_reason: reason)
+-      {:load, {:error, :unavailable}} -> socket |> clear() |> assign(state: :unavailable)
+       {:load, _} -> socket |> clear() |> assign(state: :not_found)
+       {:audit, _} -> socket |> clear() |> assign(state: :audit_failed)
+     end

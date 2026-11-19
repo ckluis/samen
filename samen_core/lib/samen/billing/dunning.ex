@@ -355,7 +355,9 @@ defmodule Samen.Billing.Dunning do
 
     :ok
   rescue
-    _ -> :ok
+    e ->
+      Samen.Observability.Failure.report_write(:dunning_notify, Keyword.get(opts, :org_id), e)
+      :ok
   end
 
   # ---------------------------------------------------------------------------
@@ -384,7 +386,9 @@ defmodule Samen.Billing.Dunning do
         :ok
     end
   rescue
-    _ -> :ok
+    e ->
+      Samen.Observability.Failure.report_write(:dunning_escalate_open, Keyword.get(opts, :org_id), e)
+      :ok
   end
 
   defp escalate_resolve(opts, invoice_id) do
@@ -397,6 +401,8 @@ defmodule Samen.Billing.Dunning do
         :ok
     end
   rescue
-    _ -> :ok
+    e ->
+      Samen.Observability.Failure.report_write(:dunning_escalate_resolve, Keyword.get(opts, :org_id), e)
+      :ok
   end
 end

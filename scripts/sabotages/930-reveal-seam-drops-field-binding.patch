@@ -1,0 +1,19 @@
+# SABOTAGE: Samen.Reveal.reveal/5 drops :field again: a same-subject token minted for another field reveals
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_grant_seam_test.exs
+# MUST_FAIL: a field-bound reveal of a same-subject token minted for ANOTHER field DENIES :field_mismatch
+diff --git a/samen_core/lib/samen/reveal.ex b/samen_core/lib/samen/reveal.ex
+index 99264903..e70e4124 100644
+--- a/samen_core/lib/samen/reveal.ex
++++ b/samen_core/lib/samen/reveal.ex
+@@ -276,7 +276,7 @@ defmodule Samen.Reveal do
+         repo = Keyword.fetch!(opts, :repo)
+         # An integer key is the same subject as its decimal string (what the vault stored).
+         vault_opts =
+-          opts |> Keyword.take([:subject_id, :field]) |> Keyword.update!(:subject_id, &to_string/1)
++          opts |> Keyword.take([:subject_id]) |> Keyword.update!(:subject_id, &to_string/1)
+ 
+         vault_mod.reveal(masked, repo, vault_opts)
+     end

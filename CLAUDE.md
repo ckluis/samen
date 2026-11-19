@@ -34,10 +34,10 @@ Use the driver; never hand-segment `ci.sh`, never background a run and poll it (
   new` — `git add` your fix FIRST, make ONLY the sabotage edit unstaged, then run it. `MUST_FAIL` is a literal test
   name, never interpolated. A patch that stopped applying: `scripts/sabotage reanchor <n>`; never delete it.
   Replay: `scripts/sabotage.sh` (filters) / `scripts/sabotage-lanes.sh` (N lanes). Unfiltered runs need `scripts/ci full`.
-- Counts are generated (`scripts/counts --write`, never by hand): <!--count:sabotages-->898<!--/count--> sabotages
-  (driver red paths `scripts/ci_test.sh` <!--count:driver_sabotages-->496–892<!--/count-->), watch-list <!--count:watchlist_modules-->23<!--/count-->
-  modules / <!--count:watchlist_mutants-->393<!--/count--> mutants, corpus <!--count:corpus_targets-->309<!--/count--> targets /
-  <!--count:corpus_mutants-->5,684<!--/count--> mutants.
+- Counts are generated (`scripts/counts --write`, never by hand): <!--count:sabotages-->1097<!--/count--> sabotages
+  (driver red paths `scripts/ci_test.sh` <!--count:driver_sabotages-->496–976<!--/count-->), watch-list <!--count:watchlist_modules-->23<!--/count-->
+  modules / <!--count:watchlist_mutants-->469<!--/count--> mutants, corpus <!--count:corpus_targets-->337<!--/count--> targets /
+  <!--count:corpus_mutants-->6,103<!--/count--> mutants.
 - Toolchain floor `.tool-versions` (Elixir 1.20.4 / OTP 29.1.1); the `toolchain` step fails on older — raise the pin
   when upgrading. Prerequisite: Postgres WITH `pgvector` (`brew install pgvector`; ADR-043 §7.1/M3) — else the
   samen_core suite fails at setup with "pgvector not installed".
@@ -86,6 +86,8 @@ tests: `samen_web/test/samen/web/file_preview_masking_test.exs` (first consumer)
   are `:quarantined` (fail-closed); promotion only via a clean scan (`Scanner.Reject` default).
 - PII writes: through governed actions only — `Samen.Pii.WriteGuard` + `Samen.Vault.Change`;
   `Samen.Type.VaultField` is the last-line guard refusing raw plaintext.
+- Vault tokens: `Vault.Change` binds every changed `%Masked{}` to the record's subject (its PK), vault and field, and a raw
+  string is always plaintext (`VaultField` never reads `vt_…` as a token); `PiiResolution` reveals bound-only (ADR-001 §6.2).
 - Reads: org-scoped (`Samen.Policy.OrgScope`) + keyset-bounded via the Reads helpers.
 - Test infra ships in lib: `Samen.RedPath`, `Samen.Factory`, `Samen.MaskingCase` — every
   red-path pairs denial with a positive control (anti-tautology; a test that cannot fail is a bug).

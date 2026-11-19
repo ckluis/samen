@@ -133,6 +133,10 @@ defmodule Samen.IndexingTest.Ranked do
     uuid_primary_key(:id)
     attribute(:org_id, :uuid, allow_nil?: false, public?: true)
     attribute(:rank, :integer, allow_nil?: false, public?: true)
+    # not a sort attribute: says non-nil over a nullable column (a NOTE) ...
+    attribute(:note, :string, allow_nil?: false, public?: true)
+    # ... and nil-able over a NOT NULL column (the reverse direction, also a NOTE)
+    attribute(:tag, :string, allow_nil?: true, public?: true)
   end
 
   actions do
@@ -691,25 +695,49 @@ defmodule Samen.IndexingTest do
     end
   end
 
-  describe "a sort attribute that says non-nil over a nullable column (WP12)" do
+  describe "an attribute that says one thing about NULL over a column that says another" do
     alias Samen.IndexingTest.{Ranked, RankedDomain}
 
     @ranked %{Ranked => :rank}
 
     setup do
-      @repo.query!("CREATE TABLE ix_ranked (id uuid PRIMARY KEY, org_id uuid NOT NULL, rank integer)")
+      @repo.query!(
+        "CREATE TABLE ix_ranked (id uuid PRIMARY KEY, org_id uuid NOT NULL, rank integer, note text, tag text NOT NULL DEFAULT 'x')"
+      )
+
       @repo.query!("CREATE INDEX i ON ix_ranked (org_id, rank, id)")
       :ok
     end
 
-    test "the verifier notes it (advisory, not a violation); making the column NOT NULL clears the note" do
+    test "a SORT attribute that says non-nil over a nullable column is a violation; making the column NOT NULL clears it" do
       opts = [domains: [RankedDomain], keyset_sorts: @ranked]
-      assert Indexes.violations(opts) == []
-      assert [note] = Indexes.notes(opts)
-      assert note =~ "Samen.IndexingTest.Ranked (ix_ranked): attribute :rank is `allow_nil? false`"
-      assert note =~ "database column is nullable"
+      assert [violation] = Indexes.violations(opts)
+      assert violation =~ "Samen.IndexingTest.Ranked (ix_ranked): sort attribute :rank is `allow_nil? false`"
+      assert violation =~ "database column is nullable"
+      assert violation =~ "ExpandContract.set_not_null"
+
+      # the sort attribute is not repeated as a note
+      refute Enum.any?(Indexes.notes(opts), &(&1 =~ ":rank"))
 
       @repo.query!("ALTER TABLE ix_ranked ALTER COLUMN rank SET NOT NULL")
+      assert Indexes.violations(opts) == []
+    end
+
+    test "every other attribute is a NOTE in both directions (never a violation), one line per resource and direction" do
+      opts = [domains: [RankedDomain], keyset_sorts: @ranked]
+      @repo.query!("ALTER TABLE ix_ranked ALTER COLUMN rank SET NOT NULL")
+      assert Indexes.violations(opts) == []
+
+      notes = Indexes.notes(opts)
+      assert [nil_note] = Enum.filter(notes, &(&1 =~ "`allow_nil? false` but the database column is nullable"))
+      assert nil_note =~ "Samen.IndexingTest.Ranked (ix_ranked): :note"
+      assert nil_note =~ "not a keyset sort attribute"
+      assert [not_nil_note] = Enum.filter(notes, &(&1 =~ "`allow_nil? true` but the database column is NOT NULL"))
+      assert not_nil_note =~ "Samen.IndexingTest.Ranked (ix_ranked): :tag"
+      assert length(notes) == 2
+
+      # POSITIVE CONTROL: once both columns agree with their attributes there is nothing left to say
+      @repo.query!("ALTER TABLE ix_ranked ALTER COLUMN note SET NOT NULL, ALTER COLUMN tag DROP NOT NULL")
       assert Indexes.notes(opts) == []
     end
   end
@@ -777,6 +805,39 @@ defmodule Samen.IndexingTest do
 
       # the build was not killed, and its index (same relation) is the finished, VALID one
       assert %Postgrex.Result{} = Task.await(builder, 60_000)
+      assert [[true, ^oid, _]] = slow_index_state()
+    end
+
+    # CREATE INDEX CONCURRENTLY releases its session lock BEFORE the transaction that flips indisvalid
+    # commits. A migrator that wins the lock in that window reads the old (invalid) row, and a DROP then
+    # waits on the build's uncommitted row update and fails "tuple concurrently updated" (observed once, and
+    # reproduced by polling LOCK + look against back-to-back builds). The window is microseconds wide, so
+    # this holds it open: a second session has flipped the abandoned index valid and not committed.
+    test "an index whose valid flag is being committed by another session is left alone (lock released before commit)" do
+      assert {:error, _} = @repo.query("CREATE UNIQUE INDEX CONCURRENTLY ix_slow_idx ON ix_slow ((id / 1000))")
+      assert [[false, oid, _]] = slow_index_state()
+
+      {:ok, finisher} = Postgrex.start_link(Keyword.take(@repo.config(), [:hostname, :port, :username, :password, :database, :socket_dir, :socket]))
+      Postgrex.query!(finisher, "BEGIN", [])
+      Postgrex.query!(finisher, "UPDATE pg_index SET indisvalid = true WHERE indexrelid = 'ix_slow_idx'::regclass", [])
+
+      {:ok, sup} = Task.Supervisor.start_link()
+
+      task =
+        Task.Supervisor.async_nolink(sup, fn ->
+          Ecto.Migrator.run(@repo, [{29_990_101_000_020, Samen.IndexingTest.DropOnlyMigration}], :up,
+            all: true,
+            log: false,
+            migration_lock: false
+          )
+        end)
+
+      # With the guard the migrator returns at once. Without it, its DROP waits on the finisher's row.
+      result = Task.yield(task, 5_000)
+      Postgrex.query!(finisher, "COMMIT", [])
+      if result == nil, do: Task.shutdown(task, :brutal_kill)
+
+      assert {:ok, [_]} = result
       assert [[true, ^oid, _]] = slow_index_state()
     end
 

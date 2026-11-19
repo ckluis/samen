@@ -1,0 +1,20 @@
+# SABOTAGE: the ledger-continuity check ignores a last after-cents that is not the live MRR: a skipped 
+#   latest movement is not found
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/movement_continuity_test.exs
+# MUST_FAIL: a skipped movement (the price read fails once) is FOUND as a stale tail; the write stands
+diff --git a/samen_core/lib/samen/billing/movement_continuity.ex b/samen_core/lib/samen/billing/movement_continuity.ex
+index d6ddceb1..fb34c6c0 100644
+--- a/samen_core/lib/samen/billing/movement_continuity.ex
++++ b/samen_core/lib/samen/billing/movement_continuity.ex
+@@ -72,7 +72,7 @@ defmodule Samen.Billing.MovementContinuity do
+     last = List.last(rows)
+ 
+     tail =
+-      if last.mrr_after_cents == current,
++      if true,
+         do: [],
+         else: ["subscription #{id}: stale_tail (ledger ends at #{last.mrr_after_cents} cents, current MRR #{current})"]
+ 

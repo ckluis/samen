@@ -1,0 +1,19 @@
+# SABOTAGE: a queue whose re-open failed answers {:ok, rows}, a list claiming to be complete
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_approver_test.exs
+# MUST_FAIL: a failed re-open is reported AND the queue says it is partial
+diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+index f2445010..04188919 100644
+--- a/samen_core/lib/samen/reveal/grants.ex
++++ b/samen_core/lib/samen/reveal/grants.ex
+@@ -585,7 +585,7 @@ defmodule Samen.Reveal.Grants do
+ 
+       # A request whose approval could not be re-opened is a pending request this list does not show: say so, never
+       # `{:ok, rows}` as if the queue were complete.
+-      if unrecovered == 0, do: {:ok, rows}, else: {:partial, rows, unrecovered}
++      if unrecovered < 0, do: {:partial, rows, unrecovered}, else: {:ok, rows}
+     else
+       {:error, :no_approvals_module} ->
+         {:ok, []}

@@ -1,0 +1,24 @@
+# SABOTAGE: the re-open ignores the request's own status, so a request decided with no approval row on  
+#   record (the engine-less path) is revived
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_approver_test.exs
+# MUST_FAIL: a request decided with NO approval row (engine-less path) is not re-opened
+diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+index ae1abc97..252735f4 100644
+--- a/samen_core/lib/samen/reveal/grants.ex
++++ b/samen_core/lib/samen/reveal/grants.ex
+@@ -239,10 +239,10 @@ defmodule Samen.Reveal.Grants do
+     case lock_request(r, req.id) do
+       # the lane the approval would be filed in must be the request's own: a request that carries an org is never
+       # opened in another org's lane (one with no org is opened wherever it was filed)
+-      %RevealRequest{status: "pending", org_id: row_org} = locked when not is_nil(row_org) ->
++      %RevealRequest{org_id: row_org} = locked when not is_nil(row_org) ->
+         if Ecto.UUID.cast(org_id) == {:ok, row_org}, do: open_pending(locked, org_id, wiring), else: {:ok, :skipped}
+ 
+-      %RevealRequest{status: "pending"} = locked ->
++      %RevealRequest{} = locked ->
+         open_pending(locked, org_id, wiring)
+ 
+       # decided (or cancelled): there is no approval to open

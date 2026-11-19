@@ -1,0 +1,20 @@
+# SABOTAGE: PiiResolution.prefetch builds the DEK memo from every row, so a foreign subject's key is 
+#   unwrapped
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault_dek_reuse_test.exs
+# MUST_FAIL: T-R2: a record holding another subject's token costs ZERO unwraps
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+index d5430a1..5b20943 100644
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -219,7 +219,7 @@ defmodule Samen.Api.PiiResolution do
+         __prefetched: true,
+         __grants: grants,
+         __vault_rows: rows,
+-        __vault_deks: vault_deks(admitted, opts),
++        __vault_deks: vault_deks(Map.merge(rows, admitted), opts),
+         __vault_vaults: vaults,
+         __reveal_reported: :atomics.new(1, []),
+         __bag_ctx: bag_context(resource, records, plane, actor, opts)

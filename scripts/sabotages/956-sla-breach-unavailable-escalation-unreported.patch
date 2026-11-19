@@ -1,0 +1,20 @@
+# SABOTAGE: the rolled-back SLA-breach escalation failure is demoted to a debug line instead of a write 
+#   failure report
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/notifications_sources_test.exs
+# MUST_FAIL: an escalation whose lookup FAILS once is not lost
+diff --git a/samen_core/lib/samen/scopes/support/sla_breach_worker.ex b/samen_core/lib/samen/scopes/support/sla_breach_worker.ex
+index 856246c7..8c854b8f 100644
+--- a/samen_core/lib/samen/scopes/support/sla_breach_worker.ex
++++ b/samen_core/lib/samen/scopes/support/sla_breach_worker.ex
+@@ -227,7 +227,7 @@ defmodule Samen.Scopes.Support.SlaBreachWorker do
+       {:error, reason} ->
+         # The transaction was rolled back by something else (an Ash action inside `Escalate.open` rolls its own
+         # failed read back through the shared connection): nothing committed, the next tick retries. Same report.
+-        Samen.Observability.Failure.report_write(:sla_breach_escalation, org_id_bin, reason)
++        Logger.debug("[SlaBreachWorker] #{inspect(reason)}")
+     end
+   end
+ 

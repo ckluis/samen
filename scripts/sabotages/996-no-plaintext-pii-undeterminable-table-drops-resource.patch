@@ -1,0 +1,23 @@
+# SABOTAGE: Context.table_name rescues every failure to nil, so a resource whose table cannot be determined 
+#   silently drops out of the sweep
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_d_test.exs
+# MUST_FAIL: RED: a resource whose table cannot be determined fails the build instead of dropping out of the sweep
+diff --git a/samen_core/lib/samen/no_plaintext_pii/context.ex b/samen_core/lib/samen/no_plaintext_pii/context.ex
+index 3930f074..2f615dfe 100644
+--- a/samen_core/lib/samen/no_plaintext_pii/context.ex
++++ b/samen_core/lib/samen/no_plaintext_pii/context.ex
+@@ -243,8 +243,9 @@ defmodule Samen.NoPlaintextPii.Context do
+   # A non-Postgres resource (ETS, simple) has no table: nil is exact. A Postgres resource whose table cannot be read
+   # raises (the verifier fails loudly) instead of silently dropping the resource from the sweep.
+   defp table_name(resource) do
+-    if Ash.Resource.Info.data_layer(resource) == AshPostgres.DataLayer,
+-      do: AshPostgres.DataLayer.Info.table(resource)
++    AshPostgres.DataLayer.Info.table(resource)
++  rescue
++    _ -> nil
+   end
+ 
+   defp project_deps do

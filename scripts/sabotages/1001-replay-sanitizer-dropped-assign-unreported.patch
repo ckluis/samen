@@ -1,0 +1,19 @@
+# SABOTAGE: Sanitizer.guarded drops an unwalkable assign without reporting it
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_d_test.exs
+# MUST_FAIL: RED: the dropped assign is reported by name, with no value in the log
+diff --git a/samen_core/lib/samen/replay/sanitizer.ex b/samen_core/lib/samen/replay/sanitizer.ex
+index 53dd3b38..51968166 100644
+--- a/samen_core/lib/samen/replay/sanitizer.ex
++++ b/samen_core/lib/samen/replay/sanitizer.ex
+@@ -177,7 +177,7 @@ defmodule Samen.Replay.Sanitizer do
+   rescue
+     # Fail closed (nothing of the value is stored) and reported by name + exception module, never the value.
+     e ->
+-      Samen.Observability.Failure.report(:replay_sanitize, nil, e)
++      _ = e
+       %Dropped{kind: :sanitizer_error}
+   catch
+     kind, _reason ->

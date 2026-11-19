@@ -69,9 +69,14 @@ defmodule Samen.Replay.Capture do
       _ -> :error
     end
   rescue
-    _ -> :error
+    # a session that cannot be opened records nothing (fail closed); on record, once per mount
+    e ->
+      Samen.Observability.Failure.report_write(:replay_capture_open, nil, e)
+      :error
   catch
-    _, _ -> :error
+    kind, reason ->
+      Samen.Observability.Failure.report_write(:replay_capture_open, nil, {kind, reason})
+      :error
   end
 
   @doc "Append a frame for the calling process's session."
@@ -99,9 +104,15 @@ defmodule Samen.Replay.Capture do
     capture(event, metadata)
     :ok
   rescue
-    _ -> :ok
+    # `:telemetry` detaches a handler that raises, so this boundary stays total; the event is not recorded and that
+    # is on record (value-free: the exception module only, never a param or the event name).
+    e ->
+      Samen.Observability.Failure.report_write(:replay_capture_event, nil, e)
+      :ok
   catch
-    _, _ -> :ok
+    kind, reason ->
+      Samen.Observability.Failure.report_write(:replay_capture_event, nil, {kind, reason})
+      :ok
   end
 
   defp capture([:phoenix, :live_view, :handle_event, :start], %{socket: socket, event: ev} = meta) do
@@ -161,8 +172,6 @@ defmodule Samen.Replay.Capture do
     if Code.ensure_loaded?(module),
       do: module.module_info(:md5) |> Base.encode16(case: :lower),
       else: nil
-  rescue
-    _ -> nil
   end
 
   def md5(_), do: nil
@@ -175,7 +184,10 @@ defmodule Samen.Replay.Capture do
       _ -> nil
     end
   rescue
-    _ -> nil
+    # no actor reference is recorded (never the raw principal), and the failure is on record
+    e ->
+      Samen.Observability.Failure.report(:replay_pseudonym, nil, e)
+      nil
   end
 
   defp pseudonym(_), do: nil

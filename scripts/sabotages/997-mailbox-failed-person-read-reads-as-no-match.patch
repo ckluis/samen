@@ -1,0 +1,21 @@
+# SABOTAGE: Match.candidate_people rescues a failed person read to [], so a CRM outage reads as no matching 
+#   person
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/mailbox_sync_test.exs
+# MUST_FAIL: RED: person_for_address/company_for raise on an unreadable CRM instead of answering nil
+# MUST_FAIL: RED: sync aborts with {:match_unavailable, _}, records nothing and keeps the cursor; the same page then syncs
+diff --git a/samen_core/lib/samen/mailbox/match.ex b/samen_core/lib/samen/mailbox/match.ex
+index ff9df9c9..7aca42fb 100644
+--- a/samen_core/lib/samen/mailbox/match.ex
++++ b/samen_core/lib/samen/mailbox/match.ex
+@@ -158,6 +158,8 @@ defmodule Samen.Mailbox.Match do
+       |> Ash.read!(authorize?: false)
+ 
+     PiiResolution.resolve(records, config.person_resource, %{plane: :tenant}, repo: config.repo)
++  rescue
++    _ -> []
+   end
+ 
+   # A `%Samen.Masked{}` (or anything that is not a resolved composite) yields NO

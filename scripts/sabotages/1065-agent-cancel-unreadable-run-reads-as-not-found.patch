@@ -1,0 +1,25 @@
+# SABOTAGE: a cancel whose run read failed answers :not_found
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_f_test.exs
+# MUST_FAIL: RED: a run log that cannot be read answers {:error, :unavailable} and reports
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index d9094b1c..9677afbe 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -588,12 +588,8 @@ defmodule Samen.AI.Agent do
+       {:error, reason} ->
+         # A run that does not exist (or is another org's) is :not_found; a read that FAILED is not
+         # "no such run" — it is :unavailable and reported (the web surface says "try again").
+-        if run_not_found?(reason) do
+-          {:error, :not_found}
+-        else
+-          Samen.Observability.Failure.report(:agent_cancel_load, scope, reason)
+-          {:error, :unavailable}
+-        end
++        _ = {reason, scope}
++        {:error, :not_found}
+     end
+   end
+ 

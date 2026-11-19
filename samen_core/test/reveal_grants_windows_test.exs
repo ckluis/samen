@@ -183,7 +183,7 @@ defmodule Samen.Reveal.GrantsWindowsTest do
       a = attrs(%{org_id: org, detail: "x"})
 
       log = capture_log(fn -> assert {:ok, _} = Grants.write_audit(ChainDownRepo, a) end)
-      assert log =~ "read=reveal_audit_chain org=#{org}"
+      assert log =~ "write=reveal_audit_chain org=#{org}"
       assert chain_rows(a.subject_id) == []
 
       # With no org_id the chain probe is asked about the reserved __global__ chain (not about "no org").

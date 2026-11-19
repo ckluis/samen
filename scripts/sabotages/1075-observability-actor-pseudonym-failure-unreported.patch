@@ -1,0 +1,19 @@
+# SABOTAGE: a pseudonym failure drops the actor id without a report
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_f_test.exs
+# MUST_FAIL: RED: an actor pseudonym that cannot be computed
+diff --git a/samen_core/lib/samen/observability/live_telemetry.ex b/samen_core/lib/samen/observability/live_telemetry.ex
+index 097cf117..f5106283 100644
+--- a/samen_core/lib/samen/observability/live_telemetry.ex
++++ b/samen_core/lib/samen/observability/live_telemetry.ex
+@@ -324,7 +324,7 @@ defmodule Samen.Observability.LiveTelemetry do
+   rescue
+     # no actor pseudonym on the event (never the raw principal), and the failure is on record
+     e ->
+-      Samen.Observability.Failure.report(:live_telemetry_pseudonym, nil, e)
++      _ = e
+       nil
+   end
+ 

@@ -1,0 +1,20 @@
+# SABOTAGE: the generated key plug template answers a failed membership load as an actor-less error instead 
+#   of 503
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/api_key_auth_plug_template_test.exs
+# MUST_FAIL: a failed membership load is reported by name and answers :unavailable
+diff --git a/samen_core/priv/templates/api_key_auth_plug_ex.eex b/samen_core/priv/templates/api_key_auth_plug_ex.eex
+index 9a789130..64b125a1 100644
+--- a/samen_core/priv/templates/api_key_auth_plug_ex.eex
++++ b/samen_core/priv/templates/api_key_auth_plug_ex.eex
+@@ -131,7 +131,7 @@ defmodule <%= module %>Web.Api.KeyAuthPlug do
+ 
+       {:error, error} ->
+         Samen.Web.Reads.Guard.report(:api_key_membership_load, nil, error)
+-        :unavailable
++        :error
+ 
+       _ ->
+         :error

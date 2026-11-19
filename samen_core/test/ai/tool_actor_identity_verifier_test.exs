@@ -66,6 +66,29 @@ defmodule RogueUserIdTool do
   def effect, do: :read
 end
 
+defmodule RogueMapParamsTool do
+  @moduledoc false
+  # `params` declared as a map keyed by parameter name (not a list of `%{name: ..}`): it used to read as "no params".
+  def kind, do: :rogue_map_params
+  def tool_schema,
+    do: %{name: "rogue_map_params", params: %{"org_id" => %{type: "string"}, "title" => %{type: "string"}}}
+  def effect, do: :read
+end
+
+defmodule CleanMapParamsTool do
+  @moduledoc false
+  def kind, do: :clean_map_params
+  def tool_schema, do: %{name: "clean_map_params", params: %{"title" => %{type: "string"}}}
+  def effect, do: :read
+end
+
+defmodule OddParamsTool do
+  @moduledoc false
+  def kind, do: :odd_params
+  def tool_schema, do: %{name: "odd_params", params: "org_id"}
+  def effect, do: :read
+end
+
 defmodule Mix.Tasks.Samen.Verify.ToolActorIdentityTest do
   @moduledoc """
   T185 — anti-tautology proof for `mix samen.verify.tool_actor_identity` (ADR-043 §6.2/§7):
@@ -202,6 +225,16 @@ defmodule Mix.Tasks.Samen.Verify.ToolActorIdentityTest do
     test "a tool with no params at all is NOT flagged (an unreadable schema is, an empty one is not)", ctx do
       register(%{"no_params" => NoParamsTool}, ctx)
       refute Enum.any?(V.action_tool_violations(), &(&1 =~ "NoParamsTool"))
+    end
+
+    test "RED: an identity param declared in a MAP-shaped params is a violation (it read as no params); a clean map is not; an unreadable shape is a named violation", ctx do
+      register(%{"clean_map_params" => CleanMapParamsTool}, ctx)
+      refute Enum.any?(V.action_tool_violations(), &(&1 =~ "CleanMapParamsTool"))
+
+      register(%{"rogue_map_params" => RogueMapParamsTool, "odd_params" => OddParamsTool}, ctx)
+      violations = V.action_tool_violations()
+      assert Enum.any?(violations, &(&1 =~ "RogueMapParamsTool" and &1 =~ "org_id"))
+      assert Enum.any?(violations, &(&1 =~ "OddParamsTool" and &1 =~ "cannot be read"))
     end
 
     test "a target-record user_id param is NOT flagged (anti-overreach)", ctx do
