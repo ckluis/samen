@@ -1,0 +1,19 @@
+# SABOTAGE: a host action's non-JSON meta reaches the jsonb outcome, so the finalize fails and the Run 
+#   stays running
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: RED: a host action whose meta holds a tuple, a pid
+diff --git a/samen_core/lib/samen/automation/run_record.ex b/samen_core/lib/samen/automation/run_record.ex
+index 7a9f5031..d92589fd 100644
+--- a/samen_core/lib/samen/automation/run_record.ex
++++ b/samen_core/lib/samen/automation/run_record.ex
+@@ -249,7 +249,6 @@ defmodule Samen.Automation.RunRecord do
+     |> Enum.filter(&plain_map?/1)
+     |> Enum.map(&Map.take(&1, @allowed_outcome_keys ++ @allowed_outcome_keys_str))
+     |> Enum.map(&bound_outcome_kind/1)
+-    |> Enum.map(&bound_outcome_meta/1)
+   end
+ 
+   defp bounded_outcomes(_), do: []

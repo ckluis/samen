@@ -258,6 +258,110 @@ defmodule Samen.Automation.ObservabilityTest do
     refute Enum.any?(rows, fn [errors] -> errors =~ marker end), "the marker reached oban_jobs.errors"
   end
 
+  defmodule NonJsonMeta do
+    @moduledoc false
+    @behaviour Samen.Automation.Action
+    def kind, do: :zz_nonjson
+    def validate(config, _key), do: {:ok, config}
+
+    # a host action's own terms: a tuple, a pid, a function, a nested map and a non-UTF-8 binary cannot be a jsonb value
+    def run(_config, _ctx) do
+      {:ok,
+       %{
+         upstream: {:accepted, 7},
+         conn: self(),
+         callback: &String.length/1,
+         nested: %{a: 1},
+         raw: <<255, 254>>,
+         kept: "ok-1",
+         count: 3,
+         flag: true,
+         none: nil
+       }}
+    end
+  end
+
+  defmodule JsonMeta do
+    @moduledoc false
+    @behaviour Samen.Automation.Action
+    def kind, do: :zz_jsonmeta
+    def validate(config, _key), do: {:ok, config}
+    def run(_config, _ctx), do: {:ok, %{count: 2, note: "fine", flag: true}}
+  end
+
+  test "RED: a host action whose meta holds a tuple, a pid or another non-JSON term still ends the Run terminal, with only the scalars stored; JSON-safe meta is stored unchanged (control)" do
+    prev = Application.get_env(:samen_core, Samen.Automation.Action)
+
+    Application.put_env(:samen_core, Samen.Automation.Action,
+      extra: %{"zz_nonjson" => NonJsonMeta, "zz_jsonmeta" => JsonMeta}
+    )
+
+    on_exit(fn -> restore(:samen_core, Samen.Automation.Action, prev) end)
+
+    owner = Ash.UUID.generate()
+
+    fire = fn kind ->
+      org = Ash.UUID.generate()
+      wf = create_workflow!(org, owner, conditions: [], actions: [%{"kind" => kind}])
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          create_target!(org)
+          assert %{failure: 0, discard: 0, snoozed: 0} = drain()
+        end)
+
+      {runs_for(org, wf.id), log}
+    end
+
+    # CONTROL: JSON-safe meta is stored exactly as the action answered it
+    {[control], control_log} = fire.("zz_jsonmeta")
+    assert control.state == :succeeded
+    assert [%{"meta" => %{"count" => 2, "note" => "fine", "flag" => true}}] = jsonify(control.outcome)
+    refute control_log =~ "run_record_finalize"
+
+    # RED: the same shape of action with non-JSON terms in its meta
+    {[run], log} = fire.("zz_nonjson")
+    assert run.state == :succeeded, "the Run stayed #{inspect(run.state)} because its outcome could not be stored"
+    assert run.finished_at != nil
+
+    assert [%{"meta" => meta}] = jsonify(run.outcome)
+    assert meta == %{"kept" => "ok-1", "count" => 3, "flag" => true, "none" => nil}
+
+    outcome_json = Jason.encode!(run.outcome)
+    refute outcome_json =~ "accepted"
+    refute outcome_json =~ "#PID"
+    refute log =~ "run_record_finalize"
+  end
+
+  test "RED: a finalize that fails is reported by name and org, never as a debug line, and never with the exception's message or the run's values" do
+    marker = "run-marker-6639@example.test"
+    org = Ash.UUID.generate()
+
+    # the injected failure is real and its message carries the marker (a plain map where a Run record belongs)
+    forged = %{org_id: org, note: marker}
+
+    assert_raise ArgumentError, ~r/#{marker}/, fn ->
+      apply(Ash.Changeset, :for_update, [forged, :finalize, %{}, [authorize?: false]])
+    end
+
+    log = ExUnit.CaptureLog.capture_log(fn -> assert :ok = RunRecord.succeed!(forged, []) end)
+
+    assert log =~ "[error]"
+    assert log =~ "write failed write=run_record_finalize org=#{org}"
+    assert log =~ "cause=ArgumentError"
+    refute log =~ marker
+
+    # CONTROL: a real Run finalizes quietly through the same seam
+    owner = Ash.UUID.generate()
+    org2 = Ash.UUID.generate()
+    wf = create_workflow!(org2, owner, conditions: [], actions: [])
+    args = %{"org_id" => org2, "event_id" => Ash.UUID.generate(), "trigger_kind" => "manual", "subject_ref" => "ref"}
+    run = RunRecord.open!(wf, args)
+    log2 = ExUnit.CaptureLog.capture_log(fn -> assert :ok = RunRecord.succeed!(RunRecord.mark_running!(run), []) end)
+    refute log2 =~ "run_record_finalize"
+    assert [%{state: :succeeded}] = runs_for(org2, wf.id)
+  end
+
   test "row 3 — a non-matching condition -> Run row :skipped/:conditions_unmet, never :running" do
     org = Ash.UUID.generate()
     owner = Ash.UUID.generate()
