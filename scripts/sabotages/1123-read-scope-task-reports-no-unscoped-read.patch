@@ -5,7 +5,7 @@
 # APP: samen_core
 # TEST_FILES: test/read_scope_verify_test.exs
 # MUST_FAIL: RED: an unscoped authorize?: false read exits 1
-# MUST_FAIL: a planted unscoped read in a copy of each host's lib/ is caught
+# MUST_FAIL: a planted unscoped read scanned with each host's lib/ is caught
 diff --git a/samen_core/lib/mix/tasks/samen.verify.read_scope.ex b/samen_core/lib/mix/tasks/samen.verify.read_scope.ex
 index 89a2ed5e..d68b05ed 100644
 --- a/samen_core/lib/mix/tasks/samen.verify.read_scope.ex
