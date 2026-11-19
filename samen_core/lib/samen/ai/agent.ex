@@ -560,10 +560,11 @@ defmodule Samen.AI.Agent do
   the caller's scope (`Samen.Policy.OrgScope` — a foreign org's run does not exist). Sets
   `cancel_requested_at`; the loop honors it at its NEXT turn boundary — the in-flight
   turn completes ("stopping after the current step", never "stopped"). Returns
-  `{:ok, run}`, `{:error, :not_found}`, or `{:error, :already_terminal}`.
+  `{:ok, run}`, `{:error, :not_found}`, `{:error, :already_terminal}`, or `{:error, :unavailable}` (the
+  run could not be READ: it is not "no such run", and it is reported as `agent_cancel_load`).
   """
   @spec cancel(Samen.Scope.t(), String.t()) ::
-          {:ok, Ash.Resource.Record.t()} | {:error, :not_found | :already_terminal | term()}
+          {:ok, Ash.Resource.Record.t()} | {:error, :not_found | :already_terminal | :unavailable | term()}
   def cancel(%Samen.Scope{} = scope, run_id) do
     case Ash.get(Run, run_id, scope: scope) do
       # A4: a PARKED run has no loop to honour the durable flag at a turn boundary, and
@@ -584,10 +585,26 @@ defmodule Samen.AI.Agent do
          |> Ash.Changeset.for_update(:request_cancel, %{})
          |> Ash.update!(authorize?: false)}
 
-      {:error, _} ->
-        {:error, :not_found}
+      {:error, reason} ->
+        # A run that does not exist (or is another org's) is :not_found; a read that FAILED is not
+        # "no such run" — it is :unavailable and reported (the web surface says "try again").
+        if run_not_found?(reason) do
+          {:error, :not_found}
+        else
+          Samen.Observability.Failure.report(:agent_cancel_load, scope, reason)
+          {:error, :unavailable}
+        end
     end
   end
+
+  defp run_not_found?(%{errors: [_ | _] = errors}),
+    do:
+      Enum.all?(
+        errors,
+        &match?(%mod{} when mod in [Ash.Error.Query.NotFound, Ash.Error.Invalid.InvalidPrimaryKey], &1)
+      )
+
+  defp run_not_found?(_), do: false
 
   @doc """
   The egress options the loop passes to EVERY `Samen.AI.complete/4` call. Pure and public

@@ -45,4 +45,22 @@ defmodule Samen.HonestKernelReadsFTest do
       assert Breaker.kills(org) == [], "an unreadable count must not trip the kill"
     end
   end
+
+  describe "agent Agent.cancel/2: a run that cannot be READ is not 'no such run'" do
+    test "RED: a run log that cannot be read answers {:error, :unavailable} and reports; an unknown run is still :not_found (control)" do
+      org = Ash.UUID.generate()
+      scope = %Samen.Scope{actor: %{id: "u:#{org}", org_id: org, role: :member, plane: :tenant}}
+
+      # POSITIVE CONTROL: the read works and the run genuinely does not exist
+      assert {:error, :not_found} = Samen.AI.Agent.cancel(scope, Ash.UUID.generate())
+
+      hide_table!("ai_agent_run")
+
+      log =
+        capture_log(fn -> assert {:error, :unavailable} = Samen.AI.Agent.cancel(scope, Ash.UUID.generate()) end)
+
+      assert log =~ "read=agent_cancel_load"
+      refute log =~ "ai_agent_run"
+    end
+  end
 end
