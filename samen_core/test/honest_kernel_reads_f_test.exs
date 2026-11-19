@@ -181,7 +181,7 @@ defmodule Samen.HonestKernelReadsFTest do
 
       # (2) the kill path RAISES (a workflow value that cannot be killed): still the trip write, never the count read
       forged = %{id: wf.id, org_id: org}
-      assert raw_message(fn -> forged.disabled_by_operator_at end) =~ "disabled_by_operator_at"
+      assert raw_message(fn -> apply(Map, :fetch!, [forged, :disabled_by_operator_at]) end) =~ "disabled_by_operator_at"
 
       log = capture_log(fn -> assert :ok = Samen.Automation.Breaker.check!(forged, opts) end)
 

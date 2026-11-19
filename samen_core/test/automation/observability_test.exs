@@ -678,7 +678,7 @@ defmodule Samen.Automation.ObservabilityTest do
     forged = %{org_id: org, actions: [%{"kind" => "webhook", "url" => secret}]}
     args = %{"org_id" => org, "event_id" => Ash.UUID.generate(), "trigger_kind" => "manual", "subject_ref" => "ref"}
 
-    msg = try do forged.id rescue e -> Exception.message(e) end
+    msg = try do apply(Map, :fetch!, [forged, :id]) rescue e -> Exception.message(e) end
     assert msg =~ secret, "the injected failure must carry the secret the report must not repeat"
 
     # the debug line is only emitted at debug level: turn it on, or the `refute` below could never fail
