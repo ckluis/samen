@@ -33,6 +33,14 @@ defmodule SamenCore.ReadScopeVerifyTest do
     dir
   end
 
+  # The deliberately unparseable fixture is stored as `unparseable/broken.ex.txt` so `mix format` (its inputs are
+  # `test/**/*.ex`) never meets it; each test that scans it gets a copy named `broken.ex` in a scratch dir.
+  defp unparseable_dir! do
+    dir = scratch!()
+    File.cp!(Path.join([@corpus, "unparseable", "broken.ex.txt"]), Path.join(dir, "broken.ex"))
+    dir
+  end
+
   defp run_task(args) do
     System.cmd("mix", ["samen.verify.read_scope" | args],
       cd: @project_dir,
@@ -71,7 +79,7 @@ defmodule SamenCore.ReadScopeVerifyTest do
 
   @tag :exit_code
   test "RED: an unparseable file exits 1 — a file the lint could not inspect is never a pass" do
-    {out, code} = run_task(["--source-dirs", Path.join(@corpus, "unparseable")])
+    {out, code} = run_task(["--source-dirs", unparseable_dir!()])
     assert code == 1, out
     assert out =~ "broken.ex"
     assert out =~ "could not be scanned"
@@ -155,10 +163,26 @@ defmodule SamenCore.ReadScopeVerifyTest do
     end
   end
 
+  describe "the unparseable fixture and the formatter" do
+    test "no file `mix format` would read is a deliberately unparseable one (it is stored as .ex.txt)" do
+      {opts, _} = Code.eval_file(Path.join(@project_dir, ".formatter.exs"))
+
+      inputs =
+        opts[:inputs]
+        |> Enum.flat_map(&Path.wildcard(Path.join(@project_dir, &1)))
+        |> Enum.map(&Path.relative_to(&1, @project_dir))
+
+      # positive control: the glob does see the parseable fixtures beside it
+      assert "test/fixtures/read_scope_corpus/clean/clean.ex" in inputs
+      assert File.exists?(Path.join([@corpus, "unparseable", "broken.ex.txt"]))
+      refute Enum.any?(inputs, &String.contains?(&1, "read_scope_corpus/unparseable")), inspect(inputs)
+    end
+  end
+
   describe "ReadScope.scan_file/1" do
     test "an unparseable file is {:error, _}, a parseable one is {:ok, counts}" do
       assert {:error, "could not be scanned: " <> _} =
-               ReadScope.scan_file(Path.join([@corpus, "unparseable", "broken.ex"]))
+               ReadScope.scan_file(Path.join(unparseable_dir!(), "broken.ex"))
 
       assert {:ok, {[], 3, 1}} = ReadScope.scan_file(Path.join([@corpus, "clean", "clean.ex"]))
       assert {:error, "cannot be read: " <> _} = ReadScope.scan_file(Path.join(@corpus, "absent.ex"))
