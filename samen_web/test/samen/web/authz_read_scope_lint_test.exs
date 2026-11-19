@@ -228,6 +228,24 @@ defmodule Samen.Web.Authz.ReadScopeLintTest do
     end
   end
 
+  test "RED PATH: assert_all_scoped! RAISES over a file it cannot parse — an uninspectable file is never a pass" do
+    dir = Path.join(System.tmp_dir!(), "samen_authz_lint_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    broken = Path.join(dir, "broken.ex")
+    File.write!(broken, "defmodule Broken do\n  def x(, do: 1\n")
+    clean = Path.join(dir, "pinned.ex")
+    File.write!(clean, @pinned_fixture)
+
+    try do
+      assert {:ok, %{files: 1}} = Lint.assert_all_scoped!([clean])
+      err = assert_raise UnscopedReadError, fn -> Lint.assert_all_scoped!([clean, broken]) end
+      assert err.message =~ "broken.ex"
+      assert err.message =~ "could not be scanned"
+    after
+      File.rm_rf!(dir)
+    end
+  end
+
   test "ANTI-TAUTOLOGY: the SAME read with a one-line org_id filter PASSES — the pin is what flips it" do
     {violations, governed, _} = Lint.scan_source(@pinned_fixture, "fixture/pinned_read.ex")
     assert violations == []

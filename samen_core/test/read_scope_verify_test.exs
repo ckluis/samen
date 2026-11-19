@@ -115,20 +115,41 @@ defmodule SamenCore.ReadScopeVerifyTest do
     end
   end
 
+  @hosts [demo: 1, driftwood: 1, pawchart: 2]
+
   describe "the reference hosts run it (D3 phase 1)" do
-    for {host, ceiling} <- [demo: 1, driftwood: 1, pawchart: 2] do
-      test "#{host}: lib/ passes, and its ci.sh pins EXACTLY the measured sanction count (#{ceiling})" do
-        host = unquote(host)
+    test "every host's lib/ passes, and its ci.sh pins EXACTLY the measured sanction count" do
+      for {host, ceiling} <- @hosts do
         lib = Path.join([@repo_root, to_string(host), "lib"])
 
         assert %{violations: [], sanctioned_reads: sanctioned, files: files} = Task.scan([lib])
         assert files > 0
-        assert sanctioned == unquote(ceiling)
+        assert sanctioned == ceiling, "#{host}: measured #{sanctioned} sanctions, test pins #{ceiling}"
 
         ci = File.read!(Path.join([@repo_root, to_string(host), "ci.sh"]))
 
         assert ci =~ "mix samen.verify.read_scope --max-sanctioned #{sanctioned}\n",
                "#{host}/ci.sh must run the read-scope lint with the exact measured ceiling"
+      end
+    end
+
+    @tag :tmp_dir
+    test "a planted unscoped read in a copy of each host's lib/ is caught (the pristine copy passes)", %{tmp_dir: tmp} do
+      for {host, ceiling} <- @hosts do
+        copy = Path.join(tmp, to_string(host))
+        File.cp_r!(Path.join([@repo_root, to_string(host), "lib"]), copy)
+
+        # positive control: the pristine copy is clean
+        assert %{violations: []} = Task.scan([copy], ceiling)
+
+        File.write!(Path.join(copy, "zz_planted.ex"), """
+        defmodule ZzPlanted.Leak do
+          def every_orgs_rows(resource), do: Ash.read!(resource, authorize?: false)
+        end
+        """)
+
+        assert %{unscoped: 1, violations: violations} = Task.scan([copy], ceiling)
+        assert Enum.any?(violations, &(&1 =~ "zz_planted.ex:2 — every_orgs_rows/1")), "#{host}: #{inspect(violations)}"
       end
     end
   end
