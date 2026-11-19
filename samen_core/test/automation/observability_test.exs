@@ -697,15 +697,22 @@ defmodule Samen.Automation.ObservabilityTest do
     refute log2 =~ "run_record_open"
   end
 
-  test "RED: RunRecord.open! whose create FAILS (and finds no existing row) reports by name; a duplicate dispatch stays quiet" do
+  test "RED: RunRecord.open! whose create FAILS (and finds no existing row) reports by name; a failed create beside an existing row stays quiet" do
     org = Ash.UUID.generate()
     wf = create_workflow!(org, Ash.UUID.generate(), conditions: [], actions: [])
     args = %{"org_id" => org, "event_id" => Ash.UUID.generate(), "trigger_kind" => "manual", "subject_ref" => "ref"}
 
-    # CONTROL: the second open of the same dispatch finds the first row and reports nothing
+    # CONTROL: the :record create is an UPSERT, so the second open of the same dispatch returns the first row and
+    # reports nothing (an upsert never reaches the find_by_key fallback; the next control does)
     assert %{id: id} = RunRecord.open!(wf, args)
     log0 = ExUnit.CaptureLog.capture_log(fn -> assert %{id: ^id} = RunRecord.open!(wf, args) end)
     refute log0 =~ "run_record_open"
+
+    # CONTROL (the fallback itself): a create that FAILS (an invalid depth) while the dispatch's row exists finds that row
+    # through `find_by_key` and reports nothing
+    failing_args = Map.put(args, "depth", "not-an-integer")
+    log1 = ExUnit.CaptureLog.capture_log(fn -> assert %{id: ^id} = RunRecord.open!(wf, failing_args) end)
+    refute log1 =~ "run_record_open"
 
     # a create that fails validation (no workflow id) and has no row to fall back to
     log = ExUnit.CaptureLog.capture_log(fn -> assert RunRecord.open!(%{id: nil, org_id: org}, args) == nil end)
