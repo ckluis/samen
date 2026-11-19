@@ -135,9 +135,17 @@ defmodule Samen.Automation.DispatchWorker do
 
         case Oban.insert(RunWorker.new(run_args)) do
           {:ok, _job} -> :ok
-          {:error, reason} -> Logger.warning("[Automation.DispatchWorker] run enqueue failed: #{inspect(reason)}")
+          {:error, reason} -> enqueue_failed(args, reason)
         end
     end
+  end
+
+  @doc false
+  # `Oban.insert/1` answered `{:error, changeset}`: the changeset's `changes.args` is the whole job envelope, including the
+  # pinned definition (each webhook action's `"url"`, which for a Slack- or Zapier-style receiver IS the bearer secret).
+  # Reported by NAME (the cause modules), with the org, never the value: and a write that did not happen is a write failure.
+  def enqueue_failed(args, reason) do
+    Samen.Observability.Failure.report_write(:automation_run_enqueue, args["org_id"], reason)
   end
 
   # No RunWorker job exists for these guards (the loop/depth cap fires BEFORE

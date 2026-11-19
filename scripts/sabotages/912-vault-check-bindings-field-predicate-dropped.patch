@@ -1,0 +1,20 @@
+# SABOTAGE: check_bindings stops comparing the token row's vault and field with the field being set
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault_change_integration_test.exs
+# MUST_FAIL: a field swap within the SAME record is refused
+diff --git a/samen_core/lib/samen/vault.ex b/samen_core/lib/samen/vault.ex
+index fce95162..f2612760 100644
+--- a/samen_core/lib/samen/vault.ex
++++ b/samen_core/lib/samen/vault.ex
+@@ -273,7 +273,8 @@ defmodule Samen.Vault do
+     do: :foreign_subject
+ 
+   defp binding_failure(%VaultRow{vault_name: vault, field_name: name}, _subject_id, field) do
+-    if vault == to_string(field.vault) and name == to_string(field.name), do: nil, else: :field_mismatch
++    _ = {vault, name, field}
++    nil
+   end
+ 
+   @doc """

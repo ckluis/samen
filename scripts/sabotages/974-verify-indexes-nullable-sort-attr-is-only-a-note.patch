@@ -1,0 +1,19 @@
+# SABOTAGE: the index verifier computes the non-nil-sort-attribute-over-a-nullable-column violations but never
+#   includes them in violations/1, so the finding is only a note and no longer gates
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/indexing_test.exs
+# MUST_FAIL: a SORT attribute that says non-nil over a nullable column is a violation; making the column NOT NULL clears it
+diff --git a/samen_core/lib/mix/tasks/samen.verify.indexes.ex b/samen_core/lib/mix/tasks/samen.verify.indexes.ex
+index af622868..746c5bd6 100644
+--- a/samen_core/lib/mix/tasks/samen.verify.indexes.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.indexes.ex
+@@ -119,7 +119,6 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
+       empty ++
+         Enum.map(unclassified, fn {_resource, reason} -> "cannot inspect: #{reason}" end) ++
+         Enum.flat_map(resources, &check(&1, Map.merge(exempt, unmounted), spec_opts)) ++
+-        nullable_sort_violations(resources, Map.merge(exempt, unmounted), spec_opts) ++
+         stale_exemptions(exempt, resources) ++
+         stale_unmounted(unmounted, resources, spec_opts)
+     end

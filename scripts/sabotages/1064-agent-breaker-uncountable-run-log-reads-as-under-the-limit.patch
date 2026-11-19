@@ -1,0 +1,21 @@
+# SABOTAGE: an uncountable run log reads as under the rate limit and the run starts
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_f_test.exs
+# MUST_FAIL: RED: an uncountable run log refuses the start
+diff --git a/samen_core/lib/samen/ai/agent/breaker.ex b/samen_core/lib/samen/ai/agent/breaker.ex
+index 97fb83c0..19f09565 100644
+--- a/samen_core/lib/samen/ai/agent/breaker.ex
++++ b/samen_core/lib/samen/ai/agent/breaker.ex
+@@ -499,8 +499,8 @@ defmodule Samen.AI.Agent.Breaker do
+     count >= rate_limit_per_org_hour()
+   rescue
+     e ->
+-      Samen.Observability.Failure.report(:breaker_rate_count, org_id, e)
+-      :unavailable
++      _ = {org_id, e}
++      false
+   end
+ 
+   # The audit SUBJECT of a per-{org, definition} kill is that definition, not the host

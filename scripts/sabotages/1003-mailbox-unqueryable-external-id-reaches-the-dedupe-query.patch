@@ -1,0 +1,20 @@
+# SABOTAGE: Sync.record/3 hands a NUL-byte external id to the dedupe query, so the batch aborts on that 
+#   message on every run
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/mailbox_sync_test.exs
+# MUST_FAIL: RED: a provider message id no query can carry
+diff --git a/samen_core/lib/samen/mailbox/sync.ex b/samen_core/lib/samen/mailbox/sync.ex
+index 36fba00d..509c1412 100644
+--- a/samen_core/lib/samen/mailbox/sync.ex
++++ b/samen_core/lib/samen/mailbox/sync.ex
+@@ -205,7 +205,7 @@ defmodule Samen.Mailbox.Sync do
+   # stall the mailbox behind one provider message: a deterministic failure is not an outage.)
+   defp record(%Message{external_id: external_id} = message, connection, %Config{} = config)
+        when is_binary(external_id) do
+-    if Match.queryable?(external_id) do
++    if is_binary(external_id) do
+       do_record(message, connection, config)
+     else
+       Samen.Observability.Failure.report(:mailbox_unqueryable_external_id, config.org_id, :unqueryable_external_id)

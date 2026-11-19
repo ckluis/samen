@@ -13,7 +13,7 @@
 # TEST_FILES: test/crm/sequence_send_test.exs
 # MUST_FAIL: bounce -> dlv_suppression row -> the recipient's NEXT step is refused as :suppressed
 diff --git a/samen_core/lib/samen/sequences/receipt_lookup.ex b/samen_core/lib/samen/sequences/receipt_lookup.ex
-index f984dbf..d72d3a4 100644
+index ccbe48a..1d78026 100644
 --- a/samen_core/lib/samen/sequences/receipt_lookup.ex
 +++ b/samen_core/lib/samen/sequences/receipt_lookup.ex
 @@ -70,7 +70,7 @@ defmodule Samen.Sequences.ReceiptLookup do
@@ -23,5 +23,5 @@ index f984dbf..d72d3a4 100644
 -      {:ok, %{send_id: send_row.id, org_id: send_row.org_id, subscriber_id: enrollment.person_id}}
 +      {:ok, %{send_id: send_row.id, org_id: send_row.org_id, subscriber_id: send_row.id}}
      else
-       _ -> :not_found
-     end
+       # a send/enrollment that is genuinely absent (or an enrollment with no id) is an unmatched event
+       {:error, reason} when reason in [:not_found, :missing_id] ->

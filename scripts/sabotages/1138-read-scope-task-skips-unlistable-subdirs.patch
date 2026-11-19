@@ -1,0 +1,20 @@
+# SABOTAGE: The read-scope task drops the directories and entries its walk could not inspect, so an 
+#   unlistable subtree is left out without a word.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/read_scope_verify_test.exs
+# MUST_FAIL: an unlistable subdirectory and a dangling symlink are violations
+diff --git a/samen_core/lib/mix/tasks/samen.verify.read_scope.ex b/samen_core/lib/mix/tasks/samen.verify.read_scope.ex
+index f24edc7b..0e70374a 100644
+--- a/samen_core/lib/mix/tasks/samen.verify.read_scope.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.read_scope.ex
+@@ -97,7 +97,7 @@ defmodule Mix.Tasks.Samen.Verify.ReadScope do
+             {files, viol ++ ["#{dir}: no .ex file found — nothing was inspected"]}
+ 
+           true ->
+-            {files ++ found, viol ++ unlistable}
++            {files ++ found, viol}
+         end
+       end)
+ 

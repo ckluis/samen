@@ -1,0 +1,20 @@
+# SABOTAGE: The five-tree sweep returns ok when the scanner reports errors but no violations, so a file it 
+#   could not inspect passes the sweep.
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/authz_read_scope_lint_test.exs
+# MUST_FAIL: RAISES over a file it cannot parse
+diff --git a/samen_web/lib/samen/web/authz/read_scope_lint.ex b/samen_web/lib/samen/web/authz/read_scope_lint.ex
+index 52ebdd7c..0d7de9b8 100644
+--- a/samen_web/lib/samen/web/authz/read_scope_lint.ex
++++ b/samen_web/lib/samen/web/authz/read_scope_lint.ex
+@@ -56,7 +56,7 @@ defmodule Samen.Web.Authz.ReadScopeLint do
+   """
+   def assert_all_scoped!(files \\ source_files()) do
+     case ReadScope.scan_files(files) do
+-      %{violations: [], errors: [], files: n, governed_reads: g, sanctioned_reads: s} ->
++      %{violations: [], files: n, governed_reads: g, sanctioned_reads: s} ->
+         {:ok, %{files: n, governed_reads: g, sanctioned_reads: s}}
+ 
+       %{violations: violations, errors: errors} ->

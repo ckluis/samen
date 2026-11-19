@@ -1,0 +1,20 @@
+# SABOTAGE: cancelling an approval does not run the handler's on_cancel hook, so a cancelled reveal request 
+#   still reads as pending
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_approver_test.exs
+# MUST_FAIL: every path that decides a reveal request writes its terminal status on the request itself
+diff --git a/samen_core/lib/samen/approvals.ex b/samen_core/lib/samen/approvals.ex
+index cfabaf24..b07d954a 100644
+--- a/samen_core/lib/samen/approvals.ex
++++ b/samen_core/lib/samen/approvals.ex
+@@ -129,7 +129,7 @@ defmodule Samen.Approvals do
+             case transition(approval, :cancel, %{}, opts) do
+               {:ok, cancelled} ->
+                 audit!(repo, cancelled, "approval_cancelled", actor)
+-                run_cancel_hook!(repo, cancelled, actor, opts)
++                :ok
+                 cancelled
+ 
+               {:error, reason} ->

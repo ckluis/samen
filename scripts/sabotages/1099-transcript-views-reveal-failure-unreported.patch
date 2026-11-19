@@ -1,0 +1,20 @@
+# SABOTAGE: the public transcript reader swallows a failed reveal without a report
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_transcript_write_test.exs
+# MUST_FAIL: RED: a failed reveal is reported by name, and the reader still answers :transcript_unavailable
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 3e79bac6..5561adc6 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -3726,8 +3726,7 @@ defmodule Samen.AI.Agent do
+           {:error, reason} ->
+             # the UI-facing reader: same gone/outage split as `reveal_failed/2`, its own op name (a literal: the
+             # `Failure.report` guard enumerates names), and the same `:transcript_unavailable` answer
+-            if reason not in @transcript_gone_reasons,
+-              do: Samen.Observability.Failure.report(:agent_transcript_views, run.org_id, reason)
++            _ = reason
+ 
+             {:error, :transcript_unavailable}
+         end

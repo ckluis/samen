@@ -1,0 +1,19 @@
+# SABOTAGE: a lost trace link is not reported
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_e_test.exs
+# MUST_FAIL: RED: a changeset whose meta cannot take the context
+diff --git a/samen_core/lib/samen/tracer.ex b/samen_core/lib/samen/tracer.ex
+index bd6cd43d..02121ef5 100644
+--- a/samen_core/lib/samen/tracer.ex
++++ b/samen_core/lib/samen/tracer.ex
+@@ -204,7 +204,7 @@ defmodule Samen.Tracer do
+     # Tracing is not essential to the job: it is enqueued without a parent link. But the lost link is REPORTED (by name
+     # and exception module, never the changeset), not silent.
+     e ->
+-      Samen.Observability.Failure.report_write(:trace_context_inject, nil, e)
++      _ = e
+       changeset
+   end
+ 

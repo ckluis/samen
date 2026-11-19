@@ -7,11 +7,11 @@
 # APP: samen_web
 # TEST_FILES: test/samen/web/authz_read_scope_lint_test.exs
 # MUST_FAIL: opts smuggle
-diff --git a/samen_web/lib/samen/web/authz/read_scope_lint.ex b/samen_web/lib/samen/web/authz/read_scope_lint.ex
-index d2c6b17..a63fac2 100644
---- a/samen_web/lib/samen/web/authz/read_scope_lint.ex
-+++ b/samen_web/lib/samen/web/authz/read_scope_lint.ex
-@@ -358,7 +358,7 @@ defmodule Samen.Web.Authz.ReadScopeLint do
+diff --git a/samen_core/lib/samen/lint/read_scope.ex b/samen_core/lib/samen/lint/read_scope.ex
+index 2a3d0fa2..02f89324 100644
+--- a/samen_core/lib/samen/lint/read_scope.ex
++++ b/samen_core/lib/samen/lint/read_scope.ex
+@@ -360,7 +360,7 @@ defmodule Samen.Lint.ReadScope do
    defp authorize_off?(args, authz_vars) do
      walk_any?(args, fn
        {:authorize?, false} -> true

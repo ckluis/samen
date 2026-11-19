@@ -1,0 +1,20 @@
+# SABOTAGE: the agent execution seam files a miswired approvals engine (:approvals_unavailable) as 
+#   :approval_not_found
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_write_test.exs
+# MUST_FAIL: RED: a configured approvals resource whose repo cannot be resolved is :approval_unavailable
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index a9834350..20684f4d 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -2979,7 +2979,7 @@ defmodule Samen.AI.Agent do
+ 
+       # A read that FAILED is not "no such approval": the write is refused either way, but the turn row names the cause.
+       # (`:approvals_unavailable` is the miswired-engine sibling: a configured resource whose repo cannot be resolved.)
+-      {:error, reason} when reason in [:unavailable, :approvals_unavailable] ->
++      {:error, :unavailable} ->
+         {:error, :approval_unavailable}
+ 
+       _ ->

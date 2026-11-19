@@ -227,26 +227,30 @@ defmodule Samen.NoPlaintextPii.Context do
     |> MapSet.new()
   end
 
+  # An unreadable non-PII registry grants NO exemptions (stricter: more findings, never fewer) and says so.
   defp safe_registry_entries do
     NonPii.entries()
   rescue
-    _ -> []
+    e ->
+      Samen.Observability.Failure.report(:no_plaintext_pii_registry, nil, e)
+      []
   catch
-    :exit, _ -> []
+    :exit, reason ->
+      Samen.Observability.Failure.report(:no_plaintext_pii_registry, nil, reason)
+      []
   end
 
+  # A non-Postgres resource (ETS, simple) has no table: nil is exact. A Postgres resource whose table cannot be read
+  # raises (the verifier fails loudly) instead of silently dropping the resource from the sweep.
   defp table_name(resource) do
-    AshPostgres.DataLayer.Info.table(resource)
-  rescue
-    _ -> nil
+    if Ash.Resource.Info.data_layer(resource) == AshPostgres.DataLayer,
+      do: AshPostgres.DataLayer.Info.table(resource)
   end
 
   defp project_deps do
     Mix.Project.config()[:deps]
     |> List.wrap()
     |> Enum.map(&elem(&1, 0))
-  rescue
-    _ -> []
   end
 
   defp default_repo do

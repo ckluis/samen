@@ -1,0 +1,20 @@
+# SABOTAGE: a key the KMS reports :absent (a key store with no entry for the subject: a wrong or wiped key dir, an
+#   in-memory store after a restart) joins the quiet erased-run set instead of being reported as a disaster
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_transcript_write_test.exs
+# MUST_FAIL: a key the KMS reports :absent is NOT gone
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 4224cec7..5d9d19e3 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -3670,7 +3670,7 @@ defmodule Samen.AI.Agent do
+   # `:kms_key_dir`, an unmounted volume, an in-memory store after a restart), which is a disaster to report, not an
+   # erasure. Anything else (a KMS outage, a decrypt failure) is reported by name, value-free; the run's outcome is the
+   # same clean `:transcript_unavailable` failure either way.
+-  @transcript_gone_reasons [:shredded, :not_found]
++  @transcript_gone_reasons [:shredded, :absent, :not_found]
+ 
+   defp reveal_failed(%Run{} = run, reason) do
+     if reason not in @transcript_gone_reasons,

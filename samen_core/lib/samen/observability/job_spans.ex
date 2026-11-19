@@ -19,7 +19,9 @@ defmodule Samen.Observability.JobSpans do
   values, never the error reason.
 
   Like `Samen.Observability.LiveTelemetry`, the handler never raises (`:telemetry` would
-  detach it): a malformed job is skipped.
+  detach it): a job whose span cannot be started or ended runs untraced, and that is on record
+  (`job_span_start` / `job_span_end`, value-free: the exception module only). The handler wraps
+  no job code: Oban runs the job itself, so a handler failure can never run it twice.
   """
 
   @handler_id {__MODULE__, :spans}
@@ -58,9 +60,9 @@ defmodule Samen.Observability.JobSpans do
     Process.put(key(job), {span_ctx, token})
     :ok
   rescue
-    _ -> :ok
+    e -> failed(:job_span_start, e)
   catch
-    _, _ -> :ok
+    kind, reason -> failed(:job_span_start, {kind, reason})
   end
 
   def handle_event([:oban, :job, kind], _measurements, %{job: job}, _config)
@@ -79,14 +81,19 @@ defmodule Samen.Observability.JobSpans do
 
     :ok
   rescue
-    _ -> :ok
+    e -> failed(:job_span_end, e)
   catch
-    _, _ -> :ok
+    kind, reason -> failed(:job_span_end, {kind, reason})
   end
 
   def handle_event(_event, _measurements, _metadata, _config), do: :ok
 
   # ---------------------------------------------------------------------------
+
+  defp failed(op, reason) do
+    Samen.Observability.Failure.report_write(op, nil, reason)
+    :ok
+  end
 
   defp key(job), do: {__MODULE__, Map.get(job, :id)}
 

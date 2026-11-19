@@ -71,9 +71,15 @@ defmodule Samen.ApiContract do
 
   Returns a map ready for JSON serialization. The map is deterministically ordered
   (resources sorted by type, routes sorted by method+path, fields sorted by name).
+
+  A resource that is not exposed through JSON:API (no `json_api type`) is skipped, and nothing is exposed when the
+  JSON:API library is not loaded. A resource whose introspection FAILS is never skipped: the whole build raises
+  `Samen.ApiContract.IntrospectionError` naming each resource and the exception module (never a message or a value),
+  because a contract silently smaller than the live API would be written by `--update` and diffed green forever.
+  `opts[:info_mod]` swaps the introspection module (tests).
   """
-  def snapshot(domains, version \\ "v1") when is_list(domains) do
-    Snapshot.build(domains, version)
+  def snapshot(domains, version \\ "v1", opts \\ []) when is_list(domains) do
+    Snapshot.build(domains, version, Keyword.get(opts, :info_mod, Module.concat(["AshJsonApi", "Resource", "Info"])))
   end
 
   @doc """
@@ -120,6 +126,20 @@ defmodule Samen.ApiContract do
   def sort_deeply(other), do: other
 end
 
+defmodule Samen.ApiContract.IntrospectionError do
+  @moduledoc """
+  Raised by `Samen.ApiContract.snapshot/3` when one or more resources could not be introspected. `:failures` is
+  `[{resource_module, exception_module}]`; the message carries those names only.
+  """
+  defexception [:failures]
+
+  @impl true
+  def message(%{failures: failures}) do
+    listed = Enum.map_join(failures, ", ", fn {resource, cause} -> "#{inspect(resource)} (#{inspect(cause)})" end)
+    "API contract introspection failed for #{length(failures)} resource(s): #{listed}"
+  end
+end
+
 defmodule Samen.ApiContract.Snapshot do
   @moduledoc false
 
@@ -130,11 +150,26 @@ defmodule Samen.ApiContract.Snapshot do
   this before calling). Resources in the domains that have no `json_api type`
   (i.e. not AshJsonApi-exposed) are silently skipped.
   """
-  def build(domains, version) when is_list(domains) do
+  def build(domains, version, info_mod) when is_list(domains) do
+    results =
+      if Code.ensure_loaded?(info_mod) do
+        domains
+        |> Enum.flat_map(&Ash.Domain.Info.resources/1)
+        |> Enum.map(fn resource -> {resource, resource_entry(resource, info_mod)} end)
+      else
+        # Without the JSON:API library nothing is exposed through it: an honest, empty answer (the task's
+        # non-emptiness floor then refuses to write or diff it).
+        []
+      end
+
+    case for({resource, {:error, cause}} <- results, do: {resource, cause}) do
+      [] -> :ok
+      failures -> raise Samen.ApiContract.IntrospectionError, failures: failures
+    end
+
     resources =
-      domains
-      |> Enum.flat_map(&Ash.Domain.Info.resources/1)
-      |> Enum.flat_map(&resource_entry/1)
+      results
+      |> Enum.flat_map(fn {_resource, {:ok, entries}} -> entries end)
       |> Enum.sort_by(& &1["type"])
 
     %{
@@ -143,18 +178,18 @@ defmodule Samen.ApiContract.Snapshot do
     }
   end
 
-  defp resource_entry(resource) do
+  # {:ok, [entry]} (exposed), {:ok, []} (not a JSON:API resource), or {:error, exception_module}.
+  defp resource_entry(resource, info_mod) do
     try do
       # Use apply/3 to avoid compile-time warnings in samen_core where
       # AshJsonApi is an optional dep (only the host app — e.g. demo — has it).
-      info_mod = Module.concat(["AshJsonApi", "Resource", "Info"])
       type = apply(info_mod, :type, [resource])
 
       if is_nil(type) or type == "" do
-        []
+        {:ok, []}
       else
-        fields = build_fields(resource)
-        routes = build_routes(resource)
+        fields = build_fields(resource, info_mod)
+        routes = build_routes(resource, info_mod)
 
         entry = %{
           "fields" => fields,
@@ -163,24 +198,16 @@ defmodule Samen.ApiContract.Snapshot do
           "type" => type
         }
 
-        [entry]
+        {:ok, [entry]}
       end
     rescue
-      # If AshJsonApi.Resource.Info is not available or the resource isn't
-      # an AshJsonApi resource, skip silently.
-      _ -> []
+      # A resource that cannot be introspected is a failure of the build, not an absent resource.
+      e -> {:error, e.__struct__}
     end
   end
 
-  defp build_fields(resource) do
-    info_mod = Module.concat(["AshJsonApi", "Resource", "Info"])
-
-    show_fields =
-      try do
-        apply(info_mod, :show_fields, [resource]) || []
-      rescue
-        _ -> []
-      end
+  defp build_fields(resource, info_mod) do
+    show_fields = apply(info_mod, :show_fields, [resource]) || []
 
     show_fields_set = MapSet.new(show_fields)
 
@@ -198,15 +225,8 @@ defmodule Samen.ApiContract.Snapshot do
     end)
   end
 
-  defp build_routes(resource) do
-    info_mod = Module.concat(["AshJsonApi", "Resource", "Info"])
-
-    routes =
-      try do
-        apply(info_mod, :routes, [resource]) || []
-      rescue
-        _ -> []
-      end
+  defp build_routes(resource, info_mod) do
+    routes = apply(info_mod, :routes, [resource]) || []
 
     routes
     |> Enum.sort_by(fn r -> {r.method, r.route} end)

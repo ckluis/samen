@@ -1,0 +1,19 @@
+# SABOTAGE: browse hands the model [] custom objects when their lookup failed
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/mcp_test.exs
+# MUST_FAIL: an unreadable custom-object table answers {:error, :unavailable}
+diff --git a/samen_core/lib/samen/ai/mcp.ex b/samen_core/lib/samen/ai/mcp.ex
+index 6b753ba0..00858a70 100644
+--- a/samen_core/lib/samen/ai/mcp.ex
++++ b/samen_core/lib/samen/ai/mcp.ex
+@@ -298,7 +298,7 @@ defmodule Samen.AI.Mcp do
+     # A half of the catalogue that could not be read is an error to the model, never an empty list: `[]` says "this host has
+     # no custom objects" and the model acts on it.
+     with {:ok, schema} <- Catalog.schema_result(catalog_opts),
+-         {:ok, custom_objects} <- Catalog.custom_objects_result(org_id_or_nil(scope), catalog_opts) do
++         {:ok, custom_objects} <- {:ok, Catalog.custom_objects(org_id_or_nil(scope), catalog_opts)} do
+       seal_meta(%{"kind" => "catalog", "schema" => schema, "custom_objects" => custom_objects})
+     end
+   end

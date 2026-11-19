@@ -18,7 +18,7 @@ FAIL: <task name> found N violation(s):
 
 On success each prints `<task name>: OK — no violations found.` Step numbers below are the
 generated app's <!--count:gate_steps_app-->18<!--/count-->-step `ci.sh` (emitted by `mix samen.gen.app`; the `--api` variant has <!--count:gate_steps_app_api-->19<!--/count-->); Driftwood's
-<!--count:gate_steps_driftwood-->20<!--/count-->-step and PawChart's <!--count:gate_steps_pawchart-->17<!--/count-->-step gates run the same tiers in the same order. There are <!--count:verifiers-->27<!--/count--> `samen.verify.*` tasks in
+<!--count:gate_steps_driftwood-->20<!--/count-->-step and PawChart's <!--count:gate_steps_pawchart-->17<!--/count-->-step gates run the same tiers in the same order. There are <!--count:verifiers-->31<!--/count--> `samen.verify.*` tasks in
 total; each has an entry below (`doc_recipes_test.exs` enforces it).
 
 ---
@@ -419,6 +419,27 @@ create/update actions (exactly what the error message prints).
 
 ---
 
+## Step 13a — `mix samen.verify.read_scope`
+
+**Error** (`samen_core/lib/mix/tasks/samen.verify.read_scope.ex`, scanner `samen_core/lib/samen/lint/read_scope.ex`):
+
+```text
+UNSCOPED `authorize?: false` READ(S) (T132 defense-in-depth): ...
+lib/<app>/x.ex:42 — fun/1
+lib/<app>/y.ex — could not be scanned: ...
+N reads carry a `# authz-scope:` marker, over the ceiling of M (--max-sanctioned) ...
+```
+
+**Meaning:** tenant isolation is Ash policy (`OrgScope`) and `authorize?: false` turns it off, so a direct read with it and no
+`org_id`/`id` narrowing returns every org's rows. This runs in every host (`demo`, `driftwood`, `pawchart`) and every generated
+app, over that app's own `lib/`. A file it cannot read or parse, a subdirectory it cannot list, a missing or empty source dir, and more sanctioned reads
+(`# authz-scope:` markers) than the ceiling in `ci.sh` all fail: it never passes on a tree it could not inspect.
+**Fix:** pin the read with an `org_id`/`id` filter (or a by-id `Ash.get`, or a scalar aggregate). A read that is deliberately
+org-less (a system sweep, a pre-auth credential lookup) takes a `# authz-scope: <why it is safe>` marker on the read and a ceiling
+raised by one in `ci.sh`. Run it by hand: `mix samen.verify.read_scope [--source-dirs lib] [--max-sanctioned N]`.
+
+---
+
 ## Step 13b — `mix samen.verify.indexes`
 
 **Error** (`samen_core/lib/mix/tasks/samen.verify.indexes.ex`):
@@ -442,6 +463,25 @@ drop the old index in a follow-up migration (`DROP INDEX CONCURRENTLY`).
 **Fix:** `mix samen.gen.indexes` writes the `CREATE INDEX CONCURRENTLY` migration; for a resource added with
 `mix samen.gen.resource` the index is already in its migration. Set `keyset_sort:` on the resource to the field its list view
 sorts by (`default_sort`).
+
+---
+
+## Step 13c — `mix samen.verify.reveal_orgs`
+
+**Note** (`samen_core/lib/mix/tasks/samen.verify.reveal_orgs.ex`):
+
+```text
+samen.verify.reveal_orgs: NOTE <n> pending reveal request(s) carry no org and have no engine approval; no queue can recover them (ids: ...)
+```
+
+**Meaning:** a pending `RevealRequest` has no org (`rvq_org_id` NULL: a row from before the column that had no engine
+approval to take its org from, or one filed without an org) and no plane-global approval either. The tenant approver
+queue recovers a missing approval only for the requests of the org it reads, so no queue can find these. The migration
+never guesses an org. A request that was decided is never listed: its `rvq_status` is no longer `pending` (the decision
+writes it), so what is named here was never decided. This is a NOTE (exit 0); a read that cannot run is a violation
+(exit 1).
+**Fix:** decide each request by id: set `rvq_org_id` to the org it belongs to (the next queue read of that org re-opens its
+approval, and only while the request is still `pending`), or deny it with `Samen.Reveal.Grants.deny/2`.
 
 ---
 
@@ -558,6 +598,55 @@ task prints `Nothing to lint — never-read-current is vacuously satisfied (tier
 and passes; Driftwood runs it as gate step 16b.
 **Fix:** read live truth from the primary repo; if the module genuinely is an analytics
 report, mark it `@cdc_analytics_read true` (an explicit, reviewable claim).
+
+### `mix samen.verify.movement_continuity`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.movement_continuity.ex`):
+
+```text
+subscription <id>: unseeded (revenue-active at <n> cents, no ledger row)
+subscription <id>: bad_origin (first row starts from <n> cents)
+subscription <id>: chain_break at row <k> (before <n> != previous after <m>)
+subscription <id>: stale_tail (ledger ends at <n> cents, current MRR <m>)
+FAIL: samen.verify.movement_continuity discovered no resource carrying the SubscriptionMovement change ... (fail-closed).
+```
+
+**Meaning:** the `mov` ledger of a subscription has a hole. `SubscriptionMovement` is best-effort: when its price read, the
+classifier or the append fails, no row is written and the failure is only reported. The rows carry `mrr_before_cents` and
+`mrr_after_cents`, so a skipped movement shows as a broken chain, a last `mrr_after_cents` that is not the live MRR, or an
+active subscription with no row. A price edited outside a subscription write is reported as `stale_tail` as well.
+**Fix:** report-only (no `--fix`; the output is ids and cents). Find the failed write in the log
+(`write=subscription_movement_append`), repair its cause, and re-derive the history by decision: `MovementBackfill.from_snapshot/1`
+seeds an `unseeded` subscription; a broken chain on a subscription that already has rows is reviewed, not rewritten.
+
+### `mix samen.verify.vault_token_binding`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.vault_token_binding.ex`):
+
+```text
+foreign_subject: <Resource>.<field> record <id>
+field_mismatch: <Resource>.<field> record <id>
+dangling_token: <Resource>.<field> record <id>
+non_token_value: <Resource>.<field> record <id>
+shared_token: <Resource>.<field> record <id>
+FAIL: samen.verify.vault_token_binding discovered ZERO resources ... A vacuous check must not pass (fail-closed).
+```
+
+**Meaning:** a vault column holds a value that does not belong to the record, vault and field
+that holds it: another subject's token, another field's token, a token with no `pii_vault`
+row, plaintext at rest, or one token in several cells. `Samen.Vault.Change` refuses these on
+write and `PiiResolution` renders them masked on read, so a hit is data written before the
+binding or by a path that bypassed Ash. The output never contains a token or a value.
+**Fix:** report-only by design (no `--fix`): review each record. Never re-mint a foreign
+subject's plaintext into the record (that launders it past the owner's erasure); clear the cell
+through a reviewed change, and re-enter plaintext values through the governed update.
+
+A `non_token_value` cell (legacy plaintext that starts with `vt_`) also blocks every update of that record on a
+**versioned** resource, with the changeset error `vault column(s) :field hold a legacy non-token value ...`. It is
+fail-closed on purpose and never auto-fixed. **Remediate:** list the rows with this task, then update each record once,
+setting EVERY field the error names to its plaintext (`Ash.update` of the governed action); the new write mints real
+tokens, and the version row records the token, not the value. Unversioned resources are not blocked, but the cell stays
+flagged until re-entered the same way.
 
 ### `mix samen.verify.ai_prompt_masking`
 

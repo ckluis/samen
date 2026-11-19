@@ -177,6 +177,12 @@ echo "--- step 14/18: mix samen.verify.same_org_fk (F3.5 same-org-FK guard)"
 mix samen.verify.same_org_fk
 echo "    PASSED"
 
+# 14a. read_scope (T132/S15): no `authorize?: false` read in this app's lib/ bypasses org scoping. The
+#      ceiling is this app's exact `# authz-scope:` count; a new sanctioned read is a conscious change to it.
+echo "--- step 14a/18: mix samen.verify.read_scope (read-scope lint)"
+mix samen.verify.read_scope --max-sanctioned 1
+echo "    PASSED"
+
 # 14b. ADR-046 §6 erasure_completeness (Phase-3 CAPSTONE): DISCOVER every out-of-DEK-envelope
 #      residue from the LIVE schema (never schema.dict — it grandfathers, which is how
 #      email_bidx shipped un-erasable) and ASSERT a registered subject_id-keyed erasure arm

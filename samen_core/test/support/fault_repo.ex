@@ -141,6 +141,7 @@ defmodule Samen.FaultRepo do
 
   def transaction(%Ecto.Multi{} = multi, opts) do
     check!(:transaction)
+    multi = inject_after_steps(multi)
     case Ecto.Multi.__apply__(multi, __MODULE__, &Real.transaction(&1, opts), &Real.rollback/1) do
       {:ok, values} -> {:ok, values}
       {:error, {key, error_value, values}} -> {:error, key, error_value, values}
@@ -153,4 +154,28 @@ defmodule Samen.FaultRepo do
   end
   def in_transaction?, do: Real.in_transaction?()
   def rollback(value), do: Real.rollback(value)
+
+  # `fail([{:after_step, name}])` — the named `Ecto.Multi` step runs for real, then the transaction fails (a step
+  # error), so everything up to and including `name` is rolled back. The seam for "step N of a multi failed".
+  defp inject_after_steps(%Ecto.Multi{operations: ops} = multi) do
+    targets = for {:after_step, name} <- Process.get(@key, []), do: name
+
+    if targets == [] do
+      multi
+    else
+      injected =
+        ops
+        |> Enum.reverse()
+        |> Enum.flat_map(fn {name, _} = op ->
+          if name in targets do
+            [op, {{:fault_after, name}, {:run, fn _repo, _changes -> {:error, {:injected_after_step, name}} end}}]
+          else
+            [op]
+          end
+        end)
+        |> Enum.reverse()
+
+      %{multi | operations: injected}
+    end
+  end
 end

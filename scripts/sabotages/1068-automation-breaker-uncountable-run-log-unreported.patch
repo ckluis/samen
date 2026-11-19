@@ -1,0 +1,19 @@
+# SABOTAGE: an uncountable automation run log is dropped without a report
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_f_test.exs
+# MUST_FAIL: RED: a run log that cannot be counted is reported by name
+diff --git a/samen_core/lib/samen/automation/breaker.ex b/samen_core/lib/samen/automation/breaker.ex
+index 498fc539..db742e9c 100644
+--- a/samen_core/lib/samen/automation/breaker.ex
++++ b/samen_core/lib/samen/automation/breaker.ex
+@@ -67,7 +67,7 @@ defmodule Samen.Automation.Breaker do
+   rescue
+     e ->
+       # reported by name; `:unreadable` is not a count, so nothing trips (the next run counts again)
+-      Samen.Observability.Failure.report(:automation_breaker_count, wf.org_id, e)
++      _ = e
+       :unreadable
+   end
+ 

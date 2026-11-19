@@ -53,9 +53,9 @@ defmodule Samen.Chokepoint do
   """
   @spec decrypt_call_sites(Path.t()) :: [{String.t(), String.t(), pos_integer()}]
   def decrypt_call_sites(lib_dir) do
-    for file <- Path.wildcard(Path.join(lib_dir, "**/*.ex")),
+    for file <- Samen.SourceScan.files(lib_dir, [".ex"]),
         Path.basename(file) != "chokepoint.ex",
-        {line, idx} <- Enum.with_index(File.read!(file) |> String.split("\n"), 1),
+        {line, idx} <- Enum.with_index(Samen.SourceScan.read!(file) |> String.split("\n"), 1),
         code_call_site?(line) do
       {Path.relative_to(file, lib_dir), String.trim(line), idx}
     end

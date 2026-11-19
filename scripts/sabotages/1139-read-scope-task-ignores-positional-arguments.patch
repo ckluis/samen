@@ -1,0 +1,20 @@
+# SABOTAGE: The read-scope task discards a positional argument and scans lib, so the caller believes the 
+#   dir they named was checked.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/read_scope_verify_test.exs
+# MUST_FAIL: a positional argument is refused, never silently ignored
+diff --git a/samen_core/lib/mix/tasks/samen.verify.read_scope.ex b/samen_core/lib/mix/tasks/samen.verify.read_scope.ex
+index f24edc7b..9f6dc82f 100644
+--- a/samen_core/lib/mix/tasks/samen.verify.read_scope.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.read_scope.ex
+@@ -44,7 +44,7 @@ defmodule Mix.Tasks.Samen.Verify.ReadScope do
+ 
+     # A positional argument is never a source dir: `mix samen.verify.read_scope apps/x/lib` used to scan `lib` and pass
+     # while the caller believed apps/x/lib was checked.
+-    if rest != [] do
++    if rest != [] and false do
+       Mix.raise(
+         "#{@task_name}: unexpected argument(s) #{inspect(rest)} — name a source dir with --source-dirs <dir> " <>
+           "(the default is lib)"

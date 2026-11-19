@@ -18,12 +18,13 @@
 # TEST_FILES: test/hardening/pii_write_guard_fail_closed_test.exs
 # MUST_FAIL: MG-10: an OPERATOR CLEARING a vaulted field is ALLOWED and the column is cleared
 diff --git a/samen_core/lib/samen/pii/write_guard.ex b/samen_core/lib/samen/pii/write_guard.ex
+index 21a7b7b2..2e11e553 100644
 --- a/samen_core/lib/samen/pii/write_guard.ex
 +++ b/samen_core/lib/samen/pii/write_guard.ex
-@@ -118,7 +118,7 @@ defmodule Samen.Pii.WriteGuard do
+@@ -117,7 +117,7 @@ defmodule Samen.Pii.WriteGuard do
+   defp plaintext_write?(changeset, name) do
      case Ash.Changeset.fetch_change(changeset, name) do
        {:ok, %Masked{}} -> false
-       {:ok, "vt_" <> _} -> false
 -      {:ok, nil} -> false
 +      {:ok, nil} -> true
        {:ok, _plaintext} -> true

@@ -1,0 +1,21 @@
+# SABOTAGE: The generated API-key lookup loses its authz-scope marker, so a freshly generated api app fails 
+#   its own read-scope lint.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/templates_parity_test.exs
+# MUST_FAIL: every generated ci.sh runs samen.verify.read_scope
+diff --git a/samen_core/priv/templates/api_key_auth_plug_ex.eex b/samen_core/priv/templates/api_key_auth_plug_ex.eex
+index 55ae660a..30ab689f 100644
+--- a/samen_core/priv/templates/api_key_auth_plug_ex.eex
++++ b/samen_core/priv/templates/api_key_auth_plug_ex.eex
+@@ -91,9 +91,6 @@ defmodule <%= module %>Web.Api.KeyAuthPlug do
+     |> Ash.Query.filter(token_digest == ^digest)
+     |> Ash.Query.filter(is_nil(revoked_at))
+     |> Ash.Query.filter(is_nil(expires_at) or expires_at > ^now)
+-    # authz-scope: API-key AUTH-STEP lookup keyed on the SHA-256 digest of a server-minted random token — no
+-    # actor/org exists until this row resolves (revoked/expired filtered out; unmatched digest => :error, fail
+-    # closed; a duplicate digest makes read_one error => :unavailable, also fail closed)
+     |> Ash.read_one(authorize?: false)
+     |> case do
+       {:ok, nil} -> :error

@@ -1,0 +1,20 @@
+# SABOTAGE: The headless/web ci.sh template stops running the read-scope lint, so those generated apps ship 
+#   without it.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/templates_parity_test.exs
+# MUST_FAIL: every generated ci.sh runs samen.verify.read_scope
+diff --git a/samen_core/priv/templates/ci_sh.eex b/samen_core/priv/templates/ci_sh.eex
+index 2ad340b7..f6629e72 100644
+--- a/samen_core/priv/templates/ci_sh.eex
++++ b/samen_core/priv/templates/ci_sh.eex
+@@ -102,7 +102,7 @@ echo "    PASSED"
+ # returns EVERY org's rows. Pin it with an org_id/id filter, or mark a deliberately org-less read
+ # `# authz-scope: <why-safe>` and raise the ceiling below by one (a conscious, reviewed change).
+ echo "--- step 13a/18: mix samen.verify.read_scope (read-scope lint)"
+-mix samen.verify.read_scope --max-sanctioned 0
++true
+ echo "    PASSED"
+ 
+ # ARCH-4: every org-scoped resource has a btree index (org_id, <keyset sort>, id) in the live DB,

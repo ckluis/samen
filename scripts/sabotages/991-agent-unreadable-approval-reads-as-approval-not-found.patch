@@ -1,0 +1,22 @@
+# SABOTAGE: the agent's execution seam reports an approval it could not read as :approval_not_found instead 
+#   of :approval_unavailable
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_write_test.exs
+# MUST_FAIL: RED: the approvals store fails -> :approval_unavailable (nothing executed); a row that names nothing stays :approval_not_found
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index a9834350..993d2236 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -2978,10 +2978,6 @@ defmodule Samen.AI.Agent do
+         end
+ 
+       # A read that FAILED is not "no such approval": the write is refused either way, but the turn row names the cause.
+-      # (`:approvals_unavailable` is the miswired-engine sibling: a configured resource whose repo cannot be resolved.)
+-      {:error, reason} when reason in [:unavailable, :approvals_unavailable] ->
+-        {:error, :approval_unavailable}
+-
+       _ ->
+         {:error, :approval_not_found}
+     end

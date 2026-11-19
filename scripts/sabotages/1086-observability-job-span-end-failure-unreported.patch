@@ -1,0 +1,19 @@
+# SABOTAGE: a job span that could not be ended is dropped without a report
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_f_test.exs
+# MUST_FAIL: RED: a job span that cannot be ended is reported
+diff --git a/samen_core/lib/samen/observability/job_spans.ex b/samen_core/lib/samen/observability/job_spans.ex
+index 57c220ff..e5c3fbe6 100644
+--- a/samen_core/lib/samen/observability/job_spans.ex
++++ b/samen_core/lib/samen/observability/job_spans.ex
+@@ -81,7 +81,7 @@ defmodule Samen.Observability.JobSpans do
+ 
+     :ok
+   rescue
+-    e -> failed(:job_span_end, e)
++    _e -> :ok
+   catch
+     kind, reason -> failed(:job_span_end, {kind, reason})
+   end

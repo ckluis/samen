@@ -79,10 +79,12 @@ SUB_TEST_REL="test/__mutation_probe_sub_test.exs"
 OWNS_TEST_REL="test/__mutation_probe_owns_test.exs"
 BADOWNS_TEST_REL="test/__mutation_probe_badowns_test.exs"
 DEADOWNS_REL="test/__mutation_probe_deadowns.exs"
+# a path with a space, an apostrophe and parentheses — what ExUnit's :tmp_dir names look like; it sorts BEFORE the bad-owns probe
+WEIRD_REL="test/__mutation_probe weird's (x).exs"
 PROBE_TESTS=("$REPO_ROOT/samen_core/$REF_TEST_REL" "$REPO_ROOT/samen_core/$MULTI_TEST_REL"
              "$REPO_ROOT/samen_core/$SUB_TEST_REL"
              "$REPO_ROOT/samen_core/$OWNS_TEST_REL" "$REPO_ROOT/samen_core/$BADOWNS_TEST_REL"
-             "$REPO_ROOT/samen_core/$DEADOWNS_REL")
+             "$REPO_ROOT/samen_core/$DEADOWNS_REL" "$REPO_ROOT/samen_core/$WEIRD_REL")
 
 cleanup() { rm -f "$PROBE" "$EMPTY" "${PROBE_TESTS[@]}"; rm -rf "$SCRATCH"; }
 trap cleanup EXIT INT TERM
@@ -445,6 +447,14 @@ else
   bad "MUTATION_OWNS did not derive its test — resource-driven proofs would drop out of the gate again"
 fi
 
+# d0) a file whose NAME has a space, a quote and parentheses must not truncate the scan (a `find | xargs` over such a
+#     name aborted, the error was hidden, and every file after it went unread: the lint passed having read nothing).
+printf '# nothing to see here\n' > "$REPO_ROOT/samen_core/$WEIRD_REL"
+if bash "$LINT" --targets "$TARGETS" --ledger "$EMPTY_LEDGER" >"$SCRATCH/weird.out" 2>&1; then
+  ok "POSITIVE CONTROL: a file named with a space, an apostrophe and parentheses is scanned without refusing the tree"
+else
+  cat "$SCRATCH/weird.out"; bad "lint refused a clean tree that merely holds an oddly named file"
+fi
 # d) a typo'd declaration owns nothing, so the lint must refuse it by name.
 cat > "$REPO_ROOT/samen_core/$BADOWNS_TEST_REL" <<'T'
 # MUTATION_OWNS: samen_core/lib/samen/__no_such_guard.ex
@@ -456,10 +466,24 @@ if bash "$LINT" --targets "$TARGETS" --ledger "$EMPTY_LEDGER" >"$SCRATCH/badowns
   bad "lint ACCEPTED a MUTATION_OWNS naming a file that does not exist"
 else
   grep -q "MUTATION_OWNS names a file that does not exist: samen_core/lib/samen/__no_such_guard.ex" "$SCRATCH/badowns.out" \
-    && ok "NEGATIVE CONTROL: lint refuses a MUTATION_OWNS naming a missing file" \
+    && ok "NEGATIVE CONTROL: lint refuses a MUTATION_OWNS naming a missing file — even with an oddly named file listed BEFORE it" \
     || { cat "$SCRATCH/badowns.out"; bad "lint failed but not for the missing MUTATION_OWNS path"; }
 fi
 rm -f "$REPO_ROOT/samen_core/$BADOWNS_TEST_REL"
+# the scan fails CLOSED: a listed file that cannot be read makes the lint refuse, never pass over it
+if [[ "$(id -u)" != 0 ]]; then
+  chmod 000 "$REPO_ROOT/samen_core/$WEIRD_REL"
+  if bash "$LINT" --targets "$TARGETS" --ledger "$EMPTY_LEDGER" >"$SCRATCH/unreadable.out" 2>&1; then
+    bad "lint PASSED over a file it could not read — a scan that fails open"
+  else
+    grep -q "the MUTATION_OWNS scan failed" "$SCRATCH/unreadable.out" \
+      && ok "NEGATIVE CONTROL: an unreadable file refuses the lint (the scan fails closed)" \
+      || { cat "$SCRATCH/unreadable.out"; bad "lint failed but not for the unreadable file"; }
+  fi
+  chmod 644 "$REPO_ROOT/samen_core/$WEIRD_REL"
+else
+  ok "(root reads any file: the unreadable-file control is skipped)"
+fi
 # A REAL path, so only the file-name rule can refuse it.
 printf '# MUTATION_OWNS: %s\n' "$PROBE_REL" > "$REPO_ROOT/samen_core/$DEADOWNS_REL"
 if bash "$LINT" --targets "$TARGETS" --ledger "$EMPTY_LEDGER" >"$SCRATCH/deadowns.out" 2>&1; then

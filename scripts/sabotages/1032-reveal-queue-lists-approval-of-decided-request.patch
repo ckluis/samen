@@ -1,0 +1,19 @@
+# SABOTAGE: the approver queue keeps listing a pending approval whose request is already decided
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_approver_test.exs
+# MUST_FAIL: a stray pending approval of a decided request is left out of the queue and reported once
+diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+index ae1abc97..dd226ce3 100644
+--- a/samen_core/lib/samen/reveal/grants.ex
++++ b/samen_core/lib/samen/reveal/grants.ex
+@@ -812,7 +812,7 @@ defmodule Samen.Reveal.Grants do
+     end
+   end
+ 
+-  defp still_pending(%RevealRequest{status: "pending"}, _approval), do: :ok
++  defp still_pending(%RevealRequest{status: _}, _approval), do: :ok
+ 
+   defp still_pending(%RevealRequest{}, approval) do
+     Samen.Observability.Failure.report(:reveal_pending_decided, approval.org_id, :request_decided)

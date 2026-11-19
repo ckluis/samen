@@ -1,0 +1,21 @@
+# SABOTAGE: the reclaim ignores a cancellation that failed, so the attempt goes on to call the provider 
+#   with the stale approval pending
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_transcript_write_test.exs
+# MUST_FAIL: RED: a failed cancellation raises before any provider call
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 860245e4..649b331b 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -977,8 +977,7 @@ defmodule Samen.AI.Agent do
+           |> Ash.update!(authorize?: false)
+         end)
+ 
+-      with {:error, reason} <- result,
+-           do: raise("run #{run.id}: a failed park's approval could not be cancelled: #{reclaim_reason_kind(reason)}")
++      _ = result
+     end
+ 
+     :ok

@@ -60,7 +60,9 @@ defmodule Samen.Search do
 
   An empty/blank term, an org with no registered index, a resource with no registered
   non-PII field, or a resource the caller did not offer → `[]`. There is no
-  "match-all" default and no full-table dump.
+  "match-all" default and no full-table dump. An UNREADABLE registry (or an unreadable
+  resource) is not one of those: `query/3` raises, so an outage is never answered as "no
+  results"; callers handle the raise (`Samen.Web.Reads.Guard`, `SearchRecords`'s text arm).
 
   ## The tsvector
 
@@ -138,8 +140,6 @@ defmodule Samen.Search do
       %{duration: duration, result_count: result_count},
       %{}
     )
-  rescue
-    _ -> :ok
   end
 
   # -- one resource ------------------------------------------------------------
@@ -217,13 +217,14 @@ defmodule Samen.Search do
 
   # -- registry / introspection ------------------------------------------------
 
+  # A registry that cannot be READ raises (`Ash.read!`): it is not "this org registered nothing" (the fail-closed `[]`
+  # above is for an org with NO registered index). The callers handle the raise and say so: the search LiveView shows its
+  # error state with a retry, and the `search_records` tool answers `text_search: "error"`, reported by name.
   defp read_registry(index_mod, scope) do
     index_mod
     |> Ash.Query.new()
     |> Ash.Query.do_filter(expr(enabled == true))
     |> Ash.read!(scope: scope)
-  rescue
-    _ -> []
   end
 
   # The registry stores `resource_name` as the module's inspect form

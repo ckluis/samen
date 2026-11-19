@@ -5,12 +5,12 @@
 # TEST_FILES: test/indexing_test.exs
 # MUST_FAIL: a resource declared unmounted is not checked — and a stale declaration is a violation
 diff --git a/samen_core/lib/mix/tasks/samen.verify.indexes.ex b/samen_core/lib/mix/tasks/samen.verify.indexes.ex
-index 67fac50c..d2b502b8 100644
+index 662d32d..3345aa8 100644
 --- a/samen_core/lib/mix/tasks/samen.verify.indexes.ex
 +++ b/samen_core/lib/mix/tasks/samen.verify.indexes.ex
-@@ -116,7 +116,7 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
-         Enum.map(unclassified, fn {_resource, reason} -> "cannot inspect: #{reason}" end) ++
+@@ -121,7 +121,7 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
          Enum.flat_map(resources, &check(&1, Map.merge(exempt, unmounted), spec_opts)) ++
+         nullable_sort_violations(resources, Map.merge(exempt, unmounted), spec_opts) ++
          stale_exemptions(exempt, resources) ++
 -        stale_unmounted(unmounted, resources, spec_opts)
 +        []

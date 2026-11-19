@@ -1,0 +1,20 @@
+# SABOTAGE: the reclaim raise interpolates inspect(reason), so row data in the cancel's database error 
+#   lands in oban_jobs.errors
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_transcript_write_test.exs
+# MUST_FAIL: a cancel that fails with row data in its database error raises a message without it
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 9ff999e3..40403f30 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -978,7 +978,7 @@ defmodule Samen.AI.Agent do
+         end)
+ 
+       with {:error, reason} <- result,
+-           do: raise("run #{run.id}: a failed park's approval could not be cancelled: #{reclaim_reason_kind(reason)}")
++           do: raise("run #{run.id}: a failed park's approval could not be cancelled: #{inspect(reason)}")
+     end
+ 
+     :ok

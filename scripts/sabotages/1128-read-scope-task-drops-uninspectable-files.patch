@@ -1,0 +1,20 @@
+# SABOTAGE: The verify task drops the files the scanner could not inspect, so it passes over an unparseable 
+#   file.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/read_scope_verify_test.exs
+# MUST_FAIL: RED: an unparseable file exits 1
+diff --git a/samen_core/lib/mix/tasks/samen.verify.read_scope.ex b/samen_core/lib/mix/tasks/samen.verify.read_scope.ex
+index 89a2ed5e..902339b4 100644
+--- a/samen_core/lib/mix/tasks/samen.verify.read_scope.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.read_scope.ex
+@@ -102,7 +102,7 @@ defmodule Mix.Tasks.Samen.Verify.ReadScope do
+     violations =
+       dir_violations ++
+         Enum.map(scanned.violations, &ReadScope.format_violation/1) ++
+-        Enum.map(scanned.errors, fn {file, why} -> "#{Path.relative_to_cwd(file)} — #{why}" end) ++
++        [] ++
+         ceiling
+ 
+     %{scanned | violations: violations} |> Map.put(:unscoped, length(scanned.violations))

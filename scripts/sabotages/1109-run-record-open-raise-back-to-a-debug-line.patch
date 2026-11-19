@@ -1,0 +1,21 @@
+# SABOTAGE: a raising open! is a debug line carrying Exception.message, which prints the workflow's webhook 
+#   URLs
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: RunRecord.open! that RAISES reports by name
+diff --git a/samen_core/lib/samen/automation/run_record.ex b/samen_core/lib/samen/automation/run_record.ex
+index cfc58665..c174dd46 100644
+--- a/samen_core/lib/samen/automation/run_record.ex
++++ b/samen_core/lib/samen/automation/run_record.ex
+@@ -108,7 +108,8 @@ defmodule Samen.Automation.RunRecord do
+     # names only: `Exception.message/1` of a KeyError/MatchError prints the offending value (here the workflow, whose
+     # actions carry webhook URLs), and this line used to be a debug line.
+     e ->
+-      Samen.Observability.Failure.report_write(:run_record_open, args["org_id"], e)
++      require Logger
++      Logger.debug("[Automation.RunRecord] open! failed: #{Exception.message(e)}")
+       nil
+   end
+ 

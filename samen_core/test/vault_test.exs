@@ -351,6 +351,38 @@ defmodule Samen.VaultTest do
     end
   end
 
+  describe "token?/1 — the minted grammar (vt_ + 32 lowercase hex)" do
+    test "every minted token is token-shaped (positive control)" do
+      for _ <- 1..20, do: assert(Vault.token?(Vault.generate_token()))
+    end
+
+    test "anything else is not: prefix-only, short, uppercase, trailing newline, non-binary" do
+      hex = String.duplicate("a", 32)
+
+      for bad <- [
+            "vt_",
+            "vt_ please help",
+            "vt_" <> String.duplicate("a", 31),
+            "vt_" <> String.duplicate("a", 33),
+            "vt_" <> String.duplicate("A", 32),
+            "vt_" <> String.duplicate("g", 32),
+            "xt_" <> hex,
+            " vt_" <> hex,
+            "vt_" <> hex <> "\n",
+            "vt_" <> hex <> "x",
+            "",
+            nil,
+            :vt_token,
+            123,
+            Masked.new("vt_" <> hex, :emails)
+          ] do
+        refute Vault.token?(bad), "expected #{inspect(bad, limit: 5)} to not be token-shaped"
+      end
+
+      assert Vault.token?("vt_" <> hex)
+    end
+  end
+
   # =====================================================================
   # F4.1 — reveal chokepoint binds the asserted subject to the token's REAL
   # subject. A masked token for subject Y with a :subject_id opt for X (mismatch)

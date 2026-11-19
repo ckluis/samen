@@ -1,0 +1,20 @@
+# SABOTAGE: a Run finalize that answers an error tuple is logged at debug instead of reported by name
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: RED: a finalize that answers {:error, _} (an invalid state transition) is reported by name and org
+diff --git a/samen_core/lib/samen/automation/run_record.ex b/samen_core/lib/samen/automation/run_record.ex
+index cfc58665..a95d6298 100644
+--- a/samen_core/lib/samen/automation/run_record.ex
++++ b/samen_core/lib/samen/automation/run_record.ex
+@@ -195,7 +195,8 @@ defmodule Samen.Automation.RunRecord do
+         :ok
+ 
+       {:error, reason} ->
+-        Samen.Observability.Failure.report_write(:run_record_finalize, safe_org_id(run), reason)
++        require Logger
++        Logger.debug("[Automation.RunRecord] finalize(#{to}) refused: #{inspect(reason)}")
+         :ok
+     end
+   rescue

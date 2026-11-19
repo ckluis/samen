@@ -607,6 +607,14 @@ or weakened by this ADR (INV-1 preserved).
 5. The T43/T97 partition keeps each task inside the convention and makes the highest-risk change
    of Phase 3 mechanically reviewable.
 
+## 13a · Note 2026-11-15 — vault-bearing moves must preserve the primary key
+
+A vault token is bound to its record: the `pii_vault` row's subject is the record's primary key, and
+`Samen.Vault.Change` refuses a `%Masked{}` that does not match (ADR-001 section 6.2). An id-preserving copy (section 5 of
+this ADR) keeps the subject, so its tokens stay valid; a copy that assigns a NEW primary key must re-mint through the
+governed create (as `Samen.Clone` and `ConvertLead` do), never carry the old token across. None of the moves here copies
+vault tokens today; a future one that does must preserve the PK or re-vault.
+
 ## 14 · References
 
 - Operator ruling **M5** — `_orch/plan/spec-questions.md`
