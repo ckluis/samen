@@ -239,4 +239,92 @@ defmodule Samen.Webhook.DeliveryWorkerSsrfTest do
     assert {:discard, reason} = DeliveryWorker.perform(%Oban.Job{args: args})
     assert reason =~ "egress guard"
   end
+
+  # ---------------------------------------------------------------------------
+  # Token binding (S6): the signing secret is revealed as the ENDPOINT's own value. A row whose
+  # `signing_secret` holds another subject's token is refused before any key is unwrapped, and
+  # nothing is POSTed.
+
+  defmodule RealVaultOnTestRepo do
+    @moduledoc false
+    # The real vault on the sandboxed test repo (the worker's own repo here is a stub).
+    def reveal(masked, _stub_repo, opts) do
+      send(self(), {:vault_reveal_opts, opts})
+      Samen.Vault.reveal(masked, SamenCore.TestRepo, opts)
+    end
+  end
+
+  describe "S6 the signing secret reveal binds the endpoint's subject" do
+    setup do
+      :ok = Ecto.Adapters.SQL.Sandbox.checkout(SamenCore.TestRepo)
+      Samen.Kms.FileBacked.simulate_outage(false)
+      Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
+      prev = Application.get_env(:samen_core, :vault_module)
+      Application.put_env(:samen_core, :vault_module, RealVaultOnTestRepo)
+      on_exit(fn -> restore(:vault_module, prev) end)
+      :ok
+    end
+
+    defp masked_endpoint_args(secret_token, id) do
+      Process.put(:ssrf_endpoints, %{
+        id => %{
+          id: id,
+          url: "https://hook.example.test/deliver",
+          signing_secret: Samen.Masked.new(secret_token, :signing_secret)
+        }
+      })
+
+      %{
+        "endpoint_id" => id,
+        "idempotency_key" => Ecto.UUID.generate(),
+        "event_type" => "invoice.created",
+        "body" => "{}",
+        "org_id" => Ecto.UUID.generate(),
+        "repo" => "Samen.Webhook.DeliveryWorkerSsrfStubRepo"
+      }
+    end
+
+    test "the endpoint's OWN secret is revealed (bound to its id) and the delivery is POSTed", %{double: double} do
+      id = Ecto.UUID.generate()
+      {:ok, token} = Samen.Vault.store_field(id, :pii_secret, :signing_secret, "whsec_own", SamenCore.TestRepo)
+
+      assert :ok = DeliveryWorker.perform(%Oban.Job{args: masked_endpoint_args(token, id)})
+      assert_received {:vault_reveal_opts, opts}
+      assert Keyword.fetch!(opts, :subject_id) == id
+      assert [_one_post] = AdapterDouble.calls(double)
+    end
+
+    test "RED: a row holding ANOTHER subject's token is DISCARDED (permanent, not retried), reported once, and nothing is POSTed", %{double: double} do
+      other = Ecto.UUID.generate()
+      {:ok, foreign} = Samen.Vault.store_field(other, :pii_secret, :signing_secret, "whsec_foreign", SamenCore.TestRepo)
+      endpoint_id = Ecto.UUID.generate()
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:discard, msg} =
+                   DeliveryWorker.perform(%Oban.Job{args: masked_endpoint_args(foreign, endpoint_id)})
+
+          assert msg =~ endpoint_id
+          assert msg =~ "subject_mismatch"
+          refute msg =~ foreign
+        end)
+
+      assert length(Regex.scan(~r/write=vault_token_unbound/, log)) == 1
+      assert log =~ "subject_mismatch"
+      refute log =~ foreign
+      assert AdapterDouble.calls(double) == [], "a foreign secret must never sign a delivery"
+    end
+
+    test "RED: the endpoint's OWN subject but a token minted for ANOTHER field is DISCARDED (:field_mismatch)", %{double: double} do
+      id = Ecto.UUID.generate()
+      {:ok, wrong_field} = Samen.Vault.store_field(id, :pii_secret, :other_secret, "whsec_wrong_field", SamenCore.TestRepo)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:discard, msg} = DeliveryWorker.perform(%Oban.Job{args: masked_endpoint_args(wrong_field, id)})
+        assert msg =~ "field_mismatch"
+      end)
+
+      assert AdapterDouble.calls(double) == []
+    end
+  end
 end

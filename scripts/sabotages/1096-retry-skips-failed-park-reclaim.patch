@@ -1,0 +1,19 @@
+# SABOTAGE: the retried attempt skips the start-of-turn reclaim of a failed park's approval
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_transcript_write_test.exs
+# MUST_FAIL: RED: a failed park followed by a TEXT answer at the retry completes the run and cancels the old approval
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index d0db6310..ecf5ac9e 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -906,7 +906,7 @@ defmodule Samen.AI.Agent do
+       true ->
+         # BEFORE anything else this attempt does (agent resolution, a terminal, the loop's kill/budget/cancel checks,
+         # the transcript reveal, hooks, the provider call): see `reclaim_failed_park!/1`
+-        reclaim_failed_park!(run)
++        :ok
+ 
+         with {:ok, agent_mod} <- resolve_agent(run),
+              {:ok, scope} <- owner_scope(run) do

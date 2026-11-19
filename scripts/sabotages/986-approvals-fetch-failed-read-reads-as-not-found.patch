@@ -1,0 +1,26 @@
+# SABOTAGE: Approvals.fetch_approval answers :not_found for a failed read, so a cancel or decision reads an 
+#   outage as no such approval
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_d_test.exs
+# MUST_FAIL: RED: a read that fails is {:error, :unavailable}, reported (it answered :not_found)
+diff --git a/samen_core/lib/samen/approvals.ex b/samen_core/lib/samen/approvals.ex
+index 79c5e7f5..0090745b 100644
+--- a/samen_core/lib/samen/approvals.ex
++++ b/samen_core/lib/samen/approvals.ex
+@@ -393,12 +393,8 @@ defmodule Samen.Approvals do
+       {:error, reason} ->
+         # Only "there is no such row" (or an id that cannot name one) is :not_found. A read that FAILED is
+         # :unavailable and reported: a caller must not read an outage as "that approval does not exist".
+-        if not_found?(reason) do
+-          {:error, :not_found}
+-        else
+-          Samen.Observability.Failure.report(:approval_fetch, nil, reason)
+-          {:error, :unavailable}
+-        end
++        _ = not_found?(reason)
++        {:error, :not_found}
+     end
+   end
+ 

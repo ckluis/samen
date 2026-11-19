@@ -180,8 +180,17 @@ defmodule Mix.Tasks.Samen.Verify.ToolActorIdentity do
              |> Enum.map(fn param -> (is_map(param) && (Map.get(param, :name) || Map.get(param, "name"))) || nil end)
              |> Enum.reject(&is_nil/1)}
 
-          _ ->
+          # A map-shaped declaration (`%{"org_id" => spec}`) names its parameters by KEY: it used to read as "none".
+          params when is_map(params) and not is_struct(params) ->
+            {:ok, params |> Map.keys() |> Enum.map(&to_string/1)}
+
+          # Declared nothing: a tool with no params is legitimate.
+          nil ->
             {:ok, []}
+
+          # Declared something this scan cannot read: never "no params".
+          _ ->
+            :unreadable
         end
 
       _ ->

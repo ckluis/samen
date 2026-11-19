@@ -137,7 +137,8 @@ registered handler's `on_approve/2` **inside the same transaction**, then the au
 Handler error ⇒ whole transaction rolls back, approval stays `pending`, error surfaced —
 this is what preserves the reveal same-tx guarantee (a grant CHECK violation must roll back
 grant, audit, and auto-revoke job together, per `reveal_grant_same_tx_test.exs`).
-`reject/3` is symmetric with `on_reject/2` (a no-op default). Decisions emit governance
+`reject/3` is symmetric with `on_reject/2` (a no-op default); `cancel/3` runs the optional `on_cancel/2` in
+its own transaction the same way (S6: reveal records a cancellation on its request). Decisions emit governance
 audit events through `Samen.AuditChain.Writer` (`approval_requested | approval_approved |
 approval_rejected | approval_expired | approval_cancelled | approval_self_decide_refused`)
 — token/id-only detail, `reason` never enters chain detail.
@@ -158,7 +159,8 @@ defmodule Samen.Approvals.Handler do
   @callback on_approve(approval :: struct(), ctx :: map()) ::
               {:ok, meta :: map()} | {:error, term()}
   @callback on_reject(approval :: struct(), ctx :: map()) :: :ok | {:error, term()}
-  @optional_callbacks on_reject: 2
+  @callback on_cancel(approval :: struct(), ctx :: map()) :: :ok | {:error, term()}
+  @optional_callbacks on_reject: 2, on_cancel: 2
 end
 ```
 
@@ -240,6 +242,60 @@ Reveal grants become a **client**, not a rewrite. What changes and what provably
    TestRepo host; the gen_app golden templates gain the approval migration alongside their
    existing reveal-grant goldens). An unwired host fails closed
    (`{:error, :no_approvals_module}`) — never a silent single-party grant.
+
+5. **The approval that failed to open is recovered, not only reported (S6).** Opening the
+   engine approval in `request/1` never blocks the request (item 1; contract T35), so a failed
+   open leaves a pending `RevealRequest` with no approval, and the approver queue
+   (`Grants.pending_for_org_result/2`) lists engine approvals only. The recovery path is
+   therefore: (a) the request row persists the org its approval is filed under (`rvq_org_id`,
+   nullable, additive; a value that is not a UUID is stored NULL and reported once as
+   `reveal_request_org_uncastable`, never a failure); (b) **the request row is the source of
+   truth for "decided"**: `rvq_status` is `pending` until a decision, and every path that decides
+   a request writes its terminal status in the SAME transaction as the decision, under a row lock
+   on the request (`SELECT … FOR UPDATE`): `"approved"` in `Grants.do_approve/4`'s Multi (the
+   engine's `on_approve` handler and the engine-less fallback both run it), `"denied"` in
+   `Grants.deny/2` (the engine-less path) and the handler's `on_reject/2` (the engine path, also
+   for a direct `Approvals.reject/3`), `"cancelled"` in the handler's optional `on_cancel/2`
+   (`Approvals.cancel/3` runs it in the cancel transaction). A reveal approval carries no
+   `deadline_at`, so there is no expiry path to record. `Grants.approve/2` and `deny/2` refuse a
+   request that is no longer `pending` (`{:error, :not_pending}`) before an approval is opened
+   for it, so a decided request gets no second approval and mints no second grant; (c) every
+   queue read of an org first scans that org's recent requests that are still `pending` (the
+   last 14 days, at most 200, newest first, `(rvq_org_id, rvq_inserted_at, rvq_id)` index; decided
+   requests never use the bound; a scan that fills its limit is reported as `bounded`) for the
+   ones with no approval in any state, and re-opens each (`open_engine_approval/4`) through
+   `Samen.Approvals.request/2` with the request's own `inserted_at` as `requested_at`. **What is
+   guaranteed, and how:** the re-open runs in one transaction that first takes the request's row
+   lock and then re-checks, under it, that the request is still `pending` AND has no approval in
+   any state; only then does it open one. Every `Grants` decision takes the same lock first, so two re-openers
+   are serialised by it (the second sees the first one's approval in its any-state check and opens
+   nothing; the pending-approval unique index is only the backstop for an opener that does not take
+   the lock, and there is none for reveal), so a
+   request decided between the scan and the re-open is seen as decided by the re-open and is not
+   revived, whichever lane (org, no org, none: the engine-less path) its approval was filed in.
+   The original open in `request/1` takes the same lock and runs the same check, so a late first
+   open cannot land after a decision either. The lock order is request row, then approval row;
+   a decision made by calling `Samen.Approvals.approve/3`, `reject/3` or `cancel/3` directly on the
+   approval (not through `Grants`) takes them the other way round, so under contention with a `Grants` decision on the
+   same request Postgres may abort one of the two with a deadlock error (fail-closed: nothing is
+   committed by the aborted side). A lock timeout or deadlock abort on a `Grants.approve/2` /
+   `deny/2` decision is answered `{:error, :unavailable}` and reported (`reveal_decision_lock`),
+   matched on the Postgres error code and never retried. A grant for a request is decisive that it
+   was decided: `do_approve/4` refuses (`{:error, :already_granted}`, under the lock) a request that
+   has one, whatever its `rvq_status` says, so no path mints a second grant; the queue leaves out
+   (and reports, `reveal_pending_decided`) a pending approval whose request is no longer
+   `pending`, and does not close it (a read does not write). A re-open that fails is reported (`reveal_open_engine_approval`)
+   and counted: the queue answers `{:partial, rows, n}` (`n` pending requests it could not
+   surface; `RevealApprovalsLive` shows "n pending reveal request(s) could not be shown"), never
+   `{:ok, rows}` for a list it knows is incomplete; an orphan scan that cannot run makes the
+   queue `{:error, :unavailable}`. Rows that predate the columns are backfilled by the retrofit
+   migrations (literal SQL, batched; `mix samen.gen.reveal_requests` writes them for an app
+   generated earlier): `rvq_org_id` from the request's engine approval, `rvq_status` from the
+   approvals, grants and recorded denials on file (a grant is decisive: `approved`); a grant-less
+   request whose records disagree, or that has none, is left `pending` and counted in the migration's output; one with no approval and
+   no org stays NULL and is named by `mix samen.verify.reveal_orgs` (a NOTE), never given a
+   guessed org.
+   Residual: a request older than the window whose open failed is not recovered by a queue read.
 
 ## 5 · E6 — Soft-delete core + adoption (spec §E6; T36, T37)
 

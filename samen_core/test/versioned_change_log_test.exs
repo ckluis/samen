@@ -119,6 +119,36 @@ defmodule Samen.VersionedChangeLogTest do
     assert Enum.all?(rows, &(&1.org_id == org))
   end
 
+  test "WP28 N5: a legacy vt_-prefixed PLAINTEXT in a vault column fails an update explicitly, naming the field and the verifier; a clean record updates",
+       %{org: org, scope: scope} do
+    legacy = Samen.Factory.create!(Contact, person_attrs(org, "v1", "Ada", "Lovelace", "ada@x.invalid"), scope)
+    clean = Samen.Factory.create!(Contact, person_attrs(org, "c1", "Grace", "Hopper", "grace@x.invalid"), scope)
+
+    # Pre-token-binding data: a plaintext that merely started with "vt_" was stored in the cell as-is.
+    @repo.query!("UPDATE svc_contact SET svc_full_name = 'vt_ please help' WHERE svc_id = $1", [Ecto.UUID.dump!(legacy.id)])
+    versions_before = version_count("svc_contact_versions", org)
+
+    assert {:error, %Ash.Error.Invalid{} = err} =
+             legacy |> Ash.Changeset.for_update(:update, %{label: "v2"}, scope: scope) |> Ash.update()
+
+    text = Exception.message(err)
+    assert text =~ ":full_name"
+    assert text =~ "mix samen.verify.vault_token_binding"
+    assert text =~ "non_token_value"
+    refute text =~ "vt_ please help"
+    # fail closed: no half-written version, the label is unchanged
+    assert version_count("svc_contact_versions", org) == versions_before
+
+    # The remediation the message names works: one update that re-sets every flagged field to plaintext.
+    remediation = Samen.Factory.person("Ada", "Lovelace", email: "ada@x.invalid") |> Map.take([:full_name])
+
+    assert {:ok, _} =
+             legacy |> Ash.Changeset.for_update(:update, Map.put(remediation, :label, "v2"), scope: scope) |> Ash.update()
+
+    # CONTROL: an update of a record whose cells are real tokens is not refused.
+    assert {:ok, _} = clean |> Ash.Changeset.for_update(:update, %{label: "c2"}, scope: scope) |> Ash.update()
+  end
+
   # ── c2 · INV-1 token-only diffs (:changes_only) ─────────────────────────────
 
   test "INV-1 (§6.3(1), :changes_only): a vault-attribute diff stores the vt_ token, never plaintext; a plain field stays cleartext",

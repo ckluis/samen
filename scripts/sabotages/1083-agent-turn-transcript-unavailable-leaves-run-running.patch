@@ -1,0 +1,19 @@
+# SABOTAGE: a transcript that cannot be read at the top of a turn no longer fails the run, leaving it running
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_transcript_write_test.exs
+# MUST_FAIL: RED: a reveal failing at the top of a proposing turn
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 049a1655..2a943d0e 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1216,7 +1216,7 @@ defmodule Samen.AI.Agent do
+         {:error, :context_exhausted, run}
+ 
+       {:error, kind} when is_atom(kind) ->
+-        {:error, kind, terminal_logged!(run, kind)}
++        {:error, kind, run}
+     end
+   end
+ 

@@ -280,6 +280,41 @@ defmodule Samen.Automation.EscalationTest do
     assert count == 1, "no duplicate row was created"
   end
 
+  test "RED: open/2 whose lookup of the existing active escalation FAILS answers {:error, :unavailable} and reports (it read the failure as \"none\" and went on to create); a readable lookup still advances the same row (control)" do
+    org = Ash.UUID.generate()
+    deadline = DateTime.utc_now() |> DateTime.add(3600, :second) |> DateTime.truncate(:second)
+
+    attrs = %{
+      org_id: org,
+      kind: "sla_breach",
+      dedupe_key: "tkt-lookup-fails",
+      subject_ref: "samen:support.ticket:tkt-lookup-fails",
+      deadline_at: deadline,
+      chain: nil
+    }
+
+    # POSITIVE CONTROL: the lookup works -> the existing row is advanced, never duplicated
+    {:ok, first} = Escalate.open(attrs)
+    assert {:ok, again} = Escalate.open(attrs)
+    assert again.id == first.id
+
+    TestRepo.query!("ALTER TABLE aes_escalation RENAME TO aes_escalation_unreadable")
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, :unavailable} = Escalate.open(attrs)
+      end)
+
+    assert log =~ "read=escalate_existing_active"
+
+    TestRepo.query!("ALTER TABLE aes_escalation_unreadable RENAME TO aes_escalation")
+
+    assert [_one] =
+             Escalation
+             |> filter(org_id == ^org and kind == "sla_breach" and dedupe_key == "tkt-lookup-fails")
+             |> Ash.read!(authorize?: false)
+  end
+
   test "ANTI-TAUTOLOGY: a DIFFERENT dedupe_key genuinely creates a second, distinct escalation" do
     org = Ash.UUID.generate()
     deadline = DateTime.utc_now() |> DateTime.add(3600, :second) |> DateTime.truncate(:second)

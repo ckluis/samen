@@ -1,0 +1,19 @@
+# SABOTAGE: record/1 logs the exception message of a failed ledger write (it interpolates the cohort value 
+#   it was binding)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_d_test.exs
+# MUST_FAIL: record/1 reports a failed write by name, without the exception message
+diff --git a/samen_core/lib/samen/aggregate/query_budget.ex b/samen_core/lib/samen/aggregate/query_budget.ex
+index b8223c95..6b833b43 100644
+--- a/samen_core/lib/samen/aggregate/query_budget.ex
++++ b/samen_core/lib/samen/aggregate/query_budget.ex
+@@ -230,6 +230,7 @@ defmodule Samen.Aggregate.QueryBudget do
+     e ->
+       # Reported by name and cause (never `inspect(e)`: an Ecto error interpolates the cohort values it was binding).
+       Samen.Observability.Failure.report_write(:query_budget_record, nil, e)
++      Logger.error(Exception.message(e))
+       {:ok, %{count: 0, warned: false}}
+   end
+ 

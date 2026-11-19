@@ -111,14 +111,16 @@ defmodule Samen.Observability.LiveEvents do
 
   defp md5(module) do
     if Code.ensure_loaded?(module), do: module.module_info(:md5), else: nil
-  rescue
-    _ -> nil
   end
 
   defp compute(module) do
     module |> literals() |> to_map()
   rescue
-    _ -> %{}
+    # a view whose live-event labels cannot be derived has NO labels: every event on it is the coarse "other"
+    # (fail closed: a client string is never recorded), and the failure is on record
+    e ->
+      Samen.Observability.Failure.report(:live_events_compute, nil, e)
+      %{}
   end
 
   defp literals(module) do

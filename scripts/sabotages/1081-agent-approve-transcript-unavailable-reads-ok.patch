@@ -1,0 +1,20 @@
+# SABOTAGE: execute_approved answers ok when its transcript cannot be read, so the decision commits without the write having run
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_transcript_write_test.exs
+# MUST_FAIL: RED: an unreadable transcript runs the tool ZERO times
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 049a1655..97c64612 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -2751,6 +2751,9 @@ defmodule Samen.AI.Agent do
+           # ReplyHandler fail-honest posture).
+           {:error, {:tool_failed, safe_error_kind(kind)}}
+       end
++    else
++      {:error, :transcript_unavailable} -> {:ok, %{}}
++      other -> other
+     end
+   end
+ 

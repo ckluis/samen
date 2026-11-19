@@ -7,8 +7,10 @@ defmodule Samen.VaultDekReuseTest do
 
   What this module proves (each red path pairs with a positive control):
 
-    * N rows x M fields over S subjects -> exactly S unwraps (was N x M), and the plaintexts
-      are right per value; `Vault.reveal/3` is still called once per value
+    * S records (= S subjects) x M vaulted fields -> exactly S unwraps (was S x M), and the
+      plaintexts are right per value; `Vault.reveal/3` is still called once per value. (A vault
+      subject IS the holding record's primary key — token binding — so several values per subject
+      means several FIELDS of one record.)
     * the reuse is ONE CALL wide: the next call unwraps again; a subject shredded in between is
       masked on the second call, the others still clear
     * a subject whose unwrap fails (shredded) denies only its own values, costs ONE failed
@@ -25,7 +27,7 @@ defmodule Samen.VaultDekReuseTest do
   alias Samen.Masked
   alias Samen.Vault
   alias Samen.Vault.DekMemo
-  alias SamenCore.Support.RevealDomain.RevealPerson
+  alias SamenCore.Support.CrmScopeFixture.Person
 
   @repo SamenCore.TestRepo
 
@@ -107,6 +109,15 @@ defmodule Samen.VaultDekReuseTest do
       do: ctx.subject_id in Application.get_env(:samen_core, :__dek_grant_ids, [])
   end
 
+  # Grants keyed on {record id, field label}: `:__dek_grant_labels` lists the pairs the operator may reveal.
+  defmodule PerLabelGrant do
+    @moduledoc false
+    def granted_many(ctxs), do: Enum.map(ctxs, &granted?/1)
+
+    def granted?(ctx),
+      do: {ctx.subject_id, ctx.label} in Application.get_env(:samen_core, :__dek_grant_labels, [])
+  end
+
   setup do
     Samen.TestSandbox.shared!(@repo)
     Samen.Kms.FileBacked.simulate_outage(false)
@@ -117,6 +128,7 @@ defmodule Samen.VaultDekReuseTest do
       Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
       Application.delete_env(:samen_core, :__dek_grant)
       Application.delete_env(:samen_core, :__dek_grant_ids)
+      Application.delete_env(:samen_core, :__dek_grant_labels)
     end)
 
     :ok
@@ -124,31 +136,42 @@ defmodule Samen.VaultDekReuseTest do
 
   # --- fixtures -----------------------------------------------------------------------------------------------
 
-  # `fields` vaulted values for a fresh subject: [{token, plaintext}].
-  defp subject!(tag, fields \\ 3) do
-    id = "#{tag}-#{Ash.UUID.generate()}"
+  @fields [:full_name, :emails, :phones]
+
+  defp vault_of(name) do
+    Person |> Samen.Pii.Info.fields() |> Enum.find(&(&1.name == name)) |> Map.fetch!(:vault)
+  end
+
+  # A record's worth of vaulted values: `nfields` of Person's fields, minted under the subject = the
+  # record's primary key (as `Vault.Change` does). `vals` = [{field, token, plaintext}].
+  defp subject!(tag, nfields \\ 3) do
+    id = Ash.UUID.generate()
 
     vals =
-      for i <- 1..fields do
-        plain = "#{tag}.f#{i}.secret@example.com"
-        {:ok, token} = Vault.store_field(id, :pii_email, :emails, plain, @repo)
-        {token, plain}
+      for name <- Enum.take(@fields, nfields) do
+        plain = "#{tag}.#{name}.secret@example.com"
+        {:ok, token} = Vault.store_field(id, vault_of(name), name, plain, @repo)
+        {name, token, plain}
       end
 
     %{id: id, vals: vals}
   end
 
-  # One record per vaulted value (N = subjects x fields rows).
-  defp records(subjects) do
-    for s <- subjects, {token, plain} <- s.vals do
-      {struct(RevealPerson, %{id: Ash.UUID.generate(), emails: Masked.new(token, :emails)}), plain}
-    end
+  defp tokens(s), do: Enum.map(s.vals, fn {_n, t, _p} -> t end)
+  defp token_of(s, name), do: Enum.find_value(s.vals, fn {n, t, _} -> if n == name, do: t end)
+  defp plain_of(s, name), do: Enum.find_value(s.vals, fn {n, _, p} -> if n == name, do: p end)
+
+  # The record holding a subject's values: id = subject, each value under its own field.
+  defp record(s) do
+    struct(Person, Map.new([id: s.id] ++ for({n, t, _} <- s.vals, do: {n, Masked.new(t, n)})))
   end
+
+  defp records(subjects), do: Enum.map(subjects, &record/1)
 
   defp resolve(recs, actor, opts \\ []) do
     PiiResolution.resolve(
-      Enum.map(recs, &elem(&1, 0)),
-      RevealPerson,
+      recs,
+      Person,
       actor,
       Keyword.merge([repo: @repo, vault: CountingVault, grant: Grant], opts)
     )
@@ -168,7 +191,9 @@ defmodule Samen.VaultDekReuseTest do
   defp unwraps, do: tag_count(:kms_unwrap)
   defp tag_count(tag), do: tag |> drain() |> length()
 
-  defp plains(resolved), do: Enum.map(resolved, & &1.emails)
+  # {field => resolved value} for one resolved record.
+  defp values(rec, nfields \\ 3), do: Map.new(Enum.take(@fields, nfields), &{&1, Map.fetch!(rec, &1)})
+  defp expected(s), do: Map.new(s.vals, fn {n, _t, p} -> {n, p} end)
 
   # ==========================================================================================================
 
@@ -176,17 +201,15 @@ defmodule Samen.VaultDekReuseTest do
     test "N x M values over S subjects cost exactly S unwraps (per-value was N x M)" do
       subjects = [subject!("a"), subject!("b"), subject!("c")]
       recs = records(subjects)
-      assert length(recs) == 9
       _ = drain(:kms_unwrap)
 
       # TODAY (baseline, the pre-change path): revealing each value alone unwraps per value.
-      _ = drain(:kms_unwrap)
-      for {r, plain} <- recs, do: assert({:ok, ^plain} = Vault.reveal(r.emails, @repo))
+      for s <- subjects, {_n, t, p} <- s.vals, do: assert({:ok, ^p} = Vault.reveal(Masked.new(t, :emails), @repo))
       assert unwraps() == 9
 
       # NEW: the same 9 values in one resolve call.
       resolved = resolve(recs, tenant())
-      assert plains(resolved) == Enum.map(recs, &elem(&1, 1))
+      assert Enum.map(resolved, &values/1) == Enum.map(subjects, &expected/1)
       unwrapped = drain(:kms_unwrap)
       assert length(unwrapped) == 3
       assert unwrapped |> Enum.map(&elem(&1, 1)) |> Enum.sort() == subjects |> Enum.map(& &1.id) |> Enum.sort()
@@ -195,31 +218,43 @@ defmodule Samen.VaultDekReuseTest do
       assert tag_count(:reveal) == 9
     end
 
+    test "several distinct record structs of the SAME subject (replay frames) cost one unwrap, with every value resolved" do
+      a = subject!("a")
+      b = subject!("b")
+      _ = drain(:kms_unwrap)
+
+      # Three structs for subject a (the same id and tokens in separate structs, as replay frames hold them),
+      # one for b.
+      frames = [record(a), record(a), record(a), record(b)]
+      resolved = resolve(frames, tenant())
+
+      assert Enum.map(resolved, &values/1) == [expected(a), expected(a), expected(a), expected(b)]
+      unwrapped = drain(:kms_unwrap)
+      assert length(unwrapped) == 2
+      assert unwrapped |> Enum.map(&elem(&1, 1)) |> Enum.sort() == Enum.sort([a.id, b.id])
+    end
+
     test "the reuse ends with the call: a second call unwraps again; a subject shredded between is masked" do
       a = subject!("a")
       b = subject!("b")
       recs = records([a, b])
       _ = drain(:kms_unwrap)
 
-      assert plains(resolve(recs, tenant())) == Enum.map(recs, &elem(&1, 1))
+      assert Enum.map(resolve(recs, tenant()), &values/1) == [expected(a), expected(b)]
       assert length(drain(:kms_unwrap)) == 2
 
       # no cross-call reuse: unwrapped afresh
-      assert plains(resolve(recs, tenant())) == Enum.map(recs, &elem(&1, 1))
+      assert Enum.map(resolve(recs, tenant()), &values/1) == [expected(a), expected(b)]
       assert length(drain(:kms_unwrap)) == 2
 
       # crypto-shred is immediate: the very next call sees nothing of `a`, `b` still clear
       {:ok, _} = Vault.shred(a.id)
       _ = drain(:kms_unwrap)
-      out = resolve(recs, tenant())
+      [out_a, out_b] = resolve(recs, tenant())
 
-      for {{rec, plain}, got} <- Enum.zip(recs, out) do
-        if rec.emails.token in Enum.map(a.vals, &elem(&1, 0)),
-          do: assert(%Masked{} = got.emails),
-          else: assert(got.emails == plain)
-      end
-
-      refute inspect(out) =~ "a.f1.secret"
+      assert Enum.all?(values(out_a), fn {_n, v} -> match?(%Masked{}, v) end)
+      assert values(out_b) == expected(b)
+      refute inspect([out_a, out_b]) =~ "a.emails.secret"
     end
 
     test "a failing subject denies only its own values, costs ONE failed unwrap, and poisons nobody" do
@@ -230,14 +265,11 @@ defmodule Samen.VaultDekReuseTest do
       recs = records([bad, good1, good2])
       _ = drain(:kms_unwrap)
 
-      out = resolve(recs, tenant())
-      bad_tokens = Enum.map(bad.vals, &elem(&1, 0))
+      [out_bad, out1, out2] = resolve(recs, tenant())
 
-      for {{rec, plain}, got} <- Enum.zip(recs, out) do
-        if rec.emails.token in bad_tokens,
-          do: assert(%Masked{} = got.emails, "shredded values stay masked"),
-          else: assert(got.emails == plain, "POSITIVE CONTROL: healthy subjects still resolve")
-      end
+      assert Enum.all?(values(out_bad), fn {_n, v} -> match?(%Masked{}, v) end), "shredded values stay masked"
+      assert values(out1) == expected(good1), "POSITIVE CONTROL: healthy subjects still resolve"
+      assert values(out2) == expected(good2)
 
       # 3 subjects -> 3 unwraps, the failed one NOT retried per value (3 values)
       unwrapped = drain(:kms_unwrap) |> Enum.map(&elem(&1, 1)) |> Enum.sort()
@@ -249,48 +281,51 @@ defmodule Samen.VaultDekReuseTest do
     test "a memo built for subject A is not used for subject B's row (B unwraps live, own key)" do
       a = subject!("org1:alice", 1)
       b = subject!("org2:alice", 1)
-      [{ta, pa}] = a.vals
-      [{tb, pb}] = b.vals
+      ta = token_of(a, :full_name)
+      tb = token_of(b, :full_name)
+      pa = plain_of(a, :full_name)
+      pb = plain_of(b, :full_name)
       rows = Vault.prefetch_rows([ta, tb], @repo)
       memo = Vault.unwrap_subjects(Map.take(rows, [ta]))
       _ = drain(:kms_unwrap)
 
-      assert {:ok, ^pa} = Vault.reveal(Masked.new(ta, :emails), @repo, prefetched: rows, deks: memo)
+      assert {:ok, ^pa} = Vault.reveal(Masked.new(ta, :full_name), @repo, prefetched: rows, deks: memo)
       assert unwraps() == 0
 
       # B is not in the memo: it takes its OWN live unwrap and decrypts under its OWN key.
-      assert {:ok, ^pb} = Vault.reveal(Masked.new(tb, :emails), @repo, prefetched: rows, deks: memo)
+      assert {:ok, ^pb} = Vault.reveal(Masked.new(tb, :full_name), @repo, prefetched: rows, deks: memo)
       assert [{:kms_unwrap, bid}] = drain(:kms_unwrap)
       assert bid == b.id
     end
 
     test "a mixed-subject batch resolves each value under its own subject's key" do
       subjects = [subject!("org1:same", 2), subject!("org2:same", 2)]
-      recs = records(subjects)
-      assert plains(resolve(recs, tenant())) == Enum.map(recs, &elem(&1, 1))
+      out = resolve(records(subjects), tenant())
+      assert Enum.map(out, &values(&1, 2)) == Enum.map(subjects, &expected/1)
     end
 
     test "a memo built under one adapter is not trusted under another" do
       a = subject!("a", 1)
-      [{t, p}] = a.vals
+      t = token_of(a, :full_name)
+      p = plain_of(a, :full_name)
       rows = Vault.prefetch_rows([t], @repo)
       memo = Vault.unwrap_subjects(rows)
       _ = drain(:kms_unwrap)
 
       Application.put_env(:samen_core, :kms_adapter, OtherKms)
-      assert {:ok, ^p} = Vault.reveal(Masked.new(t, :emails), @repo, prefetched: rows, deks: memo)
+      assert {:ok, ^p} = Vault.reveal(Masked.new(t, :full_name), @repo, prefetched: rows, deks: memo)
       assert [{:other_unwrap, id}] = drain(:other_unwrap)
       assert id == a.id
     end
 
     test "a subject-asserting reveal still binds the real subject before any unwrap" do
       a = subject!("a", 1)
-      [{t, _}] = a.vals
+      t = token_of(a, :full_name)
       rows = Vault.prefetch_rows([t], @repo)
       memo = Vault.unwrap_subjects(rows)
 
       assert {:error, :subject_mismatch} =
-               Vault.reveal(Masked.new(t, :emails), @repo,
+               Vault.reveal(Masked.new(t, :full_name), @repo,
                  prefetched: rows,
                  deks: memo,
                  subject_id: "someone-else"
@@ -307,113 +342,104 @@ defmodule Samen.VaultDekReuseTest do
       Application.put_env(:samen_core, :__dek_grant, false)
       denied = resolve(recs, operator())
       assert unwraps() == 0
-      assert Enum.all?(denied, &match?(%Masked{}, &1.emails))
+      assert Enum.all?(denied, fn r -> Enum.all?(values(r), fn {_n, v} -> match?(%Masked{}, v) end) end)
       refute inspect(denied) =~ "secret@example.com"
 
       # POSITIVE CONTROL: the same call under a live grant decrypts, one unwrap per subject.
       Application.put_env(:samen_core, :__dek_grant, true)
       granted = resolve(recs, operator())
-      assert plains(granted) == Enum.map(recs, &elem(&1, 1))
+      assert Enum.map(granted, &values/1) == Enum.map(subjects, &expected/1)
       assert length(drain(:kms_unwrap)) == 2
     end
 
-    test "a subject IN the memo still has its DENIED value masked: no plaintext, no vt_ token" do
-      s = subject!("s", 2)
-      [{t1, p1}, {t2, p2}] = s.vals
-      r1 = Ash.UUID.generate()
-      r2 = Ash.UUID.generate()
-      rec1 = struct(RevealPerson, %{id: r1, emails: Masked.new(t1, :emails)})
-      rec2 = struct(RevealPerson, %{id: r2, emails: Masked.new(t2, :emails)})
+    test "a value the plane denies stays masked, even though its sibling (SAME subject, DEK in the memo) is clear" do
+      s = subject!("s", 3)
+      rec = record(s)
       _ = drain(:kms_unwrap)
 
-      Application.put_env(:samen_core, :__dek_grant_ids, [r1])
+      # A grant is per {record, field}: grant ONLY the :emails label of this record.
+      Application.put_env(:samen_core, :__dek_grant_labels, [{s.id, :emails}])
 
-      [out1, out2] =
-        PiiResolution.resolve([rec1, rec2], RevealPerson, operator(),
+      [out] =
+        PiiResolution.resolve([rec], Person, operator(),
           repo: @repo,
           vault: CountingVault,
-          grant: PerRecordGrant
+          grant: PerLabelGrant
         )
 
-      # the granted value is clear; its sibling (SAME subject, whose DEK is in the memo) stays masked
-      assert out1.emails == p1
-      assert %Masked{} = out2.emails
-      refute inspect(out2) =~ p2
-      refute inspect(out2) =~ "vt_"
-      # one unwrap for S, and Vault.reveal/3 was never asked for the denied value
+      assert out.emails == plain_of(s, :emails)
+      assert %Masked{} = out.full_name
+      assert %Masked{} = out.phones
+      refute inspect(out.full_name) =~ plain_of(s, :full_name)
+      refute inspect(out.phones) =~ plain_of(s, :phones)
+      refute inspect(out.full_name) =~ "vt_"
+      # one unwrap for S, and Vault.reveal/3 was never asked for the denied values
       assert unwraps() == 1
-      assert drain(:reveal) == [{:reveal, t1}]
+      assert drain(:reveal) == [{:reveal, token_of(s, :emails)}]
 
-      # POSITIVE CONTROL: grant both -> both clear (the denial above was the grant, not the memo)
-      Application.put_env(:samen_core, :__dek_grant_ids, [r1, r2])
+      # POSITIVE CONTROL: grant all three -> all clear (the denial above was the grant, not the memo)
+      Application.put_env(:samen_core, :__dek_grant_labels, for(n <- @fields, do: {s.id, n}))
 
-      both =
-        PiiResolution.resolve([rec1, rec2], RevealPerson, operator(),
+      [both] =
+        PiiResolution.resolve([rec], Person, operator(),
           repo: @repo,
           vault: CountingVault,
-          grant: PerRecordGrant
+          grant: PerLabelGrant
         )
 
-      assert Enum.map(both, & &1.emails) == [p1, p2]
+      assert values(both) == expected(s)
     end
 
     test "building the memo never widens what is decrypted: a fully denied subject is never unwrapped" do
       allowed = subject!("allowed", 1)
       denied = subject!("denied", 2)
-      [{ta, pa}] = allowed.vals
-      [{td1, pd1}, {td2, pd2}] = denied.vals
-      ra = Ash.UUID.generate()
-      rd1 = Ash.UUID.generate()
-      rd2 = Ash.UUID.generate()
 
-      recs = [
-        struct(RevealPerson, %{id: ra, emails: Masked.new(ta, :emails)}),
-        struct(RevealPerson, %{id: rd1, emails: Masked.new(td1, :emails)}),
-        struct(RevealPerson, %{id: rd2, emails: Masked.new(td2, :emails)})
-      ]
-
+      recs = [record(allowed), record(denied)]
       _ = drain(:kms_unwrap)
-      Application.put_env(:samen_core, :__dek_grant_ids, [ra])
+      Application.put_env(:samen_core, :__dek_grant_ids, [allowed.id])
 
       out =
-        PiiResolution.resolve(recs, RevealPerson, operator(),
+        PiiResolution.resolve(recs, Person, operator(),
           repo: @repo,
           vault: CountingVault,
           grant: PerRecordGrant
         )
 
-      assert [%{emails: ^pa}, %{emails: %Masked{}}, %{emails: %Masked{}}] = out
-      refute inspect(out) =~ pd1
-      refute inspect(out) =~ pd2
+      assert [%{full_name: pa}, %{full_name: %Masked{}, emails: %Masked{}}] = out
+      assert pa == plain_of(allowed, :full_name)
+      refute inspect(out) =~ plain_of(denied, :full_name)
+      refute inspect(out) =~ plain_of(denied, :emails)
       # only the ALLOWED subject reached the KMS (the denied one's DEK is never in memory)
       assert drain(:kms_unwrap) == [{:kms_unwrap, allowed.id}]
     end
 
     test "a memo built by ANOTHER process is ignored: reveal unwraps live" do
       a = subject!("a", 1)
-      [{t, plain}] = a.vals
+      t = token_of(a, :full_name)
+      plain = plain_of(a, :full_name)
       rows = Vault.prefetch_rows([t], @repo)
       memo = Task.async(fn -> Vault.unwrap_subjects(rows) end) |> Task.await()
       _ = drain(:kms_unwrap)
 
       # the foreign memo is not used: a live unwrap happens in this process
-      assert {:ok, ^plain} = Vault.reveal(Masked.new(t, :emails), @repo, prefetched: rows, deks: memo)
+      assert {:ok, ^plain} = Vault.reveal(Masked.new(t, :full_name), @repo, prefetched: rows, deks: memo)
       assert unwraps() == 1
 
       # POSITIVE CONTROL: a memo built by THIS process is used (no further unwrap)
       own = Vault.unwrap_subjects(rows)
       _ = drain(:kms_unwrap)
-      assert {:ok, ^plain} = Vault.reveal(Masked.new(t, :emails), @repo, prefetched: rows, deks: own)
+      assert {:ok, ^plain} = Vault.reveal(Masked.new(t, :full_name), @repo, prefetched: rows, deks: own)
       assert unwraps() == 0
     end
 
     test "a subject shredded mid-call is served for the rest of THAT call, never by the next" do
       a = subject!("a", 2)
-      [{t1, p1}, {t2, p2}] = a.vals
+      [t1, t2] = tokens(a)
+      [p1, p2] = Enum.map(a.vals, &elem(&1, 2))
       rows = Vault.prefetch_rows([t1, t2], @repo)
       memo = Vault.unwrap_subjects(rows)
 
-      assert {:ok, ^p1} = Vault.reveal(Masked.new(t1, :emails), @repo, prefetched: rows, deks: memo)
+      assert {:ok, ^p1} = Vault.reveal(Masked.new(t1, :full_name), @repo, prefetched: rows, deks: memo)
       {:ok, _} = Vault.shred(a.id)
       # the shred check IS the unwrap, done once when the memo was built: this call still serves it
       assert {:ok, ^p2} = Vault.reveal(Masked.new(t2, :emails), @repo, prefetched: rows, deks: memo)
@@ -427,17 +453,55 @@ defmodule Samen.VaultDekReuseTest do
       _ = drain(:kms_unwrap)
       Application.put_env(:samen_core, :__dek_grant, true)
 
-      out = resolve(recs, tenant(), egress: true)
+      [out] = resolve(recs, tenant(), egress: true)
       assert unwraps() == 0
-      assert Enum.all?(out, &match?(%Masked{}, &1.emails))
+      assert Enum.all?(values(out), fn {_n, v} -> match?(%Masked{}, v) end)
+    end
+  end
+
+  describe "token binding: a foreign subject's key is never unwrapped" do
+    test "T-R2: a record holding another subject's token costs ZERO unwraps of that subject; its own subject still costs one" do
+      own = subject!("own", 3)
+      foreign = subject!("foreign", 3)
+      # `own`'s record, plus a record (a fresh id) whose :full_name cell holds `foreign`'s token
+      holder = struct(Person, %{id: Ash.UUID.generate(), full_name: Masked.new(token_of(foreign, :full_name), :full_name)})
+      _ = drain(:kms_unwrap)
+
+      [out_own, out_holder] = resolve([record(own), holder], tenant())
+
+      assert values(out_own) == expected(own), "POSITIVE CONTROL: the bound record resolves clear"
+      assert %Masked{} = out_holder.full_name
+      refute inspect(out_holder) =~ plain_of(foreign, :full_name)
+
+      unwrapped = drain(:kms_unwrap) |> Enum.map(&elem(&1, 1))
+      assert unwrapped == [own.id], "only the bound subject may be unwrapped, got #{inspect(unwrapped)}"
+      refute foreign.id in unwrapped
+      # reveal/3 is still asked per value that passed the plane; it refuses the foreign one itself
+      assert tag_count(:reveal) == 4
+    end
+
+    test "a reveal that asserts the wrong field is refused BEFORE any unwrap" do
+      s = subject!("s", 1)
+      t = token_of(s, :full_name)
+      rows = Vault.prefetch_rows([t], @repo)
+      _ = drain(:kms_unwrap)
+
+      assert {:error, :field_mismatch} =
+               Vault.reveal(Masked.new(t, :full_name), @repo, prefetched: rows, field: {vault_of(:full_name), "emails"})
+
+      assert unwraps() == 0
+
+      # POSITIVE CONTROL: the right field unwraps and reveals
+      p = plain_of(s, :full_name)
+      assert {:ok, ^p} = Vault.reveal(Masked.new(t, :full_name), @repo, prefetched: rows, field: {vault_of(:full_name), "full_name"})
+      assert unwraps() == 1
     end
   end
 
   describe "the memo holds key bytes only inside the call" do
     test "Inspect is redacted (positive control: the key IS in the memo)" do
       a = subject!("a", 1)
-      [{t, _}] = a.vals
-      memo = Vault.unwrap_subjects(Vault.prefetch_rows([t], @repo))
+      memo = Vault.unwrap_subjects(Vault.prefetch_rows(tokens(a), @repo))
 
       assert %DekMemo{entries: entries} = memo
       assert [{:ok, dek}] = Map.values(entries)
@@ -452,18 +516,12 @@ defmodule Samen.VaultDekReuseTest do
     end
 
     test "nothing is left in the process dictionary after a resolve" do
-      recs = records([subject!("a")])
-      {:ok, dek} = Samen.Kms.FileBacked.unwrap(subject_of(recs))
-      _ = resolve(recs, tenant())
+      a = subject!("a")
+      {:ok, dek} = Samen.Kms.FileBacked.unwrap(a.id)
+      _ = resolve(records([a]), tenant())
 
       refute inspect(Process.get(), limit: :infinity) =~ inspect(dek)
       refute Enum.any?(Process.get(), fn {_, v} -> match?(%DekMemo{}, v) end)
     end
-  end
-
-  defp subject_of(recs) do
-    {r, _} = hd(recs)
-    %{subject_id: sid} = @repo.get(Samen.Vault.VaultRow, r.emails.token)
-    sid
   end
 end

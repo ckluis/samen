@@ -11,12 +11,12 @@
 # MUST_FAIL: mix task exits 1 in --update mode and REFUSES to write an empty snapshot
 # MUST_FAIL: mix task exits 1 in diff mode (empty-vs-empty must not print OK)
 diff --git a/samen_core/lib/mix/tasks/samen.verify.api_contract.ex b/samen_core/lib/mix/tasks/samen.verify.api_contract.ex
-index fb00490..e514f15 100644
+index fd39ee7..eea2c37 100644
 --- a/samen_core/lib/mix/tasks/samen.verify.api_contract.ex
 +++ b/samen_core/lib/mix/tasks/samen.verify.api_contract.ex
-@@ -159,7 +159,7 @@ defmodule Mix.Tasks.Samen.Verify.ApiContract do
-   # vacuously forever. Same fail-closed shape as
-   # `vault_declared_parity.halt_if_no_resources!/1`.
+@@ -166,7 +166,7 @@ defmodule Mix.Tasks.Samen.Verify.ApiContract do
+   # vacuously forever. (A resource whose introspection FAILS never reaches here: `snapshot/2` raises and the task fails
+   # above.) Same fail-closed shape as `vault_declared_parity.halt_if_no_resources!/1`.
    defp halt_if_empty_contract!(live_snapshot) do
 -    if (live_snapshot["resources"] || []) == [] do
 +    if (live_snapshot["resources"] || []) == [:__sabotaged__] do

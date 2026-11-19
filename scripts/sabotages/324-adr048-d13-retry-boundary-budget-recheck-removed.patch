@@ -28,15 +28,17 @@
 # would trip Elixir's always-same-result warning). No private function goes uncalled:
 # `over_budget/2` is public and still called at the turn boundary, and `reload!/1` keeps its
 # other callers. Touches agent.ex ALONE.
+# Re-anchored for the single-reveal transcript write (the diff now carries real index/line headers). Same deletion, same semantics.
 # APP: samen_core
 # TEST_FILES: test/ai/agent_durability_test.exs
 # MUST_FAIL: D-13 RED: a budget exhausted DURING the overflowing first attempt stops the Level 2 retry — no summarizing fold, no second provider call
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 049a1655..ecfd53e6 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -1169,33 +1169,12 @@
+@@ -1313,33 +1313,12 @@ defmodule Samen.AI.Agent do
            Breaker.killed?(run.org_id, run.agent) ->
-         {run, lines, turn_row, {:error, :killed}, duration_ms, retries}
+         {run, lines, views, turn_row, {:error, :killed}, duration_ms, retries}
  
 -      # D-13 (ADR-048 §6/§8, operator ruling D-13) — the BUDGET is RE-CHECKED here too, and
 -      # with it the triple is complete: the turn boundary guards budget, cancel and the
@@ -62,7 +64,7 @@ diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
 -      # reads only ever grows within a run. Sabotage 324 makes this clause refutable.
 -      attempt <= @max_context_retries and context_overflow?(result) and
 -          over_budget(reload!(run), DateTime.utc_now()) != nil ->
--        {run, lines, turn_row, {:error, over_budget(reload!(run), DateTime.utc_now())},
+-        {run, lines, views, turn_row, {:error, over_budget(reload!(run), DateTime.utc_now())},
 -         duration_ms, retries}
 -
 +      # SABOTAGE (D-13, ADR-048 §6/§8, ruling D-13): the RETRY-boundary BUDGET re-check is

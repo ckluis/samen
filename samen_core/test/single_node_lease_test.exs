@@ -89,7 +89,10 @@ defmodule Samen.SingleNodeLeaseTest do
     %{key: key, admin: admin}
   end
 
+  # `await_session: false` is for a lease that is MEANT to have no session (an unreachable database): there is no
+  # `after_connect` to wait for.
   defp start_lease(ctx, opts \\ []) do
+    {await_session?, opts} = Keyword.pop(opts, :await_session, true)
     n = System.unique_integer([:positive])
     name = Keyword.get(opts, :name, :"sn_lease_#{n}")
     table = :"sn_lease_t_#{n}"
@@ -100,9 +103,22 @@ defmodule Samen.SingleNodeLeaseTest do
         opts
       )
 
-    start_supervised!(Supervisor.child_spec({Lease, opts}, id: name))
-    # `start_link` returns before the dedicated connection is up. The first check is served only once the session
-    # exists (after_connect has taken the lock), so after it the instance is a real, visible holder.
+    # `start_link` returns before the dedicated connection is up. The session exists once `after_connect` has taken
+    # the lock and announced it, so wait for THAT event: a check issued earlier queues for a connection that is not
+    # there yet, and a pool with a small queue (`queue_target` 20 ms, as the reconnect test uses) drops it as
+    # `:connection_down` as soon as the handshake takes longer than the queue allows (it does under machine load).
+    test_pid = self()
+    handler = {__MODULE__, :session, make_ref()}
+    :ok = :telemetry.attach(handler, [:samen, :single_node, :session], fn _e, m, _meta, _ -> send(test_pid, {:lease_session, m.backend_pid}) end, nil)
+
+    try do
+      start_supervised!(Supervisor.child_spec({Lease, opts}, id: name))
+      if await_session?, do: assert_receive({:lease_session, _backend_pid}, 5_000)
+    after
+      :telemetry.detach(handler)
+    end
+
+    # The first check is served now that the session exists, so after it the instance is a real, visible holder.
     _ = Lease.check_now(name)
     %{name: name, table: table}
   end
@@ -378,7 +394,7 @@ defmodule Samen.SingleNodeLeaseTest do
 
   describe "fail-honest: unreadable is UNKNOWN, never single" do
     test "the database is unreachable", ctx do
-      a = start_lease(ctx, repo: nil, connect_opts: [hostname: "127.0.0.1", port: 1, username: "x", database: "x"], query_timeout_ms: 300, pool_opts: [queue_target: 20, queue_interval: 50])
+      a = start_lease(ctx, await_session: false, repo: nil, connect_opts: [hostname: "127.0.0.1", port: 1, username: "x", database: "x"], query_timeout_ms: 300, pool_opts: [queue_target: 20, queue_interval: 50])
 
       assert %{state: :unknown, reason: :connection_down} = Lease.check_now(a.name)
       assert {:unknown, detail} = SingleNode.advisory(table: a.table)
@@ -693,6 +709,7 @@ defmodule Samen.SingleNodeLeaseTest do
 
       control =
         start_lease(ctx,
+          await_session: false,
           repo: Samen.SingleNodeLeaseTest.StaticRepo,
           query_timeout_ms: 300,
           pool_opts: [queue_target: 20, queue_interval: 50]
@@ -866,7 +883,7 @@ defmodule Samen.SingleNodeLeaseTest do
     test "capture: boot with the DB down logs the failure ONCE and does not crash the lease", ctx do
       log =
         capture_log(fn ->
-          a = start_lease(ctx, repo: nil, connect_opts: [hostname: "127.0.0.1", port: 1, username: "x", database: "x"], query_timeout_ms: 300, pool_opts: [queue_target: 20, queue_interval: 50])
+          a = start_lease(ctx, await_session: false, repo: nil, connect_opts: [hostname: "127.0.0.1", port: 1, username: "x", database: "x"], query_timeout_ms: 300, pool_opts: [queue_target: 20, queue_interval: 50])
           assert %{state: :unknown} = Lease.check_now(a.name)
           assert %{state: :unknown} = Lease.check_now(a.name)
         end)

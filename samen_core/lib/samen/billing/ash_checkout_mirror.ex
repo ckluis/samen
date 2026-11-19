@@ -201,7 +201,16 @@ defmodule Samen.Billing.AshCheckoutMirror do
     (plan.features || %{})
     |> Enum.filter(fn {_key, granted} -> granted == true end)
     |> Enum.map(fn {feature_key, _} -> safe_feature_atom(feature_key) end)
-    |> Enum.reject(&is_nil/1)
+    |> Enum.reject(fn
+      nil ->
+        # a granted feature whose key is not an existing atom (its checking module may not be loaded yet) gets no
+        # entitlement row: on record by name and org only, never the key
+        Samen.Observability.Failure.report_write(:checkout_feature_unknown, org_id, :unknown_atom)
+        true
+
+      _feature ->
+        false
+    end)
     |> Enum.map(fn feature ->
       entitlement_resource
       |> Ash.Changeset.for_create(

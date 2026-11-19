@@ -110,7 +110,7 @@ defmodule Samen.Webhook.DeliveryWorker do
     with {:ok, endpoint} <- load_endpoint(endpoint_id, repo),
          {:ok, url} <- endpoint_url(endpoint),
          :ok <- egress_check(url),
-         {:ok, secret} <- reveal_secret(endpoint, repo),
+         {:ok, secret} <- reveal_secret(endpoint, endpoint_id, repo),
          {:ok, _} <- deliver(url, body, secret) do
       :ok
     else
@@ -128,6 +128,18 @@ defmodule Samen.Webhook.DeliveryWorker do
         {:discard,
          "webhook endpoint URL refused by egress guard (#{reason}): endpoint #{endpoint_id}"}
 
+      {:error, reason} when reason in [:subject_mismatch, :field_mismatch] ->
+        # The signing secret is a token minted for another subject or field. A binding mismatch is
+        # PERMANENT (no retry can fix the row), so discard and report ONCE, value- and token-free,
+        # naming the endpoint so an operator can find the row.
+        Samen.Observability.Failure.report_write(
+          :vault_token_unbound,
+          %{org_id: Map.get(args, "org_id")},
+          reason
+        )
+
+        {:discard, "webhook signing secret not bound to endpoint #{endpoint_id} (#{reason})"}
+
       {:error, reason} ->
         {:error, reason}
     end
@@ -142,9 +154,11 @@ defmodule Samen.Webhook.DeliveryWorker do
       row -> {:ok, row}
     end
   rescue
-    _ ->
-      # No real Ash resource wired — this is the seam for host apps.
-      {:error, :not_found}
+    e ->
+      # A lookup that FAILED (an outage, an unwired endpoint module) is not "the endpoint was deleted": answering
+      # :not_found made `perform/1` DISCARD the delivery for good. It is a transient, reported error, so Oban retries.
+      Samen.Observability.Failure.report(:webhook_delivery_load_endpoint, nil, e)
+      {:error, :endpoint_unavailable}
   end
 
   defp load_endpoint(_id, nil) do
@@ -152,13 +166,17 @@ defmodule Samen.Webhook.DeliveryWorker do
     {:error, :no_repo}
   end
 
-  # Try to use the configured vault + repo to reveal the signing secret.
-  defp reveal_secret(endpoint, repo) do
+  # Try to use the configured vault + repo to reveal the signing secret. The reveal asserts the
+  # endpoint's own id as the vault subject (a signing secret is minted under the endpoint's
+  # primary key): a row whose `signing_secret` holds another subject's token is refused as
+  # `{:error, :subject_mismatch}` before any key is unwrapped, never signed with (`perform/1` discards
+  # it: a mismatch is permanent).
+  defp reveal_secret(endpoint, endpoint_id, repo) do
     vault = Application.get_env(:samen_core, :vault_module, Samen.Vault)
 
     case Map.get(endpoint, :signing_secret) do
       %Samen.Masked{} = masked ->
-        vault.reveal(masked, repo, [])
+        vault.reveal(masked, repo, subject_id: endpoint_id, field: {:pii_secret, :signing_secret})
 
       nil ->
         {:error, :no_secret}
@@ -210,7 +228,10 @@ defmodule Samen.Webhook.DeliveryWorker do
         String.to_existing_atom("Elixir.#{repo_str}")
     end
   rescue
-    _ -> nil
+    e ->
+      # an unresolvable repo is `:no_repo` (a retried error, never a delivery); on record by name
+      Samen.Observability.Failure.report(:webhook_delivery_repo, nil, e)
+      nil
   end
 
   # Hook for the host app — returns the table module for webhook endpoint rows.

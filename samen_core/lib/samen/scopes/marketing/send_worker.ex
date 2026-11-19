@@ -231,7 +231,7 @@ defmodule Samen.Scopes.Marketing.SendWorker do
         })
       rescue
         e ->
-          Samen.Observability.Failure.report(:send_worker_emit_blocked_audit, nil, e)
+          Samen.Observability.Failure.report_write(:send_worker_emit_blocked_audit, nil, e)
           :ok
       end
     else

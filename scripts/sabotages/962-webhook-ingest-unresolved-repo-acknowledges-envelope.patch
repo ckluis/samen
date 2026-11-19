@@ -1,0 +1,20 @@
+# SABOTAGE: IngestWorker acknowledges an inbound envelope when its repo cannot be resolved: the verified 
+#   event is stranded unprocessed
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_c_test.exs
+# MUST_FAIL: an event id with no repo is a retried, reported error, not an acknowledged (stranded) envelope
+diff --git a/samen_core/lib/samen/webhook/ingest_worker.ex b/samen_core/lib/samen/webhook/ingest_worker.ex
+index b0331afa..99ee83a7 100644
+--- a/samen_core/lib/samen/webhook/ingest_worker.ex
++++ b/samen_core/lib/samen/webhook/ingest_worker.ex
+@@ -44,7 +44,7 @@ defmodule Samen.Webhook.IngestWorker do
+     event_id = Map.get(args, "event_id") || Map.get(args, :event_id)
+ 
+     case repo && event_id && Event.get(repo, event_id) do
+-      nil when is_nil(repo) and not is_nil(event_id) ->
++      nil when false ->
+         # An event to process but no repo to read it from (unconfigured or unresolvable): acknowledging would strand a
+         # verified inbound envelope unprocessed for good. A retried, reported error instead.
+         Samen.Observability.Failure.report(:webhook_ingest_repo, nil, :unresolved_repo)

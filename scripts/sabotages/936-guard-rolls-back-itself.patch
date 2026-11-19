@@ -1,0 +1,21 @@
+# SABOTAGE: The vault write guard only returns an error and relies on Ash to roll back, so 
+#   rollback_on_error?: false leaves a refused write durable
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault/vault_write_guard_test.exs
+# MUST_FAIL: a call-site upsert with rollback_on_error?: false is still refused and not durable
+# MUST_FAIL: a swapping hook with rollback_on_error?: false is refused and nothing is written
+diff --git a/samen_core/lib/samen/vault/change.ex b/samen_core/lib/samen/vault/change.ex
+index 889b50a6..b798c05a 100644
+--- a/samen_core/lib/samen/vault/change.ex
++++ b/samen_core/lib/samen/vault/change.ex
+@@ -158,7 +158,7 @@ defmodule Samen.Vault.Change do
+   # leaves `rollback_on_error?` at its default (true), and commits the error's transaction otherwise.
+   # `guarded_route/2` guarantees a transaction is open here, so this always rolls back the vault rows and
+   # the domain write together (in a caller's outer transaction it aborts that one, which fails closed).
+-  defp refuse_written(repo, error), do: repo.rollback(error)
++  defp refuse_written(_repo, error), do: {:error, error}
+ 
+   # What the changeset will write for a vault field, comparable across hooks. Never a plaintext.
+   defp vault_view(changeset, name) do

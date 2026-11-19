@@ -1,0 +1,19 @@
+# SABOTAGE: ai_prompt_masking concatenates a dynamic defmodule alias unguarded: the verifier crashes 
+#   instead of reading on
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/ai_prompt_masking_tool_checks_test.exs
+# MUST_FAIL: a `defmodule __MODULE__.X` ahead of the tool module in its source does not crash the verifier
+diff --git a/samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex b/samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex
+index 42d9148f..c1f329a1 100644
+--- a/samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex
+@@ -351,6 +351,6 @@ defmodule Mix.Tasks.Samen.Verify.AiPromptMasking do
+ 
+   # An AST alias whose parts cannot be concatenated (`__MODULE__.Foo`, a dynamic part) names no module here: nil.
+   defp concat_or_nil(parts) do
+-    if Enum.all?(parts, &is_atom/1), do: Module.concat(parts)
++    Module.concat(parts)
+   end
+ end

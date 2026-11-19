@@ -64,12 +64,17 @@ defmodule Samen.Approvals do
          {:ok, kind} <- fetch_kind(attrs),
          {:ok, _} <- Registry.resolve(kind, opts),
          :ok <- scan_reason(fetch(attrs, :reason)) do
+      # A pending-row read that FAILED is not "no pending approval": creating on top of an unreadable table would
+      # open a duplicate (or lose the idempotent return), so the request is refused as unavailable instead.
       case existing_pending(res, attrs, opts) do
         {:ok, approval} ->
           {:ok, approval}
 
         :none ->
           create_approval(res, repo, attrs, kind, opts)
+
+        {:error, :unavailable} = unavailable ->
+          unavailable
       end
     end
   end
@@ -105,8 +110,9 @@ defmodule Samen.Approvals do
   end
 
   @doc """
-  Cancel `approval_id` (the requester withdraws). `pending → cancelled`, audited. No
-  handler runs. Returns `{:ok, approval}` or `{:error, term()}`.
+  Cancel `approval_id` (the requester withdraws). `pending → cancelled`, audited, and the registered handler's
+  OPTIONAL `on_cancel/2` runs in the same transaction (a kind without the hook runs nothing; an error from the hook
+  rolls the cancel back). Returns `{:ok, approval}` or `{:error, term()}`.
   """
   @spec cancel(term(), term(), keyword()) :: {:ok, struct()} | {:error, term()}
   def cancel(approval_id, actor, opts \\ []) do
@@ -124,6 +130,7 @@ defmodule Samen.Approvals do
             case transition(approval, :cancel, %{}, opts) do
               {:ok, cancelled} ->
                 audit!(repo, cancelled, "approval_cancelled", actor)
+                run_cancel_hook!(repo, cancelled, actor, opts)
                 cancelled
 
               {:error, reason} ->
@@ -134,9 +141,32 @@ defmodule Samen.Approvals do
     end
   end
 
+  # The handler's optional `on_cancel/2`, inside the cancel transaction (a kind with no registered handler, or a handler
+  # without the hook, has nothing to run). An error rolls the cancel back, like a failed `on_reject/2`.
+  defp run_cancel_hook!(repo, approval, actor, opts) do
+    case Registry.resolve(approval.kind, opts) do
+      {:ok, {_plane, handler}} ->
+        if exports?(handler, :on_cancel, 2) do
+          ctx = %{approval: approval, actor: actor, repo: repo, opts: opts}
+
+          case handler.on_cancel(approval, ctx) do
+            :ok -> :ok
+            {:error, reason} -> repo.rollback(reason)
+            other -> repo.rollback({:bad_handler_return, other})
+          end
+        else
+          :ok
+        end
+
+      {:error, :unregistered_kind} ->
+        :ok
+    end
+  end
+
   @doc """
   Look up an approval by id through the engine's wiring (bypasses authorization — a
-  kernel read for handlers/tests). Returns `{:ok, approval}` or `{:error, :not_found}`.
+  kernel read for handlers/tests). Returns `{:ok, approval}`, `{:error, :not_found}` (no such row) or `{:error, :unavailable}` (the read
+  itself FAILED — an outage is never reported as "no such approval").
   """
   @spec get(term(), keyword()) :: {:ok, struct()} | {:error, term()}
   def get(approval_id, opts \\ []) do
@@ -173,6 +203,36 @@ defmodule Samen.Approvals do
       case Ash.read(query, authorize?: false) do
         {:ok, approvals} -> {:ok, approvals}
         {:error, _} = err -> err
+      end
+    end
+  end
+
+  @doc """
+  Which of `subject_refs` already have an approval of `kind` for `org_id` in ANY state (pending, approved, rejected,
+  cancelled) — the "was an approval ever opened for it" read a recovery sweep needs. Org-pinned like `list_pending/3`
+  (`org_filter/2`): another org's approval for the same ref never counts. Returns `{:ok, MapSet}` of the refs that
+  have one, `{:error, :no_approvals_module}` on an unwired host, or `{:error, :unavailable}` when the read FAILED (an
+  outage is never "none of them has an approval": the caller would open duplicates on top of an unreadable table).
+  """
+  @spec subject_refs_with_approval(term(), String.t(), [String.t()], keyword()) ::
+          {:ok, MapSet.t(String.t())} | {:error, term()}
+  def subject_refs_with_approval(org_id, kind, subject_refs, opts \\ []) when is_binary(kind) and is_list(subject_refs) do
+    with {:ok, {res, _repo}} <- wiring(opts) do
+      query =
+        res
+        |> Ash.Query.filter(kind == ^kind and subject_ref in ^subject_refs)
+        |> org_filter(org_id)
+        |> Ash.Query.select([:subject_ref])
+
+      # authz-scope: org-pinned one clause down via org_filter/2 (binary org => org_id == ^org_id;
+      # nil => is_nil(org_id), the deliberate GLOBAL lane) — a cross-clause pin the static check cannot see
+      case Ash.read(query, authorize?: false) do
+        {:ok, approvals} ->
+          {:ok, MapSet.new(approvals, & &1.subject_ref)}
+
+        {:error, reason} ->
+          Samen.Observability.Failure.report(:approval_subject_refs, org_id, reason)
+          {:error, :unavailable}
       end
     end
   end
@@ -308,7 +368,8 @@ defmodule Samen.Approvals do
       requested_by: to_actor_id(fetch(attrs, :requested_by)),
       reason: fetch(attrs, :reason),
       deadline_at: fetch(attrs, :deadline_at),
-      requested_at: now
+      # a caller re-opening an approval for something filed earlier (the reveal queue's recovery) keeps that time
+      requested_at: fetch(attrs, :requested_at) || now
     }
 
     result =
@@ -335,6 +396,7 @@ defmodule Samen.Approvals do
         case existing_pending(res, attrs, opts) do
           {:ok, approval} -> {:ok, approval}
           :none -> {:error, :request_failed}
+          {:error, :unavailable} = unavailable -> unavailable
         end
     end
   end
@@ -363,8 +425,15 @@ defmodule Samen.Approvals do
     # authz-scope: org-pinned one clause down via org_filter/2 (binary org => org_id == ^org_id;
     # nil => is_nil(org_id), the deliberate GLOBAL lane) — a cross-clause pin the static check cannot see
     case Ash.read(query, authorize?: false) do
-      {:ok, [approval]} -> {:ok, approval}
-      _ -> :none
+      {:ok, [approval]} ->
+        {:ok, approval}
+
+      {:ok, []} ->
+        :none
+
+      {:error, reason} ->
+        Samen.Observability.Failure.report(:approval_existing_pending, org_id, reason)
+        {:error, :unavailable}
     end
   end
 
@@ -373,10 +442,25 @@ defmodule Samen.Approvals do
 
   defp fetch_approval(res, approval_id, _opts) do
     case Ash.get(res, approval_id, authorize?: false) do
-      {:ok, approval} -> {:ok, approval}
-      {:error, _} -> {:error, :not_found}
+      {:ok, approval} ->
+        {:ok, approval}
+
+      {:error, reason} ->
+        # Only "there is no such row" (or an id that cannot name one) is :not_found. A read that FAILED is
+        # :unavailable and reported: a caller must not read an outage as "that approval does not exist".
+        if not_found?(reason) do
+          {:error, :not_found}
+        else
+          Samen.Observability.Failure.report(:approval_fetch, nil, reason)
+          {:error, :unavailable}
+        end
     end
   end
+
+  defp not_found?(%{errors: [_ | _] = errors}),
+    do: Enum.all?(errors, &match?(%mod{} when mod in [Ash.Error.Query.NotFound, Ash.Error.Invalid.InvalidPrimaryKey], &1))
+
+  defp not_found?(_), do: false
 
   # ==========================================================================
   # Audit — governance chain, token/id-only detail (§4.3). `reason` NEVER enters detail.
@@ -392,7 +476,7 @@ defmodule Samen.Approvals do
         :ok
 
       {:error, reason} ->
-        Samen.Observability.Failure.report(:approval_audit, approval.org_id, reason)
+        Samen.Observability.Failure.report_write(:approval_audit, approval.org_id, reason)
         repo.rollback({:audit_failed, reason})
     end
   end
@@ -420,24 +504,35 @@ defmodule Samen.Approvals do
     Samen.PiiReasonScan.check(reason, "approval reason")
   end
 
-  @spec wiring(keyword()) :: {:ok, wiring()} | {:error, :no_approvals_module}
+  @spec wiring(keyword()) :: {:ok, wiring()} | {:error, :no_approvals_module | :approvals_unavailable}
   defp wiring(opts) do
     res = opt(opts, :approval_resource)
-    repo = opt(opts, :repo) || res_repo(res)
 
-    cond do
-      is_nil(res) -> {:error, :no_approvals_module}
-      is_nil(repo) -> {:error, :no_approvals_module}
-      true -> {:ok, {res, repo}}
+    with false <- is_nil(res),
+         {:ok, repo} <- repo_for(res, opts) do
+      if is_nil(repo), do: {:error, :no_approvals_module}, else: {:ok, {res, repo}}
+    else
+      true -> {:error, :no_approvals_module}
+      {:error, _} = error -> error
     end
   end
 
-  defp res_repo(nil), do: nil
+  defp repo_for(res, opts) do
+    case opt(opts, :repo) do
+      nil -> res_repo(res)
+      repo -> {:ok, repo}
+    end
+  end
 
+  # A configured approval resource whose repo cannot be resolved is a MISWIRED engine, not an unwired host: reading it
+  # as `:no_approvals_module` would let `Reveal.Grants.approve/2` fall back to its engine-less path (and
+  # `pending_for_org_result/2` answer an honest empty), so it is its own reported, fail-closed error.
   defp res_repo(res) do
-    AshPostgres.DataLayer.Info.repo(res)
+    {:ok, AshPostgres.DataLayer.Info.repo(res)}
   rescue
-    _ -> nil
+    e ->
+      Samen.Observability.Failure.report(:approval_res_repo, nil, e)
+      {:error, :approvals_unavailable}
   end
 
   defp event_for(:approve), do: "approval_approved"

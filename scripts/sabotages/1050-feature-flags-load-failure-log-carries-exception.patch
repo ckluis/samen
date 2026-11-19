@@ -1,0 +1,20 @@
+# SABOTAGE: a failed flag load also logs the whole exception, whose message holds the value it was 
+#   processing
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_e_test.exs
+# MUST_FAIL: RED: a loader that RAISES -> OFF
+diff --git a/samen_core/lib/samen/feature_flags/cache.ex b/samen_core/lib/samen/feature_flags/cache.ex
+index f22e3b55..49207dbe 100644
+--- a/samen_core/lib/samen/feature_flags/cache.ex
++++ b/samen_core/lib/samen/feature_flags/cache.ex
+@@ -177,7 +177,7 @@ defmodule Samen.FeatureFlags.Cache do
+         # RP-F4: a load error is fail-SAFE — do NOT cache, do NOT guess ON. An unconfigured flag module / owner is a
+         # documented state (OFF); every other error is a FAILED read and is reported, by name (value-free).
+         if reason not in [:no_flag_module, :no_flag_owner],
+-          do: Samen.Observability.Failure.report(:feature_flag_load, nil, reason)
++          do: (Samen.Observability.Failure.report(:feature_flag_load, nil, reason); :logger.error(inspect(reason)))
+ 
+         err
+     end

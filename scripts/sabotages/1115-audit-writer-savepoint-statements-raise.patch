@@ -1,0 +1,34 @@
+# SABOTAGE: the savepoint statements are bang queries again, so an aborted caller transaction raises 25P02 
+#   instead of answering an error tuple
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/audit_chain_writer_test.exs
+# MUST_FAIL: a caller whose transaction is already aborted gets {:error, :audit_chain_unavailable} and a report
+diff --git a/samen_core/lib/samen/audit_chain/writer.ex b/samen_core/lib/samen/audit_chain/writer.ex
+index 3318643e..bd01ffcd 100644
+--- a/samen_core/lib/samen/audit_chain/writer.ex
++++ b/samen_core/lib/samen/audit_chain/writer.ex
+@@ -132,19 +132,9 @@ defmodule Samen.AuditChain.Writer do
+       :erlang.raise(kind, reason, stacktrace)
+   end
+ 
+-  defp savepoint(repo, statement, sp, org_id) do
+-    case repo.query(statement <> sp) do
+-      {:ok, _} ->
+-        :ok
+-
+-      {:error, reason} ->
+-        Samen.Observability.Failure.report_write(:audit_chain_savepoint, org_id, reason)
+-        {:error, :audit_chain_unavailable}
+-    end
+-  rescue
+-    e ->
+-      Samen.Observability.Failure.report_write(:audit_chain_savepoint, org_id, e)
+-      {:error, :audit_chain_unavailable}
++  defp savepoint(repo, statement, sp, _org_id) do
++    repo.query!(statement <> sp)
++    :ok
+   end
+ 
+   # F4.3: the audit `detail` is a NON-shreddable plaintext channel (ADR-002 §2.5) — it is

@@ -1,0 +1,20 @@
+# SABOTAGE: SourceScan.dirs treats a whole-segment * as the directory itself, so a scan over spikes/*/lib 
+#   silently scans nothing
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/source_scan_test.exs
+# MUST_FAIL: dirs/2 names what Path.wildcard did
+diff --git a/samen_core/lib/samen/source_scan.ex b/samen_core/lib/samen/source_scan.ex
+index e4211701..4e33e254 100644
+--- a/samen_core/lib/samen/source_scan.ex
++++ b/samen_core/lib/samen/source_scan.ex
+@@ -26,7 +26,7 @@ defmodule Samen.SourceScan do
+     rel
+     |> Path.split()
+     |> Enum.reduce([root], fn
+-      "*", acc -> Enum.flat_map(acc, &subdirs/1)
++      "*", acc -> acc
+       segment, acc -> Enum.map(acc, &Path.join(&1, segment))
+     end)
+     |> Enum.filter(&dir?/1)

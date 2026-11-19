@@ -1,0 +1,19 @@
+# SABOTAGE: the gen probe guard never exports its private HEX_HOME, so concurrent probes share one Hex 
+#   registry cache and race on cache.ets
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: GENHEX each gen probe gets its own HEX_HOME so concurrent mix deps.get cannot race on cache.ets
+diff --git a/scripts/gen_probe_guard.sh b/scripts/gen_probe_guard.sh
+index 3e269ed0..236c8ad3 100755
+--- a/scripts/gen_probe_guard.sh
++++ b/scripts/gen_probe_guard.sh
+@@ -178,7 +178,6 @@ run_gen_probe() {
+   echo "==> Running $label"
+   local code=0
+   # HEX_HOME is exported to the probe (and its generated app's `mix deps.get`) only when a private one was made
+-  if [[ -n "$GEN_PROBE_HEX_HOME" ]]; then local -x HEX_HOME="$GEN_PROBE_HEX_HOME"; fi
+   if [[ -n "$GEN_PROBE_PRIVATE" ]]; then
+     (cd "$REPO_ROOT/samen_core" && SAMEN_ABBREV_REGISTRY="$GEN_PROBE_PRIVATE" mix run "$probe_rel") || code=$?
+   else

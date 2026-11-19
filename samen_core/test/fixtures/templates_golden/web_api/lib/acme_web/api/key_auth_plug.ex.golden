@@ -33,6 +33,9 @@ defmodule AcmeWeb.Api.KeyAuthPlug do
 
   Fail closed: a missing/malformed/unknown/revoked key sets NO actor. Downstream, an
   actor-less request hits the org-scope policy's nil-org branch and sees zero rows.
+
+  A key lookup that FAILS (not "no such key": the read errored) is `503` with `Retry-After`, reported once, and the
+  request is halted (`Samen.Web.Api.KeyCheckUnavailable`): a good key is never reported as bad during an outage.
   """
   import Plug.Conn
   require Ash.Query
@@ -59,6 +62,8 @@ defmodule AcmeWeb.Api.KeyAuthPlug do
       # plane without re-resolving the key.
       |> put_private(:samen_api_actor, actor)
     else
+      # The key could not be CHECKED (a lookup failed): 503 + Retry-After, halted — never served, never "bad key".
+      :unavailable -> Samen.Web.Api.KeyCheckUnavailable.send(conn)
       # Fail closed: no valid key → no actor. The org-scope policy denies (nil org).
       _ -> conn
     end
@@ -86,7 +91,10 @@ defmodule AcmeWeb.Api.KeyAuthPlug do
     |> case do
       {:ok, nil} -> :error
       {:ok, key_row} -> {:ok, key_row}
-      {:error, _} -> :error
+      # A lookup that FAILED is an outage, not "an invalid key": report once (value-free) and answer 503.
+      {:error, error} ->
+        Samen.Web.Reads.Guard.report(:api_key_lookup, nil, error)
+        :unavailable
     end
   end
 
@@ -120,6 +128,10 @@ defmodule AcmeWeb.Api.KeyAuthPlug do
         }
 
         {:ok, actor}
+
+      {:error, error} ->
+        Samen.Web.Reads.Guard.report(:api_key_membership_load, nil, error)
+        :unavailable
 
       _ ->
         :error

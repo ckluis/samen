@@ -204,7 +204,7 @@ defmodule Samen.Identity.Reset do
           fun.(digests)
         rescue
           e ->
-            Samen.Observability.Failure.report(:reset_notify_sessions_revoked, nil, e)
+            Samen.Observability.Failure.report_write(:reset_notify_sessions_revoked, nil, e)
             :ok
         end
 

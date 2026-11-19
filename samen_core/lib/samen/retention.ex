@@ -196,6 +196,9 @@ defmodule Samen.Retention do
         %{resource: spec.resource, action: spec.action, swept: swept, archived: archived}
       end)
 
+    # A resume marker that has not cleared is a stuck erasure (and a re-linkage): surface it on every sweep.
+    _ = Samen.Erasure.report_stuck(Keyword.take(opts, [:repo, :now]))
+
     total = Enum.reduce(by_spec, 0, &(&1.swept + &2))
     archived_total = Enum.reduce(by_spec, 0, &(&1.archived + &2))
 
@@ -285,7 +288,18 @@ defmodule Samen.Retention do
 
       case Samen.Erasure.shred(subject_id, shred_opts) do
         {:ok, _} -> acc + 1
-        {:error, _} -> acc
+        # An operator action, not a transient: log it loudly each sweep; the sweep never retries it in a loop and
+        # never counts it (the operator report is already written, once).
+        {:error, {tag, _}} when tag in [:shred_reference_lost, :shred_reference_lost_unreported] ->
+          Logger.error(
+            "[Samen.Retention] shred of #{subject_id} needs OPERATOR ACTION: the key is destroyed but no " <>
+              "reference was recorded (Samen.Erasure :shred_reference_lost); not retried automatically."
+          )
+
+          acc
+
+        {:error, _} ->
+          acc
       end
     end)
   rescue

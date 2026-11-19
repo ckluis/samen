@@ -18,7 +18,7 @@ defmodule SamenCore.AudRoleDerivationTest do
 
   @migrations_dir Path.join(__DIR__, "../priv/test_repo/migrations")
 
-  defp source(file), do: File.read!(Path.join(@migrations_dir, file))
+  defp source(file), do: Samen.SourceScan.read!(Path.join(@migrations_dir, file))
 
   # Written out per file (not a `for` over file names) so each test's name is a literal the
   # sabotage harness can locate (MUST_FAIL headers are matched against the test source).
@@ -55,20 +55,24 @@ defmodule SamenCore.AudRoleDerivationTest do
     root = Path.expand("../..", __DIR__)
     role_literal = ~r/["']clank["']|\b(FROM|TO)\s+clank\b/
 
-    offenders =
-      Path.wildcard(Path.join(root, "*/priv/**/migrations/*.exs")) ++
-        Path.wildcard(Path.join(root, "spikes/*/priv/**/migrations/*.exs"))
+    # `Samen.SourceScan`, never `Path.wildcard`/`File.read!`: ~390 migrations, one file-server call each — 16x slower
+    # with 40 other processes doing file I/O, and past ExUnit's 60 s on a loaded machine.
+    migrations = fn ->
+      for prefix <- ["*/priv", "spikes/*/priv"],
+          priv <- Samen.SourceScan.dirs(root, prefix),
+          file <- Samen.SourceScan.files(priv, [".exs"]),
+          Path.basename(Path.dirname(file)) == "migrations",
+          do: file
+    end
 
     offenders =
-      offenders
+      migrations.()
       |> Enum.uniq()
-      |> Enum.filter(&(File.read!(&1) =~ role_literal))
+      |> Enum.filter(&(Samen.SourceScan.read!(&1) =~ role_literal))
       |> Enum.map(&Path.relative_to(&1, root))
 
     # Positive control: the scan actually sees the migrations it guards.
-    assert Path.join(root, "samen_web/priv/repo/migrations/20260705020000_aud_event.exs") in Path.wildcard(
-             Path.join(root, "*/priv/**/migrations/*.exs")
-           )
+    assert Path.join(root, "samen_web/priv/repo/migrations/20260705020000_aud_event.exs") in migrations.()
 
     assert offenders == [],
            "migrations hardcoding the laptop role (derive it via Samen.OperatorPlane.Migration.app_role!/2): " <>

@@ -12,8 +12,11 @@ defmodule Samen.Type.VaultField do
 
     * **Input face** (`cast_input/2`): accepts *anything* the caller sets —
       a composite plaintext struct (`%Samen.Type.FullName{}`), a scalar plaintext
-      (`~D[1990-01-01]`, `"MRN-1"`), a `%Masked{}` (re-set of an already-masked
-      value), or a raw `"vt_*"` token. Casting does NOT encrypt: encryption is a
+      (`~D[1990-01-01]`, `"MRN-1"`), or a `%Masked{}` (re-set of an already-masked
+      value). A raw string is ALWAYS plaintext, even one that starts with `"vt_"`: no
+      external decoder (form params, CSV, JSON, automation attrs, inbound mail) can
+      produce a `%Masked{}`, so input can never NAME a token; `Samen.Vault.Change`
+      binds any `%Masked{}` to the record's subject and field. Casting does NOT encrypt: encryption is a
       side-effecting operation that needs the subject key, so it happens in
       `Samen.Vault.Change` (a changeset change), never in a pure type callback.
       A plaintext value is held as `%Samen.Pii.Plaintext{}` until then, whose
@@ -25,8 +28,9 @@ defmodule Samen.Type.VaultField do
       per-resource read hook. Plaintext is available ONLY via
       `Samen.Vault.reveal/3` (the single decrypt chokepoint).
 
-    * **Dump face** (`dump_to_native/2`): only a `%Masked{}` or a bare `vt_*` token
-      may be written to the column — both dump to the token string. A raw plaintext
+    * **Dump face** (`dump_to_native/2`): only a `%Masked{}` or a bare string that is
+      TOKEN-SHAPED (`Samen.Vault.token?/1`) may be written to the column — both dump to
+      the token string; anything else (including `"vt_ please help"`) is refused. A raw plaintext
       value reaching `dump_to_native` is a BUG (it means `Samen.Vault.Change` did
       not run / did not replace the value), so it FAILS CLOSED with `:error`
       rather than writing plaintext to the domain table. This is the last-line
@@ -46,8 +50,8 @@ defmodule Samen.Type.VaultField do
 
   # ---------------------------------------------------------------------------
   # Input: accept anything; encryption happens in Samen.Vault.Change, not here.
-  # Already-vaulted values (a %Masked{} round-trip, a raw vt_* token) pass through; a
-  # PLAINTEXT value is wrapped in %Samen.Pii.Plaintext{} so `inspect(changeset)` — a log
+  # Only a %Masked{} (the internal "already vaulted" marker) passes through; EVERY other
+  # value, a "vt_"-prefixed string included, is PLAINTEXT: it is wrapped in %Samen.Pii.Plaintext{} so `inspect(changeset)` — a log
   # line, a crash report, a FunctionClauseError blame — prints `**redacted**`, never the
   # value, in the window before the vault write (ADR-052 §2.1 item 3; Ash redacts a
   # sensitive changeset ARGUMENT but not a sensitive ATTRIBUTE).
@@ -55,7 +59,6 @@ defmodule Samen.Type.VaultField do
   @impl true
   def cast_input(nil, _constraints), do: {:ok, nil}
   def cast_input(%Masked{} = masked, _constraints), do: {:ok, masked}
-  def cast_input("vt_" <> _ = token, _constraints), do: {:ok, token}
   def cast_input(value, _constraints), do: {:ok, Samen.Pii.Plaintext.wrap(value)}
 
   # ---------------------------------------------------------------------------
@@ -80,15 +83,18 @@ defmodule Samen.Type.VaultField do
   @impl true
   def dump_to_native(nil, _constraints), do: {:ok, nil}
 
-  def dump_to_native(%Masked{token: token}, _constraints) when is_binary(token) do
-    {:ok, token}
-  end
+  def dump_to_native(%Masked{token: token}, constraints), do: dump_token(token, constraints)
 
-  def dump_to_native("vt_" <> _ = token, _constraints) do
-    {:ok, token}
-  end
+  def dump_to_native(token, constraints) when is_binary(token), do: dump_token(token, constraints)
 
   # A raw plaintext value reaching dump means Samen.Vault.Change did not replace
   # it with a token. Refuse — the domain column must never hold plaintext.
   def dump_to_native(_plaintext, _constraints), do: :error
+
+  # The column holds only tokens `Samen.Vault.generate_token/0` could have minted. A
+  # "vt_"-prefixed plaintext is NOT one: it would sit unencrypted in a column the oracle and
+  # the CDC mirror treat as token-only.
+  defp dump_token(token, _constraints) do
+    if Samen.Vault.token?(token), do: {:ok, token}, else: :error
+  end
 end

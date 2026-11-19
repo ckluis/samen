@@ -94,6 +94,7 @@ defmodule Samen.RevealTest do
       result =
         Reveal.reveal(:some_actor, @masked, :reveal_email, @resource,
           repo: SamenCore.TestRepo,
+          subject_id: "subj-1",
           grant: Samen.Reveal.DenyAll,
           vault: ExplodingVault
         )
@@ -106,6 +107,7 @@ defmodule Samen.RevealTest do
       assert {:error, :denied} =
                Reveal.reveal(:actor, @masked, :reveal_email, @resource,
                  repo: SamenCore.TestRepo,
+                 subject_id: "subj-1",
                  grant: Samen.Reveal.DenyAll,
                  vault: ExplodingVault
                )
@@ -145,6 +147,7 @@ defmodule Samen.RevealTest do
       assert {:ok, "plaintext@revealed.test"} =
                Reveal.reveal(:actor, @masked, :reveal_email, @resource,
                  repo: SamenCore.TestRepo,
+                 subject_id: "subj-1",
                  grant: ApproveAll,
                  vault: OkVault
                )
