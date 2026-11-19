@@ -3664,10 +3664,13 @@ defmodule Samen.AI.Agent do
   end
 
   # A reveal that FAILED ends the operation as `:transcript_unavailable`, and the operator can tell an outage from an
-  # erasure: a subject whose key is genuinely gone (`:shredded`, `:absent` = the KMS adapters' answer for a missing
-  # key, `:not_found` = no vault row; the same set `Samen.Vault`'s erasure verifier treats as clean) is the expected end
-  # of an erased run and stays quiet; anything else (a KMS outage, a decrypt failure) is reported by name, value-free.
-  @transcript_gone_reasons [:shredded, :absent, :not_found]
+  # erasure: a subject whose key was SANCTIONEDLY erased (`:shredded`: every shipped KMS adapter leaves a positive
+  # tombstone, `Samen.Kms` requires one; `:not_found` = no vault row) is the expected end of an erased run and stays
+  # quiet. `:absent` is NOT in that set: it only says the key store has no entry for the subject (a wrong or wiped
+  # `:kms_key_dir`, an unmounted volume, an in-memory store after a restart), which is a disaster to report, not an
+  # erasure. Anything else (a KMS outage, a decrypt failure) is reported by name, value-free; the run's outcome is the
+  # same clean `:transcript_unavailable` failure either way.
+  @transcript_gone_reasons [:shredded, :not_found]
 
   defp reveal_failed(%Run{} = run, reason) do
     if reason not in @transcript_gone_reasons,

@@ -701,10 +701,11 @@ defmodule Samen.AI.AgentTranscriptWriteTest do
       refute log =~ "agent_transcript_reveal"
     end
 
-    test "a key the KMS reports :absent is gone too: :transcript_unavailable, quiet" do
+    test "a key the KMS reports :absent is NOT gone: the run fails cleanly and the disaster is reported by name" do
       scope = new_scope()
 
-      # the adapters answer {:error, :absent} for a subject with no wrapped key (in_memory.ex / file_backed.ex)
+      # the adapters answer {:error, :absent} for a subject with no wrapped key (in_memory.ex / file_backed.ex): a wrong
+      # or wiped key directory, or an in-memory store after a restart. A sanctioned shred answers :shredded instead.
       vanish = fn ->
         F3FlakyKms.fail_next!(current_run(scope).id, 1, :absent)
         {:continue, "turn two"}
@@ -713,9 +714,15 @@ defmodule Samen.AI.AgentTranscriptWriteTest do
       script([vanish, {:final, "done"}])
       {result, log} = with_log(fn -> run_scripted(Plain, scope, "goal #{@goal_marker}") end)
 
+      # the same clean failure as an outage ...
       assert {:error, :transcript_unavailable, run} = result
       assert run.state == :failed and run.error_kind == "transcript_unavailable"
-      refute log =~ "agent_transcript_reveal"
+      refute F3FlakyKms.armed?(), "the planned :absent never fired"
+      assert [_final] = Scripted.remaining(), "no provider call was made for the refused turn"
+
+      # ... but not a quiet one
+      assert log =~ "read failed read=agent_transcript_reveal"
+      assert log =~ "absent"
     end
 
     test "control: a KMS outage (:unavailable) is NOT gone: it is reported by name" do
