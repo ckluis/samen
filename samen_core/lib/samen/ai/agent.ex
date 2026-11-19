@@ -978,7 +978,7 @@ defmodule Samen.AI.Agent do
         end)
 
       with {:error, reason} <- result,
-           do: raise("run #{run.id}: a failed park's approval could not be cancelled: #{inspect(reason)}")
+           do: raise("run #{run.id}: a failed park's approval could not be cancelled: #{reclaim_reason_kind(reason)}")
     end
 
     :ok
@@ -989,6 +989,12 @@ defmodule Samen.AI.Agent do
   end
 
   defp reclaim_failed_park!(_run), do: :ok
+
+  # The raise above lands in `oban_jobs.errors`, so it carries a BOUNDED kind: an atom reason (`:unavailable`, a handler's
+  # kind) by name, a struct (an Ash changeset/error, whose database message may carry row data) by module name only.
+  defp reclaim_reason_kind(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp reclaim_reason_kind(%module{}), do: inspect(module)
+  defp reclaim_reason_kind(_other), do: "unknown"
 
   # The worker's opts: the host-configured agent provider override (tests point this at
   # Samen.AI.Provider.Scripted — the cross-process script seam), else Samen.AI's own

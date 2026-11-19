@@ -837,6 +837,47 @@ defmodule Samen.AI.AgentTranscriptWriteTest do
     end
   end
 
+  describe "the reclaim's failure message is a bounded kind, never the engine's reason" do
+    # Oban stores the exception message in `oban_jobs.errors`. The reason of a failed cancel is an Ash error whose
+    # database message can carry row data (a trigger/CHECK detail), so the raise names a kind only.
+    @leak "LEAKMARK-7c1e9f"
+
+    defp install_cancel_trigger! do
+      Ecto.Adapters.SQL.query!(SamenCore.TestRepo, """
+      CREATE FUNCTION f3_leak_cancel() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        RAISE EXCEPTION '#{@leak} row detail';
+        RETURN NEW;
+      END $$
+      """)
+
+      Ecto.Adapters.SQL.query!(
+        SamenCore.TestRepo,
+        "CREATE TRIGGER f3_leak_cancel BEFORE UPDATE ON apv_approval FOR EACH ROW EXECUTE FUNCTION f3_leak_cancel()"
+      )
+    end
+
+    test "RED: a cancel that fails with row data in its database error raises a message without it" do
+      worker_provider!()
+      scope = new_scope()
+      {run, approval} = strand!(scope)
+      script([{:final, "never reached"}])
+      install_cancel_trigger!()
+
+      # positive control: the injected error really carries the marker
+      assert {:error, direct} = Approvals.cancel(approval.id, Samen.AI.Agent.WriteProposal.requester_principal_id())
+      assert inspect(direct) =~ @leak
+
+      {error, _log} =
+        with_log(fn ->
+          assert_raise RuntimeError, ~r/approval could not be cancelled/, fn -> Agent.execute_batch(run) end
+        end)
+
+      refute error.message =~ @leak
+      assert error.message =~ "Ash.Changeset"
+    end
+  end
+
   describe "a halt never depends on the approvals engine (fail-closed, not fail-open)" do
     # Review 4: the end-of-run withdrawal made a halt scan the org's approvals; an unreadable approvals store then made
     # the halt RAISE and be lost. A halt or a kill on a turn with no prior proposal must land regardless.
