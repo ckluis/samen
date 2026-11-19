@@ -2039,15 +2039,23 @@ defmodule Samen.AI.Agent do
   # state with the bounded kind `:hook_halted` and the bounded reason on the turn row —
   # never `{:ok, answer}`, never a partial answer promoted out of the transcript.
   defp halt_run(%Run{} = run, turn_row, kind, reason) do
-    if turn_row do
-      finalize_turn!(turn_row, %{
-        status: :failed,
-        error_kind: to_string(safe_error_kind(kind)),
-        meta: bounded_meta(Map.put(turn_row.meta || %{}, "hook_reason", reason))
-      })
-    end
+    {:ok, run} =
+      repo!().transaction(fn ->
+        # a reused turn row can still be `:proposed` behind a pending approval: withdraw BEFORE it is finalized
+        # (the withdrawal finds the approval through the `:proposed` row)
+        withdraw_approvals!(run)
 
-    run = terminal!(run, :fail, kind)
+        if turn_row do
+          finalize_turn!(turn_row, %{
+            status: :failed,
+            error_kind: to_string(safe_error_kind(kind)),
+            meta: bounded_meta(Map.put(turn_row.meta || %{}, "hook_reason", reason))
+          })
+        end
+
+        terminal!(run, :fail, kind)
+      end)
+
     log_terminal(run)
     {:error, safe_error_kind(kind), run}
   end
@@ -3940,10 +3948,51 @@ defmodule Samen.AI.Agent do
 
   # :fail and :cancel transition from :queued OR :running; :exhaust is loop-only (the
   # loop always runs post-begin!, so an exhaust on a :queued row cannot arise).
+  #
+  # A run that ends terminal can own a write proposal: the approval is opened (and the turn row stamped
+  # `:proposed`) in transactions of their own BEFORE `park_run!/6` writes the transcript, so a park that fails (its
+  # store unwraps the run's KMS key) leaves the run `:running` with a pending approval. If that run is then ended
+  # (the retry's top-of-turn reveal fails, a kill, a hook halt, a budget), the approval would stay decidable on a
+  # dead run and nothing would ever expire it. So EVERY terminal withdraws the approval the run owns and finalizes
+  # its `:proposed` turn row, in the SAME transaction as the terminal write; a withdrawal that fails rolls the
+  # terminal back (the run stays resumable) instead of stranding the approval.
   defp terminal!(%Run{} = run, action, kind) do
+    {:ok, ended} =
+      repo!().transaction(fn ->
+        withdraw_proposal!(run, kind)
+
+        run
+        |> Ash.Changeset.for_update(action, %{error_kind: to_string(safe_error_kind(kind))})
+        |> Ash.update!(authorize?: false)
+      end)
+
+    ended
+  end
+
+  defp withdraw_approvals!(%Run{} = run) do
+    # `list_pending/3` reads a nil org as the GLOBAL lane, so the run must carry its org
+    run = if is_binary(run.org_id), do: run, else: reload!(run)
+
+    if withdrawal_failed?(withdraw_by_turn(run)),
+      do: raise("run #{run.id} not ended: its pending approval could not be withdrawn")
+
     run
-    |> Ash.Changeset.for_update(action, %{error_kind: to_string(safe_error_kind(kind))})
-    |> Ash.update!(authorize?: false)
+  end
+
+  defp withdraw_proposal!(%Run{} = run, kind) do
+    run = withdraw_approvals!(run)
+
+    case pending_turn(run) do
+      {:ok, turn_row} ->
+        finalize_turn!(turn_row, %{
+          status: :failed,
+          error_kind: to_string(safe_error_kind(kind)),
+          meta: bounded_meta(Map.put(turn_row.meta || %{}, "withdrawn", true))
+        })
+
+      _ ->
+        :ok
+    end
   end
 
   defp terminal_logged!(%Run{} = run, kind) do

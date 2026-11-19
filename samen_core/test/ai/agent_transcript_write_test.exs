@@ -27,6 +27,7 @@ defmodule F3FlakyKms do
 
   @plan {__MODULE__, :plan}
   @real {__MODULE__, :real}
+  @store_plan {__MODULE__, :store_plan}
   @table :f3_flaky_kms_counts
 
   def install! do
@@ -43,13 +44,25 @@ defmodule F3FlakyKms do
   def fail_next!(subject, k, reason \\ :unavailable) when k >= 1,
     do: :persistent_term.put(@plan, {subject, unwraps(subject) + k, reason})
 
-  @doc "Whether a planned failure is still waiting (it was never reached)."
-  def armed?, do: :persistent_term.get(@plan, nil) != nil
+  @doc """
+  Fail the `k`th STORE-side unwrap (`Samen.Vault.store_field(s)`, reached by every `transcript:` write) of `subject`
+  counted from NOW, exactly once, with `reason`. Stores and reveals are counted and planned apart.
+  """
+  def fail_store!(subject, k, reason \\ :unavailable) when k >= 1,
+    do: :persistent_term.put(@store_plan, {subject, stores(subject) + k, reason})
 
-  def disarm!, do: :persistent_term.erase(@plan)
+  @doc "Whether a planned failure (reveal or store) is still waiting (it was never reached)."
+  def armed?, do: :persistent_term.get(@plan, nil) != nil or :persistent_term.get(@store_plan, nil) != nil
 
-  def unwraps(subject) do
-    case :ets.lookup(@table, subject) do
+  def disarm!, do: [@plan, @store_plan] |> Enum.each(&:persistent_term.erase/1)
+
+  @doc "How many STORE-side unwraps of `subject` have been seen."
+  def stores(subject), do: count({:store, subject})
+
+  def unwraps(subject), do: count(subject)
+
+  defp count(key) do
+    case :ets.lookup(@table, key) do
       [{_, n}] -> n
       [] -> 0
     end
@@ -64,17 +77,28 @@ defmodule F3FlakyKms do
     if :ets.whereis(@table) != :undefined, do: :ets.delete(@table)
     :persistent_term.erase(@real)
     :persistent_term.erase(@plan)
+    :persistent_term.erase(@store_plan)
     :ok
   end
 
   defp real, do: :persistent_term.get(@real)
 
-  # Only REVEALS are counted and failed: `Samen.Vault.store_field(s)` also unwraps the subject's key (to encrypt), and
-  # a write that fails is a different failure from the read this suite is about. The caller is told apart by its stack.
+  # REVEALS and STORES are counted and planned separately: `Samen.Vault.store_field(s)` also unwraps the subject's key
+  # (to encrypt). The caller is told apart by its stack (the adapter is handed only the subject); the stores are counted
+  # so that a refactor which hides the store frame shows up as a store count of zero where a test expects some.
   @impl true
   def unwrap(subject) do
     if store?() do
-      real().unwrap(subject)
+      n = :ets.update_counter(@table, {:store, subject}, 1, {{:store, subject}, 0})
+
+      case :persistent_term.get(@store_plan, nil) do
+        {^subject, ^n, reason} ->
+          :persistent_term.erase(@store_plan)
+          {:error, reason}
+
+        _ ->
+          real().unwrap(subject)
+      end
     else
       n = :ets.update_counter(@table, subject, 1, {subject, 0})
 
@@ -533,6 +557,85 @@ defmodule Samen.AI.AgentTranscriptWriteTest do
       blob = Jason.decode!(json)
       assert blob["ui_view"] == before_blob["ui_view"] ++ ["tool_expired: assign_record_owner"]
       refute Map.has_key?(blob, "pending"), "an expired proposal is never re-bindable"
+    end
+  end
+
+  describe "a failed transcript STORE never strands a pending approval on a failed run" do
+    # Mechanism (read, then proved by the first test): `WriteProposal.open/1` and `stamp_proposal!/4` commit BEFORE
+    # `park_run!/6`, each in its own transaction, so a store that fails inside `park_run!` (its `Vault.Change` unwraps the
+    # run's KMS key) rolls back only the park. The approval stays `pending`, the turn row `:proposed`, the run `:running`.
+    defp assert_no_stranded_proposal!(scope, run, approval) do
+      assert pending_approvals(scope) == [], "a failed run left a pending approval"
+      assert Enum.filter(turns_of(run), &(&1.status == :proposed)) == [], "a failed run left a :proposed turn row"
+      assert {:ok, %{state: :cancelled}} = Approvals.get(approval.id)
+    end
+
+    # A proposing turn whose transcript STORE (the park) fails: the exception escapes, the run is left `:running`
+    # with the approval and the `:proposed` turn row already committed.
+    defp strand!(scope) do
+      target =
+        Target
+        |> Ash.Changeset.for_create(:create, %{org_id: scope.actor.org_id, title: "f3 target", priority: :high, email: "f3-store@leak.example"})
+        |> Ash.create!(authorize?: false)
+
+      propose = fn ->
+        F3FlakyKms.fail_store!(current_run(scope).id, 1)
+
+        {:tool_call, "assign_record_owner",
+         %{"resource" => "SamenCore.Support.AutomationFixture.Target", "id" => target.id, "user_id" => Ash.UUID.generate()},
+         %{input_tokens: 40, output_tokens: 10}}
+      end
+
+      script([propose, {:final, "assigned"}])
+
+      assert_raise Ash.Error.Invalid, fn -> run_scripted(Writer, scope, "who should own it?") end
+      refute F3FlakyKms.armed?(), "the planned store failure never fired"
+
+      [run] = runs_of(scope)
+      assert F3FlakyKms.stores(run.id) > 0
+      assert run.state == :running, "the failed park left the run running"
+      assert [approval] = pending_approvals(scope)
+      assert [%{status: :proposed}] = turns_of(run)
+      {run, approval}
+    end
+
+    test "control: a healthy proposing turn leaves exactly one pending approval on an :awaiting_approval run" do
+      {s, run, _target, approval} = propose!()
+      assert run.state == :awaiting_approval
+      assert [pending] = pending_approvals(s)
+      assert pending.id == approval.id
+      assert [%{status: :proposed}] = turns_of(run)
+      assert F3FlakyKms.stores(run.id) > 0, "the store counter sees the transcript writes"
+    end
+
+    test "RED: a failed park followed by a failed reveal at the retry leaves no pending approval on the failed run" do
+      scope = new_scope()
+      {run, approval} = strand!(scope)
+
+      F3FlakyKms.fail_next!(run.id, 1)
+      reads = F3FlakyKms.unwraps(run.id)
+      {result, log} = with_log(fn -> Agent.execute_batch(run) end)
+
+      assert {:error, :transcript_unavailable, failed} = result
+      assert F3FlakyKms.unwraps(run.id) - reads == 1
+      refute F3FlakyKms.armed?(), "the planned reveal failure never fired"
+      assert log =~ "read failed read=agent_transcript_reveal"
+
+      [row] = runs_of(scope)
+      assert failed.id == row.id and row.state == :failed and row.error_kind == "transcript_unavailable"
+      assert_no_stranded_proposal!(scope, row, approval)
+    end
+
+    test "RED: a failed park followed by the kill switch at the retry leaves no pending approval on the failed run" do
+      scope = new_scope()
+      {run, approval} = strand!(scope)
+
+      Samen.AI.Agent.Breaker.kill(:operator)
+      assert {:error, :killed, failed} = Agent.execute_batch(run)
+
+      [row] = runs_of(scope)
+      assert failed.id == row.id and row.state == :failed and row.error_kind == "killed"
+      assert_no_stranded_proposal!(scope, row, approval)
     end
   end
 
