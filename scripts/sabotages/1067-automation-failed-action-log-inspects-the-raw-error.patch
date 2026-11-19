@@ -1,0 +1,20 @@
+# SABOTAGE: the failed-action log line inspects Reactor's raw error, which carries the webhook secret and 
+#   the subject
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: RED: a failed action is logged by its bounded error_kind
+diff --git a/samen_core/lib/samen/automation/run_worker.ex b/samen_core/lib/samen/automation/run_worker.ex
+index 3729d326..5d084d97 100644
+--- a/samen_core/lib/samen/automation/run_worker.ex
++++ b/samen_core/lib/samen/automation/run_worker.ex
+@@ -309,7 +309,7 @@ defmodule Samen.Automation.RunWorker do
+         RunRecord.fail!(run_row, outcomes, error_kind)
+         # Bounded error_kind ONLY: the raw reason is Reactor's error, whose step arguments carry the whole Context
+         # (the webhook secret, the actor, the subject values), so it is never inspected into a log line.
+-        Logger.warning("[Automation.RunWorker] workflow #{wf.id} action(s) failed: error_kind=#{error_kind}")
++        Logger.warning("[Automation.RunWorker] workflow #{wf.id} action(s) failed: #{inspect(reason)}")
+         :ok
+     end
+   end

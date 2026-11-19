@@ -9,6 +9,8 @@ defmodule Samen.HonestKernelReadsFTest do
   import ExUnit.CaptureLog
 
   alias Samen.AI.Agent.Breaker
+  alias Samen.Automation.RunWorker
+  alias SamenCore.Support.AutomationFixture.Workflow
   alias SamenCore.TestRepo, as: Repo
 
   setup do
@@ -61,6 +63,86 @@ defmodule Samen.HonestKernelReadsFTest do
 
       assert log =~ "read=agent_cancel_load"
       refute log =~ "ai_agent_run"
+    end
+  end
+
+  describe "RunWorker unreadable workflow" do
+    setup do
+      prev = Application.get_env(:samen_core, Samen.Automation)
+      Application.put_env(:samen_core, Samen.Automation, workflow_module: Workflow, repo: Repo)
+
+      on_exit(fn ->
+        if prev, do: Application.put_env(:samen_core, Samen.Automation, prev), else: Application.delete_env(:samen_core, Samen.Automation)
+      end)
+
+      :ok
+    end
+
+    defp run_job(workflow_id) do
+      %Oban.Job{args: %{"workflow_id" => workflow_id, "org_id" => Ash.UUID.generate(), "event_id" => Ash.UUID.generate()}, attempt: 1, max_attempts: 3}
+    end
+
+    test "RED: an unreadable workflow errors the job for a retry (it finished :ok, silently dropped) and reports; a deleted one stays :ok" do
+      # POSITIVE CONTROL: the read works and the workflow genuinely does not exist
+      assert :ok = RunWorker.perform(run_job(Ash.UUID.generate()))
+
+      hide_table!("awf_workflow")
+
+      log = capture_log(fn -> assert {:error, :unavailable} = RunWorker.perform(run_job(Ash.UUID.generate())) end)
+
+      assert log =~ "read=run_worker_load_workflow"
+      refute log =~ "awf_workflow"
+    end
+  end
+
+  defp workflow!(org) do
+    Workflow
+    |> Ash.Changeset.for_create(:create, %{
+      org_id: org,
+      name: "wf-#{System.unique_integer([:positive])}",
+      status: :active,
+      trigger_kind: :resource_event,
+      resource_key: "SamenCore.Support.AutomationFixture.Subject",
+      event: :created,
+      conditions: [],
+      actions: [%{"kind" => "notify", "recipient" => "owner", "event_type" => "workflow.fired"}],
+      owner_id: Ash.UUID.generate()
+    })
+    |> Ash.create!(authorize?: false)
+  end
+
+  describe "automation Breaker.check!/2: an uncountable run log is reported, not silently 'under the limit'" do
+    test "RED: a run log that cannot be counted is reported by name, trips nothing and never raises; a readable count over the limit trips (control)" do
+      prev = Application.get_env(:samen_core, :automation_rate_limit)
+      Application.put_env(:samen_core, :automation_rate_limit, -1)
+      on_exit(fn -> if prev, do: Application.put_env(:samen_core, :automation_rate_limit, prev), else: Application.delete_env(:samen_core, :automation_rate_limit) end)
+
+      org = Ash.UUID.generate()
+
+      wf = workflow!(org)
+
+      opts = [run_module: SamenCore.Support.AutomationFixture.Run, repo: Repo]
+
+      hide_table!("sar_run")
+
+      log = capture_log(fn -> assert :ok = Samen.Automation.Breaker.check!(wf, opts) end)
+
+      assert log =~ "read=automation_breaker_count"
+      refute log =~ "sar_run"
+      assert Ash.get!(Workflow, wf.id, authorize?: false).disabled_by_operator_at == nil
+    end
+
+    test "control: the readable count over the limit trips the workflow's kill-switch" do
+      prev = Application.get_env(:samen_core, :automation_rate_limit)
+      Application.put_env(:samen_core, :automation_rate_limit, -1)
+      on_exit(fn -> if prev, do: Application.put_env(:samen_core, :automation_rate_limit, prev), else: Application.delete_env(:samen_core, :automation_rate_limit) end)
+
+      org = Ash.UUID.generate()
+
+      wf = workflow!(org)
+
+      assert :ok = Samen.Automation.Breaker.check!(wf, run_module: SamenCore.Support.AutomationFixture.Run, repo: Repo)
+      assert %DateTime{} = Ash.get!(Workflow, wf.id, authorize?: false).disabled_by_operator_at
     end
   end
 end

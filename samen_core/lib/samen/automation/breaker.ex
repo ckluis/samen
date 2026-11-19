@@ -15,12 +15,13 @@ defmodule Samen.Automation.Breaker do
   "Re-arming is an explicit operator (or, for rate trips, tenant-owner) action —
   never automatic." This module only ever TRIPS; nothing here re-arms.
 
-  ## Fail-safe
+  ## Fail-safe, and said
 
   A missing/unwired Run log (`run_module` not configured) makes the breaker
   INERT (`check!/2` is a no-op) rather than raising — exactly
-  `Samen.Automation.RunRecord`'s posture. Observability failing open on the
-  breaker's OWN counting never blocks or crashes a run.
+  `Samen.Automation.RunRecord`'s posture. The breaker runs AFTER the run finalized, so a count that
+  cannot be read has nothing left to refuse: it never blocks or crashes the run, but it is not
+  silent either — it is reported (`automation_breaker_count`) and the next run counts again.
   """
 
   require Logger
@@ -50,7 +51,7 @@ defmodule Samen.Automation.Breaker do
     end
   rescue
     e ->
-      Logger.debug("[Automation.Breaker] check! failed: #{Exception.message(e)}")
+      Samen.Observability.Failure.report(:automation_breaker_count, nil, e)
       :ok
   end
 

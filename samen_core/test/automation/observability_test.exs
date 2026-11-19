@@ -157,6 +157,33 @@ defmodule Samen.Automation.ObservabilityTest do
              jsonify(run.outcome)
   end
 
+  test "RED: a failed action is logged by its bounded error_kind, never by inspecting the raw error (which carries the webhook secret and the subject)" do
+    org = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+
+    Application.put_env(:samen_core, Samen.Delivery.Chokepoint, suppression_module: SuppressAll)
+
+    wf =
+      create_workflow!(org, owner,
+        conditions: [],
+        actions: [%{"kind" => "send_email", "to" => "owner", "template_key" => "welcome"}]
+      )
+
+    secret = Map.fetch!(wf, :webhook_secret)
+    assert is_binary(secret) and byte_size(secret) > 16
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        create_target!(org)
+        drain()
+      end)
+
+    assert log =~ "action(s) failed"
+    assert log =~ "error_kind=suppressed"
+    refute log =~ secret
+    refute log =~ "Reactor.Argument"
+  end
+
   test "row 3 — a non-matching condition -> Run row :skipped/:conditions_unmet, never :running" do
     org = Ash.UUID.generate()
     owner = Ash.UUID.generate()

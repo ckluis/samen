@@ -1,0 +1,21 @@
+# SABOTAGE: a run job whose workflow could not be read finishes :ok, the automation silently dropped
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_f_test.exs
+# MUST_FAIL: RED: an unreadable workflow errors the job for a retry
+diff --git a/samen_core/lib/samen/automation/run_worker.ex b/samen_core/lib/samen/automation/run_worker.ex
+index 3729d326..bc4d642e 100644
+--- a/samen_core/lib/samen/automation/run_worker.ex
++++ b/samen_core/lib/samen/automation/run_worker.ex
+@@ -103,8 +103,8 @@ defmodule Samen.Automation.RunWorker do
+       {:error, reason} ->
+         # A workflow row that could not be READ is not "nothing to run": the job errors (Oban backoff + retry;
+         # a job that exhausts its attempts is discarded, visibly) instead of finishing as if the automation ran.
+-        Samen.Observability.Failure.report(:run_worker_load_workflow, nil, reason)
+-        {:error, :unavailable}
++        _ = reason
++        :ok
+     end
+   end
+ 
