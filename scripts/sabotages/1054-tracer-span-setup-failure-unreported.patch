@@ -1,0 +1,19 @@
+# SABOTAGE: a tracing failure before the body is not reported
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_e_test.exs
+# MUST_FAIL: RED: tracing that fails BEFORE the body runs
+diff --git a/samen_core/lib/samen/tracer.ex b/samen_core/lib/samen/tracer.ex
+index bd6cd43d..273fd0a6 100644
+--- a/samen_core/lib/samen/tracer.ex
++++ b/samen_core/lib/samen/tracer.ex
+@@ -317,7 +317,7 @@ defmodule Samen.Tracer do
+ 
+           # the tracing plumbing failed before the body started: run the body untraced
+           nil ->
+-            Samen.Observability.Failure.report_write(:job_span_setup, nil, e)
++            _ = e
+             fun.()
+         end
+     after

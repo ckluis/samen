@@ -1,0 +1,19 @@
+# SABOTAGE: an unreadable pii_declared catalog reads as 'no declared keys' (the bag rides along clear)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_e_test.exs
+# MUST_FAIL: RED: the catalog read fails -> the WHOLE bag is masked
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+index 8d8dac9a..677138b0 100644
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -670,7 +670,7 @@ defmodule Samen.Api.PiiResolution do
+     # (value-free), once per resolve call, so a masked bag is never mistaken for a deliberate one.
+     e ->
+       Samen.Observability.Failure.report(:pii_resolution_declared_keys, actor, e)
+-      :error
++      %{}
+   end
+ 
+   defp resolve_bag_keys(record, :skip, _plane, _resource, _reveal_action, _actor, _opts), do: record

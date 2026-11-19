@@ -449,7 +449,7 @@ defmodule Samen.Automation.ObservabilityTest do
     end)
   end
 
-  test "RED: a subject that cannot be READ skips the run instead of reading as an empty subject " <>
+  test "RED: a malformed record id skips the run instead of reading as an empty subject " <>
          "(which every neq / not_in / is_nil gate passes); the readable subject fires (control)" do
     org = Ash.UUID.generate()
     owner = Ash.UUID.generate()
@@ -477,14 +477,14 @@ defmodule Samen.Automation.ObservabilityTest do
     end
 
     ExUnit.CaptureLog.capture_log(fn ->
-      assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: args.("not-a-uuid")})
+      assert :ok = Samen.Automation.RunWorker.perform(run_job(args.("not-a-uuid")))
     end)
 
     assert notified(org, owner) == 0
     assert [%{state: :skipped, error_kind: :internal_error}] = runs_for(org, wf.id)
 
     # POSITIVE CONTROL: the same workflow against the readable record fires
-    assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: args.(to_string(target.id))})
+    assert :ok = Samen.Automation.RunWorker.perform(run_job(args.(to_string(target.id))))
     assert notified(org, owner) == 1
   end
 
@@ -518,7 +518,7 @@ defmodule Samen.Automation.ObservabilityTest do
     # `Nope.Missing` does not resolve at all.
     for key <- ["String", "Nope.Missing"] do
       ExUnit.CaptureLog.capture_log(fn ->
-        assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: args.(key)})
+        assert :ok = Samen.Automation.RunWorker.perform(run_job(args.(key)))
       end)
     end
 
@@ -526,8 +526,145 @@ defmodule Samen.Automation.ObservabilityTest do
     assert [%{state: :skipped, error_kind: :internal_error}, %{state: :skipped, error_kind: :internal_error}] = runs_for(org, wf.id)
 
     # POSITIVE CONTROL: the same workflow and record under the real resource key fires
-    assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: args.(@target_key)})
+    assert :ok = Samen.Automation.RunWorker.perform(run_job(args.(@target_key)))
     assert notified(org, owner) == 1
+  end
+
+  defp subject_args(wf, org, record_id, event) do
+    %{
+      "workflow_id" => to_string(wf.id),
+      "org_id" => org,
+      "resource_key" => @target_key,
+      "record_id" => record_id,
+      "event" => event,
+      "event_id" => Ash.UUID.generate(),
+      "trigger_kind" => "resource_event",
+      "depth" => 0,
+      "chain" => []
+    }
+  end
+
+  @notify [%{"kind" => "notify", "recipient" => "owner", "event_type" => "workflow.fired"}]
+
+  test "RED: a created/updated run whose subject was DELETED before the run skips :no_subject_record (it ran its gates against %{}); the live subject fires (control)" do
+    org = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+
+    wf =
+      create_workflow!(org, owner,
+        conditions: [%{"attribute" => "priority", "op" => "neq", "values" => ["urgent"]}],
+        actions: @notify
+      )
+
+    target = create_target!(org)
+
+    # POSITIVE CONTROL: the record is there -> the neq gate passes on its real value and the run fires
+    assert :ok = Samen.Automation.RunWorker.perform(run_job(subject_args(wf, org, to_string(target.id), "created")))
+    assert notified(org, owner) == 1
+
+    # RED: the record id names nothing (deleted between the event and the run), for both record events
+    for event <- ["created", "updated"] do
+      assert :ok = Samen.Automation.RunWorker.perform(run_job(subject_args(wf, org, Ash.UUID.generate(), event)))
+    end
+
+    assert notified(org, owner) == 1
+    # `inserted_at` has second resolution, so the order of runs created in the same second is not defined: compare as a set
+    assert [{:skipped, :no_subject_record}, {:skipped, :no_subject_record}, {:succeeded, nil}] =
+             org |> runs_for(wf.id) |> Enum.map(&{&1.state, &1.error_kind}) |> Enum.sort()
+  end
+
+  test "a destroyed run's subject is expected to be gone: a workflow without conditions fires, one with conditions skips :no_subject_record (no snapshot to judge them on)" do
+    org = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+    plain = create_workflow!(org, owner, event: :destroyed, conditions: [], actions: @notify)
+
+    gated =
+      create_workflow!(org, owner,
+        event: :destroyed,
+        conditions: [%{"attribute" => "priority", "op" => "neq", "values" => ["urgent"]}],
+        actions: @notify
+      )
+
+    assert :ok = Samen.Automation.RunWorker.perform(run_job(subject_args(plain, org, Ash.UUID.generate(), "destroyed")))
+    assert notified(org, owner) == 1
+    assert [%{state: :succeeded}] = runs_for(org, plain.id)
+
+    assert :ok = Samen.Automation.RunWorker.perform(run_job(subject_args(gated, org, Ash.UUID.generate(), "destroyed")))
+    assert notified(org, owner) == 1
+    assert [%{state: :skipped, error_kind: :no_subject_record}] = runs_for(org, gated.id)
+  end
+
+  test "a destroyed run whose conditions read only event metadata (`changed`) is judged on them and fires; one needing an attribute value (alone or mixed in) is skipped :no_subject_record" do
+    org = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+    changed_cond = %{"attribute" => "priority", "op" => "changed", "values" => []}
+    attr_cond = %{"attribute" => "priority", "op" => "neq", "values" => ["urgent"]}
+
+    meta_only = create_workflow!(org, owner, event: :destroyed, conditions: [changed_cond], actions: @notify)
+    attr_only = create_workflow!(org, owner, event: :destroyed, conditions: [attr_cond], actions: @notify)
+    mixed = create_workflow!(org, owner, event: :destroyed, conditions: [changed_cond, attr_cond], actions: @notify)
+
+    run = fn wf, changed ->
+      args = wf |> subject_args(org, Ash.UUID.generate(), "destroyed") |> Map.put("changed", changed)
+      assert :ok = Samen.Automation.RunWorker.perform(run_job(args))
+    end
+
+    # RED on the previous round: a soft destroy (archive) names the stamped attribute in `changed`; the condition is satisfied
+    run.(meta_only, ["priority"])
+    assert notified(org, owner) == 1
+    assert [%{state: :succeeded}] = runs_for(org, meta_only.id)
+
+    # POSITIVE CONTROL: the metadata condition is really evaluated (not waved through): unmet when the attribute is not in `changed`
+    run.(meta_only, ["tags"])
+    assert notified(org, owner) == 1
+    assert [{:skipped, :conditions_unmet}, {:succeeded, nil}] =
+             org |> runs_for(meta_only.id) |> Enum.map(&{&1.state, &1.error_kind}) |> Enum.sort()
+
+    run.(attr_only, ["priority"])
+    run.(mixed, ["priority"])
+    assert notified(org, owner) == 1
+    assert [%{state: :skipped, error_kind: :no_subject_record}] = runs_for(org, attr_only.id)
+    assert [%{state: :skipped, error_kind: :no_subject_record}] = runs_for(org, mixed.id)
+  end
+
+  test "Condition.needs_subject_values?/1 fails closed: only `changed` is metadata-only, every other operator (and an unknown one) needs the record" do
+    refute Samen.Automation.Condition.needs_subject_values?(%{attribute: "a", op: :changed, values: []})
+
+    for op <- ~w(eq neq in not_in gt gte lt lte is_nil not_nil)a ++ [:some_future_op] do
+      assert Samen.Automation.Condition.needs_subject_values?(%{attribute: "a", op: op, values: []}), "#{op}"
+    end
+  end
+
+  test "RED: a subject read that FAILS is retried (Oban error, run left queued) instead of skipping the run for good; the last attempt finalizes it; a healed read fires (control)" do
+    org = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+    wf = create_workflow!(org, owner, conditions: [], actions: @notify)
+    target = create_target!(org)
+    args = subject_args(wf, org, to_string(target.id), "created")
+    table = AshPostgres.DataLayer.Info.table(Target)
+
+    job = fn attempt -> %Oban.Job{args: args, attempt: attempt, max_attempts: 3} end
+
+    TestRepo.query!("ALTER TABLE #{table} RENAME TO #{table}_unreadable")
+
+    ExUnit.CaptureLog.capture_log(fn ->
+      # not the last attempt: retryable, nothing finalized, nothing fired
+      assert {:error, :unavailable} = Samen.Automation.RunWorker.perform(job.(1))
+      assert [%{state: :queued}] = runs_for(org, wf.id)
+      assert notified(org, owner) == 0
+
+      # the last attempt: terminal, visible on the run
+      assert :ok = Samen.Automation.RunWorker.perform(job.(3))
+      assert [%{state: :skipped, error_kind: :internal_error}] = runs_for(org, wf.id)
+    end)
+
+    TestRepo.query!("ALTER TABLE #{table}_unreadable RENAME TO #{table}")
+
+    # POSITIVE CONTROL: a retry against a healed read fires (a fresh workflow run: the first is already terminal)
+    wf2 = create_workflow!(org, owner, conditions: [], actions: @notify)
+    assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: subject_args(wf2, org, to_string(target.id), "created"), attempt: 2, max_attempts: 3})
+    assert notified(org, owner) == 1
+    assert [%{state: :succeeded}] = runs_for(org, wf2.id)
   end
 
   defmodule CompensatedOk do
@@ -598,7 +735,7 @@ defmodule Samen.Automation.ObservabilityTest do
         "chain" => []
       }
 
-      ExUnit.CaptureLog.capture_log(fn -> assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: args}) end)
+      ExUnit.CaptureLog.capture_log(fn -> assert :ok = Samen.Automation.RunWorker.perform(run_job(args)) end)
       [run] = runs_for(org, wf.id)
       run
     end
@@ -718,7 +855,7 @@ defmodule Samen.Automation.ObservabilityTest do
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          assert :ok = Samen.Automation.RunWorker.perform(%Oban.Job{args: args})
+          assert :ok = Samen.Automation.RunWorker.perform(run_job(args))
         end)
 
       [run] = runs_for(org, wf.id)
@@ -831,6 +968,108 @@ defmodule Samen.Automation.ObservabilityTest do
     assert log =~ "write=schedule_advance_enqueue_skipped"
   end
 
+  test "RED: via the real AshOban scan, an unresolvable org leaves next_fire_at unchanged and enqueues nothing; a resolvable org advances and enqueues one (control)" do
+    require Ecto.Query
+
+    org = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+    past = DateTime.utc_now() |> DateTime.add(-120, :second) |> DateTime.truncate(:second)
+
+    wf =
+      Workflow
+      |> Ash.Changeset.for_create(:create, %{
+        org_id: org,
+        name: "wf-#{System.unique_integer([:positive])}",
+        status: :active,
+        trigger_kind: :schedule,
+        resource_key: @target_key,
+        schedule_cron: "* * * * *",
+        next_fire_at: past,
+        conditions: [],
+        actions: @notify,
+        owner_id: owner
+      })
+      |> Ash.create!(authorize?: false)
+
+    table = AshPostgres.DataLayer.Info.table(Workflow)
+    wf_id = Ecto.UUID.dump!(wf.id)
+    [id_col] = for %{name: :id} = attr <- Ash.Resource.Info.attributes(Workflow), do: to_string(attr.source || attr.name)
+    [fire_col] = for %{name: :next_fire_at} = attr <- Ash.Resource.Info.attributes(Workflow), do: to_string(attr.source || attr.name)
+
+    persisted_fire_at = fn ->
+      %{rows: [[at]]} = TestRepo.query!("SELECT #{fire_col} FROM #{table} WHERE #{id_col} = $1", [wf_id])
+      at
+    end
+
+    dispatches = fn ->
+      Oban.Job
+      |> Ecto.Query.where([j], j.worker == "Samen.Automation.DispatchWorker")
+      |> TestRepo.all()
+      |> Enum.filter(&(&1.args["trigger_kind"] == "schedule" and &1.args["workflow_id"] == to_string(wf.id)))
+    end
+
+    before = persisted_fire_at.()
+    assert dispatches.() == []
+
+    # the org cannot be resolved inside the real update: the scan read does not select org_id, so the hook reloads the
+    # row by id, and an AFTER UPDATE trigger makes the row vanish from that reload (the "deleted between the scan and the
+    # update" shape: the reload answers no row, so no org)
+    TestRepo.query!("""
+    CREATE FUNCTION zz_vanish_after_update() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      DELETE FROM #{table} WHERE #{id_col} = NEW.#{id_col};
+      RETURN NULL;
+    END $$
+    """)
+
+    TestRepo.query!("CREATE TRIGGER zz_vanish AFTER UPDATE ON #{table} FOR EACH ROW EXECUTE FUNCTION zz_vanish_after_update()")
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        AshOban.Test.schedule_and_run_triggers(Workflow, drain_queues?: true)
+      end)
+
+    TestRepo.query!("DROP TRIGGER zz_vanish ON #{table}")
+
+    # the real :dispatch_due hook ran and refused (so this is not a scan that never reached the update) ...
+    assert log =~ "write=schedule_advance_enqueue_skipped"
+    # ... and the real action path rolled the update back (the trigger's delete with it): the fire is neither advanced
+    # nor lost, and nothing was enqueued
+    assert persisted_fire_at.() == before
+    assert dispatches.() == []
+
+    # POSITIVE CONTROL: the org resolves again -> the SAME due fire advances and enqueues exactly one dispatch
+    AshOban.Test.schedule_and_run_triggers(Workflow, drain_queues?: true)
+
+    assert DateTime.compare(DateTime.from_naive!(persisted_fire_at.(), "Etc/UTC"), DateTime.from_naive!(before, "Etc/UTC")) == :gt
+    assert [%{args: %{"org_id" => ^org}}] = dispatches.()
+  end
+
+  test "RED: a schedule advance whose org cannot be resolved FAILS the step (so the update rolls back and the fire retries) instead of returning ok; a resolvable org returns ok (control)" do
+    org = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+    wf = create_workflow!(org, owner, conditions: [], actions: @notify)
+
+    advance = fn changeset, result ->
+      for entry <- changeset.after_action do
+        callback = if is_function(entry), do: entry, else: elem(entry, 0)
+        callback.(changeset, result)
+      end
+    end
+
+    # POSITIVE CONTROL: the org is on the row -> the hook answers ok
+    changeset = Ash.Changeset.for_update(wf, :dispatch_due, %{})
+    assert [{:ok, _}] = advance.(changeset, wf)
+
+    # RED: org not loaded and the row cannot be reloaded
+    ghost = %{wf | id: Ash.UUID.generate(), org_id: %Ash.NotLoaded{field: :org_id}}
+    changeset = Ash.Changeset.for_update(%{wf | org_id: %Ash.NotLoaded{field: :org_id}}, :dispatch_due, %{})
+
+    ExUnit.CaptureLog.capture_log(fn ->
+      assert [{:error, :org_unresolved}] = advance.(changeset, ghost)
+    end)
+  end
+
   test "RED: an unknown event string no longer dispatches the :created workflows; 'created' does (control)" do
     org = Ash.UUID.generate()
     owner = Ash.UUID.generate()
@@ -893,6 +1132,10 @@ defmodule Samen.Automation.ObservabilityTest do
   end
 
   defp drain, do: Oban.drain_queue(queue: :automation, with_recursion: true)
+
+  # A bare `%Oban.Job{}` defaults to `attempt: 0, max_attempts: 20`, so a subject read that RAISES would be retried
+  # forever and never reach the last-attempt finalize. Production numbering starts at 1 with the worker's `max_attempts: 3`.
+  defp run_job(args), do: %Oban.Job{args: args, attempt: 1, max_attempts: 3}
 
   defp runs_for(org, workflow_id) do
     Run

@@ -1,0 +1,22 @@
+# SABOTAGE: ai_prompt_masking treats an unreadable tool_schema source as a pass: the static-schema rule 
+#   goes unverified
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/ai_prompt_masking_tool_checks_test.exs
+# MUST_FAIL: a tool whose tool_schema body cannot be found in its source is a violation
+diff --git a/samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex b/samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex
+index a60f250b..42e79b65 100644
+--- a/samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex
+@@ -129,9 +129,7 @@ defmodule Mix.Tasks.Samen.Verify.AiPromptMasking do
+         []
+       end
+     else
+-      _ ->
+-        ["#{inspect(mod)}: the `tool_schema/0` source could not be read or its body not found — the static-schema " <>
+-           "rule (ADR-047 §4.2) is unverifiable, so it is not passed."]
++      _ -> []
+     end
+   end
+ 

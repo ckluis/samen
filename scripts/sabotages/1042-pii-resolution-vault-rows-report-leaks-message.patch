@@ -1,0 +1,18 @@
+# SABOTAGE: the vault-row prefetch report also logs the exception message
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_e_test.exs
+# MUST_FAIL: RED: the prefetch read fails -> ONE report by name
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+index 8d8dac9a..cecba0df 100644
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -296,6 +296,7 @@ defmodule Samen.Api.PiiResolution do
+   rescue
+     e ->
+       Samen.Observability.Failure.report(:pii_resolution_vault_rows, actor, e)
++      Logger.error(Exception.message(e))
+       %{}
+   end
+ 

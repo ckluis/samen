@@ -1,0 +1,19 @@
+# SABOTAGE: a failed reveal is reported once per value instead of once per call
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_e_test.exs
+# MUST_FAIL: RED: a KMS outage masks the whole page on the tenant plane
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+index 118dd194..4eb21fea 100644
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -451,7 +451,7 @@ defmodule Samen.Api.PiiResolution do
+     # (`prefetch/4` always sets the flag; a fresh one reports, so a caller without it is never silent)
+     flag = Keyword.get(opts, :__reveal_reported) || :atomics.new(1, [])
+ 
+-    if :atomics.compare_exchange(flag, 1, 0, 1) == :ok do
++    if flag != nil do
+       # an atom reason reports its name, an error struct its MODULE name (`Failure.causes/1`, never the message), else "unknown"
+       reason =
+         case other do

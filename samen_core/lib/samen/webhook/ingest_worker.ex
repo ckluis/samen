@@ -44,8 +44,14 @@ defmodule Samen.Webhook.IngestWorker do
     event_id = Map.get(args, "event_id") || Map.get(args, :event_id)
 
     case repo && event_id && Event.get(repo, event_id) do
+      nil when is_nil(repo) and not is_nil(event_id) ->
+        # An event to process but no repo to read it from (unconfigured or unresolvable): acknowledging would strand a
+        # verified inbound envelope unprocessed for good. A retried, reported error instead.
+        Samen.Observability.Failure.report(:webhook_ingest_repo, nil, :unresolved_repo)
+        {:error, :repo_unavailable}
+
       nil ->
-        # No repo, no id, or the row is gone — nothing to do, acknowledge.
+        # No id, or the row is gone — nothing to do, acknowledge.
         :ok
 
       %Event{} = event ->
@@ -128,12 +134,7 @@ defmodule Samen.Webhook.IngestWorker do
   defp safe_module(str) do
     String.to_existing_atom(str)
   rescue
-    _ ->
-      # tolerate "Elixir."-prefixed or bare names
-      try do
-        Module.concat([str])
-      rescue
-        _ -> nil
-      end
+    # tolerate "Elixir."-prefixed or bare names (an unknown module then fails loudly at the first repo call: retried)
+    ArgumentError -> Module.concat([str])
   end
 end

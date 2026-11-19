@@ -1,0 +1,20 @@
+# SABOTAGE: QueryBudget.over_threshold? answers false when the ledger cannot be read, so an unknown cohort 
+#   count reads as under budget
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_d_test.exs
+# MUST_FAIL: RED: a ledger that cannot be counted raises; it does not answer false
+diff --git a/samen_core/lib/samen/aggregate/query_budget.ex b/samen_core/lib/samen/aggregate/query_budget.ex
+index b8223c95..12c2dd7e 100644
+--- a/samen_core/lib/samen/aggregate/query_budget.ex
++++ b/samen_core/lib/samen/aggregate/query_budget.ex
+@@ -321,6 +321,8 @@ defmodule Samen.Aggregate.QueryBudget do
+   @spec over_threshold?(map(), keyword()) :: boolean()
+   def over_threshold?(key, opts \\ []) do
+     count(key, opts) >= warn_threshold()
++  rescue
++    _ -> false
+   end
+ 
+   @doc """

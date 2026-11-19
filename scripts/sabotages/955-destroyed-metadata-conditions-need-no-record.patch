@@ -1,0 +1,20 @@
+# SABOTAGE: a destroyed run whose attribute-reading condition is classified as metadata-only is judged on 
+#   an empty subject
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: a destroyed run whose conditions read only event metadata
+diff --git a/samen_core/lib/samen/automation/condition.ex b/samen_core/lib/samen/automation/condition.ex
+index fb720773..436cfd63 100644
+--- a/samen_core/lib/samen/automation/condition.ex
++++ b/samen_core/lib/samen/automation/condition.ex
+@@ -120,7 +120,7 @@ defmodule Samen.Automation.Condition do
+   event metadata alone (`changed`); an unknown operator counts as needing the record.
+   """
+   @spec needs_subject_values?(condition()) :: boolean()
+-  def needs_subject_values?(%{op: op}), do: op not in @metadata_only_ops
++  def needs_subject_values?(%{op: op}), do: op == :eq
+   def needs_subject_values?(_), do: true
+ 
+   @doc "Does a single parsed condition match the subject?"

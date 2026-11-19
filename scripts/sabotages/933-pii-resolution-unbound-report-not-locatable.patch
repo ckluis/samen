@@ -1,0 +1,20 @@
+# SABOTAGE: The read-side vault_token_unbound report drops resource, field and record id: an operator 
+#   cannot find the planted row
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/pii_resolution_token_binding_test.exs
+# MUST_FAIL: one report per holding record (a repeat adds none); the log names resource, field, record; telemetry has the reason only
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+index a75872f5..31bebe83 100644
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -493,7 +493,7 @@ defmodule Samen.Api.PiiResolution do
+ 
+       Enum.each(reported, fn {reason, record_id, field} ->
+         Samen.Observability.Failure.report(:read, :vault_token_unbound, actor, reason,
+-          locate: [resource: resource, field: field, record: record_id]
++          locate: []
+         )
+       end)
+ 

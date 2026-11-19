@@ -142,7 +142,10 @@ defmodule Samen.Migration do
           drop_jsonb_path_index: 3,
           drop_jsonb_path_index: 4,
           chunked_backfill: 3,
-          chunked_backfill: 4
+          chunked_backfill: 4,
+          set_not_null: 3,
+          set_not_null: 4,
+          drop_not_null: 3
         ]
     end
   end
@@ -270,6 +273,38 @@ defmodule Samen.Migration do
         unquote(set_clause),
         Keyword.put(unquote(opts), :caller, unquote(caller))
       )
+    end
+  end
+
+  @doc "NOT NULL without a long ACCESS EXCLUSIVE scan (requires @disable_ddl_transaction true). See `Samen.Migration.ExpandContract.set_not_null/4`."
+  defmacro set_not_null(repo, table, column) do
+    caller = __CALLER__.module
+
+    quote do
+      Samen.Migration.ExpandContract.set_not_null(unquote(repo), unquote(table), unquote(column), caller: unquote(caller))
+    end
+  end
+
+  @doc "See `set_not_null/3`; `opts` takes `:backfill` and `:chunk_size`."
+  defmacro set_not_null(repo, table, column, opts) do
+    caller = __CALLER__.module
+
+    quote do
+      Samen.Migration.ExpandContract.set_not_null(
+        unquote(repo),
+        unquote(table),
+        unquote(column),
+        Keyword.put(unquote(opts), :caller, unquote(caller))
+      )
+    end
+  end
+
+  @doc "The reverse of `set_not_null/3` (requires @disable_ddl_transaction true). See `Samen.Migration.ExpandContract.drop_not_null/4`."
+  defmacro drop_not_null(repo, table, column) do
+    caller = __CALLER__.module
+
+    quote do
+      Samen.Migration.ExpandContract.drop_not_null(unquote(repo), unquote(table), unquote(column), caller: unquote(caller))
     end
   end
 

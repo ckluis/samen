@@ -68,9 +68,8 @@ defmodule Samen.Cdc.NeverReadCurrent do
   @spec scan_dir(String.t(), module() | nil) :: {:ok, [finding()]}
   def scan_dir(dir, repo \\ cdc_repo()) do
     dir
-    |> Path.join("**/*.{ex,exs}")
-    |> Path.wildcard()
-    |> Enum.map(fn path -> {path, File.read!(path)} end)
+    |> Samen.SourceScan.files([".ex", ".exs"])
+    |> Enum.map(fn path -> {path, Samen.SourceScan.read!(path)} end)
     |> scan_sources(repo)
   end
 

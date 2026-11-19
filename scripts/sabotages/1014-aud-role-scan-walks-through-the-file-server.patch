@@ -1,0 +1,20 @@
+# SABOTAGE: a whole-tree scan test finds its directories with Path.wildcard again, so it queues behind the 
+#   single file server under load
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/source_scan_test.exs
+# MUST_FAIL: no scan test calls Path.wildcard or File.read!/regular?/dir?/ls through the file server
+diff --git a/samen_core/test/aud_role_derivation_test.exs b/samen_core/test/aud_role_derivation_test.exs
+index cdae8cf8..98843888 100644
+--- a/samen_core/test/aud_role_derivation_test.exs
++++ b/samen_core/test/aud_role_derivation_test.exs
+@@ -59,7 +59,7 @@ defmodule SamenCore.AudRoleDerivationTest do
+     # with 40 other processes doing file I/O, and past ExUnit's 60 s on a loaded machine.
+     migrations = fn ->
+       for prefix <- ["*/priv", "spikes/*/priv"],
+-          priv <- Samen.SourceScan.dirs(root, prefix),
++          priv <- Path.wildcard(Path.join(root, prefix)),
+           file <- Samen.SourceScan.files(priv, [".exs"]),
+           Path.basename(Path.dirname(file)) == "migrations",
+           do: file

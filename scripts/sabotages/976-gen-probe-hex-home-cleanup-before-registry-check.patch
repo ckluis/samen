@@ -1,0 +1,23 @@
+# SABOTAGE: the gen probe guard removes its private HEX_HOME before verifying the abbrev registry, so a 
+#   failing rm under set -e skips the repair and the FATAL
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: GENHEXRO a failed HEX_HOME cleanup under set -e can never skip
+diff --git a/scripts/gen_probe_guard.sh b/scripts/gen_probe_guard.sh
+index 8e381591..5e2ee749 100755
+--- a/scripts/gen_probe_guard.sh
++++ b/scripts/gen_probe_guard.sh
+@@ -89,6 +89,11 @@ gen_probe_restore() {
+   fi
+   GEN_PROBE_RESTORED=1
+ 
++  if [[ -n "$GEN_PROBE_HEX_HOME" ]]; then
++    rm -rf "$GEN_PROBE_HEX_HOME"
++    GEN_PROBE_HEX_HOME=""
++  fi
++
+   local post_sha
+   if [[ -n "$GEN_PROBE_PRIVATE" ]]; then
+     # private mode: the committed file must be exactly what it was; nothing to restore, only to prove — and

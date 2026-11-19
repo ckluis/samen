@@ -2815,7 +2815,7 @@ defmodule Samen.AI.Agent do
           {:ok, expired}
 
         {:error, error} ->
-          Samen.Observability.Failure.report(:agent_expire_parked, run.org_id, error)
+          Samen.Observability.Failure.report_write(:agent_expire_parked, run.org_id, error)
           {:error, :expiry_incomplete}
       end
     else
@@ -2876,7 +2876,7 @@ defmodule Samen.AI.Agent do
     end
 
     if withdrawal_failed?(withdrawn) or turn == {:error, :unavailable} do
-      Samen.Observability.Failure.report(:agent_on_proposal_expired, run.org_id, :approval_withdrawal_failed)
+      Samen.Observability.Failure.report_write(:agent_on_proposal_expired, run.org_id, :approval_withdrawal_failed)
       {:error, :expiry_incomplete}
     else
       log_terminal(run)
@@ -2884,7 +2884,7 @@ defmodule Samen.AI.Agent do
     end
   rescue
     e ->
-      Samen.Observability.Failure.report(:agent_on_proposal_expired, nil, e)
+      Samen.Observability.Failure.report_write(:agent_on_proposal_expired, nil, e)
       {:error, :expiry_incomplete}
   end
 
@@ -2977,6 +2977,11 @@ defmodule Samen.AI.Agent do
             {:ok, loaded}
         end
 
+      # A read that FAILED is not "no such approval": the write is refused either way, but the turn row names the cause.
+      # (`:approvals_unavailable` is the miswired-engine sibling: a configured resource whose repo cannot be resolved.)
+      {:error, reason} when reason in [:unavailable, :approvals_unavailable] ->
+        {:error, :approval_unavailable}
+
       _ ->
         {:error, :approval_not_found}
     end
@@ -2994,7 +2999,7 @@ defmodule Samen.AI.Agent do
   rescue
     e ->
       Samen.Observability.Failure.report(:agent_load_approval, nil, e)
-      {:error, :approval_not_found}
+      {:error, :unavailable}
   end
 
   defp approval_id_of(%{id: id}) when is_binary(id), do: id

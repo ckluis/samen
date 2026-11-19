@@ -61,20 +61,31 @@ defmodule Samen.Mailbox.Match do
 
   def normalize(_), do: nil
 
-  @doc "The domain part of an address, normalized. `nil` when there is no `@`."
+  @doc """
+  The domain part of an address, normalized. `nil` when there is no `@`, and `nil` for an address that is
+  not `queryable?/1` (a domain that cannot exist cannot match, and it must never reach a query).
+  """
   @spec domain(term()) :: String.t() | nil
   def domain(address) do
-    case normalize(address) do
-      nil ->
-        nil
-
-      norm ->
-        case String.split(norm, "@") do
-          [_local, dom] when dom != "" -> dom
-          _ -> nil
-        end
+    with true <- queryable?(address),
+         norm when is_binary(norm) <- normalize(address),
+         [_local, dom] when dom != "" <- String.split(norm, "@") do
+      dom
+    else
+      _ -> nil
     end
   end
+
+  @doc """
+  Whether `value` can be bound as a text parameter of a query: valid UTF-8 with no control character
+  (Postgres refuses a NUL byte in a text parameter, `22021`). A sender controls an address and a provider
+  an id, so one message must never be able to make its read raise: an unqueryable value is answered
+  without a query, never by a rescue.
+  """
+  @spec queryable?(term()) :: boolean()
+  def queryable?(value) when is_binary(value),
+    do: String.valid?(value) and not (String.trim(value) =~ ~r/[\x00-\x1f\x7f]/)
+  def queryable?(_), do: false
 
   @doc """
   A stable, NON-REVERSIBLE thread key for a message: SHA-256 of the provider's
@@ -101,6 +112,9 @@ defmodule Samen.Mailbox.Match do
   @doc """
   Find the org's CRM `Person` whose vaulted `emails` contains `address`. Returns
   the resolved record or `nil`. `nil` person resource ⇒ matching disabled ⇒ `nil`.
+
+  `nil` always means "no unique match". A candidate read that FAILS raises (it is never `nil`): a message
+  threaded onto nothing because the CRM could not be read is recorded unanchored for good.
   """
   @spec person_for_address(term(), Config.t()) :: struct() | nil
   def person_for_address(_address, %Config{person_resource: nil}), do: nil
@@ -155,8 +169,6 @@ defmodule Samen.Mailbox.Match do
       |> Ash.read!(authorize?: false)
 
     PiiResolution.resolve(records, config.person_resource, %{plane: :tenant}, repo: config.repo)
-  rescue
-    _ -> []
   end
 
   # A `%Samen.Masked{}` (or anything that is not a resolved composite) yields NO
@@ -190,8 +202,6 @@ defmodule Samen.Mailbox.Match do
     |> Ash.Query.limit(1)
     |> Ash.read!(authorize?: false)
     |> List.first()
-  rescue
-    _ -> nil
   end
 
   defp company_by_id(_person, _config), do: nil
@@ -199,6 +209,11 @@ defmodule Samen.Mailbox.Match do
   defp company_by_domain(address, config) do
     case domain(address) do
       nil ->
+        # An address no query can carry (control bytes / invalid UTF-8) is honest absence, REPORTED once (the
+        # message is then recorded, so it is not met again) rather than raised into a sync that halts on it forever.
+        if is_binary(address) and not queryable?(address),
+          do: Samen.Observability.Failure.report(:mailbox_unqueryable_address, config.org_id, :unqueryable_address)
+
         nil
 
       dom ->
@@ -217,8 +232,6 @@ defmodule Samen.Mailbox.Match do
           _ -> nil
         end
     end
-  rescue
-    _ -> nil
   end
 
   defp first_binary(values) do

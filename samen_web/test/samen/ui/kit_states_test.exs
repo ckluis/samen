@@ -640,7 +640,15 @@ defmodule Samen.UI.KitStatesTest do
       assert log =~ "RuntimeError"
 
       ok = Samen.Web.Mount.new(:crm, __MODULE__, Samen.WebTest.Repo, labels: %{host_nav_extra: {__MODULE__, :mixed_items, []}})
-      assert ExUnit.CaptureLog.capture_log(fn -> render_component(&Samen.UI.host_nav_extra/1, %{mount: ok, org_id: "O1"}) end) == ""
+
+      # THIS test's own log lines only: `capture_log` sees every line the node emits, so a line from another async test
+      # (the metrics controller test's `read=metrics_scrape`) used to leak into this "logs nothing" assertion.
+      {_html, own_log} = Samen.WebTest.OwnLog.capture(fn -> render_component(&Samen.UI.host_nav_extra/1, %{mount: ok, org_id: "O1"}) end)
+      assert own_log == ""
+
+      # ANTI-TAUTOLOGY: the same capture DOES see the raising resolver's report, so the empty log above is not vacuous
+      {_html, broken_log} = Samen.WebTest.OwnLog.capture(fn -> render_component(&Samen.UI.host_nav_extra/1, %{mount: mount, org_id: "O1"}) end)
+      assert broken_log =~ "host_nav_extra"
     end
   end
 

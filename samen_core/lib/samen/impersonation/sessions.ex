@@ -393,7 +393,7 @@ defmodule Samen.Impersonation.Sessions do
     # Reported here so a TOLERANT caller (close, expiry: they remove access and must not depend on the audit)
     # is never silent; `open/1` treats the error as fatal.
     with {:error, reason} <- result do
-      Samen.Observability.Failure.report(:impersonation_audit, attrs[:org_id], reason)
+      Samen.Observability.Failure.report_write(:impersonation_audit, attrs[:org_id], reason)
       result
     end
   end
