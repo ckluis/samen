@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P3 - sabotage new stops writing the README/docs front-door counts, so the driver's 
+#   docs-number check (C10) fails its baseline right after it.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: SABNEW sabotage new refuses an unprovable patch and leaves the tree exactly as it was
+diff --git a/scripts/sabotage_new.sh b/scripts/sabotage_new.sh
+index 3a789fd8..8017eac1 100755
+--- a/scripts/sabotage_new.sh
++++ b/scripts/sabotage_new.sh
+@@ -211,7 +211,7 @@ if [[ -x scripts/counts ]]; then
+     mkdir -p "$WORK/counts_snap/$(dirname "$c")"
+     cp -p "$c" "$WORK/counts_snap/$c"
+   done < <(bash scripts/counts --files)
+-  bash scripts/counts --write > "$WORK/counts.out" 2>&1 && bash scripts/counts --write --docs >> "$WORK/counts.out" 2>&1 \
++  bash scripts/counts --write > "$WORK/counts.out" 2>&1 \
+     || refuse "scripts/counts could not bring the generated counts up to date." "$(tail -6 "$WORK/counts.out")"
+   COUNTS_NOTE="$(grep -E '^COUNTS: [a-z_]+ ' "$WORK/counts.out" | sed 's/^COUNTS: //' | tr '\n' ';')"
+   [[ -n "$COUNTS_NOTE" ]] || COUNTS_NOTE="all current"

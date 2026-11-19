@@ -10,8 +10,9 @@ between inline markers and are DERIVED:
     scripts/counts --write    rewrite the stale values in place (never adds or removes a marker)
     scripts/counts --list     print every derived value
     --file PATH               the document (default: CLAUDE.md at the repo root)
-    --only a,b                restrict to those names (the cheap path: `sabotage new` uses --only
-                              sabotages,driver_sabotages)
+    --only a,b                restrict to those names
+    --files                   list the repo-relative files --write / --write --docs can rewrite (`sabotage new`
+                              snapshots them, and runs the full --write and --write --docs)
 
 Sources of truth (nothing is typed here):
     sabotages          ls scripts/sabotages/*.patch | wc -l
@@ -250,7 +251,7 @@ def run_file(mode, path, wanted):
     return 0
 
 
-USAGE = "usage: scripts/counts --check|--write|--list [--docs] [--file PATH] [--only a,b]"
+USAGE = "usage: scripts/counts --check|--write|--list [--docs] [--file PATH] [--only a,b] | --files"
 
 
 def main(argv):
@@ -265,6 +266,13 @@ def main(argv):
             mode = a[2:]
         elif a == "--docs":
             docs = True
+        elif a == "--files":
+            # every file --write / --write --docs can rewrite (repo-relative): `sabotage new` snapshots them so a
+            # refusal leaves each byte-identical
+            print("CLAUDE.md")
+            for rel in DOC_COUNTS:
+                print(rel)
+            return 0
         elif a in ("--file", "--only") and i + 1 < len(argv):
             i += 1
             if a == "--file":

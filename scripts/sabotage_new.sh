@@ -40,8 +40,10 @@
 #     test-failure headers found") cannot show a named flip and is refused;
 #   * the BASELINE is green: the same test files PASS with the sabotage removed (this is what catches an
 #     unstaged fix that was captured into the patch — without the fix the tests fail).
-# On success it runs `scripts/counts --write` for the sabotage counts in CLAUDE.md. The new patch is left
-# untracked (git add it with the rest of your change).
+# On success every generated count is current: it runs `scripts/counts --write` (all of CLAUDE.md's counts) and
+# `scripts/counts --write --docs` (the README/docs front-door numbers), and on a refusal every file they can
+# rewrite (`scripts/counts --files`) is put back byte-identical. The new patch is left untracked (git add it
+# with the rest of your change, and the counts' files).
 #
 # WHAT IT CANNOT TELL APART: an UNSTAGED edit in a named file that the named tests do not exercise (work in
 # progress next to the sabotage) passes every check above, so it ends up IN the patch and is restored away with
@@ -90,7 +92,12 @@ SNAPPED=0
 DONE=0
 
 restore_snapshot() {
-  [[ -f "$WORK/CLAUDE.md.snap" ]] && cp -p "$WORK/CLAUDE.md.snap" "$REPO_ROOT/CLAUDE.md"
+  if [[ -d "$WORK/counts_snap" ]]; then
+    local c
+    while IFS= read -r c; do
+      cp -p "$WORK/counts_snap/$c" "$REPO_ROOT/$c"
+    done < <(cd "$WORK/counts_snap" && find . -type f | sed 's|^\./||')
+  fi
   [[ $SNAPPED -eq 1 ]] || return 0
   local f
   for f in "${FILES[@]}"; do
@@ -194,13 +201,20 @@ bash scripts/sabotage_lint.sh >"$WORK/lint.out" 2>&1 || refuse "the header lint 
 git apply --check "$PATCH" 2>"$WORK/apply.err" || refuse "the new patch does not apply to the restored tree" "$(head -3 "$WORK/apply.err")"
 
 # ── 3b. the counts: the guard tests check CLAUDE.md against the patch directory, so the new patch must be
-#        counted BEFORE the replay and the baseline run (restored with everything else on a refusal)
-FIXERS="sabotages"
-grep -q 'ci_driver_guard_test.exs' <<<"${TEST_FILES[*]}" && FIXERS="sabotages,driver_sabotages"
+#        counted BEFORE the replay and the baseline run. ALL generated counts are written (CLAUDE.md's, which also
+#        move with the corpus targets this patch adds, and the README/docs front-door numbers), so the tree is
+#        current when this command succeeds; every file they can rewrite is snapshotted and restored on a refusal
 COUNTS_NOTE="(scripts/counts not present)"
 if [[ -x scripts/counts ]]; then
-  [[ -f CLAUDE.md ]] && cp -p CLAUDE.md "$WORK/CLAUDE.md.snap"
-  COUNTS_NOTE="$(bash scripts/counts --write --only "$FIXERS" 2>&1 | tail -3 | tr '\n' ' ')"
+  while IFS= read -r c; do
+    [[ -f "$c" ]] || continue
+    mkdir -p "$WORK/counts_snap/$(dirname "$c")"
+    cp -p "$c" "$WORK/counts_snap/$c"
+  done < <(bash scripts/counts --files)
+  bash scripts/counts --write > "$WORK/counts.out" 2>&1 && bash scripts/counts --write --docs >> "$WORK/counts.out" 2>&1 \
+    || refuse "scripts/counts could not bring the generated counts up to date." "$(tail -6 "$WORK/counts.out")"
+  COUNTS_NOTE="$(grep -E '^COUNTS: [a-z_]+ ' "$WORK/counts.out" | sed 's/^COUNTS: //' | awk '!seen[$0]++' | tr '\n' ';')"
+  [[ -n "$COUNTS_NOTE" ]] || COUNTS_NOTE="all current"
 fi
 
 # ── 4. anchor — ask the double sweep itself ───────────────────────────────────
@@ -270,5 +284,5 @@ echo "  flip      : $(grep -m1 'flip confirmed' "$WORK/flip.out" | sed 's/^ *//'
 echo "  restore   : byte-exact (sha-256), ${FILES[*]} back to the index"
 echo "  baseline  : ${TEST_FILES[*]} pass without it"
 echo "  counts    : $COUNTS_NOTE"
-echo "  next      : git add scripts/sabotages/$NAME CLAUDE.md   (the patch is untracked until you do)"
+echo "  next      : git add scripts/sabotages/$NAME and the files git status shows as changed by the counts (the patch is untracked until you do)"
 exit 0
