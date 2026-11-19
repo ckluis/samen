@@ -46,21 +46,23 @@ if config_env() == :prod do
 
   maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
 
+  # ARCH-12: the connection VERIFIES the server certificate (verify_peer against the OS CA store, hostname
+  # checked, SNI set by Postgrex per host). Private network with a self-signed cert: DATABASE_SSL_CACERTFILE=/path
+  # (your CA) or, loudly, DATABASE_SSL_VERIFY=none (warns at boot). Anything else raises. The lease's direct
+  # connection below inherits the same options through the repo config.
+  direct_url = System.get_env("DATABASE_DIRECT_URL")
+
   config :acme, Acme.Repo,
     url: database_url,
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
     socket_options: maybe_ipv6,
-    # Neon requires TLS; verify_none keeps the scaffold honest without shipping a CA
-    # bundle assumption (the runbook flags hardening verify_full as an operator step).
-    ssl: [verify: :verify_none]
+    ssl: Samen.Deploy.db_ssl_opts([database_url, direct_url])
 
   # ADR-054: the single-instance lease holds Postgres SESSION locks, which a transaction pooler (Neon's `-pooler`
   # host, PgBouncer) cannot keep. Point it at the DIRECT (unpooled) connection string; with a pooled DATABASE_URL and
   # no DATABASE_DIRECT_URL the lease is unreliable: `/readyz` reports `single_node: UNKNOWN ... (connection_pooler)` once its
   # statements land on different server connections, and until then it can read "single" next to a second instance.
   # An empty DATABASE_DIRECT_URL counts as unset.
-  direct_url = System.get_env("DATABASE_DIRECT_URL")
-
   if direct_url not in [nil, ""] do
     config :samen_core, Samen.SingleNode, lease_url: direct_url
   end
