@@ -5,13 +5,13 @@
 # TEST_FILES: test/honest_kernel_reads_f_test.exs
 # MUST_FAIL: RED: a damaged process row is reported by name
 diff --git a/samen_core/lib/samen/replay/buffer.ex b/samen_core/lib/samen/replay/buffer.ex
-index f0907df4..01983311 100644
+index 1b79a92b..c88549c8 100644
 --- a/samen_core/lib/samen/replay/buffer.ex
 +++ b/samen_core/lib/samen/replay/buffer.ex
-@@ -213,7 +213,7 @@ defmodule Samen.Replay.Buffer do
+@@ -216,7 +216,7 @@ defmodule Samen.Replay.Buffer do
      fun.()
    rescue
-     ArgumentError -> missing
+     e in ArgumentError -> if table_exists?(), do: report(kind, e, failed), else: missing
 -    e -> report(kind, e, failed)
 +    _ -> failed
    end
