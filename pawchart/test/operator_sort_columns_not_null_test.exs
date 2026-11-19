@@ -63,4 +63,41 @@ defmodule PawChart.OperatorSortColumnsNotNullTest do
     assert {:ok, %{num_rows: 1}} = Ecto.Adapters.SQL.query(PawChart.Repo, plan, [org, "Basic"])
     assert {:ok, %{num_rows: 1}} = Ecto.Adapters.SQL.query(PawChart.Repo, ticket, [org, "Printer on fire"])
   end
+
+  describe "pqk_ticket.pqk_breached (migration 20261119100000_operator_ticket_breached_not_null.exs)" do
+    test "POSITIVE CONTROL: the migrated column is NOT NULL with default false, and an insert that omits it gets false" do
+      refute nullable?("pqk_ticket", "pqk_breached")
+
+      %{rows: [[default]]} =
+        Ecto.Adapters.SQL.query!(PawChart.Repo, "SELECT column_default FROM information_schema.columns WHERE table_name = 'pqk_ticket' AND column_name = 'pqk_breached'", [])
+
+      assert default == "false"
+
+      org = Ecto.UUID.dump!(Ecto.UUID.generate())
+
+      assert %{rows: [[false]]} =
+               Ecto.Adapters.SQL.query!(
+                 PawChart.Repo,
+                 "INSERT INTO pqk_ticket (pqk_org_id, pqk_subject, pqk_inserted_at, pqk_updated_at) VALUES ($1, 's', now(), now()) RETURNING pqk_breached",
+                 [org]
+               )
+    end
+
+    test "RED PATH: an explicit NULL is refused by the database naming that column" do
+      org = Ecto.UUID.dump!(Ecto.UUID.generate())
+
+      assert {:error, %Postgrex.Error{postgres: %{code: :not_null_violation, column: "pqk_breached"}}} =
+               Ecto.Adapters.SQL.query(
+                 PawChart.Repo,
+                 "INSERT INTO pqk_ticket (pqk_org_id, pqk_subject, pqk_breached, pqk_inserted_at, pqk_updated_at) VALUES ($1, 's', NULL, now(), now())",
+                 [org]
+               )
+    end
+
+    test "the verifier no longer notes the column, and notes it again when the NOT NULL is dropped" do
+      refute Enum.any?(Indexes.notes(opts()), &(&1 =~ "pqk_ticket"))
+      ddl!("ALTER TABLE pqk_ticket ALTER COLUMN pqk_breached DROP NOT NULL")
+      assert Enum.any?(Indexes.notes(opts()), &(&1 =~ "pqk_ticket"))
+    end
+  end
 end
