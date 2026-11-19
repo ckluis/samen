@@ -51,7 +51,7 @@ defmodule Samen.Automation.Breaker do
     end
   rescue
     e ->
-      Samen.Observability.Failure.report(:automation_breaker_count, nil, e)
+      Samen.Observability.Failure.report(:automation_breaker_count, wf.org_id, e)
       :ok
   end
 

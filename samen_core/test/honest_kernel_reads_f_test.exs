@@ -82,8 +82,8 @@ defmodule Samen.HonestKernelReadsFTest do
       :ok
     end
 
-    defp run_job(workflow_id) do
-      %Oban.Job{args: %{"workflow_id" => workflow_id, "org_id" => Ash.UUID.generate(), "event_id" => Ash.UUID.generate()}, attempt: 1, max_attempts: 3}
+    defp run_job(workflow_id, org \\ Ash.UUID.generate()) do
+      %Oban.Job{args: %{"workflow_id" => workflow_id, "org_id" => org, "event_id" => Ash.UUID.generate()}, attempt: 1, max_attempts: 3}
     end
 
     test "RED: an unreadable workflow errors the job for a retry (it finished :ok, silently dropped) and reports; a deleted one stays :ok" do
@@ -92,9 +92,10 @@ defmodule Samen.HonestKernelReadsFTest do
 
       hide_table!("awf_workflow")
 
-      log = capture_log(fn -> assert {:error, :unavailable} = RunWorker.perform(run_job(Ash.UUID.generate())) end)
+      org = Ash.UUID.generate()
+      log = capture_log(fn -> assert {:error, :unavailable} = RunWorker.perform(run_job(Ash.UUID.generate(), org)) end)
 
-      assert log =~ "read=run_worker_load_workflow"
+      assert log =~ "read=run_worker_load_workflow org=#{org} "
       refute log =~ "awf_workflow"
     end
   end
@@ -115,6 +116,16 @@ defmodule Samen.HonestKernelReadsFTest do
     |> Ash.create!(authorize?: false)
   end
 
+  defp reload_with_org!(%{id: id}) do
+    require Ash.Query
+
+    Workflow
+    |> Ash.Query.filter(id == ^id)
+    |> Ash.Query.ensure_selected([:org_id])
+    |> Ash.read!(authorize?: false)
+    |> hd()
+  end
+
   describe "automation Breaker.check!/2: an uncountable run log is reported, not silently 'under the limit'" do
     test "RED: a run log that cannot be counted is reported by name, trips nothing and never raises; a readable count over the limit trips (control)" do
       prev = Application.get_env(:samen_core, :automation_rate_limit)
@@ -123,7 +134,8 @@ defmodule Samen.HonestKernelReadsFTest do
 
       org = Ash.UUID.generate()
 
-      wf = workflow!(org)
+      # as the RunWorker hands it over: the row read with `org_id` selected
+      wf = org |> workflow!() |> reload_with_org!()
 
       opts = [run_module: SamenCore.Support.AutomationFixture.Run, repo: Repo]
 
@@ -131,7 +143,7 @@ defmodule Samen.HonestKernelReadsFTest do
 
       log = capture_log(fn -> assert :ok = Samen.Automation.Breaker.check!(wf, opts) end)
 
-      assert log =~ "read=automation_breaker_count"
+      assert log =~ "read=automation_breaker_count org=#{org} "
       refute log =~ "sar_run"
       assert Ash.get!(Workflow, wf.id, authorize?: false).disabled_by_operator_at == nil
     end

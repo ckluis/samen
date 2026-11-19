@@ -103,7 +103,7 @@ defmodule Samen.Automation.RunWorker do
       {:error, reason} ->
         # A workflow row that could not be READ is not "nothing to run": the job errors (Oban backoff + retry;
         # a job that exhausts its attempts is discarded, visibly) instead of finishing as if the automation ran.
-        Samen.Observability.Failure.report(:run_worker_load_workflow, nil, reason)
+        Samen.Observability.Failure.report(:run_worker_load_workflow, args["org_id"], reason)
         {:error, :unavailable}
     end
   end
