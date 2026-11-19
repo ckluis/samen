@@ -1,0 +1,39 @@
+# SABOTAGE: S15: the read-scope lint regresses to counting any Ash.Query call mentioning org_id as a pin 
+#   (select-forcing decoy) AND drops the demo/driftwood/pawchart trees from the sweep.
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/authz_read_scope_lint_test.exs
+# MUST_FAIL: the decoy is FLAGGED
+# MUST_FAIL: vertical trees
+# MUST_FAIL: pinned or sanctioned
+diff --git a/samen_core/lib/samen/lint/read_scope.ex b/samen_core/lib/samen/lint/read_scope.ex
+index 2a3d0fa2..78580173 100644
+--- a/samen_core/lib/samen/lint/read_scope.ex
++++ b/samen_core/lib/samen/lint/read_scope.ex
+@@ -407,8 +407,7 @@ defmodule Samen.Lint.ReadScope do
+   # CONSTRAINS the row set; everything else needs the `# authz-scope:` sanction marker.
+   defp read_narrowed?(ctx, pinned_vars) do
+     walk_any?(ctx, fn
+-      {{:., _, [{:__aliases__, _, [_ | _] = segs}, fun]}, _, args}
+-      when fun in @narrowing_funs and is_list(args) ->
++      {{:., _, [{:__aliases__, _, [_ | _] = segs}, _fun]}, _, args} ->
+         List.last(segs) == :Query and args_reference_pin?(args)
+ 
+       {fun, _, args} when fun in @narrowing_funs and is_list(args) ->
+diff --git a/samen_web/lib/samen/web/authz/read_scope_lint.ex b/samen_web/lib/samen/web/authz/read_scope_lint.ex
+index 89db68db..a9828cc2 100644
+--- a/samen_web/lib/samen/web/authz/read_scope_lint.ex
++++ b/samen_web/lib/samen/web/authz/read_scope_lint.ex
+@@ -34,10 +34,7 @@ defmodule Samen.Web.Authz.ReadScopeLint do
+ 
+     [
+       Path.join(repo_root, "samen_core/lib/**/*.ex"),
+-      Path.join(repo_root, "samen_web/lib/**/*.ex"),
+-      Path.join(repo_root, "demo/lib/**/*.ex"),
+-      Path.join(repo_root, "driftwood/lib/**/*.ex"),
+-      Path.join(repo_root, "pawchart/lib/**/*.ex")
++      Path.join(repo_root, "samen_web/lib/**/*.ex")
+     ]
+     |> Enum.flat_map(&Path.wildcard/1)
+     |> Enum.reject(fn f -> Path.basename(f) in @skip_basenames end)

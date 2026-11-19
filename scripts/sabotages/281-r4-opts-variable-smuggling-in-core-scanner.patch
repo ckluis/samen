@@ -1,0 +1,20 @@
+# SABOTAGE: Phase-4 addendum R4: read detection stops following authorize?: false through a locally-bound 
+#   opts variable, so a smuggled read goes unseen.
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/authz_read_scope_lint_test.exs
+# MUST_FAIL: opts smuggle
+diff --git a/samen_core/lib/samen/lint/read_scope.ex b/samen_core/lib/samen/lint/read_scope.ex
+index 2a3d0fa2..02f89324 100644
+--- a/samen_core/lib/samen/lint/read_scope.ex
++++ b/samen_core/lib/samen/lint/read_scope.ex
+@@ -360,7 +360,7 @@ defmodule Samen.Lint.ReadScope do
+   defp authorize_off?(args, authz_vars) do
+     walk_any?(args, fn
+       {:authorize?, false} -> true
+-      {name, _, ctx} when is_atom(name) and is_atom(ctx) -> MapSet.member?(authz_vars, name)
++      {_n, _, ctx} when is_atom(ctx) -> false
+       _ -> false
+     end)
+   end

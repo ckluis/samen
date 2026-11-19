@@ -1,0 +1,20 @@
+# SABOTAGE: Phase-4 addendum R5: the read-verb matcher regresses to a literal Ash module segment, so an 
+#   aliased or wrapper read verb is no longer swept.
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/authz_read_scope_lint_test.exs
+# MUST_FAIL: wrapper bypass
+diff --git a/samen_core/lib/samen/lint/read_scope.ex b/samen_core/lib/samen/lint/read_scope.ex
+index 2a3d0fa2..8caa6a89 100644
+--- a/samen_core/lib/samen/lint/read_scope.ex
++++ b/samen_core/lib/samen/lint/read_scope.ex
+@@ -334,7 +334,7 @@ defmodule Samen.Lint.ReadScope do
+   # `{read_fun, line}` when `node` is a governed read CALL, else nil. Matches a
+   # `Module.<read_fun>(args)` call (any module segment — R5) whose args carry
+   # `authorize?: false` inline/spread or via a variable in `authz_vars` (R4).
+-  defp read_call({{:., _, [{:__aliases__, _, [_ | _]}, fun]}, meta, args}, authz_vars)
++  defp read_call({{:., _, [{:__aliases__, _, [:Ash]}, fun]}, meta, args}, authz_vars)
+        when fun in @read_funs and is_list(args) do
+     if authorize_off?(args, authz_vars), do: {fun, meta[:line]}, else: nil
+   end
