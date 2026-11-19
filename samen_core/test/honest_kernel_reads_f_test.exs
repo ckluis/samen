@@ -8,6 +8,9 @@ defmodule Samen.HonestKernelReadsFTest do
 
   import ExUnit.CaptureLog
 
+  require Record
+  Record.defrecordp(:span_ctx, Record.extract(:span_ctx, from_lib: "opentelemetry_api/include/opentelemetry.hrl"))
+
   alias Samen.AI.Agent.Breaker
   alias Samen.Automation.RunWorker
   alias Samen.Replay.{Buffer, Monitor}
@@ -253,6 +256,77 @@ defmodule Samen.HonestKernelReadsFTest do
       log = capture_log(fn -> assert :ok = Samen.Replay.Capture.handle_event(event, %{}, bad, nil) end)
 
       assert log =~ "write=replay_capture_event"
+      refute log =~ @marker
+    end
+  end
+
+  describe "observability telemetry handlers: a handler failure is total AND on record" do
+    alias Samen.Observability.{JobSpans, LiveTelemetry}
+
+    test "RED: a job span that cannot be started or ended is reported by name (write), never raised, never with the job data; a well-formed job is silent (control)" do
+      good = %{id: System.unique_integer([:positive]), worker: "W", queue: "q", attempt: 1, meta: %{}}
+      bad = "not a job #{@marker}"
+
+      # POSITIVE CONTROL: a well-formed job starts and ends its span without a report
+      log =
+        capture_log(fn ->
+          assert :ok = JobSpans.handle_event([:oban, :job, :start], %{}, %{job: good}, %{})
+          assert :ok = JobSpans.handle_event([:oban, :job, :stop], %{}, %{job: good}, %{})
+        end)
+
+      refute log =~ "job_span_"
+
+      assert_raise BadMapError, ~r/#{@marker}/, fn -> apply(Map, :get, [bad, :meta]) end
+
+      log =
+        capture_log(fn ->
+          assert :ok = JobSpans.handle_event([:oban, :job, :start], %{}, %{job: bad}, %{})
+          assert :ok = JobSpans.handle_event([:oban, :job, :stop], %{}, %{job: bad}, %{})
+        end)
+
+      assert log =~ "write=job_span_start"
+      assert log =~ "write=job_span_end"
+      refute log =~ @marker
+    end
+
+    test "RED: a wide event that cannot be built is reported by name (write), never raised, never with the metadata; a well-formed one is silent (control)" do
+      event = [:phoenix, :live_view, :mount, :stop]
+
+      log = capture_log(fn -> assert :ok = LiveTelemetry.handle_event(event, %{duration: 1}, %{socket: %{view: __MODULE__, assigns: %{}}}, %{}) end)
+      refute log =~ "live_telemetry_event"
+
+      bad = "not metadata #{@marker}"
+      assert_raise BadMapError, ~r/#{@marker}/, fn -> apply(Map, :get, [bad, :socket]) end
+
+      log = capture_log(fn -> assert :ok = LiveTelemetry.handle_event(event, %{}, bad, %{}) end)
+
+      assert log =~ "write=live_telemetry_event"
+      refute log =~ @marker
+    end
+
+    test "RED: an actor pseudonym that cannot be computed and a current span that cannot be read are each reported by name; the event still goes out" do
+      event = [:phoenix, :live_view, :mount, :stop]
+      meta = %{socket: %{view: __MODULE__, assigns: %{samen_tenant_principal: "u-#{System.unique_integer([:positive])}"}}}
+      kms = :"Elixir.Kms#{@marker}"
+
+      log = capture_log(fn -> assert :ok = LiveTelemetry.handle_event(event, %{}, meta, %{kms: kms}) end)
+      assert log =~ "read=live_telemetry_pseudonym"
+      refute log =~ @marker
+
+      assert_raise Protocol.UndefinedError, ~r/#{@marker}/, fn -> to_string({:damaged, @marker}) end
+
+      log =
+        capture_log(fn ->
+          Task.async(fn ->
+            :otel_tracer.set_current_span(
+              span_ctx(trace_id: 1, hex_trace_id: {:damaged, @marker}, span_id: 1, hex_span_id: "0000000000000001")
+            )
+            assert :ok = LiveTelemetry.handle_event(event, %{}, %{socket: %{view: __MODULE__, assigns: %{}}}, %{})
+          end)
+          |> Task.await()
+        end)
+
+      assert log =~ "read=live_telemetry_trace"
       refute log =~ @marker
     end
   end
