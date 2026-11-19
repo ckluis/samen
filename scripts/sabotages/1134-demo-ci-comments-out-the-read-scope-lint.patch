@@ -1,0 +1,20 @@
+# SABOTAGE: demo/ci.sh keeps the read-scope lint line only as a comment, so the gate no longer runs it 
+#   though the text is still there.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/read_scope_verify_test.exs
+# MUST_FAIL: every host's lib/ passes, and its ci.sh pins EXACTLY the measured sanction count
+diff --git a/demo/ci.sh b/demo/ci.sh
+index 08cb1bfc..9977f632 100755
+--- a/demo/ci.sh
++++ b/demo/ci.sh
+@@ -180,7 +180,7 @@ echo "    PASSED"
+ # 14a. read_scope (T132/S15): no `authorize?: false` read in this app's lib/ bypasses org scoping. The
+ #      ceiling is this app's exact `# authz-scope:` count; a new sanctioned read is a conscious change to it.
+ echo "--- step 14a/18: mix samen.verify.read_scope (read-scope lint)"
+-mix samen.verify.read_scope --max-sanctioned 1
++# mix samen.verify.read_scope --max-sanctioned 1
+ echo "    PASSED"
+ 
+ # 14b. ADR-046 §6 erasure_completeness (Phase-3 CAPSTONE): DISCOVER every out-of-DEK-envelope
