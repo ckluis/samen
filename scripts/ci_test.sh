@@ -84,6 +84,9 @@
 #          own mix.exs reads, and config.exs under a runtime.exs override (runtime.exs alone does not change it); a seed
 #          cut short by an eviction leaves nothing seeded.
 #
+#   MUTLINT  scripts/mutation_lint.sh's MUTATION_OWNS scan reads every file git knows whatever its name (a quote or space in a
+#          path once truncated a `find | xargs` scan silently), ignores gitignored scratch, and fails closed on a file it cannot read.
+#
 #   ESCAPE   the self-test can never write to the repository it is testing (it once did: a failed `cd "$R"` let the fixture's
 #          `git add -A && git commit && git update-ref refs/remotes/origin/main` run in the REAL repo). An unusable temp root
 #          exits 1 before anything runs; `git` is shadowed (scripts/fixture_guard.sh) and refuses any command whose repo
@@ -2116,7 +2119,42 @@ SH
   has "$T/esc.f" 'staged new: .*scripts/__pycache__' "ESCAPE: ... naming the staged path"
 }
 
-ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS LOCALPATHS GENPROBE GENHEX GENHEXRO NARROW RECHUNK COSTW TIMEOUT SELTMO GENDEPS ESCAPE)
+# MUTLINT: scripts/mutation_lint.sh's MUTATION_OWNS scan reads every file git knows, whatever its NAME, and FAILS CLOSED.
+# (A `find | xargs` over a path with a quote aborted, `2>/dev/null` hid it, and the lint PASSED having read nothing after
+# that point.) The fixture is a throwaway repo holding a copy of the lint, an oddly named test file that sorts first,
+# and a test file declaring a MUTATION_OWNS for a file that does not exist; a gitignored scratch copy must not count.
+case_MUTLINT() {
+  local R="$T/mutlint"
+  rm -rf "$R"; mkdir -p "$R/scripts" "$R/app/test" "$R/app/tmp" || { echo "ci_test: MUTLINT: cannot build the fixture" >&2; exit 1; }
+  cp "$ROOT/scripts/mutation_lint.sh" "$R/scripts/mutation_lint.sh"
+  : > "$R/targets.tsv"
+  (
+    set -e
+    fixture_cd "$R"
+    git init -q -b main . && git config user.email t@t && git config user.name t
+    printf 'tmp/\n' > app/.gitignore
+    printf '# fine\n' > "app/test/a b's (x)_test.exs"
+    git add -A && git commit -qm init
+  ) || { echo "ci_test: MUTLINT: building the fixture repo failed" >&2; exit 1; }
+  lint() { ( cd "$R" && bash scripts/mutation_lint.sh --targets "$R/targets.tsv" > "$1" 2>&1 ); }
+  lint "$T/ml.clean"
+  hasnt "$T/ml.clean" 'MUTATION_OWNS|scan (failed|cannot)' "MUTLINT: positive control — an oddly named file and no declaration: the owns scan refuses nothing"
+  printf '# MUTATION_OWNS: app/lib/no_such.ex\n' > "$R/app/test/zz_bad_test.exs"
+  lint "$T/ml.bad"
+  has "$T/ml.bad" 'MUTATION_OWNS names a file that does not exist: app/lib/no_such.ex' "MUTLINT: a bad declaration AFTER an oddly named file is still refused (the scan is not truncated)"
+  printf '# MUTATION_OWNS: app/lib/no_such.ex\n' > "$R/app/tmp/scratch_test.exs"
+  rm -f "$R/app/test/zz_bad_test.exs"
+  lint "$T/ml.ignored"
+  hasnt "$T/ml.ignored" 'MUTATION_OWNS' "MUTLINT: a gitignored scratch file is not part of the tree being linted"
+  if [[ "$(id -u)" != 0 ]]; then
+    chmod 000 "$R/app/test/a b's (x)_test.exs"
+    lint "$T/ml.unread"
+    has "$T/ml.unread" 'the MUTATION_OWNS scan failed' "MUTLINT: a listed file that cannot be read refuses the lint (fail closed)"
+    chmod 644 "$R/app/test/a b's (x)_test.exs"
+  fi
+}
+
+ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS LOCALPATHS GENPROBE GENHEX GENHEXRO NARROW RECHUNK COSTW TIMEOUT SELTMO GENDEPS ESCAPE MUTLINT)
 CASES=("$@")
 [[ ${#CASES[@]} -gt 0 ]] || CASES=("${ALL[@]}")
 for c in "${CASES[@]}"; do

@@ -286,3 +286,11 @@ defmodule Samen.Meta.CiDriverGuardTest.SelfTestEscape do
     Samen.Meta.CiDriverGuard.run_case!("ESCAPE")
   end
 end
+
+defmodule Samen.Meta.CiDriverGuardTest.MutationLintScan do
+  use ExUnit.Case, async: true
+
+  test "MUTLINT the mutation lint's MUTATION_OWNS scan survives odd file names, ignores scratch and fails closed" do
+    Samen.Meta.CiDriverGuard.run_case!("MUTLINT")
+  end
+end
