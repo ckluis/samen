@@ -248,6 +248,29 @@ defmodule Samen.HonestKernelReadsFTest do
       assert log =~ "read=replay_buffer"
     end
 
+    test "RED: a take that fails releases the session slot and its frames; the next session can open" do
+      with_buffer!()
+      cfg = %{max_sessions: 1, max_frames: 10, max_bytes: 10_000}
+
+      # positive control: a healthy take releases the slot (the cap of one admits the next session)
+      assert {:ok, ok_id} = Buffer.open(self(), %{view: "V"}, cfg)
+      assert :ok = Buffer.record(self(), :render, %{html: "x"})
+      assert {:ok, _meta, [_frame], _counters} = Buffer.take(ok_id)
+      assert :ets.lookup(Buffer.table(), :sessions) == [{:sessions, 0}]
+
+      Buffer.stop(self())
+      assert {:ok, id} = Buffer.open(self(), %{view: "V"}, cfg)
+      assert :ok = Buffer.record(self(), :render, %{html: "y"})
+      assert :ok = Buffer.record(self(), :render, %{html: "z"})
+      corrupt_counters!(id)
+
+      capture_log(fn -> assert Buffer.take(id) == {:error, :unavailable} end)
+
+      assert :ets.lookup(Buffer.table(), :sessions) == [{:sessions, 0}], "the failed take leaked the session slot"
+      assert :ets.match_object(Buffer.table(), {{:frame, id, :_}, :_}) == [], "the failed take orphaned the session's frames"
+      assert {:ok, _next} = Buffer.open(self(), %{view: "V"}, cfg)
+    end
+
     test "RED: a damaged process row is reported by name for session/1, accepting?/1 and record/4, each still total" do
       with_buffer!()
       :ets.insert(Buffer.table(), {{:proc, self()}, "process row damaged #{@marker}"})

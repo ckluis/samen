@@ -169,8 +169,12 @@ defmodule Samen.Replay.Buffer do
     guarded(:read, :error, {:error, :unavailable}, fn ->
       case :ets.take(@table, {:meta, id}) do
         [{_, pid, meta}] ->
+          # The meta row IS the session's claim on a slot, and taking it ends the session. So the slot goes back, the
+          # process row and the frames are removed, BEFORE anything that can fail (a damaged counter row, a row that
+          # is not a frame): a take that raises part-way must not leak the slot or orphan the frames for the node's
+          # lifetime.
+          :ets.update_counter(@table, :sessions, {2, -1})
           :ets.delete(@table, {:proc, pid})
-          [{_, seq, bytes, interactions, truncated}] = :ets.take(@table, {:ctr, id})
 
           frames =
             @table
@@ -179,9 +183,9 @@ defmodule Samen.Replay.Buffer do
               :ets.delete(@table, key)
               frame
             end)
-            |> Enum.sort_by(&elem(&1, 0))
 
-          :ets.update_counter(@table, :sessions, {2, -1})
+          [{_, seq, bytes, interactions, truncated}] = :ets.take(@table, {:ctr, id})
+          frames = Enum.sort_by(frames, &elem(&1, 0))
 
           {:ok, meta, frames,
            %{
