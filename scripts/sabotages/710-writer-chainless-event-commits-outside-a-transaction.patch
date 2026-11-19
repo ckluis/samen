@@ -6,12 +6,12 @@
 # TEST_FILES: test/audit_writer_callers_test.exs
 # MUST_FAIL: a chain append that fails AFTER the event insert leaves no chainless aud_event
 diff --git a/samen_core/lib/samen/audit_chain/writer.ex b/samen_core/lib/samen/audit_chain/writer.ex
-index 9b55ceb4..747c1cae 100644
+index 3318643..66fbb81 100644
 --- a/samen_core/lib/samen/audit_chain/writer.ex
 +++ b/samen_core/lib/samen/audit_chain/writer.ex
 @@ -79,15 +79,7 @@ defmodule Samen.AuditChain.Writer do
        if repo.in_transaction?() do
-         in_savepoint(repo, fn -> do_write(repo, attrs) end)
+         in_savepoint(repo, get(attrs, :org_id), fn -> do_write(repo, attrs) end)
        else
 -        case repo.transaction(fn ->
 -               case do_write(repo, attrs) do

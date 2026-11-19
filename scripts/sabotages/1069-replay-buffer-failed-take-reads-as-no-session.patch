@@ -6,7 +6,7 @@
 # TEST_FILES: test/honest_kernel_reads_f_test.exs
 # MUST_FAIL: RED: a session whose counters are damaged is {:error, :unavailable}
 diff --git a/samen_core/lib/samen/replay/buffer.ex b/samen_core/lib/samen/replay/buffer.ex
-index f0907df4..9525297c 100644
+index 316320a..ab71e39 100644
 --- a/samen_core/lib/samen/replay/buffer.ex
 +++ b/samen_core/lib/samen/replay/buffer.ex
 @@ -166,7 +166,7 @@ defmodule Samen.Replay.Buffer do
@@ -17,4 +17,4 @@ index f0907df4..9525297c 100644
 +    guarded(:read, :error, :error, fn ->
        case :ets.take(@table, {:meta, id}) do
          [{_, pid, meta}] ->
-           :ets.delete(@table, {:proc, pid})
+           # The meta row IS the session's claim on a slot, and taking it ends the session. So the slot goes back, the
