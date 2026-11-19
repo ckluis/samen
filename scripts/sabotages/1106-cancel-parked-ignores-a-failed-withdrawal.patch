@@ -6,15 +6,18 @@
 # TEST_FILES: test/ai/agent_transcript_write_test.exs
 # MUST_FAIL: a withdrawal that FAILS rolls the cancel back and answers :unavailable
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
-index 860245e4..95d10790 100644
+index 84f3e6fa..1bcb327b 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -3263,7 +3263,7 @@ defmodule Samen.AI.Agent do
+@@ -3312,9 +3312,8 @@ defmodule Samen.AI.Agent do
+   end
  
-     result =
-       repo.transaction(fn ->
--        if withdrawal_failed?(withdraw_pending_approval(run, state)), do: repo.rollback(:approval_withdrawal_failed)
-+        _ = withdraw_pending_approval(run, state)
+   defp withdraw_for_cancel(%Run{} = locked) do
+-    if withdrawal_failed?(withdraw_pending_approval(locked, transcript_state(locked))),
+-      do: {:error, :approval_withdrawal_failed},
+-      else: :ok
++    _ = withdraw_pending_approval(locked, transcript_state(locked))
++    :ok
+   end
  
-         run
-         |> Ash.Changeset.for_update(:request_cancel, %{})
+   defp run_update(%Run{} = run, action) do
