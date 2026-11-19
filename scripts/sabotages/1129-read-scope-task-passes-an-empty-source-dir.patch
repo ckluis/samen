@@ -13,7 +13,7 @@ index 89a2ed5e..279f9be6 100644
            not File.dir?(dir) ->
              {files, viol ++ ["#{dir}: source dir does not exist — nothing was inspected"]}
  
--          found == [] ->
+-          found == [] and unlistable == [] ->
 +          false ->
              {files, viol ++ ["#{dir}: no .ex file found — nothing was inspected"]}
  
