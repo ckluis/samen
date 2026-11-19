@@ -80,15 +80,20 @@ defmodule <%= module %>Web.Api.KeyAuthPlug do
 
   defp lookup_key(raw) do
     digest = digest(raw)
+    now = DateTime.utc_now()
 
     # Look up the api_key row by digest, unauthorized (this IS the auth step — the
     # key row lookup cannot itself require an actor). A revoked key (revoked_at set)
-    # is rejected.
+    # is rejected, and so is an EXPIRED one (F3.4 deny-on-read: expires_at <= now is
+    # never resolved, so no actor is built; a row with no expires_at is a legacy,
+    # non-expiring key).
     <%= module %>.Operator.ApiKey
     |> Ash.Query.filter(token_digest == ^digest)
     |> Ash.Query.filter(is_nil(revoked_at))
-    # authz-scope: API-key AUTH-STEP lookup keyed on the unique token digest — no actor/org
-    # exists until this row resolves (revoked filtered out; unmatched digest => :error, fail closed)
+    |> Ash.Query.filter(is_nil(expires_at) or expires_at > ^now)
+    # authz-scope: API-key AUTH-STEP lookup keyed on the SHA-256 digest of a server-minted random token — no
+    # actor/org exists until this row resolves (revoked/expired filtered out; unmatched digest => :error, fail
+    # closed; a duplicate digest makes read_one error => :unavailable, also fail closed)
     |> Ash.read_one(authorize?: false)
     |> case do
       {:ok, nil} -> :error

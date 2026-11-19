@@ -168,9 +168,23 @@ defmodule Samen.Gen.TemplatesParityTest do
       assert violations == [],
              "#{set}: the generated lib/ FAILS its own read-scope lint: #{inspect(violations)}"
 
-      assert ci =~ "mix samen.verify.read_scope --max-sanctioned #{sanctioned}\n",
+      # a WHOLE, uncommented, unindented command line (a `# mix …` comment or an `|| true` tail must not satisfy it)
+      assert ci =~ ~r/^mix samen\.verify\.read_scope --max-sanctioned #{sanctioned}$/m,
              "#{set}/ci.sh must run the read-scope lint pinned at the measured #{sanctioned} sanction(s) — " <>
                "an `authorize?: false` read added to a generated app would otherwise bypass org scoping unnoticed"
+    end
+  end
+
+  # F3.4 deny-on-read: the generated api_key table carries `expires_at`, so the generated auth-step lookup must filter an
+  # expired key out at the query (the demo host does). Without it an expired key kept authenticating: its actor map
+  # carries no expiry, so `Samen.Scope.ApiKey.authorized?` could not refuse it either.
+  test "every generated API key auth plug filters expired keys out of the lookup (F3.4 deny-on-read)" do
+    plugs = for {set, files} <- render_all(), {path, src} <- files, String.ends_with?(path, "api/key_auth_plug.ex"), do: {set, src}
+    assert plugs != [], "no generated app emitted an api/key_auth_plug.ex — the expiry guard has nothing to check"
+
+    for {set, src} <- plugs do
+      assert src =~ ~r/^\s*\|> Ash\.Query\.filter\(is_nil\(expires_at\) or expires_at > \^now\)$/m,
+             "#{set}: the generated API-key lookup does not filter expired keys — an expired key would authenticate"
     end
   end
 
