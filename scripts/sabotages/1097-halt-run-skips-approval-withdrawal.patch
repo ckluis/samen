@@ -1,0 +1,19 @@
+# SABOTAGE: a hook halt finalizes the proposed turn row without withdrawing the approval it owns
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_transcript_write_test.exs
+# MUST_FAIL: RED: a failed park followed by a hook halt at the retry leaves no pending approval on the failed run
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index b99a6c20..ec64b098 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -2043,7 +2043,7 @@ defmodule Samen.AI.Agent do
+       repo!().transaction(fn ->
+         # a reused turn row can still be `:proposed` behind a pending approval: withdraw BEFORE it is finalized
+         # (the withdrawal finds the approval through the `:proposed` row)
+-        withdraw_approvals!(run)
++        :ok
+ 
+         if turn_row do
+           finalize_turn!(turn_row, %{
