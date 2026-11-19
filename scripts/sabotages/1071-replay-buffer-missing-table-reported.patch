@@ -5,14 +5,14 @@
 # TEST_FILES: test/honest_kernel_reads_f_test.exs
 # MUST_FAIL: control: with no buffer table every function answers its quiet default
 diff --git a/samen_core/lib/samen/replay/buffer.ex b/samen_core/lib/samen/replay/buffer.ex
-index f0907df4..c40c33b1 100644
+index 1b79a92b..54e76523 100644
 --- a/samen_core/lib/samen/replay/buffer.ex
 +++ b/samen_core/lib/samen/replay/buffer.ex
-@@ -212,7 +212,7 @@ defmodule Samen.Replay.Buffer do
+@@ -215,7 +215,7 @@ defmodule Samen.Replay.Buffer do
    defp guarded(kind, missing, failed, fun) do
      fun.()
    rescue
--    ArgumentError -> missing
+-    e in ArgumentError -> if table_exists?(), do: report(kind, e, failed), else: missing
 +    e in ArgumentError -> report(kind, e, missing)
      e -> report(kind, e, failed)
    end
