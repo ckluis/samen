@@ -1214,6 +1214,17 @@ defmodule Samen.AI.Agent do
       {:error, kind} when is_atom(kind) ->
         {:error, kind, terminal_logged!(run, kind)}
     end
+  rescue
+    _e in Samen.AI.Agent.TranscriptUnavailable ->
+      # The carried views could not be read at transcript-WRITE time, so the commit was aborted (and its transaction
+      # rolled back): the stored transcript is untouched. The turn cannot be committed honestly, and a retry would
+      # call the provider again against the same unreadable vault, so the run ends fail-honest exactly as it does when
+      # the same reveal fails at the top of a turn. The still-`:proposed` turn row is closed first (never left dangling).
+      with {:ok, turn_row} <- pending_turn(run) do
+        finalize_turn!(turn_row, %{status: :failed, error_kind: "transcript_unavailable"})
+      end
+
+      {:error, :transcript_unavailable, terminal_logged!(reload!(run), :transcript_unavailable)}
   end
 
   # ------------------------------------------------------------------------------------
@@ -2746,6 +2757,10 @@ defmodule Samen.AI.Agent do
           {:error, {:tool_failed, safe_error_kind(kind)}}
       end
     end
+  rescue
+    # The transcript write could not carry its prior views forward (the vault read failed): the commit is refused, and
+    # the `{:error, _}` rolls the whole decision back like any failed execution (the approval stays pending).
+    _e in Samen.AI.Agent.TranscriptUnavailable -> {:error, :transcript_unavailable}
   end
 
   @doc """
@@ -2792,6 +2807,10 @@ defmodule Samen.AI.Agent do
       {:ok, _decided_or_unparked_run} -> :ok
       {:error, _read_failed} -> {:error, :unavailable}
     end
+  rescue
+    # The transcript line could not be written (the vault read of the carried views failed): the rejection rolls back
+    # like any unreadable run, and the approval stays pending and can be rejected again.
+    _e in Samen.AI.Agent.TranscriptUnavailable -> {:error, :unavailable}
   end
 
   @doc """
@@ -3794,7 +3813,7 @@ defmodule Samen.AI.Agent do
   defp carried_views(nil), do: empty_views()
 
   defp carried_views(%Run{transcript: %Samen.Masked{} = masked} = run),
-    do: reveal_views(masked, run.id)
+    do: reveal_views(masked, run.id, run.org_id)
 
   # A vault-routed attribute is NOT handed back on the record an `:advance` writes — the
   # plaintext must never ride home on the struct — so a run THIS process just wrote
@@ -3802,8 +3821,10 @@ defmodule Samen.AI.Agent do
   # dropping the carry would erase the fold ledger and the append-only `ui_view` on the
   # very next write, which is exactly the deletion §4 forbids. The common path (a run
   # read at the top of a turn) is already `%Samen.Masked{}` and never reaches here.
-  defp carried_views(%Run{id: id}) when is_binary(id) do
+  defp carried_views(%Run{id: id} = run) when is_binary(id) do
     require Ash.Query
+
+    org_id = run.org_id
 
     Run
     |> Ash.Query.filter(id == ^id)
@@ -3811,17 +3832,29 @@ defmodule Samen.AI.Agent do
     |> Ash.Query.limit(1)
     |> Ash.read!(authorize?: false)
     |> case do
-      [%Run{transcript: %Samen.Masked{} = masked}] -> reveal_views(masked, id)
+      [%Run{transcript: %Samen.Masked{} = masked}] -> reveal_views(masked, id, org_id)
       _ -> empty_views()
     end
   end
 
   defp carried_views(_run), do: empty_views()
 
-  defp reveal_views(masked, subject_id) do
+  # A WRITE carries the prior views forward, so a reveal that FAILED must never read as "no prior views": the write would
+  # then drop `ui_view` and the fold ledger and attribute the whole history to the current turn, in an unrecoverable
+  # overwrite. Only a subject that is genuinely gone (shredded, or its vault row erased) has no views to carry; any other
+  # failure is reported by name (the bounded reason or the exception module, never a value or a token) and ABORTS the
+  # write: the stored transcript stays as it was.
+  defp reveal_views(masked, subject_id, org_id) do
     case Samen.Vault.reveal(masked, repo!(), subject_id: subject_id) do
-      {:ok, json} -> decode_views(json)
-      {:error, _reason} -> empty_views()
+      {:ok, json} ->
+        decode_views(json)
+
+      {:error, reason} when reason in [:shredded, :not_found] ->
+        empty_views()
+
+      {:error, reason} ->
+        Samen.Observability.Failure.report(:agent_carried_views, org_id, reason)
+        raise Samen.AI.Agent.TranscriptUnavailable
     end
   end
 
