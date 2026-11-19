@@ -248,6 +248,18 @@ defmodule Samen.AI.AgentTranscriptWriteTest do
       {scope, result}
     end
 
+    # What a healthy run's stored transcript holds after folds: the append-only ui_view, the finalized fold ledger and
+    # boundaries that reconcile with the model's view. A write that dropped the carried views fails every line of it.
+    defp assert_views_carried!(blob) do
+      assert [_ | _] = folds = blob["folds"]
+      assert Enum.all?(folds, &(&1["status"] in ["done", "proposed"]))
+      assert Enum.any?(folds, &(&1["status"] == "done")), "a committed turn finalizes its fold"
+      assert length(blob["ui_view"]) > length(blob["llm_view"]), "ui_view keeps what a fold removed from the model's view"
+      assert Enum.any?(blob["ui_view"], &String.contains?(&1, "were folded out of the model's working set"))
+      assert Enum.sum(blob["turn_lens"]) == length(blob["llm_view"])
+      assert length(blob["turn_shapes"]) == length(blob["turn_lens"])
+    end
+
     test "control: a healthy folding run keeps ui_view, folds and boundaries and reveals once per turn" do
       {scope, result} = folded_run!({:continue, "three"})
       assert {:ok, %{turns: turns}} = result
@@ -256,14 +268,7 @@ defmodule Samen.AI.AgentTranscriptWriteTest do
       [run] = runs_of(scope)
       assert F3FlakyKms.unwraps(run.id) == length(turns_of(run)), "a turn reveals the transcript once, at its start"
 
-      blob = decoded!(run)
-      assert [_ | _] = folds = blob["folds"]
-      assert Enum.all?(folds, &(&1["status"] in ["done", "proposed"]))
-      assert Enum.any?(folds, &(&1["status"] == "done")), "a committed turn finalizes its fold"
-      assert length(blob["ui_view"]) > length(blob["llm_view"]), "ui_view keeps what a fold removed from the model's view"
-      assert Enum.any?(blob["ui_view"], &String.contains?(&1, "were folded out of the model's working set"))
-      assert Enum.sum(blob["turn_lens"]) == length(blob["llm_view"])
-      assert length(blob["turn_shapes"]) == length(blob["turn_lens"])
+      assert_views_carried!(decoded!(run))
     end
 
     test "RED: an unreadable transcript mid-turn changes nothing: the turn commits from the views it revealed" do
@@ -293,6 +298,7 @@ defmodule Samen.AI.AgentTranscriptWriteTest do
 
       # ... and it did not matter: the stored transcript is byte-for-byte what the undamaged control run stored
       assert decoded!(run) == control_blob
+      assert_views_carried!(decoded!(run))
       assert is_binary(original_ciphertext) and original_ciphertext != <<0, 1, 2, 3>>
       assert token != run.transcript.token or ciphertext_of(token) != <<0, 1, 2, 3>>
     end

@@ -1,0 +1,31 @@
+# SABOTAGE: an approved write reveals the vault a second time, after the host tool already ran
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_transcript_write_test.exs
+# MUST_FAIL: RED: an approve reads the vault once
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 049a1655..92be41d3 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -3102,7 +3102,7 @@ defmodule Samen.AI.Agent do
+       # is a UXD-18 checkpoint 2 and finalizes any `:proposed` fold entry with it.
+       transcript:
+         encode_transcript_finalizing(
+-          views,
++          fresh_views!(run, views),
+           goal,
+           lines ++ new_lines,
+           :none,
+@@ -3668,6 +3668,11 @@ defmodule Samen.AI.Agent do
+     {:error, :transcript_unavailable}
+   end
+ 
++  defp fresh_views!(run, _views) do
++    {:ok, {_goal, _lines, _pending, fresh}} = transcript_state(reload!(run))
++    fresh
++  end
++
+   # The history, the pending proposal AND the carried views, all decoded from ONE reveal: a transcript write that
+   # follows this read appends to exactly the blob it read, and never reveals the vault a second time (a second reveal
+   # has side effects between the two: an opened approval, an executed tool, a billed provider call).

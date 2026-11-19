@@ -1,0 +1,20 @@
+# SABOTAGE: a key the KMS reports :absent (no key for the subject) is reported as a read failure instead of 
+#   the quiet end of an erased run
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_transcript_write_test.exs
+# MUST_FAIL: a key the KMS reports :absent is gone too
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 049a1655..8eff171f 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -3659,7 +3659,7 @@ defmodule Samen.AI.Agent do
+   # erasure: a subject whose key is genuinely gone (`:shredded`, `:absent` = the KMS adapters' answer for a missing
+   # key, `:not_found` = no vault row; the same set `Samen.Vault`'s erasure verifier treats as clean) is the expected end
+   # of an erased run and stays quiet; anything else (a KMS outage, a decrypt failure) is reported by name, value-free.
+-  @transcript_gone_reasons [:shredded, :absent, :not_found]
++  @transcript_gone_reasons [:shredded, :not_found]
+ 
+   defp reveal_failed(%Run{} = run, reason) do
+     if reason not in @transcript_gone_reasons,
