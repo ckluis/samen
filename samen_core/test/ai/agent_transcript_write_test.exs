@@ -546,16 +546,17 @@ defmodule Samen.AI.AgentTranscriptWriteTest do
       assert {:rejected, ^json_before} = parked_transcript(run)
     end
 
-    test "RED: an expiry reads the vault twice, never a third time, and its line joins the views read" do
+    test "RED: an expiry reads the vault once, never a second time, and its line joins the views read" do
       {s, run, target, approval} = propose!()
       before_blob = decoded!(hd(runs_of(s)))
 
-      # the third read of this expiry (the one the old second reveal made) is planned to fail: it must never happen
-      F3FlakyKms.fail_next!(run.id, 3)
+      # the second read of this expiry (the one the old second reveal made, after the approval was cancelled) is
+      # planned to fail: it must never happen
+      F3FlakyKms.fail_next!(run.id, 2)
       reads = F3FlakyKms.unwraps(run.id)
       assert {:ok, %{state: :expired}} = Agent.expire_parked(run.id)
-      assert F3FlakyKms.unwraps(run.id) - reads == 2, "one read to find the pending approval, one for the write"
-      assert F3FlakyKms.armed?(), "the failure planned at a third read was never reached"
+      assert F3FlakyKms.unwraps(run.id) - reads == 1, "one read serves the withdrawal and the write"
+      assert F3FlakyKms.armed?(), "the failure planned at a second read was never reached"
       F3FlakyKms.disarm!()
 
       assert pending_approvals(s) == []

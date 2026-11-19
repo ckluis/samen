@@ -2873,7 +2873,11 @@ defmodule Samen.AI.Agent do
     #    decidable in the same transaction that terminates the run. A withdrawal that FAILED (not one that was
     #    already unnecessary) must roll that transaction back: `:expired` with the approval still decidable is
     #    exactly the state this hook exists to make impossible (it used to be `_ =` / `rescue _ -> :ok`).
-    withdrawn = withdraw_pending_approval(run)
+    #    The transcript is revealed ONCE, here, and the same read serves the withdrawal and the line below: a second
+    #    reveal after the approval was cancelled and the turn row finalized could blip and leave the proposal's argument
+    #    values in the blob.
+    state = transcript_state(run)
+    withdrawn = withdraw_pending_approval(run, state)
 
     # 2. Finalize the still-:proposed turn row honestly (token-only, bounded kind).
     turn = pending_turn(run)
@@ -2892,7 +2896,7 @@ defmodule Samen.AI.Agent do
 
     # 3. One bounded transcript line (inside the DEK envelope), and the pending proposal
     #    CLEARED by the 2-arity encoder — an expired proposal is never re-bindable.
-    case transcript_state(run) do
+    case state do
       {:ok, {goal, lines, pending, views}} ->
         kind = pending_kind(pending) || "write"
 
@@ -3198,7 +3202,7 @@ defmodule Samen.AI.Agent do
 
   defp cancel_parked(%Run{} = run) do
     run = reload!(run)
-    _ = withdraw_pending_approval(run)
+    _ = withdraw_pending_approval(run, transcript_state(run))
 
     run =
       run
@@ -3214,8 +3218,8 @@ defmodule Samen.AI.Agent do
     {:ok, run}
   end
 
-  defp withdraw_pending_approval(%Run{} = run) do
-    case transcript_state(run) do
+  defp withdraw_pending_approval(%Run{} = run, state) do
+    case state do
       {:ok, {_goal, _lines, pending, _views}} ->
         with true <- is_map(pending),
              approval_id when is_binary(approval_id) <- Map.get(pending, "approval_id") do
