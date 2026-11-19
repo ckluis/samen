@@ -1,0 +1,19 @@
+# SABOTAGE: a replay buffer failure other than a missing table answers its default without a report
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_f_test.exs
+# MUST_FAIL: RED: a damaged process row is reported by name
+diff --git a/samen_core/lib/samen/replay/buffer.ex b/samen_core/lib/samen/replay/buffer.ex
+index f0907df4..01983311 100644
+--- a/samen_core/lib/samen/replay/buffer.ex
++++ b/samen_core/lib/samen/replay/buffer.ex
+@@ -213,7 +213,7 @@ defmodule Samen.Replay.Buffer do
+     fun.()
+   rescue
+     ArgumentError -> missing
+-    e -> report(kind, e, failed)
++    _ -> failed
+   end
+ 
+   defp report(:read, e, failed) do

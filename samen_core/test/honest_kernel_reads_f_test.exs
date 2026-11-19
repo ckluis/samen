@@ -10,6 +10,7 @@ defmodule Samen.HonestKernelReadsFTest do
 
   alias Samen.AI.Agent.Breaker
   alias Samen.Automation.RunWorker
+  alias Samen.Replay.{Buffer, Monitor}
   alias SamenCore.Support.AutomationFixture.Workflow
   alias SamenCore.TestRepo, as: Repo
 
@@ -143,6 +144,116 @@ defmodule Samen.HonestKernelReadsFTest do
 
       assert :ok = Samen.Automation.Breaker.check!(wf, run_module: SamenCore.Support.AutomationFixture.Run, repo: Repo)
       assert %DateTime{} = Ash.get!(Workflow, wf.id, authorize?: false).disabled_by_operator_at
+    end
+  end
+
+  describe "replay Buffer: a buffer that FAILED is not 'no replay'" do
+    @marker "Secret-7731"
+
+    # The buffer table, owned by a process of this test (the Monitor owns it in production).
+    defp with_buffer! do
+      {:ok, owner} = Agent.start(fn -> Buffer.create_table() end)
+      on_exit(fn -> if Process.alive?(owner), do: Agent.stop(owner) end)
+      :ok
+    end
+
+    defp open_session! do
+      assert {:ok, id} = Buffer.open(self(), %{org_id: Ash.UUID.generate(), view: "V"}, %{max_sessions: 10, max_frames: 10, max_bytes: 10_000})
+      id
+    end
+
+    # What a damaged counter row does to a real read of it: the MatchError message prints the row.
+    defp corrupt_counters!(id) do
+      :ets.insert(Buffer.table(), {{:ctr, id}, "counter damaged #{@marker}"})
+
+      msg =
+        try do
+          [{_, _, _, _, _}] = :ets.lookup(Buffer.table(), {:ctr, id})
+        rescue
+          e -> Exception.message(e)
+        end
+
+      assert msg =~ @marker, "the injected failure must carry the marker the report must not repeat"
+    end
+
+    test "control: with no buffer table every function answers its quiet default and reports nothing (capture is not running)" do
+      refute Buffer.table_exists?()
+
+      log =
+        capture_log(fn ->
+          assert Buffer.open(self(), %{}, %{max_sessions: 1, max_frames: 1, max_bytes: 1}) == :error
+          assert Buffer.session(self()) == :error
+          refute Buffer.accepting?(self())
+          assert Buffer.record(self(), :render, %{}) == :error
+          assert Buffer.stop(self()) == :ok
+          assert Buffer.take("nope") == :error
+          assert Buffer.sessions() == []
+        end)
+
+      refute log =~ "replay_buffer"
+    end
+
+    test "RED: a session whose counters are damaged is {:error, :unavailable} and reports; the monitor counts it :error, never :discarded" do
+      with_buffer!()
+
+      # POSITIVE CONTROLS through the same seam: an absent session is :error / :discarded; a healthy one is taken
+      assert Buffer.take("no-such-session") == :error
+      assert Monitor.finalize("no-such-session", :normal) == :discarded
+      healthy = open_session!()
+      assert {:ok, %{}, [], %{interactions: 0}} = Buffer.take(healthy)
+
+      id = open_session!()
+      corrupt_counters!(id)
+
+      log =
+        capture_log(fn ->
+          assert Buffer.take(id) == {:error, :unavailable}
+        end)
+
+      assert log =~ "read=replay_buffer"
+      refute log =~ @marker
+
+      # a second damaged session, through the monitor's finalize
+      Buffer.stop(self())
+      id2 = open_session!()
+      corrupt_counters!(id2)
+      log = capture_log(fn -> assert Monitor.finalize(id2, :normal) == :error end)
+      assert log =~ "read=replay_buffer"
+    end
+
+    test "RED: a damaged process row is reported by name for session/1, accepting?/1 and record/4, each still total" do
+      with_buffer!()
+      :ets.insert(Buffer.table(), {{:proc, self()}, "process row damaged #{@marker}"})
+
+      log =
+        capture_log(fn ->
+          assert Buffer.session(self()) == :error
+          refute Buffer.accepting?(self())
+          assert Buffer.record(self(), :render, %{}) == :error
+        end)
+
+      assert length(Regex.scan(~r/read failed read=replay_buffer /, log)) == 2
+      assert length(Regex.scan(~r/write failed write=replay_buffer /, log)) == 1
+      refute log =~ @marker
+    end
+
+    test "RED: a telemetry event whose capture raises stays total (:ok, the handler is not detached) and is reported by name, without the event data" do
+      with_buffer!()
+      event = [:phoenix, :live_view, :handle_event, :start]
+      bad = %{socket: "not a socket #{@marker}", event: "save", params: %{}}
+
+      # POSITIVE CONTROL: an unrecorded process pays one lookup and reports nothing
+      log = capture_log(fn -> assert :ok = Samen.Replay.Capture.handle_event(event, %{}, bad, nil) end)
+      refute log =~ "replay_capture_event"
+
+      open_session!()
+
+      assert_raise BadMapError, ~r/#{@marker}/, fn -> apply(Map, :get, [bad.socket, :view]) end
+
+      log = capture_log(fn -> assert :ok = Samen.Replay.Capture.handle_event(event, %{}, bad, nil) end)
+
+      assert log =~ "write=replay_capture_event"
+      refute log =~ @marker
     end
   end
 end

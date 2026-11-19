@@ -1,0 +1,20 @@
+# SABOTAGE: a replay buffer take that FAILED answers :error, which the monitor counts as a deliberate 
+#   discard
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_f_test.exs
+# MUST_FAIL: RED: a session whose counters are damaged is {:error, :unavailable}
+diff --git a/samen_core/lib/samen/replay/buffer.ex b/samen_core/lib/samen/replay/buffer.ex
+index f0907df4..9525297c 100644
+--- a/samen_core/lib/samen/replay/buffer.ex
++++ b/samen_core/lib/samen/replay/buffer.ex
+@@ -166,7 +166,7 @@ defmodule Samen.Replay.Buffer do
+   """
+   @spec take(String.t()) :: {:ok, map(), list(), map()} | :error | {:error, :unavailable}
+   def take(id) do
+-    guarded(:read, :error, {:error, :unavailable}, fn ->
++    guarded(:read, :error, :error, fn ->
+       case :ets.take(@table, {:meta, id}) do
+         [{_, pid, meta}] ->
+           :ets.delete(@table, {:proc, pid})
