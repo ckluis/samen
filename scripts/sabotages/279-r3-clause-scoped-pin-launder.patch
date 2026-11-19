@@ -1,7 +1,10 @@
-# SABOTAGE: Phase-4 addendum R3: the per-read pin check regresses to CLAUSE scope, so a genuine org filter 
-#   on one read launders a bare unpinned sibling read in the same clause.
-#
-# Flips the named test(s).
+# SABOTAGE: Phase-4 addendum R3 (clause-scoped PIN launder — "the most plausible future
+# laundering path"). The per-read pin check regresses to CLAUSE scope: `read_narrowed?`
+# is fed the whole clause `body` instead of the individual read's own value `ctx`, so a
+# genuine org filter on ONE read (`scoped = q |> filter(org_id==^o) |> Ash.read!(…)`)
+# again launders a bare unpinned SIBLING read (`everyone = Ash.read!(r, authorize?: false)`)
+# in the same clause. The sibling passes when it must be FLAGGED. The positive control
+# (pin BOTH reads → clean) stays green, so the discriminator is non-vacuous.
 # APP: samen_web
 # TEST_FILES: test/samen/web/authz_read_scope_lint_test.exs
 # MUST_FAIL: pin granularity

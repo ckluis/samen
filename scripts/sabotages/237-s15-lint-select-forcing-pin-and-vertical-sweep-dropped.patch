@@ -1,7 +1,15 @@
-# SABOTAGE: S15: the read-scope lint regresses to counting any Ash.Query call mentioning org_id as a pin 
-#   (select-forcing decoy) AND drops the demo/driftwood/pawchart trees from the sweep.
-#
-# Flips the named test(s).
+# SABOTAGE: S15 (luminary panel-2) — the `authorize?: false` read-scope lint regresses to its
+# pre-S15 shape, BOTH defects at once: (a) `read_narrowed?` accepts an `org_id`/`id` mention
+# inside ANY `Ash.Query.*` call again, so `Ash.Query.ensure_selected([:org_id])` — select-FORCING,
+# it scopes NOTHING — counts as an org pin and the modeled org-less all-tenants read sails through;
+# (b) `source_files/0` drops the demo/driftwood/pawchart trees, so the ~150 vertical
+# `authorize?: false` sites are unswept again. Flips the S15 decoy red-path AND the vertical
+# roll-call; AND the GREEN sweep's FILES floor is independently load-bearing — a framework-only
+# sweep now measures 754 files < 800 on its own (the kernel has since grown past the point where
+# the governed/sanctioned floors independently catch a dropped-vertical sweep — 154 governed / 48
+# sanctioned — so that shape is red via the files floor + the roll-call's vertical path assertions).
+# (Re-anchored at the R3/R4/R5 addendum: the select-forcing check moved from clause_narrowed?/1 to
+# the per-read read_narrowed?/2; the defect and its flips are unchanged.)
 # APP: samen_web
 # TEST_FILES: test/samen/web/authz_read_scope_lint_test.exs
 # MUST_FAIL: the decoy is FLAGGED

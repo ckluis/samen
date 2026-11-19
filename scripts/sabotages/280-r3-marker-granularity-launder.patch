@@ -1,7 +1,8 @@
-# SABOTAGE: Phase-4 addendum R3: a # authz-scope: marker regresses to sanctioning EVERY read in its clause 
-#   instead of exactly the one it sits on.
-#
-# Flips the named test(s).
+# SABOTAGE: Phase-4 addendum R3 (clause-scoped MARKER launder). A `# authz-scope:` marker
+# regresses to sanctioning EVERY read in its clause instead of exactly the one it sits on:
+# `marker_binds?` is replaced by `clause_markers != []`. One marker over two org-less reads
+# then sanctions BOTH — the second, unjustified read sails through instead of being FLAGGED.
+# Flips the marker-granularity red path; the two-marker positive control stays green.
 # APP: samen_web
 # TEST_FILES: test/samen/web/authz_read_scope_lint_test.exs
 # MUST_FAIL: marker granularity

@@ -1,7 +1,8 @@
-# SABOTAGE: Phase-4 addendum R5: the read-verb matcher regresses to a literal Ash module segment, so an 
-#   aliased or wrapper read verb is no longer swept.
-#
-# Flips the named test(s).
+# SABOTAGE: Phase-4 addendum R5 (non-Ash read-wrapper bypass). The read-verb matcher
+# regresses to a literal `Ash.` module segment only (`[:Ash]` instead of any `[_ | _]`), so a
+# read verb routed through another module — an aliased-Ash call or a same-named wrapper
+# (`ScopedReads.read!(q, authorize?: false)`) — is no longer swept and an unpinned one slips
+# through. Flips the wrapper-bypass red path; the pinned-wrapper positive control stays green.
 # APP: samen_web
 # TEST_FILES: test/samen/web/authz_read_scope_lint_test.exs
 # MUST_FAIL: wrapper bypass

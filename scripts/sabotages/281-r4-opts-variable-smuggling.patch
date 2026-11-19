@@ -1,7 +1,9 @@
-# SABOTAGE: Phase-4 addendum R4: read detection stops following authorize?: false through a locally-bound 
-#   opts variable, so a smuggled read goes unseen.
-#
-# Flips the named test(s).
+# SABOTAGE: Phase-4 addendum R4 (opts-variable smuggling). The read-detection stops
+# following `authorize?: false` through a locally-bound opts variable — the var clause in
+# `authorize_off?` is neutered to `false`. A read whose `authorize?: false` is hidden behind
+# a name (`opts = [authorize?: false]; Ash.read!(q, opts)`) becomes INVISIBLE (governed 0)
+# and slips past the scope gate entirely. Flips the opts-smuggle red path; the specificity
+# control (a non-authz opts var stays ungoverned) is unaffected.
 # APP: samen_web
 # TEST_FILES: test/samen/web/authz_read_scope_lint_test.exs
 # MUST_FAIL: opts smuggle
