@@ -33,7 +33,6 @@ defmodule Samen.Automation.RunRecord do
   violating the index or creating a second log entry for one logical run.
   """
 
-  require Logger
   require Ash.Query
   import Ash.Query
 
@@ -94,12 +93,22 @@ defmodule Samen.Automation.RunRecord do
     )
     |> Ash.create(authorize?: false)
     |> case do
-      {:ok, run} -> run
-      {:error, _reason} -> find_by_key(run_mod, org_id, key)
+      {:ok, run} ->
+        run
+
+      # A concurrent duplicate dispatch lost the create and finds the winner's row. No row to find means the run was NOT
+      # recorded: a failed write, reported by name (the reason is an Ash error that prints the pinned definition).
+      {:error, reason} ->
+        with nil <- find_by_key(run_mod, org_id, key) do
+          Samen.Observability.Failure.report_write(:run_record_open, org_id, reason)
+          nil
+        end
     end
   rescue
+    # names only: `Exception.message/1` of a KeyError/MatchError prints the offending value (here the workflow, whose
+    # actions carry webhook URLs), and this line used to be a debug line.
     e ->
-      Logger.debug("[Automation.RunRecord] open! failed: #{Exception.message(e)}")
+      Samen.Observability.Failure.report_write(:run_record_open, args["org_id"], e)
       nil
   end
 

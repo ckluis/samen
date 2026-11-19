@@ -1,0 +1,19 @@
+# SABOTAGE: a failed run enqueue logs inspect(changeset), printing the pinned webhook URLs
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: a failed run enqueue is reported by name and org, never the job changeset
+diff --git a/samen_core/lib/samen/automation/dispatch_worker.ex b/samen_core/lib/samen/automation/dispatch_worker.ex
+index 8a606cd3..250cc584 100644
+--- a/samen_core/lib/samen/automation/dispatch_worker.ex
++++ b/samen_core/lib/samen/automation/dispatch_worker.ex
+@@ -145,7 +145,7 @@ defmodule Samen.Automation.DispatchWorker do
+   # pinned definition (each webhook action's `"url"`, which for a Slack- or Zapier-style receiver IS the bearer secret).
+   # Reported by NAME (the cause modules), with the org, never the value: and a write that did not happen is a write failure.
+   def enqueue_failed(args, reason) do
+-    Samen.Observability.Failure.report_write(:automation_run_enqueue, args["org_id"], reason)
++    Logger.warning("[Automation.DispatchWorker] run enqueue failed: #{inspect(reason)}")
+   end
+ 
+   # No RunWorker job exists for these guards (the loop/depth cap fires BEFORE

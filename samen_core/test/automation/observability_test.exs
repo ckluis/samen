@@ -650,6 +650,69 @@ defmodule Samen.Automation.ObservabilityTest do
   end
 
   # ---------------------------------------------------------------------------
+  # Failed writes of the dispatch path are reported by name, never as a value dump or a debug line.
+
+  test "RED: a failed run enqueue is reported by name and org, never the job changeset (its args carry the pinned definition)" do
+    org = Ash.UUID.generate()
+    secret = "https://hooks.example/bearer-#{System.unique_integer([:positive])}"
+    pinned = %{"actions" => [%{"kind" => "webhook", "url" => secret}]}
+
+    # the shape `Oban.insert/1` answers with: an invalid job changeset whose changes.args IS the envelope
+    changeset =
+      %{"org_id" => org, "workflow_id" => Ash.UUID.generate(), "definition" => pinned}
+      |> Samen.Automation.RunWorker.new()
+      |> Ecto.Changeset.add_error(:args, "rejected")
+
+    assert inspect(changeset) =~ secret, "the injected failure must carry the secret the report must not repeat"
+
+    log = ExUnit.CaptureLog.capture_log(fn -> Samen.Automation.DispatchWorker.enqueue_failed(%{"org_id" => org}, changeset) end)
+
+    refute log =~ secret
+    assert log =~ "write failed write=automation_run_enqueue org=#{org} cause=Ecto.Changeset"
+  end
+
+  test "RED: RunRecord.open! that RAISES reports by name (no debug line carrying the exception message); a healthy open is quiet" do
+    org = Ash.UUID.generate()
+    secret = "https://hooks.example/bearer-#{System.unique_integer([:positive])}"
+    # a workflow value that cannot name a run (no :id): `wf.id` raises a KeyError whose message PRINTS the whole value
+    forged = %{org_id: org, actions: [%{"kind" => "webhook", "url" => secret}]}
+    args = %{"org_id" => org, "event_id" => Ash.UUID.generate(), "trigger_kind" => "manual", "subject_ref" => "ref"}
+
+    msg = try do forged.id rescue e -> Exception.message(e) end
+    assert msg =~ secret, "the injected failure must carry the secret the report must not repeat"
+
+    # the debug line is only emitted at debug level: turn it on, or the `refute` below could never fail
+    previous = Logger.level()
+    Logger.configure(level: :debug)
+    on_exit(fn -> Logger.configure(level: previous) end)
+
+    log = ExUnit.CaptureLog.capture_log([level: :debug], fn -> assert RunRecord.open!(forged, args) == nil end)
+
+    refute log =~ secret
+    assert log =~ "write failed write=run_record_open org=#{org} cause=KeyError"
+
+    # CONTROL: a real workflow opens its run quietly through the same seam
+    wf = create_workflow!(org, Ash.UUID.generate(), conditions: [], actions: [])
+    log2 = ExUnit.CaptureLog.capture_log([level: :debug], fn -> assert %{} = RunRecord.open!(wf, args) end)
+    refute log2 =~ "run_record_open"
+  end
+
+  test "RED: RunRecord.open! whose create FAILS (and finds no existing row) reports by name; a duplicate dispatch stays quiet" do
+    org = Ash.UUID.generate()
+    wf = create_workflow!(org, Ash.UUID.generate(), conditions: [], actions: [])
+    args = %{"org_id" => org, "event_id" => Ash.UUID.generate(), "trigger_kind" => "manual", "subject_ref" => "ref"}
+
+    # CONTROL: the second open of the same dispatch finds the first row and reports nothing
+    assert %{id: id} = RunRecord.open!(wf, args)
+    log0 = ExUnit.CaptureLog.capture_log(fn -> assert %{id: ^id} = RunRecord.open!(wf, args) end)
+    refute log0 =~ "run_record_open"
+
+    # a create that fails validation (no workflow id) and has no row to fall back to
+    log = ExUnit.CaptureLog.capture_log(fn -> assert RunRecord.open!(%{id: nil, org_id: org}, args) == nil end)
+    assert log =~ "write failed write=run_record_open org=#{org} cause=Ash.Error.Invalid"
+  end
+
+  # ---------------------------------------------------------------------------
   # Helpers
 
   # ---------------------------------------------------------------------------
