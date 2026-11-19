@@ -5,13 +5,13 @@
 # TEST_FILES: test/templates_parity_test.exs
 # MUST_FAIL: every emitted file is byte-identical to the frozen golden fixture
 diff --git a/samen_core/priv/templates/runtime_exs.eex b/samen_core/priv/templates/runtime_exs.eex
-index 515e4dad..427d8ffb 100644
+index d3d3fd41..f9c16b9f 100644
 --- a/samen_core/priv/templates/runtime_exs.eex
 +++ b/samen_core/priv/templates/runtime_exs.eex
-@@ -61,7 +61,7 @@ if config_env() == :prod do
+@@ -63,7 +63,7 @@ if config_env() == :prod do
+   # no DATABASE_DIRECT_URL the lease is unreliable: `/readyz` reports `single_node: UNKNOWN ... (connection_pooler)` once its
+   # statements land on different server connections, and until then it can read "single" next to a second instance.
    # An empty DATABASE_DIRECT_URL counts as unset.
-   direct_url = System.get_env("DATABASE_DIRECT_URL")
- 
 -  if direct_url not in [nil, ""] do
 +  if direct_url do
      config :samen_core, Samen.SingleNode, lease_url: direct_url

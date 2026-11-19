@@ -6,7 +6,7 @@
 # TEST_FILES: test/meta/ci_driver_guard_test.exs
 # MUST_FAIL: SABNEW sabotage new refuses an unprovable patch and leaves the tree exactly as it was
 diff --git a/scripts/sabotage_new.sh b/scripts/sabotage_new.sh
-index 3a789fd8..8017eac1 100755
+index 9a7fc08..bffd8db 100755
 --- a/scripts/sabotage_new.sh
 +++ b/scripts/sabotage_new.sh
 @@ -211,7 +211,7 @@ if [[ -x scripts/counts ]]; then
@@ -16,5 +16,5 @@ index 3a789fd8..8017eac1 100755
 -  bash scripts/counts --write > "$WORK/counts.out" 2>&1 && bash scripts/counts --write --docs >> "$WORK/counts.out" 2>&1 \
 +  bash scripts/counts --write > "$WORK/counts.out" 2>&1 \
      || refuse "scripts/counts could not bring the generated counts up to date." "$(tail -6 "$WORK/counts.out")"
-   COUNTS_NOTE="$(grep -E '^COUNTS: [a-z_]+ ' "$WORK/counts.out" | sed 's/^COUNTS: //' | tr '\n' ';')"
+   COUNTS_NOTE="$(grep -E '^COUNTS: [a-z_]+ ' "$WORK/counts.out" | sed 's/^COUNTS: //' | awk '!seen[$0]++' | tr '\n' ';')"
    [[ -n "$COUNTS_NOTE" ]] || COUNTS_NOTE="all current"
