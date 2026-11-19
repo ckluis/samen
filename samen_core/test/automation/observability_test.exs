@@ -362,6 +362,27 @@ defmodule Samen.Automation.ObservabilityTest do
     assert [%{state: :succeeded}] = runs_for(org2, wf.id)
   end
 
+  test "RED: a finalize that answers {:error, _} (an invalid state transition) is reported by name and org, never as a debug line" do
+    org = Ash.UUID.generate()
+    wf = create_workflow!(org, Ash.UUID.generate(), conditions: [], actions: [])
+    args = %{"org_id" => org, "event_id" => Ash.UUID.generate(), "trigger_kind" => "manual", "subject_ref" => "ref"}
+    run = RunRecord.open!(wf, args)
+
+    # CONTROL: the first finalize is quiet and terminal
+    log1 = ExUnit.CaptureLog.capture_log(fn -> assert :ok = RunRecord.succeed!(RunRecord.mark_running!(run), []) end)
+    refute log1 =~ "run_record_finalize"
+    assert [%{state: :succeeded}] = runs_for(org, wf.id)
+
+    # the injected failure is real: a second finalize of the same, already-terminal Run is refused by the state machine
+    [terminal] = runs_for(org, wf.id)
+    assert {:error, _} = terminal |> Ash.Changeset.for_update(:finalize, %{to: :failed, outcome: [], error_kind: :action_failed}, authorize?: false) |> Ash.update(authorize?: false)
+
+    log = ExUnit.CaptureLog.capture_log(fn -> assert :ok = RunRecord.fail!(terminal, [], :action_failed) end)
+    assert log =~ "[error]"
+    assert log =~ "write failed write=run_record_finalize org=#{org}"
+    assert [%{state: :succeeded}] = runs_for(org, wf.id), "the refused finalize changed nothing"
+  end
+
   test "row 3 — a non-matching condition -> Run row :skipped/:conditions_unmet, never :running" do
     org = Ash.UUID.generate()
     owner = Ash.UUID.generate()
