@@ -2,18 +2,19 @@
 #   and the run stays running)
 #
 # Flips the named test(s).
+# (Re-anchored: bounded_outcomes/1 gained the meta bound on the next line. Same edit.)
 # APP: samen_core
 # TEST_FILES: test/automation/observability_test.exs
 # MUST_FAIL: a host action failing with a NON-ATOM error does not raise
 diff --git a/samen_core/lib/samen/automation/run_record.ex b/samen_core/lib/samen/automation/run_record.ex
-index d901b06e..bea6dbd5 100644
+index 7a9f5031..2245ee8c 100644
 --- a/samen_core/lib/samen/automation/run_record.ex
 +++ b/samen_core/lib/samen/automation/run_record.ex
-@@ -245,7 +245,6 @@ defmodule Samen.Automation.RunRecord do
+@@ -248,7 +248,6 @@ defmodule Samen.Automation.RunRecord do
      outcomes
      |> Enum.filter(&plain_map?/1)
      |> Enum.map(&Map.take(&1, @allowed_outcome_keys ++ @allowed_outcome_keys_str))
 -    |> Enum.map(&bound_outcome_kind/1)
+     |> Enum.map(&bound_outcome_meta/1)
    end
  
-   defp bounded_outcomes(_), do: []

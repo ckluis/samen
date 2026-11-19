@@ -28,14 +28,15 @@
 # rewritten, so the old context no longer matched. Same deletion, same semantics.
 # Re-anchored a third time for the #11 follow-up: `bill_failed_attempt` now returns the
 # turn row too, so the line above this `cond` changed. Same deletion, same semantics.
+# Re-anchored a fourth time for the single-reveal transcript write: the clause's result tuple now carries the views. Same deletion, same semantics.
 # APP: samen_core
 # TEST_FILES: test/ai/agent_durability_test.exs
 # MUST_FAIL: P5 RED: a kill flipped DURING the overflowing attempt stops the Level 2 retry
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
-index 19b9f66..1038271 100644
+index 049a1655..01db69fa 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -1162,22 +1162,12 @@ defmodule Samen.AI.Agent do
+@@ -1297,22 +1297,12 @@ defmodule Samen.AI.Agent do
      {run, turn_row, result} = bill_failed_attempt(run, turn_row, result)
  
      cond do
@@ -53,7 +54,7 @@ index 19b9f66..1038271 100644
 -      # Sabotage 322 makes this clause refutable.
 -      attempt <= @max_context_retries and context_overflow?(result) and
 -          Breaker.killed?(run.org_id, run.agent) ->
--        {run, lines, turn_row, {:error, :killed}, duration_ms, retries}
+-        {run, lines, views, turn_row, {:error, :killed}, duration_ms, retries}
 -
 +      # SABOTAGE (P5, ADR-048 §8, ruling D-04): the RETRY-boundary kill-switch re-check is
 +      # REMOVED — the sabotage-244 shape ONE LEVEL DOWN. 244 removes the check at the TURN
