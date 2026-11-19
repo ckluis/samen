@@ -1,0 +1,20 @@
+# SABOTAGE: execute_approved answers ok when the transcript write was refused, so the decision commits 
+#   without its transcript
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_transcript_write_test.exs
+# MUST_FAIL: RED: approve with unreadable carried views
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 826ddf7e..56f7ff00 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -2760,7 +2760,7 @@ defmodule Samen.AI.Agent do
+   rescue
+     # The transcript write could not carry its prior views forward (the vault read failed): the commit is refused, and
+     # the `{:error, _}` rolls the whole decision back like any failed execution (the approval stays pending).
+-    _e in Samen.AI.Agent.TranscriptUnavailable -> {:error, :transcript_unavailable}
++    _e in Samen.AI.Agent.TranscriptUnavailable -> {:ok, %{}}
+   end
+ 
+   @doc """

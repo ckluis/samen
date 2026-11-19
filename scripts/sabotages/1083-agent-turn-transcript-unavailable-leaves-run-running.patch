@@ -1,0 +1,20 @@
+# SABOTAGE: the turn loop does not fail the run when a transcript write is refused, leaving it running 
+#   against the unwritten turn
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_transcript_write_test.exs
+# MUST_FAIL: RED: an unreadable prior transcript at write time ends the run
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 826ddf7e..097f8eef 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1224,7 +1224,7 @@ defmodule Samen.AI.Agent do
+         finalize_turn!(turn_row, %{status: :failed, error_kind: "transcript_unavailable"})
+       end
+ 
+-      {:error, :transcript_unavailable, terminal_logged!(reload!(run), :transcript_unavailable)}
++      {:done, run}
+   end
+ 
+   # ------------------------------------------------------------------------------------

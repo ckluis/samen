@@ -1,0 +1,20 @@
+# SABOTAGE: reject_proposal answers ok when the transcript write was refused, so the rejection commits 
+#   without its transcript line
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_transcript_write_test.exs
+# MUST_FAIL: RED: reject with unreadable carried views
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 826ddf7e..62b3a725 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -2810,7 +2810,7 @@ defmodule Samen.AI.Agent do
+   rescue
+     # The transcript line could not be written (the vault read of the carried views failed): the rejection rolls back
+     # like any unreadable run, and the approval stays pending and can be rejected again.
+-    _e in Samen.AI.Agent.TranscriptUnavailable -> {:error, :unavailable}
++    _e in Samen.AI.Agent.TranscriptUnavailable -> :ok
+   end
+ 
+   @doc """

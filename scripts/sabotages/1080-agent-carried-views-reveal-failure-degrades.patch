@@ -1,0 +1,20 @@
+# SABOTAGE: a failed reveal of the carried views at write time degrades to empty views again (the write 
+#   drops ui_view and the fold ledger)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_transcript_write_test.exs
+# MUST_FAIL: RED: an unreadable prior transcript at write time ends the run
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 826ddf7e..5ec8d507 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -3854,7 +3854,7 @@ defmodule Samen.AI.Agent do
+ 
+       {:error, reason} ->
+         Samen.Observability.Failure.report(:agent_carried_views, org_id, reason)
+-        raise Samen.AI.Agent.TranscriptUnavailable
++        empty_views()
+     end
+   end
+ 
