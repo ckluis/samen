@@ -20,7 +20,7 @@ defmodule SamenCore.ReadScopeVerifyTest do
 
   @project_dir Path.expand("../", __DIR__)
   @repo_root Path.expand("../../", __DIR__)
-  @corpus Path.join(__DIR__, "read_scope_corpus")
+  @corpus Path.join([__DIR__, "fixtures", "read_scope_corpus"])
 
   defp run_task(args) do
     System.cmd("mix", ["samen.verify.read_scope" | args],
