@@ -293,7 +293,7 @@ defmodule Samen.MigrationExpandContractTest do
 
   describe "down/0 CI check (Samen.Migration.DownCheck)" do
     test "GREEN: exercises a well-formed expand's down/0 in a scratch DB" do
-      {repo, config} = start_scratch_repo("dc_good")
+      {repo, config} = start_scratch_repo("dcgood")
 
       try do
         assert {:ok, checked} = Samen.Migration.DownCheck.run(repo, @good_migrations, log: false)
@@ -306,7 +306,7 @@ defmodule Samen.MigrationExpandContractTest do
     end
 
     test "RED PATH: flags an expand whose down/0 is broken/irreversible" do
-      {repo, config} = start_scratch_repo("dc_broken")
+      {repo, config} = start_scratch_repo("dcbroken")
 
       try do
         assert {:error, violations} =
@@ -338,7 +338,7 @@ defmodule Samen.MigrationExpandContractTest do
     # non-expand migration; the `:down, to: version - 1` fix rolls down THROUGH the
     # expand regardless. This fixture reproduces the exact scenario that broke demo/ci.sh.
     test "GREEN: exercises an expand's down/0 with a NON-expand migration layered on top" do
-      {repo, config} = start_scratch_repo("dc_layered")
+      {repo, config} = start_scratch_repo("dclayered")
 
       try do
         assert {:ok, checked} =
