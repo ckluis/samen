@@ -1,0 +1,20 @@
+# SABOTAGE: a failed Run finalize logs the exception message (which carries the run's values) instead of
+#   reporting by name
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: RED: a finalize that fails is reported by name and org
+diff --git a/samen_core/lib/samen/automation/run_record.ex b/samen_core/lib/samen/automation/run_record.ex
+index 7a9f5031..53eb4981 100644
+--- a/samen_core/lib/samen/automation/run_record.ex
++++ b/samen_core/lib/samen/automation/run_record.ex
+@@ -191,7 +191,7 @@ defmodule Samen.Automation.RunRecord do
+     end
+   rescue
+     e ->
+-      Samen.Observability.Failure.report_write(:run_record_finalize, safe_org_id(run), e)
++      Logger.error("[Automation.RunRecord] finalize(#{to}) failed: #{Exception.message(e)}")
+       :ok
+   end
+ 

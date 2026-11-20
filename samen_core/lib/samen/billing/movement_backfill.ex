@@ -32,9 +32,13 @@ defmodule Samen.Billing.MovementBackfill do
         event_resource: Demo.BillingScope.SubscriptionEvent,
         price_resource: Demo.BillingScope.Price
       )
-      # => {:ok, %{seeded: n, skipped: m}}
+      # => {:ok, %{seeded: n, skipped: m, failed: f}}
 
-  Returns a summary; best-effort per subscription (one bad row never aborts the run).
+  Returns a summary. A subscription whose existing-movement read or seed fails is NOT seeded (never a wrong-MRR
+  seed), is counted in `failed` and reported (`write=movement_backfill_row`), and the run goes on, so one poison row
+  can neither stop the backfill for good nor vanish silently; the run is safe to repeat and a re-run retries exactly
+  those rows. `{:error, :unavailable}` (reported, never a zero summary) is only for a failed read of the snapshot itself
+  (the prices or the active subscriptions).
   """
 
   require Ash.Query
@@ -43,7 +47,8 @@ defmodule Samen.Billing.MovementBackfill do
 
   @doc """
   Seed one synthetic `:new` movement per revenue-active subscription with no prior
-  `mov` row, for the given org. Returns `{:ok, %{seeded:, skipped:}}`.
+  `mov` row, for the given org. Returns `{:ok, %{seeded:, skipped:, failed:}}` (`skipped`: already has a row;
+  `failed`: unreadable or unseedable, reported) or `{:error, :unavailable}` when the snapshot itself cannot be read.
 
   Required opts:
 
@@ -56,7 +61,9 @@ defmodule Samen.Billing.MovementBackfill do
 
     * `:as_of` — the `occurred_at` timestamp for seeded rows (default: now).
   """
-  @spec from_snapshot(keyword()) :: {:ok, %{seeded: non_neg_integer(), skipped: non_neg_integer()}}
+  @spec from_snapshot(keyword()) ::
+          {:ok, %{seeded: non_neg_integer(), skipped: non_neg_integer(), failed: non_neg_integer()}}
+          | {:error, :unavailable}
   def from_snapshot(opts) do
     org_id = Keyword.fetch!(opts, :org_id) |> to_string()
     subscription_resource = Keyword.fetch!(opts, :subscription_resource)
@@ -67,26 +74,48 @@ defmodule Samen.Billing.MovementBackfill do
     # total-order guarantee; truncating to :second would re-introduce tied keys.
     as_of = Keyword.get(opts, :as_of, DateTime.utc_now())
 
+    snapshot(org_id, subscription_resource, event_resource, price_resource, as_of)
+  end
+
+  # A missing required opt raised above (a caller bug, never an outage); only a failed read of the snapshot is
+  # `{:error, :unavailable}`.
+  defp snapshot(org_id, subscription_resource, event_resource, price_resource, as_of) do
     prices_by_plan = monthly_prices_by_plan(price_resource, org_id)
     active = active_subscriptions(subscription_resource, org_id)
 
-    {seeded, skipped} =
-      Enum.reduce(active, {0, 0}, fn sub, {seeded, skipped} ->
-        cond do
-          has_movement?(event_resource, org_id, sub.id) ->
-            {seeded, skipped + 1}
-
-          true ->
-            case seed_new(event_resource, org_id, sub, prices_by_plan, as_of) do
-              :ok -> {seeded + 1, skipped}
-              :error -> {seeded, skipped + 1}
-            end
+    {seeded, skipped, failed} =
+      Enum.reduce(active, {0, 0, 0}, fn sub, {seeded, skipped, failed} ->
+        case seed_one(event_resource, org_id, sub, prices_by_plan, as_of) do
+          :seeded -> {seeded + 1, skipped, failed}
+          :skipped -> {seeded, skipped + 1, failed}
+          :failed -> {seeded, skipped, failed + 1}
         end
       end)
 
-    {:ok, %{seeded: seeded, skipped: skipped}}
+    {:ok, %{seeded: seeded, skipped: skipped, failed: failed}}
   rescue
-    _ -> {:ok, %{seeded: 0, skipped: 0}}
+    # ONE honest answer for a failed read of the snapshot itself (the price or the active-subscription read; neither
+    # rescues on its own): `{:error, :unavailable}` and on record, never `{:ok, %{seeded: 0, skipped: 0}}` and never a
+    # seed priced at 0 MRR because the price read failed. A failure confined to ONE subscription is handled per row
+    # by `seed_one/5`.
+    e ->
+      Samen.Observability.Failure.report_write(:movement_backfill, org_id, e)
+      {:error, :unavailable}
+  end
+
+  # One subscription: seed it, skip it (it already has a movement), or count it failed. A failure here is the
+  # row's own (its movement read or its append), reported, and never stops the run.
+  defp seed_one(event_resource, org_id, sub, prices_by_plan, as_of) do
+    if has_movement?(event_resource, org_id, sub.id) do
+      :skipped
+    else
+      :ok = seed_new(event_resource, org_id, sub, prices_by_plan, as_of)
+      :seeded
+    end
+  rescue
+    e ->
+      Samen.Observability.Failure.report_write(:movement_backfill_row, org_id, e)
+      :failed
   end
 
   defp active_subscriptions(subscription_resource, org_id) do
@@ -97,8 +126,6 @@ defmodule Samen.Billing.MovementBackfill do
     |> Ash.Query.filter(org_id == ^org_id)
     |> Ash.Query.filter(status in ^active)
     |> Ash.read!(authorize?: false)
-  rescue
-    _ -> []
   end
 
   # Org-pinned (S15): the subscription is unique already, but the explicit org filter
@@ -108,12 +135,7 @@ defmodule Samen.Billing.MovementBackfill do
     |> Ash.Query.filter(org_id == ^org_id and subscription_id == ^subscription_id)
     |> Ash.Query.limit(1)
     |> Ash.read!(authorize?: false)
-    |> case do
-      [] -> false
-      _ -> true
-    end
-  rescue
-    _ -> true
+    |> Enum.any?()
   end
 
   defp seed_new(event_resource, org_id, sub, prices_by_plan, as_of) do
@@ -142,8 +164,6 @@ defmodule Samen.Billing.MovementBackfill do
     |> Ash.create!(authorize?: false)
 
     :ok
-  rescue
-    _ -> :error
   end
 
   # ADR-036 §4.5(1): Price.unit_amount_cents is now the Money attribute
@@ -156,7 +176,5 @@ defmodule Samen.Billing.MovementBackfill do
     |> Ash.Query.filter(interval == :monthly and active == true)
     |> Ash.read!(authorize?: false)
     |> Map.new(&{&1.plan_id, Samen.Type.Money.cents(&1.unit_amount)})
-  rescue
-    _ -> %{}
   end
 end

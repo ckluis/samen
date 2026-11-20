@@ -55,33 +55,33 @@ defmodule Samen.Replay.Buffer do
   """
   @spec open(pid(), map(), Samen.Replay.config()) :: {:ok, String.t()} | :full | :error
   def open(pid, meta, cfg) do
-    if :ets.update_counter(@table, :sessions, {2, 1}) > cfg.max_sessions do
-      :ets.update_counter(@table, :sessions, {2, -1})
-      :full
-    else
-      id = Ecto.UUID.generate()
+    guarded(:write, :error, :error, fn ->
+      if :ets.update_counter(@table, :sessions, {2, 1}) > cfg.max_sessions do
+        :ets.update_counter(@table, :sessions, {2, -1})
+        :full
+      else
+        id = Ecto.UUID.generate()
 
-      :ets.insert(@table, [
-        {{:meta, id}, pid, meta},
-        {{:ctr, id}, 0, 0, 0, 0},
-        {{:proc, pid}, id, System.monotonic_time(:millisecond), cfg.max_frames, cfg.max_bytes}
-      ])
+        :ets.insert(@table, [
+          {{:meta, id}, pid, meta},
+          {{:ctr, id}, 0, 0, 0, 0},
+          {{:proc, pid}, id, System.monotonic_time(:millisecond), cfg.max_frames, cfg.max_bytes}
+        ])
 
-      {:ok, id}
-    end
-  rescue
-    _ -> :error
+        {:ok, id}
+      end
+    end)
   end
 
   @doc "The session id `pid` records, if any."
   @spec session(pid()) :: {:ok, String.t()} | :error
   def session(pid) do
-    case :ets.lookup(@table, {:proc, pid}) do
-      [{_, id, _, _, _}] -> {:ok, id}
-      [] -> :error
-    end
-  rescue
-    _ -> :error
+    guarded(:read, :error, :error, fn ->
+      case :ets.lookup(@table, {:proc, pid}) do
+        [{_, id, _, _, _}] -> {:ok, id}
+        [] -> :error
+      end
+    end)
   end
 
   @doc """
@@ -90,12 +90,12 @@ defmodule Samen.Replay.Buffer do
   """
   @spec accepting?(pid()) :: boolean()
   def accepting?(pid) do
-    case :ets.lookup(@table, {:proc, pid}) do
-      [{_, id, _, _, _}] -> match?([{_, _, _, _, 0}], :ets.lookup(@table, {:ctr, id}))
-      [] -> false
-    end
-  rescue
-    _ -> false
+    guarded(:read, false, false, fn ->
+      case :ets.lookup(@table, {:proc, pid}) do
+        [{_, id, _, _, _}] -> match?([{_, _, _, _, 0}], :ets.lookup(@table, {:ctr, id}))
+        [] -> false
+      end
+    end)
   end
 
   @doc """
@@ -105,16 +105,16 @@ defmodule Samen.Replay.Buffer do
   """
   @spec record(pid(), atom(), map(), boolean()) :: :ok | :truncated | :error
   def record(pid, kind, payload, interaction? \\ false) do
-    case :ets.lookup(@table, {:proc, pid}) do
-      [{_, id, started, max_frames, max_bytes}] ->
-        if interaction?, do: :ets.update_counter(@table, {:ctr, id}, {4, 1})
-        write(id, started, max_frames, max_bytes, kind, payload)
+    guarded(:write, :error, :error, fn ->
+      case :ets.lookup(@table, {:proc, pid}) do
+        [{_, id, started, max_frames, max_bytes}] ->
+          if interaction?, do: :ets.update_counter(@table, {:ctr, id}, {4, 1})
+          write(id, started, max_frames, max_bytes, kind, payload)
 
-      [] ->
-        :error
-    end
-  rescue
-    _ -> :error
+        [] ->
+          :error
+      end
+    end)
   end
 
   defp write(id, started, max_frames, max_bytes, kind, payload) do
@@ -152,54 +152,84 @@ defmodule Samen.Replay.Buffer do
   """
   @spec stop(pid()) :: :ok
   def stop(pid) do
-    :ets.delete(@table, {:proc, pid})
-    :ok
-  rescue
-    _ -> :ok
+    guarded(:write, :ok, :ok, fn ->
+      :ets.delete(@table, {:proc, pid})
+      :ok
+    end)
   end
 
   @doc """
   Remove the session `id` from the buffer and return it:
-  `{:ok, meta, frames_in_seq_order, counters}` or `:error`. Called by the monitor, once.
+  `{:ok, meta, frames_in_seq_order, counters}`, `:error` (no such session: recording was stopped on purpose,
+  or capture is not running) or `{:error, :unavailable}` (the buffer READ FAILED: the session is not "no
+  replay", and the failure is reported as `replay_buffer`). Called by the monitor, once.
   """
-  @spec take(String.t()) :: {:ok, map(), list(), map()} | :error
+  @spec take(String.t()) :: {:ok, map(), list(), map()} | :error | {:error, :unavailable}
   def take(id) do
-    case :ets.take(@table, {:meta, id}) do
-      [{_, pid, meta}] ->
-        :ets.delete(@table, {:proc, pid})
-        [{_, seq, bytes, interactions, truncated}] = :ets.take(@table, {:ctr, id})
+    guarded(:read, :error, {:error, :unavailable}, fn ->
+      case :ets.take(@table, {:meta, id}) do
+        [{_, pid, meta}] ->
+          # The meta row IS the session's claim on a slot, and taking it ends the session. So the slot goes back, the
+          # process row and the frames are removed, BEFORE anything that can fail (a damaged counter row, a row that
+          # is not a frame): a take that raises part-way must not leak the slot or orphan the frames for the node's
+          # lifetime.
+          :ets.update_counter(@table, :sessions, {2, -1})
+          :ets.delete(@table, {:proc, pid})
 
-        frames =
-          @table
-          |> :ets.match_object({{:frame, id, :_}, :_})
-          |> Enum.map(fn {key, frame} ->
-            :ets.delete(@table, key)
-            frame
-          end)
-          |> Enum.sort_by(&elem(&1, 0))
+          frames =
+            @table
+            |> :ets.match_object({{:frame, id, :_}, :_})
+            |> Enum.map(fn {key, frame} ->
+              :ets.delete(@table, key)
+              frame
+            end)
 
-        :ets.update_counter(@table, :sessions, {2, -1})
+          [{_, seq, bytes, interactions, truncated}] = :ets.take(@table, {:ctr, id})
+          frames = Enum.sort_by(frames, &elem(&1, 0))
 
-        {:ok, meta, frames,
-         %{
-           frames: min(seq, length(frames)),
-           bytes: bytes,
-           interactions: interactions,
-           truncated: truncated > 0
-         }}
+          {:ok, meta, frames,
+           %{
+             frames: min(seq, length(frames)),
+             bytes: bytes,
+             interactions: interactions,
+             truncated: truncated > 0
+           }}
 
-      [] ->
-        :error
-    end
-  rescue
-    _ -> :error
+        [] ->
+          :error
+      end
+    end)
   end
 
   @doc "Ids of every session currently buffered (monitor recovery)."
   @spec sessions() :: [{String.t(), pid()}]
   def sessions do
-    @table |> :ets.match({{:meta, :"$1"}, :"$2", :_}) |> Enum.map(fn [id, pid] -> {id, pid} end)
+    guarded(:read, [], [], fn ->
+      @table |> :ets.match({{:meta, :"$1"}, :"$2", :_}) |> Enum.map(fn [id, pid] -> {id, pid} end)
+    end)
+  end
+
+  # Every public function is total (see the moduledoc): a raise would reach the LiveView that records. The quiet `missing`
+  # answer is for ONE situation only: the table does not exist (capture is not running), which is what `table_exists?/0`
+  # decides. No function here can raise ArgumentError for a merely missing row while the table is there: `take/1`, the only
+  # remover of a session's rows, runs after the recording process is DOWN (the monitor), and `stop/1` removes only the
+  # process row. So an ArgumentError with the table present is a failure of the buffer itself (a damaged counter row, a row
+  # that is not a frame), and like any other exception it is reported (names only, never a frame or a value) and answers
+  # `failed`.
+  defp guarded(kind, missing, failed, fun) do
+    fun.()
   rescue
-    _ -> []
+    e in ArgumentError -> if table_exists?(), do: report(kind, e, failed), else: missing
+    e -> report(kind, e, failed)
+  end
+
+  defp report(:read, e, failed) do
+    Samen.Observability.Failure.report(:replay_buffer, nil, e)
+    failed
+  end
+
+  defp report(:write, e, failed) do
+    Samen.Observability.Failure.report_write(:replay_buffer, nil, e)
+    failed
   end
 end

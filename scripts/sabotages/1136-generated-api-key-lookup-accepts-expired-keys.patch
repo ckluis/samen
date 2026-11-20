@@ -1,0 +1,19 @@
+# SABOTAGE: The generated API-key auth-step lookup stops filtering expired keys, so an expired key 
+#   authenticates.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/templates_parity_test.exs
+# MUST_FAIL: every generated API key auth plug filters expired keys out of the lookup
+diff --git a/samen_core/priv/templates/api_key_auth_plug_ex.eex b/samen_core/priv/templates/api_key_auth_plug_ex.eex
+index 55ae660a..3d6bb059 100644
+--- a/samen_core/priv/templates/api_key_auth_plug_ex.eex
++++ b/samen_core/priv/templates/api_key_auth_plug_ex.eex
+@@ -90,7 +90,6 @@ defmodule <%= module %>Web.Api.KeyAuthPlug do
+     <%= module %>.Operator.ApiKey
+     |> Ash.Query.filter(token_digest == ^digest)
+     |> Ash.Query.filter(is_nil(revoked_at))
+-    |> Ash.Query.filter(is_nil(expires_at) or expires_at > ^now)
+     # authz-scope: API-key AUTH-STEP lookup keyed on the SHA-256 digest of a server-minted random token — no
+     # actor/org exists until this row resolves (revoked/expired filtered out; unmatched digest => :error, fail
+     # closed; a duplicate digest makes read_one error => :unavailable, also fail closed)

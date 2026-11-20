@@ -1,0 +1,19 @@
+# SABOTAGE: The five-tree sweep stops naming files the scanner could not inspect.
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/authz_read_scope_lint_test.exs
+# MUST_FAIL: RAISES over a file it cannot parse
+diff --git a/samen_web/lib/samen/web/authz/read_scope_lint.ex b/samen_web/lib/samen/web/authz/read_scope_lint.ex
+index 89db68db..220c8492 100644
+--- a/samen_web/lib/samen/web/authz/read_scope_lint.ex
++++ b/samen_web/lib/samen/web/authz/read_scope_lint.ex
+@@ -66,7 +66,7 @@ defmodule Samen.Web.Authz.ReadScopeLint do
+               "\n" <>
+               Enum.join(
+                 Enum.map(violations, &("  * " <> ReadScope.format_violation(&1))) ++
+-                  Enum.map(errors, fn {file, why} -> "  * #{Path.relative_to_cwd(file)} — #{why}" end),
++                  [],
+                 "\n"
+               )
+     end

@@ -302,7 +302,10 @@ defmodule Samen.DocsScopeTest do
     end
 
     test "the VaultField last-line guard refuses a raw plaintext write (red path)" do
-      assert {:ok, "vt_realtoken"} = Samen.Type.VaultField.dump_to_native("vt_realtoken", [])
+      minted = Samen.Vault.generate_token()
+      assert {:ok, ^minted} = Samen.Type.VaultField.dump_to_native(minted, [])
+      # a "vt_"-prefixed string that is not a minted token is plaintext, not a token
+      assert :error == Samen.Type.VaultField.dump_to_native("vt_realtoken", [])
       assert :error == Samen.Type.VaultField.dump_to_native(@secret_body, [])
     end
   end

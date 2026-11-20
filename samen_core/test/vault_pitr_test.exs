@@ -185,7 +185,8 @@ defmodule Samen.VaultPitrTest do
 
   defp recreate_db!(config, db) do
     admin = Keyword.put(config, :database, "postgres")
-    _ = psql(admin, "DROP DATABASE IF EXISTS #{db}")
+    {drop_out, drop_code} = psql(admin, "DROP DATABASE IF EXISTS #{db}")
+    if drop_code != 0, do: raise("could not drop restore DB #{db}: #{drop_out}")
     {out, code} = psql(admin, "CREATE DATABASE #{db}")
     if code != 0, do: raise("could not create restore DB: #{out}")
     :ok

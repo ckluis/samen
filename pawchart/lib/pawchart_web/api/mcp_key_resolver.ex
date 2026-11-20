@@ -18,6 +18,9 @@ defmodule PawChartWeb.Api.McpKeyResolver do
        MCP engine's hard `org_id ==` filter isolates the caller to its own org (an org-A token can
        never reach org-B data).
 
+  A lookup that FAILS (the read errored: not "no such key") returns `{:error, :unavailable}` → 503 + `Retry-After`,
+  reported once here; the request is never served.
+
   Fail CLOSED: a missing/malformed/unknown/revoked/mismatched key → `:error` (401). This is the
   enforcing layer the T157/T142 e2e auth test pins (unauth → 401, forged → 401, cross-org denied).
   """
@@ -34,7 +37,7 @@ defmodule PawChartWeb.Api.McpKeyResolver do
   `:actor_resolver` MFA (`{PawChartWeb.Api.McpKeyResolver, :resolve_scope, []}`), called by
   `Samen.Web.AI.McpPlug` with the raw token.
   """
-  @spec resolve_scope(String.t() | nil) :: {:ok, Samen.Scope.t()} | :error
+  @spec resolve_scope(String.t() | nil) :: {:ok, Samen.Scope.t()} | :error | {:error, :unavailable}
   def resolve_scope(raw) when is_binary(raw) and byte_size(raw) > 0 do
     digest = digest(raw)
 
@@ -52,6 +55,10 @@ defmodule PawChartWeb.Api.McpKeyResolver do
 
       :error ->
         :error
+
+      # The lookup FAILED (already reported by `lookup/1`): "could not check", not "bad key" — the MCP plug answers 503.
+      {:error, :unavailable} ->
+        {:error, :unavailable}
     end
   end
 
@@ -71,11 +78,11 @@ defmodule PawChartWeb.Api.McpKeyResolver do
     |> case do
       {:ok, nil} -> :error
       {:ok, row} -> {:ok, row}
-      # Fail CLOSED either way (no key row => no actor), but a lookup that FAILED is an outage, not "an invalid
-      # key": report it by name and exception module so it is not invisible.
+      # A lookup that FAILED is an outage, not "an invalid key": report it once by name and exception module and hand
+      # the plug `{:error, :unavailable}` (503, fail closed).
       {:error, error} ->
         Samen.Web.Reads.Guard.report(:pawchart_mcp_key_lookup, nil, error)
-        :error
+        {:error, :unavailable}
     end
   end
 

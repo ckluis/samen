@@ -43,7 +43,30 @@ defmodule Samen.Reveal.ApprovalHandler do
     end
   end
 
-  defp parse_subject_ref(@subject_ref_prefix <> request_id), do: {:ok, request_id}
+  # A rejection / cancellation of the approval is a decision on the request: its `rvq_status` records it in the same
+  # transaction (and under the request's row lock), so "decided" is a fact of the request row.
+  @impl true
+  def on_reject(approval, ctx), do: close(approval, ctx, "denied")
+
+  @impl true
+  def on_cancel(approval, ctx), do: close(approval, ctx, "cancelled")
+
+  defp close(approval, ctx, status) do
+    case parse_subject_ref(approval.subject_ref) do
+      {:ok, request_id} -> Grants.close_request(ctx.repo, request_id, status)
+      # an approval that names no request has no request to mark (the queue already reports it as unparseable)
+      {:error, {:bad_subject_ref, _}} -> :ok
+    end
+  end
+
+  # A ref whose suffix is not a UUID names no request (the lookup would raise a cast error out of the decision).
+  defp parse_subject_ref(@subject_ref_prefix <> request_id = ref) do
+    case Ecto.UUID.cast(request_id) do
+      {:ok, uuid} -> {:ok, uuid}
+      :error -> {:error, {:bad_subject_ref, ref}}
+    end
+  end
+
   defp parse_subject_ref(other), do: {:error, {:bad_subject_ref, other}}
 
   defp fetch_request(repo, request_id) do

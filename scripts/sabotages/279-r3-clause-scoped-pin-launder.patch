@@ -8,11 +8,11 @@
 # APP: samen_web
 # TEST_FILES: test/samen/web/authz_read_scope_lint_test.exs
 # MUST_FAIL: pin granularity
-diff --git a/samen_web/lib/samen/web/authz/read_scope_lint.ex b/samen_web/lib/samen/web/authz/read_scope_lint.ex
-index d2c6b17..79dc5f7 100644
---- a/samen_web/lib/samen/web/authz/read_scope_lint.ex
-+++ b/samen_web/lib/samen/web/authz/read_scope_lint.ex
-@@ -206,7 +206,7 @@ defmodule Samen.Web.Authz.ReadScopeLint do
+diff --git a/samen_core/lib/samen/lint/read_scope.ex b/samen_core/lib/samen/lint/read_scope.ex
+index 2a3d0fa2..03bf51d2 100644
+--- a/samen_core/lib/samen/lint/read_scope.ex
++++ b/samen_core/lib/samen/lint/read_scope.ex
+@@ -180,7 +180,7 @@ defmodule Samen.Lint.ReadScope do
          Enum.reduce(reads, {viol, gov, sanc}, fn {read_fun, read_line, ctx}, {v, g, s} ->
            cond do
              read_fun in @by_id_funs or read_fun in @aggregate_funs or

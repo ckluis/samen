@@ -1,0 +1,20 @@
+# SABOTAGE: The mutation lint lists gitignored files too, so test scratch (samen_core/tmp) is linted as if 
+#   it were the repo.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: MUTLINT the mutation lint's MUTATION_OWNS scan survives odd file names
+diff --git a/scripts/mutation_lint.sh b/scripts/mutation_lint.sh
+index ef9a0a21..20cd6844 100755
+--- a/scripts/mutation_lint.sh
++++ b/scripts/mutation_lint.sh
+@@ -142,7 +142,7 @@ owns_flush() {
+   fi
+   OWNS_BATCH=()
+ }
+-if ! (cd "$REPO_ROOT" && git ls-files -z --cached --others --exclude-standard -- '*.ex' '*.exs' \
++if ! (cd "$REPO_ROOT" && git ls-files -z --cached --others -- '*.ex' '*.exs' \
+         ':(exclude)spikes' ':(exclude,glob)**/deps/**' ':(exclude,glob)**/_build/**' ':(exclude,glob)**/node_modules/**') \
+      > "$WORK/owns_files" 2>"$WORK/owns_ls.err"; then
+   refuse "the MUTATION_OWNS scan cannot list the repository's files (git ls-files failed) — $(head -1 "$WORK/owns_ls.err")"

@@ -1,0 +1,27 @@
+# SABOTAGE: set_not_null adds its NOT VALID check only after the count, so a NULL written during the 
+#   backfill slips through to a raw check violation
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/migration_expand_contract_test.exs
+# MUST_FAIL: the check goes on FIRST: a NULL written DURING the backfill is refused by the database
+diff --git a/samen_core/lib/samen/migration/expand_contract.ex b/samen_core/lib/samen/migration/expand_contract.ex
+index dbd315ee..5114a254 100644
+--- a/samen_core/lib/samen/migration/expand_contract.ex
++++ b/samen_core/lib/samen/migration/expand_contract.ex
+@@ -444,7 +444,6 @@ defmodule Samen.Migration.ExpandContract do
+     # 1. the check FIRST: no new NULL can be written from here on
+     with_short_lock(repo, lock_sql, tname, "nothing was changed (no constraint was added or removed)", fn ->
+       repo.query!("ALTER TABLE #{qt} DROP CONSTRAINT IF EXISTS #{qk}")
+-      repo.query!("ALTER TABLE #{qt} ADD CONSTRAINT #{qk} CHECK (#{qc} IS NOT NULL) NOT VALID")
+     end)
+ 
+     # 2. backfill what the expression can answer for
+@@ -472,6 +471,7 @@ defmodule Samen.Migration.ExpandContract do
+               "the migration again; `backfill:` only helps while the migration is still being written."
+     end
+ 
++    repo.query!("ALTER TABLE #{qt} ADD CONSTRAINT #{qk} CHECK (#{qc} IS NOT NULL) NOT VALID")
+     # 4. validate (SHARE UPDATE EXCLUSIVE: reads and writes continue)
+     repo.query!("ALTER TABLE #{qt} VALIDATE CONSTRAINT #{qk}")
+ 

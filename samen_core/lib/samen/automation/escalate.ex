@@ -57,6 +57,8 @@ defmodule Samen.Automation.Escalate do
           case existing_active(res, org_id, kind, dedupe_key) do
             {:ok, escalation} -> refresh(escalation, deadline_at)
             :none -> create(res, attrs, org_id, kind, dedupe_key, deadline_at)
+            # A lookup that FAILED is not "no active escalation": opening on it would duplicate one that exists.
+            {:error, :unavailable} = unavailable -> unavailable
           end
       end
     end
@@ -111,8 +113,15 @@ defmodule Samen.Automation.Escalate do
     |> Ash.read(authorize?: false)
     |> case do
       {:ok, [escalation]} -> {:ok, escalation}
-      _other -> :none
+      {:ok, []} -> :none
+      {:error, reason} ->
+        Samen.Observability.Failure.report(:escalate_existing_active, org_id, reason)
+        {:error, :unavailable}
     end
+  rescue
+    e ->
+      Samen.Observability.Failure.report(:escalate_existing_active, org_id, e)
+      {:error, :unavailable}
   end
 
   defp fetch_escalation(res, {org_id, kind, dedupe_key}) do

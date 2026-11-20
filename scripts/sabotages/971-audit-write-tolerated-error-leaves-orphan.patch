@@ -1,0 +1,21 @@
+# SABOTAGE: inside a caller's transaction the Writer's event+chain pair is not rolled back to its savepoint 
+#   when the chain append fails, so a tolerating caller keeps an orphan aud_event
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/audit_chain_writer_test.exs
+# MUST_FAIL: inside a caller's transaction that tolerates the error, a failed chain append leaves no orphan aud_event
+diff --git a/samen_core/lib/samen/audit_chain/writer.ex b/samen_core/lib/samen/audit_chain/writer.ex
+index 3318643e..379b3e71 100644
+--- a/samen_core/lib/samen/audit_chain/writer.ex
++++ b/samen_core/lib/samen/audit_chain/writer.ex
+@@ -120,8 +120,7 @@ defmodule Samen.AuditChain.Writer do
+         with :ok <- savepoint(repo, "RELEASE SAVEPOINT ", sp, org_id), do: ok
+ 
+       {:error, _} = error ->
+-        with :ok <- savepoint(repo, "ROLLBACK TO SAVEPOINT ", sp, org_id),
+-             :ok <- savepoint(repo, "RELEASE SAVEPOINT ", sp, org_id),
++        with :ok <- savepoint(repo, "RELEASE SAVEPOINT ", sp, org_id),
+              do: error
+     end
+   catch

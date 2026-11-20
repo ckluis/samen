@@ -15,10 +15,10 @@
 # TEST_FILES: test/fleet_registry_test.exs
 # MUST_FAIL: L5: cockpit_identity failure does NOT burn the enrollment token
 diff --git a/samen_core/lib/samen/fleet/registry.ex b/samen_core/lib/samen/fleet/registry.ex
-index 182568f..1f37177 100644
+index 48ee5a3a..4758418d 100644
 --- a/samen_core/lib/samen/fleet/registry.ex
 +++ b/samen_core/lib/samen/fleet/registry.ex
-@@ -227,53 +227,39 @@ defmodule Samen.Fleet.Registry do
+@@ -251,58 +251,44 @@ defmodule Samen.Fleet.Registry do
    exactly: one `UPDATE ... WHERE token_digest = $1 AND consumed_at IS NULL AND
    expires_at > now() RETURNING`. Zero rows ⇒ one generic `{:error, :invalid_token}`
    (never distinguishing consumed vs expired vs unknown).
@@ -38,7 +38,7 @@ index 182568f..1f37177 100644
 -  token instead of being forced to mint a fresh one.
    """
    @spec consume_enrollment(module(), String.t(), String.t()) ::
-           {:ok, map()} | {:error, :invalid_token | term()}
+           {:ok, map()} | {:error, :invalid_token | :unavailable | term()}
    def consume_enrollment(ns, raw_token, public_key_b64) when is_binary(raw_token) do
 -    with {:ok, {cockpit_pub, cockpit_priv}} <- cockpit_identity(ns) do
 -      digest = Samen.Auth.TokenMint.digest(raw_token)
@@ -65,14 +65,23 @@ index 182568f..1f37177 100644
 +        return_records?: true,
 +        return_errors?: true
 +      )
-
+ 
 -      case result do
 -        %Ash.BulkResult{status: :success, records: [token | _]} ->
 -          finish_enrollment(ns, token, public_key_b64, {cockpit_pub, cockpit_priv})
 +    case result do
 +      %Ash.BulkResult{status: :success, records: [token | _]} ->
 +        finish_enrollment(ns, token, public_key_b64)
-
+ 
+-        %Ash.BulkResult{status: :error, errors: errors} when is_list(errors) and errors != [] ->
+-          # the consume itself failed (a DB error): the token was NOT judged invalid and was not spent
+-          Samen.Observability.Failure.report(:fleet_enrollment_consume, nil, hd(errors))
+-          {:error, :unavailable}
++      %Ash.BulkResult{status: :error, errors: errors} when is_list(errors) and errors != [] ->
++        # the consume itself failed (a DB error): the token was NOT judged invalid and was not spent
++        Samen.Observability.Failure.report(:fleet_enrollment_consume, nil, hd(errors))
++        {:error, :unavailable}
+ 
 -        _ ->
 -          {:error, :invalid_token}
 -      end
@@ -80,7 +89,7 @@ index 182568f..1f37177 100644
 +        {:error, :invalid_token}
      end
    end
-
+ 
 -  defp finish_enrollment(ns, token, public_key_b64, {cockpit_pub, _cockpit_priv}) do
 -    # The cockpit identity is ALREADY resolved (consume_enrollment/3, above) —
 -    # this only writes the app + credential rows now that the token is

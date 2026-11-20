@@ -1,0 +1,19 @@
+# SABOTAGE: a schedule advance with an unresolvable org answers ok, so the fire is advanced past and lost
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: a schedule advance whose org cannot be resolved FAILS the step
+diff --git a/samen_core/lib/samen/automation/schedule_advance.ex b/samen_core/lib/samen/automation/schedule_advance.ex
+index 31424e30..9a57dda5 100644
+--- a/samen_core/lib/samen/automation/schedule_advance.ex
++++ b/samen_core/lib/samen/automation/schedule_advance.ex
+@@ -31,7 +31,7 @@ defmodule Samen.Automation.ScheduleAdvance do
+           # rejected downstream and leave no Run row at all. Returning an error rolls the whole update back, so
+           # `next_fire_at` is NOT advanced and the scan retries this fire (it is never silently lost).
+           Samen.Observability.Failure.report_write(:schedule_advance_enqueue_skipped, nil, :no_org)
+-          {:error, :org_unresolved}
++          {:ok, result}
+ 
+         org_id ->
+           enqueue_dispatch(result, org_id)

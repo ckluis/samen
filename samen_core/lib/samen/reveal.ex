@@ -132,13 +132,19 @@ defmodule Samen.Reveal do
     * `{:error, :denied}` — no approving grant (default with DenyAll)
     * `{:error, :shredded | :unavailable | :not_found | term}` — from the vault
 
-  Required option:
+    * `{:error, :subject_required}` — no `:subject_id` was given (WP28 S2): refused after the
+      structural gates and before the grant check, because the token is bound to its subject at
+      the vault and the grant is scoped by it
+
+  Required options:
     * `:repo` — the Ecto repo for the vault-row lookup.
+    * `:subject_id` — the subject (a non-empty string) the token was minted for: the grant is
+      checked against it and the vault refuses a token bound to another subject. Also the reveal
+      span's `subject_id` attribute.
 
   Optional:
-    * `:subject_id` — the subject the grant is checked against (lets the grant
-      model scope by subject before any vault hit). Also the reveal span's
-      `subject_id` attribute.
+    * `:field` — `{vault, field_name}`: the vault refuses a token minted for another field
+      (`:field_mismatch`). Pass it whenever the caller knows the field.
     * `:grant_id` — the grant id, recorded as the reveal span's `grant_id` attribute.
     * `:reason` — a bounded reason CODE (an atom), recorded as the span's `reason`
       attribute. A binary (free text) is never put on the span.
@@ -255,6 +261,12 @@ defmodule Samen.Reveal do
       not Info.reveal_action?(resource, action_name) ->
         {:error, :not_reveal_action}
 
+      # Subject gate (WP28 S2): a reveal is bound to the subject the token was minted for, so a
+      # call without one is refused BEFORE the grant check (nothing to scope the grant by, and the
+      # vault would apply no binding at all).
+      not subject_given?(Keyword.get(opts, :subject_id)) ->
+        {:error, :subject_required}
+
       # Grant gate: default-deny. No approving grant → deny, never decrypt.
       not grant_mod.granted?(context) ->
         {:error, :denied}
@@ -262,9 +274,17 @@ defmodule Samen.Reveal do
       true ->
         # Both gates passed → the single vault chokepoint.
         repo = Keyword.fetch!(opts, :repo)
-        vault_mod.reveal(masked, repo, Keyword.take(opts, [:subject_id]))
+        # An integer key is the same subject as its decimal string (what the vault stored).
+        vault_opts =
+          opts |> Keyword.take([:subject_id, :field]) |> Keyword.update!(:subject_id, &to_string/1)
+
+        vault_mod.reveal(masked, repo, vault_opts)
     end
   end
+
+  defp subject_given?(subject_id) when is_binary(subject_id), do: subject_id != ""
+  defp subject_given?(subject_id) when is_integer(subject_id), do: true
+  defp subject_given?(_), do: false
 
   @doc """
   The configured `Samen.Reveal.Grant` implementation. Defaults to

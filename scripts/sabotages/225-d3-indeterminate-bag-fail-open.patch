@@ -21,4 +21,4 @@ diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/a
 +            :skip
  
            true ->
-             case pii_declared_keys(repo, table, org_ids) do
+             case pii_declared_keys(repo, table, org_ids, actor) do

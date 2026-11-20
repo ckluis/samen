@@ -1,0 +1,19 @@
+# SABOTAGE: Resolver.records renders a failed record read as [gone] without reporting it
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_d_test.exs
+# MUST_FAIL: RED: a record read that FAILS is reported
+diff --git a/samen_core/lib/samen/replay/resolver.ex b/samen_core/lib/samen/replay/resolver.ex
+index 37ae9061..c2e4cc8b 100644
+--- a/samen_core/lib/samen/replay/resolver.ex
++++ b/samen_core/lib/samen/replay/resolver.ex
+@@ -140,7 +140,7 @@ defmodule Samen.Replay.Resolver do
+       {:error, error} ->
+         # Fail safe: a read the viewer is REFUSED looks exactly like a deleted record. A read that FAILED (a database
+         # error) shows the same `[gone]` placeholder (fail closed: nothing resolves), but it is reported by name.
+-        unless refused?(error), do: Samen.Observability.Failure.report(:replay_resolver_records, scope, error)
++        _ = refused?(error)
+         %{}
+     end
+   rescue

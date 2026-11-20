@@ -490,8 +490,7 @@ defmodule Samen.Gen.PostTemplates do
     File.rm_rf!(kms_key_dir)
     Application.put_env(:samen_core, :kms_key_dir, kms_key_dir)
 
-    _ = Ecto.Adapters.Postgres.storage_down(Repo.config())
-    :ok = Ecto.Adapters.Postgres.storage_up(Repo.config())
+    :ok = Samen.TestDb.reset!(Repo.config())
     {:ok, _} = Repo.start_link()
     Ecto.Migrator.run(Repo, :up, all: true)
 

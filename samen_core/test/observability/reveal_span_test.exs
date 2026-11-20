@@ -130,6 +130,7 @@ defmodule Samen.Observability.RevealSpanTest do
         repo: :unused,
         vault: OkVault,
         grant: ApproveAll,
+        subject_id: Ecto.UUID.generate(),
         reason: "calling Alice Anders back"
       )
 
@@ -145,6 +146,7 @@ defmodule Samen.Observability.RevealSpanTest do
           repo: :unused,
           vault: OkVault,
           grant: ApproveAll,
+          subject_id: Ecto.UUID.generate(),
           reason: reason
         )
 

@@ -1,0 +1,19 @@
+# SABOTAGE: The generated first migration drops the unique index on the API-key token digest.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/api_key_digest_unique_template_test.exs
+# MUST_FAIL: the generated mount migration builds a unique index on the api key's token digest
+diff --git a/samen_core/priv/templates/m_mount_operator_scopes.eex b/samen_core/priv/templates/m_mount_operator_scopes.eex
+index 69a6f396..6925e916 100644
+--- a/samen_core/priv/templates/m_mount_operator_scopes.eex
++++ b/samen_core/priv/templates/m_mount_operator_scopes.eex
+@@ -150,7 +150,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
+       add(:<%= o_key %>_updated_at, :utc_datetime, null: false)
+     end
+     # One row per digest — the auth lookup (`token_digest == ^digest`) assumes it, and a duplicate made it error.
+-    create(unique_index(:<%= o_key %>_api_key, [:<%= o_key %>_token_digest]))
++    # (sabotage)
+ 
+     # --- <%= o_invite %>_invitation : a pending invite 🔒 (email vault-routed).
+     #     ADR-035 §4.1/§4.2/§5 A5 (T05 hardening): `token_digest` (SHA-256 digest at

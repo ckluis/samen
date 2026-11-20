@@ -34,6 +34,9 @@ defmodule DriftwoodWeb.Api.KeyAuthPlug do
 
   Fail closed: a missing/malformed/unknown/revoked key sets NO actor. Downstream, an
   actor-less request hits the org-scope policy's nil-org branch and sees zero rows.
+
+  A key lookup that FAILS (not "no such key": the read errored) is `503` with `Retry-After`, reported once, and the
+  request is halted (`Samen.Web.Api.KeyCheckUnavailable`).
   """
   import Plug.Conn
   require Ash.Query
@@ -58,6 +61,8 @@ defmodule DriftwoodWeb.Api.KeyAuthPlug do
       |> Ash.PlugHelpers.set_actor(actor)
       |> put_private(:samen_api_actor, actor)
     else
+      # The key could not be CHECKED (the lookup failed): 503 + Retry-After, halted — never served, never "bad key".
+      :unavailable -> Samen.Web.Api.KeyCheckUnavailable.send(conn)
       # Fail closed: no valid key → no actor. The org-scope policy denies (nil org).
       _ -> conn
     end
@@ -81,17 +86,17 @@ defmodule DriftwoodWeb.Api.KeyAuthPlug do
     |> Ash.Query.filter(token_digest == ^digest)
     |> Ash.Query.filter(is_nil(revoked_at))
     |> Ash.Query.ensure_selected([:id, :org_id, :plane, :scopes, :minter_role, :minter_user_id])
-    # authz-scope: API-key AUTH-STEP lookup keyed on the unique token digest — no actor/org
-    # exists until this row resolves (revoked filtered out; unmatched digest => :error, fail closed)
+    # authz-scope: API-key AUTH-STEP lookup keyed on the SHA-256 digest of a server-minted random token — no actor/org
+    # exists until this row resolves (revoked filtered out; unmatched digest => :error; a duplicate digest makes read_one error => :unavailable — both fail closed)
     |> Ash.read_one(authorize?: false)
     |> case do
       {:ok, nil} -> :error
       {:ok, key_row} -> {:ok, key_row}
-      # Fail CLOSED either way (no key row => no actor), but a lookup that FAILED is an outage, not "an invalid
-      # key": report it by name and exception module so it is not invisible.
+      # A lookup that FAILED is an outage, not "an invalid key": report it once by name and exception module and
+      # answer 503 (`:unavailable`), failing closed.
       {:error, error} ->
         Samen.Web.Reads.Guard.report(:driftwood_api_key_lookup, nil, error)
-        :error
+        :unavailable
     end
   end
 

@@ -228,7 +228,8 @@ defmodule Samen.Aggregate.QueryBudget do
     # a fail-closed enforcement mechanism, which the doc says we deliberately do NOT
     # have yet). The FLOORS still ran; only the accounting is skipped.
     e ->
-      Logger.warning("[query_budget] ledger record failed (recording skipped): #{inspect(e)}")
+      # Reported by name and cause (never `inspect(e)`: an Ecto error interpolates the cohort values it was binding).
+      Samen.Observability.Failure.report_write(:query_budget_record, nil, e)
       {:ok, %{count: 0, warned: false}}
   end
 
@@ -312,15 +313,14 @@ defmodule Samen.Aggregate.QueryBudget do
 
   @doc """
   Would this cohort be over the WARN threshold? A predicate for a monitor/dashboard.
-  Returns `false`-safe (never raises the caller): a ledger error is treated as "not over"
-  because the WARN threshold does NOT gate reads (only the ENFORCING budget does, and only
-  when `enforce?/0` is on).
+  A ledger that cannot be read RAISES (the `count/2` error): `false` would read as "under
+  budget" for a cohort whose accounting is unknown, which is exactly what a monitor must not
+  be told. The WARN threshold itself does not gate reads (only the ENFORCING budget does, and
+  only when `enforce?/0` is on), so nothing depends on this swallowing.
   """
   @spec over_threshold?(map(), keyword()) :: boolean()
   def over_threshold?(key, opts \\ []) do
     count(key, opts) >= warn_threshold()
-  rescue
-    _ -> false
   end
 
   @doc """
@@ -373,10 +373,8 @@ defmodule Samen.Aggregate.QueryBudget do
     end
   rescue
     e ->
-      Logger.warning(
-        "[query_budget] enforcement check failed (fail-open; floors still enforce): #{inspect(e)}"
-      )
-
+      # Fail-open is the documented posture (the floors still enforce), but never silent and never value-bearing.
+      Samen.Observability.Failure.report(:query_budget_check, nil, e)
       :ok
   end
 

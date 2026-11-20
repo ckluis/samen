@@ -1213,14 +1213,14 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
       refute rendered =~ "No turns yet"
     end
 
-    test "agent run cancel: a failed write tells the user the run is still running" do
+    test "agent run cancel: a failed write tells the user it could not be cancelled, not that it is still running" do
       org_id = Ash.UUID.generate()
       run = AgentFixture.run!(org_id, agent: "p2_triage", state: :running)
       socket = socket_for(AgentLive, ai_mount(), [org_id, [run_id: run.id]])
 
       inject_read_faults([:ai_agent_cancel])
       failed = failing(fn -> event(AgentLive, socket, "cancel", %{"id" => run.id}) end)
-      assert {:error, "That run could not be cancelled right now" <> _} = failed.assigns.outcome
+      assert {:error, "That run could not be cancelled right now. Try again."} = failed.assigns.outcome
     end
 
     test "CRM preview: a FAILED read is the error state, not 'Record not found in this org'; 404 survives" do

@@ -1,0 +1,21 @@
+# SABOTAGE: the queue read does not re-open a request's missing engine approval, so an orphaned request 
+#   never reaches the approver
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_approver_test.exs
+# MUST_FAIL: an orphan is invisible to the queue
+# MUST_FAIL: the recovered request can be DENIED end to end
+diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+index f2445010..0cb5d312 100644
+--- a/samen_core/lib/samen/reveal/grants.ex
++++ b/samen_core/lib/samen/reveal/grants.ex
+@@ -622,7 +622,7 @@ defmodule Samen.Reveal.Grants do
+   defp recover_orphans(org_id, r, opts) when is_binary(org_id) do
+     with {:ok, org} <- Ecto.UUID.cast(org_id),
+          {:ok, orphans} <- orphan_candidates(org, r, opts) do
+-      {:ok, Enum.count(orphans, &(reopen_orphan(&1, org, r, opts) == :failed))}
++      {:ok, Enum.count(Enum.take(orphans, 0), &(reopen_orphan(&1, org, r, opts) == :failed))}
+     else
+       # not a UUID: no org the engine could hold an approval for, so nothing to recover
+       :error -> {:ok, 0}

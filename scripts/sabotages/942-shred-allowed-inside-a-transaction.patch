@@ -1,0 +1,20 @@
+# SABOTAGE: shred/2 no longer refuses inside a caller's transaction, so the resume marker can roll back 
+#   while the key stays destroyed
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/erasure_resumable_test.exs
+# MUST_FAIL: inside Repo.transaction/1 it refuses, tagged
+diff --git a/samen_core/lib/samen/erasure.ex b/samen_core/lib/samen/erasure.ex
+index edf52760..82b7d497 100644
+--- a/samen_core/lib/samen/erasure.ex
++++ b/samen_core/lib/samen/erasure.ex
+@@ -229,7 +229,7 @@ defmodule Samen.Erasure do
+     # destroyed, and the retry would find neither key nor marker. So refuse BEFORE anything is read or shredded.
+     r = Keyword.get(opts, :repo) || default_repo()
+ 
+-    if r.in_transaction?() do
++    if r.in_transaction?() and Keyword.has_key?(opts, :__never) do
+       {:error, :erasure_in_transaction}
+     else
+       do_shred(subject_id, opts)

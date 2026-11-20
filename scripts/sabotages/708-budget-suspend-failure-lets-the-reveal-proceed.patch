@@ -13,7 +13,7 @@ index 06282580..c164ad42 100644
 @@ -134,7 +134,7 @@ defmodule Samen.BreakGlass.Budget do
  
          {:error, reason} ->
-           Samen.Observability.Failure.report(:budget_auto_suspend, nil, reason)
+           Samen.Observability.Failure.report_write(:budget_auto_suspend, nil, reason)
 -          {:error, :suspend_failed}
 +          {:ok, count}
        end

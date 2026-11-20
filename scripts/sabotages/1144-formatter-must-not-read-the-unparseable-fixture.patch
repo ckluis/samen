@@ -1,0 +1,18 @@
+# SABOTAGE: The formatter's inputs must not reach the deliberately unparseable read-scope fixture, or a 
+#   developer's mix format in samen_core errors on it.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/read_scope_verify_test.exs
+# MUST_FAIL: no file `mix format` would read is a deliberately unparseable one
+diff --git a/samen_core/.formatter.exs b/samen_core/.formatter.exs
+index adbdc88e..6418a7ab 100644
+--- a/samen_core/.formatter.exs
++++ b/samen_core/.formatter.exs
+@@ -1,5 +1,5 @@
+ # Used by "mix format"
+ [
+   import_deps: [:ash, :ash_postgres],
+-  inputs: ["{mix,.formatter}.exs", "{config,lib,test}/**/*.{ex,exs}"]
++  inputs: ["{mix,.formatter}.exs", "{config,lib,test}/**/*.{ex,exs,txt}"]
+ ]

@@ -1,0 +1,21 @@
+# SABOTAGE: Vault.check_bindings/3 reports every token as bound
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault_change_integration_test.exs
+# MUST_FAIL: a %Masked{} copied from A into B (same org) is refused
+# MUST_FAIL: a field swap within the SAME record is refused
+diff --git a/samen_core/lib/samen/vault.ex b/samen_core/lib/samen/vault.ex
+index fce95162..ffbe8077 100644
+--- a/samen_core/lib/samen/vault.ex
++++ b/samen_core/lib/samen/vault.ex
+@@ -262,7 +262,8 @@ defmodule Samen.Vault do
+           reason != nil,
+           do: {field.name, reason}
+ 
+-    if failures == [], do: :ok, else: {:error, failures}
++    _ = failures
++    :ok
+   end
+ 
+   # nil = bound. Order matters: a missing row, then another subject's, then the right subject

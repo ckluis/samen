@@ -1,0 +1,20 @@
+# SABOTAGE: render_scalar/2 redacts the whole raw value before truncating to 500 bytes: a 64KB tool result 
+#   costs the full scan again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_ingress_test.exs
+# MUST_FAIL: a packed-label-opener flood renders at least four times cheaper than redacting the full binary
+diff --git a/samen_core/lib/samen/ai/agent/tool_result.ex b/samen_core/lib/samen/ai/agent/tool_result.ex
+index fd804d48..c3df25bc 100644
+--- a/samen_core/lib/samen/ai/agent/tool_result.ex
++++ b/samen_core/lib/samen/ai/agent/tool_result.ex
+@@ -455,7 +455,7 @@ defmodule Samen.AI.Agent.ToolResult do
+   # `@max_scalar_bytes` still runs AFTER the scan, on the bounded transform's output, exactly as
+   # before.
+   defp render_scalar(v, key) when is_binary(v) do
+-    sanitized = redacted_and_sanitized(v)
++    sanitized = v |> Secrets.redact() |> Ingress.sanitize()
+ 
+     if sentinel?(v) or sentinel?(sanitized),
+       do: unrenderable(key),

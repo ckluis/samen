@@ -27,10 +27,11 @@ defmodule Samen.AuditChain.Writer do
 
   ## Atomicity and nesting
 
-  Outside a transaction the event and its chain entry commit together or not at all (the write opens its own
-  transaction). Inside a caller's transaction that transaction is the unit: `write/2` returns `{:error, _}` and a
-  caller that grants, opens or approves something MUST roll back on it (Ecto does not nest rollbacks, so a
-  rollback here would poison a caller that tolerates the error). An unavailable chain (the existence probe
+  The event and its chain entry are one unit on every path. Outside a transaction the write opens its own; inside a
+  caller's transaction it runs in a SAVEPOINT, so an `{:error, _}` leaves neither row behind even when the caller
+  tolerates the error and goes on (Ecto does not nest plain rollbacks, so only a savepoint can undo this pair
+  without poisoning the caller's transaction). A caller that grants, opens or approves something must still roll
+  back on `{:error, _}`: the audit failure means the action is unaudited. An unavailable chain (the existence probe
   failed) writes nothing in either case.
 
   ## Where it plugs in
@@ -72,13 +73,11 @@ defmodule Samen.AuditChain.Writer do
   @spec write(module(), map()) :: {:ok, map()} | {:error, term}
   def write(repo, attrs) when is_atom(repo) and is_map(attrs) do
     with :ok <- Samen.PiiReasonScan.check(get(attrs, :detail), "audit detail") do
-      # Atomic: an `aud_event` without its chain entry never commits. Outside a transaction the insert and the
-      # chain append share one of their own. INSIDE a caller's transaction the caller's is the unit (Ecto does not
-      # nest rollbacks: a nested `rollback` would poison the caller's transaction even when it tolerates the
-      # error), so there this returns `{:error, _}` and a caller that must be atomic rolls back on it. The probe
-      # runs BEFORE any insert, so an unavailable chain writes nothing in either case.
+      # Atomic: an `aud_event` without its chain entry never persists. Outside a transaction the insert and the
+      # chain append share one of their own; inside a caller's, they share a savepoint (see `in_savepoint/2`). The
+      # probe runs BEFORE any insert, so an unavailable chain writes nothing in either case.
       if repo.in_transaction?() do
-        do_write(repo, attrs)
+        in_savepoint(repo, get(attrs, :org_id), fn -> do_write(repo, attrs) end)
       else
         case repo.transaction(fn ->
                case do_write(repo, attrs) do
@@ -91,6 +90,64 @@ defmodule Samen.AuditChain.Writer do
         end
       end
     end
+  end
+
+  # Inside a caller's transaction the pair runs in a SAVEPOINT (Ecto has no nested rollback: `repo.rollback` in a
+  # nested `transaction` poisons the caller's). The pair is undone on EVERY way out of `fun`:
+  #   * a returned `{:error, _}` (the chain append failed AFTER the event insert: a subject key that cannot be
+  #     unwrapped, a rejected row) rolls back TO the savepoint;
+  #   * a RAISE, EXIT or THROW (a KMS adapter that raises in `unwrap/1`, a crypto failure) does too (best effort), and is
+  #     then re-raised unchanged. A non-DB raise does NOT abort Postgres, so without this the `aud_event` stayed behind,
+  #     unchained, in a transaction the caller then committed. A raise from a DB error OUTSIDE `AuditChain.append`'s own
+  #     nested transaction (the plain event insert) is undone by the rollback to the savepoint, which also clears the
+  #     aborted state. A raise INSIDE `append`'s nested transaction (the advisory-lock query, `do_append`) leaves the
+  #     caller's transaction FAILED: DBConnection refuses every further query, so the rollback to the savepoint itself
+  #     fails (reported once more as `audit_chain_savepoint`), the original exception is re-raised, and the caller's
+  #     commit becomes a rollback. That is the safe direction; the second report is accepted, not suppressed.
+  # The savepoint statements are `query/2`s, not `query!/2`s, and a failure of one is the same
+  # `{:error, :audit_chain_unavailable}` (reported by name) the existence probe answers: an already-aborted caller
+  # transaction, or a dropped connection, is an error tuple, never a raised 25P02 that hides the reason. The savepoint takes
+  # no lock of its own; the advisory lock the append takes is taken at the same point as before.
+  defp in_savepoint(repo, org_id, fun) do
+    sp = "samen_audit_write_#{System.unique_integer([:positive])}"
+
+    case savepoint(repo, "SAVEPOINT ", sp, org_id) do
+      :ok -> run_in_savepoint(repo, org_id, sp, fun)
+      {:error, _} = error -> error
+    end
+  end
+
+  defp run_in_savepoint(repo, org_id, sp, fun) do
+    case fun.() do
+      {:ok, _} = ok ->
+        with :ok <- savepoint(repo, "RELEASE SAVEPOINT ", sp, org_id), do: ok
+
+      {:error, _} = error ->
+        with :ok <- savepoint(repo, "ROLLBACK TO SAVEPOINT ", sp, org_id),
+             :ok <- savepoint(repo, "RELEASE SAVEPOINT ", sp, org_id),
+             do: error
+    end
+  catch
+    kind, reason ->
+      stacktrace = __STACKTRACE__
+      # best effort, and never in place of the original failure: a dead connection must not replace the exception
+      with :ok <- savepoint(repo, "ROLLBACK TO SAVEPOINT ", sp, org_id), do: savepoint(repo, "RELEASE SAVEPOINT ", sp, org_id)
+      :erlang.raise(kind, reason, stacktrace)
+  end
+
+  defp savepoint(repo, statement, sp, org_id) do
+    case repo.query(statement <> sp) do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason} ->
+        Samen.Observability.Failure.report_write(:audit_chain_savepoint, org_id, reason)
+        {:error, :audit_chain_unavailable}
+    end
+  rescue
+    e ->
+      Samen.Observability.Failure.report_write(:audit_chain_savepoint, org_id, e)
+      {:error, :audit_chain_unavailable}
   end
 
   # F4.3: the audit `detail` is a NON-shreddable plaintext channel (ADR-002 §2.5) — it is

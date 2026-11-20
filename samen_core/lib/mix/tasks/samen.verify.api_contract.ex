@@ -58,8 +58,7 @@ defmodule Mix.Tasks.Samen.Verify.ApiContract do
   ## Non-emptiness floor (fail-closed on empty discovery)
 
   An EMPTY live contract means introspection discovered ZERO AshJsonApi
-  resources — a mis-keyed `:ash_domains` (or a snapshot builder swallowing
-  every resource) would otherwise let `--update` write an empty snapshot and
+  resources — a mis-keyed `:ash_domains` would otherwise let `--update` write an empty snapshot and
   every future diff green vacuously (empty vs empty, forever). The task FAILS
   CLOSED (exit 1) before writing or diffing when the live contract has no
   resources — the same non-emptiness floor as
@@ -112,7 +111,17 @@ defmodule Mix.Tasks.Samen.Verify.ApiContract do
     update? = Keyword.get(opts, :update, false)
 
     # Build the live snapshot from the running app.
-    live_snapshot = Samen.ApiContract.snapshot(domains, version)
+    live_snapshot =
+      try do
+        Samen.ApiContract.snapshot(domains, version)
+      rescue
+        e in Samen.ApiContract.IntrospectionError ->
+          IO.puts("")
+          IO.puts("FAIL: #{@task_name} could not introspect the live contract — #{Exception.message(e)}. " <>
+                    "A contract missing a resource must not be written or diffed (fail-closed).")
+          IO.puts("")
+          :erlang.halt(1)
+      end
 
     # X9 floor — BEFORE both branches: --update must never persist an empty
     # snapshot, and diff must never green an empty-vs-empty contract.
@@ -152,12 +161,10 @@ defmodule Mix.Tasks.Samen.Verify.ApiContract do
     end
   end
 
-  # X9 non-emptiness floor: `Snapshot.resource_entry/1` rescues per-resource
-  # introspection failures into absence, and a mis-keyed :ash_domains yields []
-  # outright — either way an empty live contract pins NOTHING. Writing it
-  # (--update) or diffing it against an empty stored snapshot would green
-  # vacuously forever. Same fail-closed shape as
-  # `vault_declared_parity.halt_if_no_resources!/1`.
+  # X9 non-emptiness floor: a mis-keyed :ash_domains (or a host without the JSON:API library) yields [] outright, and an
+  # empty live contract pins NOTHING. Writing it (--update) or diffing it against an empty stored snapshot would green
+  # vacuously forever. (A resource whose introspection FAILS never reaches here: `snapshot/2` raises and the task fails
+  # above.) Same fail-closed shape as `vault_declared_parity.halt_if_no_resources!/1`.
   defp halt_if_empty_contract!(live_snapshot) do
     if (live_snapshot["resources"] || []) == [] do
       IO.puts("")

@@ -1,0 +1,23 @@
+# SABOTAGE: MarketingReceiptLookup answers :not_found for a failed read, so a bounce is filed as an 
+#   unmatched event
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_d_test.exs
+# MUST_FAIL: RED: the marketing lookup's read fails -> {:error, :unavailable}, reported (it answered :not_found)
+diff --git a/samen_core/lib/samen/delivery/marketing_receipt_lookup.ex b/samen_core/lib/samen/delivery/marketing_receipt_lookup.ex
+index b5a314f8..8521797f 100644
+--- a/samen_core/lib/samen/delivery/marketing_receipt_lookup.ex
++++ b/samen_core/lib/samen/delivery/marketing_receipt_lookup.ex
+@@ -51,9 +51,8 @@ defmodule Samen.Delivery.MarketingReceiptLookup do
+ 
+       # A read that FAILED is not "no such send": the bounce/complaint would be matched to nothing and never suppress
+       # the address. It is its own, reported answer (Deliverability retries it, then the DLQ), never `:not_found`.
+-      {:error, reason} ->
+-        Samen.Observability.Failure.report(:marketing_receipt_lookup, nil, reason)
+-        {:error, :unavailable}
++      {:error, _} ->
++        :not_found
+     end
+   rescue
+     # A host whose Send schema doesn't (yet) carry provider_message_id raises here; that is a miswired lookup, not an

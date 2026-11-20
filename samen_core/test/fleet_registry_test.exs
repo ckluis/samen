@@ -755,6 +755,91 @@ defmodule Samen.Fleet.RegistryTest do
   end
 
   # ---------------------------------------------------------------------------
+  # A FAILED credential/token lookup is an outage, not a verdict on the presenter
+  # ---------------------------------------------------------------------------
+
+  describe "a failed fleet credential or token read is :unavailable" do
+    import ExUnit.CaptureLog
+
+    # Postgres DDL is transactional: renaming the table inside the sandbox makes the very read fail and rolls back with the test
+    defp break_table!(resource_name) do
+      table = AshPostgres.DataLayer.Info.table(Module.concat(@ns, resource_name))
+      Ecto.Adapters.SQL.query!(TestRepo, "ALTER TABLE #{table} RENAME TO #{table}_broken", [])
+    end
+
+    defp enrolled_app do
+      {:ok, %{raw_token: raw_token}} =
+        Registry.mint_enrollment_token(@ns, %{app_slug: "unav-#{System.unique_integer([:positive])}", display_name: "Unav"}, @admin)
+
+      {pub, priv} = Crypto.generate_ed25519_keypair()
+      {:ok, %{app_id: app_id}} = Registry.consume_enrollment(@ns, raw_token, Base.encode64(pub))
+      {app_id, priv}
+    end
+
+    defp heartbeat_fields(kid, priv) do
+      payload = Samen.Fleet.Report.build(app_id: kid) |> Samen.Fleet.Report.to_wire()
+      raw_body = Jason.encode!(payload)
+      ts = System.os_time(:second)
+      nonce = Crypto.generate_nonce()
+      input = Crypto.signing_input("POST", "/fleet/heartbeat", ts, nonce, Crypto.body_digest(raw_body))
+      sig = Crypto.sign_ed25519(priv, input) |> Base.encode16(case: :lower)
+
+      %{kid: kid, v: 1, ts: ts, nonce: nonce, sig: sig, method: "POST", path: "/fleet/heartbeat", raw_body: raw_body, payload: payload}
+    end
+
+    test "a failed credential lookup is :unavailable, reported once; an unknown kid stays :unknown_kid" do
+      {app_id, priv} = enrolled_app()
+
+      # controls, before anything is broken
+      assert {:ok, _} = Registry.verify_and_ingest_heartbeat(@ns, heartbeat_fields(app_id, priv))
+
+      log =
+        capture_log(fn ->
+          assert {:error, :unknown_kid} = Registry.verify_and_ingest_heartbeat(@ns, heartbeat_fields(Ash.UUID.generate(), priv))
+        end)
+
+      refute log =~ "fleet_heartbeat_credential_lookup"
+
+      break_table!(Credential)
+
+      log =
+        capture_log(fn ->
+          send(self(), {:result, Registry.verify_and_ingest_heartbeat(@ns, heartbeat_fields(app_id, priv))})
+        end)
+
+      assert_received {:result, result}
+      assert result == {:error, :unavailable}
+      assert length(Regex.scan(~r/read=fleet_heartbeat_credential_lookup/, log)) == 1
+    end
+
+    test "a failed token consume is :unavailable, reported once; an unknown token stays :invalid_token" do
+      {:ok, %{raw_token: raw_token}} =
+        Registry.mint_enrollment_token(@ns, %{app_slug: "unav2-#{System.unique_integer([:positive])}", display_name: "Unav2"}, @admin)
+
+      {pub, _priv} = Crypto.generate_ed25519_keypair()
+
+      log =
+        capture_log(fn ->
+          assert {:error, :invalid_token} = Registry.consume_enrollment(@ns, "not-a-real-token", Base.encode64(pub))
+        end)
+
+      refute log =~ "fleet_enrollment_consume"
+
+      break_table!(EnrollmentToken)
+
+      log =
+        capture_log(fn ->
+          send(self(), {:result, Registry.consume_enrollment(@ns, raw_token, Base.encode64(pub))})
+        end)
+
+      assert_received {:result, result}
+      assert result == {:error, :unavailable}
+      assert length(Regex.scan(~r/read=fleet_enrollment_consume/, log)) == 1
+      refute log =~ raw_token
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # RP-J-2 — heartbeat credential grants ZERO read (the load-bearing probe)
   # ---------------------------------------------------------------------------
 

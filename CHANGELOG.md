@@ -11,6 +11,160 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Fixed: hardening batch 3 (database TLS, API-key digest uniqueness, expired API keys)
+
+- **Fixed: a generated `--deploy` app verifies the database server certificate (ARCH-12).** `config/runtime.exs` used
+  `ssl: [verify: :verify_none]`; it now calls `Samen.Deploy.db_ssl_opts/2` (`verify_peer` against the OS CA store, hostname
+  checked). `DATABASE_SSL_CACERTFILE=/path/ca.pem` verifies against a private CA instead; `DATABASE_SSL_VERIFY=none` is the
+  loud opt-out (a warning on stderr at every boot); any other value, a URL `ssl=` other than `true`, or
+  `sslmode=disable|allow|prefer` refuses to boot, naming the variable (never the URL). The single-node lease's
+  `DATABASE_DIRECT_URL` connection inherits the same options, whatever its query string says.
+- **Fixed: every API-key token digest is unique.** The lookup assumes one row per digest; a duplicate made it error (a
+  503). New apps create the unique index in the first migration; the committed hosts got a `CONCURRENTLY` migration
+  (`concurrent_unique_index/3`, which refuses existing duplicates without printing a digest). Sabotages 1145-1152.
+- **Upgrade (apps generated before these changes):**
+  1. *TLS.* Edit your own `config/runtime.exs`: replace `ssl: [verify: :verify_none]` with
+     `ssl: Samen.Deploy.db_ssl_opts([{"DATABASE_URL", database_url}, {"DATABASE_DIRECT_URL", direct_url}])`, and move the
+     line `direct_url = System.get_env("DATABASE_DIRECT_URL")` above the `config ... Repo` call. The app then verifies the
+     certificate on its next boot: set `DATABASE_SSL_CACERTFILE` (a CA file in the image) for a private CA, or
+     `DATABASE_SSL_VERIFY=none` to keep the old behaviour knowingly.
+  2. *Unique digest.* Run `mix samen.gen.api_key_digest_unique`, then `mix ecto.migrate`. It writes one migration of literal
+     SQL (`CREATE UNIQUE INDEX CONCURRENTLY` per `*_api_key` table found in your `:ash_domains`; `--key table:column`
+     names one explicitly). If a table already holds a duplicate digest the migration raises, naming the table and column,
+     and changes nothing: resolve the duplicates, run it again. A re-run writes nothing.
+  3. *Expired keys (from the previous change in this chain).* An existing `--api` app's own key auth plug
+     (`lib/<app>_web/api/key_auth_plug.ex`) must filter expired keys, or an expired key keeps authenticating. Add
+     this line after the `is_nil(revoked_at)` filter in `lookup_key/1`:
+     `|> Ash.Query.filter(is_nil(expires_at) or expires_at > ^now)` (with `now = DateTime.utc_now()` bound above it).
+- **Backlog:** the CSAT survey-token digest indexes (`*_csat_survey_token_digest_idx`, seven tables in four hosts) are
+  plain, not unique. Tokens are 32 random bytes and both lookups tolerate a collision (`limit(1)`, an atomic
+  single-use consume), so this is hardening, not a bug; it needs template, host migrations and a retrofit.
+
+### Fixed: kernel phase D, honest reads (approvals, reveal, delivery lookups, verifier inputs, mailbox, replay)
+
+- **Fixed: a failed approvals read no longer reads as "none", "not found" or "unwired".** `Approvals.existing_pending`
+  answered `:none` (so `request/2` went on to write over an unreadable table); `fetch_approval` answered `:not_found`
+  for any failure (`get/2`, `cancel/3`, `approve/3`, and the agent's expiry withdrawal all read an outage as "already
+  gone"); a configured resource whose repo could not be resolved read as `:no_approvals_module`, which lets
+  `Reveal.Grants.approve/2` fall back to its engine-less path. They are now `{:error, :unavailable}` /
+  `{:error, :approvals_unavailable}`, reported; only a missing row (or an id that cannot name one) is `:not_found`. The
+  agent's execution seam names an unreadable approval `:approval_unavailable`.
+- **Fixed: `Reveal.Grants`** reports a parallel `pii_reveal` approval it could not open, a failed pending list, and a
+  pending approval dropped from the queue because its request row is gone.
+- **Fixed: a reveal request whose engine approval failed to open is recovered, not only reported (S6).** The request now
+  persists its org (`rvq_org_id`, nullable; a non-UUID org is stored NULL and reported once as
+  `reveal_request_org_uncastable`) and **records its own decision**: `rvq_status` is `approved` / `denied` / `cancelled`,
+  written in the same transaction as the decision under a row lock on the request (`Grants.do_approve/4`,
+  `Grants.deny/2`, the handler's `on_reject/2` and the new optional `Approvals.Handler.on_cancel/2`, which
+  `Approvals.cancel/3` runs). `Grants.approve/2` / `deny/2` refuse a request that is no longer pending
+  (`{:error, :not_pending}`): no second approval, no second grant. `pending_for_org_result/2` re-opens, idempotently,
+  the missing approval of the org's recent requests that are still `pending` (14 days, at most 200, newest first;
+  decided requests do not use the bound) before it lists. The re-open re-checks under the request's row lock that the
+  request is still pending and has no approval in any state, so a request decided between the scan and the re-open is
+  not revived; the recovered approval keeps the request's own `requested_at`. A failed re-open is reported AND the
+  queue answers **`{:partial, rows, n}`** (`RevealApprovalsLive` says "n pending reveal request(s) could not be
+  shown"; `pending_for_org/2` raises), and an orphan scan that cannot run makes the queue `{:error, :unavailable}`.
+  Sabotages 1010-1013 and 1016-1026.
+- **Upgrade (apps generated before this change): run `mix samen.gen.reveal_requests`, then `mix ecto.migrate`.** A
+  generated app is a copy that depends on `samen_core` by path: the new `RevealRequest` schema selects `rvq_org_id`, so
+  an app on the old table fails every reveal read and write with `undefined_column` until it has the column. The task
+  writes two migrations of literal SQL for the app's approvals prefix (`--approvals-prefix`, default read from the
+  configured approvals resource; `--no-approvals` for a host with no engine): `rvq_org_id` under `expand_setup/0`, then,
+  outside the DDL transaction and in batches, the backfill of `rvq_org_id` (from the request's approval) and
+  `rvq_status` (from approvals, grants and recorded denials; a request whose records disagree, or that has none, stays
+  `pending` and is counted in the output) and the `(org, inserted_at, id)` index `CONCURRENTLY`. The committed `demo`,
+  `driftwood`, `pawchart`, `samen_web` and test-repo migrations (`20261118100000`, `20261118100001`) are its output.
+  `Migration.ExpandContract.chunked_backfill/4` gains a `:where` option (a literal predicate replacing the
+  `column IS NULL` guard) so a backfill can skip rows it cannot answer for.
+- **Changed: `QueryBudget.over_threshold?/2` raises on an unreadable ledger** instead of answering `false` ("under
+  budget"). `record/1` and `check/2` keep their documented fail-open posture but report by name instead of inspecting
+  the exception.
+- **Fixed: a failed send lookup no longer files a bounce or complaint as "no matching receipt".**
+  `MarketingReceiptLookup` and `Sequences.ReceiptLookup` answer `{:error, :unavailable}`; `Deliverability.handle_event/2`
+  returns `{:error, :receipt_lookup_unavailable}`.
+- **Fixed: `NoPlaintextPii.Context`** no longer drops a resource whose table cannot be determined from the sweep, nor
+  turns a failed dependency lookup into "no OTel, nothing to assert"; an unreadable non-PII registry (no exemptions) is
+  reported.
+- **Fixed: mailbox sync no longer anchors a message to nothing for good when the CRM match read fails.** `Match` reads
+  raise; `sync/2` aborts with `{:error, {:match_unavailable, :read_failed}}` and leaves the cursor, like an unavailable
+  dedupe lookup. A cursor update that fails is reported.
+- **Fixed: the replay resolver and sanitizer report** a failed record read, grant/vault prefetch, per-record resolve,
+  shred attestation or unwalkable assign (values unchanged: nothing resolves, nothing is claimed shredded).
+- **Fixed (test): `KitStatesTest` "host_nav_extra" flaked on another async test's log line.** `ExUnit.CaptureLog` sees
+  the whole node; `Samen.WebTest.OwnLog` keeps only the calling process's lines.
+- `kernel_swallow` ceilings: rescue 123 -> 91, error arms 19 -> 15. Sabotages 985-1001.
+
+### Fixed: kernel phase C review (verifier evasion, billing ledger gaps, replay unavailable card)
+
+- **Fixed: `agent_coverage` could miss an agent-loop re-entry through a decoy `@attr` value.** One rescue covered every
+  value of `@k`, so `@k :lists` placed before `@k Samen.AI.Agent` made `source_reenters_loop?/1` read false. Each value is
+  now decided on its own, without a rescue.
+- **Fixed: `ai_prompt_masking` crashed on a `defmodule __MODULE__.X` in a tool's source file** (`Module.concat/1` raises
+  `FunctionClauseError`, not the `ArgumentError` the narrowed rescue named). The parts are guarded instead.
+- **Added: `mix samen.verify.movement_continuity` (`Samen.Billing.MovementContinuity`).** A skipped `mov` row used to
+  leave only a failure report; the ledger now has a check: each subscription's rows must chain (`mrr_before_cents` equals
+  the previous `mrr_after_cents`, the first starts from 0), the last `mrr_after_cents` must equal the live MRR, and a
+  revenue-active subscription must have a row. Report only, ids and cents only, wired for the demo host.
+- **Documented, measured: which failures roll the subscription write back.** `SubscriptionMovement` is best-effort only
+  for failures that send no SQL (an unresolvable price resource, a classifier refusal, a validation error): the
+  subscription write stands and no row is written. A failing SQL statement inside the write's transaction aborts it, so
+  the subscription write is rolled back too (`demo/test/movement_continuity_test.exs`).
+- **Fixed: `MovementBackfill.from_snapshot/1`** declares `{:error, :unavailable}` in its `@spec`, and one unreadable
+  subscription no longer stops the whole run: it is skipped, counted in `failed` and reported; `{:error, :unavailable}`
+  is only for a failed read of the snapshot itself.
+- **Fixed: the replay player's `:unavailable` arm is now driven through the real load path** (test and sabotage).
+
+### Fixed: an erasure that failed after the key shred is resumable (AI derived context is withdrawn on the retry)
+
+- **Fixed: `Samen.Erasure.shred/2` could report completion while AI runs citing the subject were never withdrawn.** The
+  irreversible `Kms.shred/1` runs before the seal transaction, and the pseudonym `subject_ref` the fold-ledger and
+  fold-source arms need dies with the key. A failure of any step 2-5 after the shred rolled the transaction back; the
+  retry saw `:shredded`, recorded both arms as `:no_pseudonym` and never stamped the fold index. The ref is now committed
+  as a `"pending"` marker (in `era_erasure_report`, no schema change) before the shred and deleted by the completing
+  transaction; the retry resumes from it and its report equals an uninterrupted run's. A shredded key with no marker and
+  no earlier completed report now fails loudly (`{:error, {:shred_reference_lost, report}}` + an `operator_action_required`
+  report; `acknowledge_lost_reference: true` is the operator override). `Erasure.pending/1` lists unfinished erasures.
+  ADR-048 §7.3 addendum 2026-11-15; `samen_core/test/erasure_resumable_test.exs`.
+
+### Security: vault tokens are bound to the record that holds them (High)
+
+- **Fixed: a tenant could read another subject's PII, across orgs, by planting its vault token.** Tokens are stored
+  "token-only downstream" by design, so anyone with read access to a replica, the CDC mirror, a backup, version or audit
+  rows could learn one; `VaultField.cast_input/2` accepted any `"vt_"` string as an already-vaulted token, so it could be
+  written into a vaulted field through a form, a CSV cell, an automation literal or an inbound mail body, and
+  `PiiResolution` revealed it. A plaintext that merely started with `vt_` was also stored unencrypted. Now a raw string is
+  always plaintext and is encrypted; only an internal `%Masked{}` means "already vaulted".
+- **`Samen.Vault.Change` binds every changed `%Masked{}`** to the record's subject (its primary key), vault and field in one
+  query (`Vault.check_bindings/3`); a mismatch is a changeset error naming the field and reason, never the token, and is
+  reported (`:vault_token_unbound`). An untouched round-trip of the record's own value costs no query. A create without an
+  explicit primary key cannot carry a `%Masked{}`. An upsert-create on a PII resource is refused twice: at build time when
+  the action or `for_create(..., upsert?: true)` says so, and AFTER the write for a call-site `Ash.create(cs, upsert?: true)`
+  (inside the action every create looks like an upsert): an `after_action` compares the written row's primary key with the
+  vault subject and errors on a mismatch, which rolls back the vault rows with the domain write. The same `after_action`
+  refuses a later hook that swapped a vault attribute after `Vault.Change` approved it. Atomic writes of a vault field never
+  reach the data layer (Ash refuses them; `Vault.Change` has no `atomic/3`).
+- **The write guard no longer depends on the caller's transaction options.** It rolls back itself (`repo.rollback/1`), so
+  `rollback_on_error?: false` cannot leave a refused write durable; a create/update on a PII resource with NO open
+  transaction (an action declared `transaction? false`, a bulk `transaction: false`) is refused before any vault insert or
+  row write. The read-side unbound report is capped per reason (20), and what the cap cuts is reported as
+  `vault_token_unbound_truncated` with the suppressed count.
+- **Removed: `Samen.Vault.materialize/2`** (public, no callers in the tree). Resolve through `Samen.Api.PiiResolution`.
+- **Reads reveal bound-only.** `Vault.reveal/3` gains `field:`, checked with `subject_id:` before any key is unwrapped;
+  `PiiResolution` asserts the holder's primary key and field for every value, never unwraps a foreign subject's DEK, and
+  renders a mismatch masked/absent on every plane. The webhook signing-secret reveal asserts the endpoint's id and field, and
+  a mismatch is discarded and reported once (permanent, not retried 20 times). The read-side `:vault_token_unbound` log
+  line now names resource, field and record id (never a token or value). `Samen.Reveal.reveal/5` forwards `:field` and
+  REQUIRES `:subject_id` (`{:error, :subject_required}`). A legacy `vt_`-prefixed plaintext cell blocks updates of a
+  versioned record with an explicit error pointing at the verifier (remediation in docs/guides/gate-failures.md).
+- **Behaviour change:** a `"vt_…"` string written to a vault field (including by an operator, formerly a no-op) is now
+  plaintext; an operator typing one is refused like any plaintext write. `Vault.token?/1` is the token grammar.
+- **New verifier** `mix samen.verify.vault_token_binding` (`Samen.Vault.BindingScan`, ci steps for samen_core, demo,
+  driftwood, pawchart, samen_web): finds existing cells that do not belong to their record (`foreign_subject`,
+  `field_mismatch`, `dangling_token`, `non_token_value`, `shared_token`). Report only; no token or value in its output.
+- Proof: `vault_token_input_test.exs`, `vault_change_integration_test.exs`, `pii_resolution_token_binding_test.exs`,
+  `vault_dek_reuse_test.exs`, `verify_vault_token_binding_test.exs`, `csv_masking_test.exs`; sabotages 905-921 and 927-934. ADR-001
+  section 6.2, ADR-036 section 12, ADR-041 section 13a.
+
 ### Vault: one KMS unwrap per subject per resolve call (ARCH-2)
 
 - **`Samen.Api.PiiResolution` unwraps each subject's DEK once per call, not once per vaulted value.** A page of N rows x M

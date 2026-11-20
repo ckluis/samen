@@ -1,0 +1,22 @@
+# SABOTAGE: Approvals.request errors on an already-pending approval instead of returning it, so an approver's
+#   decision on a request whose approval is already open fails
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_approver_test.exs
+# MUST_FAIL: now the read re-opens it and the approver can APPROVE it end to end
+diff --git a/samen_core/lib/samen/approvals.ex b/samen_core/lib/samen/approvals.ex
+index 3242444d..2eb11b51 100644
+--- a/samen_core/lib/samen/approvals.ex
++++ b/samen_core/lib/samen/approvals.ex
+@@ -67,8 +67,8 @@ defmodule Samen.Approvals do
+       # A pending-row read that FAILED is not "no pending approval": creating on top of an unreadable table would
+       # open a duplicate (or lose the idempotent return), so the request is refused as unavailable instead.
+       case existing_pending(res, attrs, opts) do
+-        {:ok, approval} ->
+-          {:ok, approval}
++        {:ok, _approval} ->
++          {:error, :request_failed}
+ 
+         :none ->
+           create_approval(res, repo, attrs, kind, opts)

@@ -152,6 +152,31 @@ defmodule Samen.Web.Billing.CheckoutReconcileTest do
     assert customer.status == :active
   end
 
+  test "a granted feature whose key is not an existing atom gets no entitlement, and is reported by name and org only" do
+    org_id = Ash.UUID.generate()
+    unknown = "zz_never_an_atom_#{System.unique_integer([:positive])}_#{:erlang.unique_integer([:positive])}"
+    plan = seed_plan(org_id, %{"api_access" => true, unknown => true})
+    event = checkout_completed_event("sub_unk_#{System.unique_integer([:positive])}", org_id, plan.id, "cus_real_1")
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:ok, :applied, applied} = Checkout.reconcile(event, reconcile_opts(snapshot()))
+        assert Enum.map(applied.entitlements, & &1.feature) == [:api_access]
+      end)
+
+    assert log =~ "write=checkout_feature_unknown"
+    refute log =~ unknown
+
+    # positive control: with only known features nothing is reported
+    plan2 = seed_plan(org_id, %{"api_access" => true})
+    event2 = checkout_completed_event("sub_unk2_#{System.unique_integer([:positive])}", org_id, plan2.id, "cus_real_1")
+
+    log2 =
+      ExUnit.CaptureLog.capture_log(fn -> assert {:ok, :applied, _} = Checkout.reconcile(event2, reconcile_opts(snapshot())) end)
+
+    refute log2 =~ "checkout_feature_unknown"
+  end
+
   test "an EXISTING customer (same org + provider ref) is reused, not duplicated" do
     org_id = Ash.UUID.generate()
     plan = seed_plan(org_id, %{"basic" => true})

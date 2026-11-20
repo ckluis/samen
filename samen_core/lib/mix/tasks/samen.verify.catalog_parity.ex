@@ -241,12 +241,14 @@ defmodule Mix.Tasks.Samen.Verify.CatalogParity do
     end
   end
 
+  # Decided by the resource's data layer, not by swallowing the introspection: a resource on another data layer
+  # has no table to check; an introspection that FAILS on a Postgres resource fails the task.
   defp postgres_resource?(resource) do
-    try do
+    if Ash.Resource.Info.data_layer(resource) == AshPostgres.DataLayer do
       table = AshPostgres.DataLayer.Info.table(resource)
       is_binary(table) and byte_size(table) > 0
-    rescue
-      _ -> false
+    else
+      false
     end
   end
 

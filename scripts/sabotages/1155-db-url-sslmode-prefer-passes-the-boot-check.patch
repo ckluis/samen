@@ -1,0 +1,20 @@
+# SABOTAGE: sslmode=prefer (TLS optional) passes the boot check although the operator asked for TLS to be 
+#   optional, which Postgrex ignores.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/deploy_db_ssl_test.exs
+# MUST_FAIL: sslmode=disable|allow|prefer raises
+diff --git a/samen_core/lib/samen/deploy.ex b/samen_core/lib/samen/deploy.ex
+index 55ee987c..6471aeb6 100644
+--- a/samen_core/lib/samen/deploy.ex
++++ b/samen_core/lib/samen/deploy.ex
+@@ -129,7 +129,7 @@ defmodule Samen.Deploy do
+                 "would switch TLS off or crash every connection (fail-closed). Remove it from the variable " <>
+                 "(TLS is always on; verification is set by DATABASE_SSL_VERIFY / DATABASE_SSL_CACERTFILE)."
+ 
+-      {"sslmode", value} when value in ["disable", "allow", "prefer"] ->
++      {"sslmode", value} when value in ["disable", "allow"] ->
+         raise ArgumentError,
+               "#{name} carries sslmode=#{value}, which asks for TLS to be optional or off (fail-closed; Postgrex " <>
+                 "ignores sslmode and always uses TLS here). Remove it, or use sslmode=require."

@@ -125,6 +125,35 @@ done < <(data_rows "$TARGETS_FILE")
 [[ "$targets_total" -gt 0 ]] || refuse "targets file $TARGETS_FILE has no data rows"
 
 # ── MUTATION_OWNS declarations ───────────────────────────────────────────────
+# The scan is over the files git knows (tracked + untracked-not-ignored), NUL-delimited, so a path with a space,
+# a quote or a parenthesis can never truncate it (a `find | xargs` over ExUnit's quoted :tmp_dir names did: xargs
+# aborted on the unmatched quote, `2>/dev/null` hid it, and the lint PASSED having read nothing after that point),
+# and gitignored scratch (samen_core/tmp/…) is not part of the repo being linted. grep exit 1 = no match (fine);
+# anything else — git or grep failing — REFUSES: a scan that could not complete never passes.
+OWNS_HITS="$WORK/owns_hits"
+: > "$OWNS_HITS"
+OWNS_BATCH=()
+owns_flush() {
+  [[ ${#OWNS_BATCH[@]} -gt 0 ]] || return 0
+  (cd "$REPO_ROOT" && grep -HE '^[[:space:]]*# MUTATION_OWNS:' -- "${OWNS_BATCH[@]}") >> "$OWNS_HITS" 2>"$WORK/owns.err"
+  local rc=$?
+  if [[ $rc -gt 1 ]]; then
+    refuse "the MUTATION_OWNS scan failed (grep exit $rc) — $(head -1 "$WORK/owns.err") — a scan that cannot read the tree must not pass"
+  fi
+  OWNS_BATCH=()
+}
+if ! (cd "$REPO_ROOT" && git ls-files -z --cached --others --exclude-standard -- '*.ex' '*.exs' \
+        ':(exclude)spikes' ':(exclude,glob)**/deps/**' ':(exclude,glob)**/_build/**' ':(exclude,glob)**/node_modules/**') \
+     > "$WORK/owns_files" 2>"$WORK/owns_ls.err"; then
+  refuse "the MUTATION_OWNS scan cannot list the repository's files (git ls-files failed) — $(head -1 "$WORK/owns_ls.err")"
+fi
+while IFS= read -r -d '' f; do
+  [[ -f "$REPO_ROOT/$f" ]] || continue   # listed but deleted in the working tree: nothing to read
+  OWNS_BATCH+=("$f")
+  [[ ${#OWNS_BATCH[@]} -lt 400 ]] || owns_flush
+done < "$WORK/owns_files"
+owns_flush
+
 owns_total=0
 while IFS= read -r hit; do
   file="${hit%%:*}"
@@ -136,9 +165,7 @@ while IFS= read -r hit; do
     [[ -f "$REPO_ROOT/$decl" ]] \
       || refuse "$file: MUTATION_OWNS names a file that does not exist: $decl (the proof drops out of the gate)"
   done
-done < <(cd "$REPO_ROOT" && find . -path ./spikes -prune -o \( -name deps -o -name _build -o -name node_modules \) -prune \
-           -o -type f \( -name '*.exs' -o -name '*.ex' \) -print 2>/dev/null \
-         | sed 's|^\./||' | sort | xargs grep -HE '^[[:space:]]*# MUTATION_OWNS:' 2>/dev/null)
+done < "$OWNS_HITS"
 
 # ── ledger.tsv ───────────────────────────────────────────────────────────────
 ledger_total=0

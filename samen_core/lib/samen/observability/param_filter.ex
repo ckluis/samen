@@ -187,9 +187,13 @@ defmodule Samen.Observability.ParamFilter do
   defp safe_filter(params) do
     filter_values(params)
   rescue
-    _ -> @filtered
+    e ->
+      Samen.Observability.Failure.report(:param_filter, nil, e)
+      @filtered
   catch
-    _, _ -> @filtered
+    kind, reason ->
+      Samen.Observability.Failure.report(:param_filter, nil, {kind, reason})
+      @filtered
   end
 
   defp phoenix_handlers, do: :telemetry.list_handlers([:phoenix])

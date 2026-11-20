@@ -1,0 +1,19 @@
+# SABOTAGE: a resource whose introspection raises is skipped, so the contract is silently smaller
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/api_contract_introspection_test.exs
+# MUST_FAIL: RED: a resource whose type introspection raises fails the build
+diff --git a/samen_core/lib/samen/api_contract.ex b/samen_core/lib/samen/api_contract.ex
+index 522918be..e91b46c2 100644
+--- a/samen_core/lib/samen/api_contract.ex
++++ b/samen_core/lib/samen/api_contract.ex
+@@ -202,7 +202,7 @@ defmodule Samen.ApiContract.Snapshot do
+       end
+     rescue
+       # A resource that cannot be introspected is a failure of the build, not an absent resource.
+-      e -> {:error, e.__struct__}
++      _ -> {:ok, []}
+     end
+   end
+ 

@@ -1,0 +1,19 @@
+# SABOTAGE: an error from the on_cancel hook no longer rolls the cancel back
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_approver_test.exs
+# MUST_FAIL: a cancel hook that errors, or returns something unexpected, rolls the cancel back
+diff --git a/samen_core/lib/samen/approvals.ex b/samen_core/lib/samen/approvals.ex
+index 69007aa4..32495f63 100644
+--- a/samen_core/lib/samen/approvals.ex
++++ b/samen_core/lib/samen/approvals.ex
+@@ -151,7 +151,7 @@ defmodule Samen.Approvals do
+ 
+           case handler.on_cancel(approval, ctx) do
+             :ok -> :ok
+-            {:error, reason} -> repo.rollback(reason)
++            {:error, _reason} -> :ok
+             other -> repo.rollback({:bad_handler_return, other})
+           end
+         else

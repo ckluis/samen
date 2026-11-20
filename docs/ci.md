@@ -202,6 +202,13 @@ the scratch DB); verticals and demo: `MIX_ENV=test bash ci.sh` in their director
 gate). CI compiles with `--warnings-as-errors` and a framework/adapter `lib/` warning fails (a path dep's
 warnings never fail a dependant's compile, so each project's lib is compiled by its own step) — keep zero warnings.
 
+The read-scope lint (`Samen.Lint.ReadScope`: a direct `authorize?: false` read with no `org_id`/`id` narrowing returns every
+org's rows) runs in every host and every generated app as the `ci.sh` step `mix samen.verify.read_scope --max-sanctioned N` over that
+app's own `lib/` (the `demo`, `driftwood` and `pawchart` steps, the generated-app probes); `samen_core` and `samen_web` run no such
+step — their `lib/` is covered by the five-tree sweep in `samen_web`'s suite, which also covers the three verticals. An unreadable or
+unparseable file, a subdirectory it cannot list, a missing or empty source dir, a positional argument, and more sanctioned reads
+(`# authz-scope:` markers, one per read) than the pinned ceiling fail it. Run it by hand from any app: `mix samen.verify.read_scope`.
+
 Dialyzer (`scripts/dialyzer_gate.sh [app…]`, the ten `dialyzer_*` steps, one at a time, 2-3 GB each):
 any warning not in that project's `.dialyzer_ignore.exs` fails, and so does an UNUSED ignore entry. Every
 entry says why it is a false positive or deliberate code; fix a new warning or add it WITH its reason,
@@ -240,8 +247,9 @@ be NEW in your branch); `scripts/sabotage.sh --range N-N` flips the named tests 
 refusal the patch is deleted and the tree is as it was, your sabotage edit included. Unstaged work in a named
 file that the tests do not exercise cannot be told apart from the sabotage, so the files' pre-command bytes
 are always kept in `<git-dir>/samen-sabotage-new/<patch name>/` and every captured line is printed — read
-it. On success it runs `scripts/counts --write --only sabotages,driver_sabotages`; the patch is left
-untracked, so `git add` it. Options: `--number`, `--description`, `--base`. `scripts/sabotage new --help`
+it. Before the replay (the guard tests check the counts against the patch directory) it snapshots every file
+`scripts/counts --files` lists and runs `scripts/counts --write` and `scripts/counts --write --docs`; on a refusal
+it restores them byte-identical. The patch is left untracked, so `git add` it and the count files `git status` shows. Options: `--number`, `--description`, `--base`. `scripts/sabotage new --help`
 is the full text.
 
 **Drifted patch — `scripts/sabotage reanchor <n…>`** (or `apply_check` failing): 3-way merges each
@@ -249,7 +257,9 @@ section against the current tree, proves the named tests are green without it an
 rewrites it with a byte-identical header. It REFUSES (original untouched) on a conflict, missing pre-image
 blob (history rewritten), create/delete/rename patch, vanished named test, red baseline, a candidate that
 no longer flips or breaks the compile, a patch outside `scripts/sabotages/`, or a number shared by two
-patches (25, 35). When refused, regenerate the patch from a real edit with `sabotage new`.
+patches (25, 35). When refused, regenerate the patch from a real edit with `sabotage new` — unless it is a SHIPPED patch
+whose target moved (`reanchor` says "moved or deleted"): a patch is never deleted or renamed, so re-anchor it by hand in place
+(same name, same header, new diff paths), as 8889c4fc did for 666 and 682.
 
 **Replaying.** `scripts/sabotage.sh` (filters compose as an intersection; repeating one flag is an
 error; a FILTERED run certifies only its subset; the header preflight still lints ALL patch headers): `--app`, `--not-app`, `--range lo-hi` / `--from`/`--to`,
@@ -452,6 +462,7 @@ test suites, then samen_core's tree-wide keys; a test-only edit no longer re-run
 | `INCOMPLETE k/n` | not a failure: `scripts/ci resume`, repeat. It never says PASS until every planned step is done. |
 | `FAIL step=<id>` | read the digest, then `_ci/logs/<id>.log`; fix; re-run the same command. |
 | `FLAKY … (passed on rerun)` | the run FAILS by design. Find the nondeterminism (sandbox ownership, ordering, timing); a flake that reproduces only in a full suite is an ordering bug. Known class: a test whose sandbox owner exited before an async insert (`aud_event`) or an `on_exit` call — `** (EXIT) shutdown: "owner … exited"`. Use `Samen.TestSandbox.shared!(Repo)` (a dedicated owner that outlives the test process); the raw `Sandbox.mode(_, {:shared, _})` is forbidden by `Samen.TestSandboxGuardTest`. Second class: a module that leaves the pool in `:auto` (no owner, so nothing ends it) puts every later sync module on an unsandboxed pool until something resets `:manual` (issue #103); the seed does not fix sync-module order, so reproduce by running the two modules together until the order flips. A test that must commit uses `Samen.TestSandbox.auto!(Repo)`; the raw `Sandbox.mode(_, :auto)` is forbidden too. |
+| `{:error, :already_up}` / `MatchError` in a test helper, CI bootstrap script or probe, or `Samen.TestDb: could not drop database …` | Symptom seen once on Actions (`ci (app_demo)`): the old helpers discarded the drop's result (`_ = storage_down`), so the cause was never recorded. Two candidates fit: (1) a live session still attached (SQLSTATE 55006), (2) a slow `DROP DATABASE` that `storage_down/1` abandoned after its 15 s client timeout while the server was still dropping, so the next `CREATE DATABASE` saw the old catalog row. Never `storage_down` + `:ok = storage_up` by hand, never `mix ecto.drop … \|\| true`, never a sleep/retry, never `WITH (FORCE)` (it would silently kill another checkout's run on the same database name): use `Samen.TestDb.reset!(config)` / `drop!(config)`. They wait for the server's answer (no client timeout; the step budget bounds it) and raise with the real Postgres error. If a session is attached, the error lists it (pid, role, `application_name`, client address, state, age) and kills nothing: that is another checkout/worktree running this app's tests on the same database name (set `SAMEN_TEST_DB_SUFFIX`), or a psql/iex session. They refuse a database whose name is not `<words>_test[N]` (plus `_lane<N>` / `_<tag>_<N>` scratch suffixes or `_downcheck_<hex>`), and any call without Mix loaded. `Samen.TestDbGuardTest` fails the old patterns (and `ecto.drop`/`dropdb` `\|\| true`) anywhere outside `spikes/`. |
 | result looks stale | `scripts/ci explain <step>` (key, inputs, CACHED?); prove with `scripts/ci pr --no-cache`. Failures are never cached, so a stale GREEN means undeclared inputs: fix `inputs`/`reads`. |
 | `role "…" does not exist` | the suites connect as `$USER`/`$PGUSER`: `psql -d postgres -c '\du'` lists roles; export `PGUSER` to one that exists (superuser-capable). Never hardcode a role in a migration or test. |
 | `pgvector not installed` | `brew install pgvector`, then `CREATE EXTENSION vector` works in your server. |

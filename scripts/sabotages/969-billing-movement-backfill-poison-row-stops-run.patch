@@ -1,0 +1,20 @@
+# SABOTAGE: the movement backfill rescues only ArgumentError per row: a poison row stops the whole run as 
+#   unavailable
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/honest_billing_reads_test.exs
+# MUST_FAIL: the seed of one subscription fails -> it is counted in failed and reported, the others are still seeded
+diff --git a/samen_core/lib/samen/billing/movement_backfill.ex b/samen_core/lib/samen/billing/movement_backfill.ex
+index d28af255..a29361fb 100644
+--- a/samen_core/lib/samen/billing/movement_backfill.ex
++++ b/samen_core/lib/samen/billing/movement_backfill.ex
+@@ -113,7 +113,7 @@ defmodule Samen.Billing.MovementBackfill do
+       :seeded
+     end
+   rescue
+-    e ->
++    e in [ArgumentError] ->
+       Samen.Observability.Failure.report_write(:movement_backfill_row, org_id, e)
+       :failed
+   end

@@ -1,0 +1,19 @@
+# SABOTAGE: SourceScan.files walks with Path.wildcard, queueing every scan behind the single file server
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/source_scan_test.exs
+# MUST_FAIL: files/2 completes
+diff --git a/samen_core/lib/samen/source_scan.ex b/samen_core/lib/samen/source_scan.ex
+index e421170..ce36668 100644
+--- a/samen_core/lib/samen/source_scan.ex
++++ b/samen_core/lib/samen/source_scan.ex
+@@ -15,7 +15,7 @@ defmodule Samen.SourceScan do
+ 
+   @doc "Every file under `dir` (recursively) whose extension is in `exts` (e.g. `[\".ex\"]`), sorted."
+   @spec files(Path.t(), [String.t()]) :: [Path.t()]
+-  def files(dir, exts) when is_list(exts), do: dir |> files_checked(exts) |> elem(0)
++  def files(dir, exts) when is_list(exts), do: Path.wildcard(Path.join(dir, "**/*.{" <> Enum.map_join(exts, ",", &String.trim_leading(&1, ".")) <> "}"))
+ 
+   @doc """
+   Like `files/2`, but also returns what the walk could NOT inspect: `{files, errors}`, where each error is

@@ -6,11 +6,11 @@
 # APP: samen_web
 # TEST_FILES: test/samen/web/authz_read_scope_lint_test.exs
 # MUST_FAIL: marker granularity
-diff --git a/samen_web/lib/samen/web/authz/read_scope_lint.ex b/samen_web/lib/samen/web/authz/read_scope_lint.ex
-index d2c6b17..04b3d2f 100644
---- a/samen_web/lib/samen/web/authz/read_scope_lint.ex
-+++ b/samen_web/lib/samen/web/authz/read_scope_lint.ex
-@@ -209,7 +209,7 @@ defmodule Samen.Web.Authz.ReadScopeLint do
+diff --git a/samen_core/lib/samen/lint/read_scope.ex b/samen_core/lib/samen/lint/read_scope.ex
+index 2a3d0fa2..82ed2ddc 100644
+--- a/samen_core/lib/samen/lint/read_scope.ex
++++ b/samen_core/lib/samen/lint/read_scope.ex
+@@ -183,7 +183,7 @@ defmodule Samen.Lint.ReadScope do
                  read_narrowed?(ctx, pinned_vars) ->
                {v, g + 1, s}
  

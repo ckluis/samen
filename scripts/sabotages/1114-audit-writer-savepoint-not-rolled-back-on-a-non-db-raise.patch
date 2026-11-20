@@ -1,0 +1,24 @@
+# SABOTAGE: a raise/exit/throw after the event insert skips the rollback to the savepoint, leaving an 
+#   unchained aud_event in a caller that carries on
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/audit_chain_writer_test.exs
+# MUST_FAIL: a non-DB raise, exit or throw after the event insert leaves no orphan aud_event
+diff --git a/samen_core/lib/samen/audit_chain/writer.ex b/samen_core/lib/samen/audit_chain/writer.ex
+index 3318643e..b970f77a 100644
+--- a/samen_core/lib/samen/audit_chain/writer.ex
++++ b/samen_core/lib/samen/audit_chain/writer.ex
+@@ -124,12 +124,6 @@ defmodule Samen.AuditChain.Writer do
+              :ok <- savepoint(repo, "RELEASE SAVEPOINT ", sp, org_id),
+              do: error
+     end
+-  catch
+-    kind, reason ->
+-      stacktrace = __STACKTRACE__
+-      # best effort, and never in place of the original failure: a dead connection must not replace the exception
+-      with :ok <- savepoint(repo, "ROLLBACK TO SAVEPOINT ", sp, org_id), do: savepoint(repo, "RELEASE SAVEPOINT ", sp, org_id)
+-      :erlang.raise(kind, reason, stacktrace)
+   end
+ 
+   defp savepoint(repo, statement, sp, org_id) do

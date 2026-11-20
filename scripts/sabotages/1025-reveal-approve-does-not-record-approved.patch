@@ -1,0 +1,20 @@
+# SABOTAGE: approving a reveal request mints the grant but does not mark the request approved, so it still 
+#   reads as pending
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_approver_test.exs
+# MUST_FAIL: every path that decides a reveal request writes its terminal status on the request itself
+diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+index f2445010..a8d35957 100644
+--- a/samen_core/lib/samen/reveal/grants.ex
++++ b/samen_core/lib/samen/reveal/grants.ex
+@@ -516,7 +516,7 @@ defmodule Samen.Reveal.Grants do
+       end)
+       # the request records its own decision in the SAME transaction (`rvq_status`), so "decided" is a fact of the
+       # request row, not something inferred from the approvals table
+-      |> Ecto.Multi.run(:decided, fn multi_repo, _changes -> {:ok, mark_decided(multi_repo, req.id, "approved")} end)
++      |> Ecto.Multi.run(:decided, fn _multi_repo, _changes -> {:ok, :ok} end)
+       |> Oban.insert(:auto_revoke, AutoRevokeWorker.new(%{grant_id: grant_id},
+         scheduled_at: expires_at
+       ))

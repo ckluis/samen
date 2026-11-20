@@ -7,14 +7,15 @@
 # record is UNCHANGED, the run PARKS, only an approval exists) must flip; the
 # approve-then-execute positive control flips with it (there is no approval left to
 # approve), proving the mechanism is gone rather than merely mis-ordered.
+# (Re-anchored for the single-reveal transcript write: propose_turn's call carries the views. Same deletion.)
 # APP: samen_core
 # TEST_FILES: test/ai/agent_write_test.exs
 # MUST_FAIL: a WRITE tool call does NOT execute
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
-index 0272f9a..f278f48 100644
+index 049a1655..4cb188fc 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -1278,23 +1278,10 @@ defmodule Samen.AI.Agent do
+@@ -2364,23 +2364,10 @@ defmodule Samen.AI.Agent do
        # E3 approval opens and the run parks. `entry.module.run/2` is not called on this
        # path at all; the ONLY caller of it for a write is `execute_approved/3`, after a
        # distinct human approved, with the APPROVER's actor.
@@ -30,7 +31,7 @@ index 0272f9a..f278f48 100644
 -          entry,
 -          normalized,
 -          duration_ms,
--          {goal, lines},
+-          {goal, lines, views},
 -          replayed?,
 -          hooks
 -        )

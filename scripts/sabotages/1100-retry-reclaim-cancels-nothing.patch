@@ -1,0 +1,20 @@
+# SABOTAGE: the reclaim clears the stamps but cancels no approval, so the retried proposal sits beside a 
+#   stale one
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_transcript_write_test.exs
+# MUST_FAIL: RED: a failed park followed by a NEW proposal at the retry leaves exactly one pending approval
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index d0db6310..12709605 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -964,7 +964,7 @@ defmodule Samen.AI.Agent do
+ 
+       result =
+         repo.transaction(fn ->
+-          case Samen.Approvals.cancel(approval_id, WriteProposal.requester_principal_id()) do
++          case {:ok, approval_id} do
+             {:ok, _approval} -> :ok
+             {:error, reason} when reason in [:not_pending, :not_found] -> :ok
+             {:error, reason} -> repo.rollback(reason)

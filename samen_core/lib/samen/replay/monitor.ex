@@ -161,6 +161,11 @@ defmodule Samen.Replay.Monitor do
       # No buffer row: recording was stopped on purpose (an org switch, R11) — nothing to keep.
       :error ->
         :discarded
+
+      # The buffer READ failed (already reported by name): the session may well hold a replay, so it is counted
+      # `:failed`, never `:discarded` ("recording was stopped on purpose").
+      {:error, :unavailable} ->
+        :error
     end
   rescue
     e ->

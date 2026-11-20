@@ -255,6 +255,84 @@ defmodule Samen.Migration.ExpandContract do
   end
 
   @doc """
+  `CREATE UNIQUE INDEX CONCURRENTLY` on one column of a table that may already hold rows (same carve-out
+  rules as `concurrent_index/3`: `@disable_ddl_transaction true`, a literal `:name`, a same-named INVALID
+  leftover dropped first).
+
+  Before the build it counts the values that already appear more than once and, if there are any, RAISES
+  naming the table and column and how to list them. It deletes nothing and prints no value (a column of
+  credential digests must not reach a log): removing duplicates is a decision for a person, and a unique
+  build over them would only fail late and leave an INVALID index behind.
+  """
+  def concurrent_unique_index(table, column, opts) do
+    name = Keyword.fetch!(opts, :name)
+    caller = Keyword.fetch!(opts, :caller)
+    __require_disabled_ddl_transaction__!(caller)
+    tname = table_name(table)
+    cname = to_string(column)
+
+    Ecto.Migration.execute(
+      fn ->
+        repo = Ecto.Migration.repo()
+
+        %{rows: [[values, rows]]} =
+          repo.query!(
+            "SELECT count(*), COALESCE(sum(n), 0) FROM " <>
+              "(SELECT count(*) AS n FROM #{q_ident(tname)} WHERE #{q_ident(cname)} IS NOT NULL " <>
+              "GROUP BY #{q_ident(cname)} HAVING count(*) > 1) d"
+          )
+
+        if values > 0 do
+          raise RuntimeError,
+                "cannot build the unique index #{name}: #{tname}.#{cname} holds #{values} value(s) that appear " <>
+                  "more than once (#{rows} rows). #{duplicate_tail(name, cname, tname)}"
+        end
+
+        :ok
+      end,
+      fn -> :ok end
+    )
+
+    drop_invalid_index(tname, name)
+
+    Ecto.Migration.execute(
+      fn -> __build_unique_index__!(Ecto.Migration.repo(), tname, cname, name) end,
+      "DROP INDEX CONCURRENTLY IF EXISTS #{q_ident(name)}"
+    )
+  end
+
+  @doc false
+  # The build, apart from the pre-count, so a duplicate that lands BETWEEN the two is testable. Postgres reports it as
+  # `DETAIL: Key (col)=(<digest>) is duplicated.`, which would put a credential digest in the release log: catch the
+  # unique violation and raise the same value-free message the pre-count raises.
+  def __build_unique_index__!(repo, tname, cname, name) do
+    repo.query!(
+      "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS #{q_ident(name)} ON #{q_ident(tname)} (#{q_ident(cname)})"
+    )
+
+    :ok
+  rescue
+    e in Postgrex.Error ->
+      if match?(%{code: :unique_violation}, e.postgres) do
+        raise RuntimeError,
+              "cannot build the unique index #{name}: #{tname}.#{cname} gained a duplicate value while the index " <>
+                "was being built. The failed build leaves an INVALID index of that name, which the next run drops " <>
+                "before building. #{duplicate_tail(name, cname, tname)}"
+      else
+        reraise e, __STACKTRACE__
+      end
+  end
+
+  # Shared by both refusals. "Nothing was changed" would be false for a migration that builds several indexes: the
+  # steps before this one are already committed (each runs outside a transaction), so say what is true.
+  defp duplicate_tail(name, cname, tname) do
+    "No row was deleted and index #{name} was not built; steps of this migration that already ran stay in place, " <>
+      "and running it again is safe. List the duplicates with " <>
+      "SELECT #{cname}, count(*) FROM #{tname} GROUP BY #{cname} HAVING count(*) > 1, " <>
+      "resolve them deliberately, then run this migration again."
+  end
+
+  @doc """
   Drop a same-named INVALID index on `table` before a `CREATE INDEX CONCURRENTLY IF NOT EXISTS`.
 
   A concurrent build that fails (a duplicate under `UNIQUE`, a deadlock, a cancel) leaves the
@@ -263,8 +341,10 @@ defmodule Samen.Migration.ExpandContract do
   of the build, a step that drops the name if it is invalid and ABANDONED. A VALID index of that
   name is never touched, and neither is one another session is building right now (that build is
   `indisvalid = false` too): the step first takes the table's `SHARE UPDATE EXCLUSIVE` lock, which
-  a running `CREATE INDEX CONCURRENTLY` holds for its whole duration, so it WAITS for the build to
-  finish and then sees it valid. Call it from a migration that disabled the DDL transaction; it is
+  a running `CREATE INDEX CONCURRENTLY` holds until its last step, so it WAITS for the build to
+  finish and then sees it valid. The build drops that lock just BEFORE it commits the valid flag, so
+  an invalid row whose updater is still in progress in our snapshot is a build finishing, and is left
+  alone too. Call it from a migration that disabled the DDL transaction; it is
   a no-op on `down`.
   """
   def drop_invalid_index(table, name) do
@@ -277,7 +357,14 @@ defmodule Samen.Migration.ExpandContract do
 
         # Lock FIRST, then look: a check-then-drop without the lock is a race (the build can start,
         # or finish, between the look and the drop). Holding SHARE UPDATE EXCLUSIVE excludes every
-        # concurrent build on the table, so an index invalid under it is genuinely abandoned. The
+        # concurrent build on the table, so an index invalid under it is genuinely abandoned, with ONE
+        # exception: CREATE INDEX CONCURRENTLY releases its session lock BEFORE the transaction that flips
+        # `indisvalid` commits. In that window we hold the lock and still read the old, invalid row, but a
+        # build is finishing it: a DROP would wait on its uncommitted row update and then fail with
+        # "tuple concurrently updated". An invalid row whose `xmax` is a transaction not yet visible in
+        # our snapshot (still in progress) is that finishing build; an abandoned build's updater is aborted,
+        # which a snapshot reports as visible, so it is still dropped. The xid8 epoch is taken from the
+        # snapshot's xmin (an updater straddling an epoch boundary reads as visible: the old behaviour). The
         # drop is therefore a plain DROP INDEX inside this transaction (the CONCURRENTLY form
         # cannot run in one and would release the lock first); its brief ACCESS EXCLUSIVE upgrade
         # is bounded by lock_timeout and fails loudly rather than queueing every reader behind it.
@@ -295,6 +382,10 @@ defmodule Samen.Migration.ExpandContract do
                       JOIN pg_class c ON c.oid = i.indexrelid
                       JOIN pg_namespace n ON n.oid = c.relnamespace
                      WHERE c.relname = $1 AND i.indrelid = to_regclass($2) AND NOT i.indisvalid
+                      AND (i.xmax::text = '0' OR pg_visible_in_snapshot(
+                            (((pg_snapshot_xmin(pg_current_snapshot())::text::bigint >> 32) << 32)
+                              | i.xmax::text::bigint)::text::xid8,
+                            pg_current_snapshot()))
                     """,
                     [iname, q_ident(tname)]
                   )
@@ -336,7 +427,11 @@ defmodule Samen.Migration.ExpandContract do
       supplied by the helper (`col IS NULL AND ctid range`), so the backfill only
       touches unset rows and is safe to re-run.
     * `opts` — `:column` (the column being backfilled, used in the WHERE null-guard),
-      `:chunk_size` (default 5_000), `:sleep_ms` (throttle between chunks, default 0).
+      `:chunk_size` (default 5_000), `:sleep_ms` (throttle between chunks, default 0), `:where` (a LITERAL SQL
+      predicate that REPLACES the `column IS NULL` guard, and then `:column` is not needed: the rows to touch, e.g. a
+      value that is only filled in for the rows it can be derived for, or a status that moves on). It must stop
+      matching a row once the `set_clause` has been applied to it, or the loop never ends; a row the set clause cannot
+      answer for must be excluded by the predicate itself.
 
   Returns `{:ok, total_updated}`.
   """
@@ -345,14 +440,20 @@ defmodule Samen.Migration.ExpandContract do
     __require_disabled_ddl_transaction__!(caller)
 
     tname = table_name(table)
-    column = opts |> Keyword.fetch!(:column) |> to_string()
+
+    predicate =
+      case Keyword.get(opts, :where) do
+        nil -> "#{q_ident(opts |> Keyword.fetch!(:column) |> to_string())} IS NULL"
+        where when is_binary(where) -> "(#{where})"
+      end
+
     chunk_size = Keyword.get(opts, :chunk_size, 5_000)
     sleep_ms = Keyword.get(opts, :sleep_ms, 0)
 
-    do_backfill_chunk(repo, tname, set_clause, column, chunk_size, sleep_ms, 0)
+    do_backfill_chunk(repo, tname, set_clause, predicate, chunk_size, sleep_ms, 0)
   end
 
-  defp do_backfill_chunk(repo, tname, set_clause, column, chunk_size, sleep_ms, acc) do
+  defp do_backfill_chunk(repo, tname, set_clause, predicate, chunk_size, sleep_ms, acc) do
     # Each chunk: its own committed statement (migration runs with
     # @disable_ddl_transaction true, so repo.query! autocommits). Bound the batch
     # with a subselect on ctid so a chunk is a small, short-lived write.
@@ -360,7 +461,7 @@ defmodule Samen.Migration.ExpandContract do
       "UPDATE #{q_ident(tname)} SET #{set_clause} " <>
         "WHERE ctid IN (" <>
         "SELECT ctid FROM #{q_ident(tname)} " <>
-        "WHERE #{q_ident(column)} IS NULL LIMIT #{chunk_size})"
+        "WHERE #{predicate} LIMIT #{chunk_size})"
 
     %{num_rows: n} = repo.query!(sql, [])
 
@@ -369,9 +470,173 @@ defmodule Samen.Migration.ExpandContract do
     if n < chunk_size or n == 0 do
       {:ok, acc + n}
     else
-      do_backfill_chunk(repo, tname, set_clause, column, chunk_size, sleep_ms, acc + n)
+      do_backfill_chunk(repo, tname, set_clause, predicate, chunk_size, sleep_ms, acc + n)
     end
   end
+
+  @doc """
+  Make an existing nullable column `NOT NULL` without a long `ACCESS EXCLUSIVE` scan — the contract-phase counterpart of
+  `add_nullable_column/4`, for a column whose resource says `allow_nil? false` (see `mix samen.verify.indexes`).
+
+  Runs OUTSIDE the DDL transaction (`@disable_ddl_transaction true`, enforced like `chunked_backfill/4`): inside one, the
+  `ACCESS EXCLUSIVE` lock the constraint add takes would be held through the validation scan, which is exactly what this
+  avoids. The steps (every `ACCESS EXCLUSIVE` statement runs in its own short transaction under `lock_timeout`, so it
+  fails loudly instead of queueing every reader and writer of the table behind a long-running transaction):
+
+    1. `DROP CONSTRAINT IF EXISTS <t>_<c>_nn_chk`, then `ADD CONSTRAINT … CHECK (<c> IS NOT NULL) NOT VALID` (one short
+       transaction, no scan). From here on the database refuses every NEW NULL (and any update that would leave a NULL row's
+       NULL in place), so a writer cannot slip a NULL in between the count below and the validation;
+    2. optional `:backfill` (see below), in short `chunk_size` batches, each a committed statement;
+    3. a hard stop: count the NULLs left. If any remain the check is DROPPED again and the migration RAISES naming the table,
+       column and count — a column with no correct value is never filled with an invented one, and the column's definition
+       was not changed. Rows the `:backfill` expression could answer for HAVE been filled (those batches are committed) and
+       stay filled;
+    4. `VALIDATE CONSTRAINT` (scan under `SHARE UPDATE EXCLUSIVE`: reads and writes continue);
+    5. `ALTER COLUMN <c> SET NOT NULL` (Postgres 12+ trusts the validated check and does not rescan) and `DROP CONSTRAINT`,
+       in one short transaction (the column's own NOT NULL now says it, and an interruption cannot leave the check behind
+       on a column that already carries the NOT NULL).
+
+  A re-run after an interruption is safe: every step is repeatable, a leftover check is dropped and re-added by step 1, and a
+  lock timeout costs only the re-run (a timed-out step raises naming what, if anything, it left on the table). A column that
+  is already `NOT NULL` is re-validated (a scan) and the statements run again, harmlessly. `drop_not_null/3` is the reverse
+  (it does not undo a backfill).
+
+  ## Options
+
+    * `:caller` — REQUIRED, the migration module (`__MODULE__`).
+    * `:backfill` — a SQL expression (a LITERAL in the migration, never derived from a resource at run time) the NULL rows
+      are set to, e.g. `"COALESCE(pmp_label, pmp_provider_plan_ref)"`. Only rows for which it is non-NULL are touched, so
+      a row it cannot answer for stays NULL and trips step 3 instead of being papered over.
+    * `:chunk_size` — backfill batch size, a positive integer (default 5_000).
+    * `:lock_timeout` — how long each `ACCESS EXCLUSIVE` statement may wait for its lock, e.g. `"5s"` (the default is the
+      module's shipped `lock_timeout`), `"500ms"`.
+  """
+  def set_not_null(repo, table, column, opts \\ []) do
+    caller = Keyword.fetch!(opts, :caller)
+    __require_disabled_ddl_transaction__!(caller)
+
+    tname = table_name(table)
+    cname = to_string(column)
+    check = not_null_check_name(tname, cname)
+    chunk_size = Keyword.get(opts, :chunk_size, 5_000)
+
+    unless is_integer(chunk_size) and chunk_size > 0 do
+      raise ArgumentError, "set_not_null/4: :chunk_size must be a positive integer, got #{inspect(chunk_size)}"
+    end
+
+    lock_sql = lock_timeout_sql(opts)
+    qt = q_ident(tname)
+    qc = q_ident(cname)
+    qk = q_ident(check)
+
+    # 1. the check FIRST: no new NULL can be written from here on
+    with_short_lock(repo, lock_sql, tname, "nothing was changed (no constraint was added or removed)", fn ->
+      repo.query!("ALTER TABLE #{qt} DROP CONSTRAINT IF EXISTS #{qk}")
+      repo.query!("ALTER TABLE #{qt} ADD CONSTRAINT #{qk} CHECK (#{qc} IS NOT NULL) NOT VALID")
+    end)
+
+    # 2. backfill what the expression can answer for
+    case Keyword.get(opts, :backfill) do
+      nil -> :ok
+      expr when is_binary(expr) -> backfill_nulls(repo, tname, cname, expr, chunk_size)
+    end
+
+    # 3. a NULL with no correct value stops the migration, and takes the check away with it
+    %{rows: [[remaining]]} = repo.query!("SELECT count(*) FROM #{qt} WHERE #{qc} IS NULL")
+
+    if remaining > 0 do
+      left_behind =
+        "the temporary check constraint #{check} is still on #{tname} (it refuses new NULLs; the next run drops it first)"
+
+      with_short_lock(repo, lock_sql, tname, left_behind, fn ->
+        repo.query!("ALTER TABLE #{qt} DROP CONSTRAINT IF EXISTS #{qk}")
+      end)
+
+      raise RuntimeError,
+            "set_not_null/4: #{tname}.#{cname} still has #{remaining} NULL row(s) and no correct value to give them. " <>
+              "The column's definition was NOT altered and the temporary check constraint was dropped again; rows the " <>
+              "`backfill:` expression could answer for HAVE been filled and stay filled (those batches are committed). " <>
+              "Find the rows with `SELECT * FROM #{qt} WHERE #{qc} IS NULL`, then fix or remove them (a data fix) and run " <>
+              "the migration again; `backfill:` only helps while the migration is still being written."
+    end
+
+    # 4. validate (SHARE UPDATE EXCLUSIVE: reads and writes continue)
+    repo.query!("ALTER TABLE #{qt} VALIDATE CONSTRAINT #{qk}")
+
+    # 5. SET NOT NULL (no rescan: the validated check proves it) + drop the check, atomically
+    left_behind =
+      "the VALID check constraint #{check} is still on #{tname} (the column is not NOT NULL yet; the next run replaces it)"
+
+    with_short_lock(repo, lock_sql, tname, left_behind, fn ->
+      repo.query!("ALTER TABLE #{qt} ALTER COLUMN #{qc} SET NOT NULL")
+      repo.query!("ALTER TABLE #{qt} DROP CONSTRAINT #{qk}")
+    end)
+
+    :ok
+  end
+
+  @doc "The reverse of `set_not_null/4`: `ALTER COLUMN … DROP NOT NULL` (a backfill is not undone). Needs the same `:caller`."
+  def drop_not_null(repo, table, column, opts \\ []) do
+    __require_disabled_ddl_transaction__!(Keyword.fetch!(opts, :caller))
+    repo.query!("ALTER TABLE #{q_ident(table_name(table))} ALTER COLUMN #{q_ident(to_string(column))} DROP NOT NULL")
+    :ok
+  end
+
+  # One short transaction under `lock_timeout` for statements that take ACCESS EXCLUSIVE: all of them or none. A lock that
+  # cannot be had in time raises with `left_behind` (what the timed-out step leaves on the table) and "re-run".
+  defp with_short_lock(repo, lock_sql, tname, left_behind, fun) do
+    {:ok, :ok} =
+      repo.transaction(
+        fn ->
+          repo.query!(lock_sql)
+          fun.()
+          :ok
+        end,
+        timeout: :infinity
+      )
+
+    :ok
+  rescue
+    e in Postgrex.Error ->
+      case e do
+        %Postgrex.Error{postgres: %{code: :lock_not_available}} ->
+          raise RuntimeError,
+                "set_not_null/4: could not get the lock on #{tname} within the lock timeout; this step was rolled back " <>
+                  "as a whole: #{left_behind}. Run the migration again when the table is quiet."
+
+        _ ->
+          reraise e, __STACKTRACE__
+      end
+  end
+
+  @lock_timeout_format ~r/\A[1-9][0-9]*(ms|s|min)\z/
+
+  defp lock_timeout_sql(opts) do
+    case Keyword.get(opts, :lock_timeout) do
+      nil ->
+        {lock_sql, _stmt_sql} = __timeout_sql__()
+        lock_sql
+
+      lt when is_binary(lt) ->
+        unless Regex.match?(@lock_timeout_format, lt),
+          do: raise(ArgumentError, "set_not_null/4: :lock_timeout must look like \"5s\", \"500ms\" or \"1min\", got #{inspect(lt)}")
+
+        "SET LOCAL lock_timeout = '#{lt}'"
+    end
+  end
+
+  # Each batch is its own committed statement; the batch predicate excludes rows the expression cannot answer for, so a
+  # row that stays NULL never makes the loop spin.
+  defp backfill_nulls(repo, tname, cname, expr, chunk_size) do
+    sql =
+      "UPDATE #{q_ident(tname)} SET #{q_ident(cname)} = (#{expr}) WHERE ctid IN (" <>
+        "SELECT ctid FROM #{q_ident(tname)} WHERE #{q_ident(cname)} IS NULL AND (#{expr}) IS NOT NULL LIMIT #{chunk_size})"
+
+    %{num_rows: n} = repo.query!(sql, [])
+    if n >= chunk_size, do: backfill_nulls(repo, tname, cname, expr, chunk_size), else: :ok
+  end
+
+  defp not_null_check_name(tname, cname), do: String.slice(tname <> "_" <> cname, 0, 56) <> "_nn_chk"
 
   @doc """
   Create the `samen_migration_meta` table (idempotent). Call from a bootstrap

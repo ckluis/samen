@@ -46,8 +46,7 @@ defmodule Samen.MultiNode.Harness do
   """
   def create_and_migrate_db! do
     config = repo_config()
-    _ = Ecto.Adapters.Postgres.storage_down(config)
-    :ok = Ecto.Adapters.Postgres.storage_up(config)
+    :ok = Samen.TestDb.reset!(config)
 
     {:ok, pid} = Samen.MultiNode.Repo.start_link(config)
 
