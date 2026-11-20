@@ -473,7 +473,10 @@ defmodule Samen.SingleNode.Lease do
 
   defp schedule(state), do: Process.send_after(self(), :tick, state.interval_ms)
 
-  defp connect_opts(opts, config) do
+  @doc false
+  # Public only so the option building is testable without a network.
+  @spec connect_opts(keyword(), map()) :: keyword()
+  def connect_opts(opts, config) do
     base =
       case Keyword.fetch(opts, :connect_opts) do
         {:ok, connect_opts} ->
@@ -484,13 +487,23 @@ defmodule Samen.SingleNode.Lease do
           lease_url = Keyword.get(opts, :lease_url, config.lease_url)
 
           if lease_url not in [nil, ""],
-            do: Keyword.merge(repo_config, Ecto.Repo.Supervisor.parse_url(lease_url)),
+            do: Keyword.merge(repo_config, lease_url_config(lease_url, repo_config)),
             else: repo_config
       end
 
     base
     |> Keyword.drop(@repo_only)
     |> Keyword.update(:socket_options, [keepalive: true], &(Enum.reject(&1, fn o -> match?({:keepalive, _}, o) end) ++ [keepalive: true]))
+  end
+
+  # What the direct URL overrides. Ecto drops a URL `ssl=true` when the repo already carries an `ssl:` list
+  # (`Ecto.Repo.Supervisor.init_config/4`); the lease does not go through that, so repeat the rule, and be stricter:
+  # a URL `:ssl` of ANY value never replaces a configured list (fail-closed; `Samen.Deploy.db_ssl_opts/2` already
+  # refuses `ssl=false` and non-canonical values at boot). Without it a `?ssl=true` swaps the hardened list (private
+  # CA, the explicit verify opt-out) for Postgrex's defaults and the lease can never connect.
+  defp lease_url_config(lease_url, repo_config) do
+    url_config = Ecto.Repo.Supervisor.parse_url(lease_url)
+    if is_list(repo_config[:ssl]), do: Keyword.delete(url_config, :ssl), else: url_config
   end
 
   defp check(state) do
