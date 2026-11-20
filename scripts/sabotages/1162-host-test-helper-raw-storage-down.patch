@@ -1,0 +1,20 @@
+# SABOTAGE: a host test_helper goes back to the discarded storage_down + bare :ok = storage_up pair
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/test_db_guard_test.exs
+# MUST_FAIL: no source or template discards storage_down or pairs it with a bare :ok = storage_up
+diff --git a/demo/test/test_helper.exs b/demo/test/test_helper.exs
+index 069c0a5e..33ec1c94 100644
+--- a/demo/test/test_helper.exs
++++ b/demo/test/test_helper.exs
+@@ -13,7 +13,8 @@ Application.put_env(:samen_core, :kms_key_dir, kms_key_dir)
+ System.at_exit(fn _ -> File.rm_rf!(kms_key_dir) end)
+ 
+ # Drop + create + migrate.
+-:ok = Samen.TestDb.reset!(Repo.config())
++_ = Ecto.Adapters.Postgres.storage_down(Repo.config())
++:ok = Ecto.Adapters.Postgres.storage_up(Repo.config())
+ 
+ {:ok, _} = Repo.start_link()
+ Ecto.Migrator.run(Repo, :up, all: true)
