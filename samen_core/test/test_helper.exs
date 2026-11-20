@@ -17,10 +17,10 @@ File.rm_rf!(kms_key_dir)
 Application.put_env(:samen_core, :kms_key_dir, kms_key_dir)
 System.at_exit(fn _ -> File.rm_rf!(kms_key_dir) end)
 
-# Drop + create + migrate so the schema always matches the generated migrations. `Samen.TestDb.reset!/1` drops
-# with `WITH (FORCE)`, so a backend of a previous `mix test` that has not finished exiting (the ADR-049 mutation
-# gate runs `mix test` dozens of times back to back) is terminated by the server instead of failing the drop and
-# leaving `storage_up` to answer `{:error, :already_up}`. No retry window: any failure raises with the real error.
+# Drop + create + migrate so the schema always matches the generated migrations. `Samen.TestDb.reset!/1` waits for the
+# server's answer to a plain DROP (no client timeout, no FORCE, no retry). If another session (another checkout's
+# run, a psql) is attached it raises naming that session and drops nothing; see the `Samen.TestDb` moduledoc for
+# the `{:error, :already_up}` symptom this replaced and the two candidate causes.
 :ok = Samen.TestDb.reset!(TestRepo.config())
 
 {:ok, _} = TestRepo.start_link()

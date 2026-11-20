@@ -24,7 +24,7 @@ defmodule Mix.Tasks.SamenWeb.TestSetup do
     # still resolves at runtime in samen_web's own `:test` env, where the repo exists.
     repo = Module.concat([Samen.WebTest, Repo])
 
-    # Drop + create the scratch DB (Samen.TestDb: deterministic FORCE drop, every failure raises).
+    # Drop + create the scratch DB (Samen.TestDb: waits for the server, raises naming any attached session, never kills one).
     :ok = Samen.TestDb.reset!(repo.config())
 
     {:ok, _} = repo.start_link(pool_size: 2)

@@ -1,7 +1,8 @@
 defmodule Samen.TestDbTest do
   @moduledoc """
-  `Samen.TestDb` drops a test/scratch database DETERMINISTICALLY even while another session is connected to it —
-  the race that failed `ci (app_demo)` with `{:error, :already_up}` (a previous mix process's backend still alive).
+  `Samen.TestDb` drops a test/scratch database, WAITS for the server's answer (no client timeout that abandons a DROP
+  in flight), and when another session is attached RAISES naming that session instead of killing it or carrying on
+  (the failure that surfaced as `{:error, :already_up}` in `ci (app_demo)` had its drop error discarded).
   Every scratch database here has a unique name and is dropped in `on_exit`.
   """
   use ExUnit.Case, async: true
@@ -39,27 +40,75 @@ defmodule Samen.TestDbTest do
     conn
   end
 
-  test "mechanism: the old storage_down -> storage_up pattern fails with :already_up while a session is connected",
-       %{config: config, db: db} do
-    :ok = TestDb.reset!(config)
-    hold_open!(config) |> Postgrex.query!("SELECT 1", [])
+  # the database exists on the server
+  defp exists?(config, db) do
+    {:ok, maint} = Postgrex.start_link(Keyword.merge(config, database: "postgres"))
 
-    assert {:error, message} = Ecto.Adapters.Postgres.storage_down(config)
-    assert message =~ "is being accessed by other users"
-    assert message =~ db
-    assert Ecto.Adapters.Postgres.storage_up(config) == {:error, :already_up}
+    try do
+      %{rows: [[n]]} = Postgrex.query!(maint, "SELECT count(*) FROM pg_database WHERE datname = $1", [db])
+      n == 1
+    after
+      stop_quiet(maint)
+    end
   end
 
-  test "reset! succeeds with a live second connection and the database is fresh", %{config: config} do
+  # a holder with a recognisable application_name, as another run's (or a psql) session would be
+  defp hold_named!(config, app) do
+    {:ok, conn} =
+      Postgrex.start_link(config |> Keyword.drop([:name, :log, :pool, :pool_size]) |> Keyword.put(:parameters, application_name: app))
+
+    on_exit(fn -> stop_quiet(conn) end)
+    %{rows: [[pid]]} = Postgrex.query!(conn, "SELECT pg_backend_pid()", [])
+    {conn, pid}
+  end
+
+  # Postgres itself waits ~5 s for other sessions to leave before answering 55006, so this test takes ~5 s.
+  test "reset! with another live session RAISES, lists the holder, and kills and drops nothing",
+       %{config: config, db: db} do
     :ok = TestDb.reset!(config)
-    conn = hold_open!(config)
+    app = "samen_test_db_holder_#{System.unique_integer([:positive])}"
+    {conn, holder_pid} = hold_named!(config, app)
     Postgrex.query!(conn, "CREATE TABLE marker (id int)", [])
+
+    e = assert_raise RuntimeError, fn -> TestDb.reset!(config) end
+
+    assert e.message =~ ~s(could not drop database "#{db}")
+    assert e.message =~ "in use by other sessions"
+    assert e.message =~ "Nothing was dropped and no session was terminated"
+    assert e.message =~ "pid=#{holder_pid} "
+    assert e.message =~ ~s(application_name="#{app}")
+    assert e.message =~ "another checkout or worktree"
+    refute e.message =~ "SELECT"
+    refute e.message =~ inspect(Keyword.get(config, :password, "no-password-configured"))
+
+    # nothing killed, nothing dropped: same backend, same data, database still on the server
+    assert exists?(config, db)
+    assert %{rows: [[^holder_pid]]} = Postgrex.query!(conn, "SELECT pg_backend_pid()", [])
     assert %{num_rows: 1} = Postgrex.query!(conn, "SELECT 1 FROM pg_tables WHERE tablename = 'marker'", [])
 
+    # the holder leaves: the next reset! succeeds and the database is fresh
+    GenServer.stop(conn)
     assert TestDb.reset!(config) == :ok
-
     fresh = hold_open!(config)
     assert %{num_rows: 0} = Postgrex.query!(fresh, "SELECT 1 FROM pg_tables WHERE tablename = 'marker'", [])
+  end
+
+  test "the drop waits for the server's answer: a holder that leaves after the first second does not time it out",
+       %{config: config} do
+    :ok = TestDb.reset!(config)
+    {conn, _pid} = hold_named!(config, "samen_test_db_slow_leaver")
+    parent = self()
+
+    spawn_link(fn ->
+      Process.sleep(1_500)
+      stop_quiet(conn)
+      send(parent, :holder_left)
+    end)
+
+    # a short client timeout (the old `storage_down` gave up after 15 s while the server was still dropping) would
+    # raise "timed out" here; the server finishes as soon as the holder is gone (Postgres re-checks every 100 ms)
+    assert TestDb.reset!(config) == :ok
+    assert_received :holder_left
   end
 
   test "reset! creates a missing database and drop! of a missing database is a no-op", %{config: config} do
@@ -72,7 +121,7 @@ defmodule Samen.TestDbTest do
   describe "safety" do
     @bad_port [username: "nobody", hostname: "127.0.0.1", port: 1]
 
-    for name <- ["samen_prod", "demo_dev", "postgres", "contest", "latest_orders"] do
+    for name <- ~w(samen_prod demo_dev postgres contest latest latest_orders test_results_prod prod_test_copy demo_test_x) do
       test "refuses #{name} before connecting" do
         # the port is dead: only the guard can produce this message
         config = Keyword.put(@bad_port, :database, unquote(name))
@@ -88,16 +137,23 @@ defmodule Samen.TestDbTest do
     end
 
     test "accepts the test and scratch names the repo uses" do
-      for name <- ~w(demo_test samen_core_test_lane2 samen_core_test_rvbackfill_42 demo_test_downcheck_ab12cd34) do
+      accepted =
+        ~w(demo_test demo_test2 driftwood_test pawchart_test samen_web_test samen_core_multinode_test
+           samen_core_test_lane2 samen_core_test_lane1_lane2 samen_core_test_rvbackfill_42 samen_core_test_akdgen_7
+           samen_core_test_testdb_12_345 demo_test_downcheck_ab12cd34 app_prod_downcheck_ab12cd34 test)
+
+      for name <- accepted do
         assert TestDb.test_database?(name), name
       end
     end
 
     test "quotes the identifier (a name that needs it)", %{config: config} do
-      odd = ~s(#{config[:database]}_q"x y)
+      # mixed case: accepted by the name rule, and only reachable if the identifier is quoted (unquoted it folds to lower)
+      odd = "#{config[:database]}_Quoted_#{:rand.uniform(1_000_000)}"
       {:ok, maint} = Postgrex.start_link(Keyword.merge(config, database: "postgres"))
       on_exit(fn -> stop_quiet(maint) end)
       Postgrex.query!(maint, ~s(CREATE DATABASE "#{String.replace(odd, ~s("), ~s(""))}"), [])
+      on_exit(fn -> TestDb.drop!(Keyword.put(config, :database, odd)) end)
       count = "SELECT count(*) FROM pg_database WHERE datname = $1"
       assert %{rows: [[1]]} = Postgrex.query!(maint, count, [odd])
 
