@@ -1,0 +1,19 @@
+# SABOTAGE: check/2 fails open on an unreadable ledger without reporting the read
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_d_test.exs
+# MUST_FAIL: check/2 fails open on an unreadable ledger (documented) but reports the read by name
+diff --git a/samen_core/lib/samen/aggregate/query_budget.ex b/samen_core/lib/samen/aggregate/query_budget.ex
+index b8223c95..e3b2a8f6 100644
+--- a/samen_core/lib/samen/aggregate/query_budget.ex
++++ b/samen_core/lib/samen/aggregate/query_budget.ex
+@@ -374,7 +374,7 @@ defmodule Samen.Aggregate.QueryBudget do
+   rescue
+     e ->
+       # Fail-open is the documented posture (the floors still enforce), but never silent and never value-bearing.
+-      Samen.Observability.Failure.report(:query_budget_check, nil, e)
++      _ = e
+       :ok
+   end
+ 

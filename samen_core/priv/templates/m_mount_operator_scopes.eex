@@ -149,6 +149,8 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_key %>_inserted_at, :utc_datetime, null: false)
       add(:<%= o_key %>_updated_at, :utc_datetime, null: false)
     end
+    # One row per digest — the auth lookup (`token_digest == ^digest`) assumes it, and a duplicate made it error.
+    create(unique_index(:<%= o_key %>_api_key, [:<%= o_key %>_token_digest]))
 
     # --- <%= o_invite %>_invitation : a pending invite 🔒 (email vault-routed).
     #     ADR-035 §4.1/§4.2/§5 A5 (T05 hardening): `token_digest` (SHA-256 digest at

@@ -164,7 +164,7 @@ defmodule Samen.SuspensionAsymmetryTest do
 
       :telemetry.attach(
         handler,
-        [:samen, :core, :read, :error],
+        [:samen, :core, :write, :error],
         fn _e, _m, meta, _ -> send(test_pid, {:failure, meta}) end,
         nil
       )
@@ -173,7 +173,7 @@ defmodule Samen.SuspensionAsymmetryTest do
 
       FaultRepo.fail([:insert])
       assert [{:ok, 1}, {:error, :suspend_failed}] = over_budget(op, FaultRepo, path)
-      assert_receive {:failure, %{read: :budget_auto_suspend}}
+      assert_receive {:failure, %{write: :budget_auto_suspend}}
     end
   end
 

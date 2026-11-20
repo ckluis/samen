@@ -1,0 +1,19 @@
+# SABOTAGE: a wide event dropped by a handler failure is not reported
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_f_test.exs
+# MUST_FAIL: RED: a wide event that cannot be built is reported
+diff --git a/samen_core/lib/samen/observability/live_telemetry.ex b/samen_core/lib/samen/observability/live_telemetry.ex
+index 097cf117..5ec7d067 100644
+--- a/samen_core/lib/samen/observability/live_telemetry.ex
++++ b/samen_core/lib/samen/observability/live_telemetry.ex
+@@ -124,7 +124,7 @@ defmodule Samen.Observability.LiveTelemetry do
+ 
+     :ok
+   rescue
+-    e -> dropped(e)
++    _ -> :ok
+   catch
+     kind, reason -> dropped({kind, reason})
+   end

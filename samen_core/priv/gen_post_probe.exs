@@ -436,6 +436,69 @@ try do
   IO.puts("D7a/W4-H2: authn-coverage guard CONFIRMED failing-until-wired — a bare unlabeled tenant")
   IO.puts("           mount flipped it; the seam restored it. Guided AND guarded, non-vacuously.")
 
+  # --- 4a-scope. D3 phase 1: the generated app RUNS the read-scope lint, and it is NON-VACUOUS --
+  # ci.sh above already ran `mix samen.verify.read_scope --max-sanctioned 1` GREEN on the fresh api app (its one sanction: the API-key auth-step lookup)
+  # (the positive control). Plant an UNSCOPED `authorize?: false` read of the generated Widget in the
+  # app's lib/ → the lint MUST fail and name the planted file; plant an unparseable file → it MUST
+  # fail too (a tree it could not inspect never passes). Remove the plants → green again.
+  planted_leak = Path.join(app_dir, "lib/#{spec.otp_app}/zz_planted_unscoped_read.ex")
+  # The unparseable plant lives OUTSIDE lib/ (scanned via --source-dirs): in lib/ it would fail the
+  # COMPILE first, and the probe would prove the compiler, not the lint.
+  broken_dir = Path.join(app_dir, "tmp_unparseable_plant")
+  planted_broken = Path.join(broken_dir, "zz_planted_unparseable.ex")
+
+  {sc_ok_out, sc_ok_code} = mix.(app_dir, ["samen.verify.read_scope", "--max-sanctioned", "1"])
+
+  if sc_ok_code != 0 or not String.contains?(sc_ok_out, "OK") do
+    IO.puts(sc_ok_out)
+    halt.(1, "FAIL: the freshly generated app does NOT pass its own read-scope lint.")
+  end
+
+  try do
+    File.write!(planted_leak, """
+    defmodule #{module}.ZzPlantedUnscopedRead do
+      def every_orgs_widgets, do: Ash.read!(#{module}.Crm.Widget, authorize?: false)
+    end
+    """)
+
+    {sc_leak_out, sc_leak_code} = mix.(app_dir, ["samen.verify.read_scope", "--max-sanctioned", "1"])
+    IO.puts("\nD3 sabotage — planted an unscoped authorize?: false read in lib/:")
+    IO.puts("  read_scope exit: #{sc_leak_code}  (MUST be non-zero)")
+
+    if sc_leak_code == 0 or not String.contains?(sc_leak_out, "zz_planted_unscoped_read.ex") or
+         not String.contains?(sc_leak_out, "UNSCOPED") do
+      IO.puts(sc_leak_out)
+      halt.(1, "FAIL: the read-scope lint did NOT catch a planted unscoped read in the generated app — VACUOUS.")
+    end
+
+    File.rm!(planted_leak)
+    File.mkdir_p!(broken_dir)
+    File.write!(planted_broken, "defmodule #{module}.ZzPlantedBroken do\n  def oops(, do: 1\n")
+
+    {sc_bad_out, sc_bad_code} =
+      mix.(app_dir, ["samen.verify.read_scope", "--source-dirs", "lib", "--source-dirs", broken_dir])
+    IO.puts("  planted unparseable file → read_scope exit: #{sc_bad_code}  (MUST be non-zero)")
+
+    if sc_bad_code == 0 or not String.contains?(sc_bad_out, "zz_planted_unparseable.ex") or
+         not String.contains?(sc_bad_out, "could not be scanned") do
+      IO.puts(sc_bad_out)
+      halt.(1, "FAIL: the read-scope lint PASSED over an unparseable file in the generated app — fail-open.")
+    end
+  after
+    File.rm(planted_leak)
+    File.rm_rf(broken_dir)
+  end
+
+  {sc_rev_out, sc_rev_code} = mix.(app_dir, ["samen.verify.read_scope", "--max-sanctioned", "1"])
+
+  if sc_rev_code != 0 do
+    IO.puts(sc_rev_out)
+    halt.(1, "FAIL: removing the planted files did not restore the read-scope lint to green.")
+  end
+
+  IO.puts("D3: the generated app runs the read-scope lint — green fresh, red on a planted unscoped read")
+  IO.puts("    AND on an unparseable file, green again once removed. Guided AND guarded, non-vacuously.")
+
   # --- 4b. §5.8 flagship cycle: archive → hidden → restore → visible again, on the REAL --
   #         generated + migrated Crm.Widget (ci.sh above already ran `mix ecto.migrate`).
   archive_cycle_script = """

@@ -224,6 +224,32 @@ defmodule Samen.AI.CatalogRuntimeTest do
       refute inspect(grounding_b) =~ "only_a"
     end
 
+    test "RED: a grounding half that FAILED is absent, never an empty list the model would read as 'none exist'" do
+      org_id = org()
+
+      {:ok, _} = CustomObjects.define_object(%{org_id: org_id, object_key: "live_object", label: "Live"}, TestRepo)
+
+      # control: healthy, both halves present and the object is there
+      healthy = Catalog.grounding(%{org_id: org_id}, resources: [])
+      assert [%{object_key: "live_object"}] = healthy.custom_objects
+      assert healthy.schema == %{"tables" => []}
+
+      # an unresolvable domain list: the SCHEMA half failed, the custom objects half is untouched
+      log = ExUnit.CaptureLog.capture_log(fn -> send(self(), {:g, Catalog.grounding(%{org_id: org_id}, domains: [Enum, :not_a_domain, "nope"])}) end)
+      assert_received {:g, schema_failed}
+      assert log =~ "read=ai_catalog_schema"
+      refute Map.has_key?(schema_failed, :schema)
+      assert [%{object_key: "live_object"}] = schema_failed.custom_objects
+
+      # an unreadable custom-object table: the CUSTOM OBJECTS half failed, the schema half is untouched
+      TestRepo.query!("ALTER TABLE tnt_object RENAME TO tnt_object_hidden_by_test")
+      log = ExUnit.CaptureLog.capture_log(fn -> send(self(), {:g, Catalog.grounding(%{org_id: org_id}, resources: [])}) end)
+      assert_received {:g, objects_failed}
+      assert log =~ "read=ai_catalog_custom_objects"
+      refute Map.has_key?(objects_failed, :custom_objects)
+      assert objects_failed.schema == %{"tables" => []}
+    end
+
     test "a disabled custom object is excluded from grounding (not a live source)" do
       org_id = org()
 

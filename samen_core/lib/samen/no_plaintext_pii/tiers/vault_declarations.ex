@@ -164,9 +164,10 @@ defmodule Samen.NoPlaintextPii.Tiers.VaultDeclarations do
     e -> {:error, e}
   end
 
+  # A non-Postgres resource (ETS, simple) has no table: nil is exact. A Postgres resource whose table cannot be read
+  # raises (the verifier fails loudly) instead of silently dropping the resource from the sweep.
   defp table_name(resource) do
-    AshPostgres.DataLayer.Info.table(resource)
-  rescue
-    _ -> nil
+    if Ash.Resource.Info.data_layer(resource) == AshPostgres.DataLayer,
+      do: AshPostgres.DataLayer.Info.table(resource)
   end
 end

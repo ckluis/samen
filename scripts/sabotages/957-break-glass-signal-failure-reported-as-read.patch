@@ -1,0 +1,20 @@
+# SABOTAGE: a failed break-glass unanchored-signal emit (a write) is reported through the 3-arity read form 
+#   again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/observability_failure_test.exs
+# MUST_FAIL: no 3-arity Failure.report names a WRITE op
+diff --git a/samen_core/lib/samen/break_glass/reconcile_worker.ex b/samen_core/lib/samen/break_glass/reconcile_worker.ex
+index 12eeb339..2f5ad373 100644
+--- a/samen_core/lib/samen/break_glass/reconcile_worker.ex
++++ b/samen_core/lib/samen/break_glass/reconcile_worker.ex
+@@ -73,7 +73,7 @@ defmodule Samen.BreakGlass.ReconcileWorker do
+     Reconciliation.emit_unanchored_signal()
+   rescue
+     e ->
+-      Samen.Observability.Failure.report_write(:break_glass_unanchored_signal, nil, e)
++      Samen.Observability.Failure.report(:break_glass_unanchored_signal, nil, e)
+       0
+   catch
+     kind, _value ->

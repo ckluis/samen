@@ -26,15 +26,21 @@ defmodule Samen.Observability.Failure do
 
   @doc """
   Report a failure of `kind` (`:read` | `:write`). Options: `:tag` (log prefix, default
-  `"[Samen.Core]"`) and `:event_prefix` (telemetry prefix, default `[:samen, :core]`; the event is
-  `prefix ++ [kind, :error]`).
+  `"[Samen.Core]"`), `:event_prefix` (telemetry prefix, default `[:samen, :core]`; the event is
+  `prefix ++ [kind, :error]`) and `:locate` (`[resource: module, field: atom, record: id]`: where the
+  failure sits, so an operator can find the row. It reaches the LOG LINE only, sanitized (a module
+  name, an atom, a canonical UUID or an integer, else a fixed placeholder), never telemetry (an id is a
+  forbidden metric dimension) and never a value or token).
   """
   @spec report(:read | :write, atom(), term(), term(), keyword()) :: :ok
   def report(kind, name, scope, reason, opts) when kind in [:read, :write] and is_atom(name) do
     causes = causes(reason)
     tag = Keyword.get(opts, :tag, "[Samen.Core]")
 
-    Logger.error("#{tag} #{kind} failed #{kind}=#{name} org=#{org_of(scope)} cause=#{Enum.join(causes, ",")}")
+    Logger.error(
+      "#{tag} #{kind} failed #{kind}=#{name} org=#{org_of(scope)} cause=#{Enum.join(causes, ",")}" <>
+        locate(Keyword.get(opts, :locate, []))
+    )
 
     emit(Keyword.get(opts, :event_prefix, [:samen, :core]), kind, name, causes)
   rescue
@@ -76,6 +82,26 @@ defmodule Samen.Observability.Failure do
   end
 
   defp safe_org(_), do: "invalid"
+
+  defp locate([]), do: ""
+
+  defp locate(locate) when is_list(locate) do
+    resource = Keyword.get(locate, :resource)
+    field = Keyword.get(locate, :field)
+
+    " resource=#{if is_atom(resource) and resource != nil, do: inspect(resource), else: "unknown"}" <>
+      " field=#{if is_atom(field) and field != nil, do: field |> Atom.to_string() |> String.replace(~r/[^a-z0-9_]/, "?"), else: "unknown"}" <>
+      " record=#{safe_record(Keyword.get(locate, :record))}"
+  end
+
+  defp locate(_), do: ""
+
+  defp safe_record(id) when is_integer(id), do: Integer.to_string(id)
+  defp safe_record(id) when is_binary(id) do
+    if id =~ ~r/\A[0-9]{1,20}\z/, do: id, else: safe_org(id)
+  end
+
+  defp safe_record(_), do: "invalid"
 
   # Bounded pair `<kind>` + `cause` (no org id — a forbidden metric dimension, see `Samen.Metrics`).
   defp emit(prefix, kind, name, causes) do

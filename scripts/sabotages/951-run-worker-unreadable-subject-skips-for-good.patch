@@ -1,0 +1,19 @@
+# SABOTAGE: a transient subject read failure skips the run permanently instead of retrying
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: a subject read that FAILS is retried
+diff --git a/samen_core/lib/samen/automation/run_worker.ex b/samen_core/lib/samen/automation/run_worker.ex
+index ed1d8676..3a5591cf 100644
+--- a/samen_core/lib/samen/automation/run_worker.ex
++++ b/samen_core/lib/samen/automation/run_worker.ex
+@@ -245,7 +245,7 @@ defmodule Samen.Automation.RunWorker do
+       # A subject that could not be READ is not an empty subject (every `neq` / `not_in` / `is_nil` gate passes
+       # against one) and not a final answer either: reported, and retried while attempts remain.
+       Samen.Observability.Failure.report(:run_worker_load_eligible, nil, e)
+-      {:retry, :unavailable}
++      {:skip, :internal_error}
+   end
+ 
+   defp conditions_gate(definition, subject_map, args) do

@@ -452,12 +452,12 @@ defmodule Samen.AuditEvent.PartitionManager do
       do_move_default_rows(repo, name, from_ts, to_ts, lock_ms, budget_ms, staging_ms)
     else
       {:error, reason} ->
-        Samen.Observability.Failure.report(:audit_partition_move, nil, reason)
+        Samen.Observability.Failure.report_write(:audit_partition_move, nil, reason)
         {:error, reason}
     end
   rescue
     e ->
-      Samen.Observability.Failure.report(:audit_partition_move, nil, e)
+      Samen.Observability.Failure.report_write(:audit_partition_move, nil, e)
       {:error, e}
   end
 
@@ -539,7 +539,7 @@ defmodule Samen.AuditEvent.PartitionManager do
         {:ok, name}
 
       {:error, reason} ->
-        Samen.Observability.Failure.report(:audit_partition_move, nil, reason)
+        Samen.Observability.Failure.report_write(:audit_partition_move, nil, reason)
         {:error, reason}
     end
   end

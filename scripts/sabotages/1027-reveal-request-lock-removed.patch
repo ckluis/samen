@@ -1,0 +1,20 @@
+# SABOTAGE: the request row lock is removed (no FOR UPDATE), so a decision and a re-open never wait for a 
+#   concurrent holder
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_request_lock_test.exs
+# MUST_FAIL: approve, deny and re-open WAIT for a request another connection holds
+diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+index ae1abc97..be219614 100644
+--- a/samen_core/lib/samen/reveal/grants.ex
++++ b/samen_core/lib/samen/reveal/grants.ex
+@@ -289,7 +289,7 @@ defmodule Samen.Reveal.Grants do
+   # The row lock every reveal decision and every approval open takes, held to the end of the surrounding transaction
+   # (callers run it inside `r.transaction/1`).
+   defp lock_request(r, request_id) do
+-    r.one(from(q in RevealRequest, where: q.id == ^request_id, lock: "FOR UPDATE"))
++    r.one(from(q in RevealRequest, where: q.id == ^request_id))
+   end
+ 
+   # Postgres aborting a decision on the request lock (`lock_not_available`: a lock timeout; `deadlock_detected`) is a

@@ -295,13 +295,12 @@ defmodule Samen.AI.Mcp do
   defp browse_catalog(scope, opts) do
     catalog_opts = Keyword.take(opts, [:domains, :resources, :repo])
 
-    data = %{
-      "kind" => "catalog",
-      "schema" => Catalog.schema(catalog_opts),
-      "custom_objects" => Catalog.custom_objects(org_id_or_nil(scope), catalog_opts)
-    }
-
-    seal_meta(data)
+    # A half of the catalogue that could not be read is an error to the model, never an empty list: `[]` says "this host has
+    # no custom objects" and the model acts on it.
+    with {:ok, schema} <- Catalog.schema_result(catalog_opts),
+         {:ok, custom_objects} <- Catalog.custom_objects_result(org_id_or_nil(scope), catalog_opts) do
+      seal_meta(%{"kind" => "catalog", "schema" => schema, "custom_objects" => custom_objects})
+    end
   end
 
   # Records mode — org-scoped list with vault fields masked at the boundary.
@@ -558,42 +557,51 @@ defmodule Samen.AI.Mcp do
   defp resolve_resource(nil, _opts), do: {:error, :missing_resource}
 
   defp resolve_resource(ref, opts) when is_binary(ref) do
-    available = available_resources(opts)
+    with {:ok, available} <- available_resources(opts) do
+      match =
+        Enum.find(available, fn res ->
+          ref == inspect(res) or ref == safe_table_name(res) or ref == to_string(res)
+        end)
 
-    match =
-      Enum.find(available, fn res ->
-        ref == inspect(res) or ref == safe_table_name(res) or ref == to_string(res)
-      end)
-
-    case match do
-      nil -> {:error, {:unknown_resource, ref}}
-      res -> {:ok, res}
+      case match do
+        nil -> {:error, {:unknown_resource, ref}}
+        res -> {:ok, res}
+      end
     end
   end
 
   defp resolve_resource(_ref, _opts), do: {:error, :missing_resource}
 
+  # `{:error, :unavailable}` when a domain's resource list could not be READ: "unknown resource" would tell the model the
+  # resource does not exist.
   defp available_resources(opts) do
     cond do
       is_list(opts[:resources]) ->
-        opts[:resources]
+        {:ok, opts[:resources]}
 
       is_list(opts[:domains]) ->
-        Enum.flat_map(opts[:domains], &safe_domain_resources/1)
+        domain_resources(opts[:domains])
 
       true ->
-        :samen_core
-        |> Application.get_env(:ash_domains, [])
-        |> Enum.flat_map(&safe_domain_resources/1)
+        domain_resources(Application.get_env(:samen_core, :ash_domains, []))
     end
   end
 
+  defp domain_resources(domains) do
+    Enum.reduce_while(domains, {:ok, []}, fn domain, {:ok, acc} ->
+      case safe_domain_resources(domain) do
+        {:ok, resources} -> {:cont, {:ok, acc ++ resources}}
+        {:error, :unavailable} = error -> {:halt, error}
+      end
+    end)
+  end
+
   defp safe_domain_resources(domain) do
-    Ash.Domain.Info.resources(domain)
+    {:ok, Ash.Domain.Info.resources(domain)}
   rescue
     e ->
       Samen.Observability.Failure.report(:mcp_domain_resources, nil, e)
-      []
+      {:error, :unavailable}
   end
 
   defp safe_table_name(resource) do

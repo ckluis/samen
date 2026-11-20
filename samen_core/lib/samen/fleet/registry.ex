@@ -267,7 +267,7 @@ defmodule Samen.Fleet.Registry do
   token instead of being forced to mint a fresh one.
   """
   @spec consume_enrollment(module(), String.t(), String.t()) ::
-          {:ok, map()} | {:error, :invalid_token | term()}
+          {:ok, map()} | {:error, :invalid_token | :unavailable | term()}
   def consume_enrollment(ns, raw_token, public_key_b64) when is_binary(raw_token) do
     with {:ok, {cockpit_pub, cockpit_priv}} <- cockpit_identity(ns) do
       digest = Samen.Auth.TokenMint.digest(raw_token)
@@ -286,6 +286,11 @@ defmodule Samen.Fleet.Registry do
       case result do
         %Ash.BulkResult{status: :success, records: [token | _]} ->
           finish_enrollment(ns, token, public_key_b64, {cockpit_pub, cockpit_priv})
+
+        %Ash.BulkResult{status: :error, errors: errors} when is_list(errors) and errors != [] ->
+          # the consume itself failed (a DB error): the token was NOT judged invalid and was not spent
+          Samen.Observability.Failure.report(:fleet_enrollment_consume, nil, hd(errors))
+          {:error, :unavailable}
 
         _ ->
           {:error, :invalid_token}
@@ -409,7 +414,7 @@ defmodule Samen.Fleet.Registry do
 
   Returns `{:ok, report}` | `{:error, reason}` where `reason` is one of the
   atoms `:unknown_kid | :revoked | :retired | :bad_signature | :stale_timestamp
-  | :replayed | :app_id_mismatch`, **or a bare `[String.t()]`** — the schema
+  | :replayed | :app_id_mismatch | :unavailable` (`:unavailable`: the credential lookup itself FAILED — not a verdict on the presenter), **or a bare `[String.t()]`** — the schema
   violation list `Samen.Fleet.Report.validate_wire/1` returns, passed through
   unwrapped. (This docstring previously claimed a `{:invalid_schema, [...]}`
   wrapper that no code path ever produced; corrected in the phase-6 SEC fix
@@ -462,6 +467,15 @@ defmodule Samen.Fleet.Registry do
           not_nil_and_passed?(credential.retire_at) -> {:error, :retired}
           true -> {:ok, credential}
         end
+
+      # (an `Ash.Error.Invalid` is the PRESENTED kid failing to cast, e.g. not a UUID: the presenter's problem, so it
+      # falls through to the unknown-kid arm below, dummy verify included)
+      {:error, error} when not is_struct(error, Ash.Error.Invalid) ->
+        # A lookup that FAILED is not an unknown kid: answering it as one would charge a genuine app's heartbeat to the
+        # forged-signature bucket, rate-limit it and raise :heartbeat_rejected during an outage. Report it (value-free)
+        # and answer a distinct outcome the HTTP surface maps to 503 + Retry-After.
+        Samen.Observability.Failure.report(:fleet_heartbeat_credential_lookup, nil, error)
+        {:error, :unavailable}
 
       _ ->
         # Timing-oracle mitigation (§4.4): do the SAME shape of work as a

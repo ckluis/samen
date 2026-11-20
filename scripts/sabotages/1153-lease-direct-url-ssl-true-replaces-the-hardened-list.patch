@@ -1,0 +1,20 @@
+# SABOTAGE: The lease merges the direct URL's ssl over the repo's hardened list, so a ?ssl=true replaces 
+#   the private CA / verify opt-out with Postgrex defaults.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/single_node_lease_test.exs
+# MUST_FAIL: on the direct URL keeps the repo
+diff --git a/samen_core/lib/samen/single_node/lease.ex b/samen_core/lib/samen/single_node/lease.ex
+index df987e6f..808a0c64 100644
+--- a/samen_core/lib/samen/single_node/lease.ex
++++ b/samen_core/lib/samen/single_node/lease.ex
+@@ -503,7 +503,7 @@ defmodule Samen.SingleNode.Lease do
+   # CA, the explicit verify opt-out) for Postgrex's defaults and the lease can never connect.
+   defp lease_url_config(lease_url, repo_config) do
+     url_config = Ecto.Repo.Supervisor.parse_url(lease_url)
+-    if is_list(repo_config[:ssl]), do: Keyword.delete(url_config, :ssl), else: url_config
++    if is_list(repo_config[:ssl]), do: Keyword.delete(url_config, :ssl_x), else: url_config
+   end
+ 
+   defp check(state) do

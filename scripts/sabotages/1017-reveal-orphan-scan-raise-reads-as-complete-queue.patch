@@ -1,0 +1,20 @@
+# SABOTAGE: an orphan scan whose request read raised answers as if nothing were orphaned, so the queue 
+#   claims to be complete
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_approver_test.exs
+# MUST_FAIL: an orphan scan whose request read RAISES is {:error, :unavailable} while the pending list is healthy
+diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+index f2445010..dbb2b5bb 100644
+--- a/samen_core/lib/samen/reveal/grants.ex
++++ b/samen_core/lib/samen/reveal/grants.ex
+@@ -670,7 +670,7 @@ defmodule Samen.Reveal.Grants do
+   rescue
+     e ->
+       Samen.Observability.Failure.report(:reveal_orphan_scan, org, e)
+-      {:error, :orphan_scan_unavailable}
++      {:ok, []}
+   end
+ 
+   @doc false

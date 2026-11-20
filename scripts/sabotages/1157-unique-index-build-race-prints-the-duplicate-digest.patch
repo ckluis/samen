@@ -1,0 +1,20 @@
+# SABOTAGE: A duplicate landing between the pre-count and the build surfaces Postgres's own error, which 
+#   prints the duplicated digest into the migration log.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/migration_unique_index_test.exs
+# MUST_FAIL: a duplicate that lands between the pre-count and the build
+diff --git a/samen_core/lib/samen/migration/expand_contract.ex b/samen_core/lib/samen/migration/expand_contract.ex
+index 1527a00a..5c74be70 100644
+--- a/samen_core/lib/samen/migration/expand_contract.ex
++++ b/samen_core/lib/samen/migration/expand_contract.ex
+@@ -313,7 +313,7 @@ defmodule Samen.Migration.ExpandContract do
+     :ok
+   rescue
+     e in Postgrex.Error ->
+-      if match?(%{code: :unique_violation}, e.postgres) do
++      if match?(%{code: :never_violation}, e.postgres) do
+         raise RuntimeError,
+               "cannot build the unique index #{name}: #{tname}.#{cname} gained a duplicate value while the index " <>
+                 "was being built. The failed build leaves an INVALID index of that name, which the next run drops " <>

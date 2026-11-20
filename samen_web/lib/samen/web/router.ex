@@ -1772,7 +1772,7 @@ defmodule Samen.Web.Router do
       import Samen.Web.Router
 
       samen_mcp_route(
-        actor_resolver: {MyWeb.Api.KeyAuthPlug, :resolve_scope, []},
+        actor_resolver: {MyWeb.Api.McpKeyResolver, :resolve_scope, []},
         tool_opts: [domains: [MyApp.Crm], repo: MyApp.Repo,
                     approval_resource: MyApp.Primitives.Approval,
                     kinds: MyApp.approval_kinds()]
@@ -1802,8 +1802,11 @@ defmodule Samen.Web.Router do
   ## Options
 
     * `:actor_resolver` — **REQUIRED** (compile-time enforced). A `{module, function, args}`
-      MFA (or 1-arity fun) taking the RAW bearer token and returning `{:ok, scope}` or
-      anything else (⇒ 401). See the constant-time requirement above.
+      MFA (or 1-arity fun) taking the RAW bearer token and returning `{:ok, scope}` (a key that
+      was checked and is not good: any other value ⇒ 401) or `{:error, :unavailable}` when the
+      key lookup itself FAILED (⇒ 503 + `Retry-After`; report the failure by name, never return
+      `:error` for it: a good key must not read as bad during an outage). `PawChartWeb.Api.McpKeyResolver`
+      is the reference resolver. See the constant-time requirement above.
     * `:tool_opts` — the host wiring threaded to `Samen.AI.Mcp.handle_rpc/3`
       (`:domains`/`:resources`/`:repo`/`:approval_resource`/`:kinds`). A kw list, a 0-arity
       fun, or an `{m, f, a}` MFA (resolved per request).

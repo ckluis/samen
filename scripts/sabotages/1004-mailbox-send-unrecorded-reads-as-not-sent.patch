@@ -1,0 +1,20 @@
+# SABOTAGE: Sync.send/3 returns a bare error after the provider sent, so a host reads it as not sent and 
+#   resends
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/mailbox_sync_test.exs
+# MUST_FAIL: RED: send/3 whose timeline record fails after the provider sent says the mail WAS sent
+diff --git a/samen_core/lib/samen/mailbox/sync.ex b/samen_core/lib/samen/mailbox/sync.ex
+index 36fba00d..ded8aa7c 100644
+--- a/samen_core/lib/samen/mailbox/sync.ex
++++ b/samen_core/lib/samen/mailbox/sync.ex
+@@ -192,7 +192,7 @@ defmodule Samen.Mailbox.Sync do
+       case record(message, connection, config) do
+         {:ok, record} -> {:ok, record}
+         :duplicate -> {:error, :duplicate_message}
+-        {:error, reason} -> {:error, {:sent_but_unrecorded, reason}}
++        {:error, reason} -> {:error, reason}
+       end
+     end
+   end

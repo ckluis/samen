@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P3 - a sabotage new refusal no longer puts CLAUDE.md and the docs back, so the counts 
+#   it wrote for a patch it threw away stay in the tree.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: SABNEW sabotage new refuses an unprovable patch and leaves the tree exactly as it was
+diff --git a/scripts/sabotage_new.sh b/scripts/sabotage_new.sh
+index 9a7fc089..99c78f9f 100755
+--- a/scripts/sabotage_new.sh
++++ b/scripts/sabotage_new.sh
+@@ -95,7 +95,7 @@ restore_snapshot() {
+   if [[ -d "$WORK/counts_snap" ]]; then
+     local c
+     while IFS= read -r c; do
+-      cp -p "$WORK/counts_snap/$c" "$REPO_ROOT/$c"
++      : "$c"
+     done < <(cd "$WORK/counts_snap" && find . -type f | sed 's|^\./||')
+   fi
+   [[ $SNAPPED -eq 1 ]] || return 0

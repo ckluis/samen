@@ -1,0 +1,20 @@
+# SABOTAGE: The mutation lint treats a failed MUTATION_OWNS scan (grep exit 2 on a file it cannot read) as 
+#   no match, so a tree it could not inspect passes.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: MUTLINT the mutation lint's MUTATION_OWNS scan survives odd file names
+diff --git a/scripts/mutation_lint.sh b/scripts/mutation_lint.sh
+index ef9a0a21..fcfb0784 100755
+--- a/scripts/mutation_lint.sh
++++ b/scripts/mutation_lint.sh
+@@ -137,7 +137,7 @@ owns_flush() {
+   [[ ${#OWNS_BATCH[@]} -gt 0 ]] || return 0
+   (cd "$REPO_ROOT" && grep -HE '^[[:space:]]*# MUTATION_OWNS:' -- "${OWNS_BATCH[@]}") >> "$OWNS_HITS" 2>"$WORK/owns.err"
+   local rc=$?
+-  if [[ $rc -gt 1 ]]; then
++  if [[ $rc -gt 99 ]]; then
+     refuse "the MUTATION_OWNS scan failed (grep exit $rc) — $(head -1 "$WORK/owns.err") — a scan that cannot read the tree must not pass"
+   fi
+   OWNS_BATCH=()

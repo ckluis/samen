@@ -65,6 +65,69 @@ defmodule Samen.Web.CsvMaskingTest do
     Enum.at(row, idx)
   end
 
+  describe "import cannot plant a vault token (token-binding T-W1)" do
+    test "a vt_<hex> cell naming ANOTHER org's live token imports as plaintext: a NEW token, the literal string back, the foreign row untouched" do
+      victim_org = Ash.UUID.generate()
+      attacker_org = Ash.UUID.generate()
+      victim = seed_secret_person!(victim_org)
+
+      victim_masked = read_full_name!(victim.id)
+      victim_token = victim_masked.token
+      assert Samen.Vault.token?(victim_token)
+
+      csv = "display_name,full_name\nPlanted,#{victim_token}\n"
+
+      assert {:ok, %Csv.Report{created: 1, errors: []}} =
+               Csv.import(Person, tenant_scope(attacker_org), csv: csv)
+
+      [planted] =
+        Person |> Ash.Query.filter(org_id == ^attacker_org) |> Ash.read!(authorize?: false)
+
+      planted_masked = read_full_name!(planted.id)
+
+      # a NEW token, not the victim's
+      refute planted_masked.token == victim_token
+      assert Samen.Vault.token?(planted_masked.token)
+
+      # tenant resolution of the planted record returns the literal cell, never the victim's PII
+      resolved =
+        resolve_on_plane(%{planted | full_name: planted_masked}, Person, :tenant, repo: Samen.WebTest.Repo)
+
+      refute inspect(resolved.full_name) =~ @secret_first
+      refute to_string(resolved.full_name) =~ @secret_last
+
+      assert {:ok, revealed} = Samen.Vault.reveal(planted_masked, Samen.WebTest.Repo)
+      assert revealed =~ victim_token
+      refute revealed =~ @secret_first
+
+      # the foreign row is untouched and still reveals the victim's own value
+      assert {:ok, victim_plain} = Samen.Vault.reveal(victim_masked, Samen.WebTest.Repo)
+      assert victim_plain =~ @secret_first
+    end
+
+    test "CONTROL: an ordinary plaintext cell still imports and vaults" do
+      org_id = Ash.UUID.generate()
+      csv = "display_name,full_name\nOrdinary,Plain Name\n"
+
+      assert {:ok, %Csv.Report{created: 1, errors: []}} =
+               Csv.import(Person, tenant_scope(org_id), csv: csv)
+
+      [p] = Person |> Ash.Query.filter(org_id == ^org_id) |> Ash.read!(authorize?: false)
+      m = read_full_name!(p.id)
+      assert Samen.Vault.token?(m.token)
+      assert {:ok, plain} = Samen.Vault.reveal(m, Samen.WebTest.Repo)
+      assert plain =~ "Plain Name"
+    end
+  end
+
+  defp read_full_name!(id) do
+    Person
+    |> Ash.Query.filter(id == ^id)
+    |> Ash.Query.ensure_selected([:full_name])
+    |> Ash.read_one!(authorize?: false)
+    |> Map.fetch!(:full_name)
+  end
+
   describe "export masking per plane (AC-G15-2)" do
     test "GREEN: tenant own-org export carries the vaulted composite in the CLEAR" do
       org_id = Ash.UUID.generate()

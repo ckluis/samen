@@ -54,7 +54,8 @@ defmodule Samen.Observability.LiveTelemetry do
   turn the plane dark again. `handle_event/4` therefore rescues and catches everything and
   returns `:ok`; a value that fails its bounded type is dropped from the event, and an event
   that still fails validation is dropped whole. Observability is best-effort; the request is
-  not.
+  not. Best-effort is not silent: a dropped event, a missing pseudonym and missing trace ids
+  are each reported by name (`live_telemetry_event` / `_pseudonym` / `_trace`), value-free.
   """
 
   alias Samen.Observability.LiveEvents
@@ -123,9 +124,15 @@ defmodule Samen.Observability.LiveTelemetry do
 
     :ok
   rescue
-    _ -> :ok
+    e -> dropped(e)
   catch
-    _, _ -> :ok
+    kind, reason -> dropped({kind, reason})
+  end
+
+  # The event is not emitted and that is on record (value-free: the exception module only, never the metadata).
+  defp dropped(reason) do
+    Samen.Observability.Failure.report_write(:live_telemetry_event, nil, reason)
+    :ok
   end
 
   @doc false
@@ -315,7 +322,10 @@ defmodule Samen.Observability.LiveTelemetry do
       _ -> nil
     end
   rescue
-    _ -> nil
+    # no actor pseudonym on the event (never the raw principal), and the failure is on record
+    e ->
+      Samen.Observability.Failure.report(:live_telemetry_pseudonym, nil, e)
+      nil
   end
 
   defp put_trace(fields) do
@@ -329,6 +339,9 @@ defmodule Samen.Observability.LiveTelemetry do
       fields
     end
   rescue
-    _ -> fields
+    # the event goes out without its trace ids, and the failure is on record
+    e ->
+      Samen.Observability.Failure.report(:live_telemetry_trace, nil, e)
+      fields
   end
 end

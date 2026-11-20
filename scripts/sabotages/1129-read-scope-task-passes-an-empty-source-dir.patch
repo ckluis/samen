@@ -1,0 +1,20 @@
+# SABOTAGE: The verify task accepts a source dir with no .ex file, so a lint that inspected nothing reads 
+#   as a pass.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/read_scope_verify_test.exs
+# MUST_FAIL: a dir with no .ex file is a violation
+diff --git a/samen_core/lib/mix/tasks/samen.verify.read_scope.ex b/samen_core/lib/mix/tasks/samen.verify.read_scope.ex
+index 89a2ed5e..279f9be6 100644
+--- a/samen_core/lib/mix/tasks/samen.verify.read_scope.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.read_scope.ex
+@@ -77,7 +77,7 @@ defmodule Mix.Tasks.Samen.Verify.ReadScope do
+           not File.dir?(dir) ->
+             {files, viol ++ ["#{dir}: source dir does not exist — nothing was inspected"]}
+ 
+-          found == [] and unlistable == [] ->
++          false ->
+             {files, viol ++ ["#{dir}: no .ex file found — nothing was inspected"]}
+ 
+           true ->

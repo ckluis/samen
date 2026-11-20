@@ -195,7 +195,10 @@ defmodule Samen.Replay do
       do: module.__samen_replay__(),
       else: %{assigns: [], params: %{}, url_params: []}
   rescue
-    _ -> %{assigns: [], params: %{}, url_params: []}
+    # a keep declaration that cannot be read keeps NOTHING (fail closed: no assign or param is recorded), on record
+    e ->
+      Samen.Observability.Failure.report(:replay_keep, nil, e)
+      %{assigns: [], params: %{}, url_params: []}
   end
 
   def keep(_), do: %{assigns: [], params: %{}, url_params: []}
@@ -327,7 +330,10 @@ defmodule Samen.Replay do
     opts = Keyword.put(cfg.flag_opts, :emit, false)
     Samen.FeatureFlags.evaluate(@flag, %{org_id: org_id}, opts).on === true
   rescue
-    _ -> false
+    # a flag that cannot be evaluated is OFF (nothing is recorded: fail closed), on record
+    e ->
+      Samen.Observability.Failure.report(:replay_flag_on, org_id, e)
+      false
   end
 
   @doc false

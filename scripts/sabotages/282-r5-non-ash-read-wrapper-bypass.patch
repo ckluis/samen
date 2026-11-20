@@ -6,11 +6,11 @@
 # APP: samen_web
 # TEST_FILES: test/samen/web/authz_read_scope_lint_test.exs
 # MUST_FAIL: wrapper bypass
-diff --git a/samen_web/lib/samen/web/authz/read_scope_lint.ex b/samen_web/lib/samen/web/authz/read_scope_lint.ex
-index d2c6b17..74c8d1d 100644
---- a/samen_web/lib/samen/web/authz/read_scope_lint.ex
-+++ b/samen_web/lib/samen/web/authz/read_scope_lint.ex
-@@ -332,7 +332,7 @@ defmodule Samen.Web.Authz.ReadScopeLint do
+diff --git a/samen_core/lib/samen/lint/read_scope.ex b/samen_core/lib/samen/lint/read_scope.ex
+index 2a3d0fa2..8caa6a89 100644
+--- a/samen_core/lib/samen/lint/read_scope.ex
++++ b/samen_core/lib/samen/lint/read_scope.ex
+@@ -334,7 +334,7 @@ defmodule Samen.Lint.ReadScope do
    # `{read_fun, line}` when `node` is a governed read CALL, else nil. Matches a
    # `Module.<read_fun>(args)` call (any module segment — R5) whose args carry
    # `authorize?: false` inline/spread or via a variable in `authz_vars` (R4).

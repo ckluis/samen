@@ -1,0 +1,20 @@
+# SABOTAGE: The verify task stops enforcing --max-sanctioned, so new # authz-scope: sanctions pile up 
+#   silently.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/read_scope_verify_test.exs
+# MUST_FAIL: is a CEILING
+diff --git a/samen_core/lib/mix/tasks/samen.verify.read_scope.ex b/samen_core/lib/mix/tasks/samen.verify.read_scope.ex
+index 89a2ed5e..13824fc8 100644
+--- a/samen_core/lib/mix/tasks/samen.verify.read_scope.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.read_scope.ex
+@@ -89,7 +89,7 @@ defmodule Mix.Tasks.Samen.Verify.ReadScope do
+ 
+     ceiling =
+       case max_sanctioned do
+-        n when is_integer(n) and scanned.sanctioned_reads > n ->
++        n when is_integer(n) and scanned.sanctioned_reads > n and false ->
+           [
+             "#{scanned.sanctioned_reads} reads carry a `# authz-scope:` marker, over the ceiling of #{n} " <>
+               "(--max-sanctioned): a new sanction is a conscious change to that number"

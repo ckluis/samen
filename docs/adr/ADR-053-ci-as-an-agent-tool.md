@@ -458,7 +458,7 @@ bytes (the author's sabotage edit included), and the reason is printed:
 | `scripts/sabotage.sh --range N-N` flips the NAMED tests and restores byte-exact | "suite failed but no test-failure headers found" is recognised as a compile/migration breaker and explained; "suite PASSED under sabotage" and "named test did not flip" each get their own message |
 | **baseline**: the same test files PASS on the restored tree | a red baseline — which is exactly what a captured *unstaged fix* produces once it is restored away |
 
-`scripts/counts --write --only sabotages[,driver_sabotages]` runs *before* the replay, because the guard tests check
+`scripts/counts --write` and `--write --docs` (every generated count; `--only sabotages[,driver_sabotages]` was the first version) run *before* the replay, because the guard tests check
 CLAUDE.md against the patch directory (a first dogfood run was refused by its own baseline for that reason; the
 counts are restored with the rest on a refusal). **Self-hosting:** sabotaging `sabotage_new.sh` with
 `sabotage_new.sh` would run the sabotaged copy, so `SAMEN_SABOTAGE_ROOT=<repo>` lets a pristine copy of the

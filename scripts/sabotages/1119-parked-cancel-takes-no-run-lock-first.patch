@@ -1,0 +1,19 @@
+# SABOTAGE: cancel_parked no longer locks the run row before the approval, so it can deadlock with the 
+#   expiry sweep
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_transcript_write_test.exs
+# MUST_FAIL: the cancel takes the RUN row lock before it touches the approval
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 84f3e6fa..e6ac5603 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -3301,7 +3301,6 @@ defmodule Samen.AI.Agent do
+     Run
+     |> Ash.Query.filter(id == ^run.id)
+     |> Ash.Query.ensure_selected([:org_id, :transcript])
+-    |> Ash.Query.lock(:for_update)
+     |> Ash.read(authorize?: false)
+     |> case do
+       {:ok, [%Run{state: :awaiting_approval} = locked | _]} -> {:ok, locked}

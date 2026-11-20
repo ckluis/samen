@@ -60,5 +60,12 @@ defmodule Samen.Approvals.Handler do
   """
   @callback owns_deadline?() :: boolean()
 
-  @optional_callbacks on_reject: 2, owns_deadline?: 0
+  @doc """
+  Optional hook for a cancellation (the requester withdraws; default: a no-op). Runs inside the `cancel/3` transaction,
+  after the transition and its audit; `{:error, term}` rolls the cancellation back. A client that records the outcome of
+  its approvals on its own record (reveal: `rvq_status`) uses it so a cancel is a fact of that record too.
+  """
+  @callback on_cancel(approval :: struct(), ctx :: ctx()) :: :ok | {:error, term()}
+
+  @optional_callbacks on_reject: 2, on_cancel: 2, owns_deadline?: 0
 end

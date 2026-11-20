@@ -1,0 +1,20 @@
+# SABOTAGE: the re-open no longer checks, under the lock, that the request belongs to the org lane it files 
+#   the approval in
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_approver_test.exs
+# MUST_FAIL: a re-open never files a request that carries an org in ANOTHER org
+diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+index ae1abc97..96199c26 100644
+--- a/samen_core/lib/samen/reveal/grants.ex
++++ b/samen_core/lib/samen/reveal/grants.ex
+@@ -240,7 +240,7 @@ defmodule Samen.Reveal.Grants do
+       # the lane the approval would be filed in must be the request's own: a request that carries an org is never
+       # opened in another org's lane (one with no org is opened wherever it was filed)
+       %RevealRequest{status: "pending", org_id: row_org} = locked when not is_nil(row_org) ->
+-        if Ecto.UUID.cast(org_id) == {:ok, row_org}, do: open_pending(locked, org_id, wiring), else: {:ok, :skipped}
++        if Ecto.UUID.cast(org_id) != {:ok, nil}, do: open_pending(locked, org_id, wiring), else: {:ok, :skipped}
+ 
+       %RevealRequest{status: "pending"} = locked ->
+         open_pending(locked, org_id, wiring)

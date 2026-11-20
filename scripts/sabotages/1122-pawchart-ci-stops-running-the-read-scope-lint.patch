@@ -1,0 +1,20 @@
+# SABOTAGE: pawchart/ci.sh stops running the read-scope lint, so an unscoped read added to pawchart/lib 
+#   ships unnoticed by its gate.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/read_scope_verify_test.exs
+# MUST_FAIL: every host's lib/ passes, and its ci.sh pins EXACTLY the measured sanction count
+diff --git a/pawchart/ci.sh b/pawchart/ci.sh
+index 95d0788a..98046959 100755
+--- a/pawchart/ci.sh
++++ b/pawchart/ci.sh
+@@ -127,7 +127,7 @@ echo "    PASSED"
+ # 13a. read_scope (T132/S15): no `authorize?: false` read in this app's lib/ bypasses org scoping. The
+ #      ceiling is this app's exact `# authz-scope:` count; a new sanctioned read is a conscious change to it.
+ echo "--- step 13a/17: mix samen.verify.read_scope (read-scope lint)"
+-mix samen.verify.read_scope --max-sanctioned 2
++true
+ echo "    PASSED"
+ 
+ # 13b. ADR-046 §6 erasure_completeness (CAPSTONE): every out-of-DEK-envelope residue

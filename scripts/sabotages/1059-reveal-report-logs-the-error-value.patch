@@ -1,0 +1,20 @@
+# SABOTAGE: the failed-reveal report also logs inspect of the error, which carries a plaintext marker and a 
+#   vault token
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_e_test.exs
+# MUST_FAIL: RED: a reveal that fails with an error CARRYING a value and a token
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+index 118dd194..7b1f32b8 100644
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -461,6 +461,8 @@ defmodule Samen.Api.PiiResolution do
+         end
+ 
+       Samen.Observability.Failure.report(:pii_resolution_reveal, actor, reason)
++      require Logger
++      Logger.error(inspect(reason))
+     end
+ 
+     :ok

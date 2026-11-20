@@ -210,6 +210,22 @@ defmodule Samen.Meta.CiDriverGuardTest.GenProbeIsolation do
   end
 end
 
+defmodule Samen.Meta.CiDriverGuardTest.GenHexIsolation do
+  use ExUnit.Case, async: true
+
+  test "GENHEX each gen probe gets its own HEX_HOME so concurrent mix deps.get cannot race on cache.ets" do
+    Samen.Meta.CiDriverGuard.run_case!("GENHEX")
+  end
+end
+
+defmodule Samen.Meta.CiDriverGuardTest.GenHexCleanupNeverMasksRegistry do
+  use ExUnit.Case, async: true
+
+  test "GENHEXRO a failed HEX_HOME cleanup under set -e can never skip the abbrev-registry verify and repair" do
+    Samen.Meta.CiDriverGuard.run_case!("GENHEXRO")
+  end
+end
+
 defmodule Samen.Meta.CiDriverGuardTest.NarrowedInputs do
   use ExUnit.Case, async: true
 
@@ -268,5 +284,13 @@ defmodule Samen.Meta.CiDriverGuardTest.SelfTestEscape do
 
   test "ESCAPE the self-test fails closed on an unusable temp root and can never write to the repo it tests" do
     Samen.Meta.CiDriverGuard.run_case!("ESCAPE")
+  end
+end
+
+defmodule Samen.Meta.CiDriverGuardTest.MutationLintScan do
+  use ExUnit.Case, async: true
+
+  test "MUTLINT the mutation lint's MUTATION_OWNS scan survives odd file names, ignores scratch and fails closed" do
+    Samen.Meta.CiDriverGuard.run_case!("MUTLINT")
   end
 end

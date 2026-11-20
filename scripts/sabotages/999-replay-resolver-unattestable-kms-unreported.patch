@@ -1,0 +1,19 @@
+# SABOTAGE: Resolver.shredded? swallows a KMS that cannot attest without a report
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_d_test.exs
+# MUST_FAIL: RED: a KMS that cannot attest never claims 'shredded' and is reported
+diff --git a/samen_core/lib/samen/replay/resolver.ex b/samen_core/lib/samen/replay/resolver.ex
+index 37ae9061..390a1f60 100644
+--- a/samen_core/lib/samen/replay/resolver.ex
++++ b/samen_core/lib/samen/replay/resolver.ex
+@@ -344,7 +344,7 @@ defmodule Samen.Replay.Resolver do
+     match?({:ok, %{state: :shredded}}, Samen.Kms.adapter().attest(to_string(normalize_pk(pk))))
+   rescue
+     e ->
+-      Samen.Observability.Failure.report(:replay_resolver_shredded, nil, e)
++      _ = e
+       false
+   end
+ 

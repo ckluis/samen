@@ -1,0 +1,27 @@
+# SABOTAGE: the session slot is released only after the counters are read, so a take that fails mid-way 
+#   leaks it
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_f_test.exs
+# MUST_FAIL: a take that fails releases the session slot and its frames; the next session can open
+diff --git a/samen_core/lib/samen/replay/buffer.ex b/samen_core/lib/samen/replay/buffer.ex
+index 316320a8..6ff41266 100644
+--- a/samen_core/lib/samen/replay/buffer.ex
++++ b/samen_core/lib/samen/replay/buffer.ex
+@@ -173,7 +173,6 @@ defmodule Samen.Replay.Buffer do
+           # process row and the frames are removed, BEFORE anything that can fail (a damaged counter row, a row that
+           # is not a frame): a take that raises part-way must not leak the slot or orphan the frames for the node's
+           # lifetime.
+-          :ets.update_counter(@table, :sessions, {2, -1})
+           :ets.delete(@table, {:proc, pid})
+ 
+           frames =
+@@ -185,6 +184,7 @@ defmodule Samen.Replay.Buffer do
+             end)
+ 
+           [{_, seq, bytes, interactions, truncated}] = :ets.take(@table, {:ctr, id})
++          :ets.update_counter(@table, :sessions, {2, -1})
+           frames = Enum.sort_by(frames, &elem(&1, 0))
+ 
+           {:ok, meta, frames,

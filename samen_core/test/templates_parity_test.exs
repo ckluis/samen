@@ -145,6 +145,49 @@ defmodule Samen.Gen.TemplatesParityTest do
     end
   end
 
+  # D3 phase 1: tenant isolation is Ash policy only, and `authorize?: false` turns it off — so EVERY
+  # generated app's ci.sh must run the read-scope lint over its OWN lib/ (the reference hosts do), and
+  # the app as emitted must PASS it with EXACTLY the sanction ceiling its ci.sh pins (the API-key
+  # auth-step lookup is the one org-less read a fresh api app carries). Asserted on the RENDERED output,
+  # so a template edit that drops the step, adds an unscoped read, or drifts the ceiling fails here even
+  # after a golden re-capture.
+  test "every generated ci.sh runs samen.verify.read_scope, and the rendered lib/ passes it at EXACTLY the pinned ceiling (D3 phase 1)" do
+    for {set, files} <- render_all() do
+      ci = files["ci.sh"]
+      assert is_binary(ci), "#{set} emitted no ci.sh — the read-scope guard has nothing to check"
+
+      lib_sources = for {path, src} <- files, String.starts_with?(path, "lib/"), String.ends_with?(path, ".ex"), do: {path, src}
+      assert lib_sources != [], "#{set} emitted no lib/*.ex"
+
+      {violations, sanctioned} =
+        Enum.reduce(lib_sources, {[], 0}, fn {path, src}, {v, s} ->
+          {viol, _gov, sanc} = Samen.Lint.ReadScope.scan_source(src, path)
+          {v ++ viol, s + sanc}
+        end)
+
+      assert violations == [],
+             "#{set}: the generated lib/ FAILS its own read-scope lint: #{inspect(violations)}"
+
+      # a WHOLE, uncommented, unindented command line (a `# mix …` comment or an `|| true` tail must not satisfy it)
+      assert ci =~ ~r/^mix samen\.verify\.read_scope --max-sanctioned #{sanctioned}$/m,
+             "#{set}/ci.sh must run the read-scope lint pinned at the measured #{sanctioned} sanction(s) — " <>
+               "an `authorize?: false` read added to a generated app would otherwise bypass org scoping unnoticed"
+    end
+  end
+
+  # F3.4 deny-on-read: the generated api_key table carries `expires_at`, so the generated auth-step lookup must filter an
+  # expired key out at the query (the demo host does). Without it an expired key kept authenticating: its actor map
+  # carries no expiry, so `Samen.Scope.ApiKey.authorized?` could not refuse it either.
+  test "every generated API key auth plug filters expired keys out of the lookup (F3.4 deny-on-read)" do
+    plugs = for {set, files} <- render_all(), {path, src} <- files, String.ends_with?(path, "api/key_auth_plug.ex"), do: {set, src}
+    assert plugs != [], "no generated app emitted an api/key_auth_plug.ex — the expiry guard has nothing to check"
+
+    for {set, src} <- plugs do
+      assert src =~ ~r/^\s*\|> Ash\.Query\.filter\(is_nil\(expires_at\) or expires_at > \^now\)$/m,
+             "#{set}: the generated API-key lookup does not filter expired keys — an expired key would authenticate"
+    end
+  end
+
   # T60 framework-first guard: EVERY generated app's operator-mount migration must EMIT the
   # chat offline-escalation dedupe partial-unique index. This is stronger than the byte-golden
   # (which would silently accept a regenerated index-less golden): if a future template edit

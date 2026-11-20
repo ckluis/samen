@@ -120,6 +120,37 @@ defmodule Samen.AI.McpTest do
     end
   end
 
+  describe "browse — a catalogue or resource list that FAILED is an error, not an empty one" do
+    test "RED: an unreadable custom-object table answers {:error, :unavailable}, not a catalogue with no custom objects" do
+      org = Ash.UUID.generate()
+
+      # control: healthy, the catalogue carries the (empty) org-variant half
+      assert {:ok, %{"kind" => "catalog", "custom_objects" => []}} = Mcp.browse(scope(org), %{}, opts())
+
+      TestRepo.query!("ALTER TABLE tnt_object RENAME TO tnt_object_hidden_by_test")
+
+      log = ExUnit.CaptureLog.capture_log(fn -> assert {:error, :unavailable} = Mcp.browse(scope(org), %{}, opts()) end)
+      assert log =~ "read=ai_catalog_custom_objects"
+    end
+
+    test "RED: a domain whose resources cannot be listed answers {:error, :unavailable}, not {:unknown_resource, _}" do
+      org = Ash.UUID.generate()
+
+      # control: the resource resolves when its list is readable
+      assert {:ok, %{"kind" => "records"}} = Mcp.browse(scope(org), %{"resource" => "apd_document"}, opts())
+      # control: a resource that genuinely is not in a readable list is still unknown
+      assert {:error, {:unknown_resource, "no_such_table"}} = Mcp.browse(scope(org), %{"resource" => "no_such_table"}, opts())
+
+      # `Ash.Domain.Info.resources/1` raises ArgumentError for a module that is not a domain
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, :unavailable} = Mcp.browse(scope(org), %{"resource" => "apd_document"}, domains: [Enum], repo: TestRepo)
+        end)
+
+      assert log =~ "read=mcp_domain_resources"
+    end
+  end
+
   describe "browse — records (EG4 masking, the crux)" do
     test "(a) a vault-routed field is MASKED and a non-PII field is CLEAR (non-vacuous)" do
       org = Ash.UUID.generate()

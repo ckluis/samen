@@ -1,0 +1,19 @@
+# SABOTAGE: reject_proposal writes its line onto empty views (the rejection drops ui_view and the fold ledger)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_transcript_write_test.exs
+# MUST_FAIL: RED: a reject reads the vault once
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 049a1655..1b827b29 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -2775,7 +2775,7 @@ defmodule Samen.AI.Agent do
+         case transcript_state(run) do
+           {:ok, {goal, lines, _pending, views}} ->
+             kind = turn_row.tool_kind || "write"
+-            %{transcript: encode_transcript(views, goal, lines ++ ["tool_rejected: #{kind}"])}
++            %{transcript: encode_transcript(%{views | ui_view: [], folds: []}, goal, lines ++ ["tool_rejected: #{kind}"])}
+ 
+           _ ->
+             %{}

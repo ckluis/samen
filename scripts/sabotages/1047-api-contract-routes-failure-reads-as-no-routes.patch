@@ -1,0 +1,24 @@
+# SABOTAGE: a failing routes introspection reads as 'no routes'
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/api_contract_introspection_test.exs
+# MUST_FAIL: RED: a failing show_fields or routes introspection fails the build
+diff --git a/samen_core/lib/samen/api_contract.ex b/samen_core/lib/samen/api_contract.ex
+index 522918be..add541bd 100644
+--- a/samen_core/lib/samen/api_contract.ex
++++ b/samen_core/lib/samen/api_contract.ex
+@@ -226,7 +226,12 @@ defmodule Samen.ApiContract.Snapshot do
+   end
+ 
+   defp build_routes(resource, info_mod) do
+-    routes = apply(info_mod, :routes, [resource]) || []
++    routes =
++      try do
++        apply(info_mod, :routes, [resource]) || []
++      rescue
++        _ -> []
++      end
+ 
+     routes
+     |> Enum.sort_by(fn r -> {r.method, r.route} end)

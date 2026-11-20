@@ -1,0 +1,23 @@
+# SABOTAGE: Approvals.existing_pending answers :none for a failed read, so request/2 writes over an 
+#   unreadable approvals table
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_d_test.exs
+# MUST_FAIL: RED: the existing-pending read fails -> {:error, :unavailable}, reported, nothing opened
+diff --git a/samen_core/lib/samen/approvals.ex b/samen_core/lib/samen/approvals.ex
+index 79c5e7f5..8143dc77 100644
+--- a/samen_core/lib/samen/approvals.ex
++++ b/samen_core/lib/samen/approvals.ex
+@@ -376,9 +376,8 @@ defmodule Samen.Approvals do
+       {:ok, []} ->
+         :none
+ 
+-      {:error, reason} ->
+-        Samen.Observability.Failure.report(:approval_existing_pending, org_id, reason)
+-        {:error, :unavailable}
++      {:error, _} ->
++        :none
+     end
+   end
+ 

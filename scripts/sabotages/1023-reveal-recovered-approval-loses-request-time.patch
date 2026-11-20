@@ -1,0 +1,20 @@
+# SABOTAGE: a recovered approval is stamped with the recovery time, so an old request queues behind newer 
+#   ones as if just filed
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_approver_test.exs
+# MUST_FAIL: a recovered approval keeps the request's own filing time and queue position
+diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+index f2445010..91a0ffa9 100644
+--- a/samen_core/lib/samen/reveal/grants.ex
++++ b/samen_core/lib/samen/reveal/grants.ex
+@@ -266,7 +266,7 @@ defmodule Samen.Reveal.Grants do
+           subject_ref: Samen.Reveal.ApprovalHandler.subject_ref(req),
+           requested_by: req.requestor_id,
+           # a recovered approval keeps the request's own time, so the queue shows (and orders) it by when it was filed
+-          requested_at: req.inserted_at
++          requested_at: nil
+         },
+         wiring
+       )

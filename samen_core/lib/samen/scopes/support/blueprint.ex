@@ -215,7 +215,7 @@ defmodule Samen.Scopes.Support.Blueprint do
           # SlaBreachWorker cron scans for tickets where sla_breach_at <= now()
           # and breached = false.
           attribute(:sla_breach_at, :utc_datetime, public?: true)
-          attribute(:breached, :boolean, public?: true, default: false)
+          attribute(:breached, :boolean, public?: true, default: false, allow_nil?: false)
           attribute(:resolved_at, :utc_datetime, public?: true)
           attribute(:closed_at, :utc_datetime, public?: true)
           attribute(:custom, :map, public?: true)

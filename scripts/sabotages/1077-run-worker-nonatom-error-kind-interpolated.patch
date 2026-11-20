@@ -1,0 +1,20 @@
+# SABOTAGE: the failed-action log line interpolates the raw error kind again (raises on a non-atom kind,
+#   Oban retries and re-runs actions)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: a host action failing with a NON-ATOM error does not raise
+diff --git a/samen_core/lib/samen/automation/run_worker.ex b/samen_core/lib/samen/automation/run_worker.ex
+index 60b101ee..afa5811b 100644
+--- a/samen_core/lib/samen/automation/run_worker.ex
++++ b/samen_core/lib/samen/automation/run_worker.ex
+@@ -312,7 +312,7 @@ defmodule Samen.Automation.RunWorker do
+         # answer a non-atom kind (a tuple or string carrying a value), which must neither be interpolated (it raises, and
+         # Oban retries the job, re-running the actions) nor printed.
+         bounded = RunRecord.safe_error_kind(error_kind || :action_failed)
+-        Logger.warning("[Automation.RunWorker] workflow #{wf.id} action(s) failed: error_kind=#{bounded}")
++        Logger.warning("[Automation.RunWorker] workflow #{wf.id} action(s) failed: error_kind=#{error_kind}")
+         :ok
+     end
+   end

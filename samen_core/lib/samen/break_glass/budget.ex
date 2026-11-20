@@ -133,7 +133,7 @@ defmodule Samen.BreakGlass.Budget do
           {:suspended, count}
 
         {:error, reason} ->
-          Samen.Observability.Failure.report(:budget_auto_suspend, nil, reason)
+          Samen.Observability.Failure.report_write(:budget_auto_suspend, nil, reason)
           {:error, :suspend_failed}
       end
     else

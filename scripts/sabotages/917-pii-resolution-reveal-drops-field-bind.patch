@@ -1,0 +1,21 @@
+# SABOTAGE: PiiResolution stops asserting the field on reveal: a token minted for another field of the same 
+#   record reveals
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/pii_resolution_token_binding_test.exs
+# MUST_FAIL: a FIELD swap inside one record
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+index 05dcfcb5..3504f52e 100644
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -428,7 +428,8 @@ defmodule Samen.Api.PiiResolution do
+   # declared vault + logical name): a token minted for another subject or field is refused by the
+   # vault BEFORE any key is unwrapped, and renders as the masked/absent value on every plane.
+   defp vault_opts(opts, subject_id, vault_field) do
+-    bind = [subject_id: subject_id, field: vault_field]
++    _ = vault_field
++    bind = [subject_id: subject_id]
+ 
+     case Keyword.get(opts, :__vault_rows) do
+       rows when is_map(rows) and map_size(rows) > 0 ->
