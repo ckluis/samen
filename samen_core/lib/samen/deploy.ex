@@ -89,16 +89,16 @@ defmodule Samen.Deploy do
   defp os_cacerts! do
     case :public_key.cacerts_get() do
       [_ | _] = certs -> certs
-      _ -> no_os_cacerts!()
+      _ -> raise ArgumentError, no_os_cacerts_message()
     end
   rescue
-    _ -> no_os_cacerts!()
+    e in ArgumentError -> reraise e, __STACKTRACE__
+    e -> reraise ArgumentError, [message: no_os_cacerts_message() <> " (" <> Exception.message(e) <> ")"], __STACKTRACE__
   end
 
-  defp no_os_cacerts! do
-    raise ArgumentError,
-          "the operating-system CA bundle could not be loaded (fail-closed): install it (the `ca-certificates` " <>
-            "package) in the image, or set DATABASE_SSL_CACERTFILE=/path/to/ca.pem."
+  defp no_os_cacerts_message do
+    "the operating-system CA bundle could not be loaded (fail-closed): install it (the `ca-certificates` " <>
+      "package) in the image, or set DATABASE_SSL_CACERTFILE=/path/to/ca.pem."
   end
 
   defp hostname_check, do: [match_fun: :public_key.pkix_verify_hostname_match_fun(:https)]
