@@ -285,9 +285,7 @@ defmodule Samen.Migration.ExpandContract do
         if values > 0 do
           raise RuntimeError,
                 "cannot build the unique index #{name}: #{tname}.#{cname} holds #{values} value(s) that appear " <>
-                  "more than once (#{rows} rows). Nothing was changed and nothing was deleted. List them with " <>
-                  "SELECT #{cname}, count(*) FROM #{tname} GROUP BY #{cname} HAVING count(*) > 1, " <>
-                  "resolve the duplicates deliberately, then run this migration again."
+                  "more than once (#{rows} rows). #{duplicate_tail(name, cname, tname)}"
         end
 
         :ok
@@ -295,7 +293,43 @@ defmodule Samen.Migration.ExpandContract do
       fn -> :ok end
     )
 
-    concurrent_index(table, [column], Keyword.merge(opts, unique: true, name: name))
+    drop_invalid_index(tname, name)
+
+    Ecto.Migration.execute(
+      fn -> __build_unique_index__!(Ecto.Migration.repo(), tname, cname, name) end,
+      "DROP INDEX CONCURRENTLY IF EXISTS #{q_ident(name)}"
+    )
+  end
+
+  @doc false
+  # The build, apart from the pre-count, so a duplicate that lands BETWEEN the two is testable. Postgres reports it as
+  # `DETAIL: Key (col)=(<digest>) is duplicated.`, which would put a credential digest in the release log: catch the
+  # unique violation and raise the same value-free message the pre-count raises.
+  def __build_unique_index__!(repo, tname, cname, name) do
+    repo.query!(
+      "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS #{q_ident(name)} ON #{q_ident(tname)} (#{q_ident(cname)})"
+    )
+
+    :ok
+  rescue
+    e in Postgrex.Error ->
+      if match?(%{code: :unique_violation}, e.postgres) do
+        raise RuntimeError,
+              "cannot build the unique index #{name}: #{tname}.#{cname} gained a duplicate value while the index " <>
+                "was being built. The failed build leaves an INVALID index of that name, which the next run drops " <>
+                "before building. #{duplicate_tail(name, cname, tname)}"
+      else
+        reraise e, __STACKTRACE__
+      end
+  end
+
+  # Shared by both refusals. "Nothing was changed" would be false for a migration that builds several indexes: the
+  # steps before this one are already committed (each runs outside a transaction), so say what is true.
+  defp duplicate_tail(name, cname, tname) do
+    "No row was deleted and index #{name} was not built; steps of this migration that already ran stay in place, " <>
+      "and running it again is safe. List the duplicates with " <>
+      "SELECT #{cname}, count(*) FROM #{tname} GROUP BY #{cname} HAVING count(*) > 1, " <>
+      "resolve them deliberately, then run this migration again."
   end
 
   @doc """

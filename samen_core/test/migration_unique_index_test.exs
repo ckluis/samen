@@ -24,26 +24,21 @@ defmodule Samen.MigrationUniqueIndexTest do
     db = "#{Keyword.fetch!(base, :database)}_uqidx_#{:rand.uniform(1_000_000)}"
     config = base |> Keyword.delete(:pool) |> Keyword.put(:pool_size, 5) |> Keyword.put(:database, db)
 
+    dir = Path.join(System.tmp_dir!(), "samen_uq_migrations_#{System.unique_integer([:positive])}")
+
     _ = Ecto.Adapters.Postgres.storage_down(config)
     :ok = Ecto.Adapters.Postgres.storage_up(config)
-    repo = start_supervised!({ScratchRepo, config})
 
-    dir = Path.join(System.tmp_dir!(), "samen_uq_migrations_#{System.unique_integer([:positive])}")
+    # registered right after storage_up, so a failure below can never leave the scratch database behind
+    on_exit(fn ->
+      File.rm_rf!(dir)
+      _ = Ecto.Adapters.Postgres.storage_down(config)
+    end)
+
+    start_supervised!({ScratchRepo, config})
     File.mkdir_p!(dir)
 
     ScratchRepo.query!("CREATE TABLE #{@table} (id serial PRIMARY KEY, token_digest text)", [])
-
-    on_exit(fn ->
-      File.rm_rf!(dir)
-      # the supervised repo is gone by now (or goes now); the scratch database must not outlive the test
-      try do
-        Supervisor.stop(repo)
-      catch
-        :exit, _ -> :ok
-      end
-
-      _ = Ecto.Adapters.Postgres.storage_down(config)
-    end)
 
     %{dir: dir}
   end
@@ -123,7 +118,7 @@ defmodule Samen.MigrationUniqueIndexTest do
 
     assert err.message =~ "cannot build the unique index #{@index}"
     assert err.message =~ "#{@table}.token_digest holds 2 value(s) that appear more than once (4 rows)"
-    assert err.message =~ "Nothing was changed and nothing was deleted"
+    assert err.message =~ "No row was deleted and index #{@index} was not built"
     refute err.message =~ "secret-digest"
 
     assert ScratchRepo.query!("SELECT count(*) FROM #{@table}", []).rows == [[5]]
@@ -132,6 +127,38 @@ defmodule Samen.MigrationUniqueIndexTest do
     # positive control: once a person resolves the duplicates the same migration builds
     ScratchRepo.query!("DELETE FROM #{@table} WHERE id IN (SELECT max(id) FROM #{@table} GROUP BY token_digest HAVING count(*) > 1)", [])
     migrate!(dir)
+    assert index_state() == [[true, true]]
+  end
+
+  @tag timeout: 120_000
+  test "RED: a duplicate that lands between the pre-count and the build raises the same value-free message" do
+    for d <- ["race-digest-1", "race-digest-1"], do: {:ok, _} = insert(d)
+
+    err =
+      assert_raise RuntimeError, fn ->
+        Samen.Migration.ExpandContract.__build_unique_index__!(ScratchRepo, @table, "token_digest", @index)
+      end
+
+    assert err.message =~ "cannot build the unique index #{@index}"
+    assert err.message =~ "#{@table}.token_digest gained a duplicate value"
+    assert err.message =~ "INVALID index"
+    assert err.message =~ "No row was deleted"
+    refute err.message =~ "race-digest"
+
+    # the leftover is invalid, and the next run (the migration, once the duplicate is resolved) drops it and builds
+    assert index_state() == [[true, false]]
+    ScratchRepo.query!("DELETE FROM #{@table} WHERE id IN (SELECT max(id) FROM #{@table} GROUP BY token_digest HAVING count(*) > 1)", [])
+    dir = Path.join(System.tmp_dir!(), "samen_uq_race_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+    write_migration!(dir, 20_261_119_000_004, "Race")
+    migrate!(dir)
+    assert index_state() == [[true, true]]
+  end
+
+  test "POSITIVE CONTROL: the build helper builds a valid unique index when there is no duplicate" do
+    {:ok, _} = insert("a")
+    assert :ok = Samen.Migration.ExpandContract.__build_unique_index__!(ScratchRepo, @table, "token_digest", @index)
     assert index_state() == [[true, true]]
   end
 

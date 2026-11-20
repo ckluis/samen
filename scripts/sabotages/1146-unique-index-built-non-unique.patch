@@ -5,15 +5,15 @@
 # TEST_FILES: test/migration_unique_index_test.exs
 # MUST_FAIL: builds a unique index on a populated table
 diff --git a/samen_core/lib/samen/migration/expand_contract.ex b/samen_core/lib/samen/migration/expand_contract.ex
-index d536845f..850996a3 100644
+index 1527a00a..80e5086a 100644
 --- a/samen_core/lib/samen/migration/expand_contract.ex
 +++ b/samen_core/lib/samen/migration/expand_contract.ex
-@@ -295,7 +295,7 @@ defmodule Samen.Migration.ExpandContract do
-       fn -> :ok end
+@@ -307,7 +307,7 @@ defmodule Samen.Migration.ExpandContract do
+   # unique violation and raise the same value-free message the pre-count raises.
+   def __build_unique_index__!(repo, tname, cname, name) do
+     repo.query!(
+-      "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS #{q_ident(name)} ON #{q_ident(tname)} (#{q_ident(cname)})"
++      "CREATE INDEX CONCURRENTLY IF NOT EXISTS #{q_ident(name)} ON #{q_ident(tname)} (#{q_ident(cname)})"
      )
  
--    concurrent_index(table, [column], Keyword.merge(opts, unique: true, name: name))
-+    concurrent_index(table, [column], Keyword.merge(opts, unique: false, name: name))
-   end
- 
-   @doc """
+     :ok
