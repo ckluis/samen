@@ -127,7 +127,7 @@ defmodule Samen.TestDb do
         {:error, error}
 
       {:ok, state} ->
-        Postgrex.Protocol.disconnect(:normal, state)
+        Postgrex.Protocol.disconnect(DBConnection.ConnectionError.exception("probe closed"), state)
         {:error, "the maintenance connection failed (#{Exception.format_exit(reason)}) but an immediate retry connected"}
     end
   end
