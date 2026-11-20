@@ -1,20 +1,21 @@
-# SABOTAGE: Samen.TestDb drops without WITH (FORCE): a lingering session blocks the drop and the race 
-#   returns
+# SABOTAGE: Samen.TestDb swallows the 55006 (database in use) answer and carries on: the live session is neither reported nor respected
+#   (re-pointed from the WITH (FORCE) design; the filename slug is stale)
 #
 # Flips the named test(s).
 # APP: samen_core
 # TEST_FILES: test/test_db_test.exs
-# MUST_FAIL: reset! succeeds with a live second connection and the database is fresh
+# MUST_FAIL: reset! with another live session RAISES, lists the holder, and kills and drops nothing
 diff --git a/samen_core/lib/samen/test_db.ex b/samen_core/lib/samen/test_db.ex
-index 7f04ad73..b8368192 100644
+index 71bb9bb9..736a52dc 100644
 --- a/samen_core/lib/samen/test_db.ex
 +++ b/samen_core/lib/samen/test_db.ex
-@@ -53,7 +53,7 @@ defmodule Samen.TestDb do
-     db = db!(config)
-     guard!(db)
+@@ -89,7 +89,8 @@ defmodule Samen.TestDb do
+         :ok
  
--    case run(config, "DROP DATABASE IF EXISTS #{quote_ident(db)} WITH (FORCE)") do
-+    case run(config, "DROP DATABASE IF EXISTS #{quote_ident(db)}") do
-       :ok -> :ok
-       {:error, error} -> raise "Samen.TestDb: could not drop database #{inspect(db)}: #{format(error)}"
-     end
+       {:error, %Postgrex.Error{postgres: %{pg_code: @in_use}} = error} ->
+-        raise in_use_message(config, db, error)
++        _ = in_use_message(config, db, error)
++        :ok
+ 
+       {:error, error} ->
+         raise "Samen.TestDb: could not drop database #{inspect(db)}: #{format(error)}"

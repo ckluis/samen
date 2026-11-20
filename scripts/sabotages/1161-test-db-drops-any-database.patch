@@ -1,19 +1,19 @@
-# SABOTAGE: Samen.TestDb loses its test-name refusal: FORCE-drops a non-test database
+# SABOTAGE: Samen.TestDb loses its test-name refusal: drops a non-test database
 #
 # Flips the named test(s).
 # APP: samen_core
 # TEST_FILES: test/test_db_test.exs
 # MUST_FAIL: refuses a production-looking database name without touching the server
 diff --git a/samen_core/lib/samen/test_db.ex b/samen_core/lib/samen/test_db.ex
-index 7f04ad73..df1aa1f9 100644
+index 71bb9bb9..5ad1a4db 100644
 --- a/samen_core/lib/samen/test_db.ex
 +++ b/samen_core/lib/samen/test_db.ex
-@@ -64,7 +64,7 @@ defmodule Samen.TestDb do
-   def test_database?(name) when is_binary(name), do: Regex.match?(@test_name, name)
+@@ -107,7 +107,7 @@ defmodule Samen.TestDb do
+               "reset by test tooling running under Mix."
+     end
  
-   defp guard!(db) do
 -    unless test_database?(db) do
 +    unless test_database?(db) or true do
        raise ArgumentError,
-             "Samen.TestDb refuses to drop #{inspect(db)}: not a test/scratch database (the name must contain a " <>
-               "`test` word or end in `_downcheck_<hex>`). Dropping uses WITH (FORCE), which kills other sessions."
+             "Samen.TestDb refuses to drop #{inspect(db)}: not a test/scratch database (the name must be " <>
+               "`<words>_test[N]` with optional `_lane<N>` / `_<tag>_<N>` suffixes, or end in `_downcheck_<8 hex>`)."
