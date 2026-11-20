@@ -814,8 +814,7 @@ defmodule Samen.MigrationExpandContractTest do
       |> Keyword.put(:pool_size, 5)
       |> Keyword.put(:database, db)
 
-    _ = Ecto.Adapters.Postgres.storage_down(config)
-    :ok = Ecto.Adapters.Postgres.storage_up(config)
+    :ok = Samen.TestDb.reset!(config)
 
     {:ok, _} = ScratchRepo.start_link(config)
     {ScratchRepo, config}
@@ -823,7 +822,6 @@ defmodule Samen.MigrationExpandContractTest do
 
   defp stop_scratch_repo(repo, config) do
     Supervisor.stop(repo)
-    _ = Ecto.Adapters.Postgres.storage_down(config)
-    :ok
+    Samen.TestDb.drop!(config)
   end
 end

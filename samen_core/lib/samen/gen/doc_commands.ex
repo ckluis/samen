@@ -213,9 +213,9 @@ defmodule Samen.Gen.DocCommands do
       },
       %{
         id: :ecto_create,
-        # Executed (as storage_up) by the emitted ci_bootstrap the probes' ci.sh runs.
+        # Executed (as Samen.TestDb.reset!, which creates the database) by the emitted ci_bootstrap the probes' ci.sh runs.
         match: fn argv -> argv == ["mix", "ecto.create"] end,
-        evidence: [{:templates, "Ecto.Adapters.Postgres.storage_up"} | ci_sh_evidence]
+        evidence: [{:templates, "Samen.TestDb.reset!"} | ci_sh_evidence]
       },
       %{
         id: :ecto_migrate,

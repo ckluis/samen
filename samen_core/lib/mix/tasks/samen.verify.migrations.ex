@@ -73,23 +73,26 @@ defmodule Mix.Tasks.Samen.Verify.Migrations do
     scratch_config = scratch_config(base_repo)
     scratch_repo = define_scratch_repo(base_repo, scratch_config)
 
-    _ = Ecto.Adapters.Postgres.storage_down(scratch_config)
-    :ok = Ecto.Adapters.Postgres.storage_up(scratch_config)
-
-    {:ok, pid} = scratch_repo.start_link(scratch_config)
+    :ok = Samen.TestDb.reset!(scratch_config)
 
     try do
-      case Samen.Migration.DownCheck.run(scratch_repo, migrations_path, log: false) do
-        {:ok, checked} ->
-          IO.puts("#{@task_name}: exercised down/0 for #{length(checked)} expand migration(s).")
-          []
+      {:ok, pid} = scratch_repo.start_link(scratch_config)
 
-        {:error, violations} ->
-          violations
+      try do
+        case Samen.Migration.DownCheck.run(scratch_repo, migrations_path, log: false) do
+          {:ok, checked} ->
+            IO.puts("#{@task_name}: exercised down/0 for #{length(checked)} expand migration(s).")
+            []
+
+          {:error, violations} ->
+            violations
+        end
+      after
+        Supervisor.stop(pid)
       end
     after
-      Supervisor.stop(pid)
-      _ = Ecto.Adapters.Postgres.storage_down(scratch_config)
+      # FORCE-drops (any session still attached is terminated by the server); a failure raises with the real error
+      Samen.TestDb.drop!(scratch_config)
     end
   end
 

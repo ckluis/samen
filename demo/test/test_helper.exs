@@ -13,8 +13,7 @@ Application.put_env(:samen_core, :kms_key_dir, kms_key_dir)
 System.at_exit(fn _ -> File.rm_rf!(kms_key_dir) end)
 
 # Drop + create + migrate.
-_ = Ecto.Adapters.Postgres.storage_down(Repo.config())
-:ok = Ecto.Adapters.Postgres.storage_up(Repo.config())
+:ok = Samen.TestDb.reset!(Repo.config())
 
 {:ok, _} = Repo.start_link()
 Ecto.Migrator.run(Repo, :up, all: true)

@@ -44,8 +44,7 @@ defmodule Samen.RevealRequestBackfillTest do
     base = Repo.config()
     db = "#{Keyword.fetch!(base, :database)}_rvbackfill_#{:rand.uniform(1_000_000)}"
     config = base |> Keyword.delete(:pool) |> Keyword.put(:pool_size, 5) |> Keyword.put(:database, db)
-    _ = Ecto.Adapters.Postgres.storage_down(config)
-    :ok = Ecto.Adapters.Postgres.storage_up(config)
+    :ok = Samen.TestDb.reset!(config)
     {:ok, _} = ScratchRepo.start_link(config)
 
     dir = Path.join(System.tmp_dir!(), "rvbackfill_#{System.unique_integer([:positive])}")
@@ -56,7 +55,7 @@ defmodule Samen.RevealRequestBackfillTest do
 
     on_exit(fn ->
       Supervisor.stop(ScratchRepo)
-      _ = Ecto.Adapters.Postgres.storage_down(config)
+      Samen.TestDb.drop!(config)
       File.rm_rf!(dir)
     end)
 
