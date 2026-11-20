@@ -247,8 +247,9 @@ be NEW in your branch); `scripts/sabotage.sh --range N-N` flips the named tests 
 refusal the patch is deleted and the tree is as it was, your sabotage edit included. Unstaged work in a named
 file that the tests do not exercise cannot be told apart from the sabotage, so the files' pre-command bytes
 are always kept in `<git-dir>/samen-sabotage-new/<patch name>/` and every captured line is printed — read
-it. On success it runs `scripts/counts --write --only sabotages,driver_sabotages`; the patch is left
-untracked, so `git add` it. Options: `--number`, `--description`, `--base`. `scripts/sabotage new --help`
+it. Before the replay (the guard tests check the counts against the patch directory) it snapshots every file
+`scripts/counts --files` lists and runs `scripts/counts --write` and `scripts/counts --write --docs`; on a refusal
+it restores them byte-identical. The patch is left untracked, so `git add` it and the count files `git status` shows. Options: `--number`, `--description`, `--base`. `scripts/sabotage new --help`
 is the full text.
 
 **Drifted patch — `scripts/sabotage reanchor <n…>`** (or `apply_check` failing): 3-way merges each
