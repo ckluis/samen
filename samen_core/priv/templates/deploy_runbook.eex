@@ -59,8 +59,10 @@ each env has an isolated copy that shares the parent's schema:
    (`?sslmode=require`); `config/runtime.exs` VERIFIES the server certificate by default
    (`verify_peer` against the OS CA store, hostname checked; `Samen.Deploy.db_ssl_opts/2`), for `DATABASE_URL` and
    `DATABASE_DIRECT_URL` alike. A private network with a self-signed certificate: set `DATABASE_SSL_CACERTFILE=/path/ca.pem`
-   (verify against your CA) or, as a loud last resort, `DATABASE_SSL_VERIFY=none` (logs a warning at every boot; any other
-   value, or a `?ssl=false` URL, refuses to boot). Neon gives a pooled string (host with `-pooler`) and a
+   (verify against your CA) or, as a loud last resort, `DATABASE_SSL_VERIFY=none` (prints a warning to stderr at every boot; any other
+   value, or a URL with `ssl=` other than `true` or `sslmode=disable|allow|prefer`, refuses to boot). The CA file must be IN the
+   image (add a `COPY` to the Dockerfile, or a Fly `[[files]]` entry) and readable by the app user. `sslrootcert=` and
+   `sslmode=verify-full` in a URL are IGNORED (Postgrex does not read them): use the two variables above. Neon gives a pooled string (host with `-pooler`) and a
    direct one: keep the pooled one as `DATABASE_URL` if you like, and ALSO set `DATABASE_DIRECT_URL` to the direct one
    (the single-instance lease needs a session; see "ONE instance per database").
 4. Migrations run automatically on deploy via `fly.toml`'s `release_command`.

@@ -8,7 +8,7 @@ defmodule Samen.DeployDbSslTest do
   """
   use ExUnit.Case, async: false
 
-  import ExUnit.CaptureLog
+  import ExUnit.CaptureIO
 
   alias Samen.Deploy
   alias Samen.Gen.App, as: Gen
@@ -65,7 +65,7 @@ defmodule Samen.DeployDbSslTest do
 
     test "explicit none is the opt-out, and it WARNS" do
       log =
-        capture_log(fn ->
+        capture_io(:stderr, fn ->
           assert Deploy.db_ssl_opts([@url], env(%{"DATABASE_SSL_VERIFY" => "none"})) == [verify: :verify_none]
         end)
 
@@ -74,7 +74,7 @@ defmodule Samen.DeployDbSslTest do
     end
 
     test "POSITIVE CONTROL: the verifying default logs no warning" do
-      assert capture_log(fn -> Deploy.db_ssl_opts([@url], env(%{})) end) == ""
+      assert capture_io(:stderr, fn -> Deploy.db_ssl_opts([@url], env(%{})) end) == ""
     end
 
     test "RED: an unrecognised DATABASE_SSL_VERIFY raises (fail-closed), naming the value" do
@@ -99,6 +99,107 @@ defmodule Samen.DeployDbSslTest do
       end
 
       assert Deploy.db_ssl_opts(["postgres://h/db?ssl=true", @url, nil], env(%{}))[:verify] == :verify_peer
+    end
+  end
+
+  describe "db_ssl_opts/2: URL values that would disable or break TLS" do
+    @secret_url "postgres://u:hunter2secret@db.example/acme"
+
+    test "RED: any ssl= value other than true raises, naming the variable and never the URL" do
+      for bad <- ["false", "FALSE", "False", "0", "off", "no", "1", "yes", ""] do
+        url = @secret_url <> "?ssl=" <> bad
+
+        err =
+          assert_raise ArgumentError, ~r/DATABASE_DIRECT_URL carries ssl=#{bad}:/, fn ->
+            Deploy.db_ssl_opts([{"DATABASE_URL", @url}, {"DATABASE_DIRECT_URL", url}], env(%{}))
+          end
+
+        refute err.message =~ "hunter2secret"
+        refute err.message =~ "db.example"
+      end
+    end
+
+    test "RED: ssl=true followed by a later ssl=<bad> still raises (every pair is checked)" do
+      assert_raise ArgumentError, ~r/DATABASE_URL carries ssl=0/, fn ->
+        Deploy.db_ssl_opts([{"DATABASE_URL", @secret_url <> "?ssl=true&ssl=0"}], env(%{}))
+      end
+    end
+
+    test "RED: sslmode=disable|allow|prefer raises, naming the variable; require/verify-* do not" do
+      for bad <- ["disable", "allow", "prefer"] do
+        err =
+          assert_raise ArgumentError, ~r/DATABASE_URL carries sslmode=#{bad}/, fn ->
+            Deploy.db_ssl_opts([{"DATABASE_URL", @secret_url <> "?sslmode=" <> bad}], env(%{}))
+          end
+
+        refute err.message =~ "hunter2secret"
+      end
+
+      for ok <- ["require", "verify-ca", "verify-full"] do
+        assert Deploy.db_ssl_opts([{"DATABASE_URL", @secret_url <> "?sslmode=" <> ok}], env(%{}))[:verify] == :verify_peer
+      end
+    end
+
+    test "POSITIVE CONTROL: ssl=true, a nil tuple value and an unlabelled entry are accepted" do
+      assert Deploy.db_ssl_opts([{"DATABASE_URL", @secret_url <> "?ssl=true"}, {"DATABASE_DIRECT_URL", nil}], env(%{}))[:verify] ==
+               :verify_peer
+    end
+
+    test "RED: an unreadable CA file raises (a real read, not a regular-file check)" do
+      file = Path.join(System.tmp_dir!(), "samen_db_ca_unreadable_#{System.unique_integer([:positive])}.pem")
+      File.write!(file, "x")
+      File.chmod!(file, 0o000)
+      on_exit(fn -> File.rm(file) end)
+
+      if match?({:error, _}, File.open(file, [:read])) do
+        assert_raise ArgumentError, ~r/DATABASE_SSL_CACERTFILE.*not a readable file/, fn ->
+          Deploy.db_ssl_opts([@url], env(%{"DATABASE_SSL_CACERTFILE" => file}))
+        end
+      end
+    end
+  end
+
+  describe "what the Repo and the lease really receive (pins Ecto's merge, which the design leans on)" do
+    defmodule TlsRepo do
+      use Ecto.Repo, otp_app: :samen_core_deploy_ssl_probe, adapter: Ecto.Adapters.Postgres
+    end
+
+    @probe_app :samen_core_deploy_ssl_probe
+
+    defp repo_config(url) do
+      ssl = Deploy.db_ssl_opts([{"DATABASE_URL", url}], env(%{"DATABASE_SSL_VERIFY" => "peer"}))
+      Application.put_env(@probe_app, TlsRepo, url: url, ssl: ssl, pool_size: 1)
+      on_exit(fn -> Application.delete_env(@probe_app, TlsRepo) end)
+
+      ExUnit.CaptureLog.with_log(fn ->
+        {:ok, config} = Ecto.Repo.Supervisor.init_config(:runtime, TlsRepo, @probe_app, [])
+        config
+      end)
+      |> then(fn {config, _log} -> {config, ssl} end)
+    end
+
+    test "?sslmode=require and ?ssl=true both leave the hardened list on the Repo" do
+      for q <- ["sslmode=require", "ssl=true", "sslmode=require&channel_binding=require"] do
+        {config, ssl} = repo_config("postgres://u:p@db.example/acme?" <> q)
+        assert config[:ssl] == ssl
+        assert config[:ssl][:verify] == :verify_peer
+      end
+    end
+
+    test "the lease inherits that list from the Repo config, with the direct URL's own host" do
+      {config, ssl} = repo_config("postgres://u:p@pooled.example/acme?sslmode=require")
+
+      defmodule Stub do
+        def config, do: Process.get(:stub_repo_config)
+      end
+
+      Process.put(:stub_repo_config, config)
+
+      opts =
+        Samen.SingleNode.Lease.connect_opts([repo: Stub, lease_url: "postgres://u:p@direct.example/acme?ssl=true"], %{lease_url: nil})
+
+      assert opts[:ssl] == ssl
+      assert opts[:hostname] == "direct.example"
     end
   end
 
@@ -156,7 +257,7 @@ defmodule Samen.DeployDbSslTest do
 
     test "the opt-out reaches the Repo, loudly", %{path: path} do
       System.put_env("DATABASE_SSL_VERIFY", "none")
-      log = capture_log(fn -> assert repo_ssl(path) == [verify: :verify_none] end)
+      log = capture_io(:stderr, fn -> assert repo_ssl(path) == [verify: :verify_none] end)
       assert log =~ "NOT verified"
     end
 
@@ -166,7 +267,10 @@ defmodule Samen.DeployDbSslTest do
 
       System.delete_env("DATABASE_SSL_VERIFY")
       System.put_env("DATABASE_DIRECT_URL", "postgres://u:p@db.example/acme?ssl=false")
-      assert_raise ArgumentError, ~r/ssl=false/, fn -> Config.Reader.read!(path, env: :prod) end
+      assert_raise ArgumentError, ~r/DATABASE_DIRECT_URL carries ssl=false/, fn -> Config.Reader.read!(path, env: :prod) end
+
+      System.put_env("DATABASE_DIRECT_URL", "postgres://u:p@db.example/acme?ssl=FALSE")
+      assert_raise ArgumentError, ~r/DATABASE_DIRECT_URL carries ssl=FALSE/, fn -> Config.Reader.read!(path, env: :prod) end
     end
 
     test "DATABASE_DIRECT_URL is honoured as the lease url and the Repo ssl still verifies", %{path: path} do
