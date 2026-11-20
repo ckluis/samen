@@ -6,15 +6,14 @@
 # TEST_FILES: test/deploy_db_ssl_test.exs
 # MUST_FAIL: default: verify_peer, the OS CA store, the :https hostname match, and no pinned SNI
 diff --git a/samen_core/lib/samen/deploy.ex b/samen_core/lib/samen/deploy.ex
-index e5872c3b..44581bf8 100644
 --- a/samen_core/lib/samen/deploy.ex
 +++ b/samen_core/lib/samen/deploy.ex
-@@ -67,7 +67,7 @@ defmodule Samen.Deploy do
+@@ -82,7 +82,7 @@
          [verify: :verify_peer, cacertfile: cafile, customize_hostname_check: hostname_check()]
  
        true ->
--        [verify: :verify_peer, cacerts: :public_key.cacerts_get(), customize_hostname_check: hostname_check()]
-+        [verify: :verify_none, cacerts: :public_key.cacerts_get(), customize_hostname_check: hostname_check()]
+-        [verify: :verify_peer, cacerts: os_cacerts!(), customize_hostname_check: hostname_check()]
++        [verify: :verify_none, cacerts: os_cacerts!(), customize_hostname_check: hostname_check()]
      end
    end
  
