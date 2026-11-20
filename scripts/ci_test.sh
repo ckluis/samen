@@ -1036,7 +1036,7 @@ DOC
   printf "$g" > "$F/scripts/sabotages/510-d.patch"
   $C --check > "$T/c10e" 2>&1; eq "$?" 1 "C10: a new patch without a count update is drift"
   has "$T/c10e" 'count sabotages says 3, the sources say 4' "C10: ... naming the new total"
-  $C --write --only sabotages,driver_sabotages > "$T/c10f" 2>&1; eq "$?" 0 "C10: --write --only fixes just those (sabotage new's path)"
+  $C --write --only sabotages,driver_sabotages > "$T/c10f" 2>&1; eq "$?" 0 "C10: --write --only fixes just those"
   $C --check > "$T/c10g" 2>&1; eq "$?" 0 "C10: ... and the whole file is current again"
   has "$F/CLAUDE.md" '496.510' "C10: ... with the new driver range"
   # a count that lost its marker is a count nobody checks
