@@ -197,6 +197,8 @@ defmodule Samen.TestDb do
     end
   end
 
+  # The connection is linked to this task: it closes its socket when the task returns, so there is no explicit stop
+  # (a stop of an already-dead connection would need a catch-all that swallows).
   defp statement(opts, sql, timeout) do
     # a failed synchronous connect also exits this (linked) process with the same reason; trap it
     Process.flag(:trap_exit, true)
@@ -210,19 +212,11 @@ defmodule Samen.TestDb do
           end
         catch
           :exit, reason -> {:error, "the maintenance connection was lost: #{Exception.format_exit(reason)}"}
-        after
-          stop_quiet(conn)
         end
 
       {:error, error} ->
         {:error, error}
     end
-  end
-
-  defp stop_quiet(conn) do
-    :gen_statem.stop(conn)
-  catch
-    :exit, _ -> :ok
   end
 end
 
