@@ -3,7 +3,7 @@
 # Flips the named test(s).
 # APP: samen_core
 # TEST_FILES: test/meta/test_db_guard_test.exs
-# MUST_FAIL: no source or template discards storage_down or pairs it with a bare :ok = storage_up
+# MUST_FAIL: no source or template discards storage_down, tolerates :already_up, or pairs it with a bare :ok = storage_up
 diff --git a/demo/test/test_helper.exs b/demo/test/test_helper.exs
 index 069c0a5e..33ec1c94 100644
 --- a/demo/test/test_helper.exs
