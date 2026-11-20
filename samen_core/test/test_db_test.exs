@@ -81,6 +81,12 @@ defmodule Samen.TestDbTest do
       end
     end
 
+    test "refuses a production-looking database name without touching the server" do
+      e = assert_raise ArgumentError, fn -> TestDb.drop!(@bad_port ++ [database: "app_production"]) end
+      assert e.message =~ "not a test/scratch database"
+      assert_raise ArgumentError, fn -> TestDb.reset!(@bad_port ++ [database: "app_production"]) end
+    end
+
     test "accepts the test and scratch names the repo uses" do
       for name <- ~w(demo_test samen_core_test_lane2 samen_core_test_rvbackfill_42 demo_test_downcheck_ab12cd34) do
         assert TestDb.test_database?(name), name
