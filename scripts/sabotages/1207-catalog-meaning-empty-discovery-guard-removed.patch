@@ -1,0 +1,19 @@
+# SABOTAGE: the empty-discovery guard is removed, so a host that discovers nothing passes
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_test.exs
+# MUST_FAIL: RED: zero discovered resources is a violation
+diff --git a/samen_core/lib/samen/catalog_meaning.ex b/samen_core/lib/samen/catalog_meaning.ex
+index 9232d5ba..8735314a 100644
+--- a/samen_core/lib/samen/catalog_meaning.ex
++++ b/samen_core/lib/samen/catalog_meaning.ex
+@@ -166,7 +166,7 @@ defmodule Samen.CatalogMeaning do
+   @spec check([table_info()], [String.t()], String.t() | nil) :: [String.t()]
+   def check(tables, errors, baseline_src) do
+     discovery =
+-      if tables == [] and errors == [] do
++      if false and tables == [] and errors == [] do
+         ["no resources discovered — nothing was verified (check the domains / `config :ash, :domains`)"]
+       else
+         []
