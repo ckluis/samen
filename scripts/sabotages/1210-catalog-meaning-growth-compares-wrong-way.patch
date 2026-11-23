@@ -1,0 +1,28 @@
+# SABOTAGE: growth/2 compares the wrong way, so a baseline that grew passes the merge-base guard
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_ratchet_test.exs
+# MUST_FAIL: growth/2 is not vacuous
+diff --git a/samen_core/lib/samen/catalog_meaning/baseline.ex b/samen_core/lib/samen/catalog_meaning/baseline.ex
+index 9a74b085..9f1aaa1a 100644
+--- a/samen_core/lib/samen/catalog_meaning/baseline.ex
++++ b/samen_core/lib/samen/catalog_meaning/baseline.ex
+@@ -87,7 +87,7 @@ defmodule Samen.CatalogMeaning.Baseline do
+     current = parse(current_src)
+     base = parse(base_src)
+ 
+-    added = MapSet.difference(MapSet.new(current.entries), MapSet.new(base.entries))
++    added = MapSet.difference(MapSet.new(base.entries), MapSet.new(current.entries))
+ 
+     entries =
+       for e <- Enum.sort(added),
+@@ -98,7 +98,7 @@ defmodule Samen.CatalogMeaning.Baseline do
+         is_nil(current.ceiling) or is_nil(base.ceiling) ->
+           ["the ceiling could not be read (current #{inspect(current.ceiling)}, merge base #{inspect(base.ceiling)})"]
+ 
+-        current.ceiling > base.ceiling ->
++        current.ceiling < base.ceiling ->
+           ["the ceiling rose: #{base.ceiling} -> #{current.ceiling}"]
+ 
+         true ->
