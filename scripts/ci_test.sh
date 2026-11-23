@@ -98,6 +98,12 @@
 #          origin/main / status are re-checked on EXIT ("SELF-TEST ESCAPED INTO THE REAL REPO"). Run against a COPY in a
 #          throwaway outer repo, so a regression damages only the throwaway.
 #
+#   LAUNCHREC  a step is released only AFTER state.json names it (the test seam holds the driver between the record and the
+#          release): a driver killed there leaves a step that never ran a line; a fresh run overlaps nothing.
+#   LAUNCHSEAM that seam is test-only: bounded (fails loudly naming itself), stopped by SIGTERM, never visible to a step.
+#   RERUNREC   the flaky rerun is gated and recorded like a step (state.json "<step>#rerun"): a driver killed during it
+#          leaves no live, unrecorded `mix test`.
+#
 # Usage: scripts/ci_test.sh [CASE…]      (default: every case)
 # Exit:  0 all assertions pass · 1 otherwise. Residue: none (temp dirs, trap on EXIT/INT/TERM).
 set -uo pipefail
