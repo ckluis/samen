@@ -87,6 +87,10 @@
 #   MUTLINT  scripts/mutation_lint.sh's MUTATION_OWNS scan reads every file git knows whatever its name (a quote or space in a
 #          path once truncated a `find | xargs` scan silently), ignores gitignored scratch, and fails closed on a file it cannot read.
 #
+#   MUTLOCK  scripts/mutate.sh refuses to start while another mutate.sh runs in the same checkout (two hand-started `--shard`
+#          runs share the mutated files and one test database): exit 3 before anything is touched, naming the holder; a free
+#          lock, a lock held by ANOTHER checkout and a read-only --list are not refused; a dead holder leaves nothing to clear.
+#
 #   ESCAPE   the self-test can never write to the repository it is testing (it once did: a failed `cd "$R"` let the fixture's
 #          `git add -A && git commit && git update-ref refs/remotes/origin/main` run in the REAL repo). An unusable temp root
 #          exits 1 before anything runs; `git` is shadowed (scripts/fixture_guard.sh) and refuses any command whose repo
@@ -2158,7 +2162,49 @@ case_MUTLINT() {
   fi
 }
 
-ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS LOCALPATHS GENPROBE GENHEX GENHEXRO NARROW RECHUNK COSTW TIMEOUT SELTMO GENDEPS ESCAPE MUTLINT)
+# MUTLOCK: scripts/mutate.sh takes an flock on <checkout>/_ci/mutate.lock before it selects, mutates or runs anything.
+# The fixture is two throwaway directories each holding a copy of mutate.sh (REPO_ROOT = the directory above scripts/), so the
+# lock lands in the fixture's own _ci/ and the real repo is never involved. A holder process stands in for the other run.
+case_MUTLOCK() {
+  local A="$T/mutlock_a" B="$T/mutlock_b" d
+  for d in "$A" "$B"; do
+    rm -rf "$d"; mkdir -p "$d/scripts" || { echo "ci_test: MUTLOCK: cannot build the fixture" >&2; exit 1; }
+    cp "$ROOT/scripts/mutate.sh" "$d/scripts/mutate.sh"
+  done
+  hold() { # hold <checkout> — flock that checkout's lock from a separate process, until killed
+    python3 -I -c '
+import fcntl, os, sys, time
+f = open(sys.argv[1], "a+"); fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+f.seek(0); f.truncate(); f.write("pid 4242: mutate.sh --shard 1/2\n"); f.flush()
+open(sys.argv[2], "w").close()
+time.sleep(120)' "$1/_ci/mutate.lock" "$1/held" &
+    HELD_PID=$!
+    local n; for n in $(seq 1 100); do [[ -e "$1/held" ]] && return 0; sleep 0.1; done
+    bad "MUTLOCK: the lock holder never started"; return 1
+  }
+  run() { ( cd "$1" && bash scripts/mutate.sh --file no/such/file.ex > "$2" 2>&1; echo "rc=$?" >> "$2" ); }
+
+  run "$A" "$T/mlock.free"
+  hasnt "$T/mlock.free" 'REFUSED' "MUTLOCK: positive control — no other mutate.sh running: the run is not refused"
+  [[ -f "$A/_ci/mutate.lock" ]] && ok || bad "MUTLOCK: the lock file lives in the checkout's own _ci/ ($A/_ci/mutate.lock)"
+
+  mkdir -p "$A/_ci" "$B/_ci"
+  if hold "$A"; then
+    run "$A" "$T/mlock.held"
+    has "$T/mlock.held" 'mutate\.sh: REFUSED - another mutate\.sh is already running in this checkout \(pid 4242: mutate\.sh --shard 1/2\)' "MUTLOCK: a second mutate.sh in the same checkout is refused, naming the holder"
+    has "$T/mlock.held" '^rc=3$' "MUTLOCK: ... with exit 3"
+    hasnt "$T/mlock.held" 'unknown|selection|MUTATION' "MUTLOCK: ... before it selects or runs anything"
+    ( cd "$A" && bash scripts/mutate.sh --list --file no/such/file.ex > "$T/mlock.list" 2>&1 )
+    hasnt "$T/mlock.list" 'REFUSED' "MUTLOCK: a read-only --list is never refused"
+    run "$B" "$T/mlock.other"
+    hasnt "$T/mlock.other" 'REFUSED' "MUTLOCK: a mutate.sh holding the lock in ANOTHER checkout does not block this one"
+    kill "$HELD_PID" 2>/dev/null; wait "$HELD_PID" 2>/dev/null
+    run "$A" "$T/mlock.after"
+    hasnt "$T/mlock.after" 'REFUSED' "MUTLOCK: once the holder is gone nothing is left to clear by hand"
+  fi
+}
+
+ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS LOCALPATHS GENPROBE GENHEX GENHEXRO NARROW RECHUNK COSTW TIMEOUT SELTMO GENDEPS ESCAPE MUTLINT MUTLOCK)
 CASES=("$@")
 [[ ${#CASES[@]} -gt 0 ]] || CASES=("${ALL[@]}")
 for c in "${CASES[@]}"; do
