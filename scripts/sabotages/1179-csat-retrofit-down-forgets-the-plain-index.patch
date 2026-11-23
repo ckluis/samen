@@ -1,0 +1,19 @@
+# SABOTAGE: the CSAT retrofit migration cannot be rolled back: down does not restore the plain lookup index
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/csat_token_digest_unique_gen_test.exs
+# MUST_FAIL: RED: existing duplicates fail it without printing a digest
+diff --git a/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex b/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
+index e9175bba..d6b77545 100644
+--- a/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
++++ b/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
+@@ -160,7 +160,7 @@ defmodule Mix.Tasks.Samen.Gen.ApiKeyDigestUnique do
+   defp restore_plain_down(%{plain_index: nil}, _table, _column), do: ""
+ 
+   defp restore_plain_down(%{plain_index: suffix}, table, column),
+-    do: "    concurrent_index(:#{table}, [:#{column}], name: \"#{table}_#{suffix}\")\n"
++    do: ""
+ 
+   defp existing_sources(dir) do
+     dir |> Path.join("*.exs") |> Path.wildcard() |> Enum.map(&File.read!/1)
