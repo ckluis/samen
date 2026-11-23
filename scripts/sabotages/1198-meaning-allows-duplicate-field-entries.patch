@@ -1,0 +1,19 @@
+# SABOTAGE: two meaning field entries for one attribute compile and the last silently wins
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_reader_test.exs
+# MUST_FAIL: RED: a meaning field entry listed twice for one attribute fails compile
+diff --git a/samen_core/lib/samen/catalog/transformers/meaning_declarations.ex b/samen_core/lib/samen/catalog/transformers/meaning_declarations.ex
+index 10972246..d74a514b 100644
+--- a/samen_core/lib/samen/catalog/transformers/meaning_declarations.ex
++++ b/samen_core/lib/samen/catalog/transformers/meaning_declarations.ex
+@@ -59,7 +59,7 @@ defmodule Samen.Catalog.Transformers.MeaningDeclarations do
+     fields = Transformer.get_entities(dsl_state, [:meaning])
+ 
+     with :ok <- check_field_names(module, fields, attributes),
+-         :ok <- check_duplicates(module, fields),
++         :ok <- check_duplicates(module, []),
+          :ok <- check_units(module, fields, attributes),
+          :ok <- check_sentinel(module, dsl_state) do
+       {:ok, dsl_state}
