@@ -1,0 +1,20 @@
+# SABOTAGE: the retrofit generators discover tables by the logical attribute name (token_digest) instead of 
+#   the stored column, so a real app finds nothing
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/digest_unique_retrofit_discovery_test.exs
+# MUST_FAIL: tables finds exactly what the shipped migration names (table and stored column)
+diff --git a/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex b/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
+index 10aa5aac..860cc002 100644
+--- a/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
++++ b/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
+@@ -196,7 +196,7 @@ defmodule Mix.Tasks.Samen.Gen.ApiKeyDigestUnique do
+         resource <- Ash.Domain.Info.resources(domain),
+         table = AshPostgres.DataLayer.Info.table(resource),
+         is_binary(table) and String.ends_with?(table, suffix),
+-        %{column_name: column} <- Samen.Catalog.fields(resource),
++        %{logical_name: column} <- Samen.Catalog.fields(resource),
+         String.ends_with?(column, "_token_digest"),
+         uniq: true,
+         do: {table, column}

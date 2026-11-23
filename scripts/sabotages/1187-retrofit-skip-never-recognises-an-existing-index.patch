@@ -1,0 +1,22 @@
+# SABOTAGE: the skip logic recognises neither index name, so a host that already has the unique index is 
+#   handed a second migration
+#
+# Flips the named test(s).
+# APP: pawchart
+# TEST_FILES: test/digest_unique_retrofit_discovery_test.exs
+# MUST_FAIL: writes nothing and says why
+diff --git a/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex b/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
+index 10aa5aac..02a7ed61 100644
+--- a/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
++++ b/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
+@@ -168,8 +168,8 @@ defmodule Mix.Tasks.Samen.Gen.ApiKeyDigestUnique do
+ 
+   # this task's index name, or the first migration's `create(unique_index(:table, [:col]))` (default name)
+   defp present?(sources, table, column) do
+-    named = ~s|"#{index_name(table)}"|
+-    plain = ~r/unique_index\(\s*:#{Regex.escape(table)}\s*,\s*\[\s*:#{Regex.escape(column)}\s*\]/
++    named = ~s|"#{index_name(table)}x"|
++    plain = ~r/unique_indexx\(\s*:#{Regex.escape(table)}\s*,\s*\[\s*:#{Regex.escape(column)}\s*\]/
+     Enum.any?(sources, &(String.contains?(&1, named) or Regex.match?(plain, &1)))
+   end
+ 
