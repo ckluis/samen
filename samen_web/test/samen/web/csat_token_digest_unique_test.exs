@@ -6,10 +6,8 @@ defmodule Samen.Web.CsatTokenDigestUniqueTest do
   """
   use Samen.WebTest.DataCase, async: false
 
-  @surveys [
-    %{prefix: "scw", table: "scw_csat_survey_token", ticket: Samen.WebTest.Support.Ticket},
-    %{prefix: "wco", table: "wco_csat_survey_token", ticket: Samen.WebTest.Operator.Ticket}
-  ]
+  @scw %{prefix: "scw", table: "scw_csat_survey_token", ticket: Samen.WebTest.Support.Ticket}
+  @wco %{prefix: "wco", table: "wco_csat_survey_token", ticket: Samen.WebTest.Operator.Ticket}
 
   # `mode: :savepoint` rolls the refused statement back to a savepoint, so the sandbox transaction stays usable.
   defp insert(%{table: table, prefix: p}, ticket_id, digest) do
@@ -29,33 +27,44 @@ defmodule Samen.Web.CsatTokenDigestUniqueTest do
     |> Map.fetch!(:id)
   end
 
-  for %{table: table} = survey <- @surveys do
-    @survey survey
+  defp assert_duplicate_refused(survey) do
+    ticket_id = ticket!(survey.ticket)
 
-    test "#{table}: a duplicate digest is refused by the database, a distinct one is not" do
-      survey = @survey
-      ticket_id = ticket!(survey.ticket)
+    assert {:ok, _} = insert(survey, ticket_id, "d1")
+    # positive control: a distinct digest inserts
+    assert {:ok, _} = insert(survey, ticket_id, "d2")
 
-      assert {:ok, _} = insert(survey, ticket_id, "d1")
-      # positive control: a distinct digest inserts
-      assert {:ok, _} = insert(survey, ticket_id, "d2")
+    assert {:error, %Postgrex.Error{postgres: %{code: :unique_violation, constraint: constraint}}} =
+             insert(survey, ticket_id, "d1")
 
-      assert {:error, %Postgrex.Error{postgres: %{code: :unique_violation, constraint: constraint}}} =
-               insert(survey, ticket_id, "d1")
-
-      assert constraint == "#{survey.table}_token_digest_uidx"
-    end
-
-    test "#{table}: the unique index replaced the plain lookup index (one valid index on the digest, and it is unique)" do
-      survey = @survey
-
-      %{rows: rows} =
-        Samen.WebTest.Repo.query!(
-          "SELECT i.indisunique FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey) " <>
-            "WHERE i.indrelid = '#{survey.table}'::regclass AND a.attname = '#{survey.prefix}_token_digest' AND i.indisvalid"
-        )
-
-      assert rows == [[true]]
-    end
+    assert constraint == "#{survey.table}_token_digest_uidx"
   end
+
+  # one valid index on the digest, it is unique, and the plain one it replaced is gone
+  defp assert_unique_replaced_plain(%{table: table, prefix: p}) do
+    %{rows: rows} =
+      Samen.WebTest.Repo.query!(
+        "SELECT i.indisunique FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey) " <>
+          "WHERE i.indrelid = '#{table}'::regclass AND a.attname = '#{p}_token_digest' AND i.indisvalid"
+      )
+
+    assert rows == [[true]]
+  end
+
+  test "scw_csat_survey_token: a duplicate digest is refused by the database, a distinct one is not" do
+    assert_duplicate_refused(@scw)
+  end
+
+  test "scw_csat_survey_token: the unique index replaced the plain lookup index (one valid index on the digest, and it is unique)" do
+    assert_unique_replaced_plain(@scw)
+  end
+
+  test "wco_csat_survey_token: a duplicate digest is refused by the database, a distinct one is not" do
+    assert_duplicate_refused(@wco)
+  end
+
+  test "wco_csat_survey_token: the unique index replaced the plain lookup index (one valid index on the digest, and it is unique)" do
+    assert_unique_replaced_plain(@wco)
+  end
+
 end
