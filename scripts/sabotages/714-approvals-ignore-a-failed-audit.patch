@@ -12,7 +12,7 @@ index a64ee3cb..383a1dc3 100644
 @@ -375,7 +375,7 @@ defmodule Samen.Approvals do
  
        {:error, reason} ->
-         Samen.Observability.Failure.report(:approval_audit, approval.org_id, reason)
+         Samen.Observability.Failure.report_write(:approval_audit, approval.org_id, reason)
 -        repo.rollback({:audit_failed, reason})
 +        :ok
      end

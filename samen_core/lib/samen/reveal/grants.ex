@@ -799,7 +799,7 @@ defmodule Samen.Reveal.Grants do
         result
 
       {:error, reason} ->
-        Samen.Observability.Failure.report(:reveal_audit_chain, attrs[:org_id], reason)
+        Samen.Observability.Failure.report_write(:reveal_audit_chain, attrs[:org_id], reason)
         if Keyword.get(opts, :strict, false), do: {:error, reason}, else: result
     end
   end

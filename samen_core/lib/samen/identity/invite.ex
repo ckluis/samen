@@ -417,7 +417,7 @@ defmodule Samen.Identity.Invite do
     end)
   rescue
     e ->
-      Samen.Observability.Failure.report(:invite_notify_accept, nil, e)
+      Samen.Observability.Failure.report_write(:invite_notify_accept, nil, e)
       :ok
   end
 

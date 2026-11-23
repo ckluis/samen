@@ -392,7 +392,7 @@ defmodule Samen.Approvals do
         :ok
 
       {:error, reason} ->
-        Samen.Observability.Failure.report(:approval_audit, approval.org_id, reason)
+        Samen.Observability.Failure.report_write(:approval_audit, approval.org_id, reason)
         repo.rollback({:audit_failed, reason})
     end
   end

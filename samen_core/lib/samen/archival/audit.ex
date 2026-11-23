@@ -43,7 +43,7 @@ defmodule Samen.Archival.Audit do
          }) do
       {:ok, _} -> :ok
       {:error, reason} ->
-        Samen.Observability.Failure.report(:archival_audit, org, reason)
+        Samen.Observability.Failure.report_write(:archival_audit, org, reason)
         {:error, :audit_unavailable}
     end
   end
