@@ -1750,7 +1750,7 @@
         },
         {
           "column_name": "dls_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -2942,7 +2942,7 @@
         },
         {
           "column_name": "dpc_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -3028,7 +3028,7 @@
       "fields": [
         {
           "column_name": "dpe_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -3197,7 +3197,7 @@
         },
         {
           "column_name": "dpi_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -3394,7 +3394,7 @@
         },
         {
           "column_name": "dpp_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -3522,7 +3522,7 @@
         },
         {
           "column_name": "dpr_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -3654,7 +3654,7 @@
         },
         {
           "column_name": "dps_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -4159,7 +4159,7 @@
         },
         {
           "column_name": "dpy_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -4428,7 +4428,7 @@
         },
         {
           "column_name": "dqg_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -4567,7 +4567,7 @@
         },
         {
           "column_name": "dqk_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -5510,7 +5510,7 @@
         },
         {
           "column_name": "drv_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -5851,7 +5851,7 @@
         },
         {
           "column_name": "dvs_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -6203,7 +6203,7 @@
         },
         {
           "column_name": "dwt_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -6475,7 +6475,7 @@
       "table_name": "fae_product_event"
     },
     {
-      "description": "A reference to a stored file that is linked to a company, a person or a deal.",
+      "description": "A reference to a stored file that can be linked to a company, a person or a deal; each link is optional.",
       "fields": [
         {
           "column_name": "fat_archived_at",
@@ -6503,7 +6503,7 @@
         },
         {
           "column_name": "fat_file_name",
-          "description": "Name of the attached file as given when it was attached; required.",
+          "description": "Name of the attached file; required.",
           "label": "File name",
           "logical_name": "file_name",
           "pii": false,
@@ -6560,7 +6560,7 @@
         },
         {
           "column_name": "fat_storage_key",
-          "description": "Opaque key that locates the file in object storage; it is not meant to be read by people.",
+          "description": "Free-text key a host may use to locate the stored file; this reference neither mints nor checks it, and it is not meant to be read by people.",
           "label": "Storage key",
           "logical_name": "storage_key",
           "pii": false,
@@ -6610,7 +6610,7 @@
       ],
       "resource": "Driftwood.Crm.Attachment",
       "synonyms": [
-        "file"
+        "attached file"
       ],
       "table_name": "fat_attachment"
     },
@@ -6627,7 +6627,7 @@
         },
         {
           "column_name": "fbc_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -6713,7 +6713,7 @@
       "fields": [
         {
           "column_name": "fbe_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -6882,7 +6882,7 @@
         },
         {
           "column_name": "fbi_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -7079,7 +7079,7 @@
         },
         {
           "column_name": "fbp_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -7207,7 +7207,7 @@
         },
         {
           "column_name": "fbr_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -7339,7 +7339,7 @@
         },
         {
           "column_name": "fbs_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -7844,7 +7844,7 @@
         },
         {
           "column_name": "fby_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -8009,7 +8009,7 @@
         },
         {
           "column_name": "fce_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -8142,7 +8142,7 @@
         },
         {
           "column_name": "fcm_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -8258,7 +8258,7 @@
         },
         {
           "column_name": "fdd_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -8363,7 +8363,7 @@
         },
         {
           "column_name": "fdn_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -8755,7 +8755,7 @@
         },
         {
           "column_name": "fmc_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -8970,7 +8970,7 @@
         },
         {
           "column_name": "fmg_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -9059,7 +9059,7 @@
         },
         {
           "column_name": "fmn_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -9319,7 +9319,7 @@
         },
         {
           "column_name": "fms_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -9422,7 +9422,7 @@
         },
         {
           "column_name": "fmt_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -9834,7 +9834,7 @@
       "table_name": "fnt_notification"
     },
     {
-      "description": "A sales deal pursued with a company and moved through pipeline stages until it is won or lost.",
+      "description": "A sales deal that can be tied to a company and a pipeline stage; its status is open, won, lost or on hold.",
       "fields": [
         {
           "column_name": "fop_archived_at",
@@ -9862,7 +9862,7 @@
         },
         {
           "column_name": "fop_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -10002,7 +10002,7 @@
         },
         {
           "column_name": "fpp_enabled",
-          "description": "Whether the stage is switched on for use; defaults to true.",
+          "description": "A flag marking whether the stage is enabled; defaults to true. Nothing in the framework reads it, so a disabled stage still shows on the board and can be assigned to a deal.",
           "label": "Enabled",
           "logical_name": "enabled",
           "pii": false,
@@ -10109,7 +10109,7 @@
         },
         {
           "column_name": "fpr_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -10203,7 +10203,7 @@
       ],
       "resource": "Driftwood.Crm.Person",
       "synonyms": [
-        "contact"
+        "individual"
       ],
       "table_name": "fpr_person"
     },
@@ -10220,7 +10220,7 @@
         },
         {
           "column_name": "fsa_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,
@@ -10560,7 +10560,7 @@
         },
         {
           "column_name": "fsk_custom",
-          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write.",
+          "description": "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it.",
           "label": "Custom",
           "logical_name": "custom",
           "pii": false,

@@ -234,7 +234,10 @@ end
 
 - Descriptions use Ash's `description`; `pii_attribute … description:` describes a vault field (its meaning, never a value).
 - `meaning do` holds only `label`, `synonyms` and `units` (free text, at most 40 characters).
-- Do not describe `id`, `org_id`, timestamps, `archived_at` or the `custom` bag: the framework does.
+- Do not describe `id`, `org_id`, timestamps, `archived_at` or the `custom` bag when the framework injects them: it does.
+  A resource that declares its own `org_id` (or any of these) must describe it itself; otherwise it stays `null`.
+- A synonym must not be a word another table in any host uses as its name, label or synonym (blueprint text reaches
+  every host): "file" and "contact" were dropped for naming the Files primitive and demo's `cnt_contact`.
 - Allowed values and max length come from `one_of` / `max_length`; Money, Percent and Duration fix their own units
   (authoring units there fails compile).
 - Write only what the code makes true: read the type, constraints, default and use first, and say so plainly when

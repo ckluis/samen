@@ -181,7 +181,7 @@ defmodule Samen.Scopes.Crm.Blueprint do
         end
 
         meaning do
-          synonyms(["contact"])
+          synonyms(["individual"])
         end
 
         postgres do
@@ -317,7 +317,7 @@ defmodule Samen.Scopes.Crm.Blueprint do
           attribute(:enabled, :boolean,
             public?: true,
             default: true,
-            description: "Whether the stage is switched on for use; defaults to true."
+            description: "A flag marking whether the stage is enabled; defaults to true. Nothing in the framework reads it, so a disabled stage still shows on the board and can be assigned to a deal."
           )
 
           # Bounded stage type: standard pipeline stages as config atoms.
@@ -374,7 +374,7 @@ defmodule Samen.Scopes.Crm.Blueprint do
 
         resource do
           description(
-            "A sales deal pursued with a company and moved through pipeline stages until it is won or lost."
+            "A sales deal that can be tied to a company and a pipeline stage; its status is open, won, lost or on hold."
           )
         end
 
@@ -517,11 +517,11 @@ defmodule Samen.Scopes.Crm.Blueprint do
           archivable: true
 
         resource do
-          description("A reference to a stored file that is linked to a company, a person or a deal.")
+          description("A reference to a stored file that can be linked to a company, a person or a deal; each link is optional.")
         end
 
         meaning do
-          synonyms(["file"])
+          synonyms(["attached file"])
           field(:size_bytes, units: "bytes")
         end
 
@@ -534,7 +534,7 @@ defmodule Samen.Scopes.Crm.Blueprint do
           attribute(:file_name, :string,
             public?: true,
             allow_nil?: false,
-            description: "Name of the attached file as given when it was attached; required."
+            description: "Name of the attached file; required."
           )
 
           attribute(:content_type, :string,
@@ -550,7 +550,7 @@ defmodule Samen.Scopes.Crm.Blueprint do
           # Opaque storage key (object-store path / S3 key). Non-PII metadata.
           attribute(:storage_key, :string,
             public?: true,
-            description: "Opaque key that locates the file in object storage; it is not meant to be read by people."
+            description: "Free-text key a host may use to locate the stored file; this reference neither mints nor checks it, and it is not meant to be read by people."
           )
         end
 

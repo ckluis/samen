@@ -69,7 +69,7 @@ defmodule Samen.Transformers.MaterializeCustomFields do
   end
 
   # The framework describes the bag once (ADR-043 §8a); a blueprint or host that wrote its own description keeps it.
-  @bag_description "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every write."
+  @bag_description "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it."
 
   defp describe_bag(dsl_state) do
     dsl_state

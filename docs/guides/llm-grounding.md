@@ -50,16 +50,19 @@ same source of truth.**
       "table_name": "per_person",
       "resource": "Demo.CrmScope.Person",
       "fields": [
-        { "column_name": "per_full_name", "logical_name": "full_name", "type": "Samen.Type.VaultField", "pii": true },
-        { "column_name": "per_id",        "logical_name": "id",        "type": "UUID", "pii": false },
-        { "column_name": "per_org_id",    "logical_name": "org_id",    "type": "UUID", "pii": false }
+        { "column_name": "per_full_name", "logical_name": "full_name", "type": "Samen.Type.VaultField", "pii": true,
+          "description": "…", "label": "Full name" },
+        { "column_name": "per_id",        "logical_name": "id",        "type": "UUID", "pii": false,
+          "description": "…", "label": "Id" },
+        { "column_name": "per_org_id",    "logical_name": "org_id",    "type": "UUID", "pii": false,
+          "description": "…", "label": "Org id" }
       ]
     }
   ]
 }
 ```
 
-Each field carries four keys the agent needs:
+Each field carries these four keys the agent needs, plus `description` and `label` (always present, see below):
 
 | key | what it is | why the agent needs it |
 |---|---|---|

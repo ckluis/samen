@@ -111,7 +111,7 @@ defmodule Demo.Crm.Org do
     attribute(:name, :string,
       public?: true,
       allow_nil?: false,
-      description: "Name of the organization as entered when it was created; required."
+      description: "Name of the organization; required."
     )
 
     attribute(:slug, :string,
