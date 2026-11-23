@@ -68,18 +68,53 @@ defmodule Samen.Scopes.Crm.Blueprint do
           abbrev: unquote(abbrev),
           archivable: true
 
+        resource do
+          description(
+            "A business the organization sells to or works with; people, deals and attachments link to it."
+          )
+        end
+
+        meaning do
+          synonyms(["account"])
+        end
+
         postgres do
           table("#{unquote(abbrev)}_company")
           repo(unquote(repo))
         end
 
         attributes do
-          attribute(:name, :string, public?: true, allow_nil?: false)
-          attribute(:domain, :string, public?: true)
-          attribute(:industry, :string, public?: true)
-          attribute(:size, :string, public?: true)
-          attribute(:website, :string, public?: true)
-          attribute(:notes, :string, public?: true)
+          attribute(:name, :string,
+            public?: true,
+            allow_nil?: false,
+            description: "Name of the company as entered by the team; required, and no uniqueness rule is enforced."
+          )
+
+          attribute(:domain, :string,
+            public?: true,
+            description: "Internet domain of the company as free text; no format is enforced."
+          )
+
+          attribute(:industry, :string,
+            public?: true,
+            description: "Industry or sector of the company as free text; no fixed list is enforced."
+          )
+
+          attribute(:size, :string,
+            public?: true,
+            description: "Size of the company as free text as entered; no format or fixed list is enforced."
+          )
+
+          attribute(:website, :string,
+            public?: true,
+            description: "Website address of the company as free text; no URL format is enforced."
+          )
+
+          attribute(:notes, :string,
+            public?: true,
+            description: "Free-text notes the team keeps about the company."
+          )
+
           # Tier-1 custom bag
           attribute(:custom, :map, public?: true)
         end
@@ -139,6 +174,16 @@ defmodule Samen.Scopes.Crm.Blueprint do
           base: Samen.Fragments.CorePerson,
           archivable: true
 
+        resource do
+          description(
+            "A person the organization deals with, such as a customer contact; name, emails and phones are vault-routed and masked unless revealed."
+          )
+        end
+
+        meaning do
+          synonyms(["contact"])
+        end
+
         postgres do
           table("#{unquote(abbrev)}_person")
           repo(unquote(repo))
@@ -151,11 +196,16 @@ defmodule Samen.Scopes.Crm.Blueprint do
         end
 
         attributes do
-          attribute(:display_name, :string, public?: true)
+          attribute(:display_name, :string,
+            public?: true,
+            description:
+              "Label used to show and sort the person in lists; free text kept apart from the vault-routed full name."
+          )
         end
 
         relationships do
           belongs_to :company, unquote(company_mod) do
+            description("The company this person is associated with, if any.")
             public?(true)
             attribute_type(:uuid)
             allow_nil?(true)
@@ -231,20 +281,50 @@ defmodule Samen.Scopes.Crm.Blueprint do
           abbrev: unquote(abbrev),
           archivable: true
 
+        resource do
+          description(
+            "One stage of the organization's sales pipeline; deals point at a stage, and admins can rename or reorder stages."
+          )
+        end
+
+        meaning do
+          synonyms(["stage"])
+        end
+
         postgres do
           table("#{unquote(abbrev)}_pipeline")
           repo(unquote(repo))
         end
 
         attributes do
-          attribute(:name, :string, public?: true, allow_nil?: false)
-          attribute(:label, :string, public?: true)
-          attribute(:stage_order, :integer, public?: true, default: 0)
-          attribute(:enabled, :boolean, public?: true, default: true)
+          attribute(:name, :string,
+            public?: true,
+            allow_nil?: false,
+            description: "Name that identifies the pipeline stage; required."
+          )
+
+          attribute(:label, :string,
+            public?: true,
+            description: "Display label shown for the stage in the interface, separate from its name."
+          )
+
+          attribute(:stage_order, :integer,
+            public?: true,
+            default: 0,
+            description: "Position of the stage in the pipeline; stages are shown in ascending order of this number."
+          )
+
+          attribute(:enabled, :boolean,
+            public?: true,
+            default: true,
+            description: "Whether the stage is switched on for use; defaults to true."
+          )
+
           # Bounded stage type: standard pipeline stages as config atoms.
           attribute(:stage_type, :atom,
             public?: true,
             default: :open,
+            description: "Kind of stage in the deal lifecycle, restricted to a fixed list of values; defaults to open.",
             constraints: [one_of: [:open, :won, :lost, :qualified, :proposal]]
           )
         end
@@ -292,38 +372,77 @@ defmodule Samen.Scopes.Crm.Blueprint do
           abbrev: unquote(abbrev),
           archivable: true
 
+        resource do
+          description(
+            "A sales deal pursued with a company and moved through pipeline stages until it is won or lost."
+          )
+        end
+
+        meaning do
+          synonyms(["deal"])
+          field(:value, label: "Deal value", synonyms: ["amount", "deal size"])
+          field(:probability, label: "Win probability")
+        end
+
         postgres do
           table("#{unquote(abbrev)}_opportunity")
           repo(unquote(repo))
         end
 
         attributes do
-          attribute(:name, :string, public?: true, allow_nil?: false)
+          attribute(:name, :string,
+            public?: true,
+            allow_nil?: false,
+            description: "Short title of the deal as shown in lists; required."
+          )
+
           # ADR-036 H1/D7: the paired `value_cents :integer` + `currency :string`
           # convention is replaced by ONE Money composite attribute (destructive,
           # pre-1.0, single data-copy migration — no deprecation window; T12).
           # Default $0.00 USD mirrors the prior pair's `default: 0` / `default: "USD"`.
-          attribute(:value, Samen.Type.Money, public?: true, default: {Money, :new!, [:USD, 0]})
-          attribute(:probability, :integer, public?: true, default: 0)
+          attribute(:value, Samen.Type.Money,
+            public?: true,
+            default: {Money, :new!, [:USD, 0]},
+            description: "Expected value of the deal, stored as money with its own currency; defaults to zero US dollars."
+          )
+
+          attribute(:probability, :integer,
+            public?: true,
+            default: 0,
+            description: "Estimated chance of winning the deal, stored as an integer; its unit and range are not enforced."
+          )
+
           attribute(:status, :atom,
             public?: true,
             default: :open,
-            constraints: [one_of: [:open, :won, :lost, :on_hold]]
+            constraints: [one_of: [:open, :won, :lost, :on_hold]],
+            description: "Overall state of the deal, independent of its pipeline stage; defaults to open."
           )
-          attribute(:close_date, :date, public?: true)
-          attribute(:notes, :string, public?: true)
+
+          attribute(:close_date, :date,
+            public?: true,
+            description: "Calendar date associated with closing the deal; no rule ties it to the deal status."
+          )
+
+          attribute(:notes, :string,
+            public?: true,
+            description: "Free-text notes the team keeps about the deal."
+          )
+
           # Tier-1 custom bag
           attribute(:custom, :map, public?: true)
         end
 
         relationships do
           belongs_to :company, unquote(company_mod) do
+            description("The company this deal is with, if any.")
             public?(true)
             attribute_type(:uuid)
             allow_nil?(true)
           end
 
           belongs_to :pipeline, unquote(pipeline_mod) do
+            description("The pipeline stage the deal is currently in, if any.")
             public?(true)
             attribute_type(:uuid)
             allow_nil?(true)
@@ -397,33 +516,61 @@ defmodule Samen.Scopes.Crm.Blueprint do
           abbrev: unquote(abbrev),
           archivable: true
 
+        resource do
+          description("A reference to a stored file that is linked to a company, a person or a deal.")
+        end
+
+        meaning do
+          synonyms(["file"])
+          field(:size_bytes, units: "bytes")
+        end
+
         postgres do
           table("#{unquote(abbrev)}_attachment")
           repo(unquote(repo))
         end
 
         attributes do
-          attribute(:file_name, :string, public?: true, allow_nil?: false)
-          attribute(:content_type, :string, public?: true)
-          attribute(:size_bytes, :integer, public?: true)
+          attribute(:file_name, :string,
+            public?: true,
+            allow_nil?: false,
+            description: "Name of the attached file as given when it was attached; required."
+          )
+
+          attribute(:content_type, :string,
+            public?: true,
+            description: "Media type of the file as free text; no format is enforced."
+          )
+
+          attribute(:size_bytes, :integer,
+            public?: true,
+            description: "Size of the file as recorded on the reference; it is not checked against the stored file."
+          )
+
           # Opaque storage key (object-store path / S3 key). Non-PII metadata.
-          attribute(:storage_key, :string, public?: true)
+          attribute(:storage_key, :string,
+            public?: true,
+            description: "Opaque key that locates the file in object storage; it is not meant to be read by people."
+          )
         end
 
         relationships do
           belongs_to :company, unquote(company_mod) do
+            description("The company the file is attached to, if any.")
             public?(true)
             attribute_type(:uuid)
             allow_nil?(true)
           end
 
           belongs_to :person, unquote(person_mod) do
+            description("The person the file is attached to, if any.")
             public?(true)
             attribute_type(:uuid)
             allow_nil?(true)
           end
 
           belongs_to :opportunity, unquote(opportunity_mod) do
+            description("The deal the file is attached to, if any.")
             public?(true)
             attribute_type(:uuid)
             allow_nil?(true)

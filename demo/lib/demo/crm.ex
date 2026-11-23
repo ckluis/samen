@@ -103,10 +103,27 @@ defmodule Demo.Crm.Org do
     repo(Demo.Repo)
   end
 
+  resource do
+    description("An organization that owns data in the demo host: the tenant that other records are scoped to.")
+  end
+
   attributes do
-    attribute(:name, :string, public?: true, allow_nil?: false)
-    attribute(:slug, :string, public?: true)
-    attribute(:plan, :string, public?: true, default: "free")
+    attribute(:name, :string,
+      public?: true,
+      allow_nil?: false,
+      description: "Name of the organization as entered when it was created; required."
+    )
+
+    attribute(:slug, :string,
+      public?: true,
+      description: "Short URL-style label for the organization; no format or uniqueness rule is enforced."
+    )
+
+    attribute(:plan, :string,
+      public?: true,
+      default: "free",
+      description: "Plan tier of the organization as free text; defaults to free and no fixed list is enforced."
+    )
   end
 
   actions do
@@ -130,13 +147,27 @@ defmodule Demo.Crm.Membership do
     repo(Demo.Repo)
   end
 
+  resource do
+    description("Links a contact to the organization it belongs to, with the role and status of that link.")
+  end
+
   attributes do
-    attribute(:role, :string, public?: true, default: "member")
-    attribute(:status, :string, public?: true, default: "active")
+    attribute(:role, :string,
+      public?: true,
+      default: "member",
+      description: "Role the contact holds in the organization as free text; defaults to member, no fixed list enforced."
+    )
+
+    attribute(:status, :string,
+      public?: true,
+      default: "active",
+      description: "State of the membership as free text; defaults to active and no fixed list is enforced."
+    )
   end
 
   relationships do
     belongs_to :contact, Demo.Crm.Contact do
+      description("The contact this membership belongs to.")
       public?(true)
       attribute_type(:uuid)
       allow_nil?(false)
@@ -227,13 +258,27 @@ defmodule Demo.Crm.Contact do
     end
   end
 
+  resource do
+    description(
+      "A person known to the demo organization; name, emails and date of birth are vault-routed and masked unless revealed."
+    )
+  end
+
   attributes do
     # Plain non-PII string (not flagged by pii_classify — not a known PII name).
-    attribute(:display_name, :string, public?: true, allow_nil?: false)
+    attribute(:display_name, :string,
+      public?: true,
+      allow_nil?: false,
+      description: "Label used to show the contact in lists; required free text kept apart from the vault-routed full name."
+    )
 
     # A non-PII boolean — not a pii_ column, not a PII name. Proves pii_classify
     # does not flag everything.
-    attribute(:active, :boolean, public?: true, default: true)
+    attribute(:active, :boolean,
+      public?: true,
+      default: true,
+      description: "Whether the contact is currently active; defaults to true."
+    )
 
     # NOTE: `org_id` is injected by Samen.Transformers.CoreAttributes (public?: true,
     # allow_nil?: false → the NOT NULL `cnt_org_id` column). It is the tenant boundary
@@ -249,11 +294,20 @@ defmodule Demo.Crm.Contact do
     vault(:pii_dob)
 
     # Composite PII: FullName + Emails — the standard T1.9 composite pair.
-    pii_attribute(:full_name, Samen.Type.FullName, vault: :pii_name)
-    pii_attribute(:emails, Samen.Type.Emails, vault: :pii_email)
+    pii_attribute(:full_name, Samen.Type.FullName,
+      vault: :pii_name,
+      description: "The contact's full name; vault-routed and masked unless revealed."
+    )
+    pii_attribute(:emails, Samen.Type.Emails,
+      vault: :pii_email,
+      description: "The contact's email addresses; vault-routed and masked unless revealed."
+    )
 
     # Scalar pii_ field: date of birth. Storage column: pii_cnt_dob.
-    pii_attribute(:dob, :date, vault: :pii_dob)
+    pii_attribute(:dob, :date,
+      vault: :pii_dob,
+      description: "The contact's date of birth; vault-routed and masked unless revealed."
+    )
 
     # Declare :reveal_contact as the reveal action. C3 pii_reads will not flag
     # vault-field reads inside this action.
@@ -262,6 +316,7 @@ defmodule Demo.Crm.Contact do
 
   relationships do
     has_many :memberships, Demo.Crm.Membership do
+      description("The organization memberships this contact holds.")
       public?(true)
     end
   end
