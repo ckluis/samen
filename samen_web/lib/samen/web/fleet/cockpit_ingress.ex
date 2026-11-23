@@ -16,8 +16,9 @@ defmodule Samen.Web.Fleet.CockpitIngress do
   @doc """
   `POST /fleet/enroll`. Body: `{"token": "...", "public_key": "..."}` (base64).
   `200 {app_id, cockpit_public_key, heartbeat_interval_s, stale_after_s}` on
-  success; `401` generic on ANY failure (unknown/consumed/expired token — one
-  outcome, §4.3).
+  success; `401` generic on a token that was checked and is unknown/consumed/expired (one
+  outcome, §4.3); `503` + `Retry-After` when the token read itself FAILED (the token was
+  not judged invalid).
   """
   @spec enroll(Plug.Conn.t(), keyword()) :: Plug.Conn.t()
   def enroll(conn, opts) do
@@ -39,6 +40,9 @@ defmodule Samen.Web.Fleet.CockpitIngress do
 
             {:error, :invalid_token} ->
               respond(conn, 401, "")
+
+            {:error, :unavailable} ->
+              unavailable(conn)
           end
 
         _ ->
@@ -52,7 +56,7 @@ defmodule Samen.Web.Fleet.CockpitIngress do
   @doc """
   `POST /fleet/heartbeat`. `204 No Content`, EMPTY body, ALWAYS (ADR §4.6 — the
   zero-read-capability claim's structural anchor, RP-J-2). Every failure is
-  `401`/`409`/`403`/`422`/`429` with an EMPTY body — never a response channel to
+  `401`/`409`/`403`/`422`/`429` (or `503` + `Retry-After` when the credential lookup itself failed: not a verdict on the presenter, never charged to the bad-sig bucket) with an EMPTY body — never a response channel to
   read through.
 
   ## Fix round (BLOCKER-1, §4.4a starvation)
@@ -128,6 +132,11 @@ defmodule Samen.Web.Fleet.CockpitIngress do
     end
   end
 
+  # The credential lookup FAILED (reported by the Registry): not a forged signature, so no bad-sig strike, no
+  # :heartbeat_rejected entry, no 429. The body stays EMPTY like every heartbeat answer (RP-J-2); only the status and
+  # Retry-After tell the app to retry.
+  defp handle_heartbeat_result(conn, _kid, {:error, :unavailable}), do: unavailable(conn)
+
   defp handle_heartbeat_result(conn, _kid, {:error, :replayed}), do: respond(conn, 409, "")
   defp handle_heartbeat_result(conn, _kid, {:error, :app_id_mismatch}), do: respond(conn, 403, "")
 
@@ -159,6 +168,12 @@ defmodule Samen.Web.Fleet.CockpitIngress do
   end
 
   defp remote_ip(%Plug.Conn{remote_ip: ip}), do: ip |> :inet.ntoa() |> to_string()
+
+  defp unavailable(conn) do
+    conn
+    |> put_resp_header("retry-after", Integer.to_string(Samen.Web.Api.KeyCheckUnavailable.retry_after_seconds()))
+    |> respond(503, "")
+  end
 
   defp respond(conn, status, body), do: conn |> send_resp(status, body) |> halt()
 

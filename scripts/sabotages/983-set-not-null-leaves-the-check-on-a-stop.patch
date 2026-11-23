@@ -1,0 +1,22 @@
+# SABOTAGE: set_not_null raises on an unanswerable NULL but leaves its temporary check constraint on the 
+#   table, which then refuses writes
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/migration_expand_contract_test.exs
+# MUST_FAIL: RED PATH: a NULL the backfill cannot answer for STOPS the migration, naming the count, and leaves the column's definition untouched
+diff --git a/samen_core/lib/samen/migration/expand_contract.ex b/samen_core/lib/samen/migration/expand_contract.ex
+index dbd315ee..30c9d121 100644
+--- a/samen_core/lib/samen/migration/expand_contract.ex
++++ b/samen_core/lib/samen/migration/expand_contract.ex
+@@ -460,9 +460,7 @@ defmodule Samen.Migration.ExpandContract do
+       left_behind =
+         "the temporary check constraint #{check} is still on #{tname} (it refuses new NULLs; the next run drops it first)"
+ 
+-      with_short_lock(repo, lock_sql, tname, left_behind, fn ->
+-        repo.query!("ALTER TABLE #{qt} DROP CONSTRAINT IF EXISTS #{qk}")
+-      end)
++      _ = left_behind
+ 
+       raise RuntimeError,
+             "set_not_null/4: #{tname}.#{cname} still has #{remaining} NULL row(s) and no correct value to give them. " <>
