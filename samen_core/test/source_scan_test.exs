@@ -110,6 +110,7 @@ defmodule Samen.SourceScanTest do
       test/delivery/chokepoint_anti_bypass_probe_test.exs
       test/ai/chokepoint_anti_bypass_probe_test.exs
       test/aud_role_derivation_test.exs
+      test/meta/test_db_guard_test.exs
     )
     @file_server_scan ~r/(\b(Path\.wildcard|File\.(read!?|regular\?|dir\?|ls!?|stat!?|lstat!?|exists\?|stream!))|:filelib\.\w+)\(/
 

@@ -50,41 +50,60 @@ defmodule Samen.TestDbGuardTest do
   @doc false
   def swallowed_drop?(source) when is_binary(source), do: Regex.match?(@shell_swallowed, strip_comments(source))
 
+  # Every walk and read goes through Samen.SourceScan (:prim_file): `Path.wildcard` (one `**` walk per app x dir x extension,
+  # 122 globs) and `File.read!` (~2,400 files) are each a call into the node's single `:file_server_2`, which queues behind
+  # every other test's file I/O -- this test passed in ~1 s alone and outran ExUnit's 60 s at load ~14.
+  @apps ~w(samen_core samen_web demo driftwood pawchart samen_stripe samen_postmark samen_ses samen_resend samen_anthropic)
+  @skipped ["/deps/", "/_build/", "/spikes/", "/node_modules/"]
+
   defp scanned_files do
-    apps = ~w(samen_core samen_web demo driftwood pawchart samen_stripe samen_postmark samen_ses samen_resend samen_anthropic)
+    tree =
+      for app <- @apps, dir <- ~w(lib test config priv), file <- Samen.SourceScan.files(Path.join([@root, app, dir]), ~w(.ex .exs .eex)), do: file
 
-    globs =
-      Enum.flat_map(apps, fn app ->
-        for dir <- ~w(lib test config priv), ext <- ~w(ex exs eex), do: "#{app}/#{dir}/**/*.#{ext}"
-      end) ++ ["scripts/**/*.{ex,exs}", "*.exs"]
+    scripts = Samen.SourceScan.files(Path.join(@root, "scripts"), ~w(.ex .exs))
+    top = for f <- flat(@root), String.ends_with?(f, ".exs"), do: f
 
-    relative(globs)
+    relative(tree ++ scripts ++ top)
   end
 
   defp shell_files do
-    relative([
-      "ci/steps.conf",
-      "ci.sh",
-      "ci-fast.sh",
-      "*/ci.sh",
-      "scripts/*.sh",
-      "docs/runbooks/*.sh",
-      "*/priv/**/*.sh"
-    ])
+    star_ci = for dir <- Samen.SourceScan.dirs(@root, "*"), f = Path.join(dir, "ci.sh"), regular?(f), do: f
+    privs = for dir <- Samen.SourceScan.dirs(@root, "*/priv"), f <- Samen.SourceScan.files(dir, [".sh"]), do: f
+
+    fixed =
+      for rel <- ~w(ci/steps.conf ci.sh ci-fast.sh), f = Path.join(@root, rel), regular?(f), do: f
+
+    flat_sh = for dir <- ~w(scripts docs/runbooks), f <- flat(Path.join(@root, dir)), String.ends_with?(f, ".sh"), do: f
+
+    relative(fixed ++ star_ci ++ flat_sh ++ privs)
   end
 
-  defp relative(globs) do
-    globs
-    |> Enum.flat_map(&Path.wildcard(Path.join(@root, &1)))
-    |> Enum.reject(&String.contains?(&1, ["/deps/", "/_build/", "/spikes/", "/node_modules/"]))
+  # the regular files directly in `dir` (what `dir/*` matched: dot-entries skipped), full paths
+  defp flat(dir) do
+    case :prim_file.list_dir(dir) do
+      {:ok, names} ->
+        for name <- Enum.map(names, &to_string/1), not String.starts_with?(name, "."), regular?(Path.join(dir, name)), do: Path.join(dir, name)
+
+      {:error, _} ->
+        []
+    end
+  end
+
+  defp regular?(path), do: match?({:ok, info} when elem(info, 2) == :regular, :prim_file.read_file_info(path))
+
+  defp relative(paths) do
+    paths
+    |> Enum.reject(&String.contains?(&1, @skipped))
     |> Enum.map(&Path.relative_to(&1, @root))
     |> Enum.uniq()
     |> Enum.sort()
   end
 
+  defp read!(rel), do: Samen.SourceScan.read!(Path.join(@root, rel))
+
   test "no source or template discards storage_down, tolerates :already_up, or pairs it with a bare :ok = storage_up" do
     offenders =
-      for rel <- scanned_files(), rel != @self, raw_pattern?(File.read!(Path.join(@root, rel))), do: rel
+      for rel <- scanned_files(), rel != @self, raw_pattern?(read!(rel)), do: rel
 
     assert offenders == [],
            "storage_down result discarded / :already_up tolerated / bare `:ok = …storage_up` / ecto.drop task in:\n  " <>
@@ -94,7 +113,7 @@ defmodule Samen.TestDbGuardTest do
 
   test "no CI step or script swallows a database drop with `|| true`" do
     offenders =
-      for rel <- shell_files(), swallowed_drop?(File.read!(Path.join(@root, rel))), do: rel
+      for rel <- shell_files(), swallowed_drop?(read!(rel)), do: rel
 
     assert offenders == [],
            "a drop whose failure is swallowed (`… || true`) in:\n  " <>
@@ -160,6 +179,6 @@ defmodule Samen.TestDbGuardTest do
     assert "scripts/backup-verify-gameday.sh" in shell
     assert "docs/runbooks/pitr-gameday-sim.sh" in shell
     assert "driftwood/priv/gameday/pitr_gameday_sim.sh" in shell
-    assert Regex.match?(~r/mix ecto\.drop/, File.read!(Path.join(@root, "ci/steps.conf")))
+    assert Regex.match?(~r/mix ecto\.drop/, read!("ci/steps.conf"))
   end
 end
