@@ -127,6 +127,17 @@ def atomic_write_json(path, data):
 TEST_SEAMS = ("SAMEN_CI_TEST_HOLD_LAUNCH", "SAMEN_CI_TEST_HOLD_KIND", "SAMEN_CI_TEST_HOLD_LIMIT_S")
 
 
+def group_alive(pg):
+    """True while any process of group `pg` exists (signal 0: ProcessLookupError means none is left)."""
+    try:
+        os.killpg(pg, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
 def hold_launch_for_test(pgid, kind, interrupted):
     """Self-test seam: with SAMEN_CI_TEST_HOLD_LAUNCH=<file> the driver records the launched process group in <file> and
     then BLOCKS, at the exact point between launching (a step, or the flaky rerun: SAMEN_CI_TEST_HOLD_KIND=step|rerun,
@@ -1118,16 +1129,23 @@ class Run(object):
         return p.returncode == 0
 
     def stop_group(self, proc):
-        """SIGTERM then (after 20 s) SIGKILL a process group this driver started, and reap it."""
+        """SIGTERM then (after 20 s) SIGKILL a process group this driver started, and reap it. The deadline covers the
+        WHOLE group: a member that handles SIGTERM can outlive the leader, and the record is dropped once this returns."""
+        pg = proc.pid
         try:
-            os.killpg(proc.pid, signal.SIGTERM)
+            os.killpg(pg, signal.SIGTERM)
         except OSError:
             pass
+        deadline = time.time() + 20
         try:
             proc.wait(timeout=20)
         except subprocess.TimeoutExpired:
+            pass
+        while group_alive(pg) and time.time() < deadline:
+            time.sleep(0.1)
+        if proc.poll() is None or group_alive(pg):
             try:
-                os.killpg(proc.pid, signal.SIGKILL)
+                os.killpg(pg, signal.SIGKILL)
             except OSError:
                 pass
             proc.wait()
@@ -1288,18 +1306,23 @@ class Run(object):
         return t0, pending, stop_reason
 
     def terminate_all(self):
-        for r in self.running.values():
+        pgs = {}
+        for sid, r in self.running.items():
             r["signalled"] = True
+            pgs[sid] = r["proc"].pid
             try:
                 os.killpg(r["proc"].pid, signal.SIGTERM)  # SIGTERM first: gen-probe/sabotage traps restore
             except OSError:
                 pass
         deadline = time.time() + 20
-        while self.running and time.time() < deadline:
+        # the deadline covers every member of every group, not just each leader: a member that handles SIGTERM outlives it
+        while time.time() < deadline:
             for sid in list(self.running):
                 rc = self.running[sid]["proc"].poll()
                 if rc is not None:
                     self.finish(sid, rc)
+            if not self.running and not any(group_alive(pg) for pg in pgs.values()):
+                break
             time.sleep(0.2)
         for sid in list(self.running):
             try:
@@ -1308,6 +1331,12 @@ class Run(object):
                 pass
             self.running[sid]["proc"].wait()
             self.finish(sid, -9)
+        for pg in pgs.values():
+            if group_alive(pg):
+                try:
+                    os.killpg(pg, signal.SIGKILL)
+                except OSError:
+                    pass
 
 
 def final_line(mode, opts, plan, status, elapsed, first_fail):

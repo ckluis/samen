@@ -327,3 +327,11 @@ defmodule Samen.Meta.CiDriverGuardTest.RerunRecord do
     Samen.Meta.CiDriverGuard.run_case!("RERUNREC")
   end
 end
+
+defmodule Samen.Meta.CiDriverGuardTest.GroupKill do
+  use ExUnit.Case, async: true
+
+  test "GROUPKILL an interrupted driver stops the whole process group, not just its leader" do
+    Samen.Meta.CiDriverGuard.run_case!("GROUPKILL")
+  end
+end

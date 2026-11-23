@@ -103,6 +103,8 @@
 #   LAUNCHSEAM that seam is test-only: bounded (fails loudly naming itself), stopped by SIGTERM, never visible to a step.
 #   RERUNREC   the flaky rerun is gated and recorded like a step (state.json "<step>#rerun"): a driver killed during it
 #          leaves no live, unrecorded `mix test`.
+#   GROUPKILL  an interrupted driver stops the WHOLE process group (a member that handles SIGTERM outlives its leader): a step
+#          and a flaky rerun, each with a SIGTERM-ignoring member, are gone when the driver exits 130, within its one 20 s deadline.
 #
 # Usage: scripts/ci_test.sh [CASE…]      (default: every case)
 # Exit:  0 all assertions pass · 1 otherwise. Residue: none (temp dirs, trap on EXIT/INT/TERM).
@@ -2379,7 +2381,62 @@ MIX
   eq "$(grep -c '^rerun' "$CI_TEST_RUNS" 2>/dev/null || true)" 0 "RERUNREC: ... which never ran a line of its command"
 }
 
-ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS LOCALPATHS GENPROBE GENHEX GENHEXRO NARROW RECHUNK COSTW TIMEOUT SELTMO GENDEPS ESCAPE MUTLINT MUTLOCK LAUNCHREC LAUNCHSEAM RERUNREC)
+# GROUPKILL: an interrupted driver stops the WHOLE process group it started, not just its leader. A member that handles
+# SIGTERM outlives the leader; waiting on the leader alone dropped the record and exited with that member still alive (and
+# never sent SIGKILL). The waits are on states (a pid file, the driver's exit, the group), each under a bounded loop; the
+# stubborn member also stops by itself when its release file appears or its own bounded loop ends.
+case_GROUPKILL() {
+  mkrepo groupkill
+  mkdir -p "$T/bin"
+  local member="$T/member.pid" release="$T/member.release" pid pg mp rc n part
+  # a group member that ignores SIGTERM and outlives its leader, which dies on SIGTERM
+  local stubborn="( trap '' TERM; echo \$BASHPID > $member; for _ in \$(seq 1 600); do [[ -e $release ]] && exit 0; sleep 0.1; done ) & wait"
+  cat > "$T/bin/mix" <<MIX
+#!/usr/bin/env bash
+[[ "\${1:-}" == test ]] || exit 2
+shift; echo "rerun \$*" >> "\$CI_TEST_RUNS"
+$stubborn
+MIX
+  chmod +x "$T/bin/mix"
+  for part in step rerun; do
+    rm -f "$member" "$release"
+    { echo "$APPS"
+      if [[ $part == step ]]; then
+        printf '[step gk]\ncmd = echo "$CI_STEP" >> "$CI_TEST_RUNS"; %s\nmodes = pr\ninputs = core/\nest_s = 1\n' "$stubborn"
+      else
+        cat <<'STEP'
+[step gk]
+cmd = echo "$CI_STEP" >> "$CI_TEST_RUNS"
+    printf '\n  1) test the thing works (Fake.Test)\n     test/fake_test.exs:7\n     Assertion with == failed\n     code:  assert 1 == 2\n     left:  1\n     right: 2\n     stacktrace:\n       test/fake_test.exs:8: (test)\n\n'
+    exit 1
+cwd = core
+exunit_dir = core
+modes = pr
+inputs = core/
+est_s = 1
+STEP
+      fi
+    } > "$SAMEN_CI_MANIFEST"
+    PATH="$T/bin:$PATH" "$CI" pr -j 1 > "$T/gk-$part" 2>&1 &
+    pid=$!
+    for n in $(seq 1 150); do [[ -s "$member" ]] && break; sleep 0.1; done
+    if [[ ! -s "$member" ]]; then bad "GROUPKILL($part): the stubborn member never started"; kill -KILL "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; continue; fi
+    mp="$(cat "$member")"
+    pg="$(jsonget "$SAMEN_CI_HOME/state.json" 'd["running"]["gk#rerun" if "gk#rerun" in d["running"] else "gk"]')"
+    kill -TERM "$pid"
+    for n in $(seq 1 250); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+    if kill -0 "$pid" 2>/dev/null; then bad "GROUPKILL($part): the interrupted driver did not exit within 25 s"; kill -KILL "$pid" 2>/dev/null; fi
+    wait "$pid" 2>/dev/null; rc=$?
+    eq "$rc" 130 "GROUPKILL($part): an interrupted driver exits 130"
+    if kill -0 "$mp" 2>/dev/null || kill -0 -- "-$pg" 2>/dev/null; then
+      bad "GROUPKILL($part): a SIGTERM-handling group member is still alive after the driver exited"
+      kill -KILL -- "-$pg" 2>/dev/null; kill -KILL "$mp" 2>/dev/null
+    else ok; fi
+    : > "$release"
+  done
+}
+
+ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS LOCALPATHS GENPROBE GENHEX GENHEXRO NARROW RECHUNK COSTW TIMEOUT SELTMO GENDEPS ESCAPE MUTLINT MUTLOCK LAUNCHREC LAUNCHSEAM RERUNREC GROUPKILL)
 CASES=("$@")
 [[ ${#CASES[@]} -gt 0 ]] || CASES=("${ALL[@]}")
 for c in "${CASES[@]}"; do
