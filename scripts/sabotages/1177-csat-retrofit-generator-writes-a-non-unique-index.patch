@@ -1,12 +1,12 @@
-# SABOTAGE: the CSAT retrofit generator emits a plain concurrent_index, so existing apps would keep 
-#   accepting a duplicate digest
+# SABOTAGE: the CSAT kind alone emits a plain concurrent_index (the API-key kind stays unique), so retrofitted CSAT
+#   tables would keep accepting a duplicate digest
 #
 # Flips the named test(s).
 # APP: samen_core
 # TEST_FILES: test/csat_token_digest_unique_gen_test.exs
 # MUST_FAIL: writes one migration of literal SQL that builds each unique index
 diff --git a/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex b/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
-index e9175bba..512f8fc6 100644
+index 10aa5aac..1add77e5 100644
 --- a/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
 +++ b/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
 @@ -117,7 +117,7 @@ defmodule Mix.Tasks.Samen.Gen.ApiKeyDigestUnique do
@@ -14,7 +14,7 @@ index e9175bba..512f8fc6 100644
    def render(repo, keys, timestamp, kind \\ :api_key) do
      k = Map.fetch!(@kinds, kind)
 -    ups = Enum.map_join(keys, "\n", fn {t, c} -> "    concurrent_unique_index(:#{t}, :#{c}, name: \"#{index_name(t)}\")" <> drop_plain_up(k, t) end)
-+    ups = Enum.map_join(keys, "\n", fn {t, c} -> "    concurrent_index(:#{t}, [:#{c}], name: \"#{index_name(t)}\")" <> drop_plain_up(k, t) end)
++    ups = Enum.map_join(keys, "\n", fn {t, c} -> (if k.plain_index, do: "    concurrent_index(:#{t}, [:#{c}], name: \"#{index_name(t)}\")", else: "    concurrent_unique_index(:#{t}, :#{c}, name: \"#{index_name(t)}\")") <> drop_plain_up(k, t) end)
      downs = Enum.map_join(keys, "\n", fn {t, c} -> restore_plain_down(k, t, c) <> "    execute(\"DROP INDEX CONCURRENTLY IF EXISTS #{index_name(t)}\")" end)
      cols = Enum.map_join(keys, ", ", fn {t, c} -> "`#{t}.#{c}`" end)
  

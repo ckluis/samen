@@ -15,8 +15,7 @@ index 5df4d802..12b761cc 100644
 -    concurrent_unique_index(:scw_csat_survey_token, :scw_token_digest, name: "scw_csat_survey_token_token_digest_uidx")
 +    concurrent_index(:scw_csat_survey_token, :scw_token_digest, name: "scw_csat_survey_token_token_digest_uidx")
      execute("DROP INDEX CONCURRENTLY IF EXISTS scw_csat_survey_token_digest_idx")
--    concurrent_unique_index(:wco_csat_survey_token, :wco_token_digest, name: "wco_csat_survey_token_token_digest_uidx")
-+    concurrent_index(:wco_csat_survey_token, :wco_token_digest, name: "wco_csat_survey_token_token_digest_uidx")
+     concurrent_unique_index(:wco_csat_survey_token, :wco_token_digest, name: "wco_csat_survey_token_token_digest_uidx")
      execute("DROP INDEX CONCURRENTLY IF EXISTS wco_csat_survey_token_digest_idx")
    end
  

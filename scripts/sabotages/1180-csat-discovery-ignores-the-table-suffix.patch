@@ -6,15 +6,15 @@
 # TEST_FILES: test/csat_token_digest_unique_gen_test.exs
 # MUST_FAIL: discovers a CSAT survey table and its digest column from a domain
 diff --git a/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex b/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
-index e9175bba..c5085335 100644
+index 10aa5aac..993b64c5 100644
 --- a/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
 +++ b/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
-@@ -191,7 +191,7 @@ defmodule Mix.Tasks.Samen.Gen.ApiKeyDigestUnique do
+@@ -195,7 +195,7 @@ defmodule Mix.Tasks.Samen.Gen.ApiKeyDigestUnique do
      for domain <- domains,
          resource <- Ash.Domain.Info.resources(domain),
          table = AshPostgres.DataLayer.Info.table(resource),
 -        is_binary(table) and String.ends_with?(table, suffix),
 +        is_binary(table) and (suffix != "" or String.ends_with?(table, suffix)) and String.ends_with?(table, "_"),
-         attr <- Ash.Resource.Info.attributes(resource),
-         column = to_string(attr.name),
+         %{column_name: column} <- Samen.Catalog.fields(resource),
          String.ends_with?(column, "_token_digest"),
+         uniq: true,
