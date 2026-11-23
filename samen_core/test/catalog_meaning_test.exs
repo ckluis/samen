@@ -46,6 +46,13 @@ defmodule SamenCore.CatalogMeaningTest do
 
   defp check(tables, baseline_src), do: CatalogMeaning.check(tables, [], baseline_src)
 
+  # The Mix shell is global: restore it, or every later test that captures task output sees nothing.
+  defp quiet_shell! do
+    previous = Mix.shell()
+    Mix.shell(Mix.Shell.Quiet)
+    on_exit(fn -> Mix.shell(previous) end)
+  end
+
   defp scratch! do
     dir = Path.join(System.tmp_dir!(), "samen_catalog_meaning_#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
@@ -401,7 +408,7 @@ defmodule SamenCore.CatalogMeaningTest do
     test "--init writes the baseline once and refuses an existing file" do
       path = Path.join(scratch!(), "catalog_meaning.baseline")
 
-      Mix.shell(Mix.Shell.Quiet)
+      quiet_shell!()
       assert :ok = Task.init(path, debt_tables(), [])
       assert File.read!(path) == baseline(["fx_deal.notes"])
 
@@ -430,7 +437,7 @@ defmodule SamenCore.CatalogMeaningTest do
 
       # fx_deal.notes still undescribed; fx_deal.title is described now; fx_gone is gone; a NEW undescribed field is not added
       tables = [table("fx_deal", fields: [field("title"), field("notes", description: nil), field("extra", description: nil)])]
-      Mix.shell(Mix.Shell.Quiet)
+      quiet_shell!()
       assert :ok = Task.shrink(path, tables, [])
 
       assert File.read!(path) == baseline(["fx_deal.notes"])
