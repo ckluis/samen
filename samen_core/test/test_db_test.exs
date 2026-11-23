@@ -69,6 +69,10 @@ defmodule Samen.TestDbTest do
     app = "samen_test_db_holder_#{System.unique_integer([:positive])}"
     {conn, holder_pid} = hold_named!(config, app)
     Postgrex.query!(conn, "CREATE TABLE marker (id int)", [])
+    # a SECOND, unnamed session (what a psql, an autovacuum worker or another run's backend looks like): its empty
+    # application_name is listed as application_name="" -- which is also what a blank configured password inspects to
+    bystander = hold_open!(config)
+    %{rows: [[bystander_pid]]} = Postgrex.query!(bystander, "SELECT pg_backend_pid()", [])
 
     e = assert_raise RuntimeError, fn -> TestDb.reset!(config) end
 
@@ -76,10 +80,21 @@ defmodule Samen.TestDbTest do
     assert e.message =~ "in use by other sessions"
     assert e.message =~ "Nothing was dropped and no session was terminated"
     assert e.message =~ "pid=#{holder_pid} "
+    # every blocking session is listed, the unnamed one included (the helper reports what blocks the drop, not just the holder)
+    assert e.message =~ "pid=#{bystander_pid} "
+    assert e.message =~ ~s(application_name="" )
     assert e.message =~ ~s(application_name="#{app}")
     assert e.message =~ "another checkout or worktree"
     refute e.message =~ "SELECT"
-    refute e.message =~ inspect(Keyword.get(config, :password, "no-password-configured"))
+    # no credential in the message: a configured password must not appear (a blank one, as here, is `""`, which a listed
+    # session with an empty application_name legitimately contains -- so only a non-empty password is searched for), and
+    # no URL / password word either way
+    case Keyword.get(config, :password) do
+      pw when is_binary(pw) and pw != "" -> refute e.message =~ pw
+      _ -> :ok
+    end
+
+    refute e.message =~ ~r/password|postgres(ql)?:\/\//i
 
     # nothing killed, nothing dropped: same backend, same data, database still on the server
     assert exists?(config, db)
@@ -88,6 +103,7 @@ defmodule Samen.TestDbTest do
 
     # the holder leaves: the next reset! succeeds and the database is fresh
     GenServer.stop(conn)
+    GenServer.stop(bystander)
     assert TestDb.reset!(config) == :ok
     fresh = hold_open!(config)
     assert %{num_rows: 0} = Postgrex.query!(fresh, "SELECT 1 FROM pg_tables WHERE tablename = 'marker'", [])
