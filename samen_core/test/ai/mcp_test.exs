@@ -122,8 +122,8 @@ defmodule Samen.AI.McpTest do
 
   describe "browse — meaning in the catalogue (ADR-043 §8a)" do
     test "the browse catalogue payload carries the described fixture and is still sealed" do
-      mod = Samen.AI.CatalogRuntimeTest.DescribedFx.load!()
-      on_exit(&Samen.AI.CatalogRuntimeTest.DescribedFx.unload/0)
+      mod = SamenCore.Support.MeaningFixture.described!()
+      on_exit(&SamenCore.Support.MeaningFixture.unload_described/0)
 
       assert {:ok, %{"kind" => "catalog", "schema" => %{"tables" => [table]}}} =
                Mcp.browse(scope(Ash.UUID.generate()), %{}, resources: [mod], repo: TestRepo)

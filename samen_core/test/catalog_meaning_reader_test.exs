@@ -1,52 +1,23 @@
 defmodule SamenCore.CatalogMeaningReaderTest do
   @moduledoc """
   ADR-043 §8a — `Samen.Catalog.Meaning` reads descriptions, label, synonyms, units and derived facts, and the
-  `Samen.Catalog.Verifiers.MeaningDeclarations` compile-time verifier refuses bad meaning text.
+  `Samen.Catalog.Transformers.MeaningDeclarations` compile-time transformer refuses bad meaning text.
   """
   use ExUnit.Case, async: false
 
   alias Samen.Catalog.Meaning
 
-  # The abbrev registry is permanent and hands-off, so a fixture cannot invent an abbrev. These two owner
-  # names are already registered to compile-string-only fixtures (`pii_red_path_test.exs` compiles and purges them
-  # the same way); every fixture here is compiled under one of them and purged on exit.
-  @full_owner {SamenCore.PiiRedPath.BadVault, "piv"}
-  @scratch_owner {SamenCore.PiiRedPath.UnclassifiedNonPii, "piu"}
+  alias SamenCore.Support.MeaningFixture
 
+  # Fixtures are compiled by `MeaningFixture` under abbrev owners the registry already holds (it is permanent and
+  # hands-off); every compile purges first and the module is purged on exit.
   defp compile!(name, body, _abbrev) do
-    {mod, abbrev} = if name == "Full", do: @full_owner, else: @scratch_owner
-    purge(mod)
-
-    src = """
-    defmodule #{inspect(mod)} do
-      use Samen.Resource,
-        otp_app: :samen_core,
-        domain: nil,
-        validate_domain_inclusion?: false,
-        data_layer: AshPostgres.DataLayer,
-        abbrev: "#{abbrev}",
-        archivable: true
-
-      postgres do
-        table "#{abbrev}_thing"
-        repo SamenCore.TestRepo
-      end
-
-      #{body}
-    end
-    """
-
-    Code.compile_string(src)
-    on_exit(fn -> purge(mod) end)
+    mod = MeaningFixture.compile!(body, if(name == "Full", do: :full, else: :scratch))
+    on_exit(fn -> MeaningFixture.purge(mod) end)
     mod
   end
 
-  defp purge(mod) do
-    for m <- [mod, Module.concat(Inspect, mod)] do
-      :code.purge(m)
-      :code.delete(m)
-    end
-  end
+  defp purge(mod), do: MeaningFixture.purge(mod)
 
   @full """
   resource do

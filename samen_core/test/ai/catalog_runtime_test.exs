@@ -26,6 +26,7 @@ defmodule Samen.AI.CatalogRuntimeTest do
   alias Samen.AI
   alias Samen.AI.{Catalog, MaskedPayload, Provider}
   alias Samen.CustomObjects
+  alias SamenCore.Support.MeaningFixture
   alias SamenCore.TestRepo
 
   @fixture_resources [
@@ -40,66 +41,10 @@ defmodule Samen.AI.CatalogRuntimeTest do
     :ok
   end
 
-  defmodule DescribedFx do
-    @moduledoc false
-    # compiled under an abbrev owner the registry already holds (permanent + hands-off); purged by the caller
-    @source """
-    defmodule SamenCore.PiiRedPath.BadVault do
-      use Samen.Resource,
-        otp_app: :samen_core,
-        domain: nil,
-        validate_domain_inclusion?: false,
-        data_layer: AshPostgres.DataLayer,
-        abbrev: "piv"
-
-      postgres do
-        table "piv_thing"
-        repo SamenCore.TestRepo
-      end
-
-      resource do
-        description "A fixture deal used to prove catalog meaning."
-      end
-
-      meaning do
-        synonyms ["contract"]
-        field :value, label: "Deal value", synonyms: ["amount"]
-        field :count, units: "pieces"
-      end
-
-      attributes do
-        attribute :value, Samen.Type.Money, public?: true, description: "Expected value of the fixture deal."
-        attribute :count, :integer, public?: true, description: "How many pieces the fixture deal covers."
-        attribute :status, :atom, public?: true, constraints: [one_of: [:open, :won]]
-      end
-
-      relationships do
-        belongs_to :company, SamenCore.Support.Crm.Company do
-          public? true
-          description "The company the fixture deal is with."
-        end
-      end
-    end
-    """
-
-    def load! do
-      unload()
-      Code.compile_string(@source)
-      SamenCore.PiiRedPath.BadVault
-    end
-
-    def unload do
-      for m <- [SamenCore.PiiRedPath.BadVault, Inspect.SamenCore.PiiRedPath.BadVault] do
-        :code.purge(m)
-        :code.delete(m)
-      end
-    end
-  end
-
   describe "meaning in the catalogue (ADR-043 §8a)" do
     setup do
-      mod = DescribedFx.load!()
-      on_exit(&DescribedFx.unload/0)
+      mod = MeaningFixture.described!()
+      on_exit(&MeaningFixture.unload_described/0)
       {:ok, mod: mod}
     end
 
