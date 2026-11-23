@@ -1,0 +1,21 @@
+# SABOTAGE: a scan test goes back to the capture form &Path.wildcard/1, which the guard's call-paren regex 
+#   did not see
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/source_scan_test.exs
+# MUST_FAIL: no scan test calls Path.wildcard or File.read!/regular?/dir?/ls through the file server
+diff --git a/samen_web/lib/samen/web/authz/read_scope_lint.ex b/samen_web/lib/samen/web/authz/read_scope_lint.ex
+index c25e229d..b8803cd4 100644
+--- a/samen_web/lib/samen/web/authz/read_scope_lint.ex
++++ b/samen_web/lib/samen/web/authz/read_scope_lint.ex
+@@ -35,7 +35,8 @@ defmodule Samen.Web.Authz.ReadScopeLint do
+     # Samen.SourceScan, not Path.wildcard: five `**` walks through the node's single :file_server_2 queue behind every other
+     # test's file I/O and outran ExUnit's 60 s on a loaded machine (the file reads here already bypass it).
+     ~w(samen_core/lib samen_web/lib demo/lib driftwood/lib pawchart/lib)
+-    |> Enum.flat_map(&Samen.SourceScan.files(Path.join(repo_root, &1), [".ex"]))
++    |> Enum.map(&Path.join(repo_root, &1 <> "/**/*.ex"))
++    |> Enum.flat_map(&Path.wildcard/1)
+     |> Enum.reject(fn f -> Path.basename(f) in @skip_basenames end)
+     |> Enum.sort()
+   end
