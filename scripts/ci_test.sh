@@ -289,11 +289,12 @@ print(b(0, 26.78), b(32, 28.1), b(32, 17), b(32, 33), b(32, 7.9))' "$ROOT/script
 
   # SIGKILL of the driver: its step (own session) runs on as an orphan — the next invocation refuses
   # while it runs, and once it is gone resume RE-RUNS it (nothing was recorded for it). The orphan waits on a file THIS test
-  # creates (never a sleep that a slow runner can outlive), and the driver releases a step only once state.json names it, so
+  # creates (never a sleep that a slow runner can outlive; the 60 s loop is only a failure limit, so an interrupted self-test cannot
+  # leave this orphan — its own session, no group kill reaches it — polling forever), and the driver releases a step only once state.json names it, so
   # `start` in the log means resume has the record to refuse on. (LAUNCHREC pins that release order.)
   mkrepo c1k
   { echo "$APPS"
-    printf '[step orphan]\ncmd = echo start >> "$CI_TEST_RUNS"; while [ ! -e "$CI_TEST_RUNS.release" ]; do sleep 0.1; done\nmodes = pr\ninputs = core/\nest_s = 1\n'; } > "$SAMEN_CI_MANIFEST"
+    printf '[step orphan]\ncmd = echo start >> "$CI_TEST_RUNS"; for _ in $(seq 1 600); do [ -e "$CI_TEST_RUNS.release" ] && break; sleep 0.1; done; [ -e "$CI_TEST_RUNS.release" ]\nmodes = pr\ninputs = core/\nest_s = 1\n'; } > "$SAMEN_CI_MANIFEST"
   "$CI" pr -j 1 > "$T/o17" 2>&1 &
   pid=$!
   for _ in $(seq 1 150); do grep -q start "$CI_TEST_RUNS" && break; sleep 0.1; done
@@ -2213,9 +2214,11 @@ time.sleep(120)' "$1/_ci/mutate.lock" "$1/held" &
 # LAUNCHREC: a step is released only AFTER the driver has persisted that it runs. The step lives in its own session, so a
 # SIGKILLed driver leaves it running; the next invocation (a fresh `pr` or `resume`) can only refuse to overlap with it from
 # state.json's "running" map, which needs the step's pid — known only after the launch. The driver therefore holds the step
-# on a pipe until state.json is written; the self-test seam SAMEN_CI_TEST_HOLD_LAUNCH blocks the driver at exactly that
-# point so the kill is placed there, not raced. (Before: the step printed `start`, the driver died, state.json did not exist,
-# `resume` said "no run recorded" and a fresh run overlapped the live orphan — once seen on Actions as the C1 flake.)
+# on a pipe until state.json is written; the self-test seam SAMEN_CI_TEST_HOLD_LAUNCH blocks the driver BETWEEN writing
+# state.json and releasing the step, so the kill is placed there, not raced, and a driver that released first (or recorded
+# last) is caught: at the seam the record must exist AND the step must still be held. (Before: the step printed `start`, the
+# driver died, state.json did not exist, `resume` said "no run recorded" and a fresh run overlapped the live orphan — once
+# seen on Actions as the C1 flake.)
 case_LAUNCHREC() {
   mkrepo launchrec
   { echo "$APPS"
@@ -2226,19 +2229,113 @@ case_LAUNCHREC() {
   for _ in $(seq 1 150); do [[ -s "$hold" ]] && break; sleep 0.1; done
   if [[ ! -s "$hold" ]]; then bad "LAUNCHREC: the driver never reached the launch seam"; kill -KILL "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; return; fi
   pg="$(jsonget "$hold" 'd["pgid"]')"
-  eq "$([[ -e "$SAMEN_CI_HOME/state.json" ]] && echo recorded || echo none)" none "LAUNCHREC: at the seam nothing is recorded yet (the premise)"
+  eq "$(jsonget "$SAMEN_CI_HOME/state.json" 'd["running"]["held"] == '"$pg"'' 2>/dev/null)" True "LAUNCHREC: at the seam state.json already names the held step's process group"
+  eq "$(runs_of start)" 0 "LAUNCHREC: ... and the step has not run a line of its command yet"
   kill -KILL "$pid"; wait "$pid" 2>/dev/null
   # the held step reads EOF on its pipe and exits; wait for it to be gone (bounded), then it must have run NOTHING
   for _ in $(seq 1 150); do kill -0 -- "-$pg" 2>/dev/null || break; sleep 0.1; done
   if kill -0 -- "-$pg" 2>/dev/null; then bad "LAUNCHREC: the held step is still alive after its driver was killed"; kill -KILL -- "-$pg" 2>/dev/null; fi
-  eq "$(runs_of start)" 0 "LAUNCHREC: a step whose driver died before recording it never ran a line of its command"
-  # nothing runs unrecorded -> nothing is left to overlap: a fresh run starts and finishes its own step (positive control)
+  eq "$(runs_of start)" 0 "LAUNCHREC: a step released only after the seam never ran a line of its command when its driver died there"
+  # nothing runs unrecorded -> nothing is left to overlap: a fresh run starts and finishes its own step (positive control:
+  # a released step runs)
   drive "$T/lr2" pr -j 1
   has "$T/lr2" '^CI\(pr\): PASS 1/1' "LAUNCHREC: a fresh run after the kill passes"
   eq "$(runs_of start)" 1 "LAUNCHREC: ... and the step ran exactly once"
 }
 
-ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS LOCALPATHS GENPROBE GENHEX GENHEXRO NARROW RECHUNK COSTW TIMEOUT SELTMO GENDEPS ESCAPE MUTLINT MUTLOCK LAUNCHREC)
+# LAUNCHSEAM: the launch-hold seam is test-only and cannot hang a developer's `scripts/ci`: bounded (fails loudly, naming
+# itself), stopped by SIGTERM like any run, and never visible to a step (a step that spawns a nested driver would hang it).
+# Every case ends with the held step gone and its command never run.
+case_LAUNCHSEAM() {
+  mkrepo launchseam
+  { echo "$APPS"
+    printf '[step held]\ncmd = echo start >> "$CI_TEST_RUNS"; sleep 30\nmodes = pr\ninputs = core/\nest_s = 1\n'; } > "$SAMEN_CI_MANIFEST"
+  local hold="$T/launchseam.hold" pid pg rc n
+  gone() { local g; for g in $(seq 1 150); do kill -0 -- "-$1" 2>/dev/null || return 0; sleep 0.1; done; kill -KILL -- "-$1" 2>/dev/null; return 1; }
+  # (a) expiry: the driver ends by itself, loudly, and the held step does not outlive it
+  env SAMEN_CI_TEST_HOLD_LAUNCH="$hold" SAMEN_CI_TEST_HOLD_LIMIT_S=1 "$CI" pr -j 1 > "$T/ls1" 2>&1 &
+  pid=$!
+  for n in $(seq 1 150); do [[ -s "$hold" ]] && break; sleep 0.1; done
+  if [[ ! -s "$hold" ]]; then bad "LAUNCHSEAM: the driver never reached the launch seam"; kill -KILL "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; return; fi
+  pg="$(jsonget "$hold" 'd["pgid"]')"
+  for n in $(seq 1 150); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+  if kill -0 "$pid" 2>/dev/null; then bad "LAUNCHSEAM: a held driver outlived the seam's limit"; kill -KILL "$pid" 2>/dev/null; fi
+  wait "$pid" 2>/dev/null; rc=$?
+  eq "$([[ $rc -ne 0 ]] && echo failed || echo "rc=$rc")" failed "LAUNCHSEAM: an expired hold fails the run (never PASS)"
+  has "$T/ls1" 'SAMEN_CI_TEST_HOLD_LAUNCH: the test seam held' "LAUNCHSEAM: ... loudly, naming the seam"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'd["verdict"]')" ERROR "LAUNCHSEAM: ... with last.json ERROR"
+  gone "$pg" && ok || bad "LAUNCHSEAM: the held step is still alive after the hold expired"
+  eq "$(runs_of start)" 0 "LAUNCHSEAM: ... and it never ran its command"
+  # (b) SIGTERM at the seam: the driver stops like any interrupted run
+  rm -f "$hold"
+  env SAMEN_CI_TEST_HOLD_LAUNCH="$hold" "$CI" pr -j 1 > "$T/ls2" 2>&1 &
+  pid=$!
+  for n in $(seq 1 150); do [[ -s "$hold" ]] && break; sleep 0.1; done
+  if [[ ! -s "$hold" ]]; then bad "LAUNCHSEAM: the driver never reached the launch seam (2)"; kill -KILL "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; return; fi
+  pg="$(jsonget "$hold" 'd["pgid"]')"
+  kill -TERM "$pid"
+  for n in $(seq 1 150); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+  if kill -0 "$pid" 2>/dev/null; then bad "LAUNCHSEAM: a held driver ignored SIGTERM"; kill -KILL "$pid" 2>/dev/null; fi
+  wait "$pid" 2>/dev/null; rc=$?
+  eq "$rc" 130 "LAUNCHSEAM: a SIGTERMed hold exits 130 like any interrupted run"
+  gone "$pg" && ok || bad "LAUNCHSEAM: the held step is still alive after SIGTERM"
+  eq "$(runs_of start)" 0 "LAUNCHSEAM: ... and it never ran its command"
+  # (c) no step sees the seam (positive control: the driver itself does — (a) and (b) held on it)
+  rm -f "$hold"
+  { echo "$APPS"
+    printf '[step env]\ncmd = echo "env h=${SAMEN_CI_TEST_HOLD_LAUNCH-unset} k=${SAMEN_CI_TEST_HOLD_KIND-unset} l=${SAMEN_CI_TEST_HOLD_LIMIT_S-unset}" >> "$CI_TEST_RUNS"\nmodes = pr\ninputs = core/\nest_s = 1\n'; } > "$SAMEN_CI_MANIFEST"
+  env SAMEN_CI_TEST_HOLD_LAUNCH="$hold" SAMEN_CI_TEST_HOLD_KIND=rerun SAMEN_CI_TEST_HOLD_LIMIT_S=7 "$CI" pr -j 1 > "$T/ls3" 2>&1; rc=$?
+  eq "$rc" 0 "LAUNCHSEAM: a step launched under a non-matching seam runs normally"
+  has "$CI_TEST_RUNS" '^env h=unset k=unset l=unset$' "LAUNCHSEAM: a step's environment carries none of the launch-hold seam variables"
+}
+
+# RERUNREC: the flaky rerun (`mix test <failing tests>`) is a process the driver starts too, so it obeys the same rule as a
+# step: held until state.json names it, started in its own session, refused-against by the next invocation. (Before: it ran in
+# the driver's own group with no record; a driver killed during it left a live `mix test` that a fresh `pr` overlapped on the
+# same test database.) The seam's SAMEN_CI_TEST_HOLD_KIND=rerun holds only the rerun, not the failing step before it.
+case_RERUNREC() {
+  mkrepo rerunrec
+  mkdir -p "$T/bin"
+  cat > "$T/bin/mix" <<'MIX'
+#!/usr/bin/env bash
+# fake `mix`: records the isolated rerun; passes
+[[ "${1:-}" == test ]] || exit 2
+shift; echo "rerun $*" >> "$CI_TEST_RUNS"
+MIX
+  chmod +x "$T/bin/mix"
+  { echo "$APPS"
+    cat <<'STEP'
+[step flaky]
+cmd = echo "$CI_STEP" >> "$CI_TEST_RUNS"
+    printf '\n  1) test the thing works (Fake.Test)\n     test/fake_test.exs:7\n     Assertion with == failed\n     code:  assert 1 == 2\n     left:  1\n     right: 2\n     stacktrace:\n       test/fake_test.exs:8: (test)\n\n'
+    exit 1
+cwd = core
+exunit_dir = core
+modes = pr
+inputs = core/
+est_s = 1
+STEP
+  } > "$SAMEN_CI_MANIFEST"
+  local hold="$T/rerunrec.hold" pid pg n
+  env PATH="$T/bin:$PATH" SAMEN_CI_TEST_HOLD_LAUNCH="$hold" SAMEN_CI_TEST_HOLD_KIND=rerun "$CI" pr -j 1 > "$T/rr1" 2>&1 &
+  pid=$!
+  for n in $(seq 1 150); do [[ -s "$hold" ]] && break; sleep 0.1; done
+  if [[ ! -s "$hold" ]]; then bad "RERUNREC: the driver never reached the rerun's launch seam"; kill -KILL "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; return; fi
+  pg="$(jsonget "$hold" 'd["pgid"]')"
+  eq "$(runs_of flaky)" 1 "RERUNREC: the failing step itself ran once, before the rerun (premise)"
+  eq "$(jsonget "$SAMEN_CI_HOME/state.json" 'd["running"]["flaky#rerun"] == '"$pg" 2>/dev/null)" True "RERUNREC: at the seam state.json names the held rerun's process group"
+  eq "$(grep -c '^rerun' "$CI_TEST_RUNS")" 0 "RERUNREC: ... and the rerun has not run a line of its command yet"
+  kill -KILL "$pid"; wait "$pid" 2>/dev/null
+  for n in $(seq 1 150); do kill -0 -- "-$pg" 2>/dev/null || break; sleep 0.1; done
+  if kill -0 -- "-$pg" 2>/dev/null; then bad "RERUNREC: the held rerun is still alive after its driver was killed"; kill -KILL -- "-$pg" 2>/dev/null; fi
+  eq "$(grep -c '^rerun' "$CI_TEST_RUNS")" 0 "RERUNREC: a rerun whose driver died before recording it never ran"
+  # positive control: nothing is left to overlap, and a released rerun does run (once)
+  PATH="$T/bin:$PATH" drive "$T/rr2" pr -j 1
+  has "$T/rr2" '^FLAKY flaky [0-9.]+s \(passed on rerun\)$' "RERUNREC: a fresh run after the kill completes its own rerun"
+  eq "$(grep -c '^rerun' "$CI_TEST_RUNS")" 1 "RERUNREC: ... exactly once"
+}
+
+ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS LOCALPATHS GENPROBE GENHEX GENHEXRO NARROW RECHUNK COSTW TIMEOUT SELTMO GENDEPS ESCAPE MUTLINT MUTLOCK LAUNCHREC LAUNCHSEAM RERUNREC)
 CASES=("$@")
 [[ ${#CASES[@]} -gt 0 ]] || CASES=("${ALL[@]}")
 for c in "${CASES[@]}"; do
