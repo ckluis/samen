@@ -79,7 +79,7 @@ defmodule Demo.AiGroundingCatalogTest do
     assert is_binary(by_name["org_id"]["description"])
   end
 
-  test "every description in demo's catalog is plain schema text: 3+ words, at most 300 chars, no vt_" do
+  test "every description in demo's catalog is plain schema text: 3+ words, at most 300 chars" do
     texts =
       for table <- Catalog.schema()["tables"],
           text <-
@@ -93,7 +93,17 @@ defmodule Demo.AiGroundingCatalogTest do
     for text <- texts do
       assert length(String.split(text)) >= 3, "too short: #{inspect(text)}"
       assert String.length(text) <= 300, "too long: #{inspect(text)}"
-      refute String.contains?(text, "vt_"), "carries a vault-token prefix: #{inspect(text)}"
     end
+  end
+
+  test "no string anywhere in demo's catalogue carries the vault-token sentinel the chokepoint refuses" do
+    leaves = Samen.AI.VtSentinel.leaves(Catalog.schema())
+
+    # anti-tautology: the walk really reaches names, descriptions, labels, synonyms, units and allowed values
+    assert length(leaves) > 5_000
+    assert Enum.any?(leaves, fn {path, _} -> "allowed_values" in path end)
+
+    offenders = for {path, text} <- leaves, Samen.AI.VtSentinel.in_string?(text), do: {path, text}
+    assert offenders == [], "strings the AI chokepoint would refuse: #{inspect(Enum.take(offenders, 5))}"
   end
 end

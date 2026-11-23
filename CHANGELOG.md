@@ -19,8 +19,11 @@ All notable changes to Samen are recorded here. The format follows
   the units Money, Percent and Duration fix. `schema.dict.json` gains `description` and `label` on tables, fields
   and (description) relationships, and optional `synonyms`, `units`, `allowed_values`, `max_length`; `grounding/2`
   and the MCP browse carry the same. The framework describes `id`, `org_id`, timestamps, `archived_at` and `custom`.
-- **Added: a literal `vt_` in any meaning text, a `meaning` field naming a non-attribute, and authored units on a
-  unit-fixing type fail compile.** The AI chokepoint refuses any metadata string containing `vt_`.
+- **Added: a literal `vt_` in any string the catalogue entry takes from meaning, a `meaning` field naming a
+  non-attribute or naming one twice, and authored units on a unit-fixing type fail compile.** The AI chokepoint
+  refuses any metadata string containing `vt_`, so the check scans the reader's whole output with the chokepoint's
+  own predicate (`Samen.AI.VtSentinel`): descriptions, labels, synonyms, units, `allowed_values`, and logical names.
+  Physical table and column names are not meaning text and are covered by a catalogue walk test in each host.
 - **Changed: the CRM scope blueprint, `Samen.Fragments.CorePerson` and demo's CRM resources are described**; the three
   committed `schema.dict.json` files are regenerated. No database column, migration or `custom_objects` change.
 

@@ -606,8 +606,17 @@ the runtime catalogue expose it, so §8's parity still holds by construction (on
 - `Samen.Catalog.Meaning` is the single reader. `description` and `label` are always present (a missing description
   is `null`; an empty string counts as missing); `synonyms`, `units`, `allowed_values`, `max_length` appear only when
   they have a value; relationships carry `description`.
-- A literal `vt_` in any meaning text fails compile: the chokepoint refuses any metadata string containing it, so
-  one such description would refuse every auto-grounded completion and the MCP browse.
+- A literal `vt_` in any string the reader puts into a catalogue entry fails compile: the chokepoint refuses any
+  metadata string containing it, so one such string would refuse every auto-grounded completion and the MCP browse.
+  The check (`Samen.Catalog.Transformers.MeaningDeclarations`) scans the reader's own output
+  (`Samen.Catalog.Meaning.string_leaves/1`): the table description, label and synonyms; each field's description,
+  label, synonyms, units and `allowed_values` (`one_of` atoms, `Ash.Type.Enum` values); each relationship
+  description; and the logical attribute and relationship names. It uses the chokepoint's own predicate
+  (`Samen.AI.VtSentinel`). It does NOT cover the physical table and column names (`table_name`, `column_name`), which
+  are not meaning text; each host's `catalog_vt_sentinel` test walks the whole catalogue, names included.
+  A `meaning field` naming an attribute twice also fails compile. The check runs after every transformer that adds
+  or describes an attribute (declared with `after?/1`), so `meaning field :company_id`, `:org_id`, `:archived_at`
+  and `:custom` are accepted.
 
 **Unchanged.** Still metadata only: author-written text and code constants, never a row value. No database column,
 no `tam_table`/`fld_field` change, and the tenant `custom_objects` payload is untouched (tenant-written text is a
