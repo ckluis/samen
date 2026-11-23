@@ -6,14 +6,14 @@
 # TEST_FILES: test/catalog_meaning_test.exs
 # MUST_FAIL: RED: a field synonym that names another table's label or synonym is refused (cross-table)
 diff --git a/samen_core/lib/samen/catalog_meaning.ex b/samen_core/lib/samen/catalog_meaning.ex
-index 9232d5ba..4156f45a 100644
+index 11d582a..fabd6a5 100644
 --- a/samen_core/lib/samen/catalog_meaning.ex
 +++ b/samen_core/lib/samen/catalog_meaning.ex
-@@ -322,6 +322,7 @@ defmodule Samen.CatalogMeaning do
+@@ -326,6 +326,7 @@ defmodule Samen.CatalogMeaning do
        field_side =
          for f <- t.fields,
              s <- f.synonyms,
 +            false,
              {other, via, label} <- Map.get(index, norm(s), []),
              other != t.table_name,
-             # a FIELD synonym may not equal another table's label or synonym (its bare table name is not a word a
+             not twin?(t, label),

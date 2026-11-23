@@ -5,13 +5,13 @@
 # TEST_FILES: test/catalog_meaning_test.exs
 # MUST_FAIL: RED: a description that restates the field name is refused
 diff --git a/samen_core/lib/samen/catalog_meaning.ex b/samen_core/lib/samen/catalog_meaning.ex
-index 9232d5ba..9e8e3c10 100644
+index 11d582a7..5ae931ad 100644
 --- a/samen_core/lib/samen/catalog_meaning.ex
 +++ b/samen_core/lib/samen/catalog_meaning.ex
-@@ -254,7 +254,8 @@ defmodule Samen.CatalogMeaning do
-   @spec restates?([String.t()], MapSet.t(String.t())) :: boolean()
+@@ -257,7 +257,8 @@ defmodule Samen.CatalogMeaning do
    def restates?(tokens, name_words) do
-     content = Enum.reject(tokens, &(&1 in @stopwords))
+     # A single letter is never a content word: the tokeniser splits "name's" into "name" and "s", and "e.g." into "e", "g".
+     content = Enum.reject(tokens, &(&1 in @stopwords or String.length(&1) <= 1))
 -    content == [] or Enum.all?(content, &MapSet.member?(name_words, stem(&1)))
 +    _ = {content, name_words}
 +    false
