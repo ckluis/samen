@@ -241,6 +241,11 @@ end
   may not equal another table's label, humanized resource name, table name or synonym; a FIELD synonym may not equal another
   table's label or synonym. Within one resource a synonym is unique (case-insensitive across the table's and every field's)
   and never another field's logical name or label. Each is 1-40 characters. `mix samen.verify.catalog_meaning` enforces this.
+  **Twin mounts are one concept:** a scope a host mounts twice (Billing and Support in driftwood and pawchart) gives each
+  table a twin with the SAME label, and a blueprint synonym lands on both mounts. A table's synonym therefore never
+  collides with a table that has the same label as itself (the twin), nor with that twin's identical synonym; it still
+  collides with any table whose label differs. So one synonym in a twin-mounted blueprint is fine, while "file" on an
+  attachment (it names the Files table, a different label) is still refused.
 - Allowed values and max length come from `one_of` / `max_length`; Money, Percent and Duration fix their own units
   (authoring units there fails compile).
 - Write only what the code makes true: read the type, constraints, default and use first, and say so plainly when

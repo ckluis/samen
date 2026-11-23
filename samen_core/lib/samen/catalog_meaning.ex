@@ -17,7 +17,8 @@ defmodule Samen.CatalogMeaning do
     * **R4 synonyms**: 1-40 characters; unique within a resource, case-insensitively, across table and field
       synonyms; never equal to another field's logical name or label. Across tables of one app: a TABLE synonym may
       not equal another table's label, humanized resource name, table name or synonym; a FIELD synonym may not equal
-      another table's label or synonym ("file" on an attachment must not name the Files table).
+      another table's label or synonym ("file" on an attachment must not name the Files table). A table with the
+      SAME label (the twin mount of a scope a host mounts twice) is exempt: twins are one concept.
     * **R5 units**: at most 40 characters, and none authored where the type fixes its own. (The `meaning`
       transformer refuses both at compile time; this re-checks the catalogue so a host that bypassed the DSL is
       still caught.)
@@ -318,6 +319,7 @@ defmodule Samen.CatalogMeaning do
         for s <- t.synonyms,
             {other, _via, label} <- Map.get(index, norm(s), []),
             other != t.table_name,
+            not twin?(t, label),
             do: finding(:quality, t.table_name, "synonym #{inspect(s)} names another table (#{other}, #{inspect(label)})")
 
       field_side =
@@ -325,6 +327,7 @@ defmodule Samen.CatalogMeaning do
             s <- f.synonyms,
             {other, via, label} <- Map.get(index, norm(s), []),
             other != t.table_name,
+            not twin?(t, label),
             # a FIELD synonym may not equal another table's label or synonym (its bare table name is not a word a
             # person would use for a column, so it is not held against it)
             via == :synonym or norm(s) == norm(label),
@@ -338,6 +341,11 @@ defmodule Samen.CatalogMeaning do
       table_side ++ field_side
     end)
   end
+
+  # A scope mounted twice in a host (Billing, Support) gives every table a twin with the SAME label, and a blueprint
+  # synonym lands on both mounts. Twins are one concept: the label they share is already (equally) ambiguous, so
+  # their names and synonyms never collide with each other. A table with a DIFFERENT label still collides.
+  defp twin?(t, other_label), do: norm(other_label) == norm(t.label)
 
   # R5.
   defp units_findings(t) do

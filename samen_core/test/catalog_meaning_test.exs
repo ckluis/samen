@@ -330,6 +330,42 @@ defmodule SamenCore.CatalogMeaningTest do
       assert check([table("fx_file", label: "File", module_label: "File", synonyms: ["file"])], nil) == []
     end
 
+    test "twin mounts are one concept: a table synonym does not collide with the twin (same label), still with any other label" do
+      # Billing is mounted twice in a host: both mounts carry the blueprint's synonym, and share the label "Invoice".
+      a = table("pbi_invoice", label: "Invoice", synonyms: ["bill"])
+      b = table("pmi_invoice", label: "Invoice", synonyms: ["bill"])
+      assert check([a, b], nil) == []
+
+      # the twin's other names are the twin's: a synonym equal to the twin's humanized resource or table name is the same concept
+      c = table("pmi_invoice", label: "Invoice", module_label: "Invoice", synonyms: ["pmi invoice"])
+      assert check([table("pbi_invoice", label: "Invoice", synonyms: ["pmi invoice"]), c], nil) == []
+
+      # control: a DIFFERENT-label table with that synonym (or with that name) is still refused, with a twin present
+      bill = table("pbi_bill", label: "Bill")
+      assert [_ | _] = check([a, b, bill], nil)
+      other_syn = table("pbi_credit", label: "Credit note", synonyms: ["bill"])
+      violations = check([a, b, other_syn], nil)
+      assert [_, _, _, _] = violations_matching(violations, ~r/names another table/)
+      assert Enum.any?(violations, &(&1 =~ "pbi_credit"))
+    end
+
+    test "twin mounts: a FIELD synonym does not collide with the twin's label or synonym, still with another table's" do
+      twin = table("pmi_plan", label: "Plan", synonyms: ["tariff"], fields: [field("name", synonyms: ["plan"])])
+      owner = table("pbi_plan", label: "Plan", synonyms: ["tariff"], fields: [field("name", synonyms: ["plan"])])
+      assert check([twin, owner], nil) == []
+
+      # a field synonym equal to the twin's table SYNONYM is the twin's too
+      field_owner = table("pbi_plan", label: "Plan", fields: [field("name", synonyms: ["tariff"])])
+      assert check([twin, field_owner], nil) == []
+
+      # control: the same field synonyms against a different-label table are refused
+      stranger = table("pbi_price", label: "Price", synonyms: ["rate"], fields: [field("amount")])
+      by_label = table("pbi_plan", label: "Plan", fields: [field("name", synonyms: ["price"])])
+      by_synonym = table("pbi_plan", label: "Plan", fields: [field("name", synonyms: ["rate"])])
+      assert [_] = check([twin, stranger, by_label], nil)
+      assert [_] = check([twin, stranger, by_synonym], nil)
+    end
+
     test "RED: a field synonym that names another table's label or synonym is refused (cross-table)" do
       contact = table("cnt_contact", label: "Contact", synonyms: ["lead"])
 
@@ -346,6 +382,79 @@ defmodule SamenCore.CatalogMeaningTest do
       assert check([contact, bare], nil) == []
 
       assert check([contact, table("crm_person", fields: [field("name", synonyms: ["full name"])])], nil) == []
+    end
+  end
+
+  describe "twin mounts against the three real dicts" do
+    @hosts ~w(demo driftwood pawchart)
+
+    # table_info from a committed schema.dict.json (the dict has no module label: it is the resource's last segment)
+    defp dict_tables(host) do
+      path = Path.join([Samen.Lint.KernelSwallow.repo_root(), host, "schema.dict.json"])
+
+      for t <- path |> File.read!() |> Jason.decode!() |> Map.fetch!("tables") do
+        %{
+          table_name: t["table_name"],
+          resource: t["resource"],
+          label: t["label"],
+          module_label: t["resource"] |> String.split(".") |> List.last() |> Macro.underscore() |> Samen.Catalog.Meaning.humanize(),
+          description: t["description"],
+          synonyms: Map.get(t, "synonyms", []),
+          fields:
+            for f <- t["fields"] do
+              %{logical_name: f["logical_name"], label: f["label"], description: f["description"], synonyms: Map.get(f, "synonyms", []), authored_units: nil, units_fixed?: false}
+            end,
+          relationships: []
+        }
+      end
+    end
+
+    defp synonym_violations(tables), do: tables |> check(nil) |> violations_matching(~r/synonym/)
+
+    # A blueprint synonym lands on EVERY mount of the scope: give each twin group (same label) its own new synonym.
+    defp with_hypothetical_synonyms(tables) do
+      groups = tables |> Enum.group_by(& &1.label) |> Enum.filter(fn {_l, ts} -> length(ts) > 1 end)
+      names = for {label, ts} <- groups, t <- ts, do: {t.table_name, "zz hypothetical #{label}"}
+      by_table = Map.new(names)
+
+      {Enum.map(tables, fn t ->
+         case by_table[t.table_name] do
+           nil -> t
+           syn -> %{t | synonyms: [syn | t.synonyms]}
+         end
+       end), length(groups)}
+    end
+
+    test "a hypothetical synonym on a twin-mounted scope's tables (on BOTH mounts) is accepted in every host" do
+      for host <- @hosts do
+        tables = dict_tables(host)
+        assert synonym_violations(tables) == [], "#{host}: the committed dict already breaks a synonym rule"
+
+        {extended, groups} = with_hypothetical_synonyms(tables)
+        assert groups > 0, "#{host}: no twin-mounted table found (the demonstration would be vacuous)"
+        assert synonym_violations(extended) == [], "#{host}: a twin's synonym was refused"
+      end
+    end
+
+    test "control: the same synonym on a table with a DIFFERENT label is refused, and so is `file` on the attachment" do
+      for host <- @hosts do
+        {extended, _} = host |> dict_tables() |> with_hypothetical_synonyms()
+        twin = Enum.find(extended, &(&1.synonyms |> Enum.any?(fn s -> s =~ "zz hypothetical" end)))
+        stranger = Enum.find(extended, &(&1.label != twin.label and &1.synonyms == []))
+
+        clash = Enum.map(extended, &if(&1.table_name == stranger.table_name, do: %{&1 | synonyms: twin.synonyms}, else: &1))
+        violations = synonym_violations(clash)
+        assert Enum.any?(violations, &(&1 =~ "#{stranger.table_name}:")), "#{host}: #{stranger.table_name} was not refused"
+        assert Enum.any?(violations, &(&1 =~ "#{twin.table_name}:")), "#{host}: #{twin.table_name} was not refused"
+
+        # the Files-on-Attachment collision (different label) is still refused
+        file_on_attachment =
+          Enum.map(extended, fn t ->
+            if t.table_name =~ ~r/attachment$/, do: %{t | synonyms: ["file" | t.synonyms]}, else: t
+          end)
+
+        assert [_ | _] = violations_matching(synonym_violations(file_on_attachment), ~r/attachment: synonym "file" names another table/)
+      end
     end
   end
 
