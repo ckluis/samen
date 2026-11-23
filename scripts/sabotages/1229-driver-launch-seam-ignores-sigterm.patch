@@ -1,0 +1,20 @@
+# SABOTAGE: the launch-hold test seam ignores the driver's interrupt flag, so Ctrl-C and SIGTERM cannot 
+#   stop a held driver
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: LAUNCHSEAM the launch-hold test seam is bounded, interruptible and never reaches a step
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index f0a6c898..d871ee7d 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -140,7 +140,7 @@ def hold_launch_for_test(pgid, kind, interrupted):
+     atomic_write_json(path, {"pgid": pgid, "kind": kind})
+     limit = float(os.environ.get("SAMEN_CI_TEST_HOLD_LIMIT_S", "60"))
+     deadline = time.time() + limit
+-    while not interrupted():
++    while True:
+         if time.time() >= deadline:
+             raise RuntimeError("SAMEN_CI_TEST_HOLD_LAUNCH: the test seam held the %s launch for %gs and nothing killed "
+                                "the driver — it is test-only (scripts/ci_test.sh LAUNCHREC); unset it" % (kind, limit))
