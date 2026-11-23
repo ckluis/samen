@@ -1,0 +1,19 @@
+# SABOTAGE: a table synonym equal to another table's label is accepted, so attachment 'file' names the 
+#   Files table
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_test.exs
+# MUST_FAIL: RED: a table synonym that names another table is refused (cross-table)
+diff --git a/samen_core/lib/samen/catalog_meaning.ex b/samen_core/lib/samen/catalog_meaning.ex
+index 9232d5ba..2af30d6f 100644
+--- a/samen_core/lib/samen/catalog_meaning.ex
++++ b/samen_core/lib/samen/catalog_meaning.ex
+@@ -315,6 +315,7 @@ defmodule Samen.CatalogMeaning do
+     Enum.flat_map(tables, fn t ->
+       table_side =
+         for s <- t.synonyms,
++            false,
+             {other, _via, label} <- Map.get(index, norm(s), []),
+             other != t.table_name,
+             do: finding(:quality, t.table_name, "synonym #{inspect(s)} names another table (#{other}, #{inspect(label)})")
