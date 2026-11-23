@@ -3,7 +3,7 @@ defmodule Samen.TestDbGuardTest do
   Guard: no non-spike `.ex`/`.exs` file in the repo and no generator template may DISCARD the result of
   `Ecto.Adapters.Postgres.storage_down/1` (bare, `_ = …`, `_ignored = …`, piped), pair it with a bare
   `:ok = …storage_up(…)`, tolerate `{:error, :already_up} -> :ok`, or shell out to `ecto.drop`/`ecto.reset`; and no
-  CI step, `*/ci.sh` or `scripts/*.sh` may swallow a drop with `… ecto.drop … || true` / `dropdb … || true`.
+  CI step, `*/ci.sh`, `scripts/*.sh`, `docs/runbooks/*.sh` or `*/priv/**/*.sh` may swallow a drop with `… ecto.drop … || true` / `dropdb … || true`.
 
   That is the pattern that failed `ci (app_demo)` with `{:error, :already_up}`: the drop failed, `_ =` threw its error
   away, and `storage_up` answered `:already_up`. The cause was never recorded (see the `Samen.TestDb` moduledoc for
@@ -13,7 +13,7 @@ defmodule Samen.TestDbGuardTest do
 
   Scanned: `lib`, `test`, `config`, `priv` (scripts and templates) of every project, `scripts/`, and the emitted
   `.eex` templates plus the generator modules that embed them; shell: `ci/steps.conf`, `ci.sh`, `*/ci.sh`,
-  `scripts/*.sh`. `spikes/` is frozen and not scanned.
+  `scripts/*.sh`, `docs/runbooks/*.sh`, `*/priv/**/*.sh`. `spikes/` is frozen and not scanned.
   """
   use ExUnit.Case, async: true
 
@@ -62,7 +62,15 @@ defmodule Samen.TestDbGuardTest do
   end
 
   defp shell_files do
-    relative(["ci/steps.conf", "ci.sh", "ci-fast.sh", "*/ci.sh", "scripts/*.sh"])
+    relative([
+      "ci/steps.conf",
+      "ci.sh",
+      "ci-fast.sh",
+      "*/ci.sh",
+      "scripts/*.sh",
+      "docs/runbooks/*.sh",
+      "*/priv/**/*.sh"
+    ])
   end
 
   defp relative(globs) do
@@ -129,8 +137,10 @@ defmodule Samen.TestDbGuardTest do
     assert swallowed_drop?("mix ecto.drop --quiet  ||  true")
     assert swallowed_drop?(~S{dropdb --if-exists "$SRC_DB" >/dev/null 2>&1 || true})
     assert swallowed_drop?(~S{psql -c "DROP DATABASE IF EXISTS x" || true})
+    assert swallowed_drop?(~S'drop_db()   { psql_admin "DROP DATABASE IF EXISTS $1" >/dev/null 2>&1 || true; }')
     refute swallowed_drop?("    MIX_ENV=test mix ecto.drop --quiet\n    MIX_ENV=test mix ecto.create --quiet\n")
     refute swallowed_drop?(~S{dropdb --if-exists "$X" || echo "WARNING: could not drop" >&2})
+    refute swallowed_drop?(~S'drop_db() { psql_admin "DROP DATABASE IF EXISTS $1" >/dev/null || fail "could not drop $1"; }')
     refute swallowed_drop?("# mix ecto.drop --quiet || true (commented out)")
     refute swallowed_drop?("rm -rf tmp || true")
   end
@@ -148,6 +158,8 @@ defmodule Samen.TestDbGuardTest do
     assert "ci/steps.conf" in shell
     assert "demo/ci.sh" in shell
     assert "scripts/backup-verify-gameday.sh" in shell
+    assert "docs/runbooks/pitr-gameday-sim.sh" in shell
+    assert "driftwood/priv/gameday/pitr_gameday_sim.sh" in shell
     assert Regex.match?(~r/mix ecto\.drop/, File.read!(Path.join(@root, "ci/steps.conf")))
   end
 end
