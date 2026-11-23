@@ -2373,8 +2373,19 @@ MIX
   # (c) an exception AFTER the rerun was registered (the launch seam's expiry raises there) leaves no record of it behind:
   # the driver ends ERROR, and state.json does not still name a rerun nobody is waiting for.
   rm -f "$CI_TEST_RUNS" "$T/rerun.hold"
-  local rc3
-  env PATH="$T/bin:$PATH" SAMEN_CI_TEST_HOLD_LAUNCH="$T/rerun.hold" SAMEN_CI_TEST_HOLD_KIND=rerun SAMEN_CI_TEST_HOLD_LIMIT_S=1 "$CI" pr -j 1 > "$T/rr4" 2>&1; rc3=$?
+  # The driver runs in the background under a bounded wait: an unbounded seam (sabotage 1228) once left this sub-case,
+  # and the driver and held rerun under it, waiting forever.
+  local rc3 pid3 pg3
+  env PATH="$T/bin:$PATH" SAMEN_CI_TEST_HOLD_LAUNCH="$T/rerun.hold" SAMEN_CI_TEST_HOLD_KIND=rerun SAMEN_CI_TEST_HOLD_LIMIT_S=1 "$CI" pr -j 1 > "$T/rr4" 2>&1 &
+  pid3=$!
+  for k in $(seq 1 300); do kill -0 "$pid3" 2>/dev/null || break; sleep 0.1; done
+  if kill -0 "$pid3" 2>/dev/null; then
+    bad "RERUNREC: a driver held on the rerun outlived the seam's limit"
+    pg3="$(jsonget "$T/rerun.hold" 'd["pgid"]' 2>/dev/null || true)"
+    kill -KILL "$pid3" 2>/dev/null
+    [[ -n "$pg3" ]] && kill -KILL -- "-$pg3" 2>/dev/null
+  fi
+  wait "$pid3" 2>/dev/null; rc3=$?
   eq "$([[ $rc3 -ne 0 ]] && echo failed || echo "rc=$rc3")" failed "RERUNREC: an expired hold on the rerun fails the run"
   has "$T/rr4" 'SAMEN_CI_TEST_HOLD_LAUNCH: the test seam held' "RERUNREC: ... loudly, naming the seam (the premise: it raised after the rerun was registered)"
   eq "$(jsonget "$SAMEN_CI_HOME/state.json" '"flaky#rerun" in d.get("running", {})')" False "RERUNREC: ... and state.json holds no record of the rerun that never ran"
