@@ -47,7 +47,6 @@ defmodule Samen.FeatureFlags do
   write, and a disabled flag resolves OFF within one broadcast hop (design §3.3).
   """
 
-  require Logger
 
   alias Samen.FeatureFlags.{Cache, Decision, TargetRule}
 
@@ -92,9 +91,10 @@ defmodule Samen.FeatureFlags do
         Decision.off(:kill_switch)
     end
   rescue
-    # Belt: any unexpected error in evaluation is fail-SAFE, never fails open.
+    # Belt: any unexpected error in evaluation is fail-SAFE (OFF), never fails open, and is reported by name and
+    # exception module (never the message: it can carry the values being processed).
     e ->
-      Logger.warning("[FeatureFlags] evaluate/2 raised, failing OFF: #{Exception.message(e)}")
+      Samen.Observability.Failure.report(:feature_flag_evaluate, nil, e)
       Decision.off(:kill_switch)
   end
 
@@ -124,7 +124,7 @@ defmodule Samen.FeatureFlags do
     decide(flag_name, config, subject, subject_key(subject), opts)
   rescue
     e ->
-      Logger.warning("[FeatureFlags] evaluate_config/4 raised, failing OFF: #{Exception.message(e)}")
+      Samen.Observability.Failure.report(:feature_flag_evaluate_config, nil, e)
       Decision.off(:kill_switch)
   end
 
@@ -322,8 +322,10 @@ defmodule Samen.FeatureFlags do
         :ok
     end
   rescue
-    # The assignment seam is best-effort — it must never break evaluation.
-    _ -> :ok
+    # The assignment seam is best-effort — it must never break evaluation — but a lost assignment event is reported.
+    e ->
+      Samen.Observability.Failure.report_write(:feature_flag_assignment_emit, nil, e)
+      :ok
   end
 
   defp configured_emitter do

@@ -15,7 +15,7 @@ index 05dcfcb5..449a4272 100644
          __grants: grants,
          __vault_rows: rows,
 -        __vault_deks: vault_deks(admitted, opts),
-+        __vault_deks: vault_deks(vault_rows(for({_, _, %Masked{token: t}} <- masked, is_binary(t), do: t), opts), opts),
++        __vault_deks: vault_deks(vault_rows(for({_, _, %Masked{token: t}} <- masked, is_binary(t), do: t), actor, opts), opts),
          __vault_vaults: vaults,
+         __reveal_reported: :atomics.new(1, []),
          __bag_ctx: bag_context(resource, records, plane, actor, opts)
-       )

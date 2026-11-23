@@ -6,15 +6,15 @@
 # TEST_FILES: test/vault_dek_reuse_test.exs
 # MUST_FAIL: T-R2: a record holding another subject's token costs ZERO unwraps
 diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
-index 05dcfcb5..5426e969 100644
+index d5430a1..5b20943 100644
 --- a/samen_core/lib/samen/api/pii_resolution.ex
 +++ b/samen_core/lib/samen/api/pii_resolution.ex
-@@ -217,7 +217,7 @@ defmodule Samen.Api.PiiResolution do
+@@ -219,7 +219,7 @@ defmodule Samen.Api.PiiResolution do
          __prefetched: true,
          __grants: grants,
          __vault_rows: rows,
 -        __vault_deks: vault_deks(admitted, opts),
 +        __vault_deks: vault_deks(Map.merge(rows, admitted), opts),
          __vault_vaults: vaults,
+         __reveal_reported: :atomics.new(1, []),
          __bag_ctx: bag_context(resource, records, plane, actor, opts)
-       )

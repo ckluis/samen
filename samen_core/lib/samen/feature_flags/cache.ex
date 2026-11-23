@@ -50,7 +50,6 @@ defmodule Samen.FeatureFlags.Cache do
   """
   use GenServer
 
-  require Logger
 
   @table :samen_feature_flags_cache
   @default_ttl_ms 60_000
@@ -93,13 +92,18 @@ defmodule Samen.FeatureFlags.Cache do
         # Owner not started — lazily start it, then load. If it still can't start,
         # this is a fail-SAFE {:error, _}.
         case ensure_started() do
-          :ok -> load_and_cache(flag_name, opts)
-          {:error, _} = err -> err
+          :ok ->
+            load_and_cache(flag_name, opts)
+
+          {:error, _} = err ->
+            Samen.Observability.Failure.report(:feature_flag_cache_start, nil, :unavailable)
+            err
         end
     end
   rescue
     e ->
-      Logger.warning("[FeatureFlags.Cache] get/2 error, fail-safe: #{Exception.message(e)}")
+      # Reported by name and exception module (never the message: it can carry the values being processed).
+      Samen.Observability.Failure.report(:feature_flag_cache_get, nil, e)
       {:error, :cache_error}
   end
 
@@ -169,8 +173,12 @@ defmodule Samen.FeatureFlags.Cache do
 
         {:ok, config}
 
-      {:error, _} = err ->
-        # RP-F4: a load error is fail-SAFE — do NOT cache, do NOT guess ON.
+      {:error, reason} = err ->
+        # RP-F4: a load error is fail-SAFE — do NOT cache, do NOT guess ON. An unconfigured flag module / owner is a
+        # documented state (OFF); every other error is a FAILED read and is reported, by name (value-free).
+        if reason not in [:no_flag_module, :no_flag_owner],
+          do: Samen.Observability.Failure.report(:feature_flag_load, nil, reason)
+
         err
     end
   end
@@ -197,7 +205,7 @@ defmodule Samen.FeatureFlags.Cache do
         end
     end
   rescue
-    e -> {:error, {:load_raised, Exception.message(e)}}
+    e -> {:error, e}
   end
 
   # The owner org whose rows are the platform flags. A UUID-shaped binary only: anything else
