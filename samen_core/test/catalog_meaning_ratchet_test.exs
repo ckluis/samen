@@ -40,6 +40,40 @@ defmodule SamenCore.CatalogMeaningRatchetTest do
     end
   end
 
+  # The ONE line that turns the verifier on in a host's ci.sh (step 1c): a WHOLE, unindented, uncommented command with
+  # no `|| true` and no `--baseline` override. Precedent: `read_scope_verify_test.exs`.
+  @ci_line "mix samen.verify.catalog_meaning"
+  @ci_line_regex ~r/^mix samen\.verify\.catalog_meaning$/m
+  @drift_passed "PASSED (schema.dict.json matches regenerated output)"
+
+  test "every host's ci.sh runs the verifier: the exact whole line `#{@ci_line}`, once, after the dict drift step" do
+    for host <- @hosts do
+      ci = File.read!(Path.join([root(), host, "ci.sh"]))
+
+      assert [[_]] = Regex.scan(@ci_line_regex, ci),
+             "#{host}/ci.sh must run `#{@ci_line}` as ONE whole, uncommented line with no `|| true` and no `--baseline` override"
+
+      [{line_at, _}] = Regex.run(@ci_line_regex, ci, return: :index)
+      assert {drift_at, _} = :binary.match(ci, @drift_passed), "#{host}/ci.sh lost its dict drift step"
+      assert line_at > drift_at, "#{host}/ci.sh: step 1c must sit after the schema.dict.json drift step"
+    end
+  end
+
+  test "the ci.sh pin is refutable: a commented, indented, `|| true`-ed, overridden or absent line does not satisfy it" do
+    assert "echo a\n#{@ci_line}\necho b\n" =~ @ci_line_regex
+
+    for bad <- [
+          "# #{@ci_line}",
+          "  #{@ci_line}",
+          "#{@ci_line} || true",
+          "#{@ci_line} --baseline /tmp/other.baseline",
+          "if false; then #{@ci_line}; fi",
+          "true"
+        ] do
+      refute "echo a\n#{bad}\necho b\n" =~ @ci_line_regex, "#{inspect(bad)} must not satisfy the pin"
+    end
+  end
+
   test "a host baseline can only shrink against the merge base" do
     for host <- @hosts do
       current = File.read!(Path.join(root(), rel(host)))
