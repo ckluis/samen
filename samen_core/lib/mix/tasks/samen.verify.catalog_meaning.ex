@@ -32,7 +32,7 @@ defmodule Mix.Tasks.Samen.Verify.CatalogMeaning do
       mix samen.verify.catalog_meaning --shrink    # rewrite it as file ∩ still-undescribed; lowers the ceiling
       mix samen.verify.catalog_meaning --domain MyApp.Crm --baseline path/to/catalog_meaning.baseline
 
-  `--init` and `--shrink` refuse to run while a resource is unreadable or none is found (an unreadable resource would
+  `--init` and `--shrink` refuse `--domain` (a partial discovery would drop the other domains' entries), and refuse to run while a resource is unreadable or none is found (an unreadable resource would
   otherwise look "gone" and shrink its debt away). `--shrink` never adds an entry. The list can only shrink: a test in
   samen_core compares every host's baseline with the merge base's.
   """
@@ -52,6 +52,13 @@ defmodule Mix.Tasks.Samen.Verify.CatalogMeaning do
 
     if rest != [], do: Mix.raise("#{@task_name}: unexpected argument(s) #{inspect(rest)}")
     if opts[:init] && opts[:shrink], do: Mix.raise("#{@task_name}: --init and --shrink are exclusive")
+
+    if (opts[:init] || opts[:shrink]) && Keyword.has_key?(opts, :domain) do
+      Mix.raise(
+        "#{@task_name}: --domain cannot be combined with --init or --shrink " <>
+          "(a partial discovery would write or shrink the other domains' entries away)"
+      )
+    end
 
     path = Keyword.get(opts, :baseline, Baseline.file_name())
 

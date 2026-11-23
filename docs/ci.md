@@ -225,6 +225,8 @@ The list can only shrink: `samen_core/test/catalog_meaning_ratchet_test.exs` com
 (`Samen.CatalogMeaning.Baseline.ratchet/3`; a missing merge base fails under `CI`, as for the swallow ceilings). A baseline absent
 at the merge base is tolerated only while the merge base predates the verifier itself (the adoption PR); once
 `samen_core/lib/samen/catalog_meaning/baseline.ex` exists there, a missing host file is a failure (deleted and re-initialised).
+Not every entry is one an author can describe: demo's 21 entries for the `ash_paper_trail` Version tables (`cbl_block_versions`,
+`cpg_page_versions`, `cpt_post_versions`) belong to generated resources, so they stay until the framework describes them by default.
 The test also fails a `catalog_meaning.baseline` under an app that is not in its host list, and pins the exact `ci.sh` line
 `mix samen.verify.catalog_meaning` (whole, uncommented, no `|| true`, no `--baseline`) after the dict drift step in each host. The baseline is inside
 each host step's `inputs = app:<host>` and the ratchet test inside `samen_core`'s `reads = **`, so a cached PASS cannot survive a

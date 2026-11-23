@@ -569,6 +569,17 @@ defmodule SamenCore.CatalogMeaningTest do
       assert message =~ "fx_deal.extra"
     end
 
+    test "run/1 refuses bad arguments before doing any work" do
+      assert_raise Mix.Error, ~r/--init and --shrink are exclusive/, fn -> Task.run(["--init", "--shrink"]) end
+      assert_raise Mix.Error, ~r/unexpected argument/, fn -> Task.run(["stray"]) end
+      assert_raise OptionParser.ParseError, fn -> Task.run(["--bogus"]) end
+    end
+
+    test "RED: --domain with --init or --shrink is refused (a partial discovery would shrink other domains' entries away)" do
+      assert_raise Mix.Error, ~r/--domain cannot be combined with --init or --shrink/, fn -> Task.run(["--init", "--domain", "Fx.Domain"]) end
+      assert_raise Mix.Error, ~r/--domain cannot be combined with --init or --shrink/, fn -> Task.run(["--shrink", "--domain", "Fx.Domain"]) end
+    end
+
     test "--shrink without a file raises (the strict end state has nothing to shrink)" do
       path = Path.join(scratch!(), "missing.baseline")
       assert_raise Mix.Error, ~r/nothing to shrink/, fn -> Task.shrink(path, debt_tables(), []) end

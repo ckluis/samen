@@ -41,6 +41,10 @@ All notable changes to Samen are recorded here. The format follows
   with the merge base (a file missing there is tolerated only while the merge base predates the verifier, so a deleted and
   re-initialised baseline fails), refuses a baseline under an app outside its host list, and pins the exact `ci.sh` line
   `mix samen.verify.catalog_meaning` in each host.
+- **Changed: `--init` and `--shrink` refuse `--domain`**: a partial discovery would write or shrink the other domains' entries away.
+- **Noted: 21 of demo's 499 baseline entries are `ash_paper_trail` Version tables** (`cbl_block_versions`, `cpg_page_versions`,
+  `cpt_post_versions`), generated resources an author cannot describe; they wait for framework default descriptions
+  (driftwood and pawchart have none).
 - **Fixed: the restatement rule no longer lets a possessive through.** "The name's name" on `name` passed because `'s` split
   off a stray "s" that counted as a new word; possessives are now their word and single letters are never content words.
 - **Fixed: the cross-table synonym rule no longer refuses a synonym on a twin-mounted scope.** A table with the same label as
