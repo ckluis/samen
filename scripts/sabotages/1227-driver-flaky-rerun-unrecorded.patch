@@ -1,0 +1,20 @@
+# SABOTAGE: the flaky rerun is launched but never recorded in state.json, so a driver killed during it 
+#   leaves a live unrecorded mix test
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: RERUNREC the flaky rerun is released only once the driver has recorded it
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index f0a6c898..9dbb161a 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1102,7 +1102,7 @@ class Run(object):
+             # Recorded like a step (state.json "running"): a driver killed during the rerun must not leave a live,
+             # unrecorded `mix test` for the next invocation to overlap on the same test database.
+             def register(proc):
+-                self.reruns[rid] = proc
++                pass
+             p = self.spawn_gated(cmd, os.path.join(REPO, step.exunit_dir), self.ctx.env(self.mode, step), f, "rerun", register)
+             try:
+                 while p.poll() is None:
