@@ -255,13 +255,18 @@ defmodule Samen.CatalogMeaning do
   @doc false
   @spec restates?([String.t()], MapSet.t(String.t())) :: boolean()
   def restates?(tokens, name_words) do
-    content = Enum.reject(tokens, &(&1 in @stopwords))
+    # A single letter ("e.g.", the "s" of a possessive) is never a content word.
+    content = Enum.reject(tokens, &(&1 in @stopwords or String.length(&1) <= 1))
     content == [] or Enum.all?(content, &MapSet.member?(name_words, stem(&1)))
   end
 
   defp finding(kind, key, message), do: %{kind: kind, key: key, message: "#{key}: #{message}"}
 
-  defp tokens(text), do: ~r/[[:alnum:]]+/u |> Regex.scan(String.downcase(text)) |> List.flatten()
+  # A possessive ("name's", "names'") is its word, not a word and a stray "s": the suffix is dropped before splitting.
+  defp tokens(text) do
+    plain = text |> String.downcase() |> String.replace(~r/['\x{2019}]s?(?![[:alnum:]])/u, "")
+    ~r/[[:alnum:]]+/u |> Regex.scan(plain) |> List.flatten()
+  end
 
   # Name words are stemmed (a trailing "s" dropped); the description's words are stemmed at comparison.
   defp words(names), do: names |> Enum.flat_map(&tokens/1) |> MapSet.new(&stem/1)

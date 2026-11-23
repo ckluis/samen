@@ -41,6 +41,8 @@ All notable changes to Samen are recorded here. The format follows
   with the merge base (a file missing there is tolerated only while the merge base predates the verifier, so a deleted and
   re-initialised baseline fails), refuses a baseline under an app outside its host list, and pins the exact `ci.sh` line
   `mix samen.verify.catalog_meaning` in each host.
+- **Fixed: the restatement rule no longer lets a possessive through.** "The name's name" on `name` passed because `'s` split
+  off a stray "s" that counted as a new word; possessives are now their word and single letters are never content words.
 - **Fixed: the cross-table synonym rule no longer refuses a synonym on a twin-mounted scope.** A table with the same label as
   the synonym's own table (the twin mount of Billing or Support) is the same concept, so its names and synonyms never
   collide; a table with a different label still does.

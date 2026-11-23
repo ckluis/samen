@@ -209,6 +209,18 @@ defmodule SamenCore.CatalogMeaningTest do
       assert one("Name", name: "title") |> Enum.any?(&(&1 =~ "fewer than 3 words"))
     end
 
+    test "RED: a possessive or a stray letter is not a new word (\"The name's name\" restates `name`)" do
+      for text <- ["The name's name", "The name\u2019s name", "The names' name", "Name's value of this record", "The name, i.e. the name e g"] do
+        assert [message] = one(text), "#{inspect(text)} must be refused"
+        assert message =~ "restates the name"
+      end
+
+      # green controls: a possessive of a REAL new word is still a new word; a contraction is not stripped
+      assert one("The company's name") == []
+      assert one("Legal or trading name of the company's group") == []
+      assert one("Name that don't change") == []
+    end
+
     test "a restatement of the LABEL is refused too" do
       tables = [table("fx_company", fields: [field("ref", label: "Customer number", description: "The customer number value")])]
       assert [message] = check(tables, nil)
