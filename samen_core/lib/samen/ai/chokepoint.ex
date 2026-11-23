@@ -110,8 +110,10 @@ defmodule Samen.AI.Chokepoint do
   # step 3). We refuse on the PREFIX substring, not the anchored `^vt_[0-9a-f]{32}$` form —
   # the most fail-closed reading: a token embedded mid-string (e.g. a laundered
   # `"...vt_deadbeef..."`) must also be refused, not just a standalone token.
-  # The predicate itself lives in `Samen.AI.VtSentinel`, shared with the compile-time meaning check
-  # (`Samen.Catalog.Transformers.MeaningDeclarations`) so the two cannot drift.
+  # The sentinel and its predicate live in `Samen.AI.VtSentinel`, shared with the compile-time meaning check
+  # (`Samen.Catalog.Transformers.MeaningDeclarations`) so the two cannot drift. `charlist_sentinel?/1` is a reviewed
+  # swallow pin (its source is hash-pinned), so it keeps the attribute form of the same constant.
+  @vt_sentinel VtSentinel.sentinel()
 
   @mask Samen.Masked.mask()
 
@@ -572,7 +574,7 @@ defmodule Samen.AI.Chokepoint do
   # does not render (a map or an atom inside, an invalid codepoint) has no string form for a
   # sentinel to appear in; its elements are each scanned by the caller.
   defp charlist_sentinel?(seg) do
-    VtSentinel.in_string?(List.to_string(seg))
+    String.contains?(List.to_string(seg), @vt_sentinel)
   rescue
     _ -> false
   end
