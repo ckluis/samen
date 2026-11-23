@@ -1,0 +1,20 @@
+# SABOTAGE: the driver hands the launch-hold test seam to every step, so a step that spawns a nested driver 
+#   would hang it
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: LAUNCHSEAM the launch-hold test seam is bounded, interruptible and never reaches a step
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index f0a6c898..1cc102a0 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -445,7 +445,7 @@ PROBE_SEAMS = ("GEN_PROBE_SHARED_REGISTRY", "SAMEN_ABBREV_REGISTRY", "SAMEN_ABBR
+ 
+ def step_base_env():
+     return {k: v for k, v in os.environ.items()
+-            if k not in WRAPPER_FLAGS and k not in PROBE_SEAMS and k not in TEST_SEAMS}
++            if k not in WRAPPER_FLAGS and k not in PROBE_SEAMS}
+ 
+ 
+ def env_fingerprint():
