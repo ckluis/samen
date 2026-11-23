@@ -6,15 +6,15 @@
 # TEST_FILES: test/catalog_meaning_reader_test.exs
 # MUST_FAIL: RED: vt_ in an attribute description fails compile
 diff --git a/samen_core/lib/samen/catalog/transformers/meaning_declarations.ex b/samen_core/lib/samen/catalog/transformers/meaning_declarations.ex
-index a2f09dcd..34dc7121 100644
+index 10972246..4c16114e 100644
 --- a/samen_core/lib/samen/catalog/transformers/meaning_declarations.ex
 +++ b/samen_core/lib/samen/catalog/transformers/meaning_declarations.ex
-@@ -100,7 +100,7 @@ defmodule Samen.Catalog.Transformers.MeaningDeclarations do
-         for(f <- fields, text <- [f.label, f.units | f.synonyms], do: {[:meaning, :field, f.name], text}) ++
-         for(text <- section_texts, do: {[:meaning], text})
+@@ -132,7 +132,7 @@ defmodule Samen.Catalog.Transformers.MeaningDeclarations do
+   end
  
--    case Enum.find(candidates, fn {_path, text} -> is_binary(text) and String.contains?(text, @sentinel) end) do
-+    case Enum.find(candidates, fn {_path, text} -> is_binary(text) and String.contains?(text, "never-written-marker") end) do
+   defp check_sentinel(module, dsl_state) do
+-    case Enum.find(Meaning.string_leaves(dsl_state), fn {_path, text} -> VtSentinel.in_string?(text) end) do
++    case Enum.find(Meaning.string_leaves(dsl_state), fn {_path, text} -> String.contains?(text, "never-written-marker") end) do
        nil ->
          :ok
  
