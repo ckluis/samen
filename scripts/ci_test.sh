@@ -2339,6 +2339,35 @@ STEP
   PATH="$T/bin:$PATH" drive "$T/rr2" pr -j 1
   has "$T/rr2" '^FLAKY flaky [0-9.]+s \(passed on rerun\)$' "RERUNREC: a fresh run after the kill completes its own rerun"
   eq "$(grep -c '^rerun' "$CI_TEST_RUNS")" 1 "RERUNREC: ... exactly once"
+  # (b) interrupted while a RELEASED rerun runs: the driver stops the rerun's group before it exits 130, and the record goes
+  # with it. The fake `mix` waits on a file under a bounded loop (never on elapsed time alone), so a driver that left the
+  # rerun alive shows as a live group, not as a hang.
+  rm -f "$CI_TEST_RUNS" "$T/rerun.release"
+  mkdir -p "$T/bin2"
+  cat > "$T/bin2/mix" <<MIX
+#!/usr/bin/env bash
+[[ "\${1:-}" == test ]] || exit 2
+shift; echo "rerun \$*" >> "\$CI_TEST_RUNS"
+for _ in \$(seq 1 300); do [[ -e "$T/rerun.release" ]] && exit 0; sleep 0.1; done
+echo "rerun-timeout" >> "\$CI_TEST_RUNS"; exit 1
+MIX
+  chmod +x "$T/bin2/mix"
+  local pid2 pg2 rc2 k
+  PATH="$T/bin2:$PATH" "$CI" pr -j 1 > "$T/rr3" 2>&1 &
+  pid2=$!
+  for n in $(seq 1 150); do [[ "$(grep -c '^rerun' "$CI_TEST_RUNS" 2>/dev/null)" == 1 ]] && break; sleep 0.1; done
+  if [[ "$(grep -c '^rerun' "$CI_TEST_RUNS" 2>/dev/null)" != 1 ]]; then bad "RERUNREC: the released rerun never started"; kill -KILL "$pid2" 2>/dev/null; wait "$pid2" 2>/dev/null; return; fi
+  pg2="$(jsonget "$SAMEN_CI_HOME/state.json" 'd["running"]["flaky#rerun"]')"
+  kill -TERM "$pid2"
+  for n in $(seq 1 250); do kill -0 "$pid2" 2>/dev/null || break; sleep 0.1; done
+  if kill -0 "$pid2" 2>/dev/null; then bad "RERUNREC: a driver interrupted during a rerun did not exit within 25 s"; kill -KILL "$pid2" 2>/dev/null; fi
+  wait "$pid2" 2>/dev/null; rc2=$?
+  eq "$rc2" 130 "RERUNREC: a driver interrupted during a released rerun exits 130"
+  for k in $(seq 1 50); do kill -0 -- "-$pg2" 2>/dev/null || break; sleep 0.1; done
+  if kill -0 -- "-$pg2" 2>/dev/null; then bad "RERUNREC: the released rerun is still alive after its driver exited"; kill -KILL -- "-$pg2" 2>/dev/null; else ok; fi
+  eq "$(jsonget "$SAMEN_CI_HOME/state.json" '"flaky#rerun" in d.get("running", {})')" False "RERUNREC: ... and state.json no longer names the rerun"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" '[s["status"] for s in d["steps"] if s["id"] == "flaky"][0]')" INTERRUPTED "RERUNREC: ... and the step is INTERRUPTED"
+  eq "$(grep -c 'rerun-timeout' "$CI_TEST_RUNS")" 0 "RERUNREC: ... and the rerun was stopped, not left to time out"
 }
 
 ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS LOCALPATHS GENPROBE GENHEX GENHEXRO NARROW RECHUNK COSTW TIMEOUT SELTMO GENDEPS ESCAPE MUTLINT MUTLOCK LAUNCHREC LAUNCHSEAM RERUNREC)
