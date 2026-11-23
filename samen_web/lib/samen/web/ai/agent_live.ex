@@ -128,7 +128,7 @@ defmodule Samen.Web.AI.AgentLive do
       case AgentReads.cancel(socket.assigns[:samen_mount], socket.assigns[:org_id], run_id) do
         {:ok, _run} -> {:ok, "Stopping after the current step."}
         {:error, :already_terminal} -> {:info, "That run has already finished."}
-        {:error, :unavailable} -> {:error, "That run could not be cancelled right now — it is still running. Try again."}
+        {:error, :unavailable} -> {:error, "That run could not be cancelled right now. Try again."}
         {:error, _} -> {:error, "That run could not be cancelled."}
       end
 

@@ -6,7 +6,7 @@
 # TEST_FILES: test/ai/agent_transcript_write_test.exs
 # MUST_FAIL: control: an :awaiting_approval run's pending approval is untouched
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
-index d0db6310..6fd0c1c2 100644
+index 860245e..7a4225e 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
 @@ -899,15 +899,13 @@ defmodule Samen.AI.Agent do
@@ -51,5 +51,5 @@ index d0db6310..6fd0c1c2 100644
  
 -  defp reclaim_failed_park!(_run), do: :ok
  
-   # The worker's opts: the host-configured agent provider override (tests point this at
-   # Samen.AI.Provider.Scripted — the cross-process script seam), else Samen.AI's own
+   # The raise above lands in `oban_jobs.errors`, so it carries a BOUNDED kind: an atom reason (`:unavailable`, a handler's
+   # kind) by name, a struct (an Ash changeset/error, whose database message may carry row data) by module name only.

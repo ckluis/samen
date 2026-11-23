@@ -419,6 +419,14 @@ defmodule Samen.AI.AgentTranscriptWriteTest do
       id
     end
 
+    defp drain_sql(acc) do
+      receive do
+        {:sql, q} -> drain_sql([q | acc])
+      after
+        0 -> Enum.reverse(acc)
+      end
+    end
+
     defp propose! do
       s = new_scope()
 
@@ -834,6 +842,130 @@ defmodule Samen.AI.AgentTranscriptWriteTest do
       [row] = runs_of(scope)
       assert row.state == :succeeded
       assert_no_stranded_proposal!(scope, row, approval)
+    end
+  end
+
+  describe "the reclaim's failure message is a bounded kind, never the engine's reason" do
+    # Oban stores the exception message in `oban_jobs.errors`. The reason of a failed cancel is an Ash error whose
+    # database message can carry row data (a trigger/CHECK detail), so the raise names a kind only.
+    @leak "LEAKMARK-7c1e9f"
+
+    defp install_cancel_trigger! do
+      Ecto.Adapters.SQL.query!(SamenCore.TestRepo, """
+      CREATE FUNCTION f3_leak_cancel() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        RAISE EXCEPTION '#{@leak} row detail';
+        RETURN NEW;
+      END $$
+      """)
+
+      Ecto.Adapters.SQL.query!(
+        SamenCore.TestRepo,
+        "CREATE TRIGGER f3_leak_cancel BEFORE UPDATE ON apv_approval FOR EACH ROW EXECUTE FUNCTION f3_leak_cancel()"
+      )
+    end
+
+    test "RED: a cancel that fails with row data in its database error raises a message without it" do
+      worker_provider!()
+      scope = new_scope()
+      {run, approval} = strand!(scope)
+      script([{:final, "never reached"}])
+      install_cancel_trigger!()
+
+      # positive control: the injected error really carries the marker
+      assert {:error, direct} = Approvals.cancel(approval.id, Samen.AI.Agent.WriteProposal.requester_principal_id())
+      assert inspect(direct) =~ @leak
+
+      {error, _log} =
+        with_log(fn ->
+          assert_raise RuntimeError, ~r/approval could not be cancelled/, fn -> Agent.execute_batch(run) end
+        end)
+
+      refute error.message =~ @leak
+      assert error.message =~ "Ash.Changeset"
+    end
+  end
+
+  describe "cancelling a parked run withdraws its approval or does not cancel" do
+    test "control: a healthy cancel withdraws the approval and terminates the run" do
+      {s, run, _target, approval} = propose!()
+
+      assert {:ok, %{state: :cancelled}} = Agent.cancel(s, run.id)
+      assert {:ok, %{state: :cancelled}} = Approvals.get(approval.id)
+      assert pending_approvals(s) == []
+    end
+
+    test "RED: a withdrawal that FAILS rolls the cancel back and answers :unavailable" do
+      {s, run, _target, approval} = propose!()
+      install_cancel_trigger!()
+
+      {result, log} = with_log(fn -> Agent.cancel(s, run.id) end)
+
+      assert {:error, :unavailable} = result
+      assert log =~ "write failed write=agent_cancel_parked"
+      assert Enum.find(runs_of(s), &(&1.id == run.id)).state == :awaiting_approval
+      assert Enum.find(runs_of(s), &(&1.id == run.id)).cancel_requested_at == nil
+      assert {:ok, %{state: :pending}} = Approvals.get(approval.id)
+      assert [_] = pending_approvals(s)
+    end
+
+    test "RED: a FAILING run update inside the cancel rolls the withdrawal back and answers :unavailable, never raises" do
+      {s, run, _target, approval} = propose!()
+
+      Ecto.Adapters.SQL.query!(SamenCore.TestRepo, """
+      CREATE FUNCTION cp_fail_run_cancel() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.cancel_requested_at IS NOT NULL THEN RAISE EXCEPTION 'cp run update refused'; END IF;
+        RETURN NEW;
+      END $$
+      """)
+
+      Ecto.Adapters.SQL.query!(
+        SamenCore.TestRepo,
+        "CREATE TRIGGER cp_fail_run_cancel BEFORE UPDATE ON ai_agent_run FOR EACH ROW EXECUTE FUNCTION cp_fail_run_cancel()"
+      )
+
+      {result, log} = with_log(fn -> Agent.cancel(s, run.id) end)
+
+      assert {:error, :unavailable} = result
+      assert log =~ "write failed write=agent_cancel_parked"
+      assert Enum.find(runs_of(s), &(&1.id == run.id)).state == :awaiting_approval
+      # the approval withdrawal ran BEFORE the failed update, in the same transaction: it is rolled back with it
+      assert {:ok, %{state: :pending}} = Approvals.get(approval.id)
+    end
+
+    test "the cancel takes the RUN row lock before it touches the approval (the expiry sweep's order: no deadlock)" do
+      {s, run, _target, _approval} = propose!()
+      parent = self()
+      handler = "cp-lock-order-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach(
+        handler,
+        [:samen_core, :test_repo, :query],
+        fn _e, _m, %{query: q}, _ -> send(parent, {:sql, q}) end,
+        nil
+      )
+
+      try do
+        assert {:ok, %{state: :cancelled}} = Agent.cancel(s, run.id)
+      after
+        :telemetry.detach(handler)
+      end
+
+      queries = drain_sql([])
+      run_lock = Enum.find_index(queries, &(&1 =~ ~s(FROM "ai_agent_run") and &1 =~ "FOR UPDATE"))
+      first_approval = Enum.find_index(queries, &(&1 =~ "_approval" and &1 =~ ~r/UPDATE|FOR UPDATE/))
+
+      assert is_integer(run_lock), "no FOR UPDATE on the run row was issued: #{inspect(queries)}"
+      assert is_integer(first_approval), "no approval write was issued"
+      assert run_lock < first_approval
+    end
+
+    test "control: an approval that is already decided is nothing to withdraw, the cancel still lands" do
+      {s, run, _target, approval} = propose!()
+      assert {:ok, %{state: :cancelled}} = Approvals.cancel(approval.id, Agent.WriteProposal.requester_principal_id())
+
+      assert {:ok, %{state: :cancelled}} = Agent.cancel(s, run.id)
     end
   end
 

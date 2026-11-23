@@ -1,0 +1,23 @@
+# SABOTAGE: a create that fails with no existing row to fall back to returns nil unreported
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: whose create FAILS (and finds no existing row) reports by name
+diff --git a/samen_core/lib/samen/automation/run_record.ex b/samen_core/lib/samen/automation/run_record.ex
+index cfc58665..30fdb4f7 100644
+--- a/samen_core/lib/samen/automation/run_record.ex
++++ b/samen_core/lib/samen/automation/run_record.ex
+@@ -99,10 +99,8 @@ defmodule Samen.Automation.RunRecord do
+       # A concurrent duplicate dispatch lost the create and finds the winner's row. No row to find means the run was NOT
+       # recorded: a failed write, reported by name (the reason is an Ash error that prints the pinned definition).
+       {:error, reason} ->
+-        with nil <- find_by_key(run_mod, org_id, key) do
+-          Samen.Observability.Failure.report_write(:run_record_open, org_id, reason)
+-          nil
+-        end
++        _ = reason
++        find_by_key(run_mod, org_id, key)
+     end
+   rescue
+     # names only: `Exception.message/1` of a KeyError/MatchError prints the offending value (here the workflow, whose

@@ -1,0 +1,19 @@
+# SABOTAGE: a grounding half that failed is sent to the model as an empty schema / no custom objects
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/catalog_runtime_test.exs
+# MUST_FAIL: a grounding half that FAILED is absent
+diff --git a/samen_core/lib/samen/ai/catalog.ex b/samen_core/lib/samen/ai/catalog.ex
+index 8b0122c8..3c2f2304 100644
+--- a/samen_core/lib/samen/ai/catalog.ex
++++ b/samen_core/lib/samen/ai/catalog.ex
+@@ -294,7 +294,7 @@ defmodule Samen.AI.Catalog do
+     [schema: schema_result(opts), custom_objects: custom_objects_result(org_id_of(scope), opts)]
+     |> Enum.flat_map(fn
+       {key, {:ok, value}} -> [{key, value}]
+-      {_key, {:error, :unavailable}} -> []
++      {key, {:error, :unavailable}} -> [{key, if(key == :schema, do: %{"tables" => []}, else: [])}]
+     end)
+     |> Map.new()
+   rescue

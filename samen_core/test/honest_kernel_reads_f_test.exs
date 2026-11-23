@@ -160,6 +160,35 @@ defmodule Samen.HonestKernelReadsFTest do
       assert Ash.get!(Workflow, wf.id, authorize?: false).disabled_by_operator_at == nil
     end
 
+    test "RED: a trip WRITE that fails is reported as the trip write, not as the count read; the count read keeps its own name" do
+      prev = Application.get_env(:samen_core, :automation_rate_limit)
+      Application.put_env(:samen_core, :automation_rate_limit, -1)
+      on_exit(fn -> if prev, do: Application.put_env(:samen_core, :automation_rate_limit, prev), else: Application.delete_env(:samen_core, :automation_rate_limit) end)
+
+      org = Ash.UUID.generate()
+      wf = org |> workflow!() |> reload_with_org!()
+      opts = [run_module: SamenCore.Support.AutomationFixture.Run, repo: Repo]
+
+      # (1) the kill UPDATE answers {:error, _}: the workflow table is gone, the run log is readable
+      hide_table!("awf_workflow")
+      assert raw_message(fn -> Ash.read!(Workflow, authorize?: false) end) =~ "awf_workflow", "the raw error must name the table"
+
+      log = capture_log(fn -> assert :ok = Samen.Automation.Breaker.check!(wf, opts) end)
+
+      assert log =~ "write failed write=automation_breaker_trip org=#{org} "
+      refute log =~ "automation_breaker_count"
+      refute log =~ "awf_workflow"
+
+      # (2) the kill path RAISES (a workflow value that cannot be killed): still the trip write, never the count read
+      forged = %{id: wf.id, org_id: org}
+      assert raw_message(fn -> apply(Map, :fetch!, [forged, :disabled_by_operator_at]) end) =~ "disabled_by_operator_at"
+
+      log = capture_log(fn -> assert :ok = Samen.Automation.Breaker.check!(forged, opts) end)
+
+      assert log =~ "write failed write=automation_breaker_trip org=#{org} cause=KeyError"
+      refute log =~ "automation_breaker_count"
+    end
+
     test "control: the readable count over the limit trips the workflow's kill-switch" do
       prev = Application.get_env(:samen_core, :automation_rate_limit)
       Application.put_env(:samen_core, :automation_rate_limit, -1)
@@ -246,6 +275,29 @@ defmodule Samen.HonestKernelReadsFTest do
       corrupt_counters!(id2)
       log = capture_log(fn -> assert Monitor.finalize(id2, :normal) == :error end)
       assert log =~ "read=replay_buffer"
+    end
+
+    test "RED: a take that fails releases the session slot and its frames; the next session can open" do
+      with_buffer!()
+      cfg = %{max_sessions: 1, max_frames: 10, max_bytes: 10_000}
+
+      # positive control: a healthy take releases the slot (the cap of one admits the next session)
+      assert {:ok, ok_id} = Buffer.open(self(), %{view: "V"}, cfg)
+      assert :ok = Buffer.record(self(), :render, %{html: "x"})
+      assert {:ok, _meta, [_frame], _counters} = Buffer.take(ok_id)
+      assert :ets.lookup(Buffer.table(), :sessions) == [{:sessions, 0}]
+
+      Buffer.stop(self())
+      assert {:ok, id} = Buffer.open(self(), %{view: "V"}, cfg)
+      assert :ok = Buffer.record(self(), :render, %{html: "y"})
+      assert :ok = Buffer.record(self(), :render, %{html: "z"})
+      corrupt_counters!(id)
+
+      capture_log(fn -> assert Buffer.take(id) == {:error, :unavailable} end)
+
+      assert :ets.lookup(Buffer.table(), :sessions) == [{:sessions, 0}], "the failed take leaked the session slot"
+      assert :ets.match_object(Buffer.table(), {{:frame, id, :_}, :_}) == [], "the failed take orphaned the session's frames"
+      assert {:ok, _next} = Buffer.open(self(), %{view: "V"}, cfg)
     end
 
     test "RED: a damaged process row is reported by name for session/1, accepting?/1 and record/4, each still total" do
