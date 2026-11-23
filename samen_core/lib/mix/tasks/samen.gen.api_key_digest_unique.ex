@@ -73,7 +73,7 @@ defmodule Mix.Tasks.Samen.Gen.ApiKeyDigestUnique do
     Mix.Task.run("compile")
 
     otp_app = Mix.Project.config()[:app]
-    repo = host_repo(otp_app)
+    repo = host_repo(otp_app, k)
     out_dir = Keyword.get(opts, :out) || Ecto.Migrator.migrations_path(repo)
     timestamp = Keyword.get(opts, :timestamp) || Calendar.strftime(DateTime.utc_now(), "%Y%m%d%H%M%S")
 
@@ -183,7 +183,11 @@ defmodule Mix.Tasks.Samen.Gen.ApiKeyDigestUnique do
   defp domains(otp_app, []), do: Application.get_env(otp_app, :ash_domains, [])
   defp domains(_otp_app, names), do: Enum.map(names, &Module.concat([&1]))
 
-  @doc "The `{table, digest_column}` of every resource of `kind` (default: API keys) in `domains`."
+  @doc """
+  The `{table, digest_column}` of every resource of `kind` (default: API keys) in `domains`. The column is the STORED
+  one (`Samen.Catalog.fields/1`'s `column_name`: the abbrev-prefixed `:source`, e.g. `aqt_token_digest`), never the
+  logical attribute name (`:token_digest`): the emitted migration must name the column that exists in the database.
+  """
   @spec discover([module()], kind()) :: [{String.t(), String.t()}]
   def discover(domains, kind \\ :api_key) do
     %{suffix: suffix} = Map.fetch!(@kinds, kind)
@@ -192,17 +196,16 @@ defmodule Mix.Tasks.Samen.Gen.ApiKeyDigestUnique do
         resource <- Ash.Domain.Info.resources(domain),
         table = AshPostgres.DataLayer.Info.table(resource),
         is_binary(table) and String.ends_with?(table, suffix),
-        attr <- Ash.Resource.Info.attributes(resource),
-        column = to_string(attr.name),
+        %{column_name: column} <- Samen.Catalog.fields(resource),
         String.ends_with?(column, "_token_digest"),
         uniq: true,
         do: {table, column}
   end
 
-  defp host_repo(otp_app) do
+  defp host_repo(otp_app, k) do
     case Application.get_env(otp_app, :ecto_repos, []) do
       [repo | _] -> repo
-      [] -> Mix.raise("mix samen.gen.api_key_digest_unique: no :ecto_repos configured for #{inspect(otp_app)}")
+      [] -> Mix.raise("mix #{k.task}: no :ecto_repos configured for #{inspect(otp_app)}")
     end
   end
 end

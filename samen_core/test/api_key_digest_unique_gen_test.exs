@@ -34,7 +34,8 @@ defmodule Samen.ApiKeyDigestUniqueGenTest do
 
     attributes do
       uuid_primary_key :id
-      attribute :zzk_token_digest, :string
+      # the shape of a real Samen resource: logical `:token_digest`, only the STORED column carries the prefix
+      attribute :token_digest, :string, source: :zzk_token_digest
     end
   end
 

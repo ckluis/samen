@@ -40,7 +40,8 @@ defmodule Samen.CsatTokenDigestUniqueGenTest do
 
     attributes do
       uuid_primary_key :id
-      attribute :zzc_token_digest, :string
+      # the shape of a real Samen resource: logical `:token_digest`, only the STORED column carries the prefix
+      attribute :token_digest, :string, source: :zzc_token_digest
     end
   end
 
@@ -54,7 +55,7 @@ defmodule Samen.CsatTokenDigestUniqueGenTest do
 
     attributes do
       uuid_primary_key :id
-      attribute :zzk_token_digest, :string
+      attribute :token_digest, :string, source: :zzk_token_digest
     end
   end
 
@@ -138,7 +139,34 @@ defmodule Samen.CsatTokenDigestUniqueGenTest do
       refute src =~ @table
     end
 
+    test "the no-repo error names the task that was run, not the API-key task" do
+      app = :samen_core
+      prev = Application.get_env(app, :ecto_repos)
+      Application.put_env(app, :ecto_repos, [])
+      on_exit(fn -> Application.put_env(app, :ecto_repos, prev) end)
+
+      assert_raise Mix.Error, ~r/^mix samen\.gen\.csat_token_digest_unique: no :ecto_repos configured/, fn -> quiet(fn -> Task.run([]) end) end
+
+      assert_raise Mix.Error, ~r/^mix samen\.gen\.api_key_digest_unique: no :ecto_repos configured/, fn ->
+        quiet(fn -> Mix.Tasks.Samen.Gen.ApiKeyDigestUnique.run([]) end)
+      end
+    end
+
+    test "the skip logic recognises BOTH index names: the fresh app's template name and the retrofit's _uidx; a plain index is not a unique one", %{dir: dir} do
+      File.write!(Path.join(dir, "20260101000000_fresh.exs"), ~s|create(unique_index(:a_csat_survey_token, [:a_token_digest], name: "a_csat_survey_token_digest_idx"))\n|)
+      File.write!(Path.join(dir, "20260101000001_retro.exs"), ~s|concurrent_unique_index(:b_csat_survey_token, :b_token_digest, name: "b_csat_survey_token_token_digest_uidx")\n|)
+      File.write!(Path.join(dir, "20260101000002_plain.exs"), ~s|create(index(:c_csat_survey_token, [:c_token_digest], name: "c_csat_survey_token_digest_idx"))\n|)
+
+      keys = [{"a_csat_survey_token", "a_token_digest"}, {"b_csat_survey_token", "b_token_digest"}, {"c_csat_survey_token", "c_token_digest"}]
+      path = quiet(fn -> Engine.generate(ScratchRepo, keys, dir, "20261120100000", :csat) end)
+      src = File.read!(path)
+      refute src =~ "a_csat_survey_token"
+      refute src =~ "b_csat_survey_token"
+      assert src =~ "c_csat_survey_token"
+    end
+
     test "discovers a CSAT survey table and its digest column from a domain; API-key tables belong to the other kind" do
+      # the STORED column, not the logical `:token_digest`
       assert Engine.discover([FixtureDomain], :csat) == [{@table, @column}]
       assert Engine.discover([FixtureDomain]) == [{"zzk_api_key", "zzk_token_digest"}]
       assert Engine.discover([], :csat) == []

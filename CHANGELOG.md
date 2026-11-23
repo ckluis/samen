@@ -31,7 +31,11 @@ All notable changes to Samen are recorded here. The format follows
   2. *Unique digest.* Run `mix samen.gen.api_key_digest_unique`, then `mix ecto.migrate`. It writes one migration of literal
      SQL (`CREATE UNIQUE INDEX CONCURRENTLY` per `*_api_key` table found in your `:ash_domains`; `--key table:column`
      names one explicitly). If a table already holds a duplicate digest the migration raises, naming the table and column,
-     and changes nothing: resolve the duplicates, run it again. A re-run writes nothing.
+     and deletes nothing: steps of the migration that already ran stay in place (a multi-table run may have built the
+     earlier tables' unique indexes), and running it again is safe. Resolve the duplicates, run it again. A re-run
+     writes nothing once every table has its index. If you ran the task before this release and it stopped with "no API-key
+     table found; pass --key table:column", run it again now: its discovery looked for the logical attribute name and so
+     found nothing in a real app; it had refused and written nothing, so no data was touched.
   3. *Expired keys (from the previous change in this chain).* An existing `--api` app's own key auth plug
      (`lib/<app>_web/api/key_auth_plug.ex`) must filter expired keys, or an expired key keeps authenticating. Add
      this line after the `is_nil(revoked_at)` filter in `lookup_key/1`:
@@ -44,6 +48,12 @@ All notable changes to Samen are recorded here. The format follows
   every row matching the digest, yet the index was plain: one row per digest rested on 32 random bytes. New apps create a
   unique index in the first migration; the committed hosts (demo `dsc`, driftwood `dcs`/`dco`, pawchart `psc`/`pqo`,
   samen_web `scw`/`wco`) got a `CONCURRENTLY` migration that replaces the plain index.
+- **Fixed: `mix samen.gen.api_key_digest_unique` and `mix samen.gen.csat_token_digest_unique` find the tables in a real
+  app.** Discovery matched the logical attribute name (`:token_digest`) against `_token_digest`, but only the stored
+  column carries the table prefix (`aqt_token_digest`), so with no `--key` it found nothing in any real app and stopped
+  with "no ... table found" (it wrote nothing). It now reads the stored column through `Samen.Catalog.fields/1`, and the
+  hosts' tests assert discovery finds exactly the tables and columns the shipped migrations name. The CSAT task's
+  "no :ecto_repos" error now names itself.
 
 ### Fixed: kernel phase D, honest reads (approvals, reveal, delivery lookups, verifier inputs, mailbox, replay)
 
