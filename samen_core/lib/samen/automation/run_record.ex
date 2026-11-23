@@ -170,6 +170,9 @@ defmodule Samen.Automation.RunRecord do
     finalize(run, :failed, bounded_outcomes(outcomes), error_kind || :action_failed)
   end
 
+  # A finalize that fails leaves the Run `:running` for good (nothing reaps it), so it is reported by NAME, never
+  # swallowed: the operation, the run's org and the error/exception module names. Never the reason's value or an
+  # exception message, which can carry the very data the outcome bounds exist to keep out.
   defp finalize(run, to, outcome, error_kind) do
     run
     |> Ash.Changeset.for_update(
@@ -183,12 +186,12 @@ defmodule Samen.Automation.RunRecord do
         :ok
 
       {:error, reason} ->
-        Logger.debug("[Automation.RunRecord] finalize(#{to}) failed: #{inspect(reason)}")
+        Samen.Observability.Failure.report_write(:run_record_finalize, safe_org_id(run), reason)
         :ok
     end
   rescue
     e ->
-      Logger.debug("[Automation.RunRecord] finalize(#{to}) failed: #{Exception.message(e)}")
+      Samen.Observability.Failure.report_write(:run_record_finalize, safe_org_id(run), e)
       :ok
   end
 
@@ -211,12 +214,20 @@ defmodule Samen.Automation.RunRecord do
     write_failed
   )a)
 
-  defp safe_error_kind(nil), do: nil
-  defp safe_error_kind(k) when is_atom(k) do
+  @known_kind_names Enum.map(@known_error_kinds, &Atom.to_string/1)
+
+  @doc """
+  The bounded `error_kind` the Run row stores for ANY value an action answered: a known atom as itself, everything else
+  (an unrecognized atom, a tuple, a string, a map) `:action_failed`. The one bound, shared with the worker's log line.
+  """
+  @spec safe_error_kind(term()) :: atom() | nil
+  def safe_error_kind(nil), do: nil
+
+  def safe_error_kind(k) when is_atom(k) do
     if MapSet.member?(@known_error_kinds, k), do: k, else: :action_failed
   end
 
-  defp safe_error_kind(_), do: :action_failed
+  def safe_error_kind(_), do: :action_failed
 
   # Outcomes must stay bounded (ids/enums/numbers only, ADR-039 §5.1) — the
   # PERSISTENCE boundary, so this is default-DENY (an explicit key ALLOWLIST),
@@ -237,9 +248,53 @@ defmodule Samen.Automation.RunRecord do
     outcomes
     |> Enum.filter(&plain_map?/1)
     |> Enum.map(&Map.take(&1, @allowed_outcome_keys ++ @allowed_outcome_keys_str))
+    |> Enum.map(&bound_outcome_kind/1)
+    |> Enum.map(&bound_outcome_meta/1)
   end
 
   defp bounded_outcomes(_), do: []
+
+  # A host action may answer ANY term as its error kind (`{:upstream_rejected, "jane@example.test"}`). A tuple cannot be
+  # encoded into the jsonb outcome (the whole finalize failed, leaving the run `:running` for good) and a string would
+  # persist whatever value it carries: only an atom (developer-chosen) or a known kind name survives; the rest is the
+  # same `:action_failed` the run's own `error_kind` column gets.
+  defp bound_outcome_kind(outcome) do
+    Enum.reduce(["error_kind", :error_kind], outcome, fn key, acc ->
+      case acc do
+        %{^key => kind} when is_atom(kind) -> acc
+        %{^key => kind} when is_binary(kind) -> if kind in @known_kind_names, do: acc, else: Map.put(acc, key, :action_failed)
+        %{^key => _other} -> Map.put(acc, key, :action_failed)
+        _ -> acc
+      end
+    end)
+  end
+
+  # `meta` is the one outcome field a host action fills with its own terms (`ActionStep.bounded/1` only drops `:detail`).
+  # The column is jsonb, so a tuple, a pid, a function or an invalid-UTF-8 binary made the whole finalize fail, leaving
+  # the run `:running` for good. Only scalar values survive (a string, number, boolean, nil or atom, under an atom or
+  # string key); everything else is dropped, and a `meta` that is not a map is dropped whole. That includes JSON-safe
+  # NESTED values (a list of maps such as `search_records`' `hits`), which would have been stored: they go by policy,
+  # not because they break the finalize. ADR-039 section 5.1 bounds an outcome to ids, enums and numbers, and nothing
+  # reads a stored outcome's `meta` (undo uses the in-memory reactor value). Values that already were scalars are stored
+  # unchanged.
+  defp bound_outcome_meta(outcome) do
+    Enum.reduce(["meta", :meta], outcome, fn key, acc ->
+      case acc do
+        %{^key => meta} when is_map(meta) and not is_struct(meta) -> Map.put(acc, key, scalar_meta(meta))
+        %{^key => _other} -> Map.delete(acc, key)
+        _ -> acc
+      end
+    end)
+  end
+
+  defp scalar_meta(meta) do
+    for {k, v} <- meta, json_key?(k), json_scalar?(v), into: %{}, do: {k, v}
+  end
+
+  defp json_key?(k), do: is_atom(k) or (is_binary(k) and String.valid?(k))
+
+  defp json_scalar?(v) when is_binary(v), do: String.valid?(v)
+  defp json_scalar?(v), do: is_number(v) or is_boolean(v) or is_nil(v) or is_atom(v)
 
   defp plain_map?(%{__struct__: _}), do: false
   defp plain_map?(m) when is_map(m), do: true

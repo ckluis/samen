@@ -104,9 +104,15 @@ defmodule Samen.Replay.Capture do
     capture(event, metadata)
     :ok
   rescue
-    _ -> :ok
+    # `:telemetry` detaches a handler that raises, so this boundary stays total; the event is not recorded and that
+    # is on record (value-free: the exception module only, never a param or the event name).
+    e ->
+      Samen.Observability.Failure.report_write(:replay_capture_event, nil, e)
+      :ok
   catch
-    _, _ -> :ok
+    kind, reason ->
+      Samen.Observability.Failure.report_write(:replay_capture_event, nil, {kind, reason})
+      :ok
   end
 
   defp capture([:phoenix, :live_view, :handle_event, :start], %{socket: socket, event: ev} = meta) do

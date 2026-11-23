@@ -467,9 +467,13 @@ defmodule Samen.AI.Agent do
       boundary (fail-closed; A2);
     * `{:error, reason, run}` — a provider/chokepoint error (bounded, EG6-normalized);
       the run is terminal `:failed` with a bounded `error_kind`;
+    * `{:error, :transcript_unavailable, run}` — the run's transcript could not be read back from the vault
+      at the top of the turn, BEFORE any provider call, proposal or tool execution (the same blob is then
+      carried into every write of that turn: a write never reads the vault): the run is terminal `:failed`;
     * `{:error, reason}` — the run could not start (`:org_scope_required`,
       `:invalid_goal`, `:invalid_budgets`, A2's breaker refusals — `:killed`,
-      `:rate_tripped`, `:provider_tripped` — and A3's tool-resolution refusals:
+      `:rate_tripped`, `:provider_tripped`, and `:unavailable` when the run log cannot be COUNTED
+      (fail-closed) — and A3's tool-resolution refusals:
       `:invalid_tools` for a declared kind that is unregistered or not opted in,
       `:tools_not_supported` for a declared `effect: :write` tool before A4;
       nothing is persisted for a refusal).
@@ -527,7 +531,7 @@ defmodule Samen.AI.Agent do
   create's own transaction** (the `EventCapture` idiom: the job exists iff the row
   committed; a lost/failed enqueue is recovered by the `:agent_turn_due` watchdog).
   Returns `{:ok, run}` (the `:queued` cursor) or the same start refusals as `run/4`
-  (`{:error, :killed | :rate_tripped | :provider_tripped | …}` — nothing persisted).
+  (`{:error, :killed | :rate_tripped | :provider_tripped | :unavailable | …}` — nothing persisted).
 
   A per-run `:hooks` opt (UXD-08, T21-verdict.json) is persisted on the row (`arn_hooks`)
   and re-resolved by the durable worker at each execution batch — it fires exactly as it
@@ -560,10 +564,11 @@ defmodule Samen.AI.Agent do
   the caller's scope (`Samen.Policy.OrgScope` — a foreign org's run does not exist). Sets
   `cancel_requested_at`; the loop honors it at its NEXT turn boundary — the in-flight
   turn completes ("stopping after the current step", never "stopped"). Returns
-  `{:ok, run}`, `{:error, :not_found}`, or `{:error, :already_terminal}`.
+  `{:ok, run}`, `{:error, :not_found}`, `{:error, :already_terminal}`, or `{:error, :unavailable}` (the
+  run could not be READ: it is not "no such run", and it is reported as `agent_cancel_load`).
   """
   @spec cancel(Samen.Scope.t(), String.t()) ::
-          {:ok, Ash.Resource.Record.t()} | {:error, :not_found | :already_terminal | term()}
+          {:ok, Ash.Resource.Record.t()} | {:error, :not_found | :already_terminal | :unavailable | term()}
   def cancel(%Samen.Scope{} = scope, run_id) do
     case Ash.get(Run, run_id, scope: scope) do
       # A4: a PARKED run has no loop to honour the durable flag at a turn boundary, and
@@ -584,10 +589,26 @@ defmodule Samen.AI.Agent do
          |> Ash.Changeset.for_update(:request_cancel, %{})
          |> Ash.update!(authorize?: false)}
 
-      {:error, _} ->
-        {:error, :not_found}
+      {:error, reason} ->
+        # A run that does not exist (or is another org's) is :not_found; a read that FAILED is not
+        # "no such run" — it is :unavailable and reported (the web surface says "try again").
+        if run_not_found?(reason) do
+          {:error, :not_found}
+        else
+          Samen.Observability.Failure.report(:agent_cancel_load, scope, reason)
+          {:error, :unavailable}
+        end
     end
   end
+
+  defp run_not_found?(%{errors: [_ | _] = errors}),
+    do:
+      Enum.all?(
+        errors,
+        &match?(%mod{} when mod in [Ash.Error.Query.NotFound, Ash.Error.Invalid.InvalidPrimaryKey], &1)
+      )
+
+  defp run_not_found?(_), do: false
 
   @doc """
   The egress options the loop passes to EVERY `Samen.AI.complete/4` call. Pure and public
@@ -883,6 +904,10 @@ defmodule Samen.AI.Agent do
         {:done, run}
 
       true ->
+        # BEFORE anything else this attempt does (agent resolution, a terminal, the loop's kill/budget/cancel checks,
+        # the transcript reveal, hooks, the provider call): see `reclaim_failed_park!/1`
+        reclaim_failed_park!(run)
+
         with {:ok, agent_mod} <- resolve_agent(run),
              {:ok, scope} <- owner_scope(run) do
           definition = agent_mod.definition()
@@ -914,6 +939,56 @@ defmodule Samen.AI.Agent do
         end
     end
   end
+
+  # A park that failed leaves a `:running` run with a pending write approval. `WriteProposal.open/1` and the turn row's
+  # `:proposed` + `meta["approval_id"]` stamp each commit in their own transaction BEFORE `park_run!/6` writes the
+  # transcript, so a park that fails (its vault store unwraps the run's KMS key) strands both. The retry REUSES that row
+  # (`find_or_reuse_turn/3`) and calls the provider again; the model may answer differently, so the old approval would
+  # outlive the run, or sit beside a new one. This is the one point every later path of the retried attempt passes
+  # through, so the stale approval is cancelled HERE, by its id, and the stamps are cleared in the SAME transaction.
+  # A run legitimately parked behind an approval is `:awaiting_approval`, which `execute_batch/1` never gets this far
+  # with; the distinguishing fact is `:running` AND a reused row that carries an `approval_id`. An approval that is no
+  # longer pending (decided, cancelled, expired) is nothing to cancel. A cancellation that FAILS raises: no provider
+  # call or tool has run in this attempt, so the job simply retries and nothing is replayed.
+  defp reclaim_failed_park!(%Run{state: :running} = run) do
+    require Ash.Query
+
+    stale =
+      Turn
+      |> Ash.Query.filter(run_id == ^run.id and turn_index == ^(run.current_turn + 1) and status == :proposed)
+      |> Ash.Query.limit(1)
+      |> Ash.read!(authorize?: false)
+
+    with [%{meta: %{"approval_id" => approval_id}} = row] when is_binary(approval_id) <- stale do
+      repo = repo!()
+
+      result =
+        repo.transaction(fn ->
+          case Samen.Approvals.cancel(approval_id, WriteProposal.requester_principal_id()) do
+            {:ok, _approval} -> :ok
+            {:error, reason} when reason in [:not_pending, :not_found] -> :ok
+            {:error, reason} -> repo.rollback(reason)
+          end
+
+          meta = row.meta |> Map.drop(["approval_id", "awaiting_approval"]) |> bounded_meta()
+
+          row
+          |> Ash.Changeset.for_update(:decide, %{meta: meta})
+          |> Ash.update!(authorize?: false)
+        end)
+
+      with {:error, reason} <- result,
+           do: raise("run #{run.id}: a failed park's approval could not be cancelled: #{inspect(reason)}")
+    end
+
+    :ok
+  rescue
+    e ->
+      Samen.Observability.Failure.report_write(:agent_reclaim_failed_park, run.org_id, e)
+      reraise e, __STACKTRACE__
+  end
+
+  defp reclaim_failed_park!(_run), do: :ok
 
   # The worker's opts: the host-configured agent provider override (tests point this at
   # Samen.AI.Provider.Scripted — the cross-process script seam), else Samen.AI's own
@@ -1071,7 +1146,7 @@ defmodule Samen.AI.Agent do
       # the counter is stamped on the turn ROW before the retry leaves. The helper hands
       # back the (possibly re-folded) run + history, the turn row carrying the counter,
       # and how many retries were spent — which is never more than one.
-      {run, lines, turn_row, result, duration_ms, retries} =
+      {run, lines, views, turn_row, result, duration_ms, retries} =
         complete_with_recovery(
           run,
           scope,
@@ -1100,7 +1175,7 @@ defmodule Samen.AI.Agent do
                 kind,
                 args,
                 duration_ms,
-                {goal, lines},
+                {goal, lines, views},
                 replayed?
               )
 
@@ -1112,7 +1187,7 @@ defmodule Samen.AI.Agent do
                 tool_error_kind,
                 nil,
                 duration_ms,
-                {goal, lines},
+                {goal, lines, views},
                 replayed?,
                 hooks,
                 nil
@@ -1126,7 +1201,7 @@ defmodule Samen.AI.Agent do
                   completion,
                   next,
                   duration_ms,
-                  {goal, lines},
+                  {goal, lines, views},
                   replayed?
                 )
 
@@ -1290,7 +1365,7 @@ defmodule Samen.AI.Agent do
       # Sabotage 322 makes this clause refutable.
       attempt <= @max_context_retries and context_overflow?(result) and
           Breaker.killed?(run.org_id, run.agent) ->
-        {run, lines, turn_row, {:error, :killed}, duration_ms, retries}
+        {run, lines, views, turn_row, {:error, :killed}, duration_ms, retries}
 
       # D-13 (ADR-048 §6/§8, operator ruling D-13) — the BUDGET is RE-CHECKED here too, and
       # with it the triple is complete: the turn boundary guards budget, cancel and the
@@ -1316,7 +1391,7 @@ defmodule Samen.AI.Agent do
       # reads only ever grows within a run. Sabotage 324 makes this clause refutable.
       attempt <= @max_context_retries and context_overflow?(result) and
           over_budget(reload!(run), DateTime.utc_now()) != nil ->
-        {run, lines, turn_row, {:error, over_budget(reload!(run), DateTime.utc_now())},
+        {run, lines, views, turn_row, {:error, over_budget(reload!(run), DateTime.utc_now())},
          duration_ms, retries}
 
       attempt <= @max_context_retries and context_overflow?(result) ->
@@ -1347,11 +1422,11 @@ defmodule Samen.AI.Agent do
           # bounded kind and takes the run terminal. Never a retry, never a silent
           # continue.
           {:halt, kind, _reason, _turn_row} ->
-            {run, lines, turn_row, {:error, kind}, duration_ms, retries}
+            {run, lines, views, turn_row, {:error, kind}, duration_ms, retries}
         end
 
       true ->
-        {run, lines, turn_row, result, duration_ms, retries}
+        {run, lines, views, turn_row, result, duration_ms, retries}
     end
   end
 
@@ -2041,7 +2116,7 @@ defmodule Samen.AI.Agent do
          %Completion{} = completion,
          next,
          duration_ms,
-         {goal, lines},
+         {goal, lines, views},
          replayed?
        ) do
     turn_index = run.current_turn + 1
@@ -2078,7 +2153,7 @@ defmodule Samen.AI.Agent do
                 next_turn_at: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds),
                 transcript:
                   encode_transcript_finalizing(
-                    run,
+                    views,
                     goal,
                     lines ++ [completion.text],
                     :none,
@@ -2137,7 +2212,7 @@ defmodule Samen.AI.Agent do
          kind,
          args,
          duration_ms,
-         {goal, lines},
+         {goal, lines, views},
          replayed?
        ) do
     tools = Keyword.get(opts, :resolved_tools, [])
@@ -2160,7 +2235,7 @@ defmodule Samen.AI.Agent do
           kind,
           args,
           duration_ms,
-          {goal, lines},
+          {goal, lines, views},
           replayed?
         )
 
@@ -2176,7 +2251,7 @@ defmodule Samen.AI.Agent do
           block_kind,
           reason,
           duration_ms,
-          {goal, lines},
+          {goal, lines, views},
           replayed?,
           hooks
         )
@@ -2195,7 +2270,7 @@ defmodule Samen.AI.Agent do
          kind,
          args,
          duration_ms,
-         {goal, lines},
+         {goal, lines, views},
          replayed?
        ) do
     case authorize_tool(tools, kind, args) do
@@ -2223,7 +2298,7 @@ defmodule Samen.AI.Agent do
               entry,
               normalized,
               duration_ms,
-              {goal, lines},
+              {goal, lines, views},
               replayed?
             )
 
@@ -2237,7 +2312,7 @@ defmodule Samen.AI.Agent do
               entry,
               edited,
               duration_ms,
-              {goal, lines},
+              {goal, lines, views},
               replayed?
             )
 
@@ -2250,7 +2325,7 @@ defmodule Samen.AI.Agent do
               block_kind,
               reason,
               duration_ms,
-              {goal, lines},
+              {goal, lines, views},
               replayed?,
               hooks
             )
@@ -2267,7 +2342,7 @@ defmodule Samen.AI.Agent do
           refusal_kind,
           known_kind,
           duration_ms,
-          {goal, lines},
+          {goal, lines, views},
           replayed?,
           hooks,
           nil
@@ -2289,7 +2364,7 @@ defmodule Samen.AI.Agent do
          entry,
          edited,
          duration_ms,
-         {goal, lines},
+         {goal, lines, views},
          replayed?
        ) do
     with :ok <- refuse_vt_args(edited),
@@ -2303,7 +2378,7 @@ defmodule Samen.AI.Agent do
         entry,
         normalized,
         duration_ms,
-        {goal, lines},
+        {goal, lines, views},
         replayed?
       )
     else
@@ -2315,7 +2390,7 @@ defmodule Samen.AI.Agent do
           refusal_kind,
           entry.kind,
           duration_ms,
-          {goal, lines},
+          {goal, lines, views},
           replayed?,
           hooks,
           nil
@@ -2332,7 +2407,7 @@ defmodule Samen.AI.Agent do
          entry,
          normalized,
          duration_ms,
-         {goal, lines},
+         {goal, lines, views},
          replayed?
        ) do
     case entry do
@@ -2355,7 +2430,7 @@ defmodule Samen.AI.Agent do
           entry,
           normalized,
           duration_ms,
-          {goal, lines},
+          {goal, lines, views},
           replayed?,
           hooks
         )
@@ -2402,6 +2477,7 @@ defmodule Samen.AI.Agent do
             duration_ms: duration_ms,
             goal: goal,
             lines: lines,
+            views: views,
             replayed?: replayed?
           })
 
@@ -2424,7 +2500,7 @@ defmodule Samen.AI.Agent do
          block_kind,
          reason,
          duration_ms,
-         {goal, lines},
+         {goal, lines, views},
          replayed?,
          hooks
        ) do
@@ -2435,7 +2511,7 @@ defmodule Samen.AI.Agent do
       block_kind,
       known_kind,
       duration_ms,
-      {goal, lines},
+      {goal, lines, views},
       replayed?,
       hooks,
       reason
@@ -2461,7 +2537,7 @@ defmodule Samen.AI.Agent do
          refusal_kind,
          known_kind,
          duration_ms,
-         {goal, lines},
+         {goal, lines, views},
          replayed?,
          hooks,
          hook_reason
@@ -2484,6 +2560,7 @@ defmodule Samen.AI.Agent do
         duration_ms: duration_ms,
         goal: goal,
         lines: lines,
+        views: views,
         replayed?: replayed?,
         hook_reason: hook_reason
       })
@@ -2523,7 +2600,7 @@ defmodule Samen.AI.Agent do
          entry,
          normalized,
          duration_ms,
-         {goal, lines},
+         {goal, lines, views},
          replayed?,
          hooks
        ) do
@@ -2558,7 +2635,7 @@ defmodule Samen.AI.Agent do
             ToolResult.render_input(normalized)
           )
 
-        run = park_run!(run, completion, {goal, lines ++ new_lines}, pending, approval, shape)
+        run = park_run!(run, completion, {goal, lines ++ new_lines, views}, pending, approval, shape)
         log_terminal(run)
         {:awaiting_approval, run}
 
@@ -2577,7 +2654,7 @@ defmodule Samen.AI.Agent do
           :approval_unavailable,
           entry.kind,
           duration_ms,
-          {goal, lines},
+          {goal, lines, views},
           replayed?,
           hooks,
           nil
@@ -2605,7 +2682,7 @@ defmodule Samen.AI.Agent do
   defp park_run!(
          %Run{} = run,
          %Completion{} = completion,
-         {goal, lines},
+         {goal, lines, views},
          pending,
          approval,
          shape
@@ -2619,7 +2696,7 @@ defmodule Samen.AI.Agent do
       Map.merge(
         %{
           next_turn_at: park_deadline(approval),
-          transcript: encode_transcript(run, goal, lines, pending, shape)
+          transcript: encode_transcript(views, goal, lines, pending, shape)
         },
         spend_attrs(run, spent(completion.usage))
       )
@@ -2682,7 +2759,7 @@ defmodule Samen.AI.Agent do
          :ok <- refuse_principal_execution(approver_id),
          {:ok, approval} <- verify_approval(approval, run, turn_row, approver_id),
          {:ok, approver_scope} <- approver_scope(approver_id, run),
-         {:ok, {goal, lines, pending}} <- transcript_state(run),
+         {:ok, {goal, lines, pending, views}} <- transcript_state(run),
          {:ok, proposal} <- bind_proposal(pending, turn_row, approval),
          {:ok, agent_mod} <- resolve_agent(run),
          {:ok, entry} <- resolve_write_tool(agent_mod, proposal.kind),
@@ -2694,7 +2771,7 @@ defmodule Samen.AI.Agent do
               ToolResult.render({:ok, meta}, actor: scope_actor(approver_scope))
 
           run =
-            commit_approved!(run, turn_row, {goal, lines}, new_lines, %{
+            commit_approved!(run, turn_row, {goal, lines, views}, new_lines, %{
               kind: entry.kind,
               normalized: normalized,
               approval_id: to_string(approval.id),
@@ -2750,9 +2827,9 @@ defmodule Samen.AI.Agent do
 
       attrs =
         case transcript_state(run) do
-          {:ok, {goal, lines, _pending}} ->
+          {:ok, {goal, lines, _pending, views}} ->
             kind = turn_row.tool_kind || "write"
-            %{transcript: encode_transcript(run, goal, lines ++ ["tool_rejected: #{kind}"])}
+            %{transcript: encode_transcript(views, goal, lines ++ ["tool_rejected: #{kind}"])}
 
           _ ->
             %{}
@@ -2842,7 +2919,11 @@ defmodule Samen.AI.Agent do
     #    decidable in the same transaction that terminates the run. A withdrawal that FAILED (not one that was
     #    already unnecessary) must roll that transaction back: `:expired` with the approval still decidable is
     #    exactly the state this hook exists to make impossible (it used to be `_ =` / `rescue _ -> :ok`).
-    withdrawn = withdraw_pending_approval(run)
+    #    The transcript is revealed ONCE, here, and the same read serves the withdrawal and the line below: a second
+    #    reveal after the approval was cancelled and the turn row finalized could blip and leave the proposal's argument
+    #    values in the blob.
+    state = transcript_state(run)
+    withdrawn = withdraw_pending_approval(run, state)
 
     # 2. Finalize the still-:proposed turn row honestly (token-only, bounded kind).
     turn = pending_turn(run)
@@ -2861,13 +2942,13 @@ defmodule Samen.AI.Agent do
 
     # 3. One bounded transcript line (inside the DEK envelope), and the pending proposal
     #    CLEARED by the 2-arity encoder — an expired proposal is never re-bindable.
-    case transcript_state(run) do
-      {:ok, {goal, lines, _pending}} ->
-        kind = pending_kind(run) || "write"
+    case state do
+      {:ok, {goal, lines, pending, views}} ->
+        kind = pending_kind(pending) || "write"
 
         run
         |> Ash.Changeset.for_update(:advance, %{
-          transcript: encode_transcript(run, goal, lines ++ ["tool_expired: #{kind}"])
+          transcript: encode_transcript(views, goal, lines ++ ["tool_expired: #{kind}"])
         })
         |> Ash.update!(authorize?: false)
 
@@ -2925,12 +3006,8 @@ defmodule Samen.AI.Agent do
       {:error, :unavailable}
   end
 
-  defp pending_kind(%Run{} = run) do
-    case transcript_state(run) do
-      {:ok, {_goal, _lines, pending}} when is_map(pending) -> Map.get(pending, "kind")
-      _ -> nil
-    end
-  end
+  defp pending_kind(pending) when is_map(pending), do: Map.get(pending, "kind")
+  defp pending_kind(_pending), do: nil
 
   # THE STATE + IDENTITY GUARD on the approval itself (see the `execute_approved/3` doc).
   # Everything here is read from the PERSISTED row: the argument is only ever used for its
@@ -3057,7 +3134,7 @@ defmodule Samen.AI.Agent do
     end
   end
 
-  defp commit_approved!(%Run{} = run, turn_row, {goal, lines}, new_lines, stamp) do
+  defp commit_approved!(%Run{} = run, turn_row, {goal, lines, views}, new_lines, stamp) do
     meta =
       (turn_row.meta || %{})
       |> Map.delete("awaiting_approval")
@@ -3083,7 +3160,7 @@ defmodule Samen.AI.Agent do
       # is a UXD-18 checkpoint 2 and finalizes any `:proposed` fold entry with it.
       transcript:
         encode_transcript_finalizing(
-          run,
+          views,
           goal,
           lines ++ new_lines,
           :none,
@@ -3171,7 +3248,7 @@ defmodule Samen.AI.Agent do
 
   defp cancel_parked(%Run{} = run) do
     run = reload!(run)
-    _ = withdraw_pending_approval(run)
+    _ = withdraw_pending_approval(run, transcript_state(run))
 
     run =
       run
@@ -3187,9 +3264,9 @@ defmodule Samen.AI.Agent do
     {:ok, run}
   end
 
-  defp withdraw_pending_approval(%Run{} = run) do
-    case transcript_state(run) do
-      {:ok, {_goal, _lines, pending}} ->
+  defp withdraw_pending_approval(%Run{} = run, state) do
+    case state do
+      {:ok, {_goal, _lines, pending, _views}} ->
         with true <- is_map(pending),
              approval_id when is_binary(approval_id) <- Map.get(pending, "approval_id") do
           Samen.Approvals.cancel(approval_id, WriteProposal.requester_principal_id())
@@ -3506,7 +3583,7 @@ defmodule Samen.AI.Agent do
               next_turn_at: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds),
               transcript:
                 encode_transcript_finalizing(
-                  run,
+                  turn.views,
                   turn.goal,
                   turn.lines ++ turn.new_lines,
                   :none,
@@ -3601,15 +3678,18 @@ defmodule Samen.AI.Agent do
   # (whole-turns-only) at the top of every turn, and paying a second decrypt for them
   # would be a second read of the same envelope for no reason.
   defp transcript_with_views(%Run{transcript: %Samen.Masked{} = masked} = run) do
-    with {:ok, json} <- Samen.Vault.reveal(masked, repo!(), subject_id: run.id),
-         {:ok, {goal, _lines, _pending}} <- decode_transcript(json) do
-      views = decode_views(json)
-      # §4 non-negotiable 3: the loop threads `llm_view` and ONLY `llm_view`. Taking the
-      # history from the same map the fold reasons over is what keeps the fold's segment
-      # arithmetic and the sealed payload describing the same list.
-      {:ok, {goal, views.llm_view, views}}
-    else
-      _ -> {:error, :transcript_unavailable}
+    case Samen.Vault.reveal(masked, repo!(), subject_id: run.id) do
+      {:ok, json} ->
+        with {:ok, {goal, _lines, _pending}} <- decode_transcript(json) do
+          views = decode_views(json)
+          # §4 non-negotiable 3: the loop threads `llm_view` and ONLY `llm_view`. Taking the
+          # history from the same map the fold reasons over is what keeps the fold's segment
+          # arithmetic and the sealed payload describing the same list.
+          {:ok, {goal, views.llm_view, views}}
+        end
+
+      {:error, reason} ->
+        reveal_failed(run, reason)
     end
   end
 
@@ -3624,12 +3704,37 @@ defmodule Samen.AI.Agent do
     case run.transcript do
       %Samen.Masked{} = masked ->
         case Samen.Vault.reveal(masked, repo!(), subject_id: run.id) do
-          {:ok, json} -> decode_transcript(json)
-          {:error, _reason} -> {:error, :transcript_unavailable}
+          {:ok, json} -> decode_transcript_state(json)
+          {:error, reason} -> reveal_failed(run, reason)
         end
 
       _ ->
         {:error, :transcript_unavailable}
+    end
+  end
+
+  # A reveal that FAILED ends the operation as `:transcript_unavailable`, and the operator can tell an outage from an
+  # erasure: a subject whose key was SANCTIONEDLY erased (`:shredded`: every shipped KMS adapter leaves a positive
+  # tombstone, `Samen.Kms` requires one; `:not_found` = no vault row) is the expected end of an erased run and stays
+  # quiet. `:absent` is NOT in that set: it only says the key store has no entry for the subject (a wrong or wiped
+  # `:kms_key_dir`, an unmounted volume, an in-memory store after a restart), which is a disaster to report, not an
+  # erasure. Anything else (a KMS outage, a decrypt failure) is reported by name, value-free; the run's outcome is the
+  # same clean `:transcript_unavailable` failure either way.
+  @transcript_gone_reasons [:shredded, :not_found]
+
+  defp reveal_failed(%Run{} = run, reason) do
+    if reason not in @transcript_gone_reasons,
+      do: Samen.Observability.Failure.report(:agent_transcript_reveal, run.org_id, reason)
+
+    {:error, :transcript_unavailable}
+  end
+
+  # The history, the pending proposal AND the carried views, all decoded from ONE reveal: a transcript write that
+  # follows this read appends to exactly the blob it read, and never reveals the vault a second time (a second reveal
+  # has side effects between the two: an opened approval, an executed tool, a billed provider call).
+  defp decode_transcript_state(json) do
+    with {:ok, {goal, lines, pending}} <- decode_transcript(json) do
+      {:ok, {goal, lines, pending, decode_views(json)}}
     end
   end
 
@@ -3664,7 +3769,13 @@ defmodule Samen.AI.Agent do
       %Samen.Masked{} = masked ->
         case Samen.Vault.reveal(masked, repo!(), subject_id: run.id) do
           {:ok, json} -> decode_transcript_views(json)
-          {:error, _reason} -> {:error, :transcript_unavailable}
+          {:error, reason} ->
+            # the UI-facing reader: same gone/outage split as `reveal_failed/2`, its own op name (a literal: the
+            # `Failure.report` guard enumerates names), and the same `:transcript_unavailable` answer
+            if reason not in @transcript_gone_reasons,
+              do: Samen.Observability.Failure.report(:agent_transcript_views, run.org_id, reason)
+
+            {:error, :transcript_unavailable}
         end
 
       _ ->
@@ -3707,19 +3818,19 @@ defmodule Samen.AI.Agent do
   # `shape` is the APPENDED turn's role shape (`Samen.AI.Agent.Conversation`, 2026-11-13) —
   # persisted beside `turn_lens` so the next turn's conversation can say who wrote each turn
   # without reading the lines. It is used only when the write appends a turn.
-  defp encode_transcript(run, goal, lines, pending \\ :none, shape \\ Conversation.note_shape()) do
-    {ui_view, boundaries, folds} = carried_for_write(run, lines, shape)
+  defp encode_transcript(prior, goal, lines, pending \\ :none, shape \\ Conversation.note_shape()) do
+    {ui_view, boundaries, folds} = carried_for_write(prior, lines, shape)
     encode_views(goal, lines, ui_view, folds, boundaries, pending)
   end
 
-  # ADR-048 §6 / ruling UXD-18 CHECKPOINT 2. Identical to `encode_transcript/3-4` except
+  # ADR-048 §6 / ruling UXD-18 CHECKPOINT 2. Identical to `encode_transcript/3-5` except
   # that it finalizes every `:proposed` fold-ledger entry to `"done"`. Call it ONLY from
   # inside a transaction that also advances the run cursor — that co-location IS the
   # ruling: the fold entry and the cursor move together or neither moves, so no crash
   # window can leave a finalized fold at an un-advanced cursor (the mirror of
   # `commit_turn!`'s single-transaction rule for turn ROWS).
-  defp encode_transcript_finalizing(run, goal, lines, pending, shape) do
-    {ui_view, boundaries, folds} = carried_for_write(run, lines, shape)
+  defp encode_transcript_finalizing(prior, goal, lines, pending, shape) do
+    {ui_view, boundaries, folds} = carried_for_write(prior, lines, shape)
     encode_views(goal, lines, ui_view, finalize_folds(folds), boundaries, pending)
   end
 
@@ -3732,9 +3843,10 @@ defmodule Samen.AI.Agent do
 
   defp finalize_folds(folds), do: folds
 
-  defp carried_for_write(run, lines, shape) do
-    prior = carried_views(run)
-
+  # `prior` is the view state the caller ALREADY revealed (the top of the turn, or `transcript_state/1`): a write never
+  # reads the vault. A reveal that can fail therefore happens once, before any provider call, proposal, tool execution
+  # or approval decision, where a failure already ends the operation cleanly.
+  defp carried_for_write(prior, lines, shape) do
     {ui_view, turn_lens, turn_shapes} =
       cond do
         not List.starts_with?(lines, prior.llm_view) ->
@@ -3769,43 +3881,6 @@ defmodule Samen.AI.Agent do
     }
 
     Jason.encode!(if pending in [:none, nil], do: base, else: Map.put(base, "pending", pending))
-  end
-
-  # The carried view state, read through the SAME single decrypt chokepoint
-  # `transcript_state/1` uses. A run with no transcript yet (create) or an unreadable one
-  # degrades to the empty carry — never to a fabricated history.
-  defp carried_views(nil), do: empty_views()
-
-  defp carried_views(%Run{transcript: %Samen.Masked{} = masked} = run),
-    do: reveal_views(masked, run.id)
-
-  # A vault-routed attribute is NOT handed back on the record an `:advance` writes — the
-  # plaintext must never ride home on the struct — so a run THIS process just wrote
-  # carries `%Ash.NotLoaded{}` here. Re-read that one row rather than degrade: silently
-  # dropping the carry would erase the fold ledger and the append-only `ui_view` on the
-  # very next write, which is exactly the deletion §4 forbids. The common path (a run
-  # read at the top of a turn) is already `%Samen.Masked{}` and never reaches here.
-  defp carried_views(%Run{id: id}) when is_binary(id) do
-    require Ash.Query
-
-    Run
-    |> Ash.Query.filter(id == ^id)
-    |> Ash.Query.ensure_selected([:transcript])
-    |> Ash.Query.limit(1)
-    |> Ash.read!(authorize?: false)
-    |> case do
-      [%Run{transcript: %Samen.Masked{} = masked}] -> reveal_views(masked, id)
-      _ -> empty_views()
-    end
-  end
-
-  defp carried_views(_run), do: empty_views()
-
-  defp reveal_views(masked, subject_id) do
-    case Samen.Vault.reveal(masked, repo!(), subject_id: subject_id) do
-      {:ok, json} -> decode_views(json)
-      {:error, _reason} -> empty_views()
-    end
   end
 
   defp decode_views(json) do
@@ -3883,7 +3958,7 @@ defmodule Samen.AI.Agent do
             # durability path for this. Shared by run/4 AND start/4 (both funnel through
             # this one function), so both modes now agree on what they persisted.
             hooks: opts |> Keyword.get(:hooks) |> List.wrap() |> Enum.map(&Atom.to_string/1),
-            transcript: encode_transcript(nil, goal, []),
+            transcript: encode_transcript(empty_views(), goal, []),
             next_turn_at: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds)
           },
           Map.new(budgets)

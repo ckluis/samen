@@ -1,0 +1,19 @@
+# SABOTAGE: a turn's transcript write carries empty views forward again (the write drops ui_view and the fold ledger)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_transcript_write_test.exs
+# MUST_FAIL: RED: an unreadable transcript mid-turn changes nothing
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 049a1655..86e19d80 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -2099,7 +2099,7 @@ defmodule Samen.AI.Agent do
+                 next_turn_at: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds),
+                 transcript:
+                   encode_transcript_finalizing(
+-                    views,
++                    %{views | ui_view: [], folds: []},
+                     goal,
+                     lines ++ [completion.text],
+                     :none,

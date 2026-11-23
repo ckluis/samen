@@ -1,0 +1,20 @@
+# SABOTAGE: the kill terminal scans the org's approvals first, so an unreadable approvals store means a 
+#   kill cannot land
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_transcript_write_test.exs
+# MUST_FAIL: RED: the kill switch lands on a run with an in-flight turn row although the approvals store is unreadable
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index d0db6310..deca26a4 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -4008,6 +4008,8 @@ defmodule Samen.AI.Agent do
+   # :fail and :cancel transition from :queued OR :running; :exhaust is loop-only (the
+   # loop always runs post-begin!, so an exhaust on a :queued row cannot arise).
+   defp terminal!(%Run{} = run, action, kind) do
++    if action == :fail and kind == :killed, do: {:ok, _} = Samen.Approvals.list_pending(run.org_id, WriteProposal.kind())
++
+     run
+     |> Ash.Changeset.for_update(action, %{error_kind: to_string(safe_error_kind(kind))})
+     |> Ash.update!(authorize?: false)

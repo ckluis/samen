@@ -157,6 +157,232 @@ defmodule Samen.Automation.ObservabilityTest do
              jsonify(run.outcome)
   end
 
+  test "RED: a failed action is logged by its bounded error_kind, never by inspecting the raw error (which carries the webhook secret and the subject)" do
+    org = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+
+    Application.put_env(:samen_core, Samen.Delivery.Chokepoint, suppression_module: SuppressAll)
+
+    wf =
+      create_workflow!(org, owner,
+        conditions: [],
+        actions: [%{"kind" => "send_email", "to" => "owner", "template_key" => "welcome"}]
+      )
+
+    secret = Map.fetch!(wf, :webhook_secret)
+    assert is_binary(secret) and byte_size(secret) > 16
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        create_target!(org)
+        drain()
+      end)
+
+    assert log =~ "action(s) failed"
+    assert log =~ "error_kind=suppressed"
+    refute log =~ secret
+    refute log =~ "Reactor.Argument"
+  end
+
+  defmodule TallyThenFail do
+    @moduledoc false
+    @behaviour Samen.Automation.Action
+    def kind, do: :zz_tally
+    def validate(config, _key), do: {:ok, config}
+
+    def run(_config, _ctx) do
+      :counters.add(:persistent_term.get({__MODULE__, :ran}), 1, 1)
+      {:ok, %{}}
+    end
+  end
+
+  defmodule NonAtomFails do
+    @moduledoc false
+    @behaviour Samen.Automation.Action
+    def kind, do: :zz_nonatom
+    def validate(config, _key), do: {:ok, config}
+    def run(_config, _ctx), do: {:error, {:upstream_rejected, "jane.doe-marker-5521@example.test"}}
+  end
+
+  test "RED: a host action failing with a NON-ATOM error does not raise out of the worker (no Oban retry, no re-run of the earlier action, no value in the log or the job errors); an atom error behaves the same (control)" do
+    marker = "jane.doe-marker-5521@example.test"
+    prev = Application.get_env(:samen_core, Samen.Automation.Action)
+
+    Application.put_env(:samen_core, Samen.Automation.Action,
+      extra: %{"zz_tally" => TallyThenFail, "zz_nonatom" => NonAtomFails, "zz_fail" => Samen.Automation.ObservabilityTest.AlwaysFails}
+    )
+
+    ran = :counters.new(1, [])
+    :persistent_term.put({TallyThenFail, :ran}, ran)
+
+    on_exit(fn ->
+      :persistent_term.erase({TallyThenFail, :ran})
+      restore(:samen_core, Samen.Automation.Action, prev)
+    end)
+
+    # the injected failure really carries the marker, and interpolating it raises with the marker in the message
+    assert {:error, {:upstream_rejected, ^marker}} = NonAtomFails.run(%{}, nil)
+    assert_raise Protocol.UndefinedError, ~r/#{marker}/, fn -> apply(&to_string/1, [{:upstream_rejected, marker}]) end
+
+    owner = Ash.UUID.generate()
+
+    # one org per firing: a second workflow of the same org would also fire on the next target
+    fire = fn failing_kind ->
+      org = Ash.UUID.generate()
+      :counters.put(ran, 1, 0)
+      wf = create_workflow!(org, owner, conditions: [], actions: [%{"kind" => "zz_tally"}, %{"kind" => failing_kind}])
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          create_target!(org)
+          assert %{failure: 0, discard: 0, snoozed: 0} = drain()
+        end)
+
+      {org, wf, log, :counters.get(ran, 1)}
+    end
+
+    # POSITIVE CONTROL: an atom error — the job finishes, the earlier action ran once, the Run row is failed
+    {control_org, control_wf, control_log, control_ran} = fire.("zz_fail")
+    assert control_ran == 1
+    assert control_log =~ "error_kind=write_failed"
+    assert [%{state: :failed, error_kind: :write_failed}] = runs_for(control_org, control_wf.id)
+
+    # RED: the non-atom error has the SAME outcome, bounded to :action_failed
+    {org, wf, log, ran_count} = fire.("zz_nonatom")
+    assert ran_count == 1, "a retry re-ran the earlier action"
+    assert log =~ "error_kind=action_failed"
+    refute log =~ marker
+    assert [%{state: :failed, error_kind: :action_failed}] = runs_for(org, wf.id)
+
+    %{rows: rows} = TestRepo.query!("select errors::text from oban_jobs")
+    refute Enum.any?(rows, fn [errors] -> errors =~ marker end), "the marker reached oban_jobs.errors"
+  end
+
+  defmodule NonJsonMeta do
+    @moduledoc false
+    @behaviour Samen.Automation.Action
+    def kind, do: :zz_nonjson
+    def validate(config, _key), do: {:ok, config}
+
+    # a host action's own terms: a tuple, a pid, a function, a nested map and a non-UTF-8 binary cannot be a jsonb value
+    def run(_config, _ctx) do
+      {:ok,
+       %{
+         upstream: {:accepted, 7},
+         conn: self(),
+         callback: &String.length/1,
+         nested: %{a: 1},
+         raw: <<255, 254>>,
+         kept: "ok-1",
+         count: 3,
+         flag: true,
+         none: nil
+       }}
+    end
+  end
+
+  defmodule JsonMeta do
+    @moduledoc false
+    @behaviour Samen.Automation.Action
+    def kind, do: :zz_jsonmeta
+    def validate(config, _key), do: {:ok, config}
+    def run(_config, _ctx), do: {:ok, %{count: 2, note: "fine", flag: true}}
+  end
+
+  test "RED: a host action whose meta holds a tuple, a pid or another non-JSON term still ends the Run terminal, with only the scalars stored; JSON-safe meta is stored unchanged (control)" do
+    prev = Application.get_env(:samen_core, Samen.Automation.Action)
+
+    Application.put_env(:samen_core, Samen.Automation.Action,
+      extra: %{"zz_nonjson" => NonJsonMeta, "zz_jsonmeta" => JsonMeta}
+    )
+
+    on_exit(fn -> restore(:samen_core, Samen.Automation.Action, prev) end)
+
+    owner = Ash.UUID.generate()
+
+    fire = fn kind ->
+      org = Ash.UUID.generate()
+      wf = create_workflow!(org, owner, conditions: [], actions: [%{"kind" => kind}])
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          create_target!(org)
+          assert %{failure: 0, discard: 0, snoozed: 0} = drain()
+        end)
+
+      {runs_for(org, wf.id), log}
+    end
+
+    # CONTROL: JSON-safe meta is stored exactly as the action answered it
+    {[control], control_log} = fire.("zz_jsonmeta")
+    assert control.state == :succeeded
+    assert [%{"meta" => %{"count" => 2, "note" => "fine", "flag" => true}}] = jsonify(control.outcome)
+    refute control_log =~ "run_record_finalize"
+
+    # RED: the same shape of action with non-JSON terms in its meta
+    {[run], log} = fire.("zz_nonjson")
+    assert run.state == :succeeded, "the Run stayed #{inspect(run.state)} because its outcome could not be stored"
+    assert run.finished_at != nil
+
+    assert [%{"meta" => meta}] = jsonify(run.outcome)
+    assert meta == %{"kept" => "ok-1", "count" => 3, "flag" => true, "none" => nil}
+
+    outcome_json = Jason.encode!(run.outcome)
+    refute outcome_json =~ "accepted"
+    refute outcome_json =~ "#PID"
+    refute log =~ "run_record_finalize"
+  end
+
+  test "RED: a finalize that fails is reported by name and org, never as a debug line, and never with the exception's message or the run's values" do
+    marker = "run-marker-6639@example.test"
+    org = Ash.UUID.generate()
+
+    # the injected failure is real and its message carries the marker (a plain map where a Run record belongs)
+    forged = %{org_id: org, note: marker}
+
+    assert_raise ArgumentError, ~r/#{marker}/, fn ->
+      apply(Ash.Changeset, :for_update, [forged, :finalize, %{}, [authorize?: false]])
+    end
+
+    log = ExUnit.CaptureLog.capture_log(fn -> assert :ok = RunRecord.succeed!(forged, []) end)
+
+    assert log =~ "[error]"
+    assert log =~ "write failed write=run_record_finalize org=#{org}"
+    assert log =~ "cause=ArgumentError"
+    refute log =~ marker
+
+    # CONTROL: a real Run finalizes quietly through the same seam
+    owner = Ash.UUID.generate()
+    org2 = Ash.UUID.generate()
+    wf = create_workflow!(org2, owner, conditions: [], actions: [])
+    args = %{"org_id" => org2, "event_id" => Ash.UUID.generate(), "trigger_kind" => "manual", "subject_ref" => "ref"}
+    run = RunRecord.open!(wf, args)
+    log2 = ExUnit.CaptureLog.capture_log(fn -> assert :ok = RunRecord.succeed!(RunRecord.mark_running!(run), []) end)
+    refute log2 =~ "run_record_finalize"
+    assert [%{state: :succeeded}] = runs_for(org2, wf.id)
+  end
+
+  test "RED: a finalize that answers {:error, _} (an invalid state transition) is reported by name and org, never as a debug line" do
+    org = Ash.UUID.generate()
+    wf = create_workflow!(org, Ash.UUID.generate(), conditions: [], actions: [])
+    args = %{"org_id" => org, "event_id" => Ash.UUID.generate(), "trigger_kind" => "manual", "subject_ref" => "ref"}
+    run = RunRecord.open!(wf, args)
+
+    # CONTROL: the first finalize is quiet and terminal
+    log1 = ExUnit.CaptureLog.capture_log(fn -> assert :ok = RunRecord.succeed!(RunRecord.mark_running!(run), []) end)
+    refute log1 =~ "run_record_finalize"
+    assert [%{state: :succeeded}] = runs_for(org, wf.id)
+
+    # the injected failure is real: a second finalize of the same, already-terminal Run is refused by the state machine
+    [terminal] = runs_for(org, wf.id)
+    assert {:error, _} = terminal |> Ash.Changeset.for_update(:finalize, %{to: :failed, outcome: [], error_kind: :action_failed}, authorize?: false) |> Ash.update(authorize?: false)
+
+    log = ExUnit.CaptureLog.capture_log(fn -> assert :ok = RunRecord.fail!(terminal, [], :action_failed) end)
+    assert log =~ "[error]"
+    assert log =~ "write failed write=run_record_finalize org=#{org}"
+    assert [%{state: :succeeded}] = runs_for(org, wf.id), "the refused finalize changed nothing"
+  end
+
   test "row 3 — a non-matching condition -> Run row :skipped/:conditions_unmet, never :running" do
     org = Ash.UUID.generate()
     owner = Ash.UUID.generate()

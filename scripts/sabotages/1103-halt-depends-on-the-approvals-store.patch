@@ -1,0 +1,19 @@
+# SABOTAGE: a hook halt scans the org's approvals first, so an unreadable approvals store loses the halt 
+#   (fail-open)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_transcript_write_test.exs
+# MUST_FAIL: RED: a hook halt on a FRESH turn lands although the approvals store is unreadable
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index d0db6310..cd116686 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -2101,6 +2101,7 @@ defmodule Samen.AI.Agent do
+       })
+     end
+ 
++    {:ok, _} = Samen.Approvals.list_pending(run.org_id, WriteProposal.kind())
+     run = terminal!(run, :fail, kind)
+     log_terminal(run)
+     {:error, safe_error_kind(kind), run}

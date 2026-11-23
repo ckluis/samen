@@ -101,8 +101,10 @@ defmodule Samen.Automation.RunWorker do
         :ok
 
       {:error, reason} ->
-        Logger.warning("[Automation.RunWorker] workflow #{args["workflow_id"]} error: #{inspect(reason)}")
-        :ok
+        # A workflow row that could not be READ is not "nothing to run": the job errors (Oban backoff + retry;
+        # a job that exhausts its attempts is discarded, visibly) instead of finishing as if the automation ran.
+        Samen.Observability.Failure.report(:run_worker_load_workflow, args["org_id"], reason)
+        {:error, :unavailable}
     end
   end
 
@@ -305,7 +307,12 @@ defmodule Samen.Automation.RunWorker do
       {:error, reason} ->
         {outcomes, error_kind} = extract_failure(reason)
         RunRecord.fail!(run_row, outcomes, error_kind)
-        Logger.warning("[Automation.RunWorker] workflow #{wf.id} action(s) failed: #{inspect(reason)}")
+        # Bounded error_kind ONLY, the SAME value the Run row stores: the raw reason is Reactor's error, whose step
+        # arguments carry the whole Context (the webhook secret, the actor, the subject values), and a host action may
+        # answer a non-atom kind (a tuple or string carrying a value), which must neither be interpolated (it raises, and
+        # Oban retries the job, re-running the actions) nor printed.
+        bounded = RunRecord.safe_error_kind(error_kind || :action_failed)
+        Logger.warning("[Automation.RunWorker] workflow #{wf.id} action(s) failed: error_kind=#{bounded}")
         :ok
     end
   end

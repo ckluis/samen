@@ -8,10 +8,10 @@
 # TEST_FILES: test/observability/live_telemetry_test.exs
 # MUST_FAIL: handle_event/4 returns :ok for ANY input
 diff --git a/samen_core/lib/samen/observability/live_telemetry.ex b/samen_core/lib/samen/observability/live_telemetry.ex
-index 8f24986..6055d9b 100644
+index 097cf117..4b540b40 100644
 --- a/samen_core/lib/samen/observability/live_telemetry.ex
 +++ b/samen_core/lib/samen/observability/live_telemetry.ex
-@@ -105,11 +105,9 @@ defmodule Samen.Observability.LiveTelemetry do
+@@ -122,11 +122,9 @@ defmodule Samen.Observability.LiveTelemetry do
        :skip -> :ok
      end
  
@@ -19,9 +19,9 @@ index 8f24986..6055d9b 100644
 +    # raises out of the telemetry callback and :telemetry detaches it for good.
      :ok
 -  rescue
--    _ -> :ok
+-    e -> dropped(e)
 -  catch
--    _, _ -> :ok
+-    kind, reason -> dropped({kind, reason})
    end
  
-   @doc false
+   # The event is not emitted and that is on record (value-free: the exception module only, never the metadata).

@@ -57,11 +57,11 @@ defmodule Samen.AI.Agent.Breaker do
   in-flight run's own error is surfaced unchanged; a success resets the streak;
   re-arming is explicit (`rearm/1` clears every parked definition).
 
-  ## Fail-safe counting, fail-closed switching
+  ## Fail-closed counting, fail-closed switching
 
-  The rate COUNT is observability over the run log: a broken count degrades to "no
-  trip" and never blocks or crashes a run (the `Automation.Breaker` rescue posture).
-  The SWITCH itself is fail-closed: once on, everything refuses until an explicit
+  The rate COUNT is the spend valve, read from the run log: a count that FAILED is not "under the
+  limit". `check_start/2` refuses the run `{:error, :unavailable}` (reported as `breaker_rate_count`),
+  tripping nothing. The SWITCH itself is fail-closed too: once on, everything refuses until an explicit
   re-arm. Kill/re-arm/trip are audited token-only via `Samen.AuditEvent` (best-effort,
   never load-bearing).
 
@@ -78,7 +78,6 @@ defmodule Samen.AI.Agent.Breaker do
   there; the two node-lifetime halves are named, not hidden.
   """
 
-  require Logger
   require Ash.Query
 
   alias Samen.AI.Agent.Kill
@@ -156,10 +155,13 @@ defmodule Samen.AI.Agent.Breaker do
     * `{:error, :killed}` — the kill-switch is on (fail-closed);
     * `{:error, :provider_tripped}` — this agent definition is parked;
     * `{:error, :rate_tripped}` — this org crossed the runs-per-hour threshold; the
-      crossing ALSO throws the kill-switch (reason `:rate_tripped`, idempotent).
+      crossing ALSO throws the kill-switch (reason `:rate_tripped`, idempotent);
+    * `{:error, :unavailable}` — the run log could not be COUNTED, so the rate cannot be judged: the
+      run is refused (fail-closed; the spend valve is never assumed open). Nothing is tripped or
+      persisted for it, and the failure is reported (`breaker_rate_count`).
   """
   @spec check_start(String.t(), String.t()) ::
-          :ok | {:error, :killed | :provider_tripped | :rate_tripped}
+          :ok | {:error, :killed | :provider_tripped | :rate_tripped | :unavailable}
   def check_start(org_id, agent_name) do
     cond do
       killed?(org_id, agent_name) ->
@@ -168,17 +170,23 @@ defmodule Samen.AI.Agent.Breaker do
       provider_tripped?(agent_name) ->
         {:error, :provider_tripped}
 
-      rate_exceeded?(org_id) ->
-        # A5: the same kill action a human operator uses — but the PER-DEFINITION one,
-        # reason "rate_tripped", idempotent (an upsert), durable, audited. A2/A3 threw
-        # the HOST switch here, which stopped every other tenant's agents too; that
-        # cross-tenant blast radius is gone. Only ever trips; re-arming is
-        # explicit-operator-only.
-        kill_definition(org_id, agent_name, :rate_tripped, org_id: org_id)
-        {:error, :rate_tripped}
-
       true ->
-        :ok
+        case rate_exceeded?(org_id) do
+          :unavailable ->
+            {:error, :unavailable}
+
+          true ->
+            # A5: the same kill action a human operator uses — but the PER-DEFINITION one,
+            # reason "rate_tripped", idempotent (an upsert), durable, audited. A2/A3 threw
+            # the HOST switch here, which stopped every other tenant's agents too; that
+            # cross-tenant blast radius is gone. Only ever trips; re-arming is
+            # explicit-operator-only.
+            kill_definition(org_id, agent_name, :rate_tripped, org_id: org_id)
+            {:error, :rate_tripped}
+
+          false ->
+            :ok
+        end
     end
   end
 
@@ -203,8 +211,8 @@ defmodule Samen.AI.Agent.Breaker do
   re-arm).
 
   **Fail-CLOSED on a read failure**: an unreachable/unmigrated kill table answers
-  `true`. A kill switch whose state cannot be read must never be assumed off — the
-  opposite of the rate COUNT, which is observability and degrades to "no trip".
+  `true`. A kill switch whose state cannot be read must never be assumed off — and the rate COUNT is
+  fail-closed the same way (`check_start/2` refuses `{:error, :unavailable}`).
   """
   @spec definition_killed?(String.t() | nil, String.t() | nil) :: boolean()
   def definition_killed?(org_id, agent_name)
@@ -223,7 +231,7 @@ defmodule Samen.AI.Agent.Breaker do
     end
   rescue
     e ->
-      Logger.debug("[Samen.AI.Agent.Breaker] kill read failed: #{Exception.message(e)}")
+      Samen.Observability.Failure.report(:breaker_definition_killed, org_id, e)
       true
   end
 
@@ -476,8 +484,9 @@ defmodule Samen.AI.Agent.Breaker do
   defp agent_config, do: Application.get_env(:samen_core, Samen.AI.Agent, [])
 
   # Count this org's runs over the trailing window from the run log itself (no second
-  # counter — the Automation.Breaker rule). Fail-safe: a broken COUNT degrades to "no
-  # trip" and never blocks a run; the switch itself stays fail-closed.
+  # counter — the Automation.Breaker rule). A broken COUNT answers `:unavailable`, which `check_start/2`
+  # REFUSES (the runs-per-hour valve is a spend limit: a read that failed must not read as "under the limit").
+  # It trips nothing and is reported by name.
   defp rate_exceeded?(org_id) do
     since = DateTime.add(DateTime.utc_now(), -@rate_window_seconds, :second)
 
@@ -490,8 +499,8 @@ defmodule Samen.AI.Agent.Breaker do
     count >= rate_limit_per_org_hour()
   rescue
     e ->
-      Logger.debug("[Samen.AI.Agent.Breaker] rate count failed: #{Exception.message(e)}")
-      false
+      Samen.Observability.Failure.report(:breaker_rate_count, org_id, e)
+      :unavailable
   end
 
   # The audit SUBJECT of a per-{org, definition} kill is that definition, not the host
