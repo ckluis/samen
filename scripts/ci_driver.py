@@ -1103,8 +1103,10 @@ class Run(object):
             # unrecorded `mix test` for the next invocation to overlap on the same test database.
             def register(proc):
                 self.reruns[rid] = proc
-            p = self.spawn_gated(cmd, os.path.join(REPO, step.exunit_dir), self.ctx.env(self.mode, step), f, "rerun", register)
+            p = None
             try:
+                # inside the try: an exception after `register` (save_state in spawn_gated) must not leave the record behind
+                p = self.spawn_gated(cmd, os.path.join(REPO, step.exunit_dir), self.ctx.env(self.mode, step), f, "rerun", register)
                 while p.poll() is None:
                     if self.interrupted:
                         self.stop_group(p)

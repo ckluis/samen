@@ -2368,6 +2368,15 @@ MIX
   eq "$(jsonget "$SAMEN_CI_HOME/state.json" '"flaky#rerun" in d.get("running", {})')" False "RERUNREC: ... and state.json no longer names the rerun"
   eq "$(jsonget "$SAMEN_CI_HOME/last.json" '[s["status"] for s in d["steps"] if s["id"] == "flaky"][0]')" INTERRUPTED "RERUNREC: ... and the step is INTERRUPTED"
   eq "$(grep -c 'rerun-timeout' "$CI_TEST_RUNS")" 0 "RERUNREC: ... and the rerun was stopped, not left to time out"
+  # (c) an exception AFTER the rerun was registered (the launch seam's expiry raises there) leaves no record of it behind:
+  # the driver ends ERROR, and state.json does not still name a rerun nobody is waiting for.
+  rm -f "$CI_TEST_RUNS" "$T/rerun.hold"
+  local rc3
+  env PATH="$T/bin:$PATH" SAMEN_CI_TEST_HOLD_LAUNCH="$T/rerun.hold" SAMEN_CI_TEST_HOLD_KIND=rerun SAMEN_CI_TEST_HOLD_LIMIT_S=1 "$CI" pr -j 1 > "$T/rr4" 2>&1; rc3=$?
+  eq "$([[ $rc3 -ne 0 ]] && echo failed || echo "rc=$rc3")" failed "RERUNREC: an expired hold on the rerun fails the run"
+  has "$T/rr4" 'SAMEN_CI_TEST_HOLD_LAUNCH: the test seam held' "RERUNREC: ... loudly, naming the seam (the premise: it raised after the rerun was registered)"
+  eq "$(jsonget "$SAMEN_CI_HOME/state.json" '"flaky#rerun" in d.get("running", {})')" False "RERUNREC: ... and state.json holds no record of the rerun that never ran"
+  eq "$(grep -c '^rerun' "$CI_TEST_RUNS" 2>/dev/null || true)" 0 "RERUNREC: ... which never ran a line of its command"
 }
 
 ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS LOCALPATHS GENPROBE GENHEX GENHEXRO NARROW RECHUNK COSTW TIMEOUT SELTMO GENDEPS ESCAPE MUTLINT MUTLOCK LAUNCHREC LAUNCHSEAM RERUNREC)
