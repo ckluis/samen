@@ -185,12 +185,15 @@ defmodule Mix.Tasks.Samen.Verify.PiiClassify do
     try do
       NonPii.entries()
     rescue
-      _ ->
-        # Registry unavailable (e.g. repo not started, DB not available).
-        # Fail safe: return an empty list — no overrides are accepted.
+      e ->
+        # Registry unavailable (e.g. repo not started, DB not available): no overrides are accepted (stricter,
+        # the check can only gain findings), and the unavailability is on record rather than silent.
+        Samen.Observability.Failure.report(:pii_classify_registry, nil, e)
         []
     catch
-      :exit, _ -> []
+      :exit, reason ->
+        Samen.Observability.Failure.report(:pii_classify_registry, nil, {:exit, reason})
+        []
     end
   end
 end

@@ -332,7 +332,9 @@ defmodule Samen.Billing.WebhookDispatch do
     end
   rescue
     # A raising resolver degrades to "couldn't resolve" — notify.ex-only impact
-    # (Lifecycle.deliver/2 skips honestly); never crashes the dunning write.
-    _ -> nil
+    # (Lifecycle.deliver/2 skips honestly); never crashes the dunning write. On record, by name.
+    e ->
+      Samen.Observability.Failure.report(:dunning_org_resolver, nil, e)
+      nil
   end
 end

@@ -1,0 +1,20 @@
+# SABOTAGE: SubscriptionMovement rescues a failed price read to an empty price map: the movement is 
+#   recorded at zero MRR
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/honest_billing_reads_test.exs
+# MUST_FAIL: the price read fails -> the subscription write stands, no extra row, reported
+diff --git a/samen_core/lib/samen/billing/subscription_movement.ex b/samen_core/lib/samen/billing/subscription_movement.ex
+index 4b9e57ce..12dc891f 100644
+--- a/samen_core/lib/samen/billing/subscription_movement.ex
++++ b/samen_core/lib/samen/billing/subscription_movement.ex
+@@ -184,6 +184,8 @@ defmodule Samen.Billing.SubscriptionMovement do
+     |> Ash.Query.filter(interval == :monthly and active == true)
+     |> Ash.read!(authorize?: false)
+     |> Map.new(&{&1.plan_id, Samen.Type.Money.cents(&1.unit_amount)})
++  rescue
++    _ -> %{}
+   end
+ 
+   # A price/plan change while active is a :price_change reason; else a status change.

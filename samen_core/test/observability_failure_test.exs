@@ -69,6 +69,8 @@ defmodule Samen.Observability.FailureTest do
   # with an unlisted name fails, telling its author to decide: a write goes through `report_write/3`; only a failed
   # READ (a lookup, a probe, a scan, a resolve) is listed here.
   @read_ops ~w(
+    live_events_compute param_filter pii_classify_registry replay_allowed_beam replay_decode_frame replay_flag_on replay_keep replay_player_list replay_player_load replay_pseudonym
+    webhook_delivery_load_endpoint webhook_delivery_repo webhook_ingest_repo
     action_effect action_tool_schema agent_fetch_turn agent_health_probe agent_health_repo_running
     agent_load_approval agent_pending_turn agent_refuse_vt_args agent_run_tool agent_validate_args
     ai_catalog_custom_objects ai_catalog_grounding ai_catalog_object_fields ai_catalog_schema ai_catalog_table_entry
@@ -80,7 +82,7 @@ defmodule Samen.Observability.FailureTest do
     chokepoint_scrub_tools chokepoint_scrub_turns chokepoint_simulated_provider chokepoint_static_tool_def
     chokepoint_turns_without_grants chokepoint_unsafe_metadata chokepoint_unsafe_segment column_nullability
     consent_change_maybe_append consent_change_org_unresolved csat_survey_preview csat_survey_respond
-    deliverability_consented deliverability_flag_on embeddings_knn embeddings_resolve_resource
+    deliverability_consented deliverability_flag_on dunning_org_resolver embeddings_knn embeddings_resolve_resource
     embeddings_simulated_provider embeddings_stale_rows embeddings_vault_routed erasure_define_guard_probe
     erasure_define_object_guard_probe erasure_pending_read escalate_existing_active event_capture_active_match
     event_capture_reload_org fetch_record_read hooks_safe_call invite_reveal_invitation_email

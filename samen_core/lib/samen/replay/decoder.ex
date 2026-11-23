@@ -50,7 +50,10 @@ defmodule Samen.Replay.Decoder do
       {:error, _path} -> invalid(seq, at_ms)
     end
   rescue
-    _ -> invalid(0, 0)
+    # a frame that cannot be decoded is the visible :invalid marker (never skipped, never a guess), on record
+    e ->
+      Samen.Observability.Failure.report(:replay_decode_frame, nil, e)
+      invalid(0, 0)
   end
 
   def frame(_), do: invalid(0, 0)
