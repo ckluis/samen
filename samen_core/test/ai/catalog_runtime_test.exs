@@ -40,6 +40,100 @@ defmodule Samen.AI.CatalogRuntimeTest do
     :ok
   end
 
+  defmodule DescribedFx do
+    @moduledoc false
+    # compiled under an abbrev owner the registry already holds (permanent + hands-off); purged by the caller
+    @source """
+    defmodule SamenCore.PiiRedPath.BadVault do
+      use Samen.Resource,
+        otp_app: :samen_core,
+        domain: nil,
+        validate_domain_inclusion?: false,
+        data_layer: AshPostgres.DataLayer,
+        abbrev: "piv"
+
+      postgres do
+        table "piv_thing"
+        repo SamenCore.TestRepo
+      end
+
+      resource do
+        description "A fixture deal used to prove catalog meaning."
+      end
+
+      meaning do
+        synonyms ["contract"]
+        field :value, label: "Deal value", synonyms: ["amount"]
+        field :count, units: "pieces"
+      end
+
+      attributes do
+        attribute :value, Samen.Type.Money, public?: true, description: "Expected value of the fixture deal."
+        attribute :count, :integer, public?: true, description: "How many pieces the fixture deal covers."
+        attribute :status, :atom, public?: true, constraints: [one_of: [:open, :won]]
+      end
+
+      relationships do
+        belongs_to :company, SamenCore.Support.Crm.Company do
+          public? true
+          description "The company the fixture deal is with."
+        end
+      end
+    end
+    """
+
+    def load! do
+      unload()
+      Code.compile_string(@source)
+      SamenCore.PiiRedPath.BadVault
+    end
+
+    def unload do
+      for m <- [SamenCore.PiiRedPath.BadVault, Inspect.SamenCore.PiiRedPath.BadVault] do
+        :code.purge(m)
+        :code.delete(m)
+      end
+    end
+  end
+
+  describe "meaning in the catalogue (ADR-043 §8a)" do
+    setup do
+      mod = DescribedFx.load!()
+      on_exit(&DescribedFx.unload/0)
+      {:ok, mod: mod}
+    end
+
+    test "the runtime catalog carries declared descriptions, synonyms, units and allowed values", %{mod: mod} do
+      [table] = Catalog.schema(resources: [mod])["tables"]
+      fields = Map.new(table["fields"], &{&1["logical_name"], &1})
+
+      assert table["description"] == "A fixture deal used to prove catalog meaning."
+      assert table["label"] == "Bad vault"
+      assert table["synonyms"] == ["contract"]
+
+      assert fields["value"]["description"] == "Expected value of the fixture deal."
+      assert fields["value"]["label"] == "Deal value"
+      assert fields["value"]["synonyms"] == ["amount"]
+      assert fields["value"]["units"] == "money: amount with per-value ISO 4217 currency"
+      assert fields["count"]["units"] == "pieces"
+      assert fields["status"]["allowed_values"] == ["open", "won"]
+      assert fields["company_id"]["description"] == "The company the fixture deal is with."
+      assert [%{"name" => "company", "description" => "The company the fixture deal is with."}] = table["relationships"]
+
+      # null description + omitted optional keys: the shape rules
+      assert Map.has_key?(fields["status"], "description") and fields["status"]["description"] == nil
+      refute Map.has_key?(fields["status"], "units")
+      refute Map.has_key?(fields["status"], "synonyms")
+      refute Map.has_key?(fields["id"], "allowed_values")
+    end
+
+    test "grounding/2 carries the same meaning, and dump parity still holds", %{mod: mod} do
+      grounding = Catalog.grounding(:scope, resources: [mod])
+      assert [%{"description" => "A fixture deal used to prove catalog meaning."}] = grounding.schema["tables"]
+      assert Catalog.dict([mod]) == Mix.Tasks.Samen.Catalog.Dump.build_dict([mod])
+    end
+  end
+
   # --------------------------------------------------------------------------------------
   # RP-AI-8 — runtime catalog == mix samen.catalog.dump (normalized diff empty)
 
@@ -93,7 +187,20 @@ defmodule Samen.AI.CatalogRuntimeTest do
       all_fields = Enum.flat_map(dict["tables"], & &1["fields"])
       assert all_fields != []
 
-      allowed_keys = MapSet.new(["column_name", "logical_name", "type", "pii"])
+      # Extended KEY BY KEY (ADR-043 §8a): each is schema text or a code constant, never a row value.
+      allowed_keys =
+        MapSet.new([
+          "column_name",
+          "logical_name",
+          "type",
+          "pii",
+          "description",
+          "label",
+          "synonyms",
+          "units",
+          "allowed_values",
+          "max_length"
+        ])
 
       for field <- all_fields do
         keys = field |> Map.keys() |> MapSet.new()

@@ -123,7 +123,7 @@ defmodule Samen.AI.Mcp do
         "name" => "browse",
         "description" =>
           "Navigate the org's data. Omit `resource` to list the runtime catalog " <>
-            "(resources + fields, metadata only). Pass `resource` (a table name or module) " <>
+            "(resources + fields with descriptions, labels, synonyms, units and allowed values; metadata only). Pass `resource` (a table name or module) " <>
             "to list that resource's records; vault-routed fields are masked (••••).",
         "inputSchema" => %{
           "type" => "object",

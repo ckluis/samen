@@ -50,8 +50,9 @@ defmodule Samen.AI.Catalog do
 
   ## No sample values, ever
 
-  Every field entry here is `{column_name, logical_name, type, pii}` — never a
-  value. There is no code path in this module that reads a ROW (the static half
+  Every field entry here is `{column_name, logical_name, type, pii, description, label}` plus the optional
+  `synonyms`, `units`, `allowed_values` and `max_length` (ADR-043 §8a, `Samen.Catalog.Meaning`: author-written schema
+  text and code constants) — never a value. There is no code path in this module that reads a ROW (the static half
   is pure `Ash.Resource.Info` introspection; the org-scoped half reads `tnt_field`
   DEFINITIONS, never `tnt_record` rows). A field's `pii` flag tells the model a
   field exists and is protected; it never tells it what the field contains.
@@ -74,10 +75,15 @@ defmodule Samen.AI.Catalog do
   resource modules) → the `schema.dict.json` shape —
 
       %{"tables" => [
-        %{"table_name" => ..., "resource" => ..., "fields" => [
-          %{"column_name" => ..., "logical_name" => ..., "type" => ..., "pii" => bool}
+        %{"table_name" => ..., "resource" => ..., "description" => String.t() | nil, "label" => ...,
+          # "synonyms" only when present
+          "fields" => [
+          %{"column_name" => ..., "logical_name" => ..., "type" => ..., "pii" => bool,
+            "description" => String.t() | nil, "label" => ...,
+            # only when present: "synonyms", "units", "allowed_values", "max_length"
+          }
         ], "relationships" => [
-          %{"name" => ..., "type" => "belongs_to" | "has_one" | "has_many" | "many_to_many",
+          %{"name" => ..., "description" => String.t() | nil, "type" => "belongs_to" | "has_one" | "has_many" | "many_to_many",
             "destination" => ..., "destination_table" => ..., "source_attribute" => ...,
             "destination_attribute" => ..., "through" => ... | nil}
         ]}
@@ -117,10 +123,15 @@ defmodule Samen.AI.Catalog do
     tam = Samen.Catalog.table(resource)
     flds = Samen.Catalog.fields(resource)
     pii_columns = pii_column_set(resource)
+    table_meaning = Samen.Catalog.Meaning.table(resource)
+    field_meaning = Samen.Catalog.Meaning.fields(resource)
+    rel_descriptions = Samen.Catalog.Meaning.relationship_descriptions(resource)
 
     %{
       "table_name" => tam.table_name,
       "resource" => tam.resource,
+      "description" => table_meaning.description,
+      "label" => table_meaning.label,
       "fields" =>
         Enum.map(flds, fn f ->
           %{
@@ -129,10 +140,12 @@ defmodule Samen.AI.Catalog do
             "type" => f.type,
             "pii" => MapSet.member?(pii_columns, f.column_name)
           }
+          |> put_meaning(Map.fetch!(field_meaning, f.logical_name))
         end),
       "relationships" =>
         Enum.map(Samen.Catalog.relationships(resource), fn r ->
           %{
+            "description" => Map.get(rel_descriptions, r.name),
             "name" => r.name,
             "type" => r.type,
             "destination" => r.destination,
@@ -143,11 +156,30 @@ defmodule Samen.AI.Catalog do
           }
         end)
     }
+    |> put_synonyms(table_meaning.synonyms)
   rescue
     e ->
       Samen.Observability.Failure.report(:ai_catalog_table_entry, nil, e)
       nil
   end
+
+  # `description` and `label` are ALWAYS present (a null description is visible debt); the other meaning keys only
+  # when they have a value, so an undeclared facet adds nothing to the payload.
+  defp put_meaning(entry, meaning) do
+    entry
+    |> Map.put("description", meaning.description)
+    |> Map.put("label", meaning.label)
+    |> put_synonyms(meaning.synonyms)
+    |> put_present("units", meaning.units)
+    |> put_present("allowed_values", meaning.allowed_values)
+    |> put_present("max_length", meaning.max_length)
+  end
+
+  defp put_synonyms(entry, []), do: entry
+  defp put_synonyms(entry, synonyms), do: Map.put(entry, "synonyms", synonyms)
+
+  defp put_present(entry, _key, nil), do: entry
+  defp put_present(entry, key, value), do: Map.put(entry, key, value)
 
   @doc """
   The static schema catalog for the CURRENT host's registered resources — the
