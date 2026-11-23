@@ -1,0 +1,30 @@
+# SABOTAGE: the operator write guard treats a vt_-prefixed raw string as a no-op round trip again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/hardening/pii_write_guard_fail_closed_test.exs
+# MUST_FAIL: MG-09: an OPERATOR writing back the raw vt_* string is REFUSED
+diff --git a/samen_core/lib/samen/pii/write_guard.ex b/samen_core/lib/samen/pii/write_guard.ex
+index 21a7b7b2..b59b1aba 100644
+--- a/samen_core/lib/samen/pii/write_guard.ex
++++ b/samen_core/lib/samen/pii/write_guard.ex
+@@ -117,6 +117,7 @@ defmodule Samen.Pii.WriteGuard do
+   defp plaintext_write?(changeset, name) do
+     case Ash.Changeset.fetch_change(changeset, name) do
+       {:ok, %Masked{}} -> false
++      {:ok, "vt_" <> _} -> false
+       {:ok, nil} -> false
+       {:ok, _plaintext} -> true
+       :error -> false
+diff --git a/samen_core/lib/samen/type/vault_field.ex b/samen_core/lib/samen/type/vault_field.ex
+index a657cf08..f48aa033 100644
+--- a/samen_core/lib/samen/type/vault_field.ex
++++ b/samen_core/lib/samen/type/vault_field.ex
+@@ -59,6 +59,7 @@ defmodule Samen.Type.VaultField do
+   @impl true
+   def cast_input(nil, _constraints), do: {:ok, nil}
+   def cast_input(%Masked{} = masked, _constraints), do: {:ok, masked}
++  def cast_input("vt_" <> _ = token, _constraints), do: {:ok, token}
+   def cast_input(value, _constraints), do: {:ok, Samen.Pii.Plaintext.wrap(value)}
+ 
+   # ---------------------------------------------------------------------------

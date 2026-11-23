@@ -212,7 +212,9 @@ defmodule Samen.Hardening.VaultChangeFailClosedTest do
 
       # `(a || b) || raise` → `a || (b && raise)` (`&&` binds tighter): with `a` nil and `b`
       # set, the mutant evaluates the `raise` instead of returning the fallback repo.
-      result = fold_before_actions!(changeset)
+      # The hooks run inside Ash's action transaction in production, and `Vault.Change` refuses a vaulted
+      # write with none open (WP28 S1), so the fold opens one on the fallback repo, like the action would.
+      result = TestRepo.transaction(fn -> fold_before_actions!(changeset) end) |> elem(1)
 
       assert result.valid?, "the fallback write must succeed, got: #{inspect(result.errors)}"
       assert %Masked{token: token} = Ash.Changeset.get_attribute(result, :email)

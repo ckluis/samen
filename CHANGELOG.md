@@ -11,6 +11,45 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Security: vault tokens are bound to the record that holds them (High)
+
+- **Fixed: a tenant could read another subject's PII, across orgs, by planting its vault token.** Tokens are stored
+  "token-only downstream" by design, so anyone with read access to a replica, the CDC mirror, a backup, version or audit
+  rows could learn one; `VaultField.cast_input/2` accepted any `"vt_"` string as an already-vaulted token, so it could be
+  written into a vaulted field through a form, a CSV cell, an automation literal or an inbound mail body, and
+  `PiiResolution` revealed it. A plaintext that merely started with `vt_` was also stored unencrypted. Now a raw string is
+  always plaintext and is encrypted; only an internal `%Masked{}` means "already vaulted".
+- **`Samen.Vault.Change` binds every changed `%Masked{}`** to the record's subject (its primary key), vault and field in one
+  query (`Vault.check_bindings/3`); a mismatch is a changeset error naming the field and reason, never the token, and is
+  reported (`:vault_token_unbound`). An untouched round-trip of the record's own value costs no query. A create without an
+  explicit primary key cannot carry a `%Masked{}`. An upsert-create on a PII resource is refused twice: at build time when
+  the action or `for_create(..., upsert?: true)` says so, and AFTER the write for a call-site `Ash.create(cs, upsert?: true)`
+  (inside the action every create looks like an upsert): an `after_action` compares the written row's primary key with the
+  vault subject and errors on a mismatch, which rolls back the vault rows with the domain write. The same `after_action`
+  refuses a later hook that swapped a vault attribute after `Vault.Change` approved it. Atomic writes of a vault field never
+  reach the data layer (Ash refuses them; `Vault.Change` has no `atomic/3`).
+- **The write guard no longer depends on the caller's transaction options.** It rolls back itself (`repo.rollback/1`), so
+  `rollback_on_error?: false` cannot leave a refused write durable; a create/update on a PII resource with NO open
+  transaction (an action declared `transaction? false`, a bulk `transaction: false`) is refused before any vault insert or
+  row write. The read-side unbound report is capped per reason (20), and what the cap cuts is reported as
+  `vault_token_unbound_truncated` with the suppressed count.
+- **Removed: `Samen.Vault.materialize/2`** (public, no callers in the tree). Resolve through `Samen.Api.PiiResolution`.
+- **Reads reveal bound-only.** `Vault.reveal/3` gains `field:`, checked with `subject_id:` before any key is unwrapped;
+  `PiiResolution` asserts the holder's primary key and field for every value, never unwraps a foreign subject's DEK, and
+  renders a mismatch masked/absent on every plane. The webhook signing-secret reveal asserts the endpoint's id and field, and
+  a mismatch is discarded and reported once (permanent, not retried 20 times). The read-side `:vault_token_unbound` log
+  line now names resource, field and record id (never a token or value). `Samen.Reveal.reveal/5` forwards `:field` and
+  REQUIRES `:subject_id` (`{:error, :subject_required}`). A legacy `vt_`-prefixed plaintext cell blocks updates of a
+  versioned record with an explicit error pointing at the verifier (remediation in docs/guides/gate-failures.md).
+- **Behaviour change:** a `"vt_…"` string written to a vault field (including by an operator, formerly a no-op) is now
+  plaintext; an operator typing one is refused like any plaintext write. `Vault.token?/1` is the token grammar.
+- **New verifier** `mix samen.verify.vault_token_binding` (`Samen.Vault.BindingScan`, ci steps for samen_core, demo,
+  driftwood, pawchart, samen_web): finds existing cells that do not belong to their record (`foreign_subject`,
+  `field_mismatch`, `dangling_token`, `non_token_value`, `shared_token`). Report only; no token or value in its output.
+- Proof: `vault_token_input_test.exs`, `vault_change_integration_test.exs`, `pii_resolution_token_binding_test.exs`,
+  `vault_dek_reuse_test.exs`, `verify_vault_token_binding_test.exs`, `csv_masking_test.exs`; sabotages 905-921 and 927-934. ADR-001
+  section 6.2, ADR-036 section 12, ADR-041 section 13a.
+
 ### Vault: one KMS unwrap per subject per resolve call (ARCH-2)
 
 - **`Samen.Api.PiiResolution` unwraps each subject's DEK once per call, not once per vaulted value.** A page of N rows x M

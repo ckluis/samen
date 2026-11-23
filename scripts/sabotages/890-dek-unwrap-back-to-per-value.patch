@@ -5,15 +5,15 @@
 # TEST_FILES: test/vault_dek_reuse_test.exs
 # MUST_FAIL: N x M values over S subjects cost exactly S unwraps
 diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
-index da1e3136..dfd9d341 100644
+index 05dcfcb5..58fce1ab 100644
 --- a/samen_core/lib/samen/api/pii_resolution.ex
 +++ b/samen_core/lib/samen/api/pii_resolution.ex
-@@ -408,7 +408,7 @@ defmodule Samen.Api.PiiResolution do
+@@ -434,7 +434,7 @@ defmodule Samen.Api.PiiResolution do
        rows when is_map(rows) and map_size(rows) > 0 ->
          case Keyword.get(opts, :__vault_deks) do
-           nil -> [prefetched: rows]
--          deks -> [prefetched: rows, deks: deks]
-+          _deks -> [prefetched: rows]
+           nil -> [prefetched: rows] ++ bind
+-          deks -> [prefetched: rows, deks: deks] ++ bind
++          _deks -> [prefetched: rows] ++ bind
          end
  
        _ ->

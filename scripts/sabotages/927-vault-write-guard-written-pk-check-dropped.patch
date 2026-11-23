@@ -1,0 +1,20 @@
+# SABOTAGE: The after_action no longer compares the written row's key with the vault subject: a call-site 
+#   upsert onto an existing identity corrupts the row
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault/vault_write_guard_test.exs
+# MUST_FAIL: is refused, the existing row's token is unchanged and the vault rows roll back with the action
+diff --git a/samen_core/lib/samen/vault/change.ex b/samen_core/lib/samen/vault/change.ex
+index 889b50a6..7a0652ed 100644
+--- a/samen_core/lib/samen/vault/change.ex
++++ b/samen_core/lib/samen/vault/change.ex
+@@ -142,7 +142,7 @@ defmodule Samen.Vault.Change do
+ 
+     Ash.Changeset.after_action(changeset, fn cs, result ->
+       cond do
+-        bound? and to_string(Map.get(result, pk)) != subject_id ->
++        bound? and is_nil(result) and to_string(Map.get(result, pk)) != subject_id ->
+           refuse_written(repo, invalid_vault(:vault, "vault subject does not match the written row (an upsert onto an existing record?)"))
+ 
+         swapped = Enum.find(fields, &(vault_view(cs, &1.name) != Map.fetch!(approved, &1.name))) ->

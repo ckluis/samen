@@ -9,13 +9,13 @@
 # MUST_FAIL: inspect(changeset) never prints a vault-routed attribute's plaintext
 # MUST_FAIL: a FunctionClauseError blame over a changeset does not print the plaintext
 diff --git a/samen_core/lib/samen/type/vault_field.ex b/samen_core/lib/samen/type/vault_field.ex
-index 5b35163..cfe2ac7 100644
+index a657cf08..4359f0f0 100644
 --- a/samen_core/lib/samen/type/vault_field.ex
 +++ b/samen_core/lib/samen/type/vault_field.ex
-@@ -56,7 +56,8 @@ defmodule Samen.Type.VaultField do
+@@ -59,7 +59,8 @@ defmodule Samen.Type.VaultField do
+   @impl true
    def cast_input(nil, _constraints), do: {:ok, nil}
    def cast_input(%Masked{} = masked, _constraints), do: {:ok, masked}
-   def cast_input("vt_" <> _ = token, _constraints), do: {:ok, token}
 -  def cast_input(value, _constraints), do: {:ok, Samen.Pii.Plaintext.wrap(value)}
 +  # SABOTAGE (ADR-052 §2.1): in-flight plaintext rides the changeset unwrapped again.
 +  def cast_input(value, _constraints), do: {:ok, value}
