@@ -24,9 +24,8 @@ defmodule Mix.Tasks.SamenWeb.TestSetup do
     # still resolves at runtime in samen_web's own `:test` env, where the repo exists.
     repo = Module.concat([Samen.WebTest, Repo])
 
-    # Drop + create the scratch DB (ignore "does not exist" on drop).
-    _ = repo.__adapter__().storage_down(repo.config())
-    :ok = ensure_created(repo)
+    # Drop + create the scratch DB (Samen.TestDb: waits for the server, raises naming any attached session, never kills one).
+    :ok = Samen.TestDb.reset!(repo.config())
 
     {:ok, _} = repo.start_link(pool_size: 2)
 
@@ -49,14 +48,6 @@ defmodule Mix.Tasks.SamenWeb.TestSetup do
     )
 
     :ok
-  end
-
-  defp ensure_created(repo) do
-    case repo.__adapter__().storage_up(repo.config()) do
-      :ok -> :ok
-      {:error, :already_up} -> :ok
-      {:error, reason} -> Mix.raise("Could not create #{inspect(repo)}: #{inspect(reason)}")
-    end
   end
 
   defp migrations_path do

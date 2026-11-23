@@ -1,0 +1,20 @@
+# SABOTAGE: Samen.TestDb gives the DROP a short client timeout again: the client abandons a statement the 
+#   server is still executing
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/test_db_test.exs
+# MUST_FAIL: the drop waits for the server's answer: a holder that leaves after the first second does not time it out
+diff --git a/samen_core/lib/samen/test_db.ex b/samen_core/lib/samen/test_db.ex
+index 71bb9bb9..45250513 100644
+--- a/samen_core/lib/samen/test_db.ex
++++ b/samen_core/lib/samen/test_db.ex
+@@ -84,7 +84,7 @@ defmodule Samen.TestDb do
+     db = db!(config)
+     guard!(db)
+ 
+-    case run(config, "DROP DATABASE IF EXISTS #{quote_ident(db)}", :infinity) do
++    case run(config, "DROP DATABASE IF EXISTS #{quote_ident(db)}", 1_000) do
+       {:ok, _} ->
+         :ok
+ 

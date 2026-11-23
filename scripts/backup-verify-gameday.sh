@@ -21,8 +21,9 @@ DUMP="$(mktemp -t backup_gameday.XXXXXX).dump"
 CORRUPT="${DUMP}.corrupt"
 
 cleanup() {
-  dropdb --if-exists "$SRC_DB" >/dev/null 2>&1 || true
-  dropdb --if-exists "$SCRATCH_DB" >/dev/null 2>&1 || true
+  # cleanup must not mask the script's own exit status, but a failed drop is reported, never swallowed
+  dropdb --if-exists "$SRC_DB" || echo "WARNING: could not drop $SRC_DB (cleanup)" >&2
+  dropdb --if-exists "$SCRATCH_DB" || echo "WARNING: could not drop $SCRATCH_DB (cleanup)" >&2
   rm -f "$DUMP" "$CORRUPT"
 }
 trap cleanup EXIT
@@ -32,7 +33,7 @@ for bin in pg_dump pg_restore createdb dropdb psql; do
 done
 
 echo "==> Seeding throwaway source DB '$SRC_DB' with real rows"
-dropdb --if-exists "$SRC_DB" >/dev/null 2>&1 || true
+dropdb --if-exists "$SRC_DB"
 createdb "$SRC_DB"
 psql -d "$SRC_DB" -v ON_ERROR_STOP=1 -c \
   "CREATE TABLE bkp_widget (id int primary key, label text);

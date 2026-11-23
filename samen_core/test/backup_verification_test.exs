@@ -160,7 +160,8 @@ defmodule Samen.Backup.VerificationTest do
       dump = Path.join(dir, "bkp_#{System.unique_integer([:positive])}.dump")
 
       # Build a real source DB with real rows.
-      _ = System.cmd("dropdb", ["--if-exists", @src_db], stderr_to_stdout: true)
+      {drop_out, drop_code} = System.cmd("dropdb", ["--if-exists", @src_db], stderr_to_stdout: true)
+      if drop_code != 0, do: raise("could not drop the source DB #{@src_db}: #{drop_out}")
       {_, 0} = System.cmd("createdb", [@src_db], stderr_to_stdout: true)
 
       seed = """
@@ -179,8 +180,10 @@ defmodule Samen.Backup.VerificationTest do
 
       on_exit(fn ->
         File.rm(dump)
-        System.cmd("dropdb", ["--if-exists", @src_db], stderr_to_stdout: true)
-        System.cmd("dropdb", ["--if-exists", @scratch_db], stderr_to_stdout: true)
+        for db <- [@src_db, @scratch_db] do
+          {out, code} = System.cmd("dropdb", ["--if-exists", db], stderr_to_stdout: true)
+          if code != 0, do: raise("could not drop #{db} in on_exit: #{out}")
+        end
       end)
 
       %{dump: dump, expected: expected, user: user}

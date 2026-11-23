@@ -99,9 +99,8 @@ defmodule Samen.ApiKeyDigestUniqueGenTest do
       db = "#{Keyword.fetch!(base, :database)}_akdgen_#{:rand.uniform(1_000_000)}"
       config = base |> Keyword.delete(:pool) |> Keyword.put(:pool_size, 5) |> Keyword.put(:database, db)
 
-      _ = Ecto.Adapters.Postgres.storage_down(config)
-      :ok = Ecto.Adapters.Postgres.storage_up(config)
-      on_exit(fn -> _ = Ecto.Adapters.Postgres.storage_down(config) end)
+      :ok = Samen.TestDb.reset!(config)
+      on_exit(fn -> Samen.TestDb.drop!(config) end)
       repo = start_supervised!({ScratchRepo, config})
       ScratchRepo.query!("CREATE TABLE #{@table} (id serial PRIMARY KEY, #{@column} text NOT NULL)", [])
       ScratchRepo.query!("CREATE INDEX #{@table}_#{@column}_index ON #{@table} (#{@column})", [])

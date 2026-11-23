@@ -26,13 +26,12 @@ defmodule Samen.MigrationUniqueIndexTest do
 
     dir = Path.join(System.tmp_dir!(), "samen_uq_migrations_#{System.unique_integer([:positive])}")
 
-    _ = Ecto.Adapters.Postgres.storage_down(config)
-    :ok = Ecto.Adapters.Postgres.storage_up(config)
+    :ok = Samen.TestDb.reset!(config)
 
-    # registered right after storage_up, so a failure below can never leave the scratch database behind
+    # registered right after the create, so a failure below can never leave the scratch database behind
     on_exit(fn ->
       File.rm_rf!(dir)
-      _ = Ecto.Adapters.Postgres.storage_down(config)
+      Samen.TestDb.drop!(config)
     end)
 
     start_supervised!({ScratchRepo, config})

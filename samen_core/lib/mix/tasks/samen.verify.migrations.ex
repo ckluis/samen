@@ -73,24 +73,41 @@ defmodule Mix.Tasks.Samen.Verify.Migrations do
     scratch_config = scratch_config(base_repo)
     scratch_repo = define_scratch_repo(base_repo, scratch_config)
 
-    _ = Ecto.Adapters.Postgres.storage_down(scratch_config)
-    :ok = Ecto.Adapters.Postgres.storage_up(scratch_config)
+    :ok = Samen.TestDb.reset!(scratch_config)
 
-    {:ok, pid} = scratch_repo.start_link(scratch_config)
+    violations =
+      try do
+        {:ok, pid} = scratch_repo.start_link(scratch_config)
 
-    try do
-      case Samen.Migration.DownCheck.run(scratch_repo, migrations_path, log: false) do
-        {:ok, checked} ->
-          IO.puts("#{@task_name}: exercised down/0 for #{length(checked)} expand migration(s).")
-          []
+        try do
+          case Samen.Migration.DownCheck.run(scratch_repo, migrations_path, log: false) do
+            {:ok, checked} ->
+              IO.puts("#{@task_name}: exercised down/0 for #{length(checked)} expand migration(s).")
+              []
 
-        {:error, violations} ->
-          violations
+            {:error, violations} ->
+              violations
+          end
+        after
+          Supervisor.stop(pid)
+        end
+      rescue
+        error ->
+          # the check's own failure is the one to report: a cleanup failure on top of it is logged, not raised over it
+          stacktrace = __STACKTRACE__
+
+          try do
+            Samen.TestDb.drop!(scratch_config)
+          rescue
+            cleanup -> Mix.shell().error("could not drop the scratch database: " <> Exception.message(cleanup))
+          end
+
+          reraise error, stacktrace
       end
-    after
-      Supervisor.stop(pid)
-      _ = Ecto.Adapters.Postgres.storage_down(scratch_config)
-    end
+
+    # a failed drop after a green check raises with the real error (a leaked scratch database is not silent)
+    Samen.TestDb.drop!(scratch_config)
+    violations
   end
 
   @doc """
