@@ -1,0 +1,21 @@
+# SABOTAGE: the retry reads the marker but drops its subject_ref, so the fold withdrawal arms are no-ops 
+#   again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/erasure_resumable_test.exs
+# MUST_FAIL: the retry takes the subject_ref from the marker: the fold ledger and sources are withdrawn after a post-shred failure
+diff --git a/samen_core/lib/samen/erasure.ex b/samen_core/lib/samen/erasure.ex
+index 837b6c6a..6d3f0136 100644
+--- a/samen_core/lib/samen/erasure.ex
++++ b/samen_core/lib/samen/erasure.ex
+@@ -389,7 +389,8 @@ defmodule Samen.Erasure do
+   defp recover_reference(subject_id, r, acknowledge?) do
+     case pending_row(subject_id, r) do
+       %Report{tiers: %{"pending" => %{"subject_ref" => ref}}} when is_binary(ref) ->
+-        {:ok, ref, :performed}
++        _ = ref
++        {:ok, nil, :performed}
+ 
+       _ ->
+         cond do

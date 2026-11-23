@@ -249,31 +249,45 @@ defmodule Samen.AI.Agent.Compaction do
   KEPT: after the shred the pseudonym is uncomputable forever, so they are permanently
   unlinkable, and dropping them would erase the evidence that a withdrawal happened.
 
-  Returns a report; `:absent`-shaped hosts (no AI plane mounted) walk zero runs.
+  Returns `{:ok, report}`; `:absent`-shaped hosts (no AI plane mounted) walk zero runs. A citing run that exists but
+  cannot be opened (a key-store outage on its key, a read error, an undecodable ledger) returns
+  `{:error, {:fold_ledger_unavailable, run_id, kind}}` — never "nothing to withdraw". A run that is genuinely gone,
+  or whose own key was shredded (its ledger is unreadable by design), is skipped.
   """
-  @spec withdraw(String.t(), keyword()) :: %{
-          runs_walked: non_neg_integer(),
-          folds_withdrawn: non_neg_integer(),
-          rounds: non_neg_integer(),
-          halted: :fixpoint | :round_bound
-        }
+  @spec withdraw(String.t(), keyword()) ::
+          {:ok,
+           %{
+             runs_walked: non_neg_integer(),
+             folds_withdrawn: non_neg_integer(),
+             rounds: non_neg_integer(),
+             halted: :fixpoint | :round_bound
+           }}
+          | {:error, {:fold_ledger_unavailable, String.t(), atom()}}
   def withdraw(subject_ref, opts \\ []) when is_binary(subject_ref) do
     repo = Keyword.get(opts, :repo) || AshPostgres.DataLayer.Info.repo(Run, :mutate)
     max_rounds = Keyword.get(opts, :max_rounds, @withdraw_max_rounds)
 
     subject_ref
     |> FoldSource.run_ids_citing(repo)
-    |> Enum.reduce(
-      %{runs_walked: 0, folds_withdrawn: 0, rounds: 0, halted: :fixpoint},
-      fn run_id, acc ->
-        {withdrawn, rounds, halted} = withdraw_run(run_id, subject_ref, repo, max_rounds)
+    |> Enum.reduce_while(
+      {:ok, %{runs_walked: 0, folds_withdrawn: 0, rounds: 0, halted: :fixpoint}},
+      fn run_id, {:ok, acc} ->
+        case withdraw_run(run_id, subject_ref, repo, max_rounds) do
+          {:error, _} = unavailable ->
+            # A citing run that could not be OPENED is not "nothing to withdraw": stop and say so, tagged, so the
+            # caller's transaction rolls back and the erasure stays resumable (the marker survives).
+            {:halt, unavailable}
 
-        %{
-          runs_walked: acc.runs_walked + 1,
-          folds_withdrawn: acc.folds_withdrawn + withdrawn,
-          rounds: acc.rounds + rounds,
-          halted: if(halted == :round_bound, do: :round_bound, else: acc.halted)
-        }
+          {withdrawn, rounds, halted} ->
+            {:cont,
+             {:ok,
+              %{
+                runs_walked: acc.runs_walked + 1,
+                folds_withdrawn: acc.folds_withdrawn + withdrawn,
+                rounds: acc.rounds + rounds,
+                halted: if(halted == :round_bound, do: :round_bound, else: acc.halted)
+              }}}
+        end
       end
     )
   end
@@ -310,8 +324,11 @@ defmodule Samen.AI.Agent.Compaction do
           {MapSet.size(targets), rounds, halted}
         end
 
-      :error ->
+      :skip ->
         {0, 0, :fixpoint}
+
+      {:error, kind} ->
+        {:error, {:fold_ledger_unavailable, run_id, kind}}
     end
   end
 
@@ -390,20 +407,44 @@ defmodule Samen.AI.Agent.Compaction do
   @spec withdrawn_marker(integer()) :: String.t()
   def withdrawn_marker(n) when is_integer(n), do: "[withdrawn: fold ##{n}, source withdrawn]"
 
+  # `{:ok, run, decoded, folds}` | `:skip` (genuinely nothing to withdraw) | `{:error, kind}` (could not be read).
+  # `kind` is a bounded atom, never an exception message or a value.
   defp load_ledger(run_id, repo) do
-    with {:ok, [run]} <-
-           Run
-           |> Ash.Query.filter(id == ^run_id)
-           |> Ash.Query.ensure_selected([:org_id, :transcript])
-           |> Ash.Query.limit(1)
-           |> Ash.read(authorize?: false),
-         %Samen.Masked{} = masked <- run.transcript,
-         {:ok, json} <- Samen.Vault.reveal(masked, repo, subject_id: run.id),
-         {:ok, %{} = decoded} <- Jason.decode(json),
-         folds when is_list(folds) <- Map.get(decoded, "folds", []) do
-      {:ok, run, decoded, folds}
-    else
-      _ -> :error
+    case Run
+         |> Ash.Query.filter(id == ^run_id)
+         |> Ash.Query.ensure_selected([:org_id, :transcript])
+         |> Ash.Query.limit(1)
+         |> Ash.read(authorize?: false) do
+      {:ok, []} -> :skip
+      {:ok, [run]} -> open_ledger(run, repo)
+      {:error, _} -> {:error, :run_read_failed}
+    end
+  end
+
+  defp open_ledger(%{transcript: nil}, _repo), do: :skip
+
+  defp open_ledger(%{transcript: %Samen.Masked{} = masked} = run, repo) do
+    case Samen.Vault.reveal(masked, repo, subject_id: run.id) do
+      {:ok, json} -> decode_ledger(run, json)
+      # the run's OWN key was shredded: its transcript is unreadable by design, there is nothing to rewrite
+      {:error, :shredded} -> :skip
+      {:error, _} -> {:error, :transcript_unreadable}
+    end
+  end
+
+  defp open_ledger(_run, _repo), do: {:error, :transcript_unreadable}
+
+  defp decode_ledger(run, json) do
+    case Jason.decode(json) do
+      {:ok, %{} = decoded} ->
+        case Map.get(decoded, "folds", []) do
+          [] -> :skip
+          folds when is_list(folds) -> {:ok, run, decoded, folds}
+          _ -> {:error, :ledger_malformed}
+        end
+
+      _ ->
+        {:error, :ledger_malformed}
     end
   end
 
