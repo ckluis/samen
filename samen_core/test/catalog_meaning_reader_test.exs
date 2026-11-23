@@ -218,6 +218,108 @@ defmodule SamenCore.CatalogMeaningReaderTest do
       end
     end
 
+    test "RED: vt_ in a one_of allowed value fails compile, naming the resource, facet and attribute" do
+      err =
+        assert_raise Spark.Error.DslError, fn ->
+          compile!(
+            "VtOneOf",
+            "attributes do\n attribute :risk, :atom, public?: true, constraints: [one_of: [:none, :dvt_risk]]\n end",
+            "mfh"
+          )
+        end
+
+      msg = Exception.message(err)
+      assert msg =~ "vt_"
+      assert msg =~ "UnclassifiedNonPii"
+      assert msg =~ "allowed_values"
+      assert msg =~ "risk"
+    end
+
+    test "control: a one_of without the sentinel compiles and is readable" do
+      mod =
+        compile!(
+          "NoVtOneOf",
+          "attributes do\n attribute :risk, :atom, public?: true, constraints: [one_of: [:none, :low]]\n end",
+          "mfh"
+        )
+
+      assert Meaning.fields(mod)["risk"].allowed_values == ["none", "low"]
+    end
+
+    test "RED: vt_ in an Ash.Type.Enum value fails compile; the same enum without it compiles" do
+      Code.compile_string("""
+      defmodule SamenCore.MeaningFx.VtEnum do
+        use Ash.Type.Enum, values: [:calm, :svt_storm]
+      end
+
+      defmodule SamenCore.MeaningFx.OkEnum do
+        use Ash.Type.Enum, values: [:calm, :storm]
+      end
+      """)
+
+      on_exit(fn ->
+        purge(SamenCore.MeaningFx.VtEnum)
+        purge(SamenCore.MeaningFx.OkEnum)
+      end)
+
+      assert_raise Spark.Error.DslError, ~r/allowed_values/, fn ->
+        compile!("VtEnumThing", "attributes do\n attribute :weather, SamenCore.MeaningFx.VtEnum, public?: true\n end", "mfh")
+      end
+
+      compile!("OkEnumThing", "attributes do\n attribute :weather, SamenCore.MeaningFx.OkEnum, public?: true\n end", "mfh")
+    end
+
+    test "RED: vt_ in a meaning label or a unit string names the facet" do
+      assert_raise Spark.Error.DslError, ~r/label/, fn ->
+        compile!("VtLabel", body("", "meaning do\n field :name, label: \"A vt_ label\"\n end"), "mfh")
+      end
+
+      assert_raise Spark.Error.DslError, ~r/units/, fn ->
+        compile!("VtUnits", body("", "meaning do\n field :name, units: \"vt_pieces\"\n end"), "mfh")
+      end
+    end
+
+    test "RED: a vt_ in a table label fails compile" do
+      assert_raise Spark.Error.DslError, ~r/label/, fn ->
+        compile!("VtTableLabel", body("", "meaning do\n label \"A vt_ thing\"\n end"), "mfh")
+      end
+    end
+
+    test "the sentinel check is the chokepoint's own predicate" do
+      assert Samen.AI.VtSentinel.in_string?("a vt_b")
+      refute Samen.AI.VtSentinel.in_string?("a vault b")
+      assert {:error, :pii_egress_refused} = Samen.AI.Chokepoint.seal(:mcp, [], meta: %{payload: %{"x" => "a vt_b"}})
+      assert {:ok, _} = Samen.AI.Chokepoint.seal(:mcp, [], meta: %{payload: %{"x" => "a vault b"}})
+    end
+
+    test "the leaf walk reaches map keys, nested values and list elements (positive control)" do
+      leaves = Samen.AI.VtSentinel.leaves(%{"a" => ["x", %{"vt_key" => "y"}], "b" => 1})
+      assert {["a", "vt_key"], "vt_key"} in leaves
+      assert {["a", "vt_key"], "y"} in leaves
+      assert Enum.count(leaves, fn {_, t} -> Samen.AI.VtSentinel.in_string?(t) end) == 1
+    end
+
+    test "RED: a meaning field entry listed twice for one attribute fails compile" do
+      err =
+        assert_raise Spark.Error.DslError, fn ->
+          compile!("DupField", body("", "meaning do\n field :name, label: \"A\"\n field :name, label: \"B\"\n end"), "mfi")
+        end
+
+      assert Exception.message(err) =~ "more than once"
+    end
+
+    test "a whitespace-only description counts as missing; a real one still reads" do
+      mod =
+        compile!(
+          "Blanks",
+          "attributes do\n attribute :a, :string, public?: true, description: \"   \\n \"\n attribute :b, :string, public?: true, description: \"Real.\"\n end",
+          "mfi"
+        )
+
+      assert Meaning.fields(mod)["a"].description == nil
+      assert Meaning.fields(mod)["b"].description == "Real."
+    end
+
     test "RED: authored units on a Money field fail compile" do
       assert_raise Spark.Error.DslError, ~r/fixes its own units/, fn ->
         compile!("UnitsMoney", body("", "meaning do\n field :cost, units: \"dollars\"\n end"), "mfg")
@@ -234,6 +336,89 @@ defmodule SamenCore.CatalogMeaningReaderTest do
           "mfg"
         )
       end
+    end
+  end
+
+  describe "compile-time transformer ordering (attributes the framework or Ash generates)" do
+    defp order_body(extra_meaning) do
+      """
+      meaning do
+        #{extra_meaning}
+      end
+
+      attributes do
+        attribute :custom, :map, public?: true
+      end
+
+      relationships do
+        belongs_to :company, SamenCore.Support.Crm.Company do
+          public? true
+          description "The company this thing belongs to."
+        end
+      end
+      """
+    end
+
+    test "control: meaning fields on the generated FK, org_id, archived_at and custom are accepted and read back" do
+      mod =
+        compile!(
+          "OrderOk",
+          order_body("""
+          field :company_id, label: "Company"
+          field :org_id, label: "Organization"
+          field :archived_at, label: "Archived on"
+          field :custom, label: "Extra fields"
+          """),
+          "mfj"
+        )
+
+      f = Meaning.fields(mod)
+      assert f["company_id"].label == "Company"
+      assert f["org_id"].label == "Organization"
+      assert f["archived_at"].label == "Archived on"
+      assert f["custom"].label == "Extra fields"
+    end
+
+    test "RED: a name that is not an attribute is still refused beside the generated ones" do
+      assert_raise Spark.Error.DslError, ~r/:nope/, fn ->
+        compile!("OrderNope", order_body("field :company_id, label: \"Company\"\nfield :nope, label: \"Nope\""), "mfj")
+      end
+    end
+
+    test "RED: vt_ in a belongs_to description is refused when the FK attribute is generated" do
+      assert_raise Spark.Error.DslError, ~r/vt_/, fn ->
+        compile!(
+          "OrderVt",
+          """
+          relationships do
+            belongs_to :company, SamenCore.Support.Crm.Company do
+              public? true
+              description "holds vt_x"
+            end
+          end
+          """,
+          "mfj"
+        )
+      end
+    end
+
+    test "the transformer is declared to run after every transformer that adds or describes attributes" do
+      t = Samen.Catalog.Transformers.MeaningDeclarations
+
+      for dep <- [
+            Ash.Resource.Transformers.BelongsToAttribute,
+            Samen.Transformers.CoreAttributes,
+            Samen.Transformers.ArchivableAttribute,
+            Samen.Transformers.MaterializeCustomFields,
+            Samen.Transformers.MaterializePii,
+            Samen.Transformers.AbbrevStorage
+          ] do
+        assert t.after?(dep), "MeaningDeclarations must run after #{inspect(dep)}"
+        refute t.before?(dep)
+      end
+
+      # control: it is not declared after an unrelated module
+      refute t.after?(Samen.Transformers.NoPanColumns)
     end
   end
 end

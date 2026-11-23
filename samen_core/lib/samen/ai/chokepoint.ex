@@ -98,6 +98,7 @@ defmodule Samen.AI.Chokepoint do
 
   alias Samen.AI.Completion
   alias Samen.AI.MaskedPayload
+  alias Samen.AI.VtSentinel
   alias Samen.Api.PiiResolution
   alias Samen.Pii.Info
   alias Samen.Reveal
@@ -109,7 +110,8 @@ defmodule Samen.AI.Chokepoint do
   # step 3). We refuse on the PREFIX substring, not the anchored `^vt_[0-9a-f]{32}$` form —
   # the most fail-closed reading: a token embedded mid-string (e.g. a laundered
   # `"...vt_deadbeef..."`) must also be refused, not just a standalone token.
-  @vt_sentinel "vt_"
+  # The predicate itself lives in `Samen.AI.VtSentinel`, shared with the compile-time meaning check
+  # (`Samen.Catalog.Transformers.MeaningDeclarations`) so the two cannot drift.
 
   @mask Samen.Masked.mask()
 
@@ -552,7 +554,7 @@ defmodule Samen.AI.Chokepoint do
   # `%Ash.ForbiddenField{}`, an un-rendered record, a composite vault value), atom, pid, ref,
   # fun — is NOT provably safe and therefore refuses. Rendering is the assembler's job; an
   # un-rendered shape at the scrub is exactly the "binding that bypassed step 1" case.
-  defp safe_segment?(seg) when is_binary(seg), do: not String.contains?(seg, @vt_sentinel)
+  defp safe_segment?(seg) when is_binary(seg), do: not VtSentinel.in_string?(seg)
   defp safe_segment?(seg) when is_number(seg) or is_boolean(seg) or is_nil(seg), do: true
   defp safe_segment?(%MaskedPayload{}), do: true
 
@@ -570,7 +572,7 @@ defmodule Samen.AI.Chokepoint do
   # does not render (a map or an atom inside, an invalid codepoint) has no string form for a
   # sentinel to appear in; its elements are each scanned by the caller.
   defp charlist_sentinel?(seg) do
-    String.contains?(List.to_string(seg), @vt_sentinel)
+    VtSentinel.in_string?(List.to_string(seg))
   rescue
     _ -> false
   end
@@ -677,7 +679,7 @@ defmodule Samen.AI.Chokepoint do
   # is allowed here (grounding's contractual shape), scanned on its RENDERED name for the
   # sentinel — the same fail-closed reading `charlist_sentinel?/1` applies to a charlist.
   defp safe_metadata?(seg) when is_atom(seg) do
-    not (seg |> Atom.to_string() |> String.contains?(@vt_sentinel))
+    not (seg |> Atom.to_string() |> VtSentinel.in_string?())
   rescue
     e ->
       Samen.Observability.Failure.report(:chokepoint_safe_metadata, nil, e)

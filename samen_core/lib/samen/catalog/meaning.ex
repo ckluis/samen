@@ -32,8 +32,11 @@ defmodule Samen.Catalog.Meaning do
 
   @type table_meaning :: %{description: String.t() | nil, label: String.t(), synonyms: [String.t()]}
 
+  @typedoc "A resource module, or the Spark DSL state of one still being compiled (the compile-time check reads both)."
+  @type source :: module() | map()
+
   @doc "The resource-level meaning: description (or `nil`), label, synonyms."
-  @spec table(module()) :: table_meaning()
+  @spec table(source()) :: table_meaning()
   def table(resource) do
     %{
       description: blank_to_nil(Ash.Resource.Info.description(resource)),
@@ -46,7 +49,7 @@ defmodule Samen.Catalog.Meaning do
   The meaning of EVERY attribute of `resource`, keyed by its logical name string (the `logical_name` the catalog
   records), in attribute declaration order.
   """
-  @spec fields(module()) :: %{String.t() => field_meaning()}
+  @spec fields(source()) :: %{String.t() => field_meaning()}
   def fields(resource) do
     authored = Map.new(Spark.Dsl.Extension.get_entities(resource, [:meaning]), &{&1.name, &1})
     fk_descriptions = fk_descriptions(resource)
@@ -67,7 +70,7 @@ defmodule Samen.Catalog.Meaning do
   end
 
   @doc "The description of each relationship (`nil` when missing), keyed by relationship name string."
-  @spec relationship_descriptions(module()) :: %{String.t() => String.t() | nil}
+  @spec relationship_descriptions(source()) :: %{String.t() => String.t() | nil}
   def relationship_descriptions(resource) do
     Map.new(Ash.Resource.Info.relationships(resource), fn rel ->
       {to_string(rel.name), blank_to_nil(rel.description)}
@@ -80,7 +83,7 @@ defmodule Samen.Catalog.Meaning do
   """
   @spec fixed_units(term(), keyword() | nil) :: String.t() | nil
   def fixed_units(type, constraints) when is_atom(type) and not is_nil(type) do
-    if Code.ensure_loaded?(type) and function_exported?(type, :samen_catalog_units, 1) do
+    if compiled?(type) and function_exported?(type, :samen_catalog_units, 1) do
       type.samen_catalog_units(constraints || [])
     end
   end
@@ -90,7 +93,7 @@ defmodule Samen.Catalog.Meaning do
   @doc "Whether `type` fixes its own units (see `fixed_units/2`)."
   @spec fixes_units?(term()) :: boolean()
   def fixes_units?(type) when is_atom(type) and not is_nil(type) do
-    Code.ensure_loaded?(type) and function_exported?(type, :samen_catalog_units, 1)
+    compiled?(type) and function_exported?(type, :samen_catalog_units, 1)
   end
 
   def fixes_units?(_type), do: false
@@ -109,13 +112,45 @@ defmodule Samen.Catalog.Meaning do
     name |> to_string() |> String.replace("_", " ") |> String.trim() |> String.capitalize()
   end
 
+  @doc """
+  EVERY string the catalog entry can carry from this resource's meaning, with where it sits: the table meaning, each
+  field's meaning (description, label, synonyms, units, allowed_values) and each relationship description — plus the
+  logical names that key them. Returned as `{path, string}`, `path` like `[:fields, "risk", :allowed_values]`.
+
+  The compile-time sentinel check scans exactly this, so a facet added to `table/1`, `fields/1` or
+  `relationship_descriptions/1` is covered without anyone remembering to list it. `source` is a module or a DSL state.
+  """
+  @spec string_leaves(source()) :: [{[term()], String.t()}]
+  def string_leaves(source) do
+    leaves([:table], table(source)) ++
+      leaves([:fields], fields(source)) ++ leaves([:relationships], relationship_descriptions(source))
+  end
+
+  defp leaves(path, string) when is_binary(string), do: [{path, string}]
+
+  defp leaves(path, map) when is_map(map) do
+    Enum.flat_map(map, fn {key, value} ->
+      key_leaf = if is_binary(key), do: [{path ++ [key, :name], key}], else: []
+      key_leaf ++ leaves(path ++ [key], value)
+    end)
+  end
+
+  defp leaves(path, list) when is_list(list), do: Enum.flat_map(list, &leaves(path, &1))
+  defp leaves(_path, _other), do: []
+
   # --- private --------------------------------------------------------------------------------------------------
+
+  # `Code.ensure_compiled/1`, not `ensure_loaded?/1`: at compile time (the meaning transformer) a type module of this
+  # very project may still be compiling, and ensure_compiled waits for it. At runtime the two agree.
+  defp compiled?(type), do: match?({:module, _}, Code.ensure_compiled(type))
 
   defp opt(resource, key), do: Spark.Dsl.Extension.get_opt(resource, [:meaning], key, nil)
 
-  defp humanize_module(resource) do
+  defp humanize_module(resource) when is_atom(resource) do
     resource |> Module.split() |> List.last() |> Macro.underscore() |> humanize()
   end
+
+  defp humanize_module(dsl_state), do: dsl_state |> Spark.Dsl.Extension.get_persisted(:module) |> humanize_module()
 
   # source attribute -> the belongs_to relationship's description (an attribute's own description wins).
   defp fk_descriptions(resource) do
@@ -143,7 +178,7 @@ defmodule Samen.Catalog.Meaning do
   end
 
   defp enum_values(type) when is_atom(type) and not is_nil(type) do
-    if Code.ensure_loaded?(type) and function_exported?(type, :values, 0) and
+    if compiled?(type) and function_exported?(type, :values, 0) and
          Spark.implements_behaviour?(type, Ash.Type.Enum) do
       Enum.map(type.values(), &to_string/1)
     end
