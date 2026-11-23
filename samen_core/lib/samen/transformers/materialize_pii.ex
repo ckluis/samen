@@ -146,6 +146,7 @@ defmodule Samen.Transformers.MaterializePii do
       public?: true,
       writable?: true,
       sensitive?: true,
+      description: pii_attr.description,
       constraints: []
     }
 

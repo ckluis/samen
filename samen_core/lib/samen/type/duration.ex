@@ -40,6 +40,9 @@ defmodule Samen.Type.Duration do
   @doc "Self-classification for `Samen.Pii.Classification`: a duration is non-PII (ADR-036 D2)."
   def samen_pii_class, do: :non_pii
 
+  @doc "Units for the catalog (ADR-043 §8a): the stored value is a whole number of seconds."
+  def samen_catalog_units(_constraints), do: "seconds"
+
   @impl true
   def storage_type(_constraints), do: :integer
 

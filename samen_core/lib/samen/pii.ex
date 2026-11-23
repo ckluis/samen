@@ -45,13 +45,14 @@ defmodule Samen.Pii.Attribute do
   T1.4/T1.5. T1.3 lands the DSL, the composite types, the classification registry,
   the storage-naming split, and the introspection API the vault runtime consumes.
   """
-  defstruct [:name, :type, :vault, :storage_type, __spark_metadata__: nil]
+  defstruct [:name, :type, :vault, :storage_type, :description, __spark_metadata__: nil]
 
   @type t :: %__MODULE__{
           name: atom(),
           type: term(),
           vault: atom(),
           storage_type: atom(),
+          description: String.t() | nil,
           __spark_metadata__: term()
         }
 end
@@ -147,6 +148,13 @@ defmodule Samen.Pii do
         required: false,
         doc:
           "Physical column type for the T1.3 materialization (defaults from the declared type)."
+      ],
+      description: [
+        type: :string,
+        required: false,
+        doc:
+          "What the field means (schema text for the catalog, never a value). Carried onto the materialized " <>
+            "attribute; must not contain the literal `vt_`."
       ]
     ]
   }

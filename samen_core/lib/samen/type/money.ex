@@ -58,6 +58,9 @@ defmodule Samen.Type.Money do
   @doc "Self-classification for `Samen.Pii.Classification`: money is non-PII (ADR-036 D1)."
   def samen_pii_class, do: :non_pii
 
+  @doc "Units for the catalog (ADR-043 §8a): the currency travels with each value, so no single unit is claimed."
+  def samen_catalog_units(_constraints), do: "money: amount with per-value ISO 4217 currency"
+
   @doc """
   The integer minor-unit (cents) count for a `%Money{}` value, or `0` for `nil`.
 

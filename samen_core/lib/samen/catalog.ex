@@ -22,7 +22,48 @@ defmodule Samen.Catalog do
   which must run *before* any resource tables are created (spike note F5).
   """
 
-  use Spark.Dsl.Extension
+  # The `meaning` section (ADR-043 §8a): label, synonyms and units that Ash's native `description` cannot carry.
+  # Descriptions themselves stay in Ash (`resource do description`, `attribute … description:`, a relationship's
+  # `description`, `pii_attribute … description:`); `Samen.Catalog.Meaning` reads both and the catalog dump and the AI
+  # catalogue expose the result. Pure schema text: no database column, no row value.
+  @meaning_field %Spark.Dsl.Entity{
+    name: :field,
+    describe:
+      "Label, synonyms and units for ONE attribute of this resource, keyed by its logical attribute name. " <>
+        "The attribute's description stays on the attribute itself.",
+    target: Samen.Catalog.MeaningField,
+    args: [:name],
+    schema: [
+      name: [type: :atom, required: true, doc: "The logical attribute name this meaning belongs to."],
+      label: [type: :string, required: false, doc: "Human label; defaults to the humanized attribute name."],
+      synonyms: [
+        type: {:list, :string},
+        default: [],
+        doc: "Other words a person or a model may use for this field."
+      ],
+      units: [
+        type: :string,
+        required: false,
+        doc:
+          "Free-text unit, at most 40 characters. Refused on a type that fixes its own units " <>
+            "(`samen_catalog_units/1`: Money, Percent, Duration)."
+      ]
+    ]
+  }
+
+  @meaning %Spark.Dsl.Section{
+    name: :meaning,
+    describe: "Catalog meaning: label, synonyms and per-field units (descriptions live on the Ash declarations).",
+    schema: [
+      label: [type: :string, required: false, doc: "Human label for the resource; defaults to the humanized module name."],
+      synonyms: [type: {:list, :string}, default: [], doc: "Other words for this resource."]
+    ],
+    entities: [@meaning_field]
+  }
+
+  use Spark.Dsl.Extension,
+    sections: [@meaning],
+    transformers: [Samen.Catalog.Transformers.MeaningDeclarations]
 
   @doc """
   The `tam_table` row for a resource: `{table_name, resource_module_string}`.
