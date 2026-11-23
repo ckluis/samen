@@ -59,6 +59,33 @@ defmodule Samen.Lint.KernelSwallow do
     {"samen_core/lib/samen/billing/webhook_dispatch.ex", :safe_atom} =>
       {1, "43b8d623939c4410",
        "String.to_existing_atom/1 raises ArgumentError only for a name that is not an existing atom; an unknown event kind is the bounded :unhandled, which the reconciler ignores (never a mint, never a success claim)"},
+    {"samen_core/lib/samen/delivery/throttle.ex", :safe_to_string} =>
+      {1, "b970d136135b4c9c",
+       "List.to_string/1 raises only for a list that is not chardata (a header name that is not a string); \"\" (no such header) is the exact answer — a pure parse of a header name, no read is involved"},
+    {"samen_core/lib/samen/delivery/throttle.ex", :rfc1123} =>
+      {1, "3fdfc53a35af2d63",
+       ":httpd_util.convert_request_date (and String.to_charlist/1) raise only for a Retry-After value that is not a date; :error (no usable date) is the exact answer, which the caller turns into the default backoff — a pure parse of an untrusted header value, no read is involved"},
+    {"samen_core/lib/samen/delivery/webhook_dispatch.ex", :safe_atom} =>
+      {1, "43b8d623939c4410",
+       "String.to_existing_atom/1 raises ArgumentError only for a name that is not an existing atom; an unknown provider or event kind is the bounded :unhandled, which Deliverability no-ops (never a mint, never a success claim)"},
+    {"samen_core/lib/samen/no_plaintext_pii.ex", :safe_name} =>
+      {1, "662a59cf525fc730",
+       "tier.tier_name/0 raises only for a module that is not a tier; the name is a LABEL on the finding, and the crash of that very tier is already a fail-closed :violation (run_tier/2), so :unknown_tier changes no verdict"},
+    {"samen_core/lib/samen/replay/resolver.ex", :repo} =>
+      {1, "be3694e4bcedc7a2",
+       "AshPostgres.DataLayer.Info.repo/2 returns nil for a resource on another data layer (nothing to raise); it raises only for a module that is not a Spark resource, or a repo function that itself raises: nil (no repo, so the value stays masked — never decrypted) is the fail-closed answer"},
+    {"samen_core/lib/samen/replay/resolver.ex", :ref_attribute} =>
+      {1, "0de297393d69e1cc",
+       "the vault/plan introspection raises only for a module that is no longer a resource (or has no replay plan): :code_changed is exactly that fact, it renders `[changed]`, and nothing resolves"},
+    {"samen_core/lib/samen/replay/resolver.ex", :build_struct} =>
+      {1, "6e7f9bdb6c0fb164",
+       "a defensive guard: Kernel.struct/2 never checks @enforce_keys (only struct!/2 does) so a stored row cannot make it raise; only a module with a hand-written __struct__ that raises can, and that module is by definition not what was recorded: a :code_changed placeholder is the fail-closed answer and no stored value reaches the render"},
+    {"samen_core/lib/samen/replay/resolver.ex", :dropped} =>
+      {1, "f0004dfcb7a5dd80",
+       "a defensive guard: Kernel.struct/1 never checks @enforce_keys (only struct!/1 does), so it raises only for a module with a hand-written __struct__ that raises; the dropped value was never data, so nil (nothing) is the fail-closed answer"},
+    {"samen_core/lib/samen/replay/row_guard.ex", :check} =>
+      {1, "55ebcd6e8afb4706",
+       "a frame-schema validator that raises REFUSES the payload: the guard hands the caller the same changeset refusal it gives an invalid frame, never :ok — fail closed, and the caller handles the error"},
     {"samen_core/lib/samen/ai/chokepoint.ex", :charlist_sentinel?} =>
       {1, "0b17c23d9eddf284",
        "List.to_string/1 raises only for a list that is not chardata; a vt sentinel is a UTF-8 binary and can only be spelled by valid chardata, so for such a list `false` (no sentinel) is the exact answer — the element-wise allowlist (`safe_segment?/1`) still applies to it"},
@@ -86,12 +113,10 @@ defmodule Samen.Lint.KernelSwallow do
     "samen_core/lib/mix/tasks/samen.verify.tool_actor_identity.ex" => 1,
     "samen_core/lib/samen/adapter_conformance_case.ex" => 6,
     "samen_core/lib/samen/aggregate/extension.ex" => 2,
-    "samen_core/lib/samen/aggregate/query_budget.ex" => 1,
     "samen_core/lib/samen/analytics.ex" => 1,
     "samen_core/lib/samen/analytics/sources.ex" => 1,
     "samen_core/lib/samen/api/pii_resolution.ex" => 4,
     "samen_core/lib/samen/api_contract.ex" => 3,
-    "samen_core/lib/samen/approvals.ex" => 1,
     "samen_core/lib/samen/auth/org_actor.ex" => 2,
     "samen_core/lib/samen/backup/verification.ex" => 1,
     "samen_core/lib/samen/catalog.ex" => 2,
@@ -102,10 +127,7 @@ defmodule Samen.Lint.KernelSwallow do
     "samen_core/lib/samen/crm/account_link.ex" => 2,
     "samen_core/lib/samen/custom_fields/change.ex" => 1,
     "samen_core/lib/samen/data_map.ex" => 1,
-    "samen_core/lib/samen/delivery/marketing_receipt_lookup.ex" => 1,
     "samen_core/lib/samen/delivery/provider_conformance_case.ex" => 2,
-    "samen_core/lib/samen/delivery/throttle.ex" => 2,
-    "samen_core/lib/samen/delivery/webhook_dispatch.ex" => 1,
     "samen_core/lib/samen/feature_flags.ex" => 1,
     "samen_core/lib/samen/feature_flags/cache.ex" => 1,
     "samen_core/lib/samen/files.ex" => 1,
@@ -115,17 +137,11 @@ defmodule Samen.Lint.KernelSwallow do
     "samen_core/lib/samen/fleet/report/schema.ex" => 1,
     "samen_core/lib/samen/gen/app.ex" => 1,
     "samen_core/lib/samen/jobs/queue_parity.ex" => 1,
-    "samen_core/lib/samen/mailbox/match.ex" => 3,
-    "samen_core/lib/samen/mailbox/sync.ex" => 1,
     "samen_core/lib/samen/marketing/consent_change.ex" => 2,
     "samen_core/lib/samen/metrics.ex" => 1,
     "samen_core/lib/samen/metrics/contention_handlers.ex" => 1,
     "samen_core/lib/samen/migration.ex" => 1,
     "samen_core/lib/samen/migration/expand_contract.ex" => 1,
-    "samen_core/lib/samen/no_plaintext_pii.ex" => 1,
-    "samen_core/lib/samen/no_plaintext_pii/context.ex" => 4,
-    "samen_core/lib/samen/no_plaintext_pii/tiers/log_telemetry.ex" => 1,
-    "samen_core/lib/samen/no_plaintext_pii/tiers/vault_declarations.ex" => 1,
     "samen_core/lib/samen/notifications/engine.ex" => 1,
     "samen_core/lib/samen/notifications/status_change.ex" => 2,
     "samen_core/lib/samen/observability/job_spans.ex" => 4,
@@ -135,17 +151,12 @@ defmodule Samen.Lint.KernelSwallow do
     "samen_core/lib/samen/pii_classify.ex" => 1,
     "samen_core/lib/samen/replay/buffer.ex" => 7,
     "samen_core/lib/samen/replay/capture.ex" => 2,
-    "samen_core/lib/samen/replay/resolver.ex" => 9,
-    "samen_core/lib/samen/replay/row_guard.ex" => 1,
-    "samen_core/lib/samen/replay/sanitizer.ex" => 2,
-    "samen_core/lib/samen/reveal/grants.ex" => 2,
     "samen_core/lib/samen/scopes/identity/notify.ex" => 1,
     "samen_core/lib/samen/scopes/marketing/blueprint.ex" => 2,
     "samen_core/lib/samen/scopes/marketing/send_worker.ex" => 1,
     "samen_core/lib/samen/scopes/support/sla_breach_worker.ex" => 1,
     "samen_core/lib/samen/search.ex" => 3,
     "samen_core/lib/samen/sequences.ex" => 1,
-    "samen_core/lib/samen/sequences/receipt_lookup.ex" => 1,
     "samen_core/lib/samen/test_sandbox.ex" => 1,
     "samen_core/lib/samen/tracer.ex" => 3,
     "samen_core/lib/samen/transformers/materialize_pii.ex" => 1,
@@ -154,16 +165,12 @@ defmodule Samen.Lint.KernelSwallow do
   }
 
   @error_arm_baseline %{
-    "samen_core/lib/samen/approvals.ex" => 1,
     "samen_core/lib/samen/custom_objects.ex" => 1,
     "samen_core/lib/samen/fleet/registry.ex" => 3,
     "samen_core/lib/samen/identity/invite.ex" => 1,
     "samen_core/lib/samen/non_pii.ex" => 1,
     "samen_core/lib/samen/operator_plane.ex" => 3,
-    "samen_core/lib/samen/replay/resolver.ex" => 1,
-    "samen_core/lib/samen/reveal/grants.ex" => 1,
     "samen_core/lib/samen/scopes/marketing/blueprint.ex" => 2,
-    "samen_core/lib/samen/sequences/receipt_lookup.ex" => 1,
     "samen_core/lib/samen/support/inbound/ingest.ex" => 2,
     "samen_core/lib/samen/support/inbound/threading.ex" => 2
   }
@@ -172,8 +179,8 @@ defmodule Samen.Lint.KernelSwallow do
   # has to raise this number too (and `SwallowLintTest` compares it with the merge base, so it can only go down). Lower
   # it together with the baseline when a swallow is converted; never raise it.
   @ceilings %{
-    rescue: %{"samen_core/lib" => 123},
-    error_arm: %{"samen_core/lib" => 19}
+    rescue: %{"samen_core/lib" => 91},
+    error_arm: %{"samen_core/lib" => 15}
   }
 
   def roots, do: @roots

@@ -1,0 +1,19 @@
+# SABOTAGE: Reveal.Grants drops a pending approval whose request row is gone from the approver queue 
+#   without reporting it
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_d_test.exs
+# MUST_FAIL: RED: a pending approval whose request row is gone is left out AND reported; a real request is listed, silently
+diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+index 810c22b2..6e09ab67 100644
+--- a/samen_core/lib/samen/reveal/grants.ex
++++ b/samen_core/lib/samen/reveal/grants.ex
+@@ -468,7 +468,6 @@ defmodule Samen.Reveal.Grants do
+         nil
+ 
+       nil ->
+-        Samen.Observability.Failure.report(:reveal_pending_enrich, approval.org_id, :request_row_missing)
+         nil
+     end
+   end

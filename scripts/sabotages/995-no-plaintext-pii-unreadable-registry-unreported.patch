@@ -1,0 +1,19 @@
+# SABOTAGE: Context.safe_registry_entries swallows an unreadable non-PII registry without a report
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/honest_kernel_reads_d_test.exs
+# MUST_FAIL: RED: an unreadable non-PII registry grants no exemption AND is reported by name
+diff --git a/samen_core/lib/samen/no_plaintext_pii/context.ex b/samen_core/lib/samen/no_plaintext_pii/context.ex
+index 3930f074..fd9d8cb5 100644
+--- a/samen_core/lib/samen/no_plaintext_pii/context.ex
++++ b/samen_core/lib/samen/no_plaintext_pii/context.ex
+@@ -232,7 +232,7 @@ defmodule Samen.NoPlaintextPii.Context do
+     NonPii.entries()
+   rescue
+     e ->
+-      Samen.Observability.Failure.report(:no_plaintext_pii_registry, nil, e)
++      _ = e
+       []
+   catch
+     :exit, reason ->

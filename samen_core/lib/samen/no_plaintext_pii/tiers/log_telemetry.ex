@@ -117,8 +117,6 @@ defmodule Samen.NoPlaintextPii.Tiers.LogTelemetry do
 
   defp mix_otp_app do
     Mix.Project.config()[:app]
-  rescue
-    _ -> nil
   end
 
   # ---------------------------------------------------------------------------

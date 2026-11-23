@@ -2977,6 +2977,11 @@ defmodule Samen.AI.Agent do
             {:ok, loaded}
         end
 
+      # A read that FAILED is not "no such approval": the write is refused either way, but the turn row names the cause.
+      # (`:approvals_unavailable` is the miswired-engine sibling: a configured resource whose repo cannot be resolved.)
+      {:error, reason} when reason in [:unavailable, :approvals_unavailable] ->
+        {:error, :approval_unavailable}
+
       _ ->
         {:error, :approval_not_found}
     end
@@ -2994,7 +2999,7 @@ defmodule Samen.AI.Agent do
   rescue
     e ->
       Samen.Observability.Failure.report(:agent_load_approval, nil, e)
-      {:error, :approval_not_found}
+      {:error, :unavailable}
   end
 
   defp approval_id_of(%{id: id}) when is_binary(id), do: id

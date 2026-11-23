@@ -23,7 +23,10 @@ defmodule Samen.Delivery.Deliverability do
        exhaustion the envelope flips to `:dead` (operator-visible DLQ, §5.5).
        This is deliberately NOT a `{:discard, ...}` — a race where the send
        receipt hasn't landed yet before the webhook arrives is transient, so
-       retrying (then DLQing if it never resolves) is the honest behavior.
+       retrying (then DLQing if it never resolves) is the honest behavior. A lookup
+       whose READ failed (`{:error, :unavailable}`) is a different fact — it is
+       `{:error, :receipt_lookup_unavailable}`, reported by the lookup, and retried
+       the same way: a bounce is never filed as "no such send" because the table was down.
 
   ## Open/click tracking — default OFF behind the consent-aware flag (c9)
 
@@ -63,7 +66,7 @@ defmodule Samen.Delivery.Deliverability do
 
     * `:repo` — required to persist
     * `:receipt_lookup` — required arity-1 fun, `provider_message_id -> {:ok,
-      receipt} | :not_found`
+      receipt} | :not_found | {:error, :unavailable}`
     * `:tracking_consent_module` — optional module implementing `consented?/2`
 
   Returns `:ok` (recorded, or honestly dropped — e.g. `:unhandled` kind, or an
@@ -84,6 +87,8 @@ defmodule Samen.Delivery.Deliverability do
     case receipt_lookup.(event.provider_message_id) do
       {:ok, receipt} -> handle_matched(event, receipt, repo, opts)
       :not_found -> {:error, :no_matching_receipt}
+      # the lookup's read FAILED: not "no such send" (a bounce must never be filed as unmatched because the table was down)
+      {:error, :unavailable} -> {:error, :receipt_lookup_unavailable}
     end
   end
 

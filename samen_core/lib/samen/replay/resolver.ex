@@ -28,8 +28,8 @@ defmodule Samen.Replay.Resolver do
        | the record is gone (deleted, or outside the viewer's org) | `Placeholder :gone` |
        | the resource/attribute is no longer vault-routed or no longer exists | `Placeholder :code_changed` |
 
-  It never writes what it resolves: no cache table, no log line, no ETS, no process
-  dictionary. Every call reads again, so a grant that expires — or an impersonation session
+  It never writes what it resolves: no cache table, no log line carrying a value, no ETS, no process
+  dictionary (a failed read is reported by operation name and exception module only). Every call reads again, so a grant that expires — or an impersonation session
   that closes — between two calls takes effect on the next call (deny-on-read). The result is
   returned to the caller, which renders it and drops it.
 
@@ -110,7 +110,9 @@ defmodule Samen.Replay.Resolver do
       _ -> :code_changed
     end
   rescue
-    _ -> :code_changed
+    e ->
+      Samen.Observability.Failure.report(:replay_resolver_read, nil, e)
+      :code_changed
   end
 
   defp records(_mod, _pk_field, [], _scope, _opts), do: %{}
@@ -135,13 +137,20 @@ defmodule Samen.Replay.Resolver do
         |> Enum.map(&plane_resolve(&1, mod, scope.actor, resolve_opts))
         |> Map.new(&{normalize_pk(Map.get(&1, pk_field)), &1})
 
-      {:error, _} ->
-        # Fail safe: a read the viewer is refused looks exactly like a deleted record.
+      {:error, error} ->
+        # Fail safe: a read the viewer is REFUSED looks exactly like a deleted record. A read that FAILED (a database
+        # error) shows the same `[gone]` placeholder (fail closed: nothing resolves), but it is reported by name.
+        unless refused?(error), do: Samen.Observability.Failure.report(:replay_resolver_records, scope, error)
         %{}
     end
   rescue
-    _ -> %{}
+    e ->
+      Samen.Observability.Failure.report(:replay_resolver_records, scope, e)
+      %{}
   end
+
+  defp refused?(%Ash.Error.Forbidden{}), do: true
+  defp refused?(_), do: false
 
   # The PiiResolution options for one batch: the viewer's repo/grant/vault, plus what
   # `PiiResolution.prefetch/4` read ONCE for all the batch's rows. Lives for this call only.
@@ -149,8 +158,10 @@ defmodule Samen.Replay.Resolver do
     base = Keyword.merge([repo: repo(mod, opts)], Keyword.take(opts, [:grant, :vault]))
     PiiResolution.prefetch(rows, mod, actor, base)
   rescue
-    # A failed prefetch costs only the per-record reads it would have saved.
-    _ -> Keyword.merge([repo: repo(mod, opts)], Keyword.take(opts, [:grant, :vault]))
+    # A failed prefetch costs only the per-record reads it would have saved (each record still resolves on its own).
+    e ->
+      Samen.Observability.Failure.report(:replay_resolver_prefetch, nil, e)
+      Keyword.merge([repo: repo(mod, opts)], Keyword.take(opts, [:grant, :vault]))
   end
 
   # The ONE resolution rule (PiiResolution) with the VIEWER's actor. On the operator plane it
@@ -172,8 +183,10 @@ defmodule Samen.Replay.Resolver do
     [resolved] = PiiResolution.resolve([record], mod, actor, resolve_opts)
     resolved
   rescue
-    # A resolver failure never downgrades to plaintext: the record keeps its masked values.
-    _ -> record
+    # A resolver failure never downgrades to plaintext: the record keeps its masked values (and the failure is reported).
+    e ->
+      Samen.Observability.Failure.report(:replay_resolver_resolve, nil, e)
+      record
   end
 
   # Every `Samen.Resource` row carries `org_id`; it must be the viewer's org. A row without
@@ -330,7 +343,9 @@ defmodule Samen.Replay.Resolver do
   defp shredded?(pk) do
     match?({:ok, %{state: :shredded}}, Samen.Kms.adapter().attest(to_string(normalize_pk(pk))))
   rescue
-    _ -> false
+    e ->
+      Samen.Observability.Failure.report(:replay_resolver_shredded, nil, e)
+      false
   end
 
   # A walked struct or an Ash record: the CURRENT module's struct with the captured fields
