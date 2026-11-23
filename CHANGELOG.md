@@ -46,7 +46,7 @@ All notable changes to Samen are recorded here. The format follows
   `cpt_post_versions`), generated resources an author cannot describe; they wait for framework default descriptions
   (driftwood and pawchart have none).
 - **Fixed: the restatement rule no longer lets a possessive through.** "The name's name" on `name` passed because `'s` split
-  off a stray "s" that counted as a new word; possessives are now their word and single letters are never content words.
+  off a stray "s" that counted as a new word; single letters ("s", "e.g.") are never content words now.
 - **Fixed: the cross-table synonym rule no longer refuses a synonym on a twin-mounted scope.** A table with the same label as
   the synonym's own table (the twin mount of Billing or Support) is the same concept, so its names and synonyms never
   collide; a table with a different label still does.
