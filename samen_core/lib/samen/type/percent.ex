@@ -41,7 +41,7 @@ defmodule Samen.Type.Percent do
 
   @doc "Units for the catalog (ADR-043 §8a): percent points (`42.5` is 42.5%), within the type's min and max."
   def samen_catalog_units(constraints) do
-    "percent points (#{bound(constraints, :min, @default_min)}–#{bound(constraints, :max, @default_max)})"
+    "percent points (#{bound(constraints, :min, @default_min)}-#{bound(constraints, :max, @default_max)})"
   end
 
   defp bound(constraints, key, default) do

@@ -82,6 +82,8 @@ defmodule Samen.Catalog.Meaning do
   authored `units` on such a type is refused at compile time.
   """
   @spec fixed_units(term(), keyword() | nil) :: String.t() | nil
+  def fixed_units({:array, inner}, constraints), do: fixed_units(inner, Keyword.get(constraints || [], :items))
+
   def fixed_units(type, constraints) when is_atom(type) and not is_nil(type) do
     if compiled?(type) and function_exported?(type, :samen_catalog_units, 1) do
       type.samen_catalog_units(constraints || [])
@@ -92,6 +94,8 @@ defmodule Samen.Catalog.Meaning do
 
   @doc "Whether `type` fixes its own units (see `fixed_units/2`)."
   @spec fixes_units?(term()) :: boolean()
+  def fixes_units?({:array, inner}), do: fixes_units?(inner)
+
   def fixes_units?(type) when is_atom(type) and not is_nil(type) do
     compiled?(type) and function_exported?(type, :samen_catalog_units, 1)
   end

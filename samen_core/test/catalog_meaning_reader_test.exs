@@ -111,7 +111,7 @@ defmodule SamenCore.CatalogMeaningReaderTest do
     test "Money units are type-derived; Percent and Duration too", %{mod: mod} do
       f = Meaning.fields(mod)
       assert f["cost"].units == "money: amount with per-value ISO 4217 currency"
-      assert f["rate"].units == "percent points (0–100)"
+      assert f["rate"].units == "percent points (0-100)"
       assert f["span"].units == "seconds"
       # control: authored units reach a plain field
       assert f["qty"].units == "pieces"
@@ -318,6 +318,16 @@ defmodule SamenCore.CatalogMeaningReaderTest do
 
       assert Meaning.fields(mod)["a"].description == nil
       assert Meaning.fields(mod)["b"].description == "Real."
+    end
+
+    test "RED: an array of a unit-fixing type reports the type's units and refuses authored ones" do
+      src = "attributes do\n attribute :amounts, {:array, Samen.Type.Money}, public?: true\n end"
+      mod = compile!("ArrUnits", src, "mfk")
+      assert Meaning.fields(mod)["amounts"].units == "money: amount with per-value ISO 4217 currency"
+
+      assert_raise Spark.Error.DslError, ~r/fixes its own units/, fn ->
+        compile!("ArrUnitsBad", src <> "\nmeaning do\n field :amounts, units: \"dollars\"\n end", "mfk")
+      end
     end
 
     test "RED: authored units on a Money field fail compile" do
