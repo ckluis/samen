@@ -1,0 +1,20 @@
+# SABOTAGE: the host ratchet ignores a merge base that has the file, so a grown host baseline passes once 
+#   baselines are on main (no real merge base needed to see it)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_ratchet_test.exs
+# MUST_FAIL: the live host path refuses a grown baseline and a raised ceiling
+diff --git a/samen_core/lib/samen/catalog_meaning/baseline.ex b/samen_core/lib/samen/catalog_meaning/baseline.ex
+index d108a30b..9f0eee77 100644
+--- a/samen_core/lib/samen/catalog_meaning/baseline.ex
++++ b/samen_core/lib/samen/catalog_meaning/baseline.ex
+@@ -131,7 +131,7 @@ defmodule Samen.CatalogMeaning.Baseline do
+   The adoption allowance is therefore self-expiring: it lasts only while the merge base predates the verifier.
+   """
+   @spec ratchet(String.t(), base(), boolean()) :: [String.t()]
+-  def ratchet(current_src, {:ok, base_src}, _feature_at_base?), do: growth(current_src, base_src)
++  def ratchet(_current_src, {:ok, _base_src}, _feature_at_base?), do: []
+   def ratchet(_current_src, :missing, false), do: []
+ 
+   def ratchet(_current_src, :missing, true) do
