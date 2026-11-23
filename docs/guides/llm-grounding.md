@@ -68,6 +68,19 @@ Each field carries four keys the agent needs:
 | `type` | the declared type (`UUID`, `Atom`, `Samen.Type.VaultField`, …) | so the agent never "guesses `status` is a string" |
 | `pii` | **boolean** — is this field vault-routed PII? | so the agent routes the field through the vault + `:reveal`, never lands it in the clear (T6.3) |
 
+Fields (and tables) also carry meaning, authored once and read by `Samen.Catalog.Meaning` (ADR-043 §8a):
+
+| key | present | what it is |
+|---|---|---|
+| `description` | always (`null` when undescribed) | what the field or table means, in plain words |
+| `label` | always | human label; the humanized name unless authored |
+| `synonyms` | only when authored | other words a person may use |
+| `units` | only when known | fixed by the type (Money, Percent, Duration) or authored |
+| `allowed_values` | only when constrained | the `one_of` values, in declared order |
+| `max_length` | only when constrained | the `max_length` constraint |
+
+Relationships carry `description` too. It is schema text written by the framework's authors, never a row value.
+
 ### The two names, and which identity is unambiguous
 
 The doc is precise about this (:923), and the agent must be too:
