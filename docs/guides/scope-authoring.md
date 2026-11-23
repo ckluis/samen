@@ -236,14 +236,22 @@ end
 - `meaning do` holds only `label`, `synonyms` and `units` (free text, at most 40 characters).
 - Do not describe `id`, `org_id`, timestamps, `archived_at` or the `custom` bag when the framework injects them: it does.
   A resource that declares its own `org_id` (or any of these) must describe it itself; otherwise it stays `null`.
-- A synonym must not be a word another table in any host uses as its name, label or synonym (blueprint text reaches
-  every host): "file" and "contact" were dropped for naming the Files primitive and demo's `cnt_contact`.
+- A synonym must not be a word another table in the app uses as its name, label or synonym (blueprint text reaches
+  every host): "file" and "contact" were dropped for naming the Files primitive and demo's `cnt_contact`. A TABLE synonym
+  may not equal another table's label, humanized resource name, table name or synonym; a FIELD synonym may not equal another
+  table's label or synonym. Within one resource a synonym is unique (case-insensitive across the table's and every field's)
+  and never another field's logical name or label. Each is 1-40 characters. `mix samen.verify.catalog_meaning` enforces this.
 - Allowed values and max length come from `one_of` / `max_length`; Money, Percent and Duration fix their own units
   (authoring units there fails compile).
 - Write only what the code makes true: read the type, constraints, default and use first, and say so plainly when
   the code defines no meaning ("free text as entered; no format is enforced"). Never invent units, ranges or rules.
-- One or two plain sentences, at least 3 words, at most 300 characters, not a restatement of the field name. No
-  personal data and no example values that look like real people.
+- One or two plain sentences, trimmed, at least 3 words, at most 300 characters, no TODO/TBD/FIXME, and not a
+  restatement of the name (after dropping words like "the", "of", "record", "field", "value" it must hold a word the
+  logical name and label do not). No personal data and no example values that look like real people.
+- Enforced, not advice: `mix samen.verify.catalog_meaning` runs in every host's `ci.sh` (step 1c) and fails an undescribed
+  table or field, or a description, synonym or units that breaks these rules. New resources are described from day one: the
+  committed `catalog_meaning.baseline` lists only today's debt, can only shrink (`--shrink`), and never takes a new line.
+  A quality violation can never be baselined.
 - A literal `vt_` anywhere in these texts fails compile (the AI chokepoint would refuse every grounded completion).
 - After changing any text, regenerate the host dicts with `mix samen.catalog.dump --output schema.dict.json`.
 

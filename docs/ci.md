@@ -209,6 +209,22 @@ step — their `lib/` is covered by the five-tree sweep in `samen_web`'s suite, 
 unparseable file, a subdirectory it cannot list, a missing or empty source dir, a positional argument, and more sanctioned reads
 (`# authz-scope:` markers, one per read) than the pinned ceiling fail it. Run it by hand from any app: `mix samen.verify.read_scope`.
 
+The catalog-meaning verifier (`mix samen.verify.catalog_meaning`, `Samen.CatalogMeaning`) runs in `demo`, `driftwood` and `pawchart` as
+`ci.sh` step 1c, right after the `schema.dict.json` drift check. It fails when a catalogued table or field has no description, or a
+present one is low quality (trimmed, at least 3 words, at most 300 characters, no TODO/TBD/FIXME or `vt_`, not a restatement of the
+name), and on bad synonyms (1-40 characters, unique within a resource, never another field's name or label, and, across the app's
+tables, never another table's label, name or synonym) or bad units. It reads compile-time metadata only and needs NO database, so it
+sits before every DB-backed verifier. It fails closed: zero resources, or a resource whose meaning it cannot read, is a violation.
+The debt that exists today is each app's committed `<app>/catalog_meaning.baseline`: a sorted list of its undescribed `table_name` and
+`table_name.logical_name` entries under a `# ceiling: N` header equal to the count. The undescribed set must EQUAL the list: a new
+undescribed entry is always a violation (new tables and fields are described from day one), and a described entry still listed is a
+violation until `mix samen.verify.catalog_meaning --shrink` removes it. `--init` writes the file once (it refuses an existing one);
+with no file the verifier is strict, the end state (a host with no debt deletes its file). A quality violation is never baselinable.
+The list can only shrink: `samen_core/test/catalog_meaning_ratchet_test.exs` compares each host baseline with the merge base
+(`Samen.CatalogMeaning.Baseline.growth/2`; a missing merge base fails under `CI`, as for the swallow ceilings). The baseline is inside
+each host step's `inputs = app:<host>` and the ratchet test inside `samen_core`'s `reads = **`, so a cached PASS cannot survive a
+baseline edit. `samen_web` has no domains of its own and no step.
+
 Dialyzer (`scripts/dialyzer_gate.sh [app…]`, the ten `dialyzer_*` steps, one at a time, 2-3 GB each):
 any warning not in that project's `.dialyzer_ignore.exs` fails, and so does an UNUSED ignore entry. Every
 entry says why it is a false positive or deliberate code; fix a new warning or add it WITH its reason,

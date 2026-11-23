@@ -27,6 +27,19 @@ All notable changes to Samen are recorded here. The format follows
 - **Changed: the CRM scope blueprint, `Samen.Fragments.CorePerson` and demo's CRM resources are described**; the three
   committed `schema.dict.json` files are regenerated. No database column, migration or `custom_objects` change.
 
+### Added: the catalog-meaning verifier (ADR-043 §8a, A2)
+
+- **Added: `mix samen.verify.catalog_meaning`** (`Samen.CatalogMeaning`) fails a catalogued table or field with no description,
+  a low-quality one (trimmed, at least 3 words, at most 300 characters, no TODO/TBD/FIXME or `vt_`, not a restatement of the
+  name), bad synonyms (length, duplicates, another field's name or label, and across tables another table's label, name or
+  synonym) or bad units. It fails closed on zero resources or an unreadable one, and needs no database. `demo`, `driftwood`
+  and `pawchart` run it as `ci.sh` step 1c.
+- **Added: `<app>/catalog_meaning.baseline`**, the exact, shrink-only list of today's undescribed tables and fields
+  (demo 499, driftwood 768, pawchart 604 entries). `--init` writes it once, `--shrink` removes what has since been described,
+  nothing adds to it, and a quality violation is never baselinable. `catalog_meaning_ratchet_test.exs` compares every host
+  baseline with the merge base.
+- **Changed: `mix samen.catalog.dump` and the verifier share one domain resolver** (`Samen.Catalog.Domains`).
+
 ### Fixed: hardening batch 3 (database TLS, API-key digest uniqueness, expired API keys)
 
 - **Fixed: a generated `--deploy` app verifies the database server certificate (ARCH-12).** `config/runtime.exs` used
