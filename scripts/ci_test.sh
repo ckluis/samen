@@ -2164,7 +2164,7 @@ case_MUTLINT() {
 
 # MUTLOCK: scripts/mutate.sh takes an flock on <checkout>/_ci/mutate.lock before it selects, mutates or runs anything.
 # The fixture is two throwaway directories each holding a copy of mutate.sh (REPO_ROOT = the directory above scripts/), so the
-# lock lands in the fixture's own _ci/ and the real repo is never involved. A holder process stands in for the other run.
+# lock lands in the fixture's own _ci/ (SAMEN_CI_HOME, which the driver sets for its steps, is unset) and the real repo is never involved. A holder process stands in for the other run.
 case_MUTLOCK() {
   local A="$T/mutlock_a" B="$T/mutlock_b" d
   for d in "$A" "$B"; do
@@ -2182,7 +2182,7 @@ time.sleep(120)' "$1/_ci/mutate.lock" "$1/held" &
     local n; for n in $(seq 1 100); do [[ -e "$1/held" ]] && return 0; sleep 0.1; done
     bad "MUTLOCK: the lock holder never started"; return 1
   }
-  run() { ( cd "$1" && bash scripts/mutate.sh --file no/such/file.ex > "$2" 2>&1; echo "rc=$?" >> "$2" ); }
+  run() { ( cd "$1" && env -u SAMEN_CI_HOME bash scripts/mutate.sh --file no/such/file.ex > "$2" 2>&1; echo "rc=$?" >> "$2" ); }
 
   run "$A" "$T/mlock.free"
   hasnt "$T/mlock.free" 'REFUSED' "MUTLOCK: positive control — no other mutate.sh running: the run is not refused"
@@ -2194,7 +2194,7 @@ time.sleep(120)' "$1/_ci/mutate.lock" "$1/held" &
     has "$T/mlock.held" 'mutate\.sh: REFUSED - another mutate\.sh is already running in this checkout \(pid 4242: mutate\.sh --shard 1/2\)' "MUTLOCK: a second mutate.sh in the same checkout is refused, naming the holder"
     has "$T/mlock.held" '^rc=3$' "MUTLOCK: ... with exit 3"
     hasnt "$T/mlock.held" 'unknown|selection|MUTATION' "MUTLOCK: ... before it selects or runs anything"
-    ( cd "$A" && bash scripts/mutate.sh --list --file no/such/file.ex > "$T/mlock.list" 2>&1 )
+    ( cd "$A" && env -u SAMEN_CI_HOME bash scripts/mutate.sh --list --file no/such/file.ex > "$T/mlock.list" 2>&1 )
     hasnt "$T/mlock.list" 'REFUSED' "MUTLOCK: a read-only --list is never refused"
     run "$B" "$T/mlock.other"
     hasnt "$T/mlock.other" 'REFUSED' "MUTLOCK: a mutate.sh holding the lock in ANOTHER checkout does not block this one"
