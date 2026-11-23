@@ -18,7 +18,7 @@ FAIL: <task name> found N violation(s):
 
 On success each prints `<task name>: OK — no violations found.` Step numbers below are the
 generated app's <!--count:gate_steps_app-->18<!--/count-->-step `ci.sh` (emitted by `mix samen.gen.app`; the `--api` variant has <!--count:gate_steps_app_api-->19<!--/count-->); Driftwood's
-<!--count:gate_steps_driftwood-->20<!--/count-->-step and PawChart's <!--count:gate_steps_pawchart-->17<!--/count-->-step gates run the same tiers in the same order. There are <!--count:verifiers-->31<!--/count--> `samen.verify.*` tasks in
+<!--count:gate_steps_driftwood-->20<!--/count-->-step and PawChart's <!--count:gate_steps_pawchart-->17<!--/count-->-step gates run the same tiers in the same order. There are <!--count:verifiers-->32<!--/count--> `samen.verify.*` tasks in
 total; each has an entry below (`doc_recipes_test.exs` enforces it).
 
 ---
