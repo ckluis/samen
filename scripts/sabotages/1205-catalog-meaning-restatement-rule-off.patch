@@ -1,0 +1,20 @@
+# SABOTAGE: the restatement rule never fires, so a description that repeats the name is accepted
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_test.exs
+# MUST_FAIL: RED: a description that restates the field name is refused
+diff --git a/samen_core/lib/samen/catalog_meaning.ex b/samen_core/lib/samen/catalog_meaning.ex
+index 9232d5ba..9e8e3c10 100644
+--- a/samen_core/lib/samen/catalog_meaning.ex
++++ b/samen_core/lib/samen/catalog_meaning.ex
+@@ -254,7 +254,8 @@ defmodule Samen.CatalogMeaning do
+   @spec restates?([String.t()], MapSet.t(String.t())) :: boolean()
+   def restates?(tokens, name_words) do
+     content = Enum.reject(tokens, &(&1 in @stopwords))
+-    content == [] or Enum.all?(content, &MapSet.member?(name_words, stem(&1)))
++    _ = {content, name_words}
++    false
+   end
+ 
+   defp finding(kind, key, message), do: %{kind: kind, key: key, message: "#{key}: #{message}"}
