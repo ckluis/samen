@@ -1,0 +1,27 @@
+# SABOTAGE: the AI catalogue stops carrying descriptions for tables and fields, so the model sees structure 
+#   only
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/catalog_runtime_test.exs
+# MUST_FAIL: the runtime catalog carries declared descriptions
+diff --git a/samen_core/lib/samen/ai/catalog.ex b/samen_core/lib/samen/ai/catalog.ex
+index 0d2daaf1..607a4a66 100644
+--- a/samen_core/lib/samen/ai/catalog.ex
++++ b/samen_core/lib/samen/ai/catalog.ex
+@@ -130,7 +130,6 @@ defmodule Samen.AI.Catalog do
+     %{
+       "table_name" => tam.table_name,
+       "resource" => tam.resource,
+-      "description" => table_meaning.description,
+       "label" => table_meaning.label,
+       "fields" =>
+         Enum.map(flds, fn f ->
+@@ -167,7 +166,6 @@ defmodule Samen.AI.Catalog do
+   # when they have a value, so an undeclared facet adds nothing to the payload.
+   defp put_meaning(entry, meaning) do
+     entry
+-    |> Map.put("description", meaning.description)
+     |> Map.put("label", meaning.label)
+     |> put_synonyms(meaning.synonyms)
+     |> put_present("units", meaning.units)

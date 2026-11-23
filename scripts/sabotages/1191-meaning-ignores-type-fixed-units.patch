@@ -1,0 +1,19 @@
+# SABOTAGE: the catalog stops asking a type for the units it fixes, so a Money field has no units
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_reader_test.exs
+# MUST_FAIL: Money units are type-derived
+diff --git a/samen_core/lib/samen/catalog/meaning.ex b/samen_core/lib/samen/catalog/meaning.ex
+index 797a18c1..ab6123fe 100644
+--- a/samen_core/lib/samen/catalog/meaning.ex
++++ b/samen_core/lib/samen/catalog/meaning.ex
+@@ -80,7 +80,7 @@ defmodule Samen.Catalog.Meaning do
+   """
+   @spec fixed_units(term(), keyword() | nil) :: String.t() | nil
+   def fixed_units(type, constraints) when is_atom(type) and not is_nil(type) do
+-    if Code.ensure_loaded?(type) and function_exported?(type, :samen_catalog_units, 1) do
++    if Code.ensure_loaded?(type) and function_exported?(type, :samen_catalog_units_off, 1) do
+       type.samen_catalog_units(constraints || [])
+     end
+   end

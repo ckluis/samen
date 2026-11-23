@@ -1,0 +1,19 @@
+# SABOTAGE: authored units on a type that fixes its own compile, so two sources of units can disagree
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_reader_test.exs
+# MUST_FAIL: RED: authored units on a Money field fail compile
+diff --git a/samen_core/lib/samen/catalog/transformers/meaning_declarations.ex b/samen_core/lib/samen/catalog/transformers/meaning_declarations.ex
+index a2f09dcd..8dfaddf8 100644
+--- a/samen_core/lib/samen/catalog/transformers/meaning_declarations.ex
++++ b/samen_core/lib/samen/catalog/transformers/meaning_declarations.ex
+@@ -71,7 +71,7 @@ defmodule Samen.Catalog.Transformers.MeaningDeclarations do
+         is_nil(field.units) ->
+           nil
+ 
+-        attr && Samen.Catalog.Meaning.fixes_units?(attr.type) ->
++        attr && is_nil(attr.type) ->
+           error(
+             module,
+             [:meaning, :field, field.name, :units],

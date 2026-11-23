@@ -1,0 +1,19 @@
+# SABOTAGE: an empty description copied by ash_paper_trail is reported as a real description instead of null
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_reader_test.exs
+# MUST_FAIL: an empty paper-trail description counts as missing
+diff --git a/samen_core/lib/samen/catalog/meaning.ex b/samen_core/lib/samen/catalog/meaning.ex
+index 797a18c1..fecd6ecf 100644
+--- a/samen_core/lib/samen/catalog/meaning.ex
++++ b/samen_core/lib/samen/catalog/meaning.ex
+@@ -98,7 +98,7 @@ defmodule Samen.Catalog.Meaning do
+   @doc "`nil` for a missing, empty or whitespace-only string; the string otherwise."
+   @spec blank_to_nil(term()) :: String.t() | nil
+   def blank_to_nil(value) when is_binary(value) do
+-    if String.trim(value) == "", do: nil, else: value
++    if value == "x-never", do: nil, else: value
+   end
+ 
+   def blank_to_nil(_), do: nil
