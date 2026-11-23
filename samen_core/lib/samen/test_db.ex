@@ -48,17 +48,18 @@ defmodule Samen.TestDb do
 
     * a database whose name is not a test/scratch name: `<words>_test` or `<words>_test<N>` (`demo_test`,
       `demo_test2` for `MIX_TEST_PARTITION`), optionally followed by `_lane<N>` suffixes and scratch tags
-      `_<tag>_<N>[_<N>]` (`samen_core_test_lane2`, `samen_core_test_rvbackfill_42`), or `<anything>_downcheck_<8 hex>`
-      (the `mix samen.verify.migrations` scratch name). `test_results_prod`, `prod_test_copy`, `contest`, `latest`,
-      `postgres` and every dev/prod name are refused: `test` must be a whole word and nothing but those suffixes may
-      follow it;
+      `_scratch_<tag>_<N>[_<N>]` (`samen_core_test_lane2`, `samen_core_test_scratch_rvbackfill_42`), or
+      `<anything>_downcheck_<8 hex>` (the `mix samen.verify.migrations` scratch name). The fixed word `scratch` is what
+      makes a tag a scratch tag: a database that merely continues `test_` with a word and digits (`test_results_2`) is
+      NOT one. `test_results_prod`, `prod_test_copy`, `contest`, `latest`, `postgres` and every dev/prod name are
+      refused: `test` must be a whole word and nothing but those suffixes may follow it;
     * any call when `Mix` is not loaded. Every legitimate caller (test helpers, CI bootstrap scripts, `mix
       samen.verify.migrations`, `mix samen_web.test_setup`) runs under Mix; a release does not have Mix, so a stray
       `bin/app eval` can never drop a database through this module.
   """
 
   @maintenance_default "postgres"
-  @test_name ~r/\A(?:[A-Za-z0-9]+_)*test\d*(?:_lane\d+)*(?:_[A-Za-z][A-Za-z0-9]*_\d+(?:_\d+)*)*\z|\A[A-Za-z0-9_]+_downcheck_[0-9a-f]{8}\z/
+  @test_name ~r/\A(?:[A-Za-z0-9]+_)*test\d*(?:_lane\d+)*(?:_scratch_[A-Za-z][A-Za-z0-9]*_\d+(?:_\d+)*)*\z|\A[A-Za-z0-9_]+_downcheck_[0-9a-f]{8}\z/
   @in_use "55006"
 
   @doc "Drop (if present) and create the database of `config`. Raises with the real error on any failure."

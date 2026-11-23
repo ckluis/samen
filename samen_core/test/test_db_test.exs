@@ -13,7 +13,7 @@ defmodule Samen.TestDbTest do
 
   setup do
     base = Repo.config()
-    db = "#{Keyword.fetch!(base, :database)}_testdb_#{System.unique_integer([:positive])}_#{:rand.uniform(1_000_000)}"
+    db = "#{Keyword.fetch!(base, :database)}_scratch_testdb_#{System.unique_integer([:positive])}_#{:rand.uniform(1_000_000)}"
     config = base |> Keyword.delete(:pool) |> Keyword.put(:pool_size, 1) |> Keyword.put(:database, db)
     on_exit(fn -> TestDb.drop!(config) end)
     %{config: config, db: db}
@@ -121,7 +121,9 @@ defmodule Samen.TestDbTest do
   describe "safety" do
     @bad_port [username: "nobody", hostname: "127.0.0.1", port: 1]
 
-    for name <- ~w(samen_prod demo_dev postgres contest latest latest_orders test_results_prod prod_test_copy demo_test_x) do
+    for name <- ~w(samen_prod demo_dev postgres contest latest latest_orders test_results_prod prod_test_copy demo_test_x
+                  test_results_2 test_results_2_3 demo_test_akdgen_7 demo_test_rvbackfill_42 demo_test_scratch demo_test_scratch_x
+                  demo_test_scratch_x_ demo_test_scratch_1_2 scratch_x_7) do
       test "refuses #{name} before connecting" do
         # the port is dead: only the guard can produce this message
         config = Keyword.put(@bad_port, :database, unquote(name))
@@ -139,17 +141,29 @@ defmodule Samen.TestDbTest do
     test "accepts the test and scratch names the repo uses" do
       accepted =
         ~w(demo_test demo_test2 driftwood_test pawchart_test samen_web_test samen_core_multinode_test
-           samen_core_test_lane2 samen_core_test_lane1_lane2 samen_core_test_rvbackfill_42 samen_core_test_akdgen_7
-           samen_core_test_testdb_12_345 demo_test_downcheck_ab12cd34 app_prod_downcheck_ab12cd34 test)
+           samen_core_test_lane2 samen_core_test_lane1_lane2 samen_core_test_scratch_rvbackfill_42
+           samen_core_test_scratch_akdgen_7 samen_core_test_lane2_scratch_csatgen_7 samen_core_test_scratch_testdb_12_345
+           samen_core_test_scratch_Quoted_9 demo_test_downcheck_ab12cd34 app_prod_downcheck_ab12cd34 test)
 
       for name <- accepted do
         assert TestDb.test_database?(name), name
       end
     end
 
+    test "a word and digits after test is not a scratch tag; only the scratch marker makes one" do
+      for name <- ~w(test_results_2 test_results_2_3 demo_test_results_9 demo_test_akdgen_7 demo_test_scratch_x) do
+        refute TestDb.test_database?(name), name
+      end
+
+      # POSITIVE CONTROL: the same words behind the marker are scratch names
+      for name <- ~w(test_scratch_results_2 demo_test_scratch_akdgen_7 demo_test_lane2_scratch_x_1_2) do
+        assert TestDb.test_database?(name), name
+      end
+    end
+
     test "quotes the identifier (a name that needs it)", %{config: config} do
       # mixed case: accepted by the name rule, and only reachable if the identifier is quoted (unquoted it folds to lower)
-      odd = "#{config[:database]}_Quoted_#{:rand.uniform(1_000_000)}"
+      odd = "#{Repo.config()[:database]}_scratch_Quoted_#{:rand.uniform(1_000_000)}"
       {:ok, maint} = Postgrex.start_link(Keyword.merge(config, database: "postgres"))
       on_exit(fn -> stop_quiet(maint) end)
       Postgrex.query!(maint, ~s(CREATE DATABASE "#{String.replace(odd, ~s("), ~s(""))}"), [])

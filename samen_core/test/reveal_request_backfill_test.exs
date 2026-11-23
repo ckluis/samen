@@ -42,7 +42,7 @@ defmodule Samen.RevealRequestBackfillTest do
 
   setup_all do
     base = Repo.config()
-    db = "#{Keyword.fetch!(base, :database)}_rvbackfill_#{:rand.uniform(1_000_000)}"
+    db = "#{Keyword.fetch!(base, :database)}_scratch_rvbackfill_#{:rand.uniform(1_000_000)}"
     config = base |> Keyword.delete(:pool) |> Keyword.put(:pool_size, 5) |> Keyword.put(:database, db)
     :ok = Samen.TestDb.reset!(config)
     {:ok, _} = ScratchRepo.start_link(config)

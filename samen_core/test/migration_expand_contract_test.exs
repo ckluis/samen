@@ -804,7 +804,7 @@ defmodule Samen.MigrationExpandContractTest do
 
   defp start_scratch_repo(suffix) do
     base = Repo.config()
-    db = "#{Keyword.fetch!(base, :database)}_#{suffix}_#{:rand.uniform(1_000_000)}"
+    db = "#{Keyword.fetch!(base, :database)}_scratch_#{suffix}_#{:rand.uniform(1_000_000)}"
 
     config =
       base
