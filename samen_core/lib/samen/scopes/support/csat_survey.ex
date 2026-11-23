@@ -130,8 +130,9 @@ defmodule Samen.Scopes.Support.CsatSurvey do
     |> Ash.Query.filter(token_digest == ^digest and is_nil(consumed_at) and expires_at > ^now)
     |> Ash.Query.ensure_selected([:id, :org_id, :ticket_id, :agent_id, :expires_at, :consumed_at])
     |> Ash.Query.limit(1)
-    # authz-scope: pre-auth survey-token preview keyed on the token digest (<=1 row in practice: 32 random bytes; the digest index is
-    # NOT unique, so `limit(1)` is what keeps a collision harmless; see the hardening backlog);
+    # authz-scope: pre-auth survey-token preview keyed on the token digest (at most one row: 32 random bytes, and the digest
+    # index is UNIQUE in every host and in a generated app's first migration; `limit(1)` stays as a bound, not as the
+    # guard against a collision);
     # the anonymous respondent HAS no actor — the unguessable token is the capability
     |> Ash.read!(authorize?: false)
     |> case do

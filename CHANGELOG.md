@@ -36,9 +36,14 @@ All notable changes to Samen are recorded here. The format follows
      (`lib/<app>_web/api/key_auth_plug.ex`) must filter expired keys, or an expired key keeps authenticating. Add
      this line after the `is_nil(revoked_at)` filter in `lookup_key/1`:
      `|> Ash.Query.filter(is_nil(expires_at) or expires_at > ^now)` (with `now = DateTime.utc_now()` bound above it).
-- **Backlog:** the CSAT survey-token digest indexes (`*_csat_survey_token_digest_idx`, seven tables in four hosts) are
-  plain, not unique. Tokens are 32 random bytes and both lookups tolerate a collision (`limit(1)`, an atomic
-  single-use consume), so this is hardening, not a bug; it needs template, host migrations and a retrofit.
+  4. *Unique CSAT survey-token digest.* Run `mix samen.gen.csat_token_digest_unique`, then `mix ecto.migrate`. Same engine and
+     behaviour as step 2, for every `*_csat_survey_token` table in your `:ash_domains` (`--key table:column` names one); it
+     also drops the plain `<table>_digest_idx` the unique index makes redundant, and `down` puts it back. A table that
+     already has the unique index (a freshly generated app) is skipped.
+- **Fixed: every CSAT survey-token digest is unique.** `preview` reads the row by digest with `limit(1)` and `respond` consumes
+  every row matching the digest, yet the index was plain: one row per digest rested on 32 random bytes. New apps create a
+  unique index in the first migration; the committed hosts (demo `dsc`, driftwood `dcs`/`dco`, pawchart `psc`/`pqo`,
+  samen_web `scw`/`wco`) got a `CONCURRENTLY` migration that replaces the plain index.
 
 ### Fixed: kernel phase D, honest reads (approvals, reveal, delivery lookups, verifier inputs, mailbox, replay)
 
