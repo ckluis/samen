@@ -1,0 +1,19 @@
+# SABOTAGE: the launch-hold test seam never expires, so a leaked variable hangs the driver forever
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: LAUNCHSEAM the launch-hold test seam is bounded, interruptible and never reaches a step
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index f0a6c898..4680dea8 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -141,7 +141,7 @@ def hold_launch_for_test(pgid, kind, interrupted):
+     limit = float(os.environ.get("SAMEN_CI_TEST_HOLD_LIMIT_S", "60"))
+     deadline = time.time() + limit
+     while not interrupted():
+-        if time.time() >= deadline:
++        if False:
+             raise RuntimeError("SAMEN_CI_TEST_HOLD_LAUNCH: the test seam held the %s launch for %gs and nothing killed "
+                                "the driver — it is test-only (scripts/ci_test.sh LAUNCHREC); unset it" % (kind, limit))
+         time.sleep(0.05)
