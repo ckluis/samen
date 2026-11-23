@@ -5,17 +5,15 @@
 # TEST_FILES: test/indexing_test.exs
 # MUST_FAIL: wait_for_build does not return while the build is reported but its index row is not yet committed
 diff --git a/samen_core/test/indexing_test.exs b/samen_core/test/indexing_test.exs
-index bcac96d9..5bf013fb 100644
+index 920ff2bd..26ccab47 100644
 --- a/samen_core/test/indexing_test.exs
 +++ b/samen_core/test/indexing_test.exs
-@@ -773,9 +773,7 @@ defmodule Samen.IndexingTest do
-     # commit (DefineIndex), so progress alone leaves a window with no row to read.
+@@ -779,7 +779,7 @@ defmodule Samen.IndexingTest do
+             "WHERE c.relname = 'ix_slow_idx' AND NOT i.indisvalid)"
+         ).rows
+ 
+-      progress == 1 and invalid_rows == 1
++      progress == 1 and invalid_rows >= 0
+     end
+ 
      defp wait_for_build(deadline \\ 100) do
-       case @repo.query!(
--             "SELECT (SELECT count(*) FROM pg_stat_progress_create_index WHERE relid = 'ix_slow'::regclass), " <>
--               "(SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid " <>
--               "WHERE c.relname = 'ix_slow_idx' AND NOT i.indisvalid)"
-+             "SELECT (SELECT count(*) FROM pg_stat_progress_create_index WHERE relid = 'ix_slow'::regclass), 1"
-            ).rows do
-         [[1, 1]] ->
-           :ok

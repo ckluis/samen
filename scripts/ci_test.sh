@@ -2164,7 +2164,9 @@ case_MUTLINT() {
 
 # MUTLOCK: scripts/mutate.sh takes an flock on <checkout>/_ci/mutate.lock before it selects, mutates or runs anything.
 # The fixture is two throwaway directories each holding a copy of mutate.sh (REPO_ROOT = the directory above scripts/), so the
-# lock lands in the fixture's own _ci/ (SAMEN_CI_HOME, which the driver sets for its steps, is unset) and the real repo is never involved. A holder process stands in for the other run.
+# lock lands in the fixture's own _ci/ and the real repo is never involved. SAMEN_CI_HOME is unset for the runs: the driver does
+# not set it (it only reads it and passes the environment through), but this file's own `mkrepo` exports it (line 147),
+# and left in place it would point mutate.sh at that case's home instead of the fixture's. A holder process stands in for the other run.
 case_MUTLOCK() {
   local A="$T/mutlock_a" B="$T/mutlock_b" d
   for d in "$A" "$B"; do
