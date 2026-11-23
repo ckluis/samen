@@ -1,0 +1,20 @@
+# SABOTAGE: the adoption commit is refused too, so the self-expiring skip would be a permanent failure 
+#   instead of a one-time allowance
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_ratchet_test.exs
+# MUST_FAIL: RED: a baseline missing at a merge base that already has the feature is refused
+diff --git a/samen_core/lib/samen/catalog_meaning/baseline.ex b/samen_core/lib/samen/catalog_meaning/baseline.ex
+index d108a30b..e25cf119 100644
+--- a/samen_core/lib/samen/catalog_meaning/baseline.ex
++++ b/samen_core/lib/samen/catalog_meaning/baseline.ex
+@@ -132,7 +132,7 @@ defmodule Samen.CatalogMeaning.Baseline do
+   """
+   @spec ratchet(String.t(), base(), boolean()) :: [String.t()]
+   def ratchet(current_src, {:ok, base_src}, _feature_at_base?), do: growth(current_src, base_src)
+-  def ratchet(_current_src, :missing, false), do: []
++  def ratchet(_current_src, :missing, false), do: ["no baseline at the merge base"]
+ 
+   def ratchet(_current_src, :missing, true) do
+     [
