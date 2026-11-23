@@ -93,9 +93,18 @@ defmodule Samen.CsatTokenDigestUniqueGenTest do
       :code.delete(mod)
     end
 
-    test "the mix task's own entry point is the csat kind (its output is the csat file, not the API-key one)", %{dir: dir} do
-      assert Task.__info__(:module) == Mix.Tasks.Samen.Gen.CsatTokenDigestUnique
+    test "the mix task runs the csat kind: its file, module and drop of the plain index; the API-key task keeps its own", %{dir: dir} do
       assert Mix.Task.task_name(Task) == "samen.gen.csat_token_digest_unique"
+
+      args = ["--out", dir, "--timestamp", "20261120100000", "--key", "#{@table}:#{@column}"]
+      path = quiet(fn -> Task.run(args) end)
+      assert Path.basename(path) == "20261120100000_csat_token_digest_unique.exs"
+      assert File.read!(path) =~ "Migrations.CsatTokenDigestUnique20261120100000"
+      assert File.read!(path) =~ "DROP INDEX CONCURRENTLY IF EXISTS #{@plain}"
+
+      assert_raise Mix.Error, ~r/mix samen.gen.csat_token_digest_unique: --key expects table:column/, fn ->
+        quiet(fn -> Task.run(["--out", dir, "--key", "oops"]) end)
+      end
 
       # the API-key task keeps its name, its file and its module name
       path = quiet(fn -> Engine.generate(ScratchRepo, [{"x_api_key", "x_token_digest"}], dir, "20261120100000") end)
