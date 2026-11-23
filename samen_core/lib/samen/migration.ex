@@ -133,6 +133,7 @@ defmodule Samen.Migration do
           add_nullable_column: 4,
           concurrent_index: 2,
           concurrent_index: 3,
+          concurrent_unique_index: 3,
           create_org_keyset_indexes: 1,
           create_org_keyset_indexes: 2,
           drop_org_keyset_indexes: 1,
@@ -243,6 +244,23 @@ defmodule Samen.Migration do
       Samen.Migration.ExpandContract.concurrent_index(
         unquote(table),
         unquote(columns),
+        Keyword.put(unquote(opts), :caller, unquote(caller))
+      )
+    end
+  end
+
+  @doc """
+  CREATE UNIQUE INDEX CONCURRENTLY on `table(column)`, LOUD about existing duplicates (requires
+  `@disable_ddl_transaction true`). `opts` needs a literal `:name`. See
+  `Samen.Migration.ExpandContract.concurrent_unique_index/3`.
+  """
+  defmacro concurrent_unique_index(table, column, opts) do
+    caller = __CALLER__.module
+
+    quote do
+      Samen.Migration.ExpandContract.concurrent_unique_index(
+        unquote(table),
+        unquote(column),
         Keyword.put(unquote(opts), :caller, unquote(caller))
       )
     end

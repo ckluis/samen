@@ -14,7 +14,7 @@
 diff --git a/samen_core/lib/samen/scopes/support/csat_survey.ex b/samen_core/lib/samen/scopes/support/csat_survey.ex
 --- a/samen_core/lib/samen/scopes/support/csat_survey.ex
 +++ b/samen_core/lib/samen/scopes/support/csat_survey.ex
-@@ -124,10 +124,9 @@ defmodule Samen.Scopes.Support.CsatSurvey do
+@@ -124,10 +124,9 @@
    @spec preview(mods(), String.t()) :: {:ok, map()} | {:error, :invalid_token}
    def preview(%{} = mods, raw_token) when is_binary(raw_token) do
      digest = TokenMint.digest(raw_token)
@@ -25,4 +25,4 @@ diff --git a/samen_core/lib/samen/scopes/support/csat_survey.ex b/samen_core/lib
 +    |> Ash.Query.filter(token_digest == ^digest and is_nil(consumed_at))
      |> Ash.Query.ensure_selected([:id, :org_id, :ticket_id, :agent_id, :expires_at, :consumed_at])
      |> Ash.Query.limit(1)
-     # authz-scope: pre-auth survey-token preview keyed on the unique token digest (<=1 row);
+     # authz-scope: pre-auth survey-token preview keyed on the token digest (<=1 row in practice: 32 random bytes; the digest index is

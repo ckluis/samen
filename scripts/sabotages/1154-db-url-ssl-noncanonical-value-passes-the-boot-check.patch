@@ -1,0 +1,20 @@
+# SABOTAGE: The boot check refuses only the exact string ssl=false, so ssl=FALSE or ssl=0 boots and then 
+#   crashes every connection.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/deploy_db_ssl_test.exs
+# MUST_FAIL: any ssl= value other than true raises
+diff --git a/samen_core/lib/samen/deploy.ex b/samen_core/lib/samen/deploy.ex
+index 55ee987c..05b5fe56 100644
+--- a/samen_core/lib/samen/deploy.ex
++++ b/samen_core/lib/samen/deploy.ex
+@@ -123,7 +123,7 @@ defmodule Samen.Deploy do
+       {"ssl", "true"} ->
+         :ok
+ 
+-      {"ssl", value} ->
++      {"ssl", value} when value == "false" ->
+         raise ArgumentError,
+               "#{name} carries ssl=#{value}: only ssl=true is valid, and ssl=false (or any other spelling) " <>
+                 "would switch TLS off or crash every connection (fail-closed). Remove it from the variable " <>

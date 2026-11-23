@@ -1036,7 +1036,7 @@ DOC
   printf "$g" > "$F/scripts/sabotages/510-d.patch"
   $C --check > "$T/c10e" 2>&1; eq "$?" 1 "C10: a new patch without a count update is drift"
   has "$T/c10e" 'count sabotages says 3, the sources say 4' "C10: ... naming the new total"
-  $C --write --only sabotages,driver_sabotages > "$T/c10f" 2>&1; eq "$?" 0 "C10: --write --only fixes just those (sabotage new's path)"
+  $C --write --only sabotages,driver_sabotages > "$T/c10f" 2>&1; eq "$?" 0 "C10: --write --only fixes just those"
   $C --check > "$T/c10g" 2>&1; eq "$?" 0 "C10: ... and the whole file is current again"
   has "$F/CLAUDE.md" '496.510' "C10: ... with the new driver range"
   # a count that lost its marker is a count nobody checks
@@ -1176,6 +1176,10 @@ case_SABNEW() {
   has "$T/sabnew" '^PASS: N1: ... numbered one past the highest' "SABNEW: the next number is derived"
   has "$T/sabnew" '^PASS: N1: scripts/counts --write updated CLAUDE.md' "SABNEW: the count in CLAUDE.md is written, not hand-edited"
   has "$T/sabnew" '^PASS: N12: \.\.\. and the pre-command file \(WIP included\) is KEPT' "SABNEW: unstaged WIP captured beside the sabotage is never lost (kept copy)"
+  has "$T/sabnew" '^PASS: N1: every count in CLAUDE.md is current after sabotage new' "SABNEW: every CLAUDE.md count is current on success, the corpus ones included"
+  has "$T/sabnew" '^PASS: N1: the README/docs front-door numbers are current after sabotage new' "SABNEW: ... and so are the README/docs front-door numbers (C10's docs check starts green)"
+  has "$T/sabnew" "^PASS: N1: \.\.\. README.md's sabotage count moved 1 -> 2" "SABNEW: ... README.md's sabotage count really moved"
+  has "$T/sabnew" '^PASS: N4: \.\.\. tree exactly as it was' "SABNEW: a refusal after the counts were written puts CLAUDE.md and the docs back byte-identical"
   hasnt "$T/sabnew" '^FAIL: ' "SABNEW: no assertion failed"
 }
 

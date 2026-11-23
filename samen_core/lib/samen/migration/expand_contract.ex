@@ -255,6 +255,84 @@ defmodule Samen.Migration.ExpandContract do
   end
 
   @doc """
+  `CREATE UNIQUE INDEX CONCURRENTLY` on one column of a table that may already hold rows (same carve-out
+  rules as `concurrent_index/3`: `@disable_ddl_transaction true`, a literal `:name`, a same-named INVALID
+  leftover dropped first).
+
+  Before the build it counts the values that already appear more than once and, if there are any, RAISES
+  naming the table and column and how to list them. It deletes nothing and prints no value (a column of
+  credential digests must not reach a log): removing duplicates is a decision for a person, and a unique
+  build over them would only fail late and leave an INVALID index behind.
+  """
+  def concurrent_unique_index(table, column, opts) do
+    name = Keyword.fetch!(opts, :name)
+    caller = Keyword.fetch!(opts, :caller)
+    __require_disabled_ddl_transaction__!(caller)
+    tname = table_name(table)
+    cname = to_string(column)
+
+    Ecto.Migration.execute(
+      fn ->
+        repo = Ecto.Migration.repo()
+
+        %{rows: [[values, rows]]} =
+          repo.query!(
+            "SELECT count(*), COALESCE(sum(n), 0) FROM " <>
+              "(SELECT count(*) AS n FROM #{q_ident(tname)} WHERE #{q_ident(cname)} IS NOT NULL " <>
+              "GROUP BY #{q_ident(cname)} HAVING count(*) > 1) d"
+          )
+
+        if values > 0 do
+          raise RuntimeError,
+                "cannot build the unique index #{name}: #{tname}.#{cname} holds #{values} value(s) that appear " <>
+                  "more than once (#{rows} rows). #{duplicate_tail(name, cname, tname)}"
+        end
+
+        :ok
+      end,
+      fn -> :ok end
+    )
+
+    drop_invalid_index(tname, name)
+
+    Ecto.Migration.execute(
+      fn -> __build_unique_index__!(Ecto.Migration.repo(), tname, cname, name) end,
+      "DROP INDEX CONCURRENTLY IF EXISTS #{q_ident(name)}"
+    )
+  end
+
+  @doc false
+  # The build, apart from the pre-count, so a duplicate that lands BETWEEN the two is testable. Postgres reports it as
+  # `DETAIL: Key (col)=(<digest>) is duplicated.`, which would put a credential digest in the release log: catch the
+  # unique violation and raise the same value-free message the pre-count raises.
+  def __build_unique_index__!(repo, tname, cname, name) do
+    repo.query!(
+      "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS #{q_ident(name)} ON #{q_ident(tname)} (#{q_ident(cname)})"
+    )
+
+    :ok
+  rescue
+    e in Postgrex.Error ->
+      if match?(%{code: :unique_violation}, e.postgres) do
+        raise RuntimeError,
+              "cannot build the unique index #{name}: #{tname}.#{cname} gained a duplicate value while the index " <>
+                "was being built. The failed build leaves an INVALID index of that name, which the next run drops " <>
+                "before building. #{duplicate_tail(name, cname, tname)}"
+      else
+        reraise e, __STACKTRACE__
+      end
+  end
+
+  # Shared by both refusals. "Nothing was changed" would be false for a migration that builds several indexes: the
+  # steps before this one are already committed (each runs outside a transaction), so say what is true.
+  defp duplicate_tail(name, cname, tname) do
+    "No row was deleted and index #{name} was not built; steps of this migration that already ran stay in place, " <>
+      "and running it again is safe. List the duplicates with " <>
+      "SELECT #{cname}, count(*) FROM #{tname} GROUP BY #{cname} HAVING count(*) > 1, " <>
+      "resolve them deliberately, then run this migration again."
+  end
+
+  @doc """
   Drop a same-named INVALID index on `table` before a `CREATE INDEX CONCURRENTLY IF NOT EXISTS`.
 
   A concurrent build that fails (a duplicate under `UNIQUE`, a deadlock, a cancel) leaves the

@@ -149,6 +149,8 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aok_inserted_at, :utc_datetime, null: false)
       add(:aok_updated_at, :utc_datetime, null: false)
     end
+    # One row per digest — the auth lookup (`token_digest == ^digest`) assumes it, and a duplicate made it error.
+    create(unique_index(:aok_api_key, [:aok_token_digest]))
 
     # --- aon_invitation : a pending invite 🔒 (email vault-routed).
     #     ADR-035 §4.1/§4.2/§5 A5 (T05 hardening): `token_digest` (SHA-256 digest at

@@ -33,6 +33,16 @@ defmodule Samen.SingleNodeLeaseTest.SlowPostgrex do
   end
 end
 
+defmodule Samen.SingleNodeLeaseTest.TlsRepo do
+  @moduledoc "A repo carrying the hardened `ssl:` list `Samen.Deploy.db_ssl_opts/2` produces (no network involved)."
+  def config, do: [hostname: "pooled.example", database: "app", ssl: [verify: :verify_peer, cacertfile: "/ca.pem"], pool_size: 10]
+end
+
+defmodule Samen.SingleNodeLeaseTest.PlainRepo do
+  @moduledoc "A dev/test-style repo with no `ssl:` list."
+  def config, do: [hostname: "pooled.example", database: "app", ssl: false]
+end
+
 defmodule Samen.SingleNodeLeaseTest.DynRepo do
   @moduledoc "A repo whose config resolves its credentials at CONNECT time (`:configure`), like an IAM-token host."
   def config do
@@ -734,6 +744,31 @@ defmodule Samen.SingleNodeLeaseTest do
 
       # the check statement and the beat statement both ran before the state was published
       assert at >= started + 10_000
+    end
+  end
+
+  describe "connect_opts/2: the direct URL never replaces the hardened ssl list" do
+    alias Samen.SingleNodeLeaseTest.{PlainRepo, TlsRepo}
+
+    defp lease_opts(repo, url), do: Lease.connect_opts([repo: repo, lease_url: url], %{lease_url: nil})
+
+    test "RED: ?ssl=true on the direct URL keeps the repo's list (private CA / verify opt-out apply to the lease)" do
+      opts = lease_opts(TlsRepo, "postgres://u:p@direct.example/app?ssl=true")
+      assert opts[:ssl] == [verify: :verify_peer, cacertfile: "/ca.pem"]
+      # the URL's other parts still win
+      assert opts[:hostname] == "direct.example"
+    end
+
+    test "RED: fail-closed, a URL ssl=false or a non-canonical value can never replace the list either" do
+      for q <- ["ssl=false", "ssl=FALSE", "ssl=0"] do
+        assert lease_opts(TlsRepo, "postgres://u:p@direct.example/app?" <> q)[:ssl] == [verify: :verify_peer, cacertfile: "/ca.pem"]
+      end
+    end
+
+    test "POSITIVE CONTROL: without an ssl: list in the repo config the URL's ssl still applies; no URL ssl inherits the list" do
+      assert lease_opts(PlainRepo, "postgres://u:p@direct.example/app?ssl=true")[:ssl] == true
+      assert lease_opts(TlsRepo, "postgres://u:p@direct.example/app?sslmode=require")[:ssl] == [verify: :verify_peer, cacertfile: "/ca.pem"]
+      assert lease_opts(TlsRepo, "")[:ssl] == [verify: :verify_peer, cacertfile: "/ca.pem"]
     end
   end
 

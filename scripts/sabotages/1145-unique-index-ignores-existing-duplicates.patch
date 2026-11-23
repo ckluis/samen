@@ -1,0 +1,20 @@
+# SABOTAGE: concurrent_unique_index stops refusing a table that already holds duplicate digests, so the 
+#   retrofit fails late inside the build instead of loudly before it.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/migration_unique_index_test.exs
+# MUST_FAIL: RED: existing duplicates fail the migration loudly
+diff --git a/samen_core/lib/samen/migration/expand_contract.ex b/samen_core/lib/samen/migration/expand_contract.ex
+index 1527a00..5dc0f4e 100644
+--- a/samen_core/lib/samen/migration/expand_contract.ex
++++ b/samen_core/lib/samen/migration/expand_contract.ex
+@@ -282,7 +282,7 @@ defmodule Samen.Migration.ExpandContract do
+               "GROUP BY #{q_ident(cname)} HAVING count(*) > 1) d"
+           )
+ 
+-        if values > 0 do
++        if values > 99 do
+           raise RuntimeError,
+                 "cannot build the unique index #{name}: #{tname}.#{cname} holds #{values} value(s) that appear " <>
+                   "more than once (#{rows} rows). #{duplicate_tail(name, cname, tname)}"

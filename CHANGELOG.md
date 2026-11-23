@@ -11,6 +11,35 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Fixed: hardening batch 3 (database TLS, API-key digest uniqueness, expired API keys)
+
+- **Fixed: a generated `--deploy` app verifies the database server certificate (ARCH-12).** `config/runtime.exs` used
+  `ssl: [verify: :verify_none]`; it now calls `Samen.Deploy.db_ssl_opts/2` (`verify_peer` against the OS CA store, hostname
+  checked). `DATABASE_SSL_CACERTFILE=/path/ca.pem` verifies against a private CA instead; `DATABASE_SSL_VERIFY=none` is the
+  loud opt-out (a warning on stderr at every boot); any other value, a URL `ssl=` other than `true`, or
+  `sslmode=disable|allow|prefer` refuses to boot, naming the variable (never the URL). The single-node lease's
+  `DATABASE_DIRECT_URL` connection inherits the same options, whatever its query string says.
+- **Fixed: every API-key token digest is unique.** The lookup assumes one row per digest; a duplicate made it error (a
+  503). New apps create the unique index in the first migration; the committed hosts got a `CONCURRENTLY` migration
+  (`concurrent_unique_index/3`, which refuses existing duplicates without printing a digest). Sabotages 1145-1152.
+- **Upgrade (apps generated before these changes):**
+  1. *TLS.* Edit your own `config/runtime.exs`: replace `ssl: [verify: :verify_none]` with
+     `ssl: Samen.Deploy.db_ssl_opts([{"DATABASE_URL", database_url}, {"DATABASE_DIRECT_URL", direct_url}])`, and move the
+     line `direct_url = System.get_env("DATABASE_DIRECT_URL")` above the `config ... Repo` call. The app then verifies the
+     certificate on its next boot: set `DATABASE_SSL_CACERTFILE` (a CA file in the image) for a private CA, or
+     `DATABASE_SSL_VERIFY=none` to keep the old behaviour knowingly.
+  2. *Unique digest.* Run `mix samen.gen.api_key_digest_unique`, then `mix ecto.migrate`. It writes one migration of literal
+     SQL (`CREATE UNIQUE INDEX CONCURRENTLY` per `*_api_key` table found in your `:ash_domains`; `--key table:column`
+     names one explicitly). If a table already holds a duplicate digest the migration raises, naming the table and column,
+     and changes nothing: resolve the duplicates, run it again. A re-run writes nothing.
+  3. *Expired keys (from the previous change in this chain).* An existing `--api` app's own key auth plug
+     (`lib/<app>_web/api/key_auth_plug.ex`) must filter expired keys, or an expired key keeps authenticating. Add
+     this line after the `is_nil(revoked_at)` filter in `lookup_key/1`:
+     `|> Ash.Query.filter(is_nil(expires_at) or expires_at > ^now)` (with `now = DateTime.utc_now()` bound above it).
+- **Backlog:** the CSAT survey-token digest indexes (`*_csat_survey_token_digest_idx`, seven tables in four hosts) are
+  plain, not unique. Tokens are 32 random bytes and both lookups tolerate a collision (`limit(1)`, an atomic
+  single-use consume), so this is hardening, not a bug; it needs template, host migrations and a retrofit.
+
 ### Fixed: kernel phase D, honest reads (approvals, reveal, delivery lookups, verifier inputs, mailbox, replay)
 
 - **Fixed: a failed approvals read no longer reads as "none", "not found" or "unwired".** `Approvals.existing_pending`

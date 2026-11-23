@@ -284,6 +284,52 @@ try do
       halt.(1, "FAIL (AC-G16-2): runtime.exs raised even with ALL secrets set:\n#{msg}")
   end
 
+  # (ARCH-12) the rendered prod config VERIFIES the database server certificate by default, the
+  # explicit opt-out is the only way to turn that off, and an unrecognised value fails closed. Config
+  # evaluation only — no TLS handshake.
+  tls_prod_cfg = fn extra ->
+    saved = Map.new(required_secrets ++ ~w(DATABASE_SSL_VERIFY DATABASE_SSL_CACERTFILE DATABASE_DIRECT_URL), fn k -> {k, System.get_env(k)} end)
+
+    try do
+      for k <- Map.keys(saved), do: System.delete_env(k)
+      for {k, v} <- Map.merge(all_secrets, extra), do: System.put_env(k, v)
+
+      try do
+        {:ok, Config.Reader.read!(runtime_path, env: :prod)[String.to_atom("#{otp_app}")][Module.concat(module, Repo)][:ssl]}
+      rescue
+        e -> {:raised, Exception.message(e)}
+      end
+    after
+      for {k, v} <- saved do
+        if v, do: System.put_env(k, v), else: System.delete_env(k)
+      end
+    end
+  end
+
+  case tls_prod_cfg.(%{}) do
+    {:ok, ssl} when is_list(ssl) ->
+      unless ssl[:verify] == :verify_peer and is_list(ssl[:cacerts]) do
+        halt.(1, "FAIL (ARCH-12): the rendered prod Repo does not verify the database certificate: #{inspect(ssl, limit: 5)}")
+      end
+
+    other ->
+      halt.(1, "FAIL (ARCH-12): the rendered prod Repo has no ssl options: #{inspect(other, limit: 5)}")
+  end
+
+  unless Regex.match?(~r/Samen\.Deploy\.db_ssl_opts/, runtime_pristine) and not String.contains?(runtime_pristine, "verify_none") do
+    halt.(1, "FAIL (ARCH-12): runtime.exs does not use Samen.Deploy.db_ssl_opts or still names verify_none.")
+  end
+
+  case tls_prod_cfg.(%{"DATABASE_SSL_VERIFY" => "bogus"}) do
+    {:raised, msg} ->
+      unless msg =~ "DATABASE_SSL_VERIFY", do: halt.(1, "FAIL (ARCH-12): the bad-value raise did not name DATABASE_SSL_VERIFY:\n#{msg}")
+
+    other ->
+      halt.(1, "FAIL (ARCH-12): an unrecognised DATABASE_SSL_VERIFY did not fail closed: #{inspect(other, limit: 5)}")
+  end
+
+  IO.puts("DEPLOY: ARCH-12 — the prod Repo verifies the database certificate by default; a bogus DATABASE_SSL_VERIFY raises.")
+
   # (green) :dev env → the prod block is skipped, so a missing secret does NOT raise.
   case eval_runtime.(runtime_path, :dev, %{}) do
     :ok ->

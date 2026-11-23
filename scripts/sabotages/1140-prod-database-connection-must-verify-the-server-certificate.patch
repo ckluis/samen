@@ -1,0 +1,19 @@
+# SABOTAGE: The generated prod database connection must verify the server certificate: a default of 
+#   verify_none is a man in the middle reading every session.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/deploy_db_ssl_test.exs
+# MUST_FAIL: default: verify_peer, the OS CA store, the :https hostname match, and no pinned SNI
+diff --git a/samen_core/lib/samen/deploy.ex b/samen_core/lib/samen/deploy.ex
+--- a/samen_core/lib/samen/deploy.ex
++++ b/samen_core/lib/samen/deploy.ex
+@@ -82,7 +82,7 @@
+         [verify: :verify_peer, cacertfile: cafile, customize_hostname_check: hostname_check()]
+ 
+       true ->
+-        [verify: :verify_peer, cacerts: os_cacerts!(), customize_hostname_check: hostname_check()]
++        [verify: :verify_none, cacerts: os_cacerts!(), customize_hostname_check: hostname_check()]
+     end
+   end
+ 
