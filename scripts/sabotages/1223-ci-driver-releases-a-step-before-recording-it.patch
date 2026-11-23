@@ -6,15 +6,15 @@
 # TEST_FILES: test/meta/ci_driver_guard_test.exs
 # MUST_FAIL: LAUNCHREC a step is released only once the driver has recorded it
 diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
-index 210519a4..d55efc6c 100755
+index f0a6c898..2e02e722 100755
 --- a/scripts/ci_driver.py
 +++ b/scripts/ci_driver.py
-@@ -1044,7 +1044,7 @@ class Run(object):
-         gate_r, gate_w = os.pipe()
+@@ -1070,7 +1070,7 @@ class Run(object):
          try:
-             proc = subprocess.Popen(
--                ["bash", "-c", "IFS= read -r _go <&%d || exit 1; exec %d<&-\nset -euo pipefail\n%s" % (gate_r, gate_r, step.cmd)],
-+                ["bash", "-c", "set -euo pipefail\n" + step.cmd],
-                 cwd=os.path.join(REPO, step.cwd), env=self.ctx.env(self.mode, step),
-                 stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                 start_new_session=True, pass_fds=(gate_r,))
+             try:
+                 proc = subprocess.Popen(
+-                    ["bash", "-c", "IFS= read -r _go <&%d || exit 1; exec %d<&-\nset -euo pipefail\n%s" % (gate_r, gate_r, cmd)],
++                    ["bash", "-c", "set -euo pipefail\n" + cmd],
+                     cwd=cwd, env=env, stdout=fh, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                     start_new_session=True, pass_fds=(gate_r,))
+             finally:

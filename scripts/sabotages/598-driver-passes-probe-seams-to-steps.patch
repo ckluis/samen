@@ -6,15 +6,15 @@
 # TEST_FILES: test/meta/ci_driver_guard_test.exs
 # MUST_FAIL: GENPROBE the gen probes run on a private registry copy and sweep only their own scratch dirs
 diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
-index 10bf934..9532a26 100755
+index f0a6c898..eb4d8581 100755
 --- a/scripts/ci_driver.py
 +++ b/scripts/ci_driver.py
-@@ -414,7 +414,7 @@ PROBE_SEAMS = ("GEN_PROBE_SHARED_REGISTRY", "SAMEN_ABBREV_REGISTRY", "SAMEN_ABBR
- 
+@@ -445,7 +445,7 @@ PROBE_SEAMS = ("GEN_PROBE_SHARED_REGISTRY", "SAMEN_ABBREV_REGISTRY", "SAMEN_ABBR
  
  def step_base_env():
--    return {k: v for k, v in os.environ.items() if k not in WRAPPER_FLAGS and k not in PROBE_SEAMS}
-+    return {k: v for k, v in os.environ.items() if k not in WRAPPER_FLAGS}
+     return {k: v for k, v in os.environ.items()
+-            if k not in WRAPPER_FLAGS and k not in PROBE_SEAMS and k not in TEST_SEAMS}
++            if k not in WRAPPER_FLAGS and k not in TEST_SEAMS}
  
  
  def env_fingerprint():
