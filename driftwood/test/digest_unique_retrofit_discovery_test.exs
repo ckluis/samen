@@ -39,18 +39,23 @@ defmodule Driftwood.DigestUniqueRetrofitDiscoveryTest do
 
     test "with the shipped migration in place the #{kind} task writes nothing and says why" do
       keys = Engine.discover(domains(), @kind)
-      before = Path.wildcard(Path.join(@migrations, "*.exs"))
+      # a scratch COPY of the host's migrations: were the skip broken, the task would write here, never into the host
+      scratch = Path.join(System.tmp_dir!(), "samen_digest_retrofit_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(scratch)
+      on_exit(fn -> File.rm_rf!(scratch) end)
+      for f <- Path.wildcard(Path.join(@migrations, "*.exs")), do: File.cp!(f, Path.join(scratch, Path.basename(f)))
+      before = Path.wildcard(Path.join(scratch, "*.exs"))
       parent = self()
 
       out =
         ExUnit.CaptureIO.capture_io(fn ->
-          send(parent, {:result, Engine.generate(Driftwood.Repo, keys, @migrations, "29990101000000", @kind)})
+          send(parent, {:result, Engine.generate(Driftwood.Repo, keys, scratch, "29990101000000", @kind)})
         end)
 
       assert_received {:result, nil}
       assert out =~ "already has a unique index in the migrations; skipped"
       assert out =~ "nothing to do"
-      assert Path.wildcard(Path.join(@migrations, "*.exs")) == before
+      assert Path.wildcard(Path.join(scratch, "*.exs")) == before
     end
   end
 end
