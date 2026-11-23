@@ -1,0 +1,20 @@
+# SABOTAGE: the approval re-open reads the request without the row lock, so it never waits for a concurrent 
+#   decision
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_request_lock_test.exs
+# MUST_FAIL: approve, deny and re-open WAIT for a request another connection holds
+diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+index ae1abc97..5d7053e1 100644
+--- a/samen_core/lib/samen/reveal/grants.ex
++++ b/samen_core/lib/samen/reveal/grants.ex
+@@ -236,7 +236,7 @@ defmodule Samen.Reveal.Grants do
+   end
+ 
+   defp open_if_undecided(req, org_id, r, wiring) do
+-    case lock_request(r, req.id) do
++    case r.get(RevealRequest, req.id) do
+       # the lane the approval would be filed in must be the request's own: a request that carries an org is never
+       # opened in another org's lane (one with no org is opened wherever it was filed)
+       %RevealRequest{status: "pending", org_id: row_org} = locked when not is_nil(row_org) ->

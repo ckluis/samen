@@ -6,15 +6,15 @@
 # TEST_FILES: test/honest_kernel_reads_d_test.exs
 # MUST_FAIL: POSITIVE CONTROL: nothing pending is an honest empty list; an unwired host is too
 diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
-index a1db81c5..6ac15a0f 100644
+index f244501..cf28fa7 100644
 --- a/samen_core/lib/samen/reveal/grants.ex
 +++ b/samen_core/lib/samen/reveal/grants.ex
-@@ -435,7 +435,7 @@ defmodule Samen.Reveal.Grants do
-          |> Enum.reject(&is_nil/1)}
- 
+@@ -588,7 +588,7 @@ defmodule Samen.Reveal.Grants do
+       if unrecovered == 0, do: {:ok, rows}, else: {:partial, rows, unrecovered}
+     else
        {:error, :no_approvals_module} ->
 -        {:ok, []}
 +        {:error, :unavailable}
  
-       {:error, reason} ->
-         Samen.Observability.Failure.report(:reveal_pending_for_org, org_id, reason)
+       {:error, :orphan_scan_unavailable} ->
+         {:error, :unavailable}

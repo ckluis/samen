@@ -18,7 +18,7 @@ FAIL: <task name> found N violation(s):
 
 On success each prints `<task name>: OK — no violations found.` Step numbers below are the
 generated app's <!--count:gate_steps_app-->18<!--/count-->-step `ci.sh` (emitted by `mix samen.gen.app`; the `--api` variant has <!--count:gate_steps_app_api-->19<!--/count-->); Driftwood's
-<!--count:gate_steps_driftwood-->20<!--/count-->-step and PawChart's <!--count:gate_steps_pawchart-->17<!--/count-->-step gates run the same tiers in the same order. There are <!--count:verifiers-->29<!--/count--> `samen.verify.*` tasks in
+<!--count:gate_steps_driftwood-->20<!--/count-->-step and PawChart's <!--count:gate_steps_pawchart-->17<!--/count-->-step gates run the same tiers in the same order. There are <!--count:verifiers-->30<!--/count--> `samen.verify.*` tasks in
 total; each has an entry below (`doc_recipes_test.exs` enforces it).
 
 ---
@@ -442,6 +442,25 @@ drop the old index in a follow-up migration (`DROP INDEX CONCURRENTLY`).
 **Fix:** `mix samen.gen.indexes` writes the `CREATE INDEX CONCURRENTLY` migration; for a resource added with
 `mix samen.gen.resource` the index is already in its migration. Set `keyset_sort:` on the resource to the field its list view
 sorts by (`default_sort`).
+
+---
+
+## Step 13c — `mix samen.verify.reveal_orgs`
+
+**Note** (`samen_core/lib/mix/tasks/samen.verify.reveal_orgs.ex`):
+
+```text
+samen.verify.reveal_orgs: NOTE <n> pending reveal request(s) carry no org and have no engine approval; no queue can recover them (ids: ...)
+```
+
+**Meaning:** a pending `RevealRequest` has no org (`rvq_org_id` NULL: a row from before the column that had no engine
+approval to take its org from, or one filed without an org) and no plane-global approval either. The tenant approver
+queue recovers a missing approval only for the requests of the org it reads, so no queue can find these. The migration
+never guesses an org. A request that was decided is never listed: its `rvq_status` is no longer `pending` (the decision
+writes it), so what is named here was never decided. This is a NOTE (exit 0); a read that cannot run is a violation
+(exit 1).
+**Fix:** decide each request by id: set `rvq_org_id` to the org it belongs to (the next queue read of that org re-opens its
+approval, and only while the request is still `pending`), or deny it with `Samen.Reveal.Grants.deny/2`.
 
 ---
 
