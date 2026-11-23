@@ -87,7 +87,11 @@ defmodule Mix.Tasks.Samen.Catalog.Dump do
     # Ensure the app is compiled so resources are available.
     Mix.Task.run("compile")
 
-    domains = resolve_domains(domain_args)
+    domains =
+      case Samen.Catalog.Domains.resolve(domain_args, Mix.Project.config()[:app]) do
+        {:ok, domains} -> domains
+        {:error, message} -> Mix.raise(message)
+      end
 
     unless domains != [] do
       Mix.raise(
@@ -118,37 +122,4 @@ defmodule Mix.Tasks.Samen.Catalog.Dump do
   normalized diff empty") true by construction rather than by convention.
   """
   def build_dict(resources), do: Samen.AI.Catalog.dict(resources)
-
-  # Discover domain modules to introspect. Priority:
-  #   1. --domain CLI args (explicit)
-  #   2. :ash, :domains from the current OTP app config
-  defp resolve_domains([]) do
-    app = Mix.Project.config()[:app]
-
-    case Application.get_env(:ash, :domains) do
-      domains when is_list(domains) ->
-        domains
-
-      _ ->
-        # Try app-level config as a fallback
-        case Application.get_env(app, :ash_domains) do
-          domains when is_list(domains) -> domains
-          _ -> []
-        end
-    end
-  end
-
-  defp resolve_domains(domain_strings) do
-    Enum.map(domain_strings, fn ds ->
-      mod = Module.concat([ds])
-
-      case Code.ensure_compiled(mod) do
-        {:module, ^mod} ->
-          mod
-
-        _ ->
-          Mix.raise("Domain module #{inspect(mod)} could not be compiled/loaded.")
-      end
-    end)
-  end
 end
