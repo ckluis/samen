@@ -1,0 +1,20 @@
+# SABOTAGE: driftwood/ci.sh stops running the catalog_meaning step, so an undescribed field added to 
+#   driftwood ships unnoticed
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_ratchet_test.exs
+# MUST_FAIL: every host's ci.sh runs the verifier: the exact whole line
+diff --git a/driftwood/ci.sh b/driftwood/ci.sh
+index 627c0abe..fdae21d9 100755
+--- a/driftwood/ci.sh
++++ b/driftwood/ci.sh
+@@ -58,7 +58,7 @@ echo "    PASSED (schema.dict.json matches regenerated output)"
+ #     (`--shrink` lowers it, nothing raises it; a samen_core test compares it with the merge base). It reads
+ #     compile-time metadata only — NO database — so it needs no DB bootstrap.
+ echo "--- step 1c/20: mix samen.verify.catalog_meaning (catalog meaning + shrink-only baseline)"
+-mix samen.verify.catalog_meaning
++true
+ echo "    PASSED"
+ 
+ # 2. C1 catalog_parity
