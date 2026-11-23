@@ -6,15 +6,15 @@
 # TEST_FILES: test/api_key_digest_unique_gen_test.exs
 # MUST_FAIL: a re-run writes nothing
 diff --git a/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex b/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
-index 2919573e..a9ad8ea2 100644
+index e9175bb..23dcc08 100644
 --- a/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
 +++ b/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
-@@ -60,7 +60,7 @@ defmodule Mix.Tasks.Samen.Gen.ApiKeyDigestUnique do
-   @spec generate(module(), [{String.t(), String.t()}], Path.t(), String.t()) :: Path.t() | nil
-   def generate(repo, keys, out_dir, timestamp) do
+@@ -96,7 +96,7 @@ defmodule Mix.Tasks.Samen.Gen.ApiKeyDigestUnique do
+   def generate(repo, keys, out_dir, timestamp, kind \\ :api_key) do
+     k = Map.fetch!(@kinds, kind)
      existing = existing_sources(out_dir)
 -    {done, todo} = Enum.split_with(Enum.sort(Enum.uniq(keys)), fn {t, c} -> present?(existing, t, c) end)
 +    {done, todo} = Enum.split_with(Enum.sort(Enum.uniq(keys)), fn {t, c} -> present?(existing, t, c) and t == "never" end)
  
      for {t, c} <- done,
-         do: Mix.shell().info("samen.gen.api_key_digest_unique: #{t}.#{c} already has a unique index in the migrations; skipped")
+         do: Mix.shell().info("#{k.task}: #{t}.#{c} already has a unique index in the migrations; skipped")
