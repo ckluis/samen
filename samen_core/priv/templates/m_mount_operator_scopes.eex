@@ -838,7 +838,9 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_csat_token %>_updated_at, :utc_datetime, null: false)
     end
 
-    create(index(:<%= o_csat_token %>_csat_survey_token, [:<%= o_csat_token %>_token_digest], name: "<%= o_csat_token %>_csat_survey_token_digest_idx"))
+    # One row per digest: `preview` reads by digest with `limit(1)` and `respond` consumes by digest, so a duplicate
+    # would make them disagree about which row they mean.
+    create(unique_index(:<%= o_csat_token %>_csat_survey_token, [:<%= o_csat_token %>_token_digest], name: "<%= o_csat_token %>_csat_survey_token_digest_idx"))
 
     # ARCH-4: the tenant keyset index (org_id, <keyset sort>, id) on every org-scoped table above.
     create_org_keyset_indexes(@resources)
@@ -850,7 +852,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
     drop_org_keyset_indexes(@resources)
 
     # --- Support (reverse FK order) ---
-    drop(index(:<%= o_csat_token %>_csat_survey_token, [:<%= o_csat_token %>_token_digest], name: "<%= o_csat_token %>_csat_survey_token_digest_idx"))
+    drop(unique_index(:<%= o_csat_token %>_csat_survey_token, [:<%= o_csat_token %>_token_digest], name: "<%= o_csat_token %>_csat_survey_token_digest_idx"))
     drop(constraint(:<%= o_csat_token %>_csat_survey_token, "<%= o_csat_token %>_csat_survey_token_<%= o_csat_token %>_agent_id_fkey"))
     drop(constraint(:<%= o_csat_token %>_csat_survey_token, "<%= o_csat_token %>_csat_survey_token_<%= o_csat_token %>_ticket_id_fkey"))
     drop(table(:<%= o_csat_token %>_csat_survey_token))

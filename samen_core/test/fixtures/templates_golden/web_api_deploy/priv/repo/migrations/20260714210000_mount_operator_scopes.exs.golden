@@ -838,7 +838,9 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aqt_updated_at, :utc_datetime, null: false)
     end
 
-    create(index(:aqt_csat_survey_token, [:aqt_token_digest], name: "aqt_csat_survey_token_digest_idx"))
+    # One row per digest: `preview` reads by digest with `limit(1)` and `respond` consumes by digest, so a duplicate
+    # would make them disagree about which row they mean.
+    create(unique_index(:aqt_csat_survey_token, [:aqt_token_digest], name: "aqt_csat_survey_token_digest_idx"))
 
     # ARCH-4: the tenant keyset index (org_id, <keyset sort>, id) on every org-scoped table above.
     create_org_keyset_indexes(@resources)
@@ -850,7 +852,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
     drop_org_keyset_indexes(@resources)
 
     # --- Support (reverse FK order) ---
-    drop(index(:aqt_csat_survey_token, [:aqt_token_digest], name: "aqt_csat_survey_token_digest_idx"))
+    drop(unique_index(:aqt_csat_survey_token, [:aqt_token_digest], name: "aqt_csat_survey_token_digest_idx"))
     drop(constraint(:aqt_csat_survey_token, "aqt_csat_survey_token_aqt_agent_id_fkey"))
     drop(constraint(:aqt_csat_survey_token, "aqt_csat_survey_token_aqt_ticket_id_fkey"))
     drop(table(:aqt_csat_survey_token))
