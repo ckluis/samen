@@ -1,0 +1,20 @@
+# SABOTAGE: the vt_ refusal skips allowed_values, so a one_of atom with the sentinel compiles and refuses 
+#   every grounded completion
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_reader_test.exs
+# MUST_FAIL: RED: vt_ in a one_of allowed value fails compile
+diff --git a/samen_core/lib/samen/catalog/transformers/meaning_declarations.ex b/samen_core/lib/samen/catalog/transformers/meaning_declarations.ex
+index 10972246..d16bc440 100644
+--- a/samen_core/lib/samen/catalog/transformers/meaning_declarations.ex
++++ b/samen_core/lib/samen/catalog/transformers/meaning_declarations.ex
+@@ -132,7 +132,7 @@ defmodule Samen.Catalog.Transformers.MeaningDeclarations do
+   end
+ 
+   defp check_sentinel(module, dsl_state) do
+-    case Enum.find(Meaning.string_leaves(dsl_state), fn {_path, text} -> VtSentinel.in_string?(text) end) do
++    case Enum.find(Meaning.string_leaves(dsl_state), fn {path, text} -> :allowed_values not in path and VtSentinel.in_string?(text) end) do
+       nil ->
+         :ok
+ 
