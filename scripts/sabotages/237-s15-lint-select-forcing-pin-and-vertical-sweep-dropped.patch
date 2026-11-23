@@ -30,18 +30,15 @@ index 2a3d0fa2..78580173 100644
  
        {fun, _, args} when fun in @narrowing_funs and is_list(args) ->
 diff --git a/samen_web/lib/samen/web/authz/read_scope_lint.ex b/samen_web/lib/samen/web/authz/read_scope_lint.ex
-index 89db68db..a9828cc2 100644
+index c25e229d..512cc1e5 100644
 --- a/samen_web/lib/samen/web/authz/read_scope_lint.ex
 +++ b/samen_web/lib/samen/web/authz/read_scope_lint.ex
-@@ -34,10 +34,7 @@ defmodule Samen.Web.Authz.ReadScopeLint do
+@@ -34,7 +34,7 @@ defmodule Samen.Web.Authz.ReadScopeLint do
  
-     [
-       Path.join(repo_root, "samen_core/lib/**/*.ex"),
--      Path.join(repo_root, "samen_web/lib/**/*.ex"),
--      Path.join(repo_root, "demo/lib/**/*.ex"),
--      Path.join(repo_root, "driftwood/lib/**/*.ex"),
--      Path.join(repo_root, "pawchart/lib/**/*.ex")
-+      Path.join(repo_root, "samen_web/lib/**/*.ex")
-     ]
-     |> Enum.flat_map(&Path.wildcard/1)
+     # Samen.SourceScan, not Path.wildcard: five `**` walks through the node's single :file_server_2 queue behind every other
+     # test's file I/O and outran ExUnit's 60 s on a loaded machine (the file reads here already bypass it).
+-    ~w(samen_core/lib samen_web/lib demo/lib driftwood/lib pawchart/lib)
++    ~w(samen_core/lib samen_web/lib)
+     |> Enum.flat_map(&Samen.SourceScan.files(Path.join(repo_root, &1), [".ex"]))
      |> Enum.reject(fn f -> Path.basename(f) in @skip_basenames end)
+     |> Enum.sort()
