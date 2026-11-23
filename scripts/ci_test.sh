@@ -288,10 +288,12 @@ print(b(0, 26.78), b(32, 28.1), b(32, 17), b(32, 33), b(32, 7.9))' "$ROOT/script
   eq "$(runs_of end)" 1 "C1: ... and only the resumed run reached its end"
 
   # SIGKILL of the driver: its step (own session) runs on as an orphan — the next invocation refuses
-  # while it runs, and once it is gone resume RE-RUNS it (nothing was recorded for it)
+  # while it runs, and once it is gone resume RE-RUNS it (nothing was recorded for it). The orphan waits on a file THIS test
+  # creates (never a sleep that a slow runner can outlive), and the driver releases a step only once state.json names it, so
+  # `start` in the log means resume has the record to refuse on. (LAUNCHREC pins that release order.)
   mkrepo c1k
   { echo "$APPS"
-    printf '[step orphan]\ncmd = echo start >> "$CI_TEST_RUNS"; sleep 2\nmodes = pr\ninputs = core/\nest_s = 1\n'; } > "$SAMEN_CI_MANIFEST"
+    printf '[step orphan]\ncmd = echo start >> "$CI_TEST_RUNS"; while [ ! -e "$CI_TEST_RUNS.release" ]; do sleep 0.1; done\nmodes = pr\ninputs = core/\nest_s = 1\n'; } > "$SAMEN_CI_MANIFEST"
   "$CI" pr -j 1 > "$T/o17" 2>&1 &
   pid=$!
   for _ in $(seq 1 150); do grep -q start "$CI_TEST_RUNS" && break; sleep 0.1; done
@@ -300,7 +302,9 @@ print(b(0, 26.78), b(32, 28.1), b(32, 17), b(32, 33), b(32, 7.9))' "$ROOT/script
   eq "$RC" 2 "C1: after a SIGKILLed driver, resume refuses while its orphaned step still runs"
   has "$T/o18" 'still running' "C1: ... and says so"
   eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'd["verdict"]')" RUNNING "C1: ... and the killed run's last.json is RUNNING, never PASS"
-  sleep 2.5
+  local opg; opg="$(jsonget "$SAMEN_CI_HOME/state.json" 'list(d["running"].values())[0]')"
+  : > "$CI_TEST_RUNS.release"
+  for _ in $(seq 1 150); do kill -0 -- "-$opg" 2>/dev/null || break; sleep 0.1; done
   drive "$T/o19" resume
   has "$T/o19" '^PASS orphan [0-9.]+s$' "C1: once the orphan is gone, resume re-runs the step"
   eq "$(runs_of start)" 2 "C1: ... it ran twice (the killed invocation's run never counted)"
@@ -2206,7 +2210,35 @@ time.sleep(120)' "$1/_ci/mutate.lock" "$1/held" &
   fi
 }
 
-ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS LOCALPATHS GENPROBE GENHEX GENHEXRO NARROW RECHUNK COSTW TIMEOUT SELTMO GENDEPS ESCAPE MUTLINT MUTLOCK)
+# LAUNCHREC: a step is released only AFTER the driver has persisted that it runs. The step lives in its own session, so a
+# SIGKILLed driver leaves it running; the next invocation (a fresh `pr` or `resume`) can only refuse to overlap with it from
+# state.json's "running" map, which needs the step's pid — known only after the launch. The driver therefore holds the step
+# on a pipe until state.json is written; the self-test seam SAMEN_CI_TEST_HOLD_LAUNCH blocks the driver at exactly that
+# point so the kill is placed there, not raced. (Before: the step printed `start`, the driver died, state.json did not exist,
+# `resume` said "no run recorded" and a fresh run overlapped the live orphan — once seen on Actions as the C1 flake.)
+case_LAUNCHREC() {
+  mkrepo launchrec
+  { echo "$APPS"
+    printf '[step held]\ncmd = echo start >> "$CI_TEST_RUNS"; sleep 3\nmodes = pr\ninputs = core/\nest_s = 1\n'; } > "$SAMEN_CI_MANIFEST"
+  local hold="$T/launchrec.hold" pid pg
+  env SAMEN_CI_TEST_HOLD_LAUNCH="$hold" "$CI" pr -j 1 > "$T/lr1" 2>&1 &
+  pid=$!
+  for _ in $(seq 1 150); do [[ -s "$hold" ]] && break; sleep 0.1; done
+  if [[ ! -s "$hold" ]]; then bad "LAUNCHREC: the driver never reached the launch seam"; kill -KILL "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; return; fi
+  pg="$(jsonget "$hold" 'd["pgid"]')"
+  eq "$([[ -e "$SAMEN_CI_HOME/state.json" ]] && echo recorded || echo none)" none "LAUNCHREC: at the seam nothing is recorded yet (the premise)"
+  kill -KILL "$pid"; wait "$pid" 2>/dev/null
+  # the held step reads EOF on its pipe and exits; wait for it to be gone (bounded), then it must have run NOTHING
+  for _ in $(seq 1 150); do kill -0 -- "-$pg" 2>/dev/null || break; sleep 0.1; done
+  if kill -0 -- "-$pg" 2>/dev/null; then bad "LAUNCHREC: the held step is still alive after its driver was killed"; kill -KILL -- "-$pg" 2>/dev/null; fi
+  eq "$(runs_of start)" 0 "LAUNCHREC: a step whose driver died before recording it never ran a line of its command"
+  # nothing runs unrecorded -> nothing is left to overlap: a fresh run starts and finishes its own step (positive control)
+  drive "$T/lr2" pr -j 1
+  has "$T/lr2" '^CI\(pr\): PASS 1/1' "LAUNCHREC: a fresh run after the kill passes"
+  eq "$(runs_of start)" 1 "LAUNCHREC: ... and the step ran exactly once"
+}
+
+ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS LOCALPATHS GENPROBE GENHEX GENHEXRO NARROW RECHUNK COSTW TIMEOUT SELTMO GENDEPS ESCAPE MUTLINT MUTLOCK LAUNCHREC)
 CASES=("$@")
 [[ ${#CASES[@]} -gt 0 ]] || CASES=("${ALL[@]}")
 for c in "${CASES[@]}"; do

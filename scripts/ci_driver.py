@@ -122,6 +122,18 @@ def atomic_write_json(path, data):
     os.replace(tmp, path)
 
 
+def hold_launch_for_test(pgid):
+    """Self-test seam (scripts/ci_test.sh LAUNCHREC): with SAMEN_CI_TEST_HOLD_LAUNCH=<file> the driver records the
+    step's process group in <file> and then blocks FOREVER, at the exact point between launching a step and
+    persisting that it runs — so a test can SIGKILL the driver there instead of racing it."""
+    path = os.environ.get("SAMEN_CI_TEST_HOLD_LAUNCH")
+    if not path:
+        return
+    atomic_write_json(path, {"pgid": pgid})
+    while True:
+        time.sleep(0.05)
+
+
 def read_json(path):
     try:
         with open(path) as f:
@@ -1024,13 +1036,29 @@ class Run(object):
             self.mode, step.id, step.cwd, time.strftime("%Y-%m-%dT%H:%M:%S"),
             "\n".join("#   " + l for l in step.cmd.splitlines()), LOG_SEP))
         f.flush()
-        proc = subprocess.Popen(["bash", "-c", "set -euo pipefail\n" + step.cmd],
-                                cwd=os.path.join(REPO, step.cwd), env=self.ctx.env(self.mode, step),
-                                stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                                start_new_session=True)
+        # The step lives in its own session, so a SIGKILLed driver cannot stop it — and the next invocation can only
+        # refuse to overlap with it (or resume) from what state.json says is running. That record needs the step's pid,
+        # which exists only after Popen: so the step is HELD on a pipe until the record is on disk. A driver killed
+        # before releasing it closes the pipe; the step reads EOF and exits without running a line of its command
+        # (once the step could print `start` before state.json existed, and a fresh run then overlapped the orphan).
+        gate_r, gate_w = os.pipe()
+        try:
+            proc = subprocess.Popen(
+                ["bash", "-c", "IFS= read -r _go <&%d || exit 1; exec %d<&-\nset -euo pipefail\n%s" % (gate_r, gate_r, step.cmd)],
+                cwd=os.path.join(REPO, step.cwd), env=self.ctx.env(self.mode, step),
+                stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                start_new_session=True, pass_fds=(gate_r,))
+        except BaseException:
+            os.close(gate_w)
+            raise
+        finally:
+            os.close(gate_r)
         self.running[step.id] = {"proc": proc, "step": step, "start": time.time(), "log": logrel, "fh": f}
         self.status[step.id] = "RUNNING"
+        hold_launch_for_test(proc.pid)
         self.save_state()
+        os.write(gate_w, b"\n")  # the record is durable: let the step run
+        os.close(gate_w)
 
     def flaky_rerun(self, step, text, logabs):
         fails = parse_exunit(ANSI.sub("", text))

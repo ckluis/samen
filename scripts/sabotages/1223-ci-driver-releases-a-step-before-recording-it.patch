@@ -1,0 +1,20 @@
+# SABOTAGE: the driver lets a step run before state.json records it, so a driver killed in that window 
+#   leaves an unrecorded orphan that a fresh run overlaps
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: LAUNCHREC a step is released only once the driver has recorded it
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 210519a4..d55efc6c 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1044,7 +1044,7 @@ class Run(object):
+         gate_r, gate_w = os.pipe()
+         try:
+             proc = subprocess.Popen(
+-                ["bash", "-c", "IFS= read -r _go <&%d || exit 1; exec %d<&-\nset -euo pipefail\n%s" % (gate_r, gate_r, step.cmd)],
++                ["bash", "-c", "set -euo pipefail\n" + step.cmd],
+                 cwd=os.path.join(REPO, step.cwd), env=self.ctx.env(self.mode, step),
+                 stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                 start_new_session=True, pass_fds=(gate_r,))

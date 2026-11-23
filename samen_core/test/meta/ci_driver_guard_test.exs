@@ -302,3 +302,11 @@ defmodule Samen.Meta.CiDriverGuardTest.MutationRunLock do
     Samen.Meta.CiDriverGuard.run_case!("MUTLOCK")
   end
 end
+
+defmodule Samen.Meta.CiDriverGuardTest.LaunchRecord do
+  use ExUnit.Case, async: true
+
+  test "LAUNCHREC a step is released only once the driver has recorded it, so a killed driver leaves no unrecorded orphan" do
+    Samen.Meta.CiDriverGuard.run_case!("LAUNCHREC")
+  end
+end
