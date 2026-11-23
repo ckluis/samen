@@ -248,9 +248,10 @@ end
 - One or two plain sentences, trimmed, at least 3 words, at most 300 characters, no TODO/TBD/FIXME, and not a
   restatement of the name (after dropping words like "the", "of", "record", "field", "value" it must hold a word the
   logical name and label do not). No personal data and no example values that look like real people.
-- Enforced, not advice: `mix samen.verify.catalog_meaning` runs in every host's `ci.sh` (step 1c) and fails an undescribed
+- Enforced, not advice: `mix samen.verify.catalog_meaning` runs in every reference host's `ci.sh` (step 1c; generated apps get it later) and fails an undescribed
   table or field, or a description, synonym or units that breaks these rules. New resources are described from day one: the
-  committed `catalog_meaning.baseline` lists only today's debt, can only shrink (`--shrink`), and never takes a new line.
+  committed `catalog_meaning.baseline` lists only today's debt, can only shrink (`--shrink`), and never takes a new line. A host with no debt keeps the file at `# ceiling: 0`; it is
+  never deleted.
   A quality violation can never be baselined.
 - A literal `vt_` anywhere in these texts fails compile (the AI chokepoint would refuse every grounded completion).
 - After changing any text, regenerate the host dicts with `mix samen.catalog.dump --output schema.dict.json`.

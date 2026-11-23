@@ -21,7 +21,9 @@ defmodule Mix.Tasks.Samen.Verify.CatalogMeaning do
     * a listed entry that is now described is a violation until `--shrink` removes it;
     * a quality violation is never baselinable.
 
-  With NO file the check is strict, the end state: a host with zero debt deletes its file.
+  With NO file the check is strict (a brand-new app before adoption). A host that has paid all its debt KEEPS its file
+  at `# ceiling: 0` with no entries and never deletes it: the ratchet test refuses a baseline that is absent at a merge
+  base which already has this verifier (a deleted file, re-initialised, would hide new debt).
 
   ## Usage
 

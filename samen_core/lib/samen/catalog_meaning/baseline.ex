@@ -13,6 +13,13 @@ defmodule Samen.CatalogMeaning.Baseline do
   `growth/2` compares a baseline with the one on the merge base (the ratchet test calls it) and names every entry
   the current file gained and a ceiling that rose. A plain list, not hashes: every grandfathered field shows up in
   review. Pure: strings in, strings and lists out.
+
+  ## End state
+
+  A host that has described everything KEEPS its file, at `# ceiling: 0` with no entries; it never deletes it. A file
+  that exists at the merge base can then never regain an entry (`growth/2`), and `ratchet/3` refuses a baseline that was
+  deleted and re-initialised once the feature itself exists at the merge base. A brand-new app with NO file is
+  verified strictly (every undescribed entry is a violation), so it can never lean on a baseline it does not have.
   """
 
   @header "# samen.verify.catalog_meaning baseline: undescribed at adoption. Shrink-only; never add a line."
@@ -106,5 +113,42 @@ defmodule Samen.CatalogMeaning.Baseline do
       end
 
     entries ++ ceiling
+  end
+
+  @typedoc "A host baseline as the merge base has it: its text, or absent."
+  @type base :: {:ok, String.t()} | :missing
+
+  @doc """
+  The ratchet verdict for one host baseline against the merge base (what `catalog_meaning_ratchet_test.exs` runs):
+  `[]` or the reasons it is refused.
+
+    * the merge base has the file: `growth/2` (an entry gained, a ceiling raised);
+    * the merge base lacks the file AND the feature itself is absent there (`feature_at_base?` false): this is the
+      adoption commit, there is nothing to compare with, tolerated;
+    * the merge base lacks the file but the feature exists there (`feature_at_base?` true): the file was deleted and
+      re-initialised (new debt hidden behind a fresh `--init`), refused. The end state keeps the file at ceiling 0.
+
+  The adoption allowance is therefore self-expiring: it lasts only while the merge base predates the verifier.
+  """
+  @spec ratchet(String.t(), base(), boolean()) :: [String.t()]
+  def ratchet(current_src, {:ok, base_src}, _feature_at_base?), do: growth(current_src, base_src)
+  def ratchet(_current_src, :missing, false), do: []
+
+  def ratchet(_current_src, :missing, true) do
+    [
+      "the baseline is absent at the merge base although the verifier already exists there: it was deleted and " <>
+        "re-initialised. Keep the file (the end state is `# ceiling: 0` with no entries) and never delete it"
+    ]
+  end
+
+  @doc """
+  The baseline files in `paths` (repo-relative, e.g. from `git ls-files`) that no listed host guards: every path other
+  than `<host>/catalog_meaning.baseline` for a host in `hosts`. A fourth host's file must fail until it is added to the
+  ratchet test's host list.
+  """
+  @spec unguarded([String.t()], [String.t()]) :: [String.t()]
+  def unguarded(paths, hosts) do
+    guarded = Enum.map(hosts, &"#{&1}/#{file_name()}")
+    paths |> Enum.reject(&(&1 in guarded)) |> Enum.sort()
   end
 end

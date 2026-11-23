@@ -453,6 +453,23 @@ defmodule SamenCore.CatalogMeaningTest do
       assert_raise Mix.Error, ~r/nothing to shrink/, fn -> Task.shrink(path, debt_tables(), []) end
     end
 
+    test "the end state: a `# ceiling: 0` file with no entries is clean when nothing is undescribed, strict otherwise" do
+      path = Path.join(scratch!(), "catalog_meaning.baseline")
+      File.write!(path, baseline([]))
+
+      assert {[], 0} = Task.verify(path, [table("fx_deal")], [])
+
+      # RED: an empty file grandfathers nothing, so a new undescribed field is still a violation
+      assert {[message], 1} = Task.verify(path, debt_tables(), [])
+      assert message =~ "fx_deal.notes"
+      assert message =~ "describe it"
+
+      # and --shrink on the empty file keeps it empty (no crash, no entry added)
+      quiet_shell!()
+      assert :ok = Task.shrink(path, debt_tables(), [])
+      assert File.read!(path) == baseline([])
+    end
+
     test "verify reads the baseline file; an absent file is strict, a matching one is clean" do
       path = Path.join(scratch!(), "catalog_meaning.baseline")
 

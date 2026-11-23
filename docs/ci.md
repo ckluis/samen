@@ -219,9 +219,14 @@ The debt that exists today is each app's committed `<app>/catalog_meaning.baseli
 `table_name.logical_name` entries under a `# ceiling: N` header equal to the count. The undescribed set must EQUAL the list: a new
 undescribed entry is always a violation (new tables and fields are described from day one), and a described entry still listed is a
 violation until `mix samen.verify.catalog_meaning --shrink` removes it. `--init` writes the file once (it refuses an existing one);
-with no file the verifier is strict, the end state (a host with no debt deletes its file). A quality violation is never baselinable.
+with no file the verifier is strict (a brand-new app before adoption). A host that has paid all its debt KEEPS its file at
+`# ceiling: 0` with no entries; it never deletes it. A quality violation is never baselinable.
 The list can only shrink: `samen_core/test/catalog_meaning_ratchet_test.exs` compares each host baseline with the merge base
-(`Samen.CatalogMeaning.Baseline.growth/2`; a missing merge base fails under `CI`, as for the swallow ceilings). The baseline is inside
+(`Samen.CatalogMeaning.Baseline.ratchet/3`; a missing merge base fails under `CI`, as for the swallow ceilings). A baseline absent
+at the merge base is tolerated only while the merge base predates the verifier itself (the adoption PR); once
+`samen_core/lib/samen/catalog_meaning/baseline.ex` exists there, a missing host file is a failure (deleted and re-initialised).
+The test also fails a `catalog_meaning.baseline` under an app that is not in its host list, and pins the exact `ci.sh` line
+`mix samen.verify.catalog_meaning` (whole, uncommented, no `|| true`, no `--baseline`) after the dict drift step in each host. The baseline is inside
 each host step's `inputs = app:<host>` and the ratchet test inside `samen_core`'s `reads = **`, so a cached PASS cannot survive a
 baseline edit. `samen_web` has no domains of its own and no step.
 

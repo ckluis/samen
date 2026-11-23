@@ -36,8 +36,11 @@ All notable changes to Samen are recorded here. The format follows
   and `pawchart` run it as `ci.sh` step 1c.
 - **Added: `<app>/catalog_meaning.baseline`**, the exact, shrink-only list of today's undescribed tables and fields
   (demo 499, driftwood 768, pawchart 604 entries). `--init` writes it once, `--shrink` removes what has since been described,
-  nothing adds to it, and a quality violation is never baselinable. `catalog_meaning_ratchet_test.exs` compares every host
-  baseline with the merge base.
+  nothing adds to it, and a quality violation is never baselinable. The end state keeps the file at `# ceiling: 0` (a host never
+  deletes it; an app with no file at all is verified strictly). `catalog_meaning_ratchet_test.exs` compares every host baseline
+  with the merge base (a file missing there is tolerated only while the merge base predates the verifier, so a deleted and
+  re-initialised baseline fails), refuses a baseline under an app outside its host list, and pins the exact `ci.sh` line
+  `mix samen.verify.catalog_meaning` in each host.
 - **Changed: `mix samen.catalog.dump` and the verifier share one domain resolver** (`Samen.Catalog.Domains`).
 
 ### Fixed: hardening batch 3 (database TLS, API-key digest uniqueness, expired API keys)

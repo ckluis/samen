@@ -23,7 +23,8 @@ defmodule Samen.CatalogMeaning do
       still caught.)
     * **R6 baseline exactness**: the set of undescribed entries must EQUAL the baseline's, and its ceiling must equal
       its entry count. A new undescribed entry is always a violation; a described entry still listed is a violation
-      until `--shrink` removes it. With no baseline file the check is strict (the end state).
+      until `--shrink` removes it. With no baseline file the check is strict (a brand-new app before adoption); the end state of
+      an adopted host is its file kept at `# ceiling: 0`, never deleted (`Baseline.ratchet/3`).
 
   Only "undescribed" is debt. A quality violation is never baselinable, whatever the file lists.
   """

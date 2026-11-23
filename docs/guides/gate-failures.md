@@ -450,7 +450,7 @@ FAIL: samen.verify.catalog_meaning found N violation(s):
   • crm_company.name: baseline entry is now described (or gone) — run mix samen.verify.catalog_meaning --shrink
   • crm_company.size: description only restates the name — say what it IS or does, in words the name does not hold ("Size")
   • crm_attachment: synonym "file" names another table (fnd_file, "File")
-  • catalog_meaning.baseline: baseline ceiling is 5 but it lists 4 entries — they must be equal
+  • baseline ceiling is 5 but it lists 4 entries — they must be equal
 ```
 
 **Meaning:** every catalogued table and field needs a description of real quality, and the only tolerated gap is the exact list in
@@ -463,7 +463,10 @@ resource, another field's name or label, or another table's label, name or synon
 that fixes its own) is never baselinable: rewrite the text. **No resources / unreadable resource:** the verifier fails closed,
 so fix the domains config or the resource it names; `--init` and `--shrink` refuse to run in that state. A renamed table makes its old
 entries stale and its new ones new: describe the new table rather than moving the entries. The samen_core ratchet test
-(`catalog_meaning_ratchet_test.exs`) additionally fails a baseline that gained an entry or raised its ceiling against the merge base.
+(`catalog_meaning_ratchet_test.exs`) additionally fails a baseline that gained an entry or raised its ceiling against the merge base, a baseline file that is
+missing at a merge base which already has the verifier (never delete the file: a host with no debt keeps it at `# ceiling: 0`),
+a `catalog_meaning.baseline` under an app the test does not list, and a host `ci.sh` that no longer runs the exact line
+`mix samen.verify.catalog_meaning` after the dict drift step.
 Run it by hand from a host: `mix samen.verify.catalog_meaning [--init | --shrink]`; it needs no database.
 
 ---
