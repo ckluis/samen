@@ -1,0 +1,19 @@
+# SABOTAGE: an interrupted driver returns from a released flaky rerun without stopping it, leaving a live 
+#   unrecorded mix test
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: RERUNREC the flaky rerun is released only once the driver has recorded it
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index e5e0718d..5373330d 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1120,7 +1120,6 @@ class Run(object):
+                 p = self.spawn_gated(cmd, os.path.join(REPO, step.exunit_dir), self.ctx.env(self.mode, step), f, "rerun", register)
+                 while p.poll() is None:
+                     if self.interrupted:
+-                        self.stop_group(p)
+                         return None
+                     time.sleep(0.2)
+             finally:
