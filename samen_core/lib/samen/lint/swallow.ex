@@ -120,7 +120,7 @@ defmodule Samen.Lint.Swallow do
   @spec files(Path.t(), [String.t()]) :: [String.t()]
   def files(root, trees) do
     for tree <- trees,
-        path <- Path.wildcard(Path.join([root, tree, "**", "*.ex"])),
+        path <- Samen.SourceScan.files(Path.join(root, tree), [".ex"]),
         do: Path.relative_to(path, root)
   end
 
@@ -145,7 +145,7 @@ defmodule Samen.Lint.Swallow do
     |> binary_part(0, 16)
   end
 
-  defp sites(rel, root, class), do: root |> Path.join(rel) |> File.read!() |> scan_source(rel, class)
+  defp sites(rel, root, class), do: root |> Path.join(rel) |> Samen.SourceScan.read!() |> scan_source(rel, class)
 
   # Subtract each reviewed function's pinned clauses; the excess stays. A pin whose hash no longer matches the
   # clauses it covers (a REPLACED clause) covers nothing.
