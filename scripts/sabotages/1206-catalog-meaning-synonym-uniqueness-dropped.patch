@@ -1,0 +1,19 @@
+# SABOTAGE: synonym uniqueness within a resource is dropped
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_test.exs
+# MUST_FAIL: RED: a synonym shared by two fields is refused
+diff --git a/samen_core/lib/samen/catalog_meaning.ex b/samen_core/lib/samen/catalog_meaning.ex
+index 9232d5ba..48c3c7c4 100644
+--- a/samen_core/lib/samen/catalog_meaning.ex
++++ b/samen_core/lib/samen/catalog_meaning.ex
+@@ -282,7 +282,7 @@ defmodule Samen.CatalogMeaning do
+     duplicates =
+       owned
+       |> Enum.group_by(fn {s, _, _} -> norm(s) end)
+-      |> Enum.filter(fn {n, group} -> n != "" and length(group) > 1 end)
++      |> Enum.filter(fn {n, group} -> n != "" and length(group) > 1 and false end)
+       |> Enum.flat_map(fn {n, group} ->
+         for {_s, _f, key} <- group,
+             do: finding(:quality, key, "synonym #{inspect(n)} is declared more than once in #{inspect(t.resource)}")
