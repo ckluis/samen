@@ -15,7 +15,19 @@ defmodule Samen.SourceScan do
 
   @doc "Every file under `dir` (recursively) whose extension is in `exts` (e.g. `[\".ex\"]`), sorted."
   @spec files(Path.t(), [String.t()]) :: [Path.t()]
-  def files(dir, exts) when is_list(exts), do: dir |> walk(exts) |> Enum.sort()
+  def files(dir, exts) when is_list(exts), do: dir |> files_checked(exts) |> elem(0)
+
+  @doc """
+  Like `files/2`, but also returns what the walk could NOT inspect: `{files, errors}`, where each error is
+  `{path, reason}` for a directory that could not be listed or an entry that could not be stat'ed (a permission
+  failure, a dangling symlink). `files/2` skips those silently; a gate that must never pass over a tree it could not
+  fully see (`mix samen.verify.read_scope`) uses this and turns every error into a violation.
+  """
+  @spec files_checked(Path.t(), [String.t()]) :: {[Path.t()], [{Path.t(), term()}]}
+  def files_checked(dir, exts) when is_list(exts) do
+    {files, errors} = walk(dir, exts)
+    {Enum.sort(files), Enum.sort(errors)}
+  end
 
   @doc """
   The directories `Path.wildcard(Path.join(root, rel))` names, for a `rel` whose only wildcards are whole `*` segments
@@ -56,14 +68,14 @@ defmodule Samen.SourceScan do
   defp walk(dir, exts) do
     case :prim_file.list_dir(dir) do
       {:ok, names} ->
-        for name <- Enum.map(names, &to_string/1),
-            not String.starts_with?(name, "."),
-            path = Path.join(dir, name),
-            file <- entry(path, name, exts),
-            do: file
+        for name <- Enum.map(names, &to_string/1), not String.starts_with?(name, "."), reduce: {[], []} do
+          {files, errors} ->
+            {f, e} = entry(Path.join(dir, name), name, exts)
+            {files ++ f, errors ++ e}
+        end
 
-      {:error, _} ->
-        []
+      {:error, reason} ->
+        {[], [{dir, reason}]}
     end
   end
 
@@ -72,12 +84,12 @@ defmodule Samen.SourceScan do
       {:ok, info} ->
         case elem(info, 2) do
           :directory -> walk(path, exts)
-          :regular -> if Path.extname(name) in exts, do: [path], else: []
-          _ -> []
+          :regular -> if Path.extname(name) in exts, do: {[path], []}, else: {[], []}
+          _ -> {[], []}
         end
 
-      {:error, _} ->
-        []
+      {:error, reason} ->
+        {[], [{path, reason}]}
     end
   end
 end

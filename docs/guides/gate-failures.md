@@ -18,7 +18,7 @@ FAIL: <task name> found N violation(s):
 
 On success each prints `<task name>: OK — no violations found.` Step numbers below are the
 generated app's <!--count:gate_steps_app-->18<!--/count-->-step `ci.sh` (emitted by `mix samen.gen.app`; the `--api` variant has <!--count:gate_steps_app_api-->19<!--/count-->); Driftwood's
-<!--count:gate_steps_driftwood-->20<!--/count-->-step and PawChart's <!--count:gate_steps_pawchart-->17<!--/count-->-step gates run the same tiers in the same order. There are <!--count:verifiers-->30<!--/count--> `samen.verify.*` tasks in
+<!--count:gate_steps_driftwood-->20<!--/count-->-step and PawChart's <!--count:gate_steps_pawchart-->17<!--/count-->-step gates run the same tiers in the same order. There are <!--count:verifiers-->31<!--/count--> `samen.verify.*` tasks in
 total; each has an entry below (`doc_recipes_test.exs` enforces it).
 
 ---
@@ -416,6 +416,27 @@ interfaces (impersonation, the token-blind aggregate plane), never a direct FK.
 write could store a dangling cross-org reference.
 **Fix:** add `change {Samen.Policy.SameOrgFk, relationships: [:<rel>]}` to the resource's
 create/update actions (exactly what the error message prints).
+
+---
+
+## Step 13a — `mix samen.verify.read_scope`
+
+**Error** (`samen_core/lib/mix/tasks/samen.verify.read_scope.ex`, scanner `samen_core/lib/samen/lint/read_scope.ex`):
+
+```text
+UNSCOPED `authorize?: false` READ(S) (T132 defense-in-depth): ...
+lib/<app>/x.ex:42 — fun/1
+lib/<app>/y.ex — could not be scanned: ...
+N reads carry a `# authz-scope:` marker, over the ceiling of M (--max-sanctioned) ...
+```
+
+**Meaning:** tenant isolation is Ash policy (`OrgScope`) and `authorize?: false` turns it off, so a direct read with it and no
+`org_id`/`id` narrowing returns every org's rows. This runs in every host (`demo`, `driftwood`, `pawchart`) and every generated
+app, over that app's own `lib/`. A file it cannot read or parse, a subdirectory it cannot list, a missing or empty source dir, and more sanctioned reads
+(`# authz-scope:` markers) than the ceiling in `ci.sh` all fail: it never passes on a tree it could not inspect.
+**Fix:** pin the read with an `org_id`/`id` filter (or a by-id `Ash.get`, or a scalar aggregate). A read that is deliberately
+org-less (a system sweep, a pre-auth credential lookup) takes a `# authz-scope: <why it is safe>` marker on the read and a ceiling
+raised by one in `ci.sh`. Run it by hand: `mix samen.verify.read_scope [--source-dirs lib] [--max-sanctioned N]`.
 
 ---
 
