@@ -261,9 +261,10 @@ defmodule Samen.Scope.ApiKey do
   @doc """
   The ACTIVE membership of `user_id` in `org_id` (for a key that records a minter user id rather
   than a membership FK — driftwood's Freight keys). `{:ok, membership}` | `:error` (none, not a
-  UUID, or the lookup failed — all fail closed).
+  UUID — all fail closed) | `{:error, reason}` (the READ itself failed: an outage, not "no such
+  membership", so a caller answers "could not check" and reports it, never "bad key").
   """
-  @spec membership_for_user(module(), term(), term()) :: {:ok, map()} | :error
+  @spec membership_for_user(module(), term(), term()) :: {:ok, map()} | :error | {:error, term()}
   def membership_for_user(membership_resource, org_id, user_id) do
     with {:ok, uid} <- Ecto.UUID.cast(to_string(user_id)),
          {:ok, oid} <- Ecto.UUID.cast(to_string(org_id)) do
@@ -275,7 +276,8 @@ defmodule Samen.Scope.ApiKey do
       |> Ash.read(authorize?: false)
       |> case do
         {:ok, [membership]} -> {:ok, membership}
-        _ -> :error
+        {:ok, []} -> :error
+        {:error, error} -> {:error, error}
       end
     else
       _ -> :error

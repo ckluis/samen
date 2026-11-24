@@ -103,8 +103,7 @@ defmodule DriftwoodWeb.Api.KeyAuthPlug do
     # The role is then capped by the minter's CURRENT membership role (a Freight key records a minter
     # USER id, so the membership is found by user + org); a removed or suspended minter refuses the key.
     with {:ok, _stored} <- Samen.Scope.ApiKey.acting_role(key_row),
-         {:ok, mbr} <-
-           Samen.Scope.ApiKey.membership_for_user(Driftwood.Operator.Membership, key_row.org_id, key_row.minter_user_id),
+         {:ok, mbr} <- load_membership(key_row),
          {:ok, role} <- Samen.Scope.ApiKey.effective_role(key_row, mbr) do
       org_id = to_string(key_row.org_id)
 
@@ -124,6 +123,21 @@ defmodule DriftwoodWeb.Api.KeyAuthPlug do
       }
 
       {:ok, actor}
+    end
+  end
+
+  # A membership read that FAILED is an outage, not a bad key: reported once by name, answered 503 (`:unavailable`).
+  defp load_membership(key_row) do
+    case Samen.Scope.ApiKey.membership_for_user(Driftwood.Operator.Membership, key_row.org_id, key_row.minter_user_id) do
+      {:ok, mbr} ->
+        {:ok, mbr}
+
+      {:error, error} ->
+        Samen.Web.Reads.Guard.report(:driftwood_api_key_membership_load, nil, error)
+        :unavailable
+
+      _ ->
+        :error
     end
   end
 end

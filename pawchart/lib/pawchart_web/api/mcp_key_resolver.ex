@@ -55,6 +55,8 @@ defmodule PawChartWeb.Api.McpKeyResolver do
              {:ok, role} <- Samen.Scope.ApiKey.effective_role(row, mbr) do
           {:ok, scope_for(row, role)}
         else
+          # The minting membership could not be READ: "could not check", not "bad key" (503, reported by `membership/1`).
+          {:error, :unavailable} -> {:error, :unavailable}
           _ -> :error
         end
 
@@ -96,8 +98,15 @@ defmodule PawChartWeb.Api.McpKeyResolver do
            # authz-scope: MCP API-key AUTH-STEP load of the key's own minting membership — no actor exists yet
            authorize?: false
          ) do
-      {:ok, %{membership: %{} = mbr}} -> {:ok, mbr}
-      _ -> :error
+      {:ok, %{membership: %{} = mbr}} ->
+        {:ok, mbr}
+
+      {:error, error} ->
+        Samen.Web.Reads.Guard.report(:pawchart_mcp_key_membership_load, nil, error)
+        {:error, :unavailable}
+
+      _ ->
+        :error
     end
   end
 

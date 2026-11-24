@@ -1,0 +1,20 @@
+# SABOTAGE: the driftwood key plug answers a failed minter-membership read as an actor-less error instead 
+#   of 503
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/api_key_membership_unavailable_test.exs
+# MUST_FAIL: a key whose membership read FAILS is 503 + Retry-After, reported once, halted, never served
+diff --git a/driftwood/lib/driftwood_web/api/key_auth_plug.ex b/driftwood/lib/driftwood_web/api/key_auth_plug.ex
+index e00c29fd..b6fcca07 100644
+--- a/driftwood/lib/driftwood_web/api/key_auth_plug.ex
++++ b/driftwood/lib/driftwood_web/api/key_auth_plug.ex
+@@ -134,7 +134,7 @@ defmodule DriftwoodWeb.Api.KeyAuthPlug do
+ 
+       {:error, error} ->
+         Samen.Web.Reads.Guard.report(:driftwood_api_key_membership_load, nil, error)
+-        :unavailable
++        :error
+ 
+       _ ->
+         :error

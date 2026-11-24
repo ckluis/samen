@@ -1,0 +1,20 @@
+# SABOTAGE: the pawchart MCP resolver answers a failed minter-membership read as a bad key (401) instead of 
+#   unavailable
+#
+# Flips the named test(s).
+# APP: pawchart
+# TEST_FILES: test/mcp_auth_test.exs
+# MUST_FAIL: a key that RESOLVES but whose membership read FAILS is 503
+diff --git a/pawchart/lib/pawchart_web/api/mcp_key_resolver.ex b/pawchart/lib/pawchart_web/api/mcp_key_resolver.ex
+index 24d2ca91..44ef8972 100644
+--- a/pawchart/lib/pawchart_web/api/mcp_key_resolver.ex
++++ b/pawchart/lib/pawchart_web/api/mcp_key_resolver.ex
+@@ -103,7 +103,7 @@ defmodule PawChartWeb.Api.McpKeyResolver do
+ 
+       {:error, error} ->
+         Samen.Web.Reads.Guard.report(:pawchart_mcp_key_membership_load, nil, error)
+-        {:error, :unavailable}
++        :error
+ 
+       _ ->
+         :error

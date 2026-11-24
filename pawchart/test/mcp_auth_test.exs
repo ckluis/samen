@@ -154,6 +154,30 @@ defmodule PawChart.McpAuthTest do
     assert {:ok, %Samen.Scope{actor: %{role: :owner}}} = McpKeyResolver.resolve_scope("owner-token")
   end
 
+  test "RED: a key that RESOLVES but whose membership read FAILS is 503 + Retry-After, reported once, not 401; CONTROL: healthy = 200" do
+    mint_key(@org_a, "membership-outage-token")
+    assert mcp_post(%{"method" => "ping", "id" => 1}, "membership-outage-token").status == 200
+
+    table = AshPostgres.DataLayer.Info.table(PawChart.Operator.Membership)
+    Ecto.Adapters.SQL.query!(PawChart.Repo, "ALTER TABLE #{table} RENAME TO #{table}_broken", [])
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        send(self(), {:resolved, McpKeyResolver.resolve_scope("membership-outage-token")})
+        send(self(), {:conn, mcp_post(%{"method" => "ping", "id" => 1}, "membership-outage-token")})
+      end)
+
+    assert_received {:resolved, {:error, :unavailable}}
+    assert_received {:conn, conn}
+    assert conn.status == 503
+    assert [retry] = Plug.Conn.get_resp_header(conn, "retry-after")
+    assert String.to_integer(retry) > 0
+    # two requests above (resolver + plug) = two reports, each once, under the membership name only
+    assert length(Regex.scan(~r/read=pawchart_mcp_key_membership_load/, log)) == 2
+    refute log =~ "read=pawchart_mcp_key_lookup"
+    refute log =~ "membership-outage-token"
+  end
+
   test "a VALID per-operator token authenticates (200, JSON-RPC ping/initialize)" do
     ping = mcp_post(%{"method" => "ping", "id" => 1}, @token_a)
     assert ping.status == 200
