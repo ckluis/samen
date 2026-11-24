@@ -13,7 +13,6 @@ defmodule Samen.Web.IdentityErasureTest do
   alias Samen.Identity.Register
   alias Samen.WebTest.Operator.AuthToken
   alias Samen.WebTest.Operator.Credential
-  alias Samen.WebTest.Operator.Invitation
   alias Samen.WebTest.Operator.LoginFailure
   alias Samen.WebTest.Operator.Membership
   alias Samen.WebTest.Operator.Org
