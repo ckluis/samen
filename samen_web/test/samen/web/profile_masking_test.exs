@@ -55,6 +55,13 @@ defmodule Samen.Web.ProfileMaskingTest do
   defp operator_scope(org_id),
     do: Plane.scope(Plane.operator("op-1", org_id, "profile-mask-session"), org_id)
 
+  # An operator-plane (impersonation) actor that IS the edited user's row: the one operator scope `ManageUser`
+  # lets through (own row, no status change), so that the vaulted-field refusal can only be `WriteGuard`'s.
+  defp operator_as(org_id, user) do
+    scope = operator_scope(org_id)
+    %{scope | actor: %{scope.actor | id: user.id}}
+  end
+
   defp seed_user!(org_id, first \\ @secret_first, last \\ @secret_last) do
     User
     |> Ash.Changeset.for_create(:create, %{
@@ -153,7 +160,7 @@ defmodule Samen.Web.ProfileMaskingTest do
       mount = settings_mount()
 
       assert {:ok, _} =
-               Profile.update(mount, tenant_scope(org_id), user.id, %{
+               Profile.update(mount, Reads.user_scope(mount, org_id, user.id), user.id, %{
                  full_name: %{first: @secret_first, last: @secret_last}
                })
 
@@ -164,24 +171,40 @@ defmodule Samen.Web.ProfileMaskingTest do
       refute raw =~ @secret_last
     end
 
-    test "RED: an operator-impersonation plaintext PII write is REFUSED — DB unchanged (RP-ST-1)" do
+    test "RED: an operator-impersonation plaintext PII write is REFUSED by WriteGuard - DB unchanged (RP-ST-1)" do
       org_id = Ash.UUID.generate()
       user = seed_user!(org_id)
       mount = settings_mount(plane: :operator, target_org_id: org_id)
+      scope = operator_as(org_id, user)
 
       before = raw_full_name(user.id)
 
-      # SABOTAGE (11-e5): dropping the governed scope from Profile.update lets this
-      # operator plaintext write succeed — which FLIPS this assertion.
-      assert {:error, _} =
-               Profile.update(mount, operator_scope(org_id), user.id, %{
-                 full_name: %{first: @op_first, last: @op_last}
-               })
+      # POSITIVE CONTROL: this operator-plane actor passes every OTHER gate. It IS the edited user's row (so
+      # `ManageUser` allows it), and a write of a non-PII field succeeds. Only `WriteGuard` can refuse the
+      # vaulted write below, so the refusal is attributable to it and to nothing earlier.
+      assert {:ok, %{handle: "op-ok"}} = Profile.update(mount, scope, user.id, %{handle: "op-ok"})
+
+      # SABOTAGE (11-e5): dropping the governed scope from Profile.update lets this operator plaintext write
+      # succeed. SABOTAGE (WriteGuard): disabling its operator-plane refusal does too.
+      assert {:error, error} =
+               Profile.update(mount, scope, user.id, %{full_name: %{first: @op_first, last: @op_last}})
+
+      assert Exception.message(error) =~ "no-operator-plaintext-write"
+      assert Exception.message(error) =~ "MC-1 / Invariant L1"
 
       after_write = raw_full_name(user.id)
       assert before == after_write
       refute after_write =~ @op_first
       refute after_write =~ @op_last
+    end
+
+    test "an operator-plane scope that is NOT the edited user is refused before any write" do
+      org_id = Ash.UUID.generate()
+      user = seed_user!(org_id)
+      mount = settings_mount(plane: :operator, target_org_id: org_id)
+
+      assert {:error, :forbidden} = Profile.update(mount, operator_scope(org_id), user.id, %{handle: "x"})
+      assert reload_user!(user.id).handle == "me"
     end
 
     test "ANTI-TAUTOLOGY: the SAME edit on the tenant plane SUCCEEDS — the plane is the gate" do
@@ -192,7 +215,7 @@ defmodule Samen.Web.ProfileMaskingTest do
       # The operator-refused edit lands cleanly on the tenant plane (the resolver/guard's
       # only difference is the actor's :plane) — proving the refusal is plane-specific.
       assert {:ok, _} =
-               Profile.update(mount, tenant_scope(org_id), user.id, %{
+               Profile.update(mount, Reads.user_scope(mount, org_id, user.id), user.id, %{
                  full_name: %{first: @op_first, last: @op_last}
                })
 
@@ -209,6 +232,58 @@ defmodule Samen.Web.ProfileMaskingTest do
       # carries the plaintext the operator read masks — the refute is non-vacuous.
       leaked = resolve_on_plane(user, User, :tenant, repo: Samen.WebTest.Repo)
       assert inspect(leaked.full_name) =~ @secret_first
+    end
+  end
+
+  describe "Profile.update acts only as the user being edited (identity-authz round 2, finding 1)" do
+    defp viewer_scope(org_id, viewer_id) do
+      %Samen.Scope{actor: %{id: viewer_id, org_id: org_id, role: :viewer, kind: :tenant, plane: :tenant}}
+    end
+
+    test "RED: a viewer's scope plus ANOTHER user's id is refused - nothing is written" do
+      org_id = Ash.UUID.generate()
+      victim = seed_user!(org_id)
+      before = raw_full_name(victim.id)
+
+      assert {:error, :forbidden} =
+               Profile.update(settings_mount(), viewer_scope(org_id, Ash.UUID.generate()), victim.id, %{
+                 handle: "taken-over"
+               })
+
+      assert raw_full_name(victim.id) == before
+      assert reload_user!(victim.id).handle == "me"
+    end
+
+    test "RED: the synthetic broker actor that names no user cannot edit anyone" do
+      org_id = Ash.UUID.generate()
+      victim = seed_user!(org_id)
+
+      assert {:error, :forbidden} =
+               Profile.update(settings_mount(), tenant_scope(org_id), victim.id, %{handle: "broker-edit"})
+
+      assert reload_user!(victim.id).handle == "me"
+    end
+
+    test "CONTROL: the session-resolved scope for that very user edits their own profile" do
+      org_id = Ash.UUID.generate()
+      user = seed_user!(org_id)
+      mount = settings_mount()
+
+      assert {:ok, updated} =
+               Profile.update(mount, Reads.user_scope(mount, org_id, user.id), user.id, %{handle: "mine"})
+
+      assert updated.handle == "mine"
+      assert reload_user!(user.id).handle == "mine"
+    end
+
+    test "the user scope carries the session user on the tenant plane, and leaves an operator scope alone" do
+      org_id = Ash.UUID.generate()
+      user_id = Ash.UUID.generate()
+
+      assert Reads.user_scope(settings_mount(), org_id, user_id).actor.id == user_id
+
+      op_mount = settings_mount(plane: :operator, target_org_id: org_id)
+      refute Reads.user_scope(op_mount, org_id, user_id).actor.id == user_id
     end
   end
 

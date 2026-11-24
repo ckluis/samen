@@ -1,0 +1,20 @@
+# SABOTAGE: Profile.update rewrites the scope's actor to the user id it is passed, so any in-org scope 
+#   edits any user as that user
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/profile_masking_test.exs
+# MUST_FAIL: RED: a viewer's scope plus ANOTHER user's id is refused
+# MUST_FAIL: RED: the synthetic broker actor that names no user cannot edit anyone
+diff --git a/samen_web/lib/samen/web/settings/profile.ex b/samen_web/lib/samen/web/settings/profile.ex
+index 8e0acf42..ab976f14 100644
+--- a/samen_web/lib/samen/web/settings/profile.ex
++++ b/samen_web/lib/samen/web/settings/profile.ex
+@@ -52,6 +52,7 @@ defmodule Samen.Web.Settings.Profile do
+       # names someone else (or no user at all, like the synthetic `broker:<org>` mount actor) is refused, so a
+       # caller cannot turn "edit user X" into "edit user X as X" and walk past the role-rank rule.
+       # `Samen.Web.Settings.Reads.user_scope/3` builds the scope from the session-resolved identity.
++      scope = %{scope | actor: Map.put(scope.actor, :id, user_id)}
+       with :ok <- acting_as?(scope, user_id),
+            {:ok, user} <- fetch_user(mount, scope, user_id) do
+         user

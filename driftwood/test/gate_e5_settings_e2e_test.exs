@@ -36,8 +36,12 @@ defmodule Driftwood.GateE5SettingsE2ETest do
   defp op_mount(org_id),
     do: Mount.new(:settings, Driftwood.Operator, Driftwood.Repo, plane: Plane.operator("op-1", org_id, "s"))
 
-  defp tenant_scope(org_id), do: Plane.scope(Plane.tenant(), org_id)
-  defp operator_scope(org_id), do: Plane.scope(Plane.operator("op-1", org_id, "s"), org_id)
+  # An operator-plane actor that IS the edited user's row: `ManageUser` lets it through, so the refusal of a
+  # vaulted plaintext write is `WriteGuard`'s alone.
+  defp operator_as(org_id, user) do
+    scope = Plane.scope(Plane.operator("op-1", org_id, "s"), org_id)
+    %{scope | actor: %{scope.actor | id: user.id}}
+  end
 
   defp admin_scope(user_id, org_id),
     do: %Samen.Scope{actor: %{id: user_id, org_id: org_id, role: :admin, kind: :tenant, plane: :tenant}}
@@ -81,7 +85,7 @@ defmodule Driftwood.GateE5SettingsE2ETest do
 
     # Tenant self-edit → vt_* at rest, plaintext nowhere.
     assert {:ok, _} =
-             Profile.update(mount(), tenant_scope(org_id), user.id, %{
+             Profile.update(mount(), Samen.Web.Settings.Reads.user_scope(mount(), org_id, user.id), user.id, %{
                full_name: %{first: "NewFirst", last: "NewLast"}
              })
 
@@ -92,11 +96,12 @@ defmodule Driftwood.GateE5SettingsE2ETest do
     # Operator-impersonation plaintext PII write → refused, DB unchanged.
     before = raw_full_name(user.id)
 
-    assert {:error, _} =
-             Profile.update(op_mount(org_id), operator_scope(org_id), user.id, %{
+    assert {:error, error} =
+             Profile.update(op_mount(org_id), operator_as(org_id, user), user.id, %{
                full_name: %{first: "OperatorInjected", last: "Plaintext"}
              })
 
+    assert Exception.message(error) =~ "no-operator-plaintext-write"
     assert raw_full_name(user.id) == before
   end
 
