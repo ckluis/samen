@@ -754,7 +754,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
           attribute(:scopes, :map,
             public?: true,
             default: %{},
-            description: "Requested scopes as a map of resource family to read and write, empty by default; no action changes it after creation. The settings mint trims them to what the minter's role allows. They are recorded only: no request path checks them, and a key acts with its effective role."
+            description: "Requested scopes as a map of resource family to read and write, empty by default; no action changes it after creation. Where a host mounts the settings surface, its mint trims them to the minter's role. They are recorded only: no request path checks them, and a key acts with its effective role."
           )
 
           # The role of the minting membership — the actor ceiling this key inherits.
