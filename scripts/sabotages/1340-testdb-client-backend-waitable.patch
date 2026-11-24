@@ -5,15 +5,15 @@
 # TEST_FILES: test/test_db_test.exs
 # MUST_FAIL: a client backend raises, however anonymous it looks
 diff --git a/samen_core/lib/samen/test_db.ex b/samen_core/lib/samen/test_db.ex
-index e2e9f7d2..5e4c030e 100644
+index 87a2bca2..17de4682 100644
 --- a/samen_core/lib/samen/test_db.ex
 +++ b/samen_core/lib/samen/test_db.ex
-@@ -151,7 +151,7 @@ defmodule Samen.TestDb do
-   # with an empty application name, user or address is still a client.
-   @spec classify([map()], non_neg_integer() | :unknown) :: {:wait, [integer()]} | :raise
-   def classify(rows, prepared) do
--    if rows != [] and prepared == 0 and Enum.all?(rows, &(Map.get(&1, :backend_type) == "autovacuum worker")) do
-+    if rows != [] and prepared == 0 and Enum.all?(rows, &(Map.get(&1, :backend_type) in ["autovacuum worker", "client backend"])) do
-       {:wait, Enum.map(rows, & &1.pid)}
-     else
-       :raise
+@@ -213,7 +213,7 @@ defmodule Samen.TestDb do
+   def classify([], 0), do: :retry_now
+ 
+   def classify([_ | _] = rows, 0) do
+-    if Enum.all?(rows, &(Map.get(&1, :backend_type) == "autovacuum worker")), do: {:wait, Enum.map(rows, & &1.pid)}, else: :raise
++    if Enum.all?(rows, &(Map.get(&1, :backend_type) in ["autovacuum worker", "client backend"])), do: {:wait, Enum.map(rows, & &1.pid)}, else: :raise
+   end
+ 
+   def classify(_rows, _prepared), do: :raise

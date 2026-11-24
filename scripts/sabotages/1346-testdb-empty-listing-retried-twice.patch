@@ -5,11 +5,11 @@
 # TEST_FILES: test/test_db_test.exs
 # MUST_FAIL: the single re-issued DROP fails too
 diff --git a/samen_core/lib/samen/test_db.ex b/samen_core/lib/samen/test_db.ex
-index 5b60b524..a05da175 100644
+index 87a2bca..574139b 100644
 --- a/samen_core/lib/samen/test_db.ex
 +++ b/samen_core/lib/samen/test_db.ex
-@@ -163,6 +163,7 @@ defmodule Samen.TestDb do
-             :ok
+@@ -179,6 +179,7 @@ defmodule Samen.TestDb do
+             note("DROP of #{inspect(db)} hit 55006 but the first listing was empty (the blocker had left before it ran); re-issued the DROP once at once: ok")
  
            {:error, %Postgrex.Error{postgres: %{pg_code: @in_use}} = second} ->
 +            _ = run.(config, drop_sql(db), :infinity)

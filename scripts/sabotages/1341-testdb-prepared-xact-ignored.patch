@@ -7,15 +7,15 @@
 # MUST_FAIL: a prepared transaction in the database raises
 # MUST_FAIL: a prepared transaction raises at once
 diff --git a/samen_core/lib/samen/test_db.ex b/samen_core/lib/samen/test_db.ex
-index e2e9f7d2..8213af0b 100644
+index 87a2bca2..6b35d124 100644
 --- a/samen_core/lib/samen/test_db.ex
 +++ b/samen_core/lib/samen/test_db.ex
-@@ -151,7 +151,7 @@ defmodule Samen.TestDb do
-   # with an empty application name, user or address is still a client.
-   @spec classify([map()], non_neg_integer() | :unknown) :: {:wait, [integer()]} | :raise
-   def classify(rows, prepared) do
--    if rows != [] and prepared == 0 and Enum.all?(rows, &(Map.get(&1, :backend_type) == "autovacuum worker")) do
-+    if rows != [] and Enum.all?(rows, &(Map.get(&1, :backend_type) == "autovacuum worker")) do
-       {:wait, Enum.map(rows, & &1.pid)}
-     else
-       :raise
+@@ -212,7 +212,7 @@ defmodule Samen.TestDb do
+   # (one immediate DROP, no wait). Empty with prepared > 0 or unknown raises. ANY non-autovacuum backend raises.
+   def classify([], 0), do: :retry_now
+ 
+-  def classify([_ | _] = rows, 0) do
++  def classify([_ | _] = rows, _prepared) do
+     if Enum.all?(rows, &(Map.get(&1, :backend_type) == "autovacuum worker")), do: {:wait, Enum.map(rows, & &1.pid)}, else: :raise
+   end
+ 

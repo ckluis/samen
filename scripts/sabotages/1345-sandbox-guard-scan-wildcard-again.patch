@@ -6,15 +6,15 @@
 # TEST_FILES: test/source_scan_test.exs
 # MUST_FAIL: no scan test calls Path.wildcard or File.read!/regular?/dir?/ls through the file server
 diff --git a/samen_core/test/meta/sandbox_shared_guard_test.exs b/samen_core/test/meta/sandbox_shared_guard_test.exs
-index fce338bb..7d41d902 100644
+index f0a755d7..355d352d 100644
 --- a/samen_core/test/meta/sandbox_shared_guard_test.exs
 +++ b/samen_core/test/meta/sandbox_shared_guard_test.exs
-@@ -68,7 +68,7 @@ defmodule Samen.TestSandboxGuardTest do
-   end
+@@ -71,7 +71,7 @@ defmodule Samen.TestSandboxGuardTest do
+   # symlink, a permission failure). `files/2` skips those silently, so a gate must use `files_checked/2` and assert none.
+   defp scan do
+     results =
+-      for app <- @apps, do: Samen.SourceScan.files_checked(Path.join([@root, app, "test"]), ~w(.ex .exs))
++      for app <- @apps, do: {Path.wildcard(Path.join([@root, app, "test", "**/*.{ex,exs}"])), []}
  
-   defp scanned_files do
--    tests = for app <- @apps, file <- Samen.SourceScan.files(Path.join([@root, app, "test"]), ~w(.ex .exs)), do: file
-+    tests = for app <- @apps, file <- Path.wildcard(Path.join([@root, app, "test", "**/*.{ex,exs}"])), do: file
-     spikes = for dir <- Samen.SourceScan.dirs(@root, "spikes/*/test"), file <- Samen.SourceScan.files(dir, ~w(.ex .exs)), do: file
- 
-     (tests ++ spikes ++ flat(Path.join(@root, "scripts/landing"), [".exs"]) ++ flat(Path.join(@root, "samen_core/priv/templates"), [".eex"]))
+     spike_results =
+       for dir <- Samen.SourceScan.dirs(@root, "spikes/*/test"), do: Samen.SourceScan.files_checked(dir, ~w(.ex .exs))

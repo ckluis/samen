@@ -5,7 +5,7 @@
 # TEST_FILES: test/test_db_test.exs
 # MUST_FAIL: item 4: an unknown prepared count
 diff --git a/samen_core/lib/samen/test_db.ex b/samen_core/lib/samen/test_db.ex
-index 34380f9d..c370413e 100644
+index 87a2bca2..7c14309f 100644
 --- a/samen_core/lib/samen/test_db.ex
 +++ b/samen_core/lib/samen/test_db.ex
 @@ -343,7 +343,7 @@ defmodule Samen.TestDb do
@@ -14,6 +14,6 @@ index 34380f9d..c370413e 100644
          n when is_integer(n) and n > 0 -> "\n  #{n} prepared transaction(s) in this database (they block DROP DATABASE and are not in pg_stat_activity)"
 -        {:unknown, reason} -> "\n  (prepared transactions could not be counted: #{reason})"
 +        {:unknown, _reason} -> "\n  (prepared transactions could not be counted)"
-         :unknown -> "\n  (prepared transactions could not be counted)"
          _ -> ""
        end
+ 
