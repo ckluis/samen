@@ -15,14 +15,14 @@
 diff --git a/samen_core/lib/samen/auth/blind_index_erasure.ex b/samen_core/lib/samen/auth/blind_index_erasure.ex
 --- a/samen_core/lib/samen/auth/blind_index_erasure.ex
 +++ b/samen_core/lib/samen/auth/blind_index_erasure.ex
-@@ -137,8 +137,8 @@ defmodule Samen.Auth.BlindIndexErasure do
-     # against the string subject_id without Postgrex needing a uuid-binary encode. The
-     # `subject_column = id` match is what scopes this to principal-account erasure only.
+@@ -254,8 +254,8 @@ defmodule Samen.Auth.BlindIndexErasure do
+     old_values = for [v] <- old_rows, is_binary(v), do: v
+ 
      sql =
 -      "UPDATE #{table} SET #{column} = $1 " <>
 -        "WHERE #{subject_column}::text = $2"
 +      "UPDATE #{table} SET #{column} = #{column} " <>
 +        "WHERE #{subject_column}::text = $2 AND $1 = $1"
-
+ 
      %{num_rows: n} = Ecto.Adapters.SQL.query!(repo, sql, [sentinel, subject_id])
-
+ 
