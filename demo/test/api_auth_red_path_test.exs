@@ -49,7 +49,7 @@ defmodule Demo.ApiAuthRedPathTest do
     # Revoke the key.
     {:ok, _} =
       key
-      |> Ash.Changeset.for_update(:update, %{revoked_at: DateTime.utc_now()})
+      |> Ash.Changeset.for_update(:revoke, %{})
       |> Ash.update(authorize?: false)
 
     # AFTER revocation the same key resolves no actor → zero rows.

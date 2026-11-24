@@ -160,7 +160,7 @@ defmodule Samen.Web.Settings.ApiKeys do
            |> Ash.Query.limit(1)
            |> Ash.read!(scope: scope) do
       row
-      |> Ash.Changeset.for_update(:update, %{revoked_at: DateTime.utc_now() |> DateTime.truncate(:second)}, scope: scope)
+      |> Ash.Changeset.for_update(:revoke, %{}, scope: scope)
       |> Ash.update(scope: scope)
       |> case do
         {:ok, updated} -> {:ok, safe_view(updated)}

@@ -1,0 +1,19 @@
+# SABOTAGE: ApiKey :update accepts revoked_at: an admin clears revocation and the key authenticates again
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: RED: an admin cannot un-revoke a key (revocation is one-way)
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index 8304aee8..dec08215 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -597,7 +597,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
+           # the ceiling check); expiry is re-clamped on every change.
+           update :update do
+             primary?(true)
+-            accept([:expires_at])
++            accept([:expires_at, :revoked_at])
+             require_atomic?(false)
+             change(Samen.Scope.ApiKey.ClampExpiry)
+           end

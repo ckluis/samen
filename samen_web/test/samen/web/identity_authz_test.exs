@@ -140,4 +140,145 @@ defmodule Samen.Web.IdentityAuthzTest do
       assert joined.membership.role == :member
     end
   end
+
+  # ===========================================================================
+  # B. ApiKey default create/update
+  # ===========================================================================
+
+  describe "B. ApiKey cannot be written above the acting role, un-revoked, or kept alive past the ceiling" do
+    alias Samen.Scope.ApiKey, as: KeyScope
+    alias Samen.Web.Mount
+    alias Samen.Web.Plane
+    alias Samen.Web.Settings.ApiKeys
+
+    defp mount, do: Mount.new(:settings, Samen.WebTest.Operator, Samen.WebTest.Repo, plane: Plane.tenant())
+
+    defp direct_create(result, role, attrs) do
+      s = scope(result, role)
+
+      ApiKey
+      |> Ash.Changeset.for_create(
+        :create,
+        Map.merge(
+          %{org_id: result.org.id, membership_id: result.membership.id, plane: :tenant, scopes: %{all: [:read]}},
+          attrs
+        ),
+        scope: s
+      )
+      |> Ash.Changeset.force_change_attribute(:token_digest, "d-#{System.unique_integer([:positive])}")
+      |> Ash.create(scope: s)
+    end
+
+    defp mint!(result, role, opts \\ []) do
+      {:ok, _raw, row} =
+        ApiKeys.mint(
+          mount(),
+          scope(result, role),
+          Keyword.merge([membership_id: result.membership.id, minter_role: role, scopes: %{all: [:read]}], opts)
+        )
+
+      row
+    end
+
+    defp key_update(row, action, attrs, s) do
+      row |> Ash.Changeset.for_update(action, attrs, scope: s) |> Ash.update(scope: s)
+    end
+
+    test "RED: an admin cannot mint a key with minter_role :owner through the default create" do
+      r = register!()
+
+      assert {:error, _} = direct_create(r, :admin, %{minter_role: :owner})
+      assert [] = ApiKey |> Ash.Query.filter(minter_role == :owner) |> Ash.read!(authorize?: false)
+    end
+
+    test "POSITIVE CONTROL: an admin CAN mint at its own rank (admin) and below; an owner can mint :owner" do
+      r = register!()
+      assert {:ok, %{minter_role: :admin}} = direct_create(r, :admin, %{minter_role: :admin})
+      assert {:ok, %{minter_role: :member}} = direct_create(r, :admin, %{minter_role: :member})
+      assert {:ok, %{minter_role: :owner}} = direct_create(r, :owner, %{minter_role: :owner})
+    end
+
+    test "RED: a key must carry a minter_role (a role-less key is refused at create)" do
+      r = register!()
+      assert {:error, _} = direct_create(r, :admin, %{minter_role: nil})
+    end
+
+    test "RED: an admin cannot raise an existing key's minter_role to :owner" do
+      r = register!()
+      row = mint!(r, :admin)
+
+      assert {:error, _} = key_update(row, :update, %{minter_role: :owner}, scope(r, :admin))
+      assert Ash.get!(ApiKey, row.id, authorize?: false).minter_role == :admin
+    end
+
+    test "RED: an admin cannot un-revoke a key (revocation is one-way)" do
+      r = register!()
+      row = mint!(r, :admin)
+      assert {:ok, revoked} = key_update(row, :revoke, %{}, scope(r, :admin))
+      refute is_nil(revoked.revoked_at)
+
+      assert {:error, _} = key_update(revoked, :update, %{revoked_at: nil}, scope(r, :admin))
+      assert {:error, _} = key_update(revoked, :revoke, %{revoked_at: nil}, scope(r, :admin))
+      assert Ash.get!(ApiKey, row.id, authorize?: false).revoked_at == revoked.revoked_at
+
+      # a second revoke is idempotent and keeps the ORIGINAL revocation instant
+      assert {:ok, again} = key_update(Ash.get!(ApiKey, row.id, authorize?: false), :revoke, %{}, scope(r, :admin))
+      assert again.revoked_at == revoked.revoked_at
+    end
+
+    test "POSITIVE CONTROL: an admin can revoke through :revoke; a member cannot" do
+      r = register!()
+      row = mint!(r, :admin)
+
+      assert {:error, _} = key_update(row, :revoke, %{}, scope(r, :member))
+      assert is_nil(Ash.get!(ApiKey, row.id, authorize?: false).revoked_at)
+      assert {:ok, %{revoked_at: %DateTime{}}} = key_update(row, :revoke, %{}, scope(r, :admin))
+    end
+
+    test "RED: expiry is clamped on every write that sets it (default create and update)" do
+      r = register!()
+      far = DateTime.utc_now() |> DateTime.add(KeyScope.max_ttl_seconds() * 10, :second) |> DateTime.truncate(:second)
+      ceiling = DateTime.add(DateTime.utc_now(), KeyScope.max_ttl_seconds() + 5, :second)
+
+      assert {:ok, created} = direct_create(r, :admin, %{minter_role: :admin, expires_at: far})
+      assert DateTime.compare(created.expires_at, ceiling) != :gt
+
+      assert {:ok, no_expiry} = direct_create(r, :admin, %{minter_role: :admin})
+      assert %DateTime{} = no_expiry.expires_at
+      assert DateTime.compare(no_expiry.expires_at, ceiling) != :gt
+
+      row = mint!(r, :admin)
+      assert {:ok, updated} = key_update(row, :update, %{expires_at: far}, scope(r, :admin))
+      assert DateTime.compare(updated.expires_at, ceiling) != :gt
+    end
+
+    test "POSITIVE CONTROL: a shorter requested expiry is kept as requested" do
+      r = register!()
+      soon = DateTime.utc_now() |> DateTime.add(3600, :second) |> DateTime.truncate(:second)
+      assert {:ok, created} = direct_create(r, :admin, %{minter_role: :admin, expires_at: soon})
+      assert created.expires_at == soon
+    end
+
+    test "POSITIVE CONTROL: an update to a PAST expiry retires the key early (the clamp never extends a key)" do
+      r = register!()
+      row = mint!(r, :admin)
+      past = DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.truncate(:second)
+
+      assert {:ok, updated} = key_update(row, :update, %{expires_at: past}, scope(r, :admin))
+      assert updated.expires_at == past
+      assert KeyScope.expired?(updated, DateTime.utc_now())
+    end
+
+    test "RED: token_digest, plane and scopes are not writable after mint" do
+      r = register!()
+      row = mint!(r, :admin)
+
+      for attrs <- [%{token_digest: "x"}, %{plane: :operator}, %{scopes: %{all: [:read, :write]}}] do
+        assert {:error, _} = key_update(row, :update, attrs, scope(r, :admin))
+      end
+
+      fresh = Ash.get!(ApiKey, row.id, authorize?: false)
+      assert fresh.plane == :tenant and fresh.scopes == row.scopes and fresh.token_digest == row.token_digest
+    end
+  end
 end

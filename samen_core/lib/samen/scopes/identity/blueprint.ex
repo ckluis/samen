@@ -578,7 +578,48 @@ defmodule Samen.Scopes.Identity.Blueprint do
         end
 
         actions do
-          defaults([:read, :destroy, create: :*, update: :*])
+          defaults([:read, :destroy])
+
+          # Default create: `minter_role` is bounded by `Samen.Policy.MinterRoleCeiling`
+          # (policy below) and `expires_at` is ALWAYS clamped into `(now, now + max_ttl]`
+          # by `Samen.Scope.ApiKey.ClampExpiry`. `revoked_at` is NOT an input (a key is
+          # born live; revocation is `:revoke`); `token_digest` is `public?: false`, so
+          # it can only be force-set by the minter, never supplied as input.
+          create :create do
+            primary?(true)
+            accept([:org_id, :plane, :scopes, :minter_role, :expires_at, :membership_id])
+            change(Samen.Scope.ApiKey.ClampExpiry)
+            validate(present(:minter_role))
+          end
+
+          # The ONLY actor-facing update: re-time a key. Role, plane, scopes, digest and
+          # revocation are immutable after mint (a wider key is a NEW key, minted under
+          # the ceiling check); expiry is re-clamped on every change.
+          update :update do
+            primary?(true)
+            accept([:expires_at])
+            require_atomic?(false)
+            change(Samen.Scope.ApiKey.ClampExpiry)
+          end
+
+          # Revocation is one-way: sets `revoked_at` once (a second revoke keeps the
+          # original instant) and takes no input, so nothing can clear or back-date it.
+          update :revoke do
+            accept([])
+            require_atomic?(false)
+
+            change(fn changeset, _ctx ->
+              if is_nil(changeset.data.revoked_at) do
+                Ash.Changeset.force_change_attribute(
+                  changeset,
+                  :revoked_at,
+                  DateTime.utc_now() |> DateTime.truncate(:second)
+                )
+              else
+                changeset
+              end
+            end)
+          end
 
           # F3.4 — least-privilege touch action: the auth path stamps ONLY
           # `last_used_at` (never expiry/scopes/plane), best-effort, authorize?: false.
@@ -599,6 +640,12 @@ defmodule Samen.Scopes.Identity.Blueprint do
           policy action_type([:create, :update, :destroy]) do
             forbid_unless(Samen.Policy.OrgScope)
             forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})
+            authorize_if(always())
+          end
+
+          # No escalation: a minted key may not act above the actor that mints it.
+          policy action(:create) do
+            forbid_unless(Samen.Policy.MinterRoleCeiling)
             authorize_if(always())
           end
         end

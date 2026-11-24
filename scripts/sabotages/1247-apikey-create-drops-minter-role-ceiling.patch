@@ -1,0 +1,18 @@
+# SABOTAGE: ApiKey create without the MinterRoleCeiling check: an admin mints a key acting as owner
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: RED: an admin cannot mint a key with minter_role :owner through the default create
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index 8304aee8..1b8c4b4f 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -645,7 +645,6 @@ defmodule Samen.Scopes.Identity.Blueprint do
+ 
+           # No escalation: a minted key may not act above the actor that mints it.
+           policy action(:create) do
+-            forbid_unless(Samen.Policy.MinterRoleCeiling)
+             authorize_if(always())
+           end
+         end

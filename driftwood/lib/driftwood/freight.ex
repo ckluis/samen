@@ -443,7 +443,35 @@ defmodule Driftwood.Freight.ApiKey do
   end
 
   actions do
-    defaults([:read, :destroy, create: :*, update: :*])
+    defaults([:read, :destroy])
+
+    # `minter_role` is bounded by `Samen.Policy.MinterRoleCeiling` (policy below); a key is
+    # born live (`revoked_at` is not an input) and `token_digest` is `public?: false`.
+    create :create do
+      primary?(true)
+      accept([:org_id, :plane, :scopes, :minter_role, :minter_user_id])
+      validate(present(:minter_role))
+    end
+
+    # No generic update: role/plane/scopes/digest are immutable after mint and revocation
+    # is one-way (sets `revoked_at` once, takes no input).
+    update :revoke do
+      primary?(true)
+      accept([])
+      require_atomic?(false)
+
+      change(fn changeset, _ctx ->
+        if is_nil(changeset.data.revoked_at) do
+          Ash.Changeset.force_change_attribute(
+            changeset,
+            :revoked_at,
+            DateTime.utc_now() |> DateTime.truncate(:second)
+          )
+        else
+          changeset
+        end
+      end)
+    end
   end
 
   policies do
@@ -455,6 +483,12 @@ defmodule Driftwood.Freight.ApiKey do
     policy action_type([:create, :update, :destroy]) do
       forbid_unless(Samen.Policy.OrgScope)
       forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})
+      authorize_if(always())
+    end
+
+    # No escalation: a minted key may not act above the actor that mints it.
+    policy action(:create) do
+      forbid_unless(Samen.Policy.MinterRoleCeiling)
       authorize_if(always())
     end
   end
