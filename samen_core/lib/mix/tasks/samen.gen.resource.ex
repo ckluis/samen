@@ -43,7 +43,8 @@ defmodule Mix.Tasks.Samen.Gen.Resource do
       true. The generator describes the fixed scaffold fields itself (`name`, `label`, `status`, the
       vault field) and accepts NO other field specs: it never invents meaning for a field it cannot
       describe — add a field by hand and describe it with `description:` in the same edit (the verifier
-      refuses it undescribed).
+      refuses it undescribed). A description that starts with `-` must be passed as
+      `--description="-…"` (with the `=`); written as a separate argument, the option parser reads it as a flag.
     * `--app-dir`  (optional) — the existing app root. Defaults to the current directory.
     * `--no-reserve-abbrevs` — do NOT append the abbrev to the registry (used by the
       red-path probe to prove the compile-time gate catches a missing reservation).

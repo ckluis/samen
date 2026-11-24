@@ -114,4 +114,59 @@ defmodule Samen.GenArgsTest do
     assert sha(ctx.registry) == ctx.sha
     refute File.read!(ctx.registry) =~ "zqz"
   end
+
+  # ADR-043 §8a (A3) ordering: the missing-description refusal comes BEFORE the permanent abbrev reservation (a refused
+  # run must not burn an abbrev). Run WITHOUT `--no-reserve-abbrevs`, against the private registry copy above.
+  describe "gen.resource: the description refusal precedes the abbrev reservation" do
+    setup ctx do
+      app = Path.join(ctx.dir, "app")
+      File.mkdir_p!(app)
+      File.write!(Path.join(app, "mix.exs"), "defmodule Zapp.MixProject do\n  def project, do: [app: :zapp]\nend\n")
+      {:ok, app: app}
+    end
+
+    test "POSITIVE CONTROL: a reservation through the default path DOES change the private registry", ctx do
+      spec = Samen.Gen.Post.build_resource_spec(app_dir: ctx.app, scope: "Crm", resource: "Widget", abbrev: "zqw")
+      Samen.Gen.Post.reserve_abbrevs!(spec)
+      refute sha(ctx.registry) == ctx.sha
+      assert File.read!(ctx.registry) =~ "zqw"
+    end
+
+    for {label, extra} <- [{"missing", []}, {"an empty", ["--description", ""]}, {"a rule-breaking", ["--description", "Widget"]}] do
+      test "#{label} --description is refused with the registry byte-identical (no --no-reserve-abbrevs)", ctx do
+        refused!(
+          Mix.Tasks.Samen.Gen.Resource,
+          ~w(--scope Crm --resource Widget --abbrev zqw --app-dir #{ctx.app}) ++ unquote(extra),
+          ["--description"]
+        )
+
+        assert sha(ctx.registry) == ctx.sha
+        refute File.read!(ctx.registry) =~ "zqw"
+        assert File.ls!(ctx.app) == ["mix.exs"]
+      end
+    end
+
+    test "a non-printable --description (NUL) is refused by the named rule, before reservation or any write", ctx do
+      err =
+        refused!(
+          Mix.Tasks.Samen.Gen.Resource,
+          ~w(--scope Crm --resource Widget --abbrev zqw --app-dir #{ctx.app}) ++ ["--description", "A team keeps\0 this label"],
+          ["non-printable"]
+        )
+
+      refute err.message =~ "ArgumentError"
+      assert sha(ctx.registry) == ctx.sha
+      assert File.ls!(ctx.app) == ["mix.exs"]
+    end
+
+    test "invalid UTF-8 in --description is a named refusal, not a bare ArgumentError stack trace", ctx do
+      refused!(
+        Mix.Tasks.Samen.Gen.Resource,
+        ~w(--scope Crm --resource Widget --abbrev zqw --app-dir #{ctx.app}) ++ ["--description", "A team keeps \xff this label"],
+        ["non-printable character or invalid UTF-8"]
+      )
+
+      assert sha(ctx.registry) == ctx.sha
+    end
+  end
 end
