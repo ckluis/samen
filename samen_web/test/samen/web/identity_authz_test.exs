@@ -1141,4 +1141,55 @@ defmodule Samen.Web.IdentityAuthzTest do
       refute j_revoked?(d.id)
     end
   end
+
+  describe "K. Every Invitation create yields a PENDING invitation with its expiry; status is not an input" do
+    defp k_create(r, role, attrs) do
+      s = scope(r, role)
+
+      Invitation
+      |> Ash.Changeset.for_create(
+        :create,
+        Map.merge(%{org_id: r.org.id, role: :member, email: ["k-#{System.unique_integer([:positive])}@example.test"]}, attrs),
+        scope: s
+      )
+      |> Ash.create(scope: s)
+    end
+
+    defp k_row(id), do: Invitation |> Ash.Query.filter(id == ^id) |> Ash.Query.select([:id, :status, :expires_at, :role]) |> Ash.read_one!(authorize?: false)
+
+    test "RED: status is not an input of the generic create (accepted, revoked, junk); CONTROL: without one the row is pending with a 14-day expiry" do
+      r = register!()
+
+      for status <- ["accepted", "revoked", "expired", "junk"] do
+        assert_not_accepted(k_create(r, :admin, %{status: status}), :status)
+      end
+
+      assert {:ok, inv} = k_create(r, :admin, %{})
+      row = k_row(inv.id)
+      assert row.status == "pending"
+      assert %DateTime{} = row.expires_at
+      assert DateTime.diff(row.expires_at, DateTime.utc_now(), :day) in 13..14
+    end
+
+    test "RED: a direct create (not through Invite.create) always carries the 14-day expiry" do
+      r = register!()
+      assert {:ok, inv} = k_create(r, :admin, %{})
+      assert %DateTime{} = k_row(inv.id).expires_at
+    end
+
+    test "RED: expires_at is not an input of the generic create either" do
+      r = register!()
+      assert_not_accepted(k_create(r, :admin, %{expires_at: DateTime.add(DateTime.utc_now(), 10 * 365, :day)}), :expires_at)
+    end
+
+    test "CONTROL: Invite.create still yields a pending invitation with the 14-day expiry that can be accepted" do
+      inviter = register!()
+      invitee = register!()
+      {:ok, inv, raw} = Invite.create(invite_mods(), scope(inviter, :admin), %{email: invitee.email, role: :member})
+      row = k_row(inv.id)
+      assert row.status == "pending"
+      assert DateTime.diff(row.expires_at, DateTime.utc_now(), :day) in 13..14
+      assert {:ok, %{status: :joined}} = Invite.accept(invite_mods(), raw)
+    end
+  end
 end

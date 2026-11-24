@@ -1,0 +1,19 @@
+# SABOTAGE: Invitation create takes the caller's status as input
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: status is not an input of the generic create
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index c07f7b35..6c191c99 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -836,7 +836,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
+           # sets only the credential-class columns (`token_digest`, `email_bidx`) on top of this.
+           create :create do
+             primary?(true)
+-            accept([:org_id, :role, :email])
++            accept([:org_id, :role, :email, :status])
+             change(set_attribute(:status, "pending"))
+ 
+             change(fn changeset, _ctx ->

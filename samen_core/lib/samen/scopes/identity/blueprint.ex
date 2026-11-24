@@ -828,7 +828,26 @@ defmodule Samen.Scopes.Identity.Blueprint do
         end
 
         actions do
-          defaults([:read, :destroy, create: :*])
+          defaults([:read, :destroy])
+
+          # EVERY create is a pending invitation with its expiry: `status` and `expires_at` are not inputs. The
+          # default `create: :*` accepted `status` (an authorized admin could create an "accepted" or "revoked"
+          # row) and left `expires_at` empty (an invitation that can never be accepted). `Samen.Identity.Invite`
+          # sets only the credential-class columns (`token_digest`, `email_bidx`) on top of this.
+          create :create do
+            primary?(true)
+            accept([:org_id, :role, :email])
+            change(set_attribute(:status, "pending"))
+
+            change(fn changeset, _ctx ->
+              expires_at =
+                DateTime.utc_now()
+                |> DateTime.add(Samen.Identity.Invite.ttl_seconds(), :second)
+                |> DateTime.truncate(:second)
+
+              Ash.Changeset.force_change_attribute(changeset, :expires_at, expires_at)
+            end)
+          end
 
           # No actor-writable generic update. The default `update: :*` accepted
           # `role`/`status`/`email` under the org-scope policy alone, so ANY in-org

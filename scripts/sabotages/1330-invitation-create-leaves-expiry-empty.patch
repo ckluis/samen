@@ -1,0 +1,25 @@
+# SABOTAGE: a direct Invitation create leaves expires_at empty
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: a direct create (not through Invite.create) always carries the 14-day expiry
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index c07f7b35..aa68ac60 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -839,14 +839,6 @@ defmodule Samen.Scopes.Identity.Blueprint do
+             accept([:org_id, :role, :email])
+             change(set_attribute(:status, "pending"))
+ 
+-            change(fn changeset, _ctx ->
+-              expires_at =
+-                DateTime.utc_now()
+-                |> DateTime.add(Samen.Identity.Invite.ttl_seconds(), :second)
+-                |> DateTime.truncate(:second)
+-
+-              Ash.Changeset.force_change_attribute(changeset, :expires_at, expires_at)
+-            end)
+           end
+ 
+           # No actor-writable generic update. The default `update: :*` accepted

@@ -41,6 +41,13 @@ All notable changes to Samen are recorded here. The format follows
   session still in use plus a newer expired one made the next sign-in revoke the in-use session. Only sessions that can still
   resolve (unrevoked and not past `expires_at`) count toward the cap now. **Upgrade notes:** none; a credential that sat at its
   cap with expired sessions now keeps its live ones. Sabotage 1328.
+- **Fixed: a direct `Invitation` create could set any `status` and left no expiry.** The default `create: :*` accepted the
+  public `status` (an admin could create an `"accepted"`, `"revoked"` or junk row) and left `expires_at` and `token_digest`
+  empty (a pending row that can never be accepted). `Invitation :create` now accepts `org_id`, `role` and `email` only, and
+  every create is `pending` with the 14-day expiry (`Samen.Identity.Invite.ttl_seconds/0`); `Samen.Identity.Invite.create/3`
+  keeps setting only the credential-class columns (`token_digest`, `email_bidx`) on top. **Upgrade notes:** code that created
+  an invitation directly with a `status:` input now fails with a no-such-input error; use `Samen.Identity.Invite.create/3`.
+  Sabotages 1329 and 1330.
 
 ### Security: authorization and erasure, round 4
 
