@@ -1,0 +1,21 @@
+# SABOTAGE: A non-printable description (NUL, invalid UTF-8) must be refused as one named rule by the rule 
+#   function the verifier and the generators share.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_test.exs
+# MUST_FAIL: RED: a non-printable description (NUL, invalid UTF-8) is ONE named problem, never an exception; newline and tab are fine
+diff --git a/samen_core/lib/samen/catalog_meaning.ex b/samen_core/lib/samen/catalog_meaning.ex
+index c588b18b..92cd6792 100644
+--- a/samen_core/lib/samen/catalog_meaning.ex
++++ b/samen_core/lib/samen/catalog_meaning.ex
+@@ -257,7 +257,8 @@ defmodule Samen.CatalogMeaning do
+   # other rules would otherwise raise a bare ArgumentError on invalid UTF-8, and a generator would emit it as an
+   # unreadable byte list. `String.printable?/1` is the very test `inspect/1` applies when it writes a string literal.
+   defp problems(description, name_words) do
+-    if String.printable?(description), do: quality_problems(description, name_words), else: [@unprintable_problem]
++    _ = @unprintable_problem
++    quality_problems(description, name_words)
+   end
+ 
+   defp quality_problems(description, name_words) do
