@@ -889,6 +889,9 @@ defmodule Samen.Scopes.Identity.Blueprint do
               end
             end)
 
+            # ...and the DATABASE decides again in the UPDATE (`status = 'pending'`): an accept that commits between
+            # the caller's read and this write matches zero rows instead of being relabelled "revoked".
+            change(Samen.Identity.OnlyPending)
             change(set_attribute(:status, "revoked"))
             change(set_attribute(:revoked_at, arg(:revoked_at)))
           end

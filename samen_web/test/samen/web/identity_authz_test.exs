@@ -189,6 +189,34 @@ defmodule Samen.Web.IdentityAuthzTest do
     end
   end
 
+  describe "A3. Invitation :revoke is decided by the database" do
+    test "RED: a STALE pending struct cannot relabel an invite that was accepted in between; CONTROL: Invite.revoke of a pending one works" do
+      inviter = register!()
+      invitee = register!()
+      other = register!()
+      {:ok, inv, raw} = Invite.create(invite_mods(), scope(inviter, :owner), %{email: invitee.email})
+      {:ok, pending, _} = Invite.create(invite_mods(), scope(inviter, :owner), %{email: other.email})
+
+      admin = scope(inviter, :admin)
+      stale = reread(Invitation, inv.id)
+      assert stale.status == "pending"
+
+      # the invitee accepts AFTER the admin read the row and BEFORE the admin's revoke commits
+      assert {:ok, _} = Invite.accept(invite_mods(), raw)
+
+      assert {:error, _} =
+               stale
+               |> Ash.Changeset.for_update(:revoke, %{revoked_at: DateTime.utc_now() |> DateTime.truncate(:second)}, scope: admin)
+               |> Ash.update(scope: admin)
+
+      fresh = reread(Invitation, inv.id)
+      assert fresh.status == "accepted"
+      assert is_nil(fresh.revoked_at)
+
+      assert {:ok, %{status: "revoked"}} = Invite.revoke(invite_mods(), admin, pending.id)
+    end
+  end
+
   # ===========================================================================
   # B. ApiKey default create/update
   # ===========================================================================
