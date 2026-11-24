@@ -6,7 +6,7 @@
 # TEST_FILES: test/samen/web/identity_authz_test.exs
 # MUST_FAIL: RED: Org :create takes name and slug only
 diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
-index 8ec3a284..e41a9846 100644
+index f5c57fc5..654782ee 100644
 --- a/samen_core/lib/samen/scopes/identity/blueprint.ex
 +++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
 @@ -152,7 +152,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
@@ -15,6 +15,6 @@ index 8ec3a284..e41a9846 100644
              primary?(true)
 -            accept([:name, :slug])
 +            accept([:name, :slug, :plan, :onboarded_at, :org_id])
+             change(Samen.Identity.SlugFree)
            end
  
-           # The OPERATOR's account create (`Samen.Web.Operator.AccountsLive` "New account"): an account
