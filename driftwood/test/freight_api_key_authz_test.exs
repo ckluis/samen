@@ -95,7 +95,7 @@ defmodule Driftwood.FreightApiKeyAuthzTest do
   describe "the key's rank follows its minter's CURRENT membership" do
     defp reads?(raw), do: api_get("/drivers", raw).resp_body =~ "Guarded"
 
-    defp set_membership(org, user_id, attrs) do
+    defp set_membership(_org, user_id, attrs) do
       mbr =
         Driftwood.Operator.Membership
         |> Ash.read!(authorize?: false)
@@ -164,7 +164,7 @@ defmodule Driftwood.FreightApiKeyAuthzTest do
 
   test "RED: revoking a row read WITHOUT revoked_at still revokes it; the original instant survives a second revoke" do
     org = mk_org()
-    {raw, key} = mk_api_key(org, minter_role: :admin)
+    {_raw, key} = mk_api_key(org, minter_role: :admin)
     s = scope(org, :admin)
     partial = fn -> Driftwood.Freight.ApiKey |> Ash.Query.filter(id == ^key.id) |> Ash.Query.select([:id, :org_id]) |> Ash.read_one!(authorize?: false) end
 
