@@ -1,0 +1,29 @@
+# SABOTAGE: the accounts console save_new stops checking the operator write role (gate and form flag): a 
+#   read-only operator creates an account
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/operator_accounts_crud_test.exs
+# MUST_FAIL: a read-only operator pushing save_new creates NOTHING
+diff --git a/samen_web/lib/samen/web/operator/accounts_live.ex b/samen_web/lib/samen/web/operator/accounts_live.ex
+index bb0ddf08..12776107 100644
+--- a/samen_web/lib/samen/web/operator/accounts_live.ex
++++ b/samen_web/lib/samen/web/operator/accounts_live.ex
+@@ -159,7 +159,7 @@ defmodule Samen.Web.Operator.AccountsLive do
+   end
+ 
+   defp check_write_role(socket) do
+-    if Samen.Web.Operator.Authz.write_role?(socket.assigns[:samen_operator_role]), do: :ok, else: {:error, :forbidden}
++    :ok
+   end
+ 
+   defp check_plan(params, socket) do
+@@ -182,7 +182,7 @@ defmodule Samen.Web.Operator.AccountsLive do
+     Mount.resource(mount, Org)
+     |> AshPhoenix.Form.for_create(:open_account,
+       scope: scope,
+-      context: %{samen_operator_write: Samen.Web.Operator.Authz.write_role?(socket.assigns[:samen_operator_role])}
++      context: %{samen_operator_write: true}
+     )
+     |> to_form()
+   end

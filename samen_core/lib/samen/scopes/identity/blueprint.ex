@@ -161,6 +161,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
           # scoped to that very org.
           create :open_account do
             accept([:name, :slug, :plan, :org_id])
+            change(Samen.Identity.SlugFree)
           end
 
           # Settings update (admin+, policy below): name/slug/session cap only. `plan` and
@@ -204,13 +205,20 @@ defmodule Samen.Scopes.Identity.Blueprint do
             authorize_if(always())
           end
 
-          # `:open_account` writes `org_id`/`plan`: the actor must be scoped to the very org the row is
-          # filed under (the operator org). No role floor: the operator UI acts through the plane's
-          # synthetic `:member` scope (`Samen.Web.Plane.scope/2`), whose gate is the operator route auth,
-          # exactly as for every other operator-console write. The always-authorized `:create` above stays
-          # the registration/bootstrap path and no longer accepts either column.
+          # `:open_account` writes `org_id`/`plan`, two checks (both must hold):
+          #   1. the actor must be scoped to the very org the row is filed under (the operator org);
+          #   2. the changeset must carry `context: %{samen_operator_write: true}`.
+          # The operator console acts through the plane's synthetic `:member` scope
+          # (`Samen.Web.Plane.scope/2`), so THIS policy cannot see the authenticated operator role. The
+          # console gates the event on the operator write roles itself (`Samen.Web.Operator.Authz.write_role?/1`,
+          # the same gate as the webhook DLQ) and only then sets the flag; the flag keeps a tenant actor
+          # (viewer/member/admin) from calling this action directly. `plan` is validated against the host's
+          # offered plans, and `slug` against existing orgs, by the console / `Samen.Identity.SlugFree`.
+          # The always-authorized `:create` above stays the registration/bootstrap path and accepts neither
+          # column.
           policy action(:open_account) do
             forbid_unless(Samen.Policy.FilesUnderActorOrg)
+            forbid_unless(Samen.Policy.OperatorConsoleWrite)
             authorize_if(always())
           end
 

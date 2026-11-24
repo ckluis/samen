@@ -70,13 +70,11 @@ defmodule Samen.Web.Operator.WebhookDlqLive do
     end
   end
 
-  # S14 — the operator roles that may MUTATE the webhook store (replay/resolve). The role is
+  # S14 — the operator roles that may MUTATE the webhook store (replay/resolve) are
+  # `Samen.Web.Operator.Authz.write_roles/0`, shared with every other console write gate. The role is
   # ONLY ever read from `:samen_operator_role` — the assign `Samen.Web.Operator.Authz`'s
   # `:require_operator` on_mount derived from the AUTHENTICATED session principal (the T146
-  # role-derivation pattern) — never from the mount or a param. `:operator_readonly`'s
-  # contract is "read the operator CRM only" (`Samen.OperatorPlane.Actor`): it may render
-  # this page, never write through it. `nil`/unknown roles fail closed.
-  @write_roles [:operator_admin, :operator_support]
+  # role-derivation pattern) — never from the mount or a param. `nil`/unknown roles fail closed.
 
   @impl true
   def handle_event("retry_load", _params, socket), do: {:noreply, load(socket)}
@@ -145,7 +143,7 @@ defmodule Samen.Web.Operator.WebhookDlqLive do
   defp action_copy(_action, _other), do: "The webhook queue was not changed."
 
   # The S14 write gate, three ANDed conjuncts — all strictly narrowing, never widening:
-  #   1. ROLE — `:samen_operator_role` ∈ @write_roles (see above; fail closed on nil);
+  #   1. ROLE — `:samen_operator_role` ∈ `Authz.write_roles/0` (see above; fail closed on nil);
   #   2. ORG  — the mount resolves an operator org, the SAME `no_org` fail-secure guard
   #      `load/1` applies to the read path (an org-less mount renders nothing AND writes
   #      nothing — parity, instead of the old write-path bypass);
@@ -155,7 +153,7 @@ defmodule Samen.Web.Operator.WebhookDlqLive do
   defp authorize_write(socket) do
     mount = socket.assigns[:samen_mount]
 
-    with true <- socket.assigns[:samen_operator_role] in @write_roles,
+    with true <- Samen.Web.Operator.Authz.write_role?(socket.assigns[:samen_operator_role]),
          %Mount{repo: repo} when is_atom(repo) and not is_nil(repo) <- mount,
          org_id when is_binary(org_id) <- Operator.org_id(mount) do
       {:ok, repo}

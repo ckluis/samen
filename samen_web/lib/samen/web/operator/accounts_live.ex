@@ -95,7 +95,7 @@ defmodule Samen.Web.Operator.AccountsLive do
           name_scope: Samen.Fleet.Resolution.scope_of(otp_app, operator_id)
         )
         |> assign_new(:show_new, fn -> false end)
-        |> assign(new_form: new_account_form(mount, scope))
+        |> assign(new_form: new_account_form(socket, mount, scope))
         |> init_list(mount, scope)
     end
   end
@@ -108,7 +108,7 @@ defmodule Samen.Web.Operator.AccountsLive do
 
   def handle_event("new_account", _params, socket) do
     mount = socket.assigns.samen_mount
-    {:noreply, assign(socket, show_new: true, new_form: new_account_form(mount, Operator.scope(mount)))}
+    {:noreply, assign(socket, show_new: true, new_form: new_account_form(socket, mount, Operator.scope(mount)))}
   end
 
   def handle_event("cancel_new", _params, socket) do
@@ -121,25 +121,69 @@ defmodule Samen.Web.Operator.AccountsLive do
   end
 
   # The account create. `org_id` (the operator org — the account row lives in the
-  # operator's book) is the server-side fact, never client input. `Org` carries NO PII;
-  # the kernel's always-authorized anchor create is the domain action — this LiveView
-  # adds no policy of its own.
+  # operator's book) is the server-side fact, never client input. `Org` carries NO PII.
+  #
+  # Three gates run BEFORE the kernel's `:open_account` (finding 2 of the second identity/authz review):
+  #   1. ROLE — the authenticated operator role (`:samen_operator_role`) must be a console WRITE role
+  #      (`Samen.Web.Operator.Authz.write_role?/1`, the same gate as the webhook DLQ). A `:operator_readonly`
+  #      operator may render this page, never create through it. The `writable?` button-hiding is cosmetic;
+  #      this is the gate.
+  #   2. PLAN — only a plan the host offers (`Samen.Web.Onboarding.plan_choices/2`, the source
+  #      `select_plan/4` validates against), or none (the column default). A host that wires no
+  #      `:plan_labels` offers none, so none can be typed.
+  #   3. SLUG — a slug already taken (another org's slug or id) is refused by `Samen.Identity.SlugFree` on
+  #      the resource, so an account cannot sit under an existing tenant's id with a forged name.
+  # The kernel policy cannot see the operator role (the console acts through the synthetic `:member`
+  # scope), so after gate 1 the form is built with `context.samen_operator_write`, which the `:open_account`
+  # policy requires (`Samen.Policy.OperatorConsoleWrite`).
   def handle_event("save_new", %{"form" => params}, socket) do
-    case Guard.submit_form(:operator_save_account, socket.assigns[:org_id], socket.assigns.new_form, with_org(params, socket)) do
-      {:ok, _org} ->
-        {:noreply, socket |> assign(show_new: false) |> load()}
+    with :ok <- check_write_role(socket),
+         {:ok, params} <- check_plan(params, socket) do
+      case Guard.submit_form(:operator_save_account, socket.assigns[:org_id], socket.assigns.new_form, with_org(params, socket)) do
+        {:ok, _org} ->
+          {:noreply, socket |> assign(show_new: false) |> load()}
 
-      {:error, kind} when is_atom(kind) ->
-        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "save that account"))}
+        {:error, kind} when is_atom(kind) ->
+          {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "save that account"))}
 
-      {:error, form} ->
-        {:noreply, assign(socket, new_form: form)}
+        {:error, form} ->
+          {:noreply, assign(socket, new_form: form)}
+      end
+    else
+      {:error, :forbidden} ->
+        {:noreply, put_flash(socket, :error, "You don't have permission to open accounts.")}
+
+      {:error, :invalid_plan} ->
+        {:noreply, put_flash(socket, :error, "That plan is not offered. Pick one of the configured plans, or leave it blank.")}
     end
   end
 
-  defp new_account_form(mount, scope) do
+  defp check_write_role(socket) do
+    if Samen.Web.Operator.Authz.write_role?(socket.assigns[:samen_operator_role]), do: :ok, else: {:error, :forbidden}
+  end
+
+  defp check_plan(params, socket) do
+    case params |> Map.get("plan") |> to_string() |> String.trim() do
+      "" ->
+        {:ok, Map.delete(params, "plan")}
+
+      plan ->
+        mount = socket.assigns.samen_mount
+
+        case Samen.Web.Onboarding.plan_choices(mount, Operator.org_id(mount)) do
+          {:ok, choices} -> if Enum.any?(choices, &(&1.key == plan)), do: {:ok, Map.put(params, "plan", plan)}, else: {:error, :invalid_plan}
+          :not_configured -> {:error, :invalid_plan}
+        end
+    end
+  end
+
+  # The form carries `samen_operator_write` only when the authenticated operator holds a write role (see above).
+  defp new_account_form(socket, mount, scope) do
     Mount.resource(mount, Org)
-    |> AshPhoenix.Form.for_create(:open_account, scope: scope)
+    |> AshPhoenix.Form.for_create(:open_account,
+      scope: scope,
+      context: %{samen_operator_write: Samen.Web.Operator.Authz.write_role?(socket.assigns[:samen_operator_role])}
+    )
     |> to_form()
   end
 

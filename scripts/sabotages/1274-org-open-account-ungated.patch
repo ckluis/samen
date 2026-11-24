@@ -6,14 +6,14 @@
 # TEST_FILES: test/samen/web/identity_authz_test.exs
 # MUST_FAIL: RED: Org :open_account (plan + org_id) is refused
 diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
-index c1c2d68f..d53377a1 100644
+index ac2af80c..3c64b487 100644
 --- a/samen_core/lib/samen/scopes/identity/blueprint.ex
 +++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
-@@ -210,7 +210,6 @@ defmodule Samen.Scopes.Identity.Blueprint do
-           # exactly as for every other operator-console write. The always-authorized `:create` above stays
-           # the registration/bootstrap path and no longer accepts either column.
+@@ -217,7 +217,6 @@ defmodule Samen.Scopes.Identity.Blueprint do
+           # The always-authorized `:create` above stays the registration/bootstrap path and accepts neither
+           # column.
            policy action(:open_account) do
 -            forbid_unless(Samen.Policy.FilesUnderActorOrg)
+             forbid_unless(Samen.Policy.OperatorConsoleWrite)
              authorize_if(always())
            end
- 

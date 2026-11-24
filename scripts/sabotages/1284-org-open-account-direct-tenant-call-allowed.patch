@@ -1,0 +1,19 @@
+# SABOTAGE: Org :open_account stops requiring the operator console's write flag: a tenant actor opens 
+#   accounts directly
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: is refused unless the actor is scoped to the org it files under AND the operator console vouched
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index ac2af80c..e2cc737f 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -218,7 +218,6 @@ defmodule Samen.Scopes.Identity.Blueprint do
+           # column.
+           policy action(:open_account) do
+             forbid_unless(Samen.Policy.FilesUnderActorOrg)
+-            forbid_unless(Samen.Policy.OperatorConsoleWrite)
+             authorize_if(always())
+           end
+ 

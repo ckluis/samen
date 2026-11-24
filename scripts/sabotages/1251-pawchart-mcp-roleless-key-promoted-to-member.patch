@@ -5,7 +5,7 @@
 # TEST_FILES: test/mcp_auth_test.exs
 # MUST_FAIL: a key with NO minter_role
 diff --git a/pawchart/lib/pawchart_web/api/mcp_key_resolver.ex b/pawchart/lib/pawchart_web/api/mcp_key_resolver.ex
-index f0adb373..d89b06e8 100644
+index 24d2ca9..fc98970 100644
 --- a/pawchart/lib/pawchart_web/api/mcp_key_resolver.ex
 +++ b/pawchart/lib/pawchart_web/api/mcp_key_resolver.ex
 @@ -50,9 +50,7 @@ defmodule PawChartWeb.Api.McpKeyResolver do
@@ -18,4 +18,4 @@ index f0adb373..d89b06e8 100644
 +             {:ok, role} <- {:ok, row.minter_role || :member} do
            {:ok, scope_for(row, role)}
          else
-           _ -> :error
+           # The minting membership could not be READ: "could not check", not "bad key" (503, reported by `membership/1`).

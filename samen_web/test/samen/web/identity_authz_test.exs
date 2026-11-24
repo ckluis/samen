@@ -588,18 +588,47 @@ defmodule Samen.Web.IdentityAuthzTest do
       assert is_binary(slug)
     end
 
-    test "RED: Org :open_account (plan + org_id) is refused unless the actor is scoped to the org it files the account under" do
+    test "RED: Org :open_account (plan + org_id) is refused unless the actor is scoped to the org it files under AND the operator console vouched" do
       op = bare_org!()
       other = bare_org!()
       attrs = %{name: "Acct #{System.unique_integer([:positive])}", plan: "growth", org_id: op.id}
+      create = fn scope, context ->
+        Org |> Ash.Changeset.for_create(:open_account, attrs, scope: scope, context: context) |> Ash.create(scope: scope)
+      end
 
-      s = org_scope(other, :member)
-      assert {:error, _} = Org |> Ash.Changeset.for_create(:open_account, attrs, scope: s) |> Ash.create(scope: s)
-      assert {:error, _} = Org |> Ash.Changeset.for_create(:open_account, attrs, scope: %Samen.Scope{actor: nil}) |> Ash.create(scope: %Samen.Scope{actor: nil})
+      vouched = %{samen_operator_write: true}
 
-      s = org_scope(op, :member)
-      assert {:ok, %{plan: "growth", org_id: org_id}} = Org |> Ash.Changeset.for_create(:open_account, attrs, scope: s) |> Ash.create(scope: s)
+      # another org's actor, no actor: refused even with the flag
+      assert {:error, _} = create.(org_scope(other, :member), vouched)
+      assert {:error, _} = create.(%Samen.Scope{actor: nil}, vouched)
+
+      # a TENANT actor of the very org (viewer/member/admin/owner) calling the action directly, no console flag: refused
+      for role <- [:viewer, :member, :admin, :owner] do
+        assert {:error, _} = create.(org_scope(op, role), %{}), "#{role} must not open an account directly"
+        assert {:error, _} = create.(org_scope(op, role), %{samen_operator_write: false})
+      end
+
+      assert Ash.count!(Org, authorize?: false) == 2
+
+      # CONTROL: the console's call (synthetic :member scope of the operator org + the flag it sets after its role check)
+      assert {:ok, %{plan: "growth", org_id: org_id}} = create.(org_scope(op, :member), vouched)
       assert org_id == op.id
+    end
+
+    test "RED: Org :open_account refuses a slug that is another org's slug or id; CONTROL: a fresh slug opens" do
+      op = bare_org!()
+      s = org_scope(op, :member)
+      open = fn slug ->
+        Org
+        |> Ash.Changeset.for_create(:open_account, %{name: "A #{System.unique_integer([:positive])}", slug: slug, org_id: op.id}, scope: s, context: %{samen_operator_write: true})
+        |> Ash.create(scope: s)
+      end
+
+      assert {:ok, first} = open.("acme-tenant")
+      assert {:error, _} = open.("acme-tenant")
+      assert {:error, _} = open.(first.id)
+      assert {:error, _} = open.(op.id)
+      assert {:ok, _} = open.("another-tenant")
     end
 
     test "RED: a viewer/member/admin cannot destroy the org; CONTROL: an owner can; another org's owner cannot" do
