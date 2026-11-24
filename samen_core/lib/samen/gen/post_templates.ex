@@ -226,7 +226,7 @@ defmodule Samen.Gen.PostTemplates do
         pii_attribute(:secret, <%= field_ash_type %>,
           vault: :pii_secret,
           description:
-            "Sensitive value (logical type <%= field_type %>) kept only in the vault and masked on every read unless a distinct-party reveal grant allows it."
+            "Sensitive value (logical type <%= field_type %>) kept only in the vault; read in clear on the owning organization's tenant plane, masked or omitted on other planes unless a reveal grant covers it."
         )
 
         reveal(:reveal_<%= abbrev %>)

@@ -249,6 +249,12 @@ defmodule Samen.Gen.TemplatesParityTest do
         assert Samen.CatalogMeaning.description_problems(d, [to_string(name)]) == [], "#{set}: #{name}: #{inspect(d)}"
         refute d =~ "vt_"
       end
+
+      # The plane wording is what `Samen.Api.PiiResolution` does (pii_resolution_planes_test.exs pins that behaviour):
+      # a tenant key reads its own org in clear with no grant; other planes see it masked or omitted without a grant.
+      assert fields[:secret] =~ "clear on the owning organization's tenant plane", "#{set}: #{inspect(fields[:secret])}"
+      assert fields[:secret] =~ "masked or omitted on other planes", "#{set}: #{inspect(fields[:secret])}"
+      refute fields[:secret] =~ "on every read", "#{set}: the vault field is not masked on every read"
     end
   end
 

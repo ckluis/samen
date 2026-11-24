@@ -176,7 +176,7 @@ defmodule Samen.Scopes.Crm.Blueprint do
 
         resource do
           description(
-            "A person the organization deals with, such as a customer contact; name, emails and phones are vault-routed and masked unless revealed."
+            "A person the organization deals with, such as a customer contact; name, emails and phones are vault-routed (clear on the owning organization's tenant plane, masked or omitted on other planes without a reveal grant)."
           )
         end
 

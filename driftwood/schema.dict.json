@@ -5532,7 +5532,7 @@
         },
         {
           "column_name": "drv_emails",
-          "description": "The person's email addresses; vault-routed and masked unless revealed.",
+          "description": "The person's email addresses; vault-routed, read in clear on the owning organization's tenant plane, masked or omitted on other planes unless a reveal grant covers it.",
           "label": "Emails",
           "logical_name": "emails",
           "pii": true,
@@ -5540,7 +5540,7 @@
         },
         {
           "column_name": "drv_full_name",
-          "description": "The person's full name; vault-routed and masked unless revealed.",
+          "description": "The person's full name; vault-routed, read in clear on the owning organization's tenant plane, masked or omitted on other planes unless a reveal grant covers it.",
           "label": "Full name",
           "logical_name": "full_name",
           "pii": true,
@@ -5588,7 +5588,7 @@
         },
         {
           "column_name": "drv_phones",
-          "description": "The person's phone numbers; vault-routed and masked unless revealed.",
+          "description": "The person's phone numbers; vault-routed, read in clear on the owning organization's tenant plane, masked or omitted on other planes unless a reveal grant covers it.",
           "label": "Phones",
           "logical_name": "phones",
           "pii": true,
@@ -10089,7 +10089,7 @@
       "table_name": "fpp_pipeline"
     },
     {
-      "description": "A person the organization deals with, such as a customer contact; name, emails and phones are vault-routed and masked unless revealed.",
+      "description": "A person the organization deals with, such as a customer contact; name, emails and phones are vault-routed (clear on the owning organization's tenant plane, masked or omitted on other planes without a reveal grant).",
       "fields": [
         {
           "column_name": "fpr_archived_at",
@@ -10125,7 +10125,7 @@
         },
         {
           "column_name": "fpr_emails",
-          "description": "The person's email addresses; vault-routed and masked unless revealed.",
+          "description": "The person's email addresses; vault-routed, read in clear on the owning organization's tenant plane, masked or omitted on other planes unless a reveal grant covers it.",
           "label": "Emails",
           "logical_name": "emails",
           "pii": true,
@@ -10133,7 +10133,7 @@
         },
         {
           "column_name": "fpr_full_name",
-          "description": "The person's full name; vault-routed and masked unless revealed.",
+          "description": "The person's full name; vault-routed, read in clear on the owning organization's tenant plane, masked or omitted on other planes unless a reveal grant covers it.",
           "label": "Full name",
           "logical_name": "full_name",
           "pii": true,
@@ -10173,7 +10173,7 @@
         },
         {
           "column_name": "fpr_phones",
-          "description": "The person's phone numbers; vault-routed and masked unless revealed.",
+          "description": "The person's phone numbers; vault-routed, read in clear on the owning organization's tenant plane, masked or omitted on other planes unless a reveal grant covers it.",
           "label": "Phones",
           "logical_name": "phones",
           "pii": true,

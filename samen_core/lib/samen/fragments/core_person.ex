@@ -70,15 +70,15 @@ defmodule Samen.Fragments.CorePerson do
 
     pii_attribute(:full_name, Samen.Type.FullName,
       vault: :pii_name,
-      description: "The person's full name; vault-routed and masked unless revealed."
+      description: "The person's full name; vault-routed, read in clear on the owning organization's tenant plane, masked or omitted on other planes unless a reveal grant covers it."
     )
     pii_attribute(:emails, Samen.Type.Emails,
       vault: :pii_email,
-      description: "The person's email addresses; vault-routed and masked unless revealed."
+      description: "The person's email addresses; vault-routed, read in clear on the owning organization's tenant plane, masked or omitted on other planes unless a reveal grant covers it."
     )
     pii_attribute(:phones, Samen.Type.Phones,
       vault: :pii_phone,
-      description: "The person's phone numbers; vault-routed and masked unless revealed."
+      description: "The person's phone numbers; vault-routed, read in clear on the owning organization's tenant plane, masked or omitted on other planes unless a reveal grant covers it."
     )
   end
 end

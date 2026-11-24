@@ -295,4 +295,30 @@ defmodule Samen.PiiResolutionPlanesTest do
       assert [%{emails: %Masked{}}] = resolve(rec(), impersonating(), [])
     end
   end
+  # ==========================================================================================================
+  # the words a vault-field description uses for the planes are the planes the resolver implements
+  # ==========================================================================================================
+
+  describe "vault-field descriptions state the plane behaviour above, no more" do
+    @person SamenCore.Support.CrmScopeFixture.Person
+
+    test "the behaviour the wording must match: tenant clear with NO grant; operator absent; impersonation masked" do
+      verdict!(false)
+      assert [%{emails: "plain-vt_a"}] = resolve(rec(), tenant(), [])
+      assert [%{emails: %Ash.ForbiddenField{}}] = resolve(rec(), operator(), [])
+      assert [%{emails: %Masked{}}] = resolve(rec(), impersonating(), [])
+    end
+
+    test "every vault field of the shared CRM Person says tenant-clear / other-planes-masked-or-omitted, never 'masked unless revealed'" do
+      for field <- [:full_name, :emails, :phones] do
+        d = Ash.Resource.Info.attribute(@person, field).description
+        assert d =~ "clear on the owning organization's tenant plane", "#{field}: #{inspect(d)}"
+        assert d =~ "masked or omitted on other planes", "#{field}: #{inspect(d)}"
+        refute d =~ "masked unless revealed", "#{field}: #{inspect(d)}"
+      end
+
+      resource = Ash.Resource.Info.description(@person)
+      refute resource =~ "masked unless revealed", inspect(resource)
+    end
+  end
 end
