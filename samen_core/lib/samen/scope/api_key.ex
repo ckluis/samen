@@ -39,6 +39,8 @@ defmodule Samen.Scope.ApiKey do
 
   alias Samen.Scope.Role
 
+  require Ash.Query
+
   @type plane :: :tenant | :operator
   @type action :: :read | :write
 
@@ -109,6 +111,52 @@ defmodule Samen.Scope.ApiKey do
   end
 
   def authorized?(_key, _action, _family, _org_id, _now), do: false
+
+  @doc """
+  THE api-key auth-step lookup query — the one place that knows which rows may authenticate.
+
+  Every host's key check (demo's plug, driftwood's plug, pawchart's MCP resolver, the generated
+  app's plug) builds its lookup from THIS query, so a host cannot forget a condition:
+
+    * `token_digest == digest` (the SHA-256 of the presented key);
+    * not revoked (`revoked_at` is nil);
+    * not expired — `expires_at` is nil (a legacy, non-expiring row) or `> now`. A resource
+      with no `expires_at` column (driftwood's `Freight.ApiKey`) has no expiry to enforce.
+
+  Returns an `Ash.Query`; the CALLER reads it `authorize?: false` (this IS the auth step — no
+  actor exists yet) and carries the `# authz-scope:` marker. A guard test
+  (`Samen.ApiKeyLookupGuardTest`) fails if a host or template keys a lookup on `token_digest`
+  without going through here.
+  """
+  @spec active_query(module(), String.t(), DateTime.t()) :: Ash.Query.t()
+  def active_query(resource, digest, now \\ DateTime.utc_now()) when is_binary(digest) do
+    query =
+      resource
+      |> Ash.Query.filter(token_digest == ^digest)
+      |> Ash.Query.filter(is_nil(revoked_at))
+
+    if Ash.Resource.Info.attribute(resource, :expires_at) do
+      Ash.Query.filter(query, is_nil(expires_at) or expires_at > ^now)
+    else
+      query
+    end
+  end
+
+  @doc """
+  The role a resolved key row acts with: its `minter_role` if it is a real, in-set role, else
+  `:error`. A key with no/unknown role authorizes nothing (`authorized?/4` denies it), so a host
+  must refuse to authenticate it rather than substitute a default role.
+  """
+  @spec acting_role(%{optional(:minter_role) => term(), optional(atom()) => term()}) ::
+          {:ok, atom()} | :error
+  def acting_role(%{minter_role: role}) do
+    case Enum.find(Role.all(), &(&1 == role or Atom.to_string(&1) == role)) do
+      nil -> :error
+      valid -> {:ok, valid}
+    end
+  end
+
+  def acting_role(_), do: :error
 
   @doc """
   Is this key past its bounded expiry at `now`? (F3.4 deny-on-read predicate.)

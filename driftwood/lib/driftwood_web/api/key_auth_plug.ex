@@ -82,9 +82,7 @@ defmodule DriftwoodWeb.Api.KeyAuthPlug do
 
     # This IS the auth step — the key row lookup cannot itself require an actor. A
     # revoked key (revoked_at set) is rejected.
-    Driftwood.Freight.ApiKey
-    |> Ash.Query.filter(token_digest == ^digest)
-    |> Ash.Query.filter(is_nil(revoked_at))
+    Samen.Scope.ApiKey.active_query(Driftwood.Freight.ApiKey, digest)
     |> Ash.Query.ensure_selected([:id, :org_id, :plane, :scopes, :minter_role, :minter_user_id])
     # authz-scope: API-key AUTH-STEP lookup keyed on the SHA-256 digest of a server-minted random token — no actor/org
     # exists until this row resolves (revoked filtered out; unmatched digest => :error; a duplicate digest makes read_one error => :unavailable — both fail closed)

@@ -11,7 +11,8 @@ defmodule PawChartWeb.Api.McpKeyResolver do
   resolver:
 
     1. digests the presented bearer token the same way (`:crypto.hash(:sha256, raw)`);
-    2. looks the key row up by that digest (a revoked key — `revoked_at` set — is rejected);
+    2. looks the key row up by that digest through the shared `Samen.Scope.ApiKey.active_query/3` (a
+     revoked or expired key is never resolved);
     3. confirms the match with `Plug.Crypto.secure_compare/2` over the stored digest — a
        constant-time comparison, NEVER a byte-by-byte `==` on the raw token (a timing oracle);
     4. builds a `%Samen.Scope{}` whose `org_id`/`plane`/`role` come from THAT key's owner, so the
@@ -47,10 +48,13 @@ defmodule PawChartWeb.Api.McpKeyResolver do
         # its digest is, via secure_compare over the stored digest. A forged token has no row
         # (the lookup already returned :error) — this line is the belt-and-suspenders equal-time
         # confirmation on the row that DID match by digest.
-        if Plug.Crypto.secure_compare(digest, to_string(row.token_digest)) do
-          {:ok, scope_for(row)}
+        # A key with no/unknown `minter_role` authorizes nothing (`Samen.Scope.ApiKey.authorized?/4`
+        # denies it), so it is refused here — never promoted to a default role.
+        with true <- Plug.Crypto.secure_compare(digest, to_string(row.token_digest)),
+             {:ok, role} <- Samen.Scope.ApiKey.acting_role(row) do
+          {:ok, scope_for(row, role)}
         else
-          :error
+          _ -> :error
         end
 
       :error ->
@@ -68,12 +72,10 @@ defmodule PawChartWeb.Api.McpKeyResolver do
   # token digests to a value that matches NO row → :error. A revoked key (revoked_at set) is
   # rejected. The `token_digest == ^digest` equality is the enforcing filter for forged-rejection.
   defp lookup(digest) do
-    PawChart.Operator.ApiKey
-    |> Ash.Query.filter(token_digest == ^digest)
-    |> Ash.Query.filter(is_nil(revoked_at))
-    |> Ash.Query.ensure_selected([:id, :org_id, :plane, :scopes, :minter_role, :token_digest])
+    Samen.Scope.ApiKey.active_query(PawChart.Operator.ApiKey, digest)
+    |> Ash.Query.ensure_selected([:id, :org_id, :plane, :scopes, :minter_role, :token_digest, :expires_at])
     # authz-scope: MCP API-key AUTH-STEP lookup keyed on the unique token digest — no actor/org
-    # exists until this row resolves (revoked filtered out; unmatched digest => :error, fail closed)
+    # exists until this row resolves (revoked/expired filtered out; unmatched digest => :error, fail closed)
     |> Ash.read_one(authorize?: false)
     |> case do
       {:ok, nil} -> :error
@@ -86,14 +88,14 @@ defmodule PawChartWeb.Api.McpKeyResolver do
     end
   end
 
-  defp scope_for(row) do
+  defp scope_for(row, role) do
     org_id = to_string(row.org_id)
 
     %Samen.Scope{
       actor: %{
         id: "apikey:" <> to_string(row.id),
         org_id: org_id,
-        role: row.minter_role || :member,
+        role: role,
         plane: row.plane || :tenant
       },
       context: nil

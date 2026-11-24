@@ -125,10 +125,7 @@ defmodule DemoWeb.Api.KeyAuthPlug do
     # never resolved — the row is filtered out at the query, so no actor is built and
     # the request fails closed at the org-scope nil-org branch (defence-in-depth with
     # `Samen.Scope.ApiKey.authorized?/5`, which also refuses an expired key at use).
-    Demo.Identity.ApiKey
-    |> Ash.Query.filter(token_digest == ^digest)
-    |> Ash.Query.filter(is_nil(revoked_at))
-    |> Ash.Query.filter(is_nil(expires_at) or expires_at > ^now)
+    Samen.Scope.ApiKey.active_query(Demo.Identity.ApiKey, digest, now)
     # authz-scope: API-key AUTH-STEP lookup keyed on the SHA-256 digest of a server-minted random token — no actor/org
     # exists until this row resolves (revoked/expired filtered out; unmatched digest => :error; a duplicate digest makes read_one error => :unavailable — both fail closed)
     |> Ash.read_one(authorize?: false)

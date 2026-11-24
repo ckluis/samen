@@ -281,4 +281,51 @@ defmodule Samen.Web.IdentityAuthzTest do
       assert fresh.plane == :tenant and fresh.scopes == row.scopes and fresh.token_digest == row.token_digest
     end
   end
+
+  # ===========================================================================
+  # C. The shared key lookup
+  # ===========================================================================
+
+  describe "C. Samen.Scope.ApiKey.active_query/3 is the one auth lookup" do
+    defp lookup(digest), do: Samen.Scope.ApiKey.active_query(ApiKey, digest) |> Ash.read!(authorize?: false)
+
+    test "RED: a revoked key and an expired key are never resolved; CONTROL: a live key and a legacy nil-expiry key are" do
+      r = register!()
+      s = scope(r, :admin)
+
+      seed = fn digest, attrs ->
+        ApiKey
+        |> Ash.Changeset.for_create(
+          :create,
+          %{org_id: r.org.id, membership_id: r.membership.id, minter_role: :admin},
+          scope: s
+        )
+        |> Ash.Changeset.force_change_attribute(:token_digest, digest)
+        |> Ash.create!(scope: s)
+        |> then(fn row ->
+          Enum.reduce(attrs, Ash.Changeset.for_update(row, :mark_used, %{}, authorize?: false), fn {k, v}, cs ->
+            Ash.Changeset.force_change_attribute(cs, k, v)
+          end)
+        end)
+        |> Ash.update!(authorize?: false)
+      end
+
+      past = DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.truncate(:second)
+      seed.("d-live", %{})
+      seed.("d-expired", %{expires_at: past})
+      seed.("d-revoked", %{revoked_at: past})
+      seed.("d-legacy", %{expires_at: nil})
+
+      assert [_] = lookup("d-live")
+      assert [] = lookup("d-expired")
+      assert [] = lookup("d-revoked")
+      assert [_] = lookup("d-legacy")
+    end
+
+    test "acting_role/1 refuses a role-less or out-of-set key and accepts a real one" do
+      assert :error = Samen.Scope.ApiKey.acting_role(%{minter_role: nil})
+      assert :error = Samen.Scope.ApiKey.acting_role(%{minter_role: :root})
+      assert {:ok, :member} = Samen.Scope.ApiKey.acting_role(%{minter_role: :member})
+    end
+  end
 end

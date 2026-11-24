@@ -183,8 +183,10 @@ defmodule Samen.Gen.TemplatesParityTest do
     assert plugs != [], "no generated app emitted an api/key_auth_plug.ex — the expiry guard has nothing to check"
 
     for {set, src} <- plugs do
-      assert src =~ ~r/^\s*\|> Ash\.Query\.filter\(is_nil\(expires_at\) or expires_at > \^now\)$/m,
-             "#{set}: the generated API-key lookup does not filter expired keys — an expired key would authenticate"
+      assert src =~ ~r/Samen\.Scope\.ApiKey\.active_query\(\w+\.Operator\.ApiKey, digest, now\)/,
+             "#{set}: the generated API-key lookup is not the shared active_query (digest + revoked + expired) — an expired key could authenticate"
+      refute src =~ "Ash.Query.filter(token_digest",
+             "#{set}: the generated API-key lookup hand-rolls the digest filter instead of the shared query"
     end
   end
 

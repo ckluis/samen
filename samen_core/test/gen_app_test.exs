@@ -673,8 +673,10 @@ defmodule Samen.Gen.AppTest do
 
       assert plug =~ "Widgetco.Operator.ApiKey"
       assert plug =~ "Widgetco.Operator.Membership"
-      assert plug =~ "token_digest == ^digest"
-      assert plug =~ "is_nil(revoked_at)"
+      # the digest + not-revoked + not-expired conditions live in ONE shared query
+      # (`Samen.Scope.ApiKey.active_query/3`, behaviour-tested in samen_web identity_authz_test)
+      assert plug =~ "Samen.Scope.ApiKey.active_query(Widgetco.Operator.ApiKey, digest, now)"
+      refute plug =~ "Ash.Query.filter(token_digest"
       # SHA-256 digest lookup — the raw key is never persisted or compared in clear.
       assert plug =~ ":crypto.hash(:sha256, raw)"
       # Fail closed: no valid key → no actor.

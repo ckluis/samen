@@ -1,0 +1,20 @@
+# SABOTAGE: shared api-key lookup stops filtering expired keys: an expired key authenticates the MCP 
+#   endpoint
+#
+# Flips the named test(s).
+# APP: pawchart
+# TEST_FILES: test/mcp_auth_test.exs
+# MUST_FAIL: an EXPIRED token
+diff --git a/samen_core/lib/samen/scope/api_key.ex b/samen_core/lib/samen/scope/api_key.ex
+index 60a20bb0..618e0f2c 100644
+--- a/samen_core/lib/samen/scope/api_key.ex
++++ b/samen_core/lib/samen/scope/api_key.ex
+@@ -136,7 +136,7 @@ defmodule Samen.Scope.ApiKey do
+       |> Ash.Query.filter(is_nil(revoked_at))
+ 
+     if Ash.Resource.Info.attribute(resource, :expires_at) do
+-      Ash.Query.filter(query, is_nil(expires_at) or expires_at > ^now)
++      query
+     else
+       query
+     end

@@ -57,7 +57,8 @@ defmodule PawChart.McpAuthTest do
       token_digest: McpKeyResolver.digest(raw),
       plane: :tenant,
       minter_role: :admin,
-      revoked_at: Keyword.get(opts, :revoked_at)
+      revoked_at: Keyword.get(opts, :revoked_at),
+      expires_at: Keyword.get(opts, :expires_at)
     })
   end
 
@@ -84,6 +85,28 @@ defmodule PawChart.McpAuthTest do
     mint_key(@org_a, "revoked-token-zzz", revoked_at: DateTime.utc_now())
     conn = mcp_post(%{"method" => "tools/list", "id" => 1}, "revoked-token-zzz")
     assert conn.status == 401
+  end
+
+  test "an EXPIRED token ⇒ 401 (deny-on-read; the same shared lookup every host uses)" do
+    past = DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.truncate(:second)
+    mint_key(@org_a, "expired-token-yyy", expires_at: past)
+    assert mcp_post(%{"method" => "tools/list", "id" => 1}, "expired-token-yyy").status == 401
+
+    # control: the same token shape with a FUTURE expiry authenticates
+    future = DateTime.utc_now() |> DateTime.add(3600, :second) |> DateTime.truncate(:second)
+    mint_key(@org_a, "future-token-yyy", expires_at: future)
+    assert mcp_post(%{"method" => "ping", "id" => 1}, "future-token-yyy").status == 200
+  end
+
+  test "a key with NO minter_role ⇒ 401 (fail closed; it must not be promoted to :member)" do
+    Ash.Seed.seed!(PawChart.Operator.ApiKey, %{
+      org_id: @org_a,
+      token_digest: McpKeyResolver.digest("roleless-token-www"),
+      plane: :tenant,
+      minter_role: nil
+    })
+
+    assert mcp_post(%{"method" => "ping", "id" => 1}, "roleless-token-www").status == 401
   end
 
   test "a VALID per-operator token authenticates (200, JSON-RPC ping/initialize)" do
