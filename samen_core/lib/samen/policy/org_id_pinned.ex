@@ -17,9 +17,10 @@ defmodule Samen.Policy.OrgIdPinned do
       value is unchanged, so the write is refused. Load it (`Ash.load!(record, :org_id)`) to send it back.
     * **create** — when an actor with an `org_id` creates a row, the row's `org_id` must be that
       actor's own. (The actor-less / org-less seed and system paths are not actor writes.) An
-      **upsert** that would rewrite `org_id` on a conflicting row is refused unless `org_id` is part
-      of the identity it conflicts on: otherwise the actor's own `org_id` would be written over
-      ANOTHER org's row that merely shares the key.
+      **upsert** that would rewrite `org_id` on a conflicting row only updates a row of the actor's
+      own org (an upsert condition) unless `org_id` is part of the identity it conflicts on:
+      otherwise the actor's own `org_id` would be written over ANOTHER org's row that merely shares
+      the key. An upsert onto a foreign row does not update it.
 
   Both checks apply only to an AUTHORIZED write (`authorize?` is not `false`): code that runs
   with `authorize?: false` is trusted system code and keeps its sanctioned seed path
@@ -37,6 +38,8 @@ defmodule Samen.Policy.OrgIdPinned do
       still an error from the build, so the pattern behaves exactly as before.
   """
   use Ash.Resource.Change
+
+  require Ash.Expr
 
   alias Ash.Changeset
 
@@ -75,22 +78,26 @@ defmodule Samen.Policy.OrgIdPinned do
   end
 
   # An upsert writes its `upsert_fields` over the row it conflicts with. If `org_id` is among them and is not
-  # part of the conflict key, the row it lands on can belong to any org.
+  # part of the conflict key, the row it lands on can belong to any org: the actor's own `org_id` would be written
+  # over ANOTHER org's row that merely shares the key. The write is made to apply to the actor's own rows only, as
+  # an upsert condition on the stored row (`WHERE org_id = <actor org>` on the conflict update): an upsert onto a
+  # row of the actor's own org is unchanged, onto a foreign row it does not update (nothing of that row changes).
   defp check_upsert(%{action_type: :create} = changeset) do
     private = changeset.context[:private] || %{}
 
-    if upsert?(changeset, private) and writes_org_on_conflict?(changeset, private) and
-         :org_id not in conflict_keys(changeset, private) do
-      Changeset.add_error(changeset,
-        field: :org_id,
-        message: "an upsert that rewrites org_id must conflict on an identity that includes org_id"
-      )
+    with true <- upsert?(changeset, private),
+         true <- writes_org_on_conflict?(changeset, private),
+         false <- :org_id in conflict_keys(changeset, private),
+         %{org_id: org} when is_binary(org) <- actor_of(changeset) do
+      Changeset.filter(changeset, Ash.Expr.expr(org_id == ^org))
     else
-      changeset
+      _ -> changeset
     end
   end
 
   defp check_upsert(changeset), do: changeset
+
+  defp actor_of(changeset), do: actor(%{}, changeset)
 
   # `private.upsert?` is set on EVERY create at run time (Ash records it unconditionally), so it cannot tell an
   # upsert from a plain create. An upsert is an action declared `upsert?`, or a run that names the identity it

@@ -252,7 +252,7 @@ defmodule Samen.OrgIdPinnedTest do
   end
 
   describe "note 11b: an authorized upsert cannot take over another org's row" do
-    test "RED: an upsert on an identity without org_id that rewrites org_id is refused" do
+    test "RED: an upsert on an identity without org_id that rewrites org_id is refused (it never updates another org's row)" do
       foreign = thing!(%{org_id: @org_b, slug: "shared", name: "theirs"})
       me = actor(@org_a)
 
@@ -261,12 +261,23 @@ defmodule Samen.OrgIdPinnedTest do
         |> Ash.Changeset.for_create(:upsert_by_slug, %{org_id: @org_a, slug: "shared", name: "mine"}, actor: me)
         |> Ash.create(actor: me)
 
-      assert {:error, %Ash.Error.Invalid{errors: errors}} = result
-      assert Enum.any?(errors, &(Map.get(&1, :field) == :org_id))
+      refute match?({:ok, %{org_id: @org_a}}, result), "the actor's org_id must not land on another org's row: #{inspect(result)}"
       assert %{org_id: @org_b, name: "theirs"} = Ash.get!(Thing, foreign.id)
     end
 
-    test "RED: the same takeover through run options (upsert?: true, upsert_identity:) on a plain create is refused" do
+    test "CONTROL: the same upsert onto a row of the actor's OWN org still updates it" do
+      mine = thing!(%{org_id: @org_a, slug: "mine", name: "old"})
+      me = actor(@org_a)
+
+      assert {:ok, %{name: "new", org_id: @org_a}} =
+               Thing
+               |> Ash.Changeset.for_create(:upsert_by_slug, %{org_id: @org_a, slug: "mine", name: "new"}, actor: me)
+               |> Ash.create(actor: me)
+
+      assert Ash.get!(Thing, mine.id).name == "new"
+    end
+
+    test "RED: the same takeover through run options (upsert?: true, upsert_identity:) on a plain create is stopped" do
       foreign = thing!(%{org_id: @org_b, slug: "opt", name: "theirs"})
       me = actor(@org_a)
 
@@ -275,8 +286,7 @@ defmodule Samen.OrgIdPinnedTest do
         |> Ash.Changeset.for_create(:create, %{org_id: @org_a, slug: "opt", name: "mine"}, actor: me)
         |> Ash.create(actor: me, upsert?: true, upsert_identity: :unique_slug, upsert_fields: [:org_id, :name])
 
-      assert {:error, %Ash.Error.Invalid{errors: errors}} = result
-      assert Enum.any?(errors, &(Map.get(&1, :field) == :org_id))
+      refute match?({:ok, %{org_id: @org_a}}, result), inspect(result)
       assert Ash.get!(Thing, foreign.id).org_id == @org_b
     end
 

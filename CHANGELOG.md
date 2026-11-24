@@ -43,10 +43,12 @@ All notable changes to Samen are recorded here. The format follows
   `before_action`, from the authorization the action actually runs with. A changeset built normally and run with
   `authorize?: false` (the notification digest's pattern) is system code at run time and is not re-checked then; an
   `org_id` change on it is still an error from the build, so that pattern behaves exactly as before. An authorized
-  upsert that would rewrite `org_id` on a conflicting row is now refused unless `org_id` is part of the identity it
-  conflicts on (an action declared `upsert?`, or a run naming `upsert_identity:`); a run-option upsert on the primary
-  key alone is indistinguishable from a create and is not covered. An atomic update whose own change writes `org_id`
-  after the pin looked is refused too (a guard test, not a fix: it already was). Sabotages 1317, 1318.
+  upsert that would rewrite `org_id` on a conflicting row, on an identity that does not include `org_id` (an action
+  declared `upsert?`, or a run naming `upsert_identity:`), now carries an upsert condition `org_id = <actor's org>`:
+  it still updates a row of the actor's own org, and no longer updates another org's row that merely shares the key.
+  A run-option upsert on the primary key alone is indistinguishable from a create and is not covered. An atomic
+  update whose own change writes `org_id` after the pin looked is refused too (a guard test, not a fix: it already
+  was). Sabotages 1317, 1318.
 - **Fixed: `Samen.Policy.ManageUser` passed an admin for a target with no id** (the template record of a bulk or
   query-based write), reading it as a membership-less viewer. It now refuses. No bulk User write exists today.
 - **Fixed: a viewer could edit another user's handle, name and emails, suspend an admin, or reactivate themselves; any
