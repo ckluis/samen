@@ -60,7 +60,7 @@ defmodule Acme.Vertical.Record do
     attribute(:segment, :string,
       public?: true,
       description:
-        "Cohort label the token-blind aggregates group items by; free text, so no fixed set of segments is enforced."
+        "Cohort label tagged on the item as free text; the aggregate summary table has a segment column of the same name, and no fixed set of segments is enforced."
     )
   end
 

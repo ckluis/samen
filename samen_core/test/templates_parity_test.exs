@@ -258,6 +258,36 @@ defmodule Samen.Gen.TemplatesParityTest do
     end
   end
 
+  test "every generated aggregate resource describes itself and its five fields, and says only what the read path enforces (ADR-043 §8a)" do
+    for {set, files} <- render_all() do
+      %{resource: resource, fields: fields} = vertical_descriptions(files["lib/acme/aggregate.ex"])
+
+      assert [description] = resource, "#{set}: the aggregate resource carries no description"
+
+      assert Samen.CatalogMeaning.description_problems(description, ["RecordCountBySegment", "record_count_by_segment", "acm_record_count"]) == []
+
+      assert Map.keys(fields) |> Enum.sort() == [:org_id, :record_count, :refreshed_at, :segment, :tenant_count]
+
+      for {name, d} <- fields do
+        assert is_binary(d), "#{set}: aggregate field #{name} is emitted WITHOUT a description — the generated app's own verifier would fail"
+        assert Samen.CatalogMeaning.description_problems(d, [to_string(name)]) == [], "#{set}: #{name}: #{inspect(d)}"
+      end
+
+      # k-anonymity suppression happens in `Samen.Aggregate.read_all/2` (a raw Ash.read returns raw values), and nothing in
+      # the generated app fills the summary table: the text says the first and claims nothing of the second.
+      assert fields[:record_count] =~ "Samen.Aggregate read path"
+      assert fields[:tenant_count] =~ "Samen.Aggregate read path"
+      refute description =~ "readable only by"
+    end
+  end
+
+  test "the aggregate check is not vacuous: stripping one aggregate description is detected" do
+    src = render_all()["web"]["lib/acme/aggregate.ex"]
+    stripped = String.replace(src, ~r/,\n\s+description: "Number of items[^"]*"/, "", global: false)
+    refute stripped == src
+    assert vertical_descriptions(stripped).fields[:record_count] == nil
+  end
+
   test "the field check is not vacuous: stripping one description from the rendered vertical is detected" do
     src = render_all()["web"]["lib/acme/vertical.ex"]
     stripped = String.replace(src, ~r/,\n\s+description: "Name of the item[^"]*"/, "", global: false)

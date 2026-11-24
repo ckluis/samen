@@ -29,7 +29,7 @@ defmodule Acme.Aggregate.RecordCountBySegment do
 
   resource do
     description(
-      "Cross-tenant cohort counts per segment (organizations and items), readable only by the token-blind aggregate actor."
+      "Per-segment summary rows of cohort counts (organizations and items), exposed read-only and only to the token-blind aggregate actor."
     )
   end
 
@@ -48,24 +48,24 @@ defmodule Acme.Aggregate.RecordCountBySegment do
     attribute(:segment, :string,
       public?: true,
       allow_nil?: false,
-      description: "Cohort label the counts are grouped by; required free text with no enforced vocabulary."
+      description: "Cohort label of the summary row, which is also its cohort key on the Samen.Aggregate read path; required free text with no enforced vocabulary."
     )
 
     attribute(:tenant_count, :integer,
       public?: true,
       default: 0,
-      description: "Number of organizations in the segment cohort; the size the k-anonymity suppression of record_count is judged by."
+      description: "Number of organizations in the segment cohort; on the Samen.Aggregate read path it is the cohort size that decides whether record_count is suppressed."
     )
 
     attribute(:record_count, :integer,
       public?: true,
       default: 0,
-      description: "Number of items counted in the segment cohort; suppressed when the cohort is smaller than k."
+      description: "Number of items counted in the segment cohort; on the Samen.Aggregate read path it is suppressed when tenant_count is below the k-anonymity floor."
     )
 
     attribute(:refreshed_at, :utc_datetime,
       public?: true,
-      description: "Timestamp recorded for the last refresh of this summary row; empty until one is recorded."
+      description: "Optional timestamp of the last refresh of this summary row; empty unless something writes it."
     )
   end
 

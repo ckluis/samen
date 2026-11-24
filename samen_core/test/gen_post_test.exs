@@ -713,6 +713,16 @@ defmodule Samen.Gen.PostTest do
         end
 
         refute inspect(fields) =~ "vt_", "a vault field's description describes the schema, never a value"
+
+        # Only what is enforced: `status` is a one_of with a default; create accepts any of the three values and nothing
+        # enforces a lifecycle, so the text claims neither "new entries start active" nor a "lifecycle".
+        assert fields[:status] =~ "one of active, paused or archived; defaults to active"
+        refute fields[:status] =~ ~r/lifecycle|new entries/i
+
+        # The vault field's planes are the ones `Samen.Api.PiiResolution` implements (pii_resolution_planes_test.exs).
+        assert fields[:secret] =~ "clear on the owning organization's tenant plane"
+        assert fields[:secret] =~ "masked or omitted on other planes"
+        refute fields[:secret] =~ "on every read"
       end
     end
 

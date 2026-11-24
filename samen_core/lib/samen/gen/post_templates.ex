@@ -214,7 +214,7 @@ defmodule Samen.Gen.PostTemplates do
         # non_pii! clearance needed).
         attribute :status, :atom do
           public?(true)
-          description("Lifecycle state of the entry, limited to active, paused or archived; new entries start active.")
+          description("State of the entry, one of active, paused or archived; defaults to active.")
           constraints(one_of: [:active, :paused, :archived])
           default(:active)
         end
