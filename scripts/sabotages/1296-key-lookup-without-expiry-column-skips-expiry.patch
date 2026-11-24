@@ -1,0 +1,24 @@
+# SABOTAGE: expiry_enforced? stops raising for an undeclared resource without an expiry column: expiry is 
+#   silently skipped
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/api_key_lookup_guard_test.exs
+# MUST_FAIL: active_query/3 raises for a resource with no :expires_at that does not declare itself expiryless
+diff --git a/samen_core/lib/samen/scope/api_key.ex b/samen_core/lib/samen/scope/api_key.ex
+index 5a7c7b0d..5c5b297e 100644
+--- a/samen_core/lib/samen/scope/api_key.ex
++++ b/samen_core/lib/samen/scope/api_key.ex
+@@ -159,11 +159,7 @@ defmodule Samen.Scope.ApiKey do
+     cond do
+       Ash.Resource.Info.attribute(resource, :expires_at) -> true
+       expiryless_declared?(resource) -> false
+-      true ->
+-        raise ArgumentError,
+-              "#{inspect(resource)} has no :expires_at attribute and does not declare `def samen_key_expiryless?, do: true` " <>
+-                "— refusing to build a key lookup that would silently skip the expiry gate (name the column " <>
+-                ":expires_at, or declare the resource expiryless)"
++      true -> false
+     end
+   end
+ 

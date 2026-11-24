@@ -1,0 +1,19 @@
+# SABOTAGE: the Freight key resource no longer declares itself expiryless: its lookup raises at request time
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/api_key_expiry_enforced_test.exs
+# MUST_FAIL: the Freight key resource declares itself expiryless and its lookup builds
+diff --git a/driftwood/lib/driftwood/freight.ex b/driftwood/lib/driftwood/freight.ex
+index eb09ab65..ea506035 100644
+--- a/driftwood/lib/driftwood/freight.ex
++++ b/driftwood/lib/driftwood/freight.ex
+@@ -418,7 +418,7 @@ defmodule Driftwood.Freight.ApiKey do
+   # This resource has NO expiry column (F3.4 does not hold for Freight keys; see CHANGELOG). Declared here, on the
+   # resource, so `Samen.Scope.ApiKey.active_query/3` builds the lookup without an expiry filter instead of raising.
+   @doc false
+-  def samen_key_expiryless?, do: true
++  def samen_key_expiryless?, do: false
+ 
+   attributes do
+     # SHA-256 digest of the key material. One-way; the raw key is never stored.

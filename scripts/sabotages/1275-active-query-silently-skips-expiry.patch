@@ -6,17 +6,17 @@
 # TEST_FILES: test/api_key_lookup_guard_test.exs
 # MUST_FAIL: active_query/3 raises for a resource with no :expires_at
 diff --git a/samen_core/lib/samen/scope/api_key.ex b/samen_core/lib/samen/scope/api_key.ex
-index 976d38ab..1a8d94f1 100644
+index 5a7c7b0d..8aa6898c 100644
 --- a/samen_core/lib/samen/scope/api_key.ex
 +++ b/samen_core/lib/samen/scope/api_key.ex
-@@ -161,10 +161,7 @@ defmodule Samen.Scope.ApiKey do
+@@ -160,10 +160,7 @@ defmodule Samen.Scope.ApiKey do
        Ash.Resource.Info.attribute(resource, :expires_at) -> true
-       resource in @expiryless_resources -> false
+       expiryless_declared?(resource) -> false
        true ->
 -        raise ArgumentError,
--              "#{inspect(resource)} has no :expires_at attribute and is not in " <>
--                "Samen.Scope.ApiKey.expiryless_resources/0 — refusing to build a key lookup that would " <>
--                "silently skip the expiry gate (name the column :expires_at, or allowlist the resource)"
+-              "#{inspect(resource)} has no :expires_at attribute and does not declare `def samen_key_expiryless?, do: true` " <>
+-                "— refusing to build a key lookup that would silently skip the expiry gate (name the column " <>
+-                ":expires_at, or declare the resource expiryless)"
 +        false
      end
    end

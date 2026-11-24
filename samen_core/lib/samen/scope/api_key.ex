@@ -121,8 +121,8 @@ defmodule Samen.Scope.ApiKey do
     * `token_digest == digest` (the SHA-256 of the presented key);
     * not revoked (`revoked_at` is nil);
     * not expired — `expires_at` is nil (a legacy, non-expiring row) or `> now`. A resource
-      with no `expires_at` column must be on `expiryless_resources/0` (driftwood's `Freight.ApiKey`),
-      else this RAISES.
+      with no `expires_at` column must declare `samen_key_expiryless?/0` (driftwood's `Freight.ApiKey`; see
+      `expiry_enforced?/1`), else this RAISES.
 
   Returns an `Ash.Query`; the CALLER reads it `authorize?: false` (this IS the auth step — no
   actor exists yet) and carries the `# authz-scope:` marker. A guard test
@@ -145,27 +145,31 @@ defmodule Samen.Scope.ApiKey do
     end
   end
 
-  # Resources that authenticate keys but have NO expiry column, by name. Driftwood's
-  # `Freight.ApiKey` is the one today (no `expires_at`: F3.4 does not hold for its API keys; see
-  # CHANGELOG). A resource NOT on this list that lacks an `:expires_at` attribute — typically a
-  # column named something else, e.g. `:expiry` — used to get no expiry filter and no warning; it
-  # now RAISES, so a forgotten or renamed column cannot silently turn expiry off.
-  @expiryless_resources [Driftwood.Freight.ApiKey]
-
-  @doc "The resources that may authenticate keys without an `expires_at` column (a named allowlist)."
-  @spec expiryless_resources() :: [module()]
-  def expiryless_resources, do: @expiryless_resources
-
-  defp expiry_enforced?(resource) do
+  @doc """
+  Does the key resource enforce an expiry (`true`), or has it DECLARED that it has none (`false`)? A resource
+  with an `:expires_at` attribute is enforced. A resource that authenticates keys with NO expiry column must say
+  so on itself by defining `samen_key_expiryless?/0` returning `true` (driftwood's `Freight.ApiKey` is the one
+  today: F3.4 does not hold for its API keys; see CHANGELOG). The declaration lives on the resource, so this
+  framework module names no host. A resource that is neither (typically a column named something else, e.g.
+  `:expiry`) RAISES: a forgotten or renamed column can never silently turn expiry off. The host test suites call
+  this over every key-check site's resource, so the mistake fails in CI, not as a 500 on every request.
+  """
+  @spec expiry_enforced?(module()) :: boolean()
+  def expiry_enforced?(resource) do
     cond do
       Ash.Resource.Info.attribute(resource, :expires_at) -> true
-      resource in @expiryless_resources -> false
+      expiryless_declared?(resource) -> false
       true ->
         raise ArgumentError,
-              "#{inspect(resource)} has no :expires_at attribute and is not in " <>
-                "Samen.Scope.ApiKey.expiryless_resources/0 — refusing to build a key lookup that would " <>
-                "silently skip the expiry gate (name the column :expires_at, or allowlist the resource)"
+              "#{inspect(resource)} has no :expires_at attribute and does not declare `def samen_key_expiryless?, do: true` " <>
+                "— refusing to build a key lookup that would silently skip the expiry gate (name the column " <>
+                ":expires_at, or declare the resource expiryless)"
     end
+  end
+
+  defp expiryless_declared?(resource) do
+    Code.ensure_loaded?(resource) and function_exported?(resource, :samen_key_expiryless?, 0) and
+      resource.samen_key_expiryless?() == true
   end
 
   @doc """

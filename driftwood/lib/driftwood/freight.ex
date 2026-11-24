@@ -415,6 +415,11 @@ defmodule Driftwood.Freight.ApiKey do
     repo(Driftwood.Repo)
   end
 
+  # This resource has NO expiry column (F3.4 does not hold for Freight keys; see CHANGELOG). Declared here, on the
+  # resource, so `Samen.Scope.ApiKey.active_query/3` builds the lookup without an expiry filter instead of raising.
+  @doc false
+  def samen_key_expiryless?, do: true
+
   attributes do
     # SHA-256 digest of the key material. One-way; the raw key is never stored.
     attribute(:token_digest, :string, public?: false, allow_nil?: false)

@@ -105,11 +105,12 @@ defmodule Samen.ApiKeyLookupGuardTest do
     refute hand_rolled_lookup?("Invitation |> Ash.Query.filter(token_digest == ^d)")
   end
 
-  test "active_query/3 raises for a resource with no :expires_at that is not allowlisted; the allowlist is named" do
-    assert_raise ArgumentError, ~r/no :expires_at attribute and is not in/, fn ->
+  test "active_query/3 raises for a resource with no :expires_at that does not declare itself expiryless; the declaration is on the resource" do
+    assert_raise ArgumentError, ~r/no :expires_at attribute and does not declare/, fn ->
       Samen.Scope.ApiKey.active_query(SamenCore.Support.Archivable.Widget, "digest")
     end
 
-    assert Samen.Scope.ApiKey.expiryless_resources() == [Driftwood.Freight.ApiKey]
+    refute function_exported?(Samen.Scope.ApiKey, :expiryless_resources, 0), "no host module is named in samen_core"
+    refute File.read!(Path.join(@root, "samen_core/lib/samen/scope/api_key.ex")) =~ "Driftwood"
   end
 end
