@@ -10,21 +10,19 @@
 # TEST_FILES: test/retention_sweep_test.exs
 # MUST_FAIL: the erasure event lands on the TENANT's chain, not __global__
 diff --git a/samen_core/lib/samen/retention.ex b/samen_core/lib/samen/retention.ex
-index ef5d570..05290d1 100644
+index e007b103..f384ee58 100644
 --- a/samen_core/lib/samen/retention.ex
 +++ b/samen_core/lib/samen/retention.ex
-@@ -255,13 +255,8 @@ defmodule Samen.Retention do
-       |> Enum.map(fn {subject, org} -> {to_string(subject), org} end)
+@@ -279,12 +279,7 @@ defmodule Samen.Retention do
        |> Enum.uniq_by(fn {subject, _org} -> subject end)
  
--    Enum.reduce(subjects, 0, fn {subject_id, org_id}, acc ->
+     Enum.reduce(subjects, 0, fn {subject_id, org_id}, acc ->
 -      # Only pass keys we actually have — an absent repo/org_id must NOT override
 -      # Erasure.shred/2's own defaults (a nil org_id would defeat the D5 fix by
 -      # forcing the "__global__" fallback).
 -      shred_opts =
 -        [repo: repo, org_id: org_id]
 -        |> Enum.reject(fn {_k, v} -> is_nil(v) end)
-+    Enum.reduce(subjects, 0, fn {subject_id, _org_id}, acc ->
 +      shred_opts = if repo, do: [repo: repo], else: []
  
        case Samen.Erasure.shred(subject_id, shred_opts) do
