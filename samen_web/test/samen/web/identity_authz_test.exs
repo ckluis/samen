@@ -1311,6 +1311,41 @@ defmodule Samen.Web.IdentityAuthzTest do
     end
   end
 
+  describe "P. A role set through an atomic update is judged like any other role" do
+    require Ash.Expr
+
+    test "RED: an admin cannot make a member an owner through atomic_update(:role); CONTROL: a plain role write and an atomic non-role write still work" do
+      r = register!()
+      member = h_member(r, :member)
+      admin = scope(r, :admin)
+
+      result =
+        member
+        |> Ash.Changeset.for_update(:update, %{}, scope: admin)
+        |> Ash.Changeset.atomic_update(:role, Ash.Expr.expr(if status == "active", do: ^:owner, else: role))
+        |> Ash.update(scope: admin)
+
+      assert {:error, _} = result
+      assert reread(Membership, member.id).role == :member
+
+      # the check itself ERRORS (fail closed, by name) rather than reading the stored role through `get_attribute`
+      changeset =
+        member
+        |> Ash.Changeset.for_update(:update, %{}, scope: admin)
+        |> Ash.Changeset.atomic_update(:role, Ash.Expr.expr(if status == "active", do: ^:owner, else: role))
+
+      assert {:error, :atomic_role} = Samen.Policy.ManageRole.match?(admin.actor, %{changeset: changeset}, [])
+
+      assert {:ok, %{role: :viewer}} = h_upd(member, %{role: :viewer}, admin)
+
+      assert {:ok, %{status: "suspended"}} =
+               reread(Membership, member.id)
+               |> Ash.Changeset.for_update(:update, %{}, scope: admin)
+               |> Ash.Changeset.atomic_update(:status, Ash.Expr.expr(^"suspended"))
+               |> Ash.update(scope: admin)
+    end
+  end
+
   describe "O. A forged struct (own org_id, another org's primary key) cannot write another org's membership" do
     test "RED: update (role, status) and destroy are refused and the foreign row is unchanged; CONTROL: the admin's own org's row is writable" do
       a = register!()

@@ -45,17 +45,24 @@ defmodule Samen.Policy.ManageRole do
   def match?(actor, %{changeset: %Ash.Changeset{} = changeset}, _opts) do
     actor_role = actor_role(actor)
 
-    case stored_role(changeset) do
-      {:ok, :none} -> {:ok, new_role_ok?(changeset, actor_role)}
-      {:ok, stored} -> {:ok, Samen.Scope.Role.may_manage?(actor_role, stored) and new_role_ok?(changeset, actor_role)}
-      # the row's role could not be established: the check itself errors, so the write is refused (fail closed,
-      # never a guess and never an `{:ok, false}` that reads as an ordinary denial)
-      {:error, reason} -> {:error, reason}
+    with :ok <- no_atomic_role(changeset),
+         {:ok, stored} <- stored_role(changeset) do
+      case stored do
+        :none -> {:ok, new_role_ok?(changeset, actor_role)}
+        stored -> {:ok, Samen.Scope.Role.may_manage?(actor_role, stored) and new_role_ok?(changeset, actor_role)}
+      end
     end
   end
 
   # Non-changeset subjects (reads, action inputs) are not role escalations.
   def match?(_actor, _context, _opts), do: {:ok, true}
+
+  # A role set through `changeset.atomics` (`Ash.Changeset.atomic_update(:role, expr)`) is invisible to
+  # `get_attribute(:role)`, so it could not be held to the rule: refuse it by name (fail closed). The write the
+  # policy sees is never one the check could not read.
+  defp no_atomic_role(%Ash.Changeset{atomics: atomics}) do
+    if Enum.any?(atomics || [], fn {name, _expr} -> name == :role end), do: {:error, :atomic_role}, else: :ok
+  end
 
   # The role being SET (a create, or an update that changes it) must be strictly below the actor. A write that sets
   # none has nothing to escalate; the stored role was already held to the rule above.
