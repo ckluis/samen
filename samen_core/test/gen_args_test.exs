@@ -132,16 +132,23 @@ defmodule Samen.GenArgsTest do
       assert File.read!(ctx.registry) =~ "zqw"
     end
 
-    for {label, extra} <- [{"missing", []}, {"an empty", ["--description", ""]}, {"a rule-breaking", ["--description", "Widget"]}] do
-      test "#{label} --description is refused with the registry byte-identical (no --no-reserve-abbrevs)", ctx do
+    test "a missing --description is refused with the registry byte-identical (no --no-reserve-abbrevs)", ctx do
+      refused!(Mix.Tasks.Samen.Gen.Resource, ~w(--scope Crm --resource Widget --abbrev zqw --app-dir #{ctx.app}), ["--description"])
+
+      assert sha(ctx.registry) == ctx.sha
+      refute File.read!(ctx.registry) =~ "zqw"
+      assert File.ls!(ctx.app) == ["mix.exs"]
+    end
+
+    test "an empty or rule-breaking --description is refused with the registry byte-identical too", ctx do
+      for description <- ["", "Widget"] do
         refused!(
           Mix.Tasks.Samen.Gen.Resource,
-          ~w(--scope Crm --resource Widget --abbrev zqw --app-dir #{ctx.app}) ++ unquote(extra),
+          ~w(--scope Crm --resource Widget --abbrev zqw --app-dir #{ctx.app}) ++ ["--description", description],
           ["--description"]
         )
 
         assert sha(ctx.registry) == ctx.sha
-        refute File.read!(ctx.registry) =~ "zqw"
         assert File.ls!(ctx.app) == ["mix.exs"]
       end
     end
