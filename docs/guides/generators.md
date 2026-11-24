@@ -41,7 +41,22 @@ mix samen.gen.app --module Widgetco --prefix wg --abbrev wid
 | `--headless` | no | the escape hatch: all product layers off (`--no-web --no-api`), reproducing the original 26-file data-only output exactly. Conflicts with an explicit `--web`/`--api`/`--deploy`/`--modules`. |
 | `--port` | no | dev HTTP port wired into the endpoint config (default `4050`) |
 | `--no-reserve-abbrevs` | no | do **not** append the abbrevs to the registry — produces an app that fails compile fail-closed (the red-path fixture) |
-| `--no-compile` | no | emit files only; skip the compile + schema-dict dump post-steps |
+| `--no-compile` | no | emit files only; skip every post-step: the compile, the schema-dict dump, `mix samen.verify.catalog_meaning --init` (so no `catalog_meaning.baseline`) and the API contract snapshot. Such an app's `ci.sh` runs the catalog-meaning verifier strict (no baseline file) until you run `--init`. |
+
+## Adding a resource later: `mix samen.gen.resource`
+
+```bash
+mix samen.gen.scope --scope Crm
+mix samen.gen.resource --scope Crm --resource Widget --abbrev wdg \
+  --description "A configurable widget a team offers, with a status and one vault-routed value."
+```
+
+`--description` is **required**: it is the resource's catalog description, and the generated app's own `ci.sh` runs
+`mix samen.verify.catalog_meaning`. A missing or empty one, or one that would fail the verifier (fewer than 3 words, over
+300 characters, TODO/TBD/FIXME, `vt_`, a restatement of the name, a non-printable character), is refused before an abbrev
+is reserved or a file is written, naming the rule. Write only what the generated code makes true. A description starting
+with `-` is passed as `--description="-…"`. The generator describes the fixed scaffold fields (`name`, `label`, `status`,
+the vault field) itself and takes no other field specs.
 
 ## What it produces
 
