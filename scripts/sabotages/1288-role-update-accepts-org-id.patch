@@ -4,11 +4,24 @@
 # APP: samen_web
 # TEST_FILES: test/samen/web/identity_authz_test.exs
 # MUST_FAIL: an admin cannot update a User or Role into another org
+diff --git a/samen_core/lib/samen/policy/org_id_pinned.ex b/samen_core/lib/samen/policy/org_id_pinned.ex
+index 67d8c4fe..22d2b063 100644
+--- a/samen_core/lib/samen/policy/org_id_pinned.ex
++++ b/samen_core/lib/samen/policy/org_id_pinned.ex
+@@ -51,7 +51,7 @@ defmodule Samen.Policy.OrgIdPinned do
+   def batch_change(changesets, opts, context),
+     do: Enum.map(changesets, &change(&1, opts, context))
+ 
+-  defp applies?(context), do: context.authorize? != false
++  defp applies?(_context), do: false
+ 
+   defp check(%{action_type: :update} = changeset, _context) do
+     if changing_org_id?(changeset) do
 diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
-index 3af9f71a..c2ea7a59 100644
+index 2f6dc34a..a92d51eb 100644
 --- a/samen_core/lib/samen/scopes/identity/blueprint.ex
 +++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
-@@ -568,7 +568,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
+@@ -582,7 +582,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
            update :update do
              primary?(true)
              require_atomic?(false)
