@@ -220,6 +220,13 @@ defmodule Samen.Erasure do
       earlier completed report). `true` completes the DB tiers and DISCLOSES the withdrawal as
       `unavailable` (`shred_reference_lost_acknowledged`), and the lifecycle audit row says so. Kernel option for an operator
       (console/mix task) only: no tenant, API or LiveView path passes it, and `Samen.Retention` never does.
+    * `:resources` / `:domains` / `:otp_app` — which resources the blind-index precondition derives from (default:
+      the host app's `:ash_domains`); `:bidx_specs` replaces the derived list and skips the precondition.
+
+  Refused BEFORE anything is read, recorded or destroyed (the subject's key is untouched):
+  `{:error, :erasure_in_transaction}`, `{:error, {:blind_index_uncovered, [{resource, column}]}}` (a `_bidx`
+  column of the live schema that `Samen.DerivedLinkable` does not register, so no arm can clear it) and
+  `{:error, {:blind_index_no_resources, lookup_options}}` (the derivation found no resources at all).
   """
   @spec shred(String.t(), keyword()) ::
           {:ok, %{attestation: Kms.attestation(), report: Report.t()}} | {:error, term}

@@ -31,6 +31,13 @@ All notable changes to Samen are recorded here. The format follows
   Sending the value a row already has as `org_id` passes only when the record in hand has `org_id` loaded; with it
   unloaded the write is refused, because the pin cannot tell the value is unchanged (load it with `Ash.load!/2`).
   `Samen.OrgIdPinnedGuard.walk/2` is the walk the per-host guard tests use.
+- **Fixed: `Samen.Web.Settings.Profile.update/4` took the identity of whatever user id it was passed.** It rewrote the
+  scope's actor to that id, so a viewer's scope plus another user's id passed `ManageUser`'s own-row branch. It now
+  refuses (`{:error, :forbidden}`) unless the scope's actor IS the user being edited; `ProfileLive` builds that scope
+  from the session-resolved user (`Samen.Web.Settings.Reads.user_scope/3`), and an operator-plane scope is never given a
+  user identity. The profile masking proofs again reach `Samen.Pii.WriteGuard`: they use an operator-plane actor
+  that is the edited row, which `ManageUser` allows, so only WriteGuard can refuse the vaulted write, and they assert
+  its error. Sabotages 1312 and 1313; 11 re-anchored.
 - **Fixed: the `org_id` pin was decided once, when the changeset was built.** A changeset built with `authorize?: false`
   and then run authorized moved a row to another org. `Samen.Policy.OrgIdPinned` now also re-checks in a
   `before_action`, from the authorization the action actually runs with. A changeset built normally and run with
