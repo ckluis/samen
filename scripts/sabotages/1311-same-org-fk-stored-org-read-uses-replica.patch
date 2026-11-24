@@ -1,0 +1,19 @@
+# SABOTAGE: SameOrgFk reads the stored org_id through the read (replica) repo instead of the write repo
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/same_org_fk_change_test.exs
+# MUST_FAIL: a same-org FK write passes even though the replica has no copy of the row yet
+diff --git a/samen_core/lib/samen/policy/same_org_fk.ex b/samen_core/lib/samen/policy/same_org_fk.ex
+index 478633f1..0c628156 100644
+--- a/samen_core/lib/samen/policy/same_org_fk.ex
++++ b/samen_core/lib/samen/policy/same_org_fk.ex
+@@ -117,7 +117,7 @@ defmodule Samen.Policy.SameOrgFk do
+   defp stored_org_id(%{resource: resource, data: data}) do
+     with pk when pk != [] <- Ash.Resource.Info.primary_key(resource),
+          {:ok, pk_params} <- pk_params(resource, data, pk),
+-         repo when not is_nil(repo) <- AshPostgres.DataLayer.Info.repo(resource, :mutate),
++         repo when not is_nil(repo) <- AshPostgres.DataLayer.Info.repo(resource, :read),
+          table when not is_nil(table) <- AshPostgres.DataLayer.Info.table(resource),
+          org_src when not is_nil(org_src) <- attribute_source(resource, :org_id) do
+       where =

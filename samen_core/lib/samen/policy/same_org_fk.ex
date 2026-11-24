@@ -53,30 +53,37 @@ defmodule Samen.Policy.SameOrgFk do
   @impl true
   def change(changeset, opts, _context) do
     Ash.Changeset.before_action(changeset, fn changeset ->
-      case org_id_for(changeset) do
-        nil ->
-          # No org on the row → OrgScope fails this closed already; nothing to compare.
-          changeset
+      rels = relationships_to_check(changeset, opts)
 
-        :no_org ->
-          changeset
-
-        {:error, _unreadable} ->
-          # The row's org could not be read: refuse a write that sets a foreign key rather than skip the check.
-          if Enum.any?(relationships_to_check(changeset, opts), &writing_fk?(changeset, &1)) do
-            Ash.Changeset.add_error(changeset,
-              field: :org_id,
-              message: "same-org FK check could not read this record's org_id"
-            )
-          else
-            changeset
-          end
-
-        org_id ->
-          rels = relationships_to_check(changeset, opts)
-          Enum.reduce(rels, changeset, &validate_relationship(&2, &1, org_id))
+      # Decide FIRST whether any foreign key is written: an update that writes none has nothing to
+      # compare, so it must not pay for (or depend on) a read of the stored org_id.
+      if Enum.any?(rels, &writing_fk?(changeset, &1)) do
+        check_written(changeset, rels)
+      else
+        changeset
       end
     end)
+  end
+
+  defp check_written(changeset, rels) do
+    case org_id_for(changeset) do
+      nil ->
+        # No org on the row → OrgScope fails this closed already; nothing to compare.
+        changeset
+
+      :no_org ->
+        changeset
+
+      {:error, _unreadable} ->
+        # The row's org could not be read: refuse a write that sets a foreign key rather than skip the check.
+        Ash.Changeset.add_error(changeset,
+          field: :org_id,
+          message: "same-org FK check could not read this record's org_id"
+        )
+
+      org_id ->
+        Enum.reduce(rels, changeset, &validate_relationship(&2, &1, org_id))
+    end
   end
 
   # The write's org_id. On a create it is set on the changeset (by the action /
@@ -103,16 +110,22 @@ defmodule Samen.Policy.SameOrgFk do
   defp data_org_id(_), do: nil
 
   # A tagged result, never an empty value for a failed read: `:unreadable` makes the guard refuse the
-  # write (fail closed), `nil` is "no org on this row" (nothing to compare against).
+  # write (fail closed), `nil` is "no org on this row" (nothing to compare against). The read goes
+  # through the WRITE repo (`:mutate`), i.e. the connection the caller's transaction is on — never a
+  # read replica, which may not hold the row yet. Every primary-key column is matched, so a composite
+  # key reads exactly its own row.
   defp stored_org_id(%{resource: resource, data: data}) do
-    with [pk] <- Ash.Resource.Info.primary_key(resource),
-         pk_value when not is_nil(pk_value) <- Map.get(data, pk),
-         repo when not is_nil(repo) <-
-           AshPostgres.DataLayer.Info.repo(resource, :read) || AshPostgres.DataLayer.Info.repo(resource),
+    with pk when pk != [] <- Ash.Resource.Info.primary_key(resource),
+         {:ok, pk_params} <- pk_params(resource, data, pk),
+         repo when not is_nil(repo) <- AshPostgres.DataLayer.Info.repo(resource, :mutate),
          table when not is_nil(table) <- AshPostgres.DataLayer.Info.table(resource),
-         org_src when not is_nil(org_src) <- attribute_source(resource, :org_id),
-         pk_src when not is_nil(pk_src) <- attribute_source(resource, pk) do
-      case repo.query("SELECT #{org_src} FROM #{table} WHERE #{pk_src} = $1 LIMIT 1", [dump_uuid(pk_value)]) do
+         org_src when not is_nil(org_src) <- attribute_source(resource, :org_id) do
+      where =
+        pk_params
+        |> Enum.with_index(1)
+        |> Enum.map_join(" AND ", fn {{src, _value}, i} -> "#{src} = $#{i}" end)
+
+      case repo.query("SELECT #{org_src} FROM #{table} WHERE #{where} LIMIT 1", Enum.map(pk_params, &elem(&1, 1))) do
         {:ok, %{rows: [[nil]]}} -> :no_org
         {:ok, %{rows: [[org_bin]]}} -> load_uuid(org_bin)
         {:ok, %{rows: []}} -> {:error, :unreadable}
@@ -121,6 +134,21 @@ defmodule Samen.Policy.SameOrgFk do
     else
       _ -> {:error, :unreadable}
     end
+  end
+
+  # `{source column, dumped value}` for every primary-key attribute, or `:error` when any key value is
+  # missing or cannot be dumped to its storage type.
+  defp pk_params(resource, data, pk) do
+    Enum.reduce_while(pk, {:ok, []}, fn name, {:ok, acc} ->
+      attr = Ash.Resource.Info.attribute(resource, name)
+
+      with value when not is_nil(value) <- Map.get(data, name),
+           {:ok, dumped} <- Ash.Type.dump_to_native(attr.type, value, attr.constraints) do
+        {:cont, {:ok, acc ++ [{attribute_source(resource, name), dumped}]}}
+      else
+        _ -> {:halt, :error}
+      end
+    end)
   end
 
   defp writing_fk?(changeset, rel_name) do
