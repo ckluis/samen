@@ -46,7 +46,8 @@ defmodule Samen.Web.OperatorScopeGateTest do
 
   defp seed_org(name) do
     Op.Org
-    |> Ash.Changeset.for_create(:create, %{name: name, plan: "growth"}, authorize?: false)
+    |> Ash.Changeset.for_create(:create, %{name: name}, authorize?: false)
+    |> Ash.Changeset.force_change_attribute(:plan, "growth")
     |> Ash.create!()
   end
 

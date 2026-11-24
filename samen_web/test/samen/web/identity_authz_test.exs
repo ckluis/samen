@@ -572,6 +572,36 @@ defmodule Samen.Web.IdentityAuthzTest do
       assert Ash.get!(Org, org.id, authorize?: false).plan == "free"
     end
 
+    test "RED: Org :create takes name and slug only (plan, onboarded_at and org_id are not input); CONTROL: name + slug work" do
+      for attrs <- [%{plan: "enterprise"}, %{onboarded_at: DateTime.utc_now()}, %{org_id: Ash.UUID.generate()}] do
+        assert {:error, _} =
+                 Org
+                 |> Ash.Changeset.for_create(:create, Map.merge(%{name: "Sneaky #{System.unique_integer([:positive])}"}, attrs))
+                 |> Ash.create()
+      end
+
+      assert {:ok, %{plan: "free", onboarded_at: nil, org_id: nil, slug: slug}} =
+               Org
+               |> Ash.Changeset.for_create(:create, %{name: "Plain #{System.unique_integer([:positive])}", slug: "plain-#{System.unique_integer([:positive])}"})
+               |> Ash.create()
+
+      assert is_binary(slug)
+    end
+
+    test "RED: Org :open_account (plan + org_id) is refused unless the actor is scoped to the org it files the account under" do
+      op = bare_org!()
+      other = bare_org!()
+      attrs = %{name: "Acct #{System.unique_integer([:positive])}", plan: "growth", org_id: op.id}
+
+      s = org_scope(other, :member)
+      assert {:error, _} = Org |> Ash.Changeset.for_create(:open_account, attrs, scope: s) |> Ash.create(scope: s)
+      assert {:error, _} = Org |> Ash.Changeset.for_create(:open_account, attrs, scope: %Samen.Scope{actor: nil}) |> Ash.create(scope: %Samen.Scope{actor: nil})
+
+      s = org_scope(op, :member)
+      assert {:ok, %{plan: "growth", org_id: org_id}} = Org |> Ash.Changeset.for_create(:open_account, attrs, scope: s) |> Ash.create(scope: s)
+      assert org_id == op.id
+    end
+
     test "RED: a viewer/member/admin cannot destroy the org; CONTROL: an owner can; another org's owner cannot" do
       org = bare_org!()
       other = bare_org!()

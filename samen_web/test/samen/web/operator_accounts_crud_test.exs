@@ -33,7 +33,8 @@ defmodule Samen.Web.OperatorAccountsCrudTest do
   defp seed_operator_org do
     org =
       Op.Org
-      |> Ash.Changeset.for_create(:create, %{name: "Samen SaaS, Inc.", plan: "operator"}, authorize?: false)
+      |> Ash.Changeset.for_create(:create, %{name: "Samen SaaS, Inc."}, authorize?: false)
+      |> Ash.Changeset.force_change_attribute(:plan, "operator")
       |> Ash.create!()
 
     org
@@ -47,13 +48,11 @@ defmodule Samen.Web.OperatorAccountsCrudTest do
       Op.Org
       |> Ash.Changeset.for_create(
         :create,
-        %{
-          org_id: operator_org_id,
-          name: "Account #{String.pad_leading(to_string(i), 2, "0")}",
-          plan: "growth"
-        },
+        %{name: "Account #{String.pad_leading(to_string(i), 2, "0")}"},
         authorize?: false
       )
+      |> Ash.Changeset.force_change_attribute(:org_id, operator_org_id)
+      |> Ash.Changeset.force_change_attribute(:plan, "growth")
       |> Ash.create!()
     end
   end

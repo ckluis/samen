@@ -1,0 +1,19 @@
+# SABOTAGE: Org :open_account loses its org-scope gate: any actor files an account (with a plan) under any 
+#   org
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: RED: Org :open_account (plan + org_id) is refused
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index c1c2d68f..d53377a1 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -210,7 +210,6 @@ defmodule Samen.Scopes.Identity.Blueprint do
+           # exactly as for every other operator-console write. The always-authorized `:create` above stays
+           # the registration/bootstrap path and no longer accepts either column.
+           policy action(:open_account) do
+-            forbid_unless(Samen.Policy.FilesUnderActorOrg)
+             authorize_if(always())
+           end
+ 

@@ -51,7 +51,8 @@ defmodule Samen.Web.OperatorDeskCrudTest do
   defp seed_operator_org do
     org =
       Op.Org
-      |> Ash.Changeset.for_create(:create, %{name: "Samen SaaS, Inc.", plan: "operator"}, authorize?: false)
+      |> Ash.Changeset.for_create(:create, %{name: "Samen SaaS, Inc."}, authorize?: false)
+      |> Ash.Changeset.force_change_attribute(:plan, "operator")
       |> Ash.create!()
 
     org

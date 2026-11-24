@@ -56,7 +56,8 @@ defmodule Samen.Web.DeliverabilityMaskingTest do
   setup do
     org =
       Op.Org
-      |> Ash.Changeset.for_create(:create, %{name: "T114 Deliverability Test Org", plan: "growth"}, authorize?: false)
+      |> Ash.Changeset.for_create(:create, %{name: "T114 Deliverability Test Org"}, authorize?: false)
+      |> Ash.Changeset.force_change_attribute(:plan, "growth")
       |> Ash.create!()
 
     user =

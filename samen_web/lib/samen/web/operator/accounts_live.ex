@@ -139,7 +139,7 @@ defmodule Samen.Web.Operator.AccountsLive do
 
   defp new_account_form(mount, scope) do
     Mount.resource(mount, Org)
-    |> AshPhoenix.Form.for_create(:create, scope: scope)
+    |> AshPhoenix.Form.for_create(:open_account, scope: scope)
     |> to_form()
   end
 

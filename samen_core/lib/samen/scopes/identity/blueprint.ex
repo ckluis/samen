@@ -144,7 +144,24 @@ defmodule Samen.Scopes.Identity.Blueprint do
         end
 
         actions do
-          defaults([:read, create: :*])
+          defaults([:read])
+
+          # Create takes the org's `name` and `slug` ONLY. The default `create: :*` also accepted
+          # `plan`, `onboarded_at` and `org_id` (an operator-host Org created with `org_id` = the
+          # operator org shows up as a fake account). Seeds/helpers that need those set them with
+          # `force_change_attribute` under `authorize?: false`, never as input.
+          create :create do
+            primary?(true)
+            accept([:name, :slug])
+          end
+
+          # The OPERATOR's account create (`Samen.Web.Operator.AccountsLive` "New account"): an account
+          # row lives in the operator org's own book, so it carries `org_id` (server-side, never client
+          # input) and a `plan`. Unlike `:create` this one is policy-gated (below): the actor must be
+          # scoped to that very org.
+          create :open_account do
+            accept([:name, :slug, :plan, :org_id])
+          end
 
           # Settings update (admin+, policy below): name/slug/session cap only. `plan` and
           # `onboarded_at` are NOT inputs — a tenant actor must never write `plan` to an
@@ -184,6 +201,16 @@ defmodule Samen.Scopes.Identity.Blueprint do
         # update/destroy require the actor be scoped to THIS org.
         policies do
           policy action_type(:create) do
+            authorize_if(always())
+          end
+
+          # `:open_account` writes `org_id`/`plan`: the actor must be scoped to the very org the row is
+          # filed under (the operator org). No role floor: the operator UI acts through the plane's
+          # synthetic `:member` scope (`Samen.Web.Plane.scope/2`), whose gate is the operator route auth,
+          # exactly as for every other operator-console write. The always-authorized `:create` above stays
+          # the registration/bootstrap path and no longer accepts either column.
+          policy action(:open_account) do
+            forbid_unless(Samen.Policy.FilesUnderActorOrg)
             authorize_if(always())
           end
 

@@ -83,9 +83,11 @@ defmodule PawChart.OperatorSeeds do
     Op.Org
     |> Ash.Changeset.for_create(
       :create,
-      %{name: "PawChart, Inc.", plan: "operator", org_id: @operator_org_id, slug: "pawchart"},
+      %{name: "PawChart, Inc.", slug: "pawchart"},
       authorize?: false
     )
+    |> Ash.Changeset.force_change_attribute(:plan, "operator")
+    |> Ash.Changeset.force_change_attribute(:org_id, @operator_org_id)
     |> Ash.Changeset.force_change_attribute(:id, @operator_org_id)
     |> Ash.create!()
   end
@@ -126,9 +128,11 @@ defmodule PawChart.OperatorSeeds do
       Op.Org
       |> Ash.Changeset.for_create(
         :create,
-        %{org_id: @operator_org_id, name: name, slug: tid, plan: "growth"},
+        %{name: name, slug: tid},
         authorize?: false
       )
+      |> Ash.Changeset.force_change_attribute(:org_id, @operator_org_id)
+      |> Ash.Changeset.force_change_attribute(:plan, "growth")
       |> Ash.create!()
 
     admin =
