@@ -1,7 +1,7 @@
 defmodule Samen.Identity.SlugFree do
   @moduledoc """
   `Identity.Org` validation (`:create`, `:update` and `:open_account`): a slug being SET must not already be taken, either as
-  another org's `slug` or as another org's `id`. An update that leaves the org's own slug as it is is not checked.
+  another org's `slug` (compared trimmed and case-insensitively) or as another org's `id`. An update that leaves the org's own slug as it is is not checked, and an update never collides with the org's own row.
 
   An account's slug is how a host names the tenant it stands for (driftwood's `Directory.orgs/0` keys the
   workspace switcher by slug), so a second row carrying an existing tenant's slug or id would render a forged name
@@ -35,11 +35,25 @@ defmodule Samen.Identity.SlugFree do
 
   defp check(changeset, slug) do
     resource = changeset.resource
+    # compared trimmed and case-insensitively on BOTH sides, so `Acme` / ` acme ` collide with `acme`. Stored slugs
+    # are not rewritten and no format is imposed: this only widens what counts as "the same slug".
+    normalized = slug |> String.trim() |> String.downcase()
 
     query =
-      case Ecto.UUID.cast(slug) do
-        {:ok, uuid} -> Ash.Query.filter(resource, slug == ^slug or id == ^uuid)
-        :error -> Ash.Query.filter(resource, slug == ^slug)
+      case Ecto.UUID.cast(normalized) do
+        {:ok, uuid} ->
+          Ash.Query.filter(resource, fragment("lower(regexp_replace(?, '^\\s+|\\s+$', '', 'g'))", slug) == ^normalized or id == ^uuid)
+
+        :error ->
+          Ash.Query.filter(resource, fragment("lower(regexp_replace(?, '^\\s+|\\s+$', '', 'g'))", slug) == ^normalized)
+      end
+
+    # An update never collides with the org's OWN row (its slug, or its id used as its slug), whether or not `slug`
+    # is loaded on the record in hand: the id is always there. Another org's id is still refused.
+    query =
+      case changeset do
+        %{action_type: :update, data: %{id: id}} when not is_nil(id) -> Ash.Query.filter(query, id != ^id)
+        _ -> query
       end
 
     # authz-scope: uniqueness probe over ALL orgs (a collision with another tenant's row must be visible to be refused); boolean only

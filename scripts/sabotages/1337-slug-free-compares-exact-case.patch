@@ -1,0 +1,19 @@
+# SABOTAGE: SlugFree compares the slug as typed, so a case or whitespace variant of a taken slug is accepted
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: collide with `acme`, on update and on create
+diff --git a/samen_core/lib/samen/identity/slug_free.ex b/samen_core/lib/samen/identity/slug_free.ex
+index db3ea17c..b8ba5490 100644
+--- a/samen_core/lib/samen/identity/slug_free.ex
++++ b/samen_core/lib/samen/identity/slug_free.ex
+@@ -37,7 +37,7 @@ defmodule Samen.Identity.SlugFree do
+     resource = changeset.resource
+     # compared trimmed and case-insensitively on BOTH sides, so `Acme` / ` acme ` collide with `acme`. Stored slugs
+     # are not rewritten and no format is imposed: this only widens what counts as "the same slug".
+-    normalized = slug |> String.trim() |> String.downcase()
++    normalized = slug
+ 
+     query =
+       case Ecto.UUID.cast(normalized) do

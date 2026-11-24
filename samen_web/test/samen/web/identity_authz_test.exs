@@ -1232,6 +1232,41 @@ defmodule Samen.Web.IdentityAuthzTest do
       assert {:ok, _} = Org |> Ash.Changeset.for_create(:create, %{name: "Ok", slug: "l-free-#{System.unique_integer([:positive])}"}, authorize?: false) |> Ash.create()
     end
   end
+  describe "L2. Slug uniqueness ignores case and surrounding whitespace, and never counts the org's own row" do
+    test "RED: `Acme`, ` acme ` and `ACME` collide with `acme`, on update and on create; CONTROL: a different slug is free" do
+      base = "l2-#{System.unique_integer([:positive])}"
+      taken = l_org!(base)
+      other = l_org!("l2-other-#{System.unique_integer([:positive])}")
+
+      for variant <- [String.upcase(base), " #{base}", "#{base} ", " #{String.capitalize(base)} "] do
+        assert {:error, _} = org_update(other, %{slug: variant}, :admin), "update accepted #{inspect(variant)}"
+
+        assert {:error, _} =
+                 Org |> Ash.Changeset.for_create(:create, %{name: "Dup", slug: variant}, authorize?: false) |> Ash.create(),
+               "create accepted #{inspect(variant)}"
+      end
+
+      assert Ash.get!(Org, other.id, authorize?: false).slug == other.slug
+      assert {:ok, _} = org_update(other, %{slug: "#{base}-two"}, :admin)
+      assert taken.slug == base
+    end
+
+    test "RED: re-sending the org's own slug, or its own id, is never a self-collision even when `slug` is not loaded; another org's id is still refused" do
+      a = l_org!("l2-a-#{System.unique_integer([:positive])}")
+      b = l_org!("l2-b-#{System.unique_integer([:positive])}")
+      # the record in hand was read without `slug`
+      thin = Org |> Ash.Query.filter(id == ^a.id) |> Ash.Query.select([:id, :name]) |> Ash.read!(authorize?: false) |> hd()
+      assert %Ash.NotLoaded{} = thin.slug
+
+      assert {:ok, %{slug: slug}} = org_update(thin, %{slug: a.slug}, :admin)
+      assert slug == a.slug
+      assert {:ok, %{slug: id_slug}} = org_update(thin, %{slug: a.id}, :admin)
+      assert id_slug == a.id
+      assert {:error, _} = org_update(thin, %{slug: b.id}, :admin)
+      assert {:error, _} = org_update(thin, %{slug: b.slug}, :admin)
+    end
+  end
+
   describe "M. ApiKey :mark_used is a system action" do
     test "RED: an authorized admin (or owner) cannot forge last_used_at; CONTROL: the auth path (no actor) still stamps it" do
       r = register!()

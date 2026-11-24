@@ -1,0 +1,20 @@
+# SABOTAGE: SlugFree counts the org's own row, so re-sending its own slug or id with slug unloaded is 
+#   refused
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: is never a self-collision even when
+diff --git a/samen_core/lib/samen/identity/slug_free.ex b/samen_core/lib/samen/identity/slug_free.ex
+index db3ea17c..1959e90b 100644
+--- a/samen_core/lib/samen/identity/slug_free.ex
++++ b/samen_core/lib/samen/identity/slug_free.ex
+@@ -52,7 +52,7 @@ defmodule Samen.Identity.SlugFree do
+     # is loaded on the record in hand: the id is always there. Another org's id is still refused.
+     query =
+       case changeset do
+-        %{action_type: :update, data: %{id: id}} when not is_nil(id) -> Ash.Query.filter(query, id != ^id)
++        %{action_type: :update, data: %{id: id}} when not is_nil(id) -> query
+         _ -> query
+       end
+ 
