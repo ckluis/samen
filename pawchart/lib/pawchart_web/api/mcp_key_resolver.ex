@@ -25,7 +25,6 @@ defmodule PawChartWeb.Api.McpKeyResolver do
   Fail CLOSED: a missing/malformed/unknown/revoked/mismatched key → `:error` (401). This is the
   enforcing layer the T157/T142 e2e auth test pins (unauth → 401, forged → 401, cross-org denied).
   """
-  require Ash.Query
 
   @doc "The canonical key digest — SHA-256 hex of the raw key material."
   @spec digest(String.t()) :: String.t()

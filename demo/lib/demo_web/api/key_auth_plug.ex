@@ -47,7 +47,6 @@ defmodule DemoWeb.Api.KeyAuthPlug do
   request is halted: a good key is never reported as bad during an outage.
   """
   import Plug.Conn
-  require Ash.Query
 
   @doc "The canonical key digest — SHA-256 hex of the raw key material."
   @spec digest(String.t()) :: String.t()

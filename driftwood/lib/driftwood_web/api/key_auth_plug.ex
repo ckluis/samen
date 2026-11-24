@@ -39,7 +39,6 @@ defmodule DriftwoodWeb.Api.KeyAuthPlug do
   request is halted (`Samen.Web.Api.KeyCheckUnavailable`).
   """
   import Plug.Conn
-  require Ash.Query
 
   @doc "The canonical key digest — SHA-256 hex of the raw key material."
   @spec digest(String.t()) :: String.t()
