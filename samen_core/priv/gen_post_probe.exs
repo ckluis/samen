@@ -230,6 +230,10 @@ try do
       "Widget",
       "--abbrev",
       resource_abbrev,
+      # ADR-043 §8a (A3): the REQUIRED catalog description — the app's ci.sh runs the catalog-meaning verifier over the
+      # new resource, so the generated resource must arrive described (no hand-edit).
+      "--description",
+      "A configurable widget a team offers, with a status and one vault-routed value.",
       # WS-D D7a `--live`: ALSO scaffold index/show/form LiveViews on `Samen.UI`.
       "--live",
       # ADR-040 §5.8 (T37h) `--archivable`: the emitted resource gets the FULL E6

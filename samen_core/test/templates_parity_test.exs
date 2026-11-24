@@ -213,4 +213,65 @@ defmodule Samen.Gen.TemplatesParityTest do
              "operator-mount golden #{rel} dedupe index is not PARTIAL (external_id IS NOT NULL)"
     end
   end
+
+  # ADR-043 §8a (A3): a generated app is correct by construction w.r.t. the catalog-meaning verifier its OWN ci.sh runs.
+  # Asserted on the RENDERED output (not the goldens), so a template that drops a description fails here even after a
+  # golden re-capture. The descriptions are read from the AST of the emitted source.
+  defp vertical_descriptions(src) do
+    {:ok, ast} = Code.string_to_quoted(src)
+
+    {_, acc} =
+      Macro.prewalk(ast, %{resource: [], fields: %{}}, fn
+        {:resource, _, [[do: {:description, _, [d]}]]} = n, acc when is_binary(d) ->
+          {n, %{acc | resource: [d | acc.resource]}}
+
+        {call, _, [name, _type, opts]} = n, acc when call in [:attribute, :pii_attribute] and is_list(opts) ->
+          {n, %{acc | fields: Map.put(acc.fields, name, opts[:description])}}
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    acc
+  end
+
+  test "every generated vertical resource describes itself and its name, segment and vault fields (ADR-043 §8a)" do
+    for {set, files} <- render_all() do
+      src = files["lib/acme/vertical.ex"]
+      %{resource: resource, fields: fields} = vertical_descriptions(src)
+
+      assert [description] = resource, "#{set}: the vertical Record carries no resource description"
+      assert Samen.CatalogMeaning.description_problems(description, ["Record", "record", "acm_record"]) == []
+      assert Map.keys(fields) |> Enum.sort() == [:name, :secret, :segment]
+
+      for {name, d} <- fields do
+        assert is_binary(d), "#{set}: vertical field #{name} is emitted WITHOUT a description — the generated app's own verifier would fail"
+        assert Samen.CatalogMeaning.description_problems(d, [to_string(name)]) == [], "#{set}: #{name}: #{inspect(d)}"
+        refute d =~ "vt_"
+      end
+    end
+  end
+
+  test "the field check is not vacuous: stripping one description from the rendered vertical is detected" do
+    src = render_all()["web"]["lib/acme/vertical.ex"]
+    stripped = String.replace(src, ~r/,\n\s+description: "Name of the item[^"]*"/, "", global: false)
+    refute stripped == src
+    assert vertical_descriptions(stripped).fields[:name] == nil
+  end
+
+  test "every generated ci.sh runs samen.verify.catalog_meaning as step 1c, right after the dict drift check (ADR-043 §8a)" do
+    for {set, files} <- render_all() do
+      ci = files["ci.sh"]
+
+      assert ci =~ ~r/^mix samen\.verify\.catalog_meaning$/m,
+             "#{set}/ci.sh does not run the catalog-meaning verifier — its baseline and descriptions would never be enforced"
+
+      {drift, meaning, parity} =
+        {pos(ci, "step 1b/"), pos(ci, "mix samen.verify.catalog_meaning\n"), pos(ci, "mix samen.verify.catalog_parity\n")}
+
+      assert drift < meaning and meaning < parity, "#{set}: step 1c must sit between the dict drift check and catalog_parity"
+    end
+  end
+
+  defp pos(text, needle), do: text |> :binary.match(needle) |> elem(0)
 end

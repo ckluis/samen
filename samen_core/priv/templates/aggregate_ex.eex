@@ -27,17 +27,46 @@ defmodule <%= module %>.Aggregate.RecordCountBySegment do
     authorizers: [Ash.Policy.Authorizer],
     abbrev: "<%= agg_abbrev %>"
 
+  resource do
+    description(
+      "Cross-tenant cohort counts per segment (organizations and items), readable only by the token-blind aggregate actor."
+    )
+  end
+
   postgres do
     table("<%= agg_table %>")
     repo(<%= module %>.Repo)
   end
 
   attributes do
-    attribute(:org_id, :uuid, public?: true, allow_nil?: true)
-    attribute(:segment, :string, public?: true, allow_nil?: false)
-    attribute(:tenant_count, :integer, public?: true, default: 0)
-    attribute(:record_count, :integer, public?: true, default: 0)
-    attribute(:refreshed_at, :utc_datetime, public?: true)
+    attribute(:org_id, :uuid,
+      public?: true,
+      allow_nil?: true,
+      description: "Organization the summary row is attributed to, if any; the aggregate plane itself has no org boundary."
+    )
+
+    attribute(:segment, :string,
+      public?: true,
+      allow_nil?: false,
+      description: "Cohort label the counts are grouped by; required free text with no enforced vocabulary."
+    )
+
+    attribute(:tenant_count, :integer,
+      public?: true,
+      default: 0,
+      description: "Number of organizations in the segment cohort; the size the k-anonymity suppression of record_count is judged by."
+    )
+
+    attribute(:record_count, :integer,
+      public?: true,
+      default: 0,
+      description: "Number of items counted in the segment cohort; suppressed when the cohort is smaller than k."
+    )
+
+    attribute(:refreshed_at, :utc_datetime,
+      public?: true,
+      description: "Timestamp recorded for the last refresh of this summary row; empty until one is recorded."
+    )
   end
 
   actions do

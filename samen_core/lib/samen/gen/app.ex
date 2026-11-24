@@ -541,13 +541,61 @@ defmodule Samen.Gen.App do
     deps_cache!(s, "seed")
     run_mix!(s, ["compile", "--warnings-as-errors"])
     deps_cache!(s, "store")
-    run_mix!(s, ["samen.catalog.dump", "--output", "schema.dict.json"])
+
+    for args <- dump_steps(s), do: run_mix!(s, args)
 
     if s.api? do
       run_mix!(s, ["samen.verify.api_contract", "--version", "v1", "--update"])
     end
 
+    own_debt_in_baseline!(s)
     :ok
+  end
+
+  @doc """
+  The `mix` invocations `compile_and_dump!/1` runs AFTER the compile, in order (ADR-043 §8a, A3). The catalog dump
+  comes first; then `samen.verify.catalog_meaning --init` writes the new app's `catalog_meaning.baseline` (the debt
+  inherited from the mounted scopes — the app's own generated resources are described, so they add none). With the
+  API layer the structural-break snapshot follows (run by `compile_and_dump!/1` itself). Pure so a test can pin the
+  order without compiling an app.
+  """
+  @spec dump_steps(%__MODULE__{}) :: [[String.t()]]
+  def dump_steps(%__MODULE__{}) do
+    [
+      ["samen.catalog.dump", "--output", "schema.dict.json"],
+      ["samen.verify.catalog_meaning", "--init"]
+    ]
+  end
+
+  @doc """
+  The baseline entries (`table` or `table.field`) that belong to the app's OWN generated resources (the authored
+  vertical record and the aggregate summary). Those are described by construction, so a non-empty result means a
+  template stopped describing a table or field the generator emits.
+  """
+  @spec own_debt(%__MODULE__{}, String.t()) :: [String.t()]
+  def own_debt(%__MODULE__{resource_table: record, agg_table: agg}, baseline_src) when is_binary(baseline_src) do
+    for entry <- Samen.CatalogMeaning.Baseline.parse(baseline_src).entries,
+        hd(String.split(entry, ".", parts: 2)) in [record, agg],
+        do: entry
+  end
+
+  defp own_debt_in_baseline!(%__MODULE__{app_dir: dir} = s) do
+    path = Path.join(dir, Samen.CatalogMeaning.Baseline.file_name())
+
+    case File.read(path) do
+      {:ok, src} ->
+        case own_debt(s, src) do
+          [] ->
+            :ok
+
+          debt ->
+            raise "samen.gen.app: the new app's #{path} lists its OWN generated resources as undescribed " <>
+                    "(#{Enum.join(debt, ", ")}) — a template emits a table or field without a description"
+        end
+
+      {:error, reason} ->
+        raise "samen.gen.app: `mix samen.verify.catalog_meaning --init` left no #{path} (#{inspect(reason)})"
+    end
   end
 
   # ADR-053 P6 — opt-in, set only by scripts/gen_probe_guard.sh for the gen probes: seed the app's `_build` with the

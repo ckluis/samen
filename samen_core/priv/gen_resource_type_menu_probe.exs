@@ -182,6 +182,8 @@ try do
           resource_name,
           "--abbrev",
           abbrev,
+          "--description",
+          "Sample item whose one vault-routed value is of the #{field_type} field type.",
           "--field-type",
           field_type
         ])

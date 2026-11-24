@@ -189,19 +189,32 @@ defmodule Samen.Gen.PostTemplates do
         authorizers: [Ash.Policy.Authorizer],
         abbrev: "<%= abbrev %>"<%= archivable_opt %>
 
+      resource do
+        description(<%= description_literal %>)
+      end
+
       postgres do
         table("<%= table %>")
         repo(<%= module %>.Repo)
       end
 
       attributes do
-        attribute(:name, :string, public?: true, allow_nil?: false)
-        attribute(:label, :string, public?: true)
+        attribute(:name, :string,
+          public?: true,
+          allow_nil?: false,
+          description: "Name of the entry; required, with no format or uniqueness enforced."
+        )
+
+        attribute(:label, :string,
+          public?: true,
+          description: "Optional secondary label for the entry; free text with no enforced format."
+        )
 
         # Bounded enum — a config-row status, NOT a freeform string (CDC-safe; no
         # non_pii! clearance needed).
         attribute :status, :atom do
           public?(true)
+          description("Lifecycle state of the entry, limited to active, paused or archived; new entries start active.")
           constraints(one_of: [:active, :paused, :archived])
           default(:active)
         end
@@ -209,7 +222,13 @@ defmodule Samen.Gen.PostTemplates do
 
       pii do
         vault(:pii_secret)
-        pii_attribute(:secret, <%= field_ash_type %>, vault: :pii_secret)
+
+        pii_attribute(:secret, <%= field_ash_type %>,
+          vault: :pii_secret,
+          description:
+            "Sensitive value (logical type <%= field_type %>) kept only in the vault and masked on every read unless a distinct-party reveal grant allows it."
+        )
+
         reveal(:reveal_<%= abbrev %>)
       end
 

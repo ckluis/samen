@@ -205,7 +205,10 @@ defmodule Samen.Gen.Post do
       # ADR-040 §5.8 (T37h) `--archivable`: emit the resource with `archivable: true`
       # (full E6 soft-delete substrate) + the migration's `archived_at` column.
       # Defaults to `false` — byte-identical to pre-T37h output when omitted.
-      archivable?: false
+      archivable?: false,
+      # ADR-043 §8a (A3): the resource's catalog description (`mix samen.gen.resource --description`). `nil` only for a
+      # spec built by a caller that never emits the resource; `validate_resource!/2` refuses it.
+      description: nil
     ]
   end
 
@@ -238,8 +241,24 @@ defmodule Samen.Gen.Post do
       migration_ts: Keyword.get(opts, :migration_ts, next_migration_ts(app_dir)),
       live?: Keyword.get(opts, :live, false),
       field_type: field_type,
-      archivable?: Keyword.get(opts, :archivable, false)
+      archivable?: Keyword.get(opts, :archivable, false),
+      description: Keyword.get(opts, :description)
     }
+  end
+
+  @doc """
+  Why `description` cannot be the catalog description of the resource `resource` (table `table`): `[]` when it can.
+  A missing one is `["is missing"]`. The quality rules are `Samen.CatalogMeaning.description_problems/2` — the very
+  function `mix samen.verify.catalog_meaning` applies, so the generator refuses exactly what the verifier would flag.
+  """
+  @spec description_problems(String.t() | nil, String.t(), String.t()) :: [String.t()]
+  def description_problems(nil, _resource, _table), do: ["is missing"]
+
+  def description_problems(description, resource, table) when is_binary(description) do
+    template_problem = if String.contains?(description, "<%"), do: ["contains `<%` (template syntax)"], else: []
+
+    Samen.CatalogMeaning.description_problems(description, [resource, Macro.underscore(resource), table]) ++
+      template_problem
   end
 
   @doc """
@@ -309,7 +328,19 @@ defmodule Samen.Gen.Post do
       {:error, message} -> raise ArgumentError, message
     end
 
-    :ok
+    validate_description!(s)
+  end
+
+  defp validate_description!(%ResourceSpec{description: description, resource: resource, table: table}) do
+    case description_problems(description, resource, table) do
+      [] ->
+        :ok
+
+      problems ->
+        raise ArgumentError,
+              "--description #{Enum.join(problems, "; ")} " <>
+                "(the catalog-meaning rules of `mix samen.verify.catalog_meaning`; ADR-043 §8a)"
+    end
   end
 
   @doc "The single `{abbrev, owner}` pair this resource reserves."
@@ -440,6 +471,10 @@ defmodule Samen.Gen.Post do
       # MaterializePii's OWN scalar-vs-composite routing (D4) — see
       # FieldTypeMenu's moduledoc "T15 attempt-1 defect" note.
       "field_vault_column" => FieldTypeMenu.vault_column(s.field_type, s.abbrev),
+      # ADR-043 §8a (A3): the resource description as an Elixir string literal (escaped by `inspect/1`). The
+      # renderer substitutes key by key, so `description_problems/3` refuses a description holding `<%` (it would be
+      # expanded by a later key).
+      "description_literal" => inspect(s.description),
       # ADR-040 §5.8 (T37h) `--archivable`: pre-resolved (not re-templated) insertion
       # strings so the tiny `<%= key %>` engine (single-pass, no conditionals) can emit
       # the E6 substrate ONLY when requested — "" leaves pre-T37h output byte-identical.

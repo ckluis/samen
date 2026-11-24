@@ -236,20 +236,32 @@ defmodule Samen.CatalogMeaning do
   defp description_findings(_key, nil, _name_words), do: []
 
   defp description_findings(key, description, name_words) do
+    for problem <- problems(description, name_words),
+        do: finding(:quality, key, "description #{problem} (#{inspect(description)})")
+  end
+
+  @doc """
+  The quality problems (R3) of ONE description against the NAMES it describes, as human-readable strings (`[]` = fine).
+  `names` is the list of identifiers the description must not merely restate (for a resource: its label, humanized
+  module name and table name). The verifier and the generators share this function, so a generator refuses exactly what
+  the verifier would flag.
+  """
+  @spec description_problems(String.t(), [String.t()]) :: [String.t()]
+  def description_problems(description, names) when is_binary(description) and is_list(names),
+    do: problems(description, words(names))
+
+  defp problems(description, name_words) do
     tokens = tokens(description)
 
-    problems =
-      [
-        {description != String.trim(description), "has leading or trailing whitespace"},
-        {length(String.split(description)) < @min_words, "has fewer than #{@min_words} words"},
-        {String.length(description) > @max_description, "is longer than #{@max_description} characters"},
-        {Regex.match?(~r/\b(todo|tbd|fixme)\b/i, description), "is a placeholder (TODO/TBD/FIXME)"},
-        {VtSentinel.in_string?(description), "contains the vault-token sentinel `#{VtSentinel.sentinel()}`"},
-        {restates?(tokens, name_words), "only restates the name — say what it IS or does, in words the name does not hold"}
-      ]
-
-    for {true, problem} <- problems,
-        do: finding(:quality, key, "description #{problem} (#{inspect(description)})")
+    for {true, problem} <- [
+          {description != String.trim(description), "has leading or trailing whitespace"},
+          {length(String.split(description)) < @min_words, "has fewer than #{@min_words} words"},
+          {String.length(description) > @max_description, "is longer than #{@max_description} characters"},
+          {Regex.match?(~r/\b(todo|tbd|fixme)\b/i, description), "is a placeholder (TODO/TBD/FIXME)"},
+          {VtSentinel.in_string?(description), "contains the vault-token sentinel `#{VtSentinel.sentinel()}`"},
+          {restates?(tokens, name_words), "only restates the name — say what it IS or does, in words the name does not hold"}
+        ],
+        do: problem
   end
 
   @doc false

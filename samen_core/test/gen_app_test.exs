@@ -611,7 +611,7 @@ defmodule Samen.Gen.AppTest do
 
       refute show_fields_line =~ "secret"
       refute show_fields_line =~ "org_id"
-      assert vertical =~ "pii_attribute(:secret, :string, vault: :pii_secret)"
+      assert vertical =~ ~r/pii_attribute\(:secret, :string,\s+vault: :pii_secret,/
 
       # F3.7 — the filter surface matches the serialization surface.
       assert vertical =~ "derive_filter?(false)"
@@ -1122,5 +1122,29 @@ defmodule Samen.Gen.AppTest do
     opens = line |> String.graphemes() |> Enum.count(&(&1 == "["))
     closes = line |> String.graphemes() |> Enum.count(&(&1 == "]"))
     opens == closes and opens > 0
+  end
+
+  describe "ADR-043 §8a (A3): the new app's catalog_meaning baseline" do
+    test "RED: the post-compile steps dump the catalog, THEN write the baseline with --init" do
+      for api <- [false, true] do
+        assert Gen.dump_steps(spec(api: api)) == [
+                 ["samen.catalog.dump", "--output", "schema.dict.json"],
+                 ["samen.verify.catalog_meaning", "--init"]
+               ]
+      end
+    end
+
+    test "own_debt/2: only the app's OWN tables count; inherited scope debt is allowed" do
+      s = spec()
+      inherited = Samen.CatalogMeaning.Baseline.render(["cus_customer", "cus_customer.name", "zzz_other.x"])
+      assert Gen.own_debt(s, inherited) == []
+
+      own = Samen.CatalogMeaning.Baseline.render(["cus_customer", "wid_record", "wid_record.name", "wga_record_count.segment"])
+      assert Gen.own_debt(s, own) == ["wga_record_count.segment", "wid_record", "wid_record.name"]
+    end
+
+    test "own_debt/2 does not match a table that merely shares the abbrev prefix" do
+      assert Gen.own_debt(spec(), Samen.CatalogMeaning.Baseline.render(["wid_recordings.title"])) == []
+    end
   end
 end

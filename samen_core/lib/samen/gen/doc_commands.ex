@@ -117,7 +117,8 @@ defmodule Samen.Gen.DocCommands do
     |> Enum.map(fn part ->
       {env, argv} =
         part
-        |> String.split(~r/\s+/)
+        # shell-like split: a quoted argument (`--description "a b c"`) is ONE token
+        |> OptionParser.split()
         |> Enum.split_while(&Regex.match?(~r/\A[A-Z][A-Z0-9_]*=\S*\z/, &1))
 
       %{
@@ -180,7 +181,7 @@ defmodule Samen.Gen.DocCommands do
       %{
         id: :gen_resource,
         match: fn argv ->
-          task_with_flags?(argv, "samen.gen.resource", ~w(--scope --resource --abbrev))
+          task_with_flags?(argv, "samen.gen.resource", ~w(--scope --resource --abbrev --description))
         end,
         evidence: [{:post_probe, ~s|"samen.gen.resource"|}]
       },
@@ -191,6 +192,13 @@ defmodule Samen.Gen.DocCommands do
         # cover it — this dedicated rule pins the shape the probe runs).
         id: :gen_resource_live,
         match: fn argv ->
+          # ADR-043 §8a (A3): `--description "…"` is required now; the pair is not part of the shape the probe pins.
+          argv =
+            case argv do
+              [mix, task, a, b, c, d, e, f, "--description", _ | rest] -> [mix, task, a, b, c, d, e, f | rest]
+              _ -> argv
+            end
+
           match?(
             ["mix", "samen.gen.resource", "--scope", _, "--resource", _, "--abbrev", _, "--live"],
             argv

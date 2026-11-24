@@ -30,9 +30,13 @@ a `Samen.Migration` with abbrev-prefixed columns + `catalog_sync`, the append-on
 reservation, the domain wiring, the four G26 red-path test files and a per-resource
 anti-tautology probe.
 
+`--description` is required: it is the resource's catalog description (ADR-043 §8a), checked against the same rules
+`mix samen.verify.catalog_meaning` applies. The generator describes the fixed scaffold fields itself and takes no other
+field specs, so it never invents meaning; a field you add by hand needs its own `description:` in the same edit.
+
 ```bash
 mix samen.gen.scope --scope Crm
-mix samen.gen.resource --scope Crm --resource Widget --abbrev wdg
+mix samen.gen.resource --scope Crm --resource Widget --abbrev wdg --description "A configurable widget a team offers, with a status and one vault-routed value."
 mix ecto.migrate
 mix samen.catalog.dump --output schema.dict.json
 MIX_ENV=test bash ci.sh
@@ -272,7 +276,7 @@ inherited kit (no bespoke markup, no per-vertical UI library). Requires a `--web
 (the surfaces mount on samen_web's `Samen.UI`).
 
 ```bash
-mix samen.gen.resource --scope Crm --resource Widget --abbrev wdg --live
+mix samen.gen.resource --scope Crm --resource Widget --abbrev wdg --description "A configurable widget a team offers, with a status and one vault-routed value." --live
 ```
 
 This emits, alongside the headless output, three LiveViews under the app's

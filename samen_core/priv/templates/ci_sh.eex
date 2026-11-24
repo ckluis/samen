@@ -37,6 +37,14 @@ if ! diff -q "$COMMITTED_DICT" "$FRESH_DICT" > /dev/null 2>&1; then
 fi
 echo "    PASSED (schema.dict.json matches regenerated output)"
 
+# 1c. catalog_meaning (ADR-043 §8a): every catalogued table and field is described, with description quality and
+#     synonym rules enforced. The undescribed debt is the exact, shrink-only list `catalog_meaning.baseline`
+#     (written once by `mix samen.gen.app`, holding only what the mounted scopes inherit; `--shrink` lowers it,
+#     nothing raises it). It reads compile-time metadata only — NO database.
+echo "--- step 1c/18: mix samen.verify.catalog_meaning (catalog meaning + shrink-only baseline)"
+mix samen.verify.catalog_meaning
+echo "    PASSED"
+
 echo "--- step 2/18: mix samen.verify.catalog_parity"
 mix samen.verify.catalog_parity
 echo "    PASSED"

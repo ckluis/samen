@@ -47,6 +47,12 @@ defmodule <%= module %>.Vertical.Record do
     abbrev: "<%= abbrev %>",
     archivable: true
 
+  resource do
+    description(
+      "A named, segmented item an organization keeps in this app; it also carries one vault-routed sensitive value."
+    )
+  end
+
   postgres do
     table("<%= resource_table %>")
     repo(<%= module %>.Repo)
@@ -90,13 +96,25 @@ defmodule <%= module %>.Vertical.Record do
   end
 
   attributes do
-    attribute(:name, :string, public?: true)
-    attribute(:segment, :string, public?: true)
+    attribute(:name, :string,
+      public?: true,
+      description: "Name of the item as entered; optional, with no format or uniqueness enforced."
+    )
+
+    attribute(:segment, :string,
+      public?: true,
+      description:
+        "Cohort label the token-blind aggregates group items by; free text, so no fixed set of segments is enforced."
+    )
   end
 
   pii do
     vault(:pii_secret)
-    pii_attribute(:secret, :string, vault: :pii_secret)
+    pii_attribute(:secret, :string,
+      vault: :pii_secret,
+      description:
+        "Sensitive text kept only in the vault and masked on every read unless a distinct-party reveal grant allows it."
+    )
     reveal(:reveal_<%= abbrev %>)
   end
 
