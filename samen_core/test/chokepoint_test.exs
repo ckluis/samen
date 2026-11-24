@@ -53,7 +53,9 @@ defmodule Samen.ChokepointTest do
       from = Path.join(src, name)
       to = Path.join(dst, name)
 
-      case :prim_file.read_file_info(from) do
+      # read_link_info does not follow links: a symlink (valid, looping or dangling) is refused loudly rather than
+      # recursed into or crashing as a CaseClauseError. lib/ has none today.
+      case :prim_file.read_link_info(from) do
         {:ok, info} when elem(info, 2) == :directory ->
           copy_tree!(from, to)
 
@@ -62,10 +64,52 @@ defmodule Samen.ChokepointTest do
             :ok -> :ok
             {:error, reason} -> raise File.Error, reason: reason, action: "write to file", path: to
           end
+
+        {:ok, info} ->
+          raise "copy_tree!: #{from} is a #{elem(info, 2)} (a symlink or special file); only directories and regular files are copied, and #{@lib_dir} has no symlinks"
+
+        {:error, reason} ->
+          raise File.Error, reason: reason, action: "stat", path: from
       end
     end
 
     :ok
+  end
+
+  describe "copy_tree!" do
+    setup do
+      src = Path.join(System.tmp_dir!(), "samen_copy_tree_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(src)
+      File.write!(Path.join(src, "real.ex"), "x")
+      on_exit(fn -> File.rm_rf!(src) end)
+      %{src: src}
+    end
+
+    test "copies regular files and nested directories", %{src: src} do
+      File.mkdir_p!(Path.join(src, "sub/deeper"))
+      File.write!(Path.join(src, "sub/deeper/b.ex"), "y")
+      dst = src <> "_dst"
+      on_exit(fn -> File.rm_rf!(dst) end)
+      assert copy_tree!(src, dst) == :ok
+      assert Samen.SourceScan.read!(Path.join(dst, "sub/deeper/b.ex")) == "y"
+    end
+
+    test "a symlink to a file fails loudly with a clear message", %{src: src} do
+      :ok = File.ln_s(Path.join(src, "real.ex"), Path.join(src, "link.ex"))
+      dst = src <> "_dst"
+      on_exit(fn -> File.rm_rf!(dst) end)
+      e = assert_raise RuntimeError, fn -> copy_tree!(src, dst) end
+      assert e.message =~ "symlink"
+      assert e.message =~ "link.ex"
+    end
+
+    test "a dangling symlink fails loudly (not a CaseClauseError)", %{src: src} do
+      :ok = File.ln_s(Path.join(src, "nowhere.ex"), Path.join(src, "dangling.ex"))
+      dst = src <> "_dst"
+      on_exit(fn -> File.rm_rf!(dst) end)
+      e = assert_raise RuntimeError, fn -> copy_tree!(src, dst) end
+      assert e.message =~ "dangling.ex"
+    end
   end
 
   describe "RED PATH — a second decrypt call site is caught" do
