@@ -5,15 +5,15 @@
 # TEST_FILES: test/samen/web/identity_authz_test.exs
 # MUST_FAIL: an admin cannot demote or suspend an owner or a peer admin
 diff --git a/samen_core/lib/samen/policy/manage_role.ex b/samen_core/lib/samen/policy/manage_role.ex
-index 3be1a6fb..df8a43a5 100644
+index 37cffc81..d03388b3 100644
 --- a/samen_core/lib/samen/policy/manage_role.ex
 +++ b/samen_core/lib/samen/policy/manage_role.ex
-@@ -47,7 +47,7 @@ defmodule Samen.Policy.ManageRole do
- 
-     case stored_role(changeset) do
-       {:ok, :none} -> {:ok, new_role_ok?(changeset, actor_role)}
--      {:ok, stored} -> {:ok, Samen.Scope.Role.may_manage?(actor_role, stored) and new_role_ok?(changeset, actor_role)}
-+      {:ok, _stored} -> {:ok, Samen.Scope.Role.may_manage?(actor_role, :viewer) and new_role_ok?(changeset, actor_role)}
-       # the row's role could not be established: the check itself errors, so the write is refused (fail closed,
-       # never a guess and never an `{:ok, false}` that reads as an ordinary denial)
-       {:error, reason} -> {:error, reason}
+@@ -51,7 +51,7 @@ defmodule Samen.Policy.ManageRole do
+          {:ok, stored} <- stored_role(changeset) do
+       case stored do
+         :none -> {:ok, new_role_ok?(changeset, actor_role)}
+-        stored -> {:ok, Samen.Scope.Role.may_manage?(actor_role, stored) and new_role_ok?(changeset, actor_role)}
++        _stored -> {:ok, Samen.Scope.Role.may_manage?(actor_role, :viewer) and new_role_ok?(changeset, actor_role)}
+       end
+     end
+   end
