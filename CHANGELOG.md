@@ -31,6 +31,17 @@ All notable changes to Samen are recorded here. The format follows
   Sending the value a row already has as `org_id` passes only when the record in hand has `org_id` loaded; with it
   unloaded the write is refused, because the pin cannot tell the value is unchanged (load it with `Ash.load!/2`).
   `Samen.OrgIdPinnedGuard.walk/2` is the walk the per-host guard tests use.
+- **Fixed: the `org_id` pin was decided once, when the changeset was built.** A changeset built with `authorize?: false`
+  and then run authorized moved a row to another org. `Samen.Policy.OrgIdPinned` now also re-checks in a
+  `before_action`, from the authorization the action actually runs with. A changeset built normally and run with
+  `authorize?: false` (the notification digest's pattern) is system code at run time and is not re-checked then; an
+  `org_id` change on it is still an error from the build, so that pattern behaves exactly as before. An authorized
+  upsert that would rewrite `org_id` on a conflicting row is now refused unless `org_id` is part of the identity it
+  conflicts on (an action declared `upsert?`, or a run naming `upsert_identity:`); a run-option upsert on the primary
+  key alone is indistinguishable from a create and is not covered. An atomic update whose own change writes `org_id`
+  after the pin looked is refused too (a guard test, not a fix: it already was). Sabotages 1317, 1318.
+- **Fixed: `Samen.Policy.ManageUser` passed an admin for a target with no id** (the template record of a bulk or
+  query-based write), reading it as a membership-less viewer. It now refuses. No bulk User write exists today.
 - **Fixed: a viewer could edit another user's handle, name and emails, suspend an admin, or reactivate themselves; any
   in-org actor could create or destroy a user row.** `Identity.User` writes rested on `OrgScope` alone. A user now edits
   their own profile fields; changing another user's row, anyone's `status`, or destroying a user needs the rank rule

@@ -1,0 +1,20 @@
+# SABOTAGE: OrgIdPinned never looks at an upsert, so an authorized upsert on an identity without org_id 
+#   rewrites another org's row
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/org_id_pinned_test.exs
+# MUST_FAIL: RED: an upsert on an identity without org_id that rewrites org_id is refused
+diff --git a/samen_core/lib/samen/policy/org_id_pinned.ex b/samen_core/lib/samen/policy/org_id_pinned.ex
+index 83346d7a..a38348c5 100644
+--- a/samen_core/lib/samen/policy/org_id_pinned.ex
++++ b/samen_core/lib/samen/policy/org_id_pinned.ex
+@@ -68,7 +68,7 @@ defmodule Samen.Policy.OrgIdPinned do
+   # At action time: the authorization the action runs with, as Ash records it on the changeset.
+   defp recheck(changeset) do
+     if changeset.context[:private][:authorize?] != false do
+-      changeset |> check(%{}) |> check_upsert()
++      changeset |> check(%{})
+     else
+       changeset
+     end

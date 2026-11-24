@@ -911,6 +911,21 @@ defmodule Samen.Web.IdentityAuthzTest do
       assert {:ok, _} = create.(scope(r, :admin))
     end
 
+    test "RED: a target with no id (the template record of a bulk or query-based write) is refused, even for an admin" do
+      r = register!()
+      lower = mk_user(r, :member, "g-template-lower")
+      admin = scope(r, :admin).actor
+      match = fn data -> Samen.Policy.ManageUser.match?(admin, %{changeset: Ash.Changeset.for_update(data, :update, %{handle: "bulk"}, authorize?: false)}, membership: Membership) end
+
+      # No id: the target's rank cannot be looked up, so it must not read as "a viewer an admin may manage"
+      assert {:ok, false} = match.(struct(User, id: nil, org_id: r.org.id))
+      # an actor whose own id is blank must not "own" a row with no id either
+      assert {:ok, false} = Samen.Policy.ManageUser.match?(%{admin | id: nil}, %{changeset: Ash.Changeset.for_update(struct(User, id: nil, org_id: r.org.id), :update, %{handle: "bulk"}, authorize?: false)}, membership: Membership)
+
+      # CONTROL: the same admin over a real, lower-ranked row is allowed
+      assert {:ok, true} = match.(User |> Ash.Query.filter(id == ^lower.id) |> Ash.read_one!(authorize?: false))
+    end
+
     test "CONTROL: Membership :destroy and Role writes keep their rank / admin gates (they were already closed)" do
       r = register!()
       member = mk_user(r, :member, "g-m-destroy")

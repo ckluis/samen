@@ -56,7 +56,7 @@ defmodule Demo.OrgIdPinnedTest do
         assert org_of(unquote(resource), row.id) == a.id
       end
 
-      test "positive control: the same actor can still update the row's other fields (and write its own org_id back)" do
+      test "positive control: the same actor can still update the row's other fields" do
         a = mk_org("pin-pa")
         row = seed(unquote(resource), Map.put(unquote(Macro.escape(create_attrs)), :org_id, a.id))
 
@@ -65,6 +65,37 @@ defmodule Demo.OrgIdPinnedTest do
                  |> Ash.Changeset.for_update(:update, unquote(Macro.escape(update_attrs)), actor: actor(a.id))
                  |> Ash.update(actor: actor(a.id))
 
+        assert org_of(unquote(resource), row.id) == a.id
+      end
+
+      test "an actor can send the row's OWN org_id back when the record in hand has org_id loaded" do
+        a = mk_org("pin-sa")
+        row = seed(unquote(resource), Map.put(unquote(Macro.escape(create_attrs)), :org_id, a.id))
+
+        loaded =
+          unquote(resource)
+          |> Ash.Query.filter(id == ^row.id)
+          |> Ash.Query.ensure_selected([:org_id])
+          |> Ash.read_one!(authorize?: false)
+
+        assert loaded.org_id == a.id
+        attrs = Map.put(unquote(Macro.escape(update_attrs)), :org_id, a.id)
+
+        assert {:ok, _} = loaded |> Ash.Changeset.for_update(:update, attrs, actor: actor(a.id)) |> Ash.update(actor: actor(a.id))
+        assert org_of(unquote(resource), row.id) == a.id
+      end
+
+      test "RED: the same org_id sent back is REFUSED when the record in hand has org_id NOT loaded (the pin cannot tell it is unchanged)" do
+        a = mk_org("pin-na")
+        row = seed(unquote(resource), Map.put(unquote(Macro.escape(create_attrs)), :org_id, a.id))
+
+        unloaded = unquote(resource) |> Ash.Query.filter(id == ^row.id) |> Ash.Query.select([:id]) |> Ash.read_one!(authorize?: false)
+        assert %Ash.NotLoaded{} = unloaded.org_id
+        attrs = Map.put(unquote(Macro.escape(update_attrs)), :org_id, a.id)
+
+        result = unloaded |> Ash.Changeset.for_update(:update, attrs, actor: actor(a.id)) |> Ash.update(actor: actor(a.id))
+
+        assert_org_error(result)
         assert org_of(unquote(resource), row.id) == a.id
       end
 

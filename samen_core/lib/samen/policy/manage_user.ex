@@ -13,7 +13,7 @@ defmodule Samen.Policy.ManageUser do
       (`Samen.Scope.Role.may_manage?/2`). The target's role is its highest-ranked membership
       there; a user with no membership counts as a `:viewer`. Nobody destroys themselves.
 
-  Fail closed: a role lookup that errors is a denial. Options: `membership:` (the host's
+  Fail closed: a role lookup that errors, or a target with no id (the template record of a bulk write), is a denial. Options: `membership:` (the host's
   Membership resource module).
   """
   use Ash.Policy.SimpleCheck
@@ -25,6 +25,11 @@ defmodule Samen.Policy.ManageUser do
     do: "actor edits their own profile, or is an admin who strictly out-ranks the target user"
 
   @impl true
+  # A target with no id is the template record of a bulk or query-based write (no row to look a rank up for).
+  # It must not read as "a membership-less viewer an admin may manage" (that would pass an admin for every row,
+  # owners included), nor as "the actor's own row".
+  def match?(actor, %{changeset: %Ash.Changeset{data: %{id: nil}}}, _opts) when is_map(actor), do: {:ok, false}
+
   def match?(actor, %{changeset: %Ash.Changeset{} = changeset}, opts) when is_map(actor) do
     target_id = changeset.data.id
     org_id = Map.get(actor, :org_id)
