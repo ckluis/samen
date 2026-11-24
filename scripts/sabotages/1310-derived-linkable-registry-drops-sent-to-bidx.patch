@@ -1,0 +1,21 @@
+# SABOTAGE: a blind-index column is dropped from the derived-linkable registry, so erasure no longer covers 
+#   it
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/blind_index_erasure_guard_test.exs
+# MUST_FAIL: no blind-index column goes uncovered, and the identity mount's are all derived
+diff --git a/samen_core/lib/samen/derived_linkable.ex b/samen_core/lib/samen/derived_linkable.ex
+index 03811539..cf5fe0c7 100644
+--- a/samen_core/lib/samen/derived_linkable.ex
++++ b/samen_core/lib/samen/derived_linkable.ex
+@@ -44,8 +44,7 @@ defmodule Samen.DerivedLinkable do
+ 
+   # derived-linkable logical name (string) => the owning-principal's LOGICAL subject attr.
+   @registry %{
+-    "email_bidx" => :id,
+-    "sent_to_bidx" => :credential_id
++    "email_bidx" => :id
+   }
+ 
+   @doc "The canonical derived-linkable registry: `logical_name => logical_subject_attr`."

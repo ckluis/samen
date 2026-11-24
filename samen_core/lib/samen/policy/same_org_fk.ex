@@ -58,6 +58,20 @@ defmodule Samen.Policy.SameOrgFk do
           # No org on the row → OrgScope fails this closed already; nothing to compare.
           changeset
 
+        :no_org ->
+          changeset
+
+        {:error, _unreadable} ->
+          # The row's org could not be read: refuse a write that sets a foreign key rather than skip the check.
+          if Enum.any?(relationships_to_check(changeset, opts), &writing_fk?(changeset, &1)) do
+            Ash.Changeset.add_error(changeset,
+              field: :org_id,
+              message: "same-org FK check could not read this record's org_id"
+            )
+          else
+            changeset
+          end
+
         org_id ->
           rels = relationships_to_check(changeset, opts)
           Enum.reduce(rels, changeset, &validate_relationship(&2, &1, org_id))
@@ -83,10 +97,13 @@ defmodule Samen.Policy.SameOrgFk do
   # (`Samen.Policy.OrgIdPinned`), so on an update the record in hand usually has it NotLoaded. Read
   # it from the table by primary key rather than skipping the check: a NotLoaded org_id must never
   # turn the same-org FK guard into a no-op.
-  defp data_org_id(%{data: %{org_id: %Ash.NotLoaded{}}} = changeset), do: stored_org_id(changeset)
+  defp data_org_id(%{action_type: :update, data: %{org_id: %Ash.NotLoaded{}}} = changeset), do: stored_org_id(changeset)
+  defp data_org_id(%{data: %{org_id: %Ash.NotLoaded{}}}), do: nil
   defp data_org_id(%{data: %{org_id: org_id}}), do: org_id
   defp data_org_id(_), do: nil
 
+  # A tagged result, never an empty value for a failed read: `:unreadable` makes the guard refuse the
+  # write (fail closed), `nil` is "no org on this row" (nothing to compare against).
   defp stored_org_id(%{resource: resource, data: data}) do
     with [pk] <- Ash.Resource.Info.primary_key(resource),
          pk_value when not is_nil(pk_value) <- Map.get(data, pk),
@@ -94,12 +111,22 @@ defmodule Samen.Policy.SameOrgFk do
            AshPostgres.DataLayer.Info.repo(resource, :read) || AshPostgres.DataLayer.Info.repo(resource),
          table when not is_nil(table) <- AshPostgres.DataLayer.Info.table(resource),
          org_src when not is_nil(org_src) <- attribute_source(resource, :org_id),
-         pk_src when not is_nil(pk_src) <- attribute_source(resource, pk),
-         {:ok, %{rows: [[org_bin]]}} when not is_nil(org_bin) <-
-           repo.query("SELECT #{org_src} FROM #{table} WHERE #{pk_src} = $1 LIMIT 1", [dump_uuid(pk_value)]) do
-      load_uuid(org_bin)
+         pk_src when not is_nil(pk_src) <- attribute_source(resource, pk) do
+      case repo.query("SELECT #{org_src} FROM #{table} WHERE #{pk_src} = $1 LIMIT 1", [dump_uuid(pk_value)]) do
+        {:ok, %{rows: [[nil]]}} -> :no_org
+        {:ok, %{rows: [[org_bin]]}} -> load_uuid(org_bin)
+        {:ok, %{rows: []}} -> {:error, :unreadable}
+        {:error, reason} -> {:error, {:unreadable, reason}}
+      end
     else
-      _ -> nil
+      _ -> {:error, :unreadable}
+    end
+  end
+
+  defp writing_fk?(changeset, rel_name) do
+    case Ash.Resource.Info.relationship(changeset.resource, rel_name) do
+      %{type: :belongs_to} = rel -> fk_being_written?(changeset, rel.source_attribute)
+      _ -> false
     end
   end
 

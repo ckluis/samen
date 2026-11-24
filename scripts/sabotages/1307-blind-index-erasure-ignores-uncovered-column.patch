@@ -1,0 +1,19 @@
+# SABOTAGE: erasure reports success while a blind-index column it cannot clear exists
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_erasure_test.exs
+# MUST_FAIL: fail-honest: a blind-index column erasure cannot cover fails the erasure
+diff --git a/samen_core/lib/samen/auth/blind_index_erasure.ex b/samen_core/lib/samen/auth/blind_index_erasure.ex
+index 75510cb2..85e157c7 100644
+--- a/samen_core/lib/samen/auth/blind_index_erasure.ex
++++ b/samen_core/lib/samen/auth/blind_index_erasure.ex
+@@ -178,7 +178,7 @@ defmodule Samen.Auth.BlindIndexErasure do
+   end
+ 
+   defp assert_covered!(resources) do
+-    case uncovered(resources) do
++    case uncovered(resources) |> Enum.take(0) do
+       [] ->
+         :ok
+ 

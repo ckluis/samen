@@ -1,0 +1,20 @@
+# SABOTAGE: the blind-index erasure arm derives no specs, so a host that never installed them tombstones 
+#   nothing
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_erasure_test.exs
+# MUST_FAIL: RED: erasing the principal account clears the credential's email_bidx without any host config
+diff --git a/samen_core/lib/samen/auth/blind_index_erasure.ex b/samen_core/lib/samen/auth/blind_index_erasure.ex
+index 75510cb2..7b8c6700 100644
+--- a/samen_core/lib/samen/auth/blind_index_erasure.ex
++++ b/samen_core/lib/samen/auth/blind_index_erasure.ex
+@@ -155,7 +155,7 @@ defmodule Samen.Auth.BlindIndexErasure do
+   """
+   @spec derived_specs([module()]) :: [map()]
+   def derived_specs(resources) do
+-    for r <- Samen.DerivedLinkable.discover(resources), r.registered?, r.subject_column != nil do
++    for r <- Samen.DerivedLinkable.discover(resources), r.registered?, r.subject_column != nil, false do
+       %{
+         table_name: r.table,
+         bidx_column: r.column,

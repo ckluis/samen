@@ -593,7 +593,12 @@ defmodule Samen.Erasure do
       # own key; a per-tenant data-subject shred matches zero rows, so the org-less human's
       # cross-org login is never broken). Runs INSIDE the tx, fail-closed (pure in-DB write).
       |> Ecto.Multi.run(:blind_index, fn repo, _changes ->
-        {:ok, Samen.Auth.BlindIndexErasure.erase_subject(subject_id, repo, bidx_specs: bidx_specs)}
+        # Fail-honest: a blind index erasure cannot clear fails the erasure (the transaction rolls back).
+        try do
+          {:ok, Samen.Auth.BlindIndexErasure.erase_subject(subject_id, repo, bidx_specs: bidx_specs)}
+        rescue
+          e in ArgumentError -> {:error, {:blind_index_uncovered, Exception.message(e)}}
+        end
       end)
       # STEP 3e — Tier-1 custom-bag erasure arm (ADR-046 §4.2 D3). A `pii_declared: true`
       # custom field stores PLAINTEXT in the sealed `custom` jsonb bag (never vaulted), so

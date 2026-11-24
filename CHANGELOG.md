@@ -34,6 +34,20 @@ All notable changes to Samen are recorded here. The format follows
   Samen.Scopes.Identity` mount passes it, so mounts are unaffected). A screen that edits a profile on a mount-level
   scope must act as the user it edits: `Samen.Web.Settings.Profile.update/4` now does so on the tenant plane. A test that
   changes a user's own `status` as that user must act as an admin over a lower-ranked user instead.
+- **Fixed: erasing a principal account could leave a keyed hash of the erased person's email in place.** The blind-index
+  arm only ran for specs a host had installed (`Samen.Erasure.install_default_specs/1` at application start), so a host
+  that did not call it reported a successful erasure with `email_bidx` still matching the email if the person
+  re-registered, and no host cleared the `Identity.LoginFailure` counters keyed on that index. The arm now derives its
+  specs from the host's live schema at erasure time (`Samen.Auth.BlindIndexErasure.derived_specs/1`: Credential and
+  Invitation `email_bidx`, AuthToken `sent_to_bidx`), purges the login-failure counters keyed on the erased index and on
+  the credential id, and fails the erasure (transaction rolled back) when the live schema has a `_bidx` column it cannot
+  clear. A per-tenant data-subject shred still leaves the shared credential alone. `uncovered/1` and a per-host guard
+  test assert every blind-index column is covered.
+- **Fixed: a subject export decrypted authentication secrets.** `Samen.Dsar.export_subject/2` walked every vault row of
+  the subject id, and a Credential vaults its TOTP secret and recovery-code digests under `:pii_secret` keyed on the
+  credential id, so a tenant-plane export of that id returned them in clear. Authentication secrets are never part of a
+  subject export: the walk excludes secret-class vaults (`Samen.Vault.Class`, `:pii_secret` plus any host vault under
+  `config :samen_core, :secret_vaults`), decided by the vault a field is routed to and never by its name.
 
 ### Security: identity authorization (evaluation 2026-11-13, findings 1, 5, 7, 10, 13, 16)
 
