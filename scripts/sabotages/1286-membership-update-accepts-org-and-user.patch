@@ -1,0 +1,19 @@
+# SABOTAGE: the generic update accepts org_id again (membership-update-accepts-org-and-user)
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: an admin cannot move a lower-ranked membership to another org
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index 3af9f71a..ffdef4be 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -488,7 +488,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
+           update :update do
+             primary?(true)
+             require_atomic?(false)
+-            accept([:role, :status])
++            accept([:role, :status, :user_id, :org_id])
+           end
+ 
+           # Bounded-by-default API read the JSON:API routes bind to (WS-A design §1.1,

@@ -103,4 +103,19 @@ defmodule Demo.ApiAuthRedPathTest do
     refute actor_for(raw1)
     refute api_get("/contacts", raw1).resp_body =~ "Guarded"
   end
+  test "RED: a key whose membership row names a DIFFERENT org than the key authenticates no actor; CONTROL: the same key before the move acts in its own org", %{org: org} do
+    other = mk_org("Other")
+    {raw, key} = mk_api_key(org.id, minter_role: :admin)
+    assert %{org_id: org_id} = actor_for(raw)
+    assert to_string(org_id) == to_string(org.id)
+
+    # a rewritten membership (seeded past the policy: Membership :update no longer accepts org_id)
+    membership_of(key)
+    |> Ash.Changeset.for_update(:update, %{}, authorize?: false)
+    |> Ash.Changeset.force_change_attribute(:org_id, other.id)
+    |> Ash.update!()
+
+    refute actor_for(raw)
+    refute api_get("/contacts", raw).resp_body =~ "Guarded"
+  end
 end

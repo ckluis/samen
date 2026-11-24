@@ -660,5 +660,61 @@ defmodule Samen.Web.IdentityAuthzTest do
     end
   end
 
+  # ===========================================================================
+  # E. A row's org (and a membership's user) cannot be rewritten by the generic update
+  # ===========================================================================
+
+  describe "E. Membership/User/Role :update cannot move a row to another org" do
+    defp org_of(mod, id), do: mod |> Ash.Query.filter(id == ^id) |> Ash.Query.ensure_selected([:org_id]) |> Ash.read!(authorize?: false) |> hd() |> Map.fetch!(:org_id)
+
+    defp mk_org_member(role) do
+      r = register!()
+      # a second user in the registrant's org holding `role`
+      user =
+        User
+        |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, handle: "e-#{System.unique_integer([:positive])}"}, authorize?: false)
+        |> Ash.create!()
+
+      mbr = Membership |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, user_id: user.id, role: role}, authorize?: false) |> Ash.create!()
+      {r, user, mbr}
+    end
+
+    test "RED: an admin cannot move a lower-ranked membership to another org or re-point its user; CONTROL: role and status changes still work" do
+      {r, user, mbr} = mk_org_member(:member)
+      other = register!()
+      s = scope(r, :admin)
+      upd = fn attrs -> mbr |> Ash.Changeset.for_update(:update, attrs, scope: s) |> Ash.update(scope: s) end
+
+      assert {:error, _} = upd.(%{org_id: other.org.id})
+      assert {:error, _} = upd.(%{user_id: other.user.id})
+      assert org_of(Membership, mbr.id) == r.org.id
+      assert reread(Membership, mbr.id).user_id == user.id
+
+      # CONTROL: role/status keep working, under the same ManageRole rule (an admin may set :member/:viewer, never :owner)
+      assert {:ok, %{role: :viewer}} = upd.(%{role: :viewer})
+      assert {:ok, %{status: "suspended"}} = upd.(%{status: "suspended"})
+      assert {:error, _} = upd.(%{role: :owner})
+    end
+
+    test "RED: an admin cannot update a User or Role into another org; CONTROL: the row still updates in place" do
+      {r, user, _mbr} = mk_org_member(:member)
+      other = register!()
+      s = scope(r, :admin)
+
+      assert {:error, _} = user |> Ash.Changeset.for_update(:update, %{org_id: other.org.id}, scope: s) |> Ash.update(scope: s)
+      assert org_of(User, user.id) == r.org.id
+      assert {:ok, %{handle: "renamed-e"}} = user |> Ash.Changeset.for_update(:update, %{handle: "renamed-e"}, scope: s) |> Ash.update(scope: s)
+
+      role =
+        Samen.WebTest.Operator.Role
+        |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, name: :member, rank: 1, label: "M"}, authorize?: false)
+        |> Ash.create!()
+
+      assert {:error, _} = role |> Ash.Changeset.for_update(:update, %{org_id: other.org.id}, scope: s) |> Ash.update(scope: s)
+      assert org_of(Samen.WebTest.Operator.Role, role.id) == r.org.id
+      assert {:ok, %{label: "Renamed"}} = role |> Ash.Changeset.for_update(:update, %{label: "Renamed"}, scope: s) |> Ash.update(scope: s)
+    end
+  end
+
   def plans(_org_id), do: [%{key: "free", label: "Free"}, %{key: "pro", label: "Pro"}]
 end

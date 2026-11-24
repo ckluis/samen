@@ -335,7 +335,15 @@ defmodule Samen.Scopes.Identity.Blueprint do
         unquote(api_preparations)
 
         actions do
-          defaults([:read, :destroy, create: :*, update: :*])
+          defaults([:read, :destroy, create: :*])
+
+          # `org_id` is NOT an update input (the default `update: :*` accepted it: a user could be moved into another
+          # org, identity-authz review 2, #3); a user's org is fixed at create.
+          update :update do
+            primary?(true)
+            require_atomic?(false)
+            accept([:handle, :status, :full_name, :emails])
+          end
 
           # Bounded-by-default API read the JSON:API routes bind to (WS-A design §1.1,
           # ADR-016 §3). PII on `:api_read` resolves per plane via the resource-level
@@ -471,7 +479,17 @@ defmodule Samen.Scopes.Identity.Blueprint do
         end
 
         actions do
-          defaults([:read, :destroy, create: :*, update: :*])
+          defaults([:read, :destroy, create: :*])
+
+          # A membership UPDATE changes its `role` and `status` only (still under `ManageRole`, below). The default
+          # `update: :*` also accepted `org_id` and `user_id`, so an admin could move a lower-ranked membership into
+          # another org or re-point it at another user (identity-authz review 2, #3). A membership's org and user are
+          # fixed at create.
+          update :update do
+            primary?(true)
+            require_atomic?(false)
+            accept([:role, :status])
+          end
 
           # Bounded-by-default API read the JSON:API routes bind to (WS-A design §1.1,
           # ADR-016 §3). `action_type(:read)` policies below cover it.
@@ -543,7 +561,15 @@ defmodule Samen.Scopes.Identity.Blueprint do
         end
 
         actions do
-          defaults([:read, :destroy, create: :*, update: :*])
+          defaults([:read, :destroy, create: :*])
+
+          # The generic update takes the role definition's own fields. `org_id` is NOT an input: the default
+          # `update: :*` accepted it, so an admin could move a role row into another org (identity-authz review 2, #3).
+          update :update do
+            primary?(true)
+            require_atomic?(false)
+            accept([:name, :label, :rank, :enabled])
+          end
         end
 
         policies do

@@ -242,21 +242,31 @@ defmodule Samen.Scope.ApiKey do
   @doc """
   The role a key ACTS with at use time: the LOWER of its stored `minter_role` and the role its
   minting membership holds NOW. `membership` is the key's membership as read at the auth step
-  (`%{role:, status:}`); a key whose membership is missing (`nil`), not `"active"`, or has an
-  out-of-set role is refused (`:error`). So demoting a member lowers every key they minted, and
+  (`%{org_id:, role:, status:}`); a key whose membership is missing (`nil`), not `"active"`, in a
+  DIFFERENT org than the key's own `org_id`, or has an out-of-set role is refused (`:error`). So demoting a member lowers every key they minted, and
   removing or suspending them kills those keys, with no per-key sweep.
 
   Every key-check site calls this (after `acting_role/1`); it is the single place that knows the rule.
   """
   @spec effective_role(map(), map() | nil) :: {:ok, atom()} | :error
-  def effective_role(key_row, %{role: membership_role, status: "active"}) do
-    with {:ok, stored} <- acting_role(key_row),
+  def effective_role(key_row, %{role: membership_role, status: "active"} = membership) do
+    with :ok <- same_org(key_row, membership),
+         {:ok, stored} <- acting_role(key_row),
          {:ok, current} <- acting_role(%{minter_role: membership_role}) do
       {:ok, if(Role.rank(stored) <= Role.rank(current), do: stored, else: current)}
     end
   end
 
   def effective_role(_key_row, _membership), do: :error
+
+  # The membership must belong to the KEY's org. A site that builds its actor's `org_id` from the membership
+  # (demo, the generated plug) would otherwise act in whatever org a rewritten membership row names. Both orgs
+  # must be present and equal; anything else (a missing or unloaded column) fails closed.
+  defp same_org(%{org_id: key_org}, %{org_id: mbr_org}) when is_binary(key_org) and is_binary(mbr_org) do
+    if key_org == mbr_org, do: :ok, else: :error
+  end
+
+  defp same_org(_key_row, _membership), do: :error
 
   @doc """
   The ACTIVE membership of `user_id` in `org_id` (for a key that records a minter user id rather

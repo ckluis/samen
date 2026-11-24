@@ -1,0 +1,19 @@
+# SABOTAGE: the generic update accepts org_id again (role-update-accepts-org-id)
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: an admin cannot update a User or Role into another org
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index 3af9f71a..c2ea7a59 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -568,7 +568,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
+           update :update do
+             primary?(true)
+             require_atomic?(false)
+-            accept([:name, :label, :rank, :enabled])
++            accept([:name, :label, :rank, :enabled, :org_id])
+           end
+         end
+ 

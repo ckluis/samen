@@ -125,6 +125,8 @@ defmodule DemoWeb.Api.KeyAuthPlug do
     # the request fails closed at the org-scope nil-org branch (defence-in-depth with
     # `Samen.Scope.ApiKey.authorized?/5`, which also refuses an expired key at use).
     Samen.Scope.ApiKey.active_query(Demo.Identity.ApiKey, digest, now)
+    # `org_id` is not selected by default: the actor's org is checked against the key's own org (`effective_role/2`).
+    |> Ash.Query.ensure_selected([:id, :org_id, :plane, :scopes, :minter_role, :membership_id, :expires_at])
     # authz-scope: API-key AUTH-STEP lookup keyed on the SHA-256 digest of a server-minted random token — no actor/org
     # exists until this row resolves (revoked/expired filtered out; unmatched digest => :error; a duplicate digest makes read_one error => :unavailable — both fail closed)
     |> Ash.read_one(authorize?: false)

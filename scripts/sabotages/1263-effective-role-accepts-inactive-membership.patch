@@ -6,15 +6,15 @@
 # TEST_FILES: test/api_auth_red_path_test.exs
 # MUST_FAIL: RED: a key whose minter's membership was suspended
 diff --git a/samen_core/lib/samen/scope/api_key.ex b/samen_core/lib/samen/scope/api_key.ex
-index 8a459240..b9e9935e 100644
+index 32aa9bfe..c43a25d0 100644
 --- a/samen_core/lib/samen/scope/api_key.ex
 +++ b/samen_core/lib/samen/scope/api_key.ex
-@@ -223,7 +223,7 @@ defmodule Samen.Scope.ApiKey do
+@@ -249,7 +249,7 @@ defmodule Samen.Scope.ApiKey do
    Every key-check site calls this (after `acting_role/1`); it is the single place that knows the rule.
    """
    @spec effective_role(map(), map() | nil) :: {:ok, atom()} | :error
--  def effective_role(key_row, %{role: membership_role, status: "active"}) do
-+  def effective_role(key_row, %{role: membership_role}) do
-     with {:ok, stored} <- acting_role(key_row),
+-  def effective_role(key_row, %{role: membership_role, status: "active"} = membership) do
++  def effective_role(key_row, %{role: membership_role} = membership) do
+     with :ok <- same_org(key_row, membership),
+          {:ok, stored} <- acting_role(key_row),
           {:ok, current} <- acting_role(%{minter_role: membership_role}) do
-       {:ok, if(Role.rank(stored) <= Role.rank(current), do: stored, else: current)}
