@@ -171,6 +171,7 @@ defmodule Samen.Scopes.Identity do
         unquote(domain),
         unquote(repo),
         unquote(abbrevs.user),
+        unquote(membership_mod),
         unquote(json_api?)
       )
 

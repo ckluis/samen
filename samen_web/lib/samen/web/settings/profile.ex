@@ -48,6 +48,8 @@ defmodule Samen.Web.Settings.Profile do
   def update(mount, scope, user_id, attrs) when is_binary(user_id) and is_map(attrs) do
     Guard.write(:settings_profile_update, scope, fn ->
       with {:ok, user} <- fetch_user(mount, scope, user_id) do
+        scope = self_scope(scope, user_id)
+
         user
         |> Ash.Changeset.for_update(:update, sanitize(attrs), scope: scope)
         |> Ash.update(scope: scope)
@@ -60,6 +62,15 @@ defmodule Samen.Web.Settings.Profile do
   end
 
   def update(_mount, _scope, _user_id, _attrs), do: {:error, :invalid}
+
+  # The tenant plane's mount scope is a synthetic org-level actor (`broker:<org>`) that names no user. A
+  # self-edit acts AS the user the session resolved (`user_id`), which is what `Samen.Policy.ManageUser` keys
+  # a user's own-profile edit on: it permits editing one's own profile fields, never another user's row and
+  # never one's own `status`. An operator-plane (impersonation) scope is left as it is, so it stays refused.
+  defp self_scope(%Samen.Scope{actor: %{plane: :tenant} = actor} = scope, user_id),
+    do: %{scope | actor: %{actor | id: user_id}}
+
+  defp self_scope(scope, _user_id), do: scope
 
   # Read the raw row to update (scope-authorized). We update on the SAME scope the
   # actor read on — the governed changes see the acting actor at build time.

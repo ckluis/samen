@@ -800,4 +800,115 @@ defmodule Samen.Web.IdentityAuthzTest do
   end
 
   def plans(_org_id), do: [%{key: "free", label: "Free"}, %{key: "pro", label: "Pro"}]
+
+  # ===========================================================================
+  # G. User :update / :destroy / :create are not gated on org scope alone
+  # ===========================================================================
+
+  describe "G. User writes follow the role model: a user edits their own profile; everything else is a strictly-below manage" do
+    defp mk_user(r, role, handle) do
+      user =
+        User
+        |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, handle: handle}, authorize?: false)
+        |> Ash.create!()
+
+      Membership |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, user_id: user.id, role: role}, authorize?: false) |> Ash.create!()
+      user
+    end
+
+    defp as_user(r, user, role),
+      do: %Samen.Scope{actor: %{id: user.id, org_id: r.org.id, role: role, verified?: true, kind: :tenant, plane: :tenant}}
+
+    defp upd(user, attrs, s), do: user |> Ash.Changeset.for_update(:update, attrs, scope: s) |> Ash.update(scope: s)
+
+    test "RED: a viewer or member cannot edit another user's handle or status; CONTROL: they edit their own handle" do
+      r = register!()
+      victim = mk_user(r, :member, "g-victim")
+      viewer = mk_user(r, :viewer, "g-viewer")
+      member = mk_user(r, :member, "g-member")
+
+      for {u, role} <- [{viewer, :viewer}, {member, :member}] do
+        s = as_user(r, u, role)
+        assert {:error, _} = upd(victim, %{handle: "hijacked-#{role}"}, s)
+        assert {:error, _} = upd(victim, %{status: "suspended"}, s)
+      end
+
+      assert reread(User, victim.id).handle == "g-victim"
+      assert reread(User, victim.id).status == "active"
+
+      # CONTROL: self-edit of the profile fields
+      assert {:ok, %{handle: "g-viewer-2"}} = upd(viewer, %{handle: "g-viewer-2"}, as_user(r, viewer, :viewer))
+      assert {:ok, %{handle: "g-member-2"}} = upd(member, %{handle: "g-member-2"}, as_user(r, member, :member))
+    end
+
+    test "RED: nobody changes their OWN status (a member cannot reactivate or suspend itself); an admin does so only for a lower rank" do
+      r = register!()
+      member = mk_user(r, :member, "g-self")
+      admin = mk_user(r, :admin, "g-admin")
+      other_admin = mk_user(r, :admin, "g-admin2")
+
+      assert {:error, _} = upd(member, %{status: "suspended"}, as_user(r, member, :member))
+      assert {:error, _} = upd(admin, %{status: "suspended"}, as_user(r, admin, :admin))
+      assert reread(User, member.id).status == "active"
+
+      # an admin may not suspend a peer; may suspend a member (CONTROL)
+      assert {:error, _} = upd(other_admin, %{status: "suspended"}, as_user(r, admin, :admin))
+      assert {:ok, %{status: "suspended"}} = upd(member, %{status: "suspended"}, as_user(r, admin, :admin))
+
+      # the suspended member cannot reactivate itself
+      assert {:error, _} = upd(reread(User, member.id), %{status: "active"}, as_user(r, member, :member))
+      assert reread(User, member.id).status == "suspended"
+    end
+
+    test "RED: an admin cannot edit the owner; CONTROL: the owner edits an admin" do
+      r = register!()
+      admin = mk_user(r, :admin, "g-adm")
+      owner_user = reread(User, r.user.id)
+
+      assert {:error, _} = upd(owner_user, %{handle: "pwned"}, as_user(r, admin, :admin))
+      assert reread(User, r.user.id).handle != "pwned"
+      assert {:ok, %{handle: "renamed-by-owner"}} = upd(admin, %{handle: "renamed-by-owner"}, scope(r, :owner))
+    end
+
+    test "RED: a viewer or member cannot destroy a user, nobody destroys themselves; CONTROL: an admin destroys a member" do
+      r = register!()
+      viewer = mk_user(r, :viewer, "g-del-viewer")
+      admin = mk_user(r, :admin, "g-del-admin")
+      # users WITHOUT a membership row, so a refusal here is the policy and not the membership FK
+      bare = fn h -> User |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, handle: h}, authorize?: false) |> Ash.create!() end
+      victim = bare.("g-del")
+
+      assert {:error, %Ash.Error.Forbidden{}} = Ash.destroy(victim, scope: as_user(r, viewer, :viewer))
+      assert {:error, %Ash.Error.Forbidden{}} = Ash.destroy(victim, scope: as_user(r, victim, :member))
+      assert {:error, %Ash.Error.Forbidden{}} = Ash.destroy(admin, scope: as_user(r, admin, :admin))
+      assert reread(User, victim.id)
+
+      assert :ok = Ash.destroy(victim, scope: as_user(r, admin, :admin))
+      assert reread(User, victim.id) == nil
+    end
+
+    test "RED: a viewer or member cannot create a user row (and so cannot link one to a credential); CONTROL: an admin can" do
+      r = register!()
+      viewer = mk_user(r, :viewer, "g-c-viewer")
+      create = fn s -> User |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, handle: "g-new"}, scope: s) |> Ash.create(scope: s) end
+
+      assert {:error, _} = create.(as_user(r, viewer, :viewer))
+      assert {:ok, _} = create.(scope(r, :admin))
+    end
+
+    test "CONTROL: Membership :destroy and Role writes keep their rank / admin gates (they were already closed)" do
+      r = register!()
+      member = mk_user(r, :member, "g-m-destroy")
+      viewer = mk_user(r, :viewer, "g-m-viewer")
+      mbr = Membership |> Ash.Query.filter(user_id == ^member.id) |> Ash.read!(authorize?: false) |> hd()
+
+      assert {:error, _} = Ash.destroy(mbr, scope: as_user(r, viewer, :viewer))
+      assert {:error, _} =
+               Samen.WebTest.Operator.Role
+               |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, name: :member, rank: 1, label: "M"}, scope: as_user(r, viewer, :viewer))
+               |> Ash.create(scope: as_user(r, viewer, :viewer))
+
+      assert :ok = Ash.destroy(mbr, scope: scope(r, :admin))
+    end
+  end
 end

@@ -1,0 +1,19 @@
+# SABOTAGE: ManageUser no longer ranks the actor against the target user
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: RED: a viewer or member cannot edit another user's handle or status
+diff --git a/samen_core/lib/samen/policy/manage_user.ex b/samen_core/lib/samen/policy/manage_user.ex
+index 06ea9115..83721f7a 100644
+--- a/samen_core/lib/samen/policy/manage_user.ex
++++ b/samen_core/lib/samen/policy/manage_user.ex
+@@ -40,7 +40,7 @@ defmodule Samen.Policy.ManageUser do
+ 
+       true ->
+         case target_role(Keyword.fetch!(opts, :membership), org_id, target_id) do
+-          {:ok, role} -> {:ok, Samen.Scope.Role.may_manage?(actor_role, role)}
++          {:ok, _role} -> {:ok, true}
+           :error -> {:ok, false}
+         end
+     end

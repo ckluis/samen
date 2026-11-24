@@ -25,6 +25,15 @@ All notable changes to Samen are recorded here. The format follows
   An update that needs `org_id` on the record (custom-field validation) loads it with `Ash.load!(record, :org_id)`.
   `Samen.Policy.SameOrgFk` now reads a record's stored `org_id` when the record in hand has it unloaded, where it
   previously skipped the check. `Samen.OrgIdPinnedGuard.walk/2` is the walk the per-host guard tests use.
+- **Fixed: a viewer could edit another user's handle, name and emails, suspend an admin, or reactivate themselves; any
+  in-org actor could create or destroy a user row.** `Identity.User` writes rested on `OrgScope` alone. A user now edits
+  their own profile fields; changing another user's row, anyone's `status`, or destroying a user needs the rank rule
+  membership updates use (`Samen.Policy.ManageUser`: at least `admin` and strictly above the target's highest membership
+  role in the org; nobody changes their own `status` or destroys themselves), and creating a user row needs `admin`.
+  **Upgrade notes:** `Samen.Scopes.Identity.Blueprint.define_user` takes the membership module (the `use
+  Samen.Scopes.Identity` mount passes it, so mounts are unaffected). A screen that edits a profile on a mount-level
+  scope must act as the user it edits: `Samen.Web.Settings.Profile.update/4` now does so on the tenant plane. A test that
+  changes a user's own `status` as that user must act as an admin over a lower-ranked user instead.
 
 ### Security: identity authorization (evaluation 2026-11-13, findings 1, 5, 7, 10, 13, 16)
 
