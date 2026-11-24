@@ -1,0 +1,29 @@
+# SABOTAGE: Invitation generic :update accepts role/status and passes on org scope: any in-org actor raises 
+#   a pending invite to owner
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: RED: an unverified viewer cannot raise a pending invite's role to :owner
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index 1edc9775..985bd29c 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -692,7 +692,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
+           # below) — system paths that must touch an internal column go through
+           # `force_change_attribute` + `authorize?: false`.
+           update :update do
+-            accept([])
++            accept([:role, :status])
+             require_atomic?(false)
+           end
+ 
+@@ -804,7 +804,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
+           # org scope alone); role/status changes are a create-time or lifecycle
+           # transition, never an in-place edit.
+           policy action(:update) do
+-            forbid_if(always())
++            authorize_if(always())
+           end
+ 
+           policy action(:reveal_invitation) do

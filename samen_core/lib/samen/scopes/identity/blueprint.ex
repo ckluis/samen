@@ -681,7 +681,20 @@ defmodule Samen.Scopes.Identity.Blueprint do
         end
 
         actions do
-          defaults([:read, :destroy, create: :*, update: :*])
+          defaults([:read, :destroy, create: :*])
+
+          # No actor-writable generic update. The default `update: :*` accepted
+          # `role`/`status`/`email` under the org-scope policy alone, so ANY in-org
+          # actor could raise a pending invite to `:owner` (accept then lands
+          # `invitation.role`) or flip a revoked one back to `"pending"`. The
+          # lifecycle moves only through `:accept`/`:revoke`/`:expire`; this
+          # `:update` takes NO input and is refused to every actor (the policy
+          # below) — system paths that must touch an internal column go through
+          # `force_change_attribute` + `authorize?: false`.
+          update :update do
+            accept([])
+            require_atomic?(false)
+          end
 
           action :reveal_invitation, :map do
             argument(:actor_id, :string, allow_nil?: false)
@@ -784,6 +797,13 @@ defmodule Samen.Scopes.Identity.Blueprint do
           # calls; any actor-based attempt is refused (defense in depth, the
           # same fail-closed posture `Credential`/`AuthToken`/`Session` use).
           policy action([:accept, :expire]) do
+            forbid_if(always())
+          end
+
+          # The generic `:update` is closed to actors (it would otherwise pass on
+          # org scope alone); role/status changes are a create-time or lifecycle
+          # transition, never an in-place edit.
+          policy action(:update) do
             forbid_if(always())
           end
 
