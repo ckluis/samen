@@ -11,6 +11,18 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Security: identity authorization, round 3
+
+- **Fixed: an admin could demote, suspend or re-role an owner or a peer admin.** `Samen.Policy.ManageRole` judged only the
+  role a membership write was SETTING, so `%{role: :member}` (or `status: "suspended"` together with a lower role)
+  passed for an admin against an owner's or another admin's row. A write on an existing membership (update, destroy) must
+  now out-rank BOTH the role the row holds in the database and the role being set. The stored role is read by primary key
+  on the write repo, never from the record in hand (which may be stale or carry `%Ash.NotLoaded{}` for `role`); a row it
+  cannot read refuses the write. `Samen.Scope.Role.may_manage?/2` is strict, so an owner cannot demote, suspend or remove
+  another owner either, and no write through `ManageRole` can leave an org without an owner. A caller that relied on an admin
+  editing an owner's or a peer admin's membership now needs an owner (for an admin) or no longer can (for an owner).
+  Sabotages 1322 and 1323.
+
 ### Security: authorization and erasure, round 4
 
 - **Fixed: an in-org actor could move a row into another organisation, or file one under a foreign `org_id`, on any

@@ -941,4 +941,85 @@ defmodule Samen.Web.IdentityAuthzTest do
       assert :ok = Ash.destroy(mbr, scope: scope(r, :admin))
     end
   end
+
+  describe "H. A membership write must out-rank BOTH the stored role and the role being set" do
+    defp h_member(r, role) do
+      user =
+        User
+        |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, handle: "h-#{System.unique_integer([:positive])}"}, authorize?: false)
+        |> Ash.create!()
+
+      Membership |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, user_id: user.id, role: role}, authorize?: false) |> Ash.create!()
+    end
+
+    defp h_mbr_of(r, user_id), do: Membership |> Ash.Query.filter(user_id == ^user_id and org_id == ^r.org.id) |> Ash.read!(authorize?: false) |> hd()
+
+    defp h_upd(mbr, attrs, s), do: mbr |> Ash.Changeset.for_update(:update, attrs, scope: s) |> Ash.update(scope: s)
+
+    test "RED: an admin cannot demote or suspend an owner or a peer admin (role, status, or both in one write); CONTROL: it can demote a member" do
+      r = register!()
+      owner = h_mbr_of(r, r.user.id)
+      peer_admin = h_member(r, :admin)
+      admin = scope(r, :admin)
+
+      for {target, label} <- [{owner, "owner"}, {peer_admin, "peer admin"}],
+          attrs <- [%{role: :member}, %{role: :viewer, status: "suspended"}, %{status: "suspended"}, %{role: :admin}] do
+        result = h_upd(target, attrs, admin)
+        assert match?({:error, _}, result), "an admin must not write #{inspect(attrs)} onto the #{label}"
+      end
+
+      assert reread(Membership, owner.id) |> Map.take([:role, :status]) == %{role: :owner, status: "active"}
+      assert reread(Membership, peer_admin.id) |> Map.take([:role, :status]) == %{role: :admin, status: "active"}
+
+      member = h_member(r, :member)
+      assert {:ok, %{role: :viewer}} = h_upd(member, %{role: :viewer}, admin)
+      assert {:ok, %{status: "suspended"}} = h_upd(member, %{status: "suspended"}, admin)
+    end
+
+    test "RED: the stored role is read from the database, not the record in hand (a stale or partially loaded struct cannot hide a promotion)" do
+      r = register!()
+      member = h_member(r, :member)
+      stale = reread(Membership, member.id)
+      # the row is promoted to admin behind the struct's back
+      {:ok, _} = h_upd(member, %{role: :admin}, scope(r, :owner))
+      admin = scope(r, :admin)
+
+      assert %{role: :member} = stale
+      assert {:error, _} = h_upd(stale, %{role: :viewer}, admin)
+      assert reread(Membership, member.id).role == :admin
+
+      unloaded = %{stale | role: %Ash.NotLoaded{field: :role, type: :attribute}}
+      assert {:error, _} = h_upd(unloaded, %{status: "suspended"}, admin)
+      assert reread(Membership, member.id).status == "active"
+
+      # CONTROL: an owner may still manage that admin, through the same stale struct
+      assert {:ok, %{role: :member}} = h_upd(stale, %{role: :member}, scope(r, :owner))
+    end
+
+    test "RED: an owner cannot demote, suspend or remove another owner (Role.may_manage?/2 is strict: no lateral management); CONTROL: it manages an admin" do
+      r = register!()
+      co_owner = h_member(r, :owner)
+      owner = scope(r, :owner)
+
+      assert {:error, _} = h_upd(co_owner, %{role: :admin}, owner)
+      assert {:error, _} = h_upd(co_owner, %{status: "suspended"}, owner)
+      assert {:error, _} = Ash.destroy(co_owner, scope: owner)
+      assert reread(Membership, co_owner.id).role == :owner
+
+      admin = h_member(r, :admin)
+      assert {:ok, %{role: :member}} = h_upd(admin, %{role: :member}, owner)
+    end
+
+    test "RED: an admin cannot remove an owner or peer admin membership; CONTROL: a member" do
+      r = register!()
+      owner = h_mbr_of(r, r.user.id)
+      peer = h_member(r, :admin)
+      member = h_member(r, :member)
+      admin = scope(r, :admin)
+
+      assert {:error, _} = Ash.destroy(owner, scope: admin)
+      assert {:error, _} = Ash.destroy(peer, scope: admin)
+      assert :ok = Ash.destroy(member, scope: admin)
+    end
+  end
 end

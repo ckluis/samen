@@ -14,12 +14,18 @@ defmodule Samen.Policy.ManageRole do
     * an `admin` minting a `member` → allowed;
     * an `owner` minting an `admin` → allowed.
 
-  ## Reading the target role from the changeset
+  ## Both roles are checked (identity-authz review 3, #1)
 
-  On a create/update the target role is the `:role` attribute the changeset is
-  setting (defaults to the row's current value on update, `:member` fallback on
-  create). If no role is being set, this check is a no-op pass (the row's role is
-  unchanged — nothing to escalate).
+  A write on an EXISTING row (update, destroy) must satisfy the rule against the role the row holds
+  **in the database** AND, when the changeset sets one, the role being set. Checking only the new role let an
+  `admin` demote or suspend an `owner` or a peer `admin` (setting `:member` is "strictly below" an admin).
+  The stored role is read from the table by primary key on the WRITE repo (the connection the caller's
+  transaction is on), never from the record in hand: that record may be stale, or carry
+  `%Ash.NotLoaded{}` for `role`. A row that cannot be read is a denial (fail closed).
+
+  A create has no stored row, so only the role being set counts. Because `may_manage?/2` is strict, an
+  `owner` cannot demote, suspend or remove another `owner` either (`Samen.Scope.Role`: "no lateral
+  escalation"), which also means no write through this check can leave an org without an owner.
 
   ## Why a second check beyond `RoleAtLeast`
 
@@ -37,19 +43,75 @@ defmodule Samen.Policy.ManageRole do
 
   @impl true
   def match?(actor, %{changeset: %Ash.Changeset{} = changeset}, _opts) do
-    case target_role(changeset) do
-      # No role change requested → nothing to escalate. Pass (other policies still
-      # gate the write; this check is only about escalation).
-      nil -> {:ok, true}
-      target -> {:ok, Samen.Scope.Role.may_manage?(actor_role(actor), target)}
+    actor_role = actor_role(actor)
+
+    with {:ok, stored} <- stored_role(changeset),
+         true <- stored == :none or Samen.Scope.Role.may_manage?(actor_role, stored) do
+      {:ok, new_role_ok?(changeset, actor_role)}
+    else
+      _ -> {:ok, false}
     end
   end
 
   # Non-changeset subjects (reads, action inputs) are not role escalations.
   def match?(_actor, _context, _opts), do: {:ok, true}
 
-  defp target_role(changeset) do
-    Ash.Changeset.get_attribute(changeset, :role)
+  # The role being SET (a create, or an update that changes it) must be strictly below the actor. A write that sets
+  # none has nothing to escalate; the stored role was already held to the rule above.
+  defp new_role_ok?(%Ash.Changeset{action_type: type} = changeset, actor_role) when type in [:create, :update] do
+    case Ash.Changeset.get_attribute(changeset, :role) do
+      nil -> true
+      target -> type == :update and not Ash.Changeset.changing_attribute?(changeset, :role) or Samen.Scope.Role.may_manage?(actor_role, target)
+    end
+  end
+
+  defp new_role_ok?(_changeset, _actor_role), do: true
+
+  # `:none` — a create (no stored row). `{:ok, role}` — the role the row holds now. Anything else denies.
+  defp stored_role(%Ash.Changeset{action_type: :create}), do: {:ok, :none}
+
+  defp stored_role(%Ash.Changeset{resource: resource, data: data}) do
+    with pk when pk != [] <- Ash.Resource.Info.primary_key(resource),
+         {:ok, params} <- pk_params(resource, data, pk),
+         repo when not is_nil(repo) <- AshPostgres.DataLayer.Info.repo(resource, :mutate),
+         table when not is_nil(table) <- AshPostgres.DataLayer.Info.table(resource),
+         role_src when not is_nil(role_src) <- source(resource, :role) do
+      where =
+        params
+        |> Enum.with_index(1)
+        |> Enum.map_join(" AND ", fn {{src, _}, i} -> "#{src} = $#{i}" end)
+
+      case repo.query("SELECT #{role_src} FROM #{table} WHERE #{where} LIMIT 1", Enum.map(params, &elem(&1, 1))) do
+        {:ok, %{rows: [[role]]}} when is_binary(role) ->
+          if Samen.Scope.Role.valid?(role), do: {:ok, String.to_existing_atom(role)}, else: :error
+
+        _ ->
+          :error
+      end
+    else
+      _ -> :error
+    end
+  end
+
+  defp pk_params(resource, data, pk) do
+    Enum.reduce_while(pk, {:ok, []}, fn name, {:ok, acc} ->
+      attr = Ash.Resource.Info.attribute(resource, name)
+
+      with value when not is_nil(value) <- Map.get(data, name),
+           {:ok, dumped} <- Ash.Type.dump_to_native(attr.type, value, attr.constraints) do
+        {:cont, {:ok, acc ++ [{source(resource, name), dumped}]}}
+      else
+        _ -> {:halt, :error}
+      end
+    end)
+  end
+
+  defp source(resource, name) do
+    case Ash.Resource.Info.attribute(resource, name) do
+      %{source: source} when not is_nil(source) -> to_string(source)
+      %{name: n} -> to_string(n)
+      _ -> nil
+    end
   end
 
   defp actor_role(actor) when is_map(actor), do: Map.get(actor, :role)

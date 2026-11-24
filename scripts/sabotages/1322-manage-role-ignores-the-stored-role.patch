@@ -1,0 +1,19 @@
+# SABOTAGE: ManageRole checks only the role being set, never the role the row holds
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: an admin cannot demote or suspend an owner or a peer admin
+diff --git a/samen_core/lib/samen/policy/manage_role.ex b/samen_core/lib/samen/policy/manage_role.ex
+index a7a67590..26b0f229 100644
+--- a/samen_core/lib/samen/policy/manage_role.ex
++++ b/samen_core/lib/samen/policy/manage_role.ex
+@@ -46,7 +46,7 @@ defmodule Samen.Policy.ManageRole do
+     actor_role = actor_role(actor)
+ 
+     with {:ok, stored} <- stored_role(changeset),
+-         true <- stored == :none or Samen.Scope.Role.may_manage?(actor_role, stored) do
++         true <- stored == :none or Samen.Scope.Role.may_manage?(actor_role, :viewer) do
+       {:ok, new_role_ok?(changeset, actor_role)}
+     else
+       _ -> {:ok, false}
