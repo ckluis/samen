@@ -146,7 +146,12 @@ defmodule Samen.TestDbTest do
     test "a prepared transaction in the database raises (it never shows in pg_stat_activity); an unknown count raises" do
       assert TestDb.classify([row([])], 1) == :raise
       assert TestDb.classify([row([])], :unknown) == :raise
-      assert TestDb.classify([], 0) == :raise
+    end
+
+    test "an EMPTY listing with a known prepared count of 0 is retried once at once; with prepared > 0 or unknown it raises" do
+      assert TestDb.classify([], 0) == :retry_now
+      assert TestDb.classify([], 1) == :raise
+      assert TestDb.classify([], :unknown) == :raise
     end
   end
 
@@ -176,8 +181,8 @@ defmodule Samen.TestDbTest do
 
         case kind do
           :drop -> opts.drops.(n)
-          :prepared -> {:ok, %{rows: [[Integer.to_string(opts.prepared)]]}}
-          :activity -> {:ok, %{rows: opts.rows}}
+          :prepared -> if opts.prepared == :error, do: {:error, "prepared boom"}, else: {:ok, %{rows: [[Integer.to_string(opts.prepared)]]}}
+          :activity -> {:ok, %{rows: if(is_function(opts.rows), do: opts.rows.(n), else: opts.rows)}}
           :poll -> {:ok, %{rows: opts.poll.(n)}}
         end
       end
@@ -228,6 +233,35 @@ defmodule Samen.TestDbTest do
       refute :drop in calls.()
     end
 
+    test "an EMPTY listing and prepared 0 (the worker left before the listing ran): ONE immediate DROP, no wait; success is ok" do
+      {run, calls} = scripted(%{rows: [], prepared: 0, poll: fn _ -> flunk("must not wait") end, drops: fn _ -> {:ok, :dropped} end})
+
+      assert TestDb.resolve_in_use([], "x_test", @in_use_error, run, 5_000) == :ok
+      assert calls.() == [:activity, :prepared, :drop]
+    end
+
+    test "an EMPTY listing, the single re-issued DROP fails too: raises naming both facts, with the FRESH listing; no third DROP" do
+      rows = fn n -> if n == 1, do: [], else: [activity_row(5, "client backend", "SELECT secret FROM t")] end
+      {run, calls} = scripted(%{rows: rows, prepared: 0, poll: fn _ -> flunk("must not wait") end, drops: fn _ -> {:error, @in_use_error} end})
+
+      e = assert_raise RuntimeError, fn -> TestDb.resolve_in_use([], "x_test", @in_use_error, run, 5_000) end
+      assert e.message =~ ~s("x_test")
+      assert e.message =~ "first listing was empty"
+      assert e.message =~ "re-issued"
+      assert e.message =~ "pid=5 "
+      refute e.message =~ "SELECT secret"
+      assert Enum.count(calls.(), &(&1 == :drop)) == 1
+      assert Enum.count(calls.(), &(&1 == :activity)) == 2
+    end
+
+    test "an EMPTY listing with prepared > 0 or an unknown count raises at once, no DROP" do
+      for prepared <- [2, :error] do
+        {run, calls} = scripted(%{rows: [], prepared: prepared, poll: fn _ -> flunk("must not wait") end, drops: fn _ -> flunk("must not DROP") end})
+        assert_raise RuntimeError, fn -> TestDb.resolve_in_use([], "x_test", @in_use_error, run, 5_000) end
+        refute :drop in calls.()
+      end
+    end
+
     test "a prepared transaction raises at once and is counted in the message" do
       {run, calls} = scripted(%{rows: av(), prepared: 2, poll: fn _ -> flunk("must not wait") end, drops: fn _ -> flunk("must not DROP") end})
 
@@ -241,7 +275,11 @@ defmodule Samen.TestDbTest do
 
       run = fn _c, sql, _t ->
         Agent.update(seen, &[sql | &1])
-        if sql =~ "pg_prepared_xacts", do: {:ok, %{rows: [["0"]]}}, else: {:ok, %{rows: []}}
+        cond do
+          sql =~ "pg_prepared_xacts" -> {:ok, %{rows: [["0"]]}}
+          sql =~ "DROP DATABASE" -> {:error, @in_use_error}
+          true -> {:ok, %{rows: []}}
+        end
       end
 
       assert_raise RuntimeError, fn -> TestDb.resolve_in_use([], "x_test", @in_use_error, run, 100) end

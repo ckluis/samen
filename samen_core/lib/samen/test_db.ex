@@ -47,6 +47,20 @@ defmodule Samen.TestDb do
     * `{:error, :already_up}` from the create after a successful drop raises.
     * No raised message contains a password or URL.
 
+  ## The blockers, and the three outcomes
+
+  The BLOCKERS are the set listed from `pg_stat_activity` (plus the prepared-transaction count) AFTER the 55006, not
+  the set that caused it; a session that left in between is not among them. From that listing there are three outcomes:
+
+    1. every listed backend is an autovacuum worker and no prepared transaction exists: wait (bounded, by pid) for
+       them to leave, then re-issue the DROP exactly once;
+    2. the listing is EMPTY and the prepared count is a known 0: the blocker left between the DROP giving up and the
+       listing (on CI an autovacuum worker exited 0.4 s after the DROP gave up), so re-issue the DROP exactly once,
+       immediately, with no wait. If it succeeds nobody was attached; if it fails, raise with the fresh listing and
+       say the first one was empty;
+    3. anything else (ANY non-autovacuum backend, a prepared transaction, an unknown prepared count, a failed
+       listing) raises at once with no second DROP.
+
   ## Safety
 
   Both functions REFUSE (`ArgumentError`, before any connection is made):
@@ -140,6 +154,29 @@ defmodule Samen.TestDb do
             raise in_use_message(db, error, "autovacuum workers #{inspect(left)} did not leave within #{bound_ms} ms", rows, prepared)
         end
 
+      :retry_now ->
+        # The listing is empty and nothing pins the database: the blocker (an autovacuum worker Postgres had signalled,
+        # say) left between the DROP giving up and the listing. Re-issue the DROP exactly once, at once, no wait. If it
+        # succeeds nobody was attached; if it fails, raise with the FRESH listing and say the first one was empty.
+        case run.(config, drop_sql(db), :infinity) do
+          {:ok, _} ->
+            :ok
+
+          {:error, %Postgrex.Error{postgres: %{pg_code: @in_use}} = second} ->
+            {rows, prepared} = blockers(config, db, run)
+
+            raise in_use_message(
+                    db,
+                    second,
+                    "the first listing was empty (the blocker had left before it ran), so the DROP was re-issued once at once, and it failed too",
+                    rows,
+                    prepared
+                  )
+
+          {:error, second} ->
+            raise "Samen.TestDb: could not drop database #{inspect(db)}: the first listing was empty, so the DROP was re-issued once at once, and it failed: #{format(second)}"
+        end
+
       :raise ->
         raise in_use_message(db, error, nil, rows, prepared)
     end
@@ -149,14 +186,16 @@ defmodule Samen.TestDb do
   # Pure. `rows` are the maps `blockers/2` lists; `prepared` is the number of prepared transactions in the database
   # (they block the DROP and never appear in pg_stat_activity). Classified on `backend_type` ONLY: a client backend
   # with an empty application name, user or address is still a client.
-  @spec classify([map()], non_neg_integer() | :unknown) :: {:wait, [integer()]} | :raise
-  def classify(rows, prepared) do
-    if rows != [] and prepared == 0 and Enum.all?(rows, &(Map.get(&1, :backend_type) == "autovacuum worker")) do
-      {:wait, Enum.map(rows, & &1.pid)}
-    else
-      :raise
-    end
+  @spec classify([map()], non_neg_integer() | :unknown) :: {:wait, [integer()]} | :retry_now | :raise
+  # An empty listing with a KNOWN prepared count of 0 means the blocker left before the listing ran: `:retry_now`
+  # (one immediate DROP, no wait). Empty with prepared > 0 or unknown raises. ANY non-autovacuum backend raises.
+  def classify([], 0), do: :retry_now
+
+  def classify([_ | _] = rows, 0) do
+    if Enum.all?(rows, &(Map.get(&1, :backend_type) == "autovacuum worker")), do: {:wait, Enum.map(rows, & &1.pid)}, else: :raise
   end
+
+  def classify(_rows, _prepared), do: :raise
 
   @doc false
   # Waits (bounded) until none of `pids` is in pg_stat_activity. Terminates nothing: Postgres has already asked them to exit.

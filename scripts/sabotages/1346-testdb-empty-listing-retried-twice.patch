@@ -1,0 +1,18 @@
+# SABOTAGE: TestDb re-issues the DROP a second time after an empty-listing retry already failed
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/test_db_test.exs
+# MUST_FAIL: the single re-issued DROP fails too
+diff --git a/samen_core/lib/samen/test_db.ex b/samen_core/lib/samen/test_db.ex
+index 5b60b524..a05da175 100644
+--- a/samen_core/lib/samen/test_db.ex
++++ b/samen_core/lib/samen/test_db.ex
+@@ -163,6 +163,7 @@ defmodule Samen.TestDb do
+             :ok
+ 
+           {:error, %Postgrex.Error{postgres: %{pg_code: @in_use}} = second} ->
++            _ = run.(config, drop_sql(db), :infinity)
+             {rows, prepared} = blockers(config, db, run)
+ 
+             raise in_use_message(
