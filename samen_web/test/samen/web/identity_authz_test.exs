@@ -259,7 +259,86 @@ defmodule Samen.Web.IdentityAuthzTest do
       assert created.expires_at == soon
     end
 
-    test "POSITIVE CONTROL: an update to a PAST expiry retires the key early (the clamp never extends a key)" do
+    test "RED: an admin cannot EXTEND a live key by update (a later time, or nil) — update may only shorten" do
+      r = register!()
+      row = mint!(r, :admin)
+      later = DateTime.add(row.expires_at, 30 * 86_400, :second)
+
+      assert {:ok, same} = key_update(row, :update, %{expires_at: later}, scope(r, :admin))
+      assert same.expires_at == row.expires_at
+      assert Ash.get!(ApiKey, row.id, authorize?: false).expires_at == row.expires_at
+
+      assert {:ok, kept} = key_update(row, :update, %{expires_at: nil}, scope(r, :admin))
+      assert kept.expires_at == row.expires_at
+      assert Ash.get!(ApiKey, row.id, authorize?: false).expires_at == row.expires_at
+    end
+
+    test "RED: an admin cannot extend an OWNER-rank key (and may shorten or revoke it)" do
+      r = register!()
+      owner_key = mint!(r, :owner)
+      later = DateTime.add(owner_key.expires_at, 30 * 86_400, :second)
+
+      assert {:ok, same} = key_update(owner_key, :update, %{expires_at: later}, scope(r, :admin))
+      assert same.expires_at == owner_key.expires_at
+      assert {:ok, same2} = key_update(owner_key, :update, %{expires_at: nil}, scope(r, :admin))
+      assert same2.expires_at == owner_key.expires_at
+
+      # no gain for the admin: shortening / revoking the owner's key is the permitted direction
+      soon = DateTime.utc_now() |> DateTime.add(3600, :second) |> DateTime.truncate(:second)
+      assert {:ok, %{expires_at: ^soon}} = key_update(owner_key, :update, %{expires_at: soon}, scope(r, :admin))
+      assert {:ok, %{revoked_at: %DateTime{}}} = key_update(owner_key, :revoke, %{}, scope(r, :admin))
+    end
+
+    test "RED: an expired key cannot be revived by update, and the shared lookup still refuses it" do
+      r = register!()
+      row = mint!(r, :owner)
+      past = DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.truncate(:second)
+      assert {:ok, dead} = key_update(row, :update, %{expires_at: past}, scope(r, :owner))
+
+      later = DateTime.utc_now() |> DateTime.add(86_400, :second) |> DateTime.truncate(:second)
+
+      for attrs <- [%{expires_at: nil}, %{expires_at: later}, %{expires_at: DateTime.add(past, -5, :second)}] do
+        assert {:error, _} = key_update(dead, :update, attrs, scope(r, :admin))
+        assert {:error, _} = key_update(dead, :update, attrs, scope(r, :owner))
+      end
+
+      fresh = Ash.get!(ApiKey, row.id, authorize?: false)
+      assert fresh.expires_at == past
+      assert [] = KeyScope.active_query(ApiKey, row.token_digest) |> Ash.read!(authorize?: false)
+    end
+
+    test "RED: a revoked key cannot be updated back to a live expiry" do
+      r = register!()
+      row = mint!(r, :admin)
+      assert {:ok, revoked} = key_update(row, :revoke, %{}, scope(r, :admin))
+      later = DateTime.add(row.expires_at, 86_400, :second)
+
+      assert {:error, _} = key_update(revoked, :update, %{expires_at: later}, scope(r, :admin))
+      assert {:error, _} = key_update(revoked, :update, %{expires_at: nil}, scope(r, :admin))
+      assert [] = KeyScope.active_query(ApiKey, row.token_digest) |> Ash.read!(authorize?: false)
+    end
+
+    test "a legacy row with a nil expiry may be given an expiry (clamped), and only shortened after" do
+      r = register!()
+      row = mint!(r, :admin)
+
+      legacy =
+        row
+        |> Ash.Changeset.for_update(:mark_used, %{}, authorize?: false)
+        |> Ash.Changeset.force_change_attribute(:expires_at, nil)
+        |> Ash.update!(authorize?: false)
+
+      assert is_nil(legacy.expires_at)
+      far = DateTime.utc_now() |> DateTime.add(KeyScope.max_ttl_seconds() * 10, :second) |> DateTime.truncate(:second)
+      ceiling = DateTime.add(DateTime.utc_now(), KeyScope.max_ttl_seconds() + 5, :second)
+
+      assert {:ok, bounded} = key_update(legacy, :update, %{expires_at: far}, scope(r, :admin))
+      assert DateTime.compare(bounded.expires_at, ceiling) != :gt
+      assert {:ok, still} = key_update(bounded, :update, %{expires_at: far}, scope(r, :admin))
+      assert still.expires_at == bounded.expires_at
+    end
+
+    test "POSITIVE CONTROL: an update to a PAST expiry retires a live key early (update only ever shortens)" do
       r = register!()
       row = mint!(r, :admin)
       past = DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.truncate(:second)

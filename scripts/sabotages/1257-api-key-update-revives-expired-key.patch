@@ -1,0 +1,19 @@
+# SABOTAGE: ApiKey :update stops refusing an already-expired row: nil / a later time revives a retired key
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: RED: an expired key cannot be revived by update
+diff --git a/samen_core/lib/samen/scope/api_key_expiry.ex b/samen_core/lib/samen/scope/api_key_expiry.ex
+index 1070386e..f405741c 100644
+--- a/samen_core/lib/samen/scope/api_key_expiry.ex
++++ b/samen_core/lib/samen/scope/api_key_expiry.ex
+@@ -58,7 +58,7 @@ defmodule Samen.Scope.ApiKey.ClampExpiry do
+         match?(%Ash.NotLoaded{}, Map.get(data, :expires_at)) ->
+           Ash.Changeset.add_error(changeset, field: :expires_at, message: "the key's current expiry was not loaded")
+ 
+-        ApiKey.expired?(data, now) ->
++        false ->
+           Ash.Changeset.add_error(changeset, field: :expires_at, message: "an expired key cannot be changed")
+ 
+         true ->
