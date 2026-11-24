@@ -50,10 +50,15 @@ All notable changes to Samen are recorded here. The format follows
   Sabotages 1329 and 1330.
 - **Fixed: an org admin could set its slug to another org's slug or id.** `Samen.Identity.SlugFree` guarded only
   `Org :open_account`, yet the operator console joins an account's admins, customer, subscription and tickets by
-  `org.slug`, so two orgs sharing a slug (or one org's slug equal to another's id) were merged into one account row. `Org
+  `org.slug`, so two orgs sharing a slug (or one org's slug equal to another's id) each showed the other's admins, customer, subscription and tickets. `Org
   :update` and `Org :create` now apply the same rule: a slug being set must not be another org's slug or id (an update that
   keeps the org's own slug passes; a check that cannot run refuses the write). **Upgrade notes:** a rename or create onto a
   taken slug now fails with `slug is already taken`. Existing duplicates are not rewritten. Sabotages 1331 and 1332.
+- **Fixed: `ApiKey :mark_used` could be written by an authorized admin.** The action stamps `last_used_at`, the evidence that
+  a key was presented, and the admin-gated update policy let an org admin or owner set it to any time. It is now a
+  system action: no actor may run it, and the key check's internal `authorize?: false` call (the demo plug, the hosts'
+  tests) is unchanged. **Upgrade notes:** a host that stamps `last_used_at` for an actor must do so from its key check
+  with `authorize?: false`. Sabotage 1333.
 
 ### Security: authorization and erasure, round 4
 

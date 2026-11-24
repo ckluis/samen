@@ -744,6 +744,12 @@ defmodule Samen.Scopes.Identity.Blueprint do
             authorize_if(always())
           end
 
+          # `:mark_used` is the authentication path's own stamp ("last used" is evidence a key was presented). It
+          # runs only as the key check's internal `authorize?: false` call; no actor, an admin included, may write it.
+          policy action(:mark_used) do
+            forbid_if(always())
+          end
+
           # No escalation: a minted key may not act above the actor that mints it.
           policy action(:create) do
             forbid_unless(Samen.Policy.MinterRoleCeiling)

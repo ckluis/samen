@@ -1217,4 +1217,25 @@ defmodule Samen.Web.IdentityAuthzTest do
       assert {:ok, _} = Org |> Ash.Changeset.for_create(:create, %{name: "Ok", slug: "l-free-#{System.unique_integer([:positive])}"}, authorize?: false) |> Ash.create()
     end
   end
+  describe "M. ApiKey :mark_used is a system action" do
+    test "RED: an authorized admin (or owner) cannot forge last_used_at; CONTROL: the auth path (no actor) still stamps it" do
+      r = register!()
+      key = mint!(r, :admin)
+      forged = ~U[2020-01-01 00:00:00Z]
+
+      for role <- [:admin, :owner] do
+        s = scope(r, role)
+        assert {:error, _} = key_update(key, :mark_used, %{last_used_at: forged}, s)
+      end
+
+      assert reread(ApiKey, key.id).last_used_at == nil
+
+      stamped = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      assert {:ok, _} =
+               key |> Ash.Changeset.for_update(:mark_used, %{last_used_at: stamped}) |> Ash.update(authorize?: false)
+
+      assert reread(ApiKey, key.id).last_used_at == stamped
+    end
+  end
 end

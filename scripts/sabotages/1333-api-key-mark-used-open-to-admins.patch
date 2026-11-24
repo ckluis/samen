@@ -1,0 +1,20 @@
+# SABOTAGE: ApiKey mark_used is writable by an authorized admin
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: an authorized admin (or owner) cannot forge last_used_at
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index f5c57fc5..f533309c 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -746,9 +746,6 @@ defmodule Samen.Scopes.Identity.Blueprint do
+ 
+           # `:mark_used` is the authentication path's own stamp ("last used" is evidence a key was presented). It
+           # runs only as the key check's internal `authorize?: false` call; no actor, an admin included, may write it.
+-          policy action(:mark_used) do
+-            forbid_if(always())
+-          end
+ 
+           # No escalation: a minted key may not act above the actor that mints it.
+           policy action(:create) do
