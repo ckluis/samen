@@ -6,15 +6,15 @@
 # TEST_FILES: test/samen/web/identity_authz_test.exs
 # MUST_FAIL: RED: an admin cannot EXTEND a live key by update
 diff --git a/samen_core/lib/samen/scope/api_key_expiry.ex b/samen_core/lib/samen/scope/api_key_expiry.ex
-index 1070386e..631e0ab4 100644
+index 98d2ca8b..bd9bac35 100644
 --- a/samen_core/lib/samen/scope/api_key_expiry.ex
 +++ b/samen_core/lib/samen/scope/api_key_expiry.ex
 @@ -78,7 +78,7 @@ defmodule Samen.Scope.ApiKey.ClampExpiry do
-     bounded = min_datetime(requested, ceiling(now))
  
-     case current do
--      %DateTime{} -> min_datetime(bounded, current)
-+      %DateTime{} -> bounded
-       _ -> bounded
-     end
-     |> DateTime.truncate(:second)
+   defp shortened(%DateTime{} = requested, now) do
+     bounded = requested |> min_datetime(ceiling(now)) |> DateTime.truncate(:second)
+-    Ash.Expr.expr(if(is_nil(expires_at), do: ^bounded, else: if(expires_at > ^bounded, do: ^bounded, else: expires_at)))
++    Ash.Expr.expr(if(is_nil(expires_at), do: ^bounded, else: if(expires_at > ^bounded, do: ^bounded, else: ^bounded)))
+   end
+ 
+   defp ceiling(now), do: DateTime.add(now, ApiKey.max_ttl_seconds(), :second)

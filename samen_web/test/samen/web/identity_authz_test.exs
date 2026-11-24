@@ -443,6 +443,40 @@ defmodule Samen.Web.IdentityAuthzTest do
       assert [] = KeyScope.active_query(ApiKey, row.token_digest) |> Ash.read!(authorize?: false)
     end
 
+    test "RED: a STALE struct cannot revive a key another actor already retired or revoked; CONTROL: a fresh struct still shortens" do
+      r = register!()
+      past = DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.truncate(:second)
+
+      # X holds K (expires T1); Y retires K early; X then "shortens" K to T1 - 1s, which the stale struct calls live
+      stale = mint!(r, :admin)
+      shorter = DateTime.add(stale.expires_at, -1, :second)
+      assert {:ok, %{expires_at: ^past}} = key_update(stale, :update, %{expires_at: past}, scope(r, :owner))
+
+      assert {:error, _} = key_update(stale, :update, %{expires_at: shorter}, scope(r, :admin))
+      assert Ash.get!(ApiKey, stale.id, authorize?: false).expires_at == past
+      assert [] = KeyScope.active_query(ApiKey, stale.token_digest) |> Ash.read!(authorize?: false)
+
+      # the same through a revoke: X's struct still says "not revoked"
+      stale2 = mint!(r, :admin)
+      original = stale2.expires_at
+      assert {:ok, %{revoked_at: %DateTime{}}} = key_update(stale2, :revoke, %{}, scope(r, :owner))
+      assert {:error, _} = key_update(stale2, :update, %{expires_at: DateTime.add(original, -1, :second)}, scope(r, :admin))
+      assert Ash.get!(ApiKey, stale2.id, authorize?: false).expires_at == original
+
+      # a stale struct holding a SOONER expiry than the database never writes a later one either
+      live = mint!(r, :admin)
+      sooner = DateTime.utc_now() |> DateTime.add(3600, :second) |> DateTime.truncate(:second)
+      assert {:ok, %{expires_at: ^sooner}} = key_update(live, :update, %{expires_at: sooner}, scope(r, :owner))
+      assert {:ok, kept} = key_update(live, :update, %{expires_at: DateTime.add(sooner, 600, :second)}, scope(r, :admin))
+      assert kept.expires_at == sooner
+      assert Ash.get!(ApiKey, live.id, authorize?: false).expires_at == sooner
+
+      # CONTROL: a fresh struct shortens a live key
+      fresh = mint!(r, :admin)
+      shorter_ok = DateTime.add(fresh.expires_at, -120, :second)
+      assert {:ok, %{expires_at: ^shorter_ok}} = key_update(fresh, :update, %{expires_at: shorter_ok}, scope(r, :admin))
+    end
+
     test "a legacy row with a nil expiry may be given an expiry (clamped), and only shortened after" do
       r = register!()
       row = mint!(r, :admin)
