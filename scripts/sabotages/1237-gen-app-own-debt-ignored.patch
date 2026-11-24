@@ -1,0 +1,20 @@
+# SABOTAGE: Own-resource debt in the new app's baseline must be refused, not written.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/gen_app_test.exs
+# MUST_FAIL: RED: compile_and_dump! raises when the written baseline holds the app's OWN generated entries
+# MUST_FAIL: own_debt/2: only the app's OWN tables count; inherited scope debt is allowed
+diff --git a/samen_core/lib/samen/gen/app.ex b/samen_core/lib/samen/gen/app.ex
+index 44609b5e..6c5c8ba1 100644
+--- a/samen_core/lib/samen/gen/app.ex
++++ b/samen_core/lib/samen/gen/app.ex
+@@ -576,7 +576,7 @@ defmodule Samen.Gen.App do
+   @spec own_debt(%__MODULE__{}, String.t()) :: [String.t()]
+   def own_debt(%__MODULE__{resource_table: record, agg_table: agg}, baseline_src) when is_binary(baseline_src) do
+     for entry <- Samen.CatalogMeaning.Baseline.parse(baseline_src).entries,
+-        hd(String.split(entry, ".", parts: 2)) in [record, agg],
++        hd(String.split(entry, ".", parts: 2)) in [],
+         do: entry
+   end
+ 

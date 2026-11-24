@@ -1,0 +1,21 @@
+# SABOTAGE: mix samen.gen.app must write the new app's catalog_meaning.baseline with --init right after the 
+#   dump.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/gen_app_test.exs
+# MUST_FAIL: RED: the post-compile steps dump the catalog, THEN write the baseline with --init
+diff --git a/samen_core/lib/samen/gen/app.ex b/samen_core/lib/samen/gen/app.ex
+index b097a3e1..1271ed85 100644
+--- a/samen_core/lib/samen/gen/app.ex
++++ b/samen_core/lib/samen/gen/app.ex
+@@ -562,8 +562,7 @@ defmodule Samen.Gen.App do
+   @spec dump_steps(%__MODULE__{}) :: [[String.t()]]
+   def dump_steps(%__MODULE__{}) do
+     [
+-      ["samen.catalog.dump", "--output", "schema.dict.json"],
+-      ["samen.verify.catalog_meaning", "--init"]
++      ["samen.catalog.dump", "--output", "schema.dict.json"]
+     ]
+   end
+ 
