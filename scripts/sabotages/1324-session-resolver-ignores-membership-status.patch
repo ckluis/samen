@@ -5,15 +5,15 @@
 # TEST_FILES: test/samen/web/identity_authz_test.exs
 # MUST_FAIL: a suspended member's EXISTING session resolves no actor
 diff --git a/samen_core/lib/samen/auth/org_actor.ex b/samen_core/lib/samen/auth/org_actor.ex
-index a964ef13..94fca1c9 100644
+index e0c38993..57777be3 100644
 --- a/samen_core/lib/samen/auth/org_actor.ex
 +++ b/samen_core/lib/samen/auth/org_actor.ex
-@@ -162,7 +162,7 @@ defmodule Samen.Auth.OrgActor do
-   @spec active_membership(module(), String.t(), String.t()) :: {:ok, map()} | :none | {:error, term()}
-   def active_membership(membership_mod, user_id, org_id) do
+@@ -183,7 +183,7 @@ defmodule Samen.Auth.OrgActor do
+ 
+   def active_memberships(membership_mod, user_ids, org_ids) do
      membership_mod
--    |> Ash.Query.filter(user_id == ^user_id and org_id == ^org_id and status == "active")
-+    |> Ash.Query.filter(user_id == ^user_id and org_id == ^org_id)
-     |> Ash.Query.ensure_selected([:id, :role, :status])
+-    |> Ash.Query.filter(user_id in ^user_ids and org_id in ^org_ids and status == "active")
++    |> Ash.Query.filter(user_id in ^user_ids and org_id in ^org_ids)
+     |> Ash.Query.ensure_selected([:id, :user_id, :org_id, :role, :status])
      # a user holds one membership per org, a handful at the very most
-     |> Ash.Query.limit(25)
+     |> Ash.Query.limit(25 * length(user_ids))
