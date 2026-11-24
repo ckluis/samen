@@ -35,10 +35,10 @@ defmodule Samen.Identity.SlugFree do
       end
 
     # authz-scope: uniqueness probe over ALL orgs (a collision with another tenant's row must be visible to be refused); boolean only
-    case Ash.exists?(query, authorize?: false) do
-      false -> changeset
-      true -> Ash.Changeset.add_error(changeset, field: :slug, message: "is already taken")
-      _ -> Ash.Changeset.add_error(changeset, field: :slug, message: "could not be checked")
+    case Ash.exists(query, authorize?: false) do
+      {:ok, false} -> changeset
+      {:ok, true} -> Ash.Changeset.add_error(changeset, field: :slug, message: "is already taken")
+      {:error, _} -> Ash.Changeset.add_error(changeset, field: :slug, message: "could not be checked")
     end
   end
 end
