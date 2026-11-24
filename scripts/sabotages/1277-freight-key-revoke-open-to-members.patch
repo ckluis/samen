@@ -1,0 +1,18 @@
+# SABOTAGE: Freight ApiKey write policy loses the admin floor: a member revokes and mints keys
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/freight_api_key_authz_test.exs
+# MUST_FAIL: RED: a member/viewer cannot revoke or mint a Freight key
+diff --git a/driftwood/lib/driftwood/freight.ex b/driftwood/lib/driftwood/freight.ex
+index d2cdbb19..5d93d5f6 100644
+--- a/driftwood/lib/driftwood/freight.ex
++++ b/driftwood/lib/driftwood/freight.ex
+@@ -493,7 +493,6 @@ defmodule Driftwood.Freight.ApiKey do
+     # Only admins+ may mint or revoke keys; org-scoped.
+     policy action_type([:create, :update, :destroy]) do
+       forbid_unless(Samen.Policy.OrgScope)
+-      forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})
+       authorize_if(always())
+     end
+ 

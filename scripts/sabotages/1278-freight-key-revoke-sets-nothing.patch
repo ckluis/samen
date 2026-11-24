@@ -1,0 +1,18 @@
+# SABOTAGE: Freight ApiKey :revoke stops setting revoked_at: the action answers ok and the key stays live
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/freight_api_key_authz_test.exs
+# MUST_FAIL: CONTROL: :revoke is one-way and idempotent
+diff --git a/driftwood/lib/driftwood/freight.ex b/driftwood/lib/driftwood/freight.ex
+index d2cdbb19..28d22cce 100644
+--- a/driftwood/lib/driftwood/freight.ex
++++ b/driftwood/lib/driftwood/freight.ex
+@@ -481,7 +481,6 @@ defmodule Driftwood.Freight.ApiKey do
+       # record in hand happens to carry (a row read with `select` omitting `revoked_at` is
+       # `%Ash.NotLoaded{}`; an `is_nil` test on it failed OPEN, answering `{:ok, _}` with the key
+       # still live), and a second revoke keeps the original instant even under concurrency.
+-      change(Samen.Scope.ApiKey.RevokeOnce)
+     end
+   end
+ 

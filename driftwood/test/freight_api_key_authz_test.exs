@@ -40,6 +40,21 @@ defmodule Driftwood.FreightApiKeyAuthzTest do
     assert again.revoked_at == revoked.revoked_at
   end
 
+  test "RED: a member/viewer cannot revoke or mint a Freight key; CONTROL: an admin revokes" do
+    org = mk_org()
+    {_raw, key} = mk_api_key(org, minter_role: :admin)
+
+    for role <- [:member, :viewer] do
+      s = scope(org, role)
+      assert {:error, _} = key |> Ash.Changeset.for_update(:revoke, %{}, scope: s) |> Ash.update(scope: s)
+      assert {:error, _} = create(org, role, role)
+    end
+
+    assert is_nil(Ash.get!(Driftwood.Freight.ApiKey, key.id, authorize?: false).revoked_at)
+    s = scope(org, :admin)
+    assert {:ok, %{revoked_at: %DateTime{}}} = key |> Ash.Changeset.for_update(:revoke, %{}, scope: s) |> Ash.update(scope: s)
+  end
+
   test "RED: a key row with a nil minter_role resolves no actor; CONTROL: the same key with a role reads" do
     org = mk_org()
     {raw, key} = mk_api_key(org, minter_role: :admin, scopes: %{"freight" => ["read"]})

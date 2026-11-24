@@ -1,0 +1,18 @@
+# SABOTAGE: Freight ApiKey create loses MinterRoleCeiling: an admin mints an owner-rank key
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/freight_api_key_authz_test.exs
+# MUST_FAIL: RED: an admin cannot mint an owner-role key
+diff --git a/driftwood/lib/driftwood/freight.ex b/driftwood/lib/driftwood/freight.ex
+index d2cdbb19..f39db634 100644
+--- a/driftwood/lib/driftwood/freight.ex
++++ b/driftwood/lib/driftwood/freight.ex
+@@ -499,7 +499,6 @@ defmodule Driftwood.Freight.ApiKey do
+ 
+     # No escalation: a minted key may not act above the actor that mints it.
+     policy action(:create) do
+-      forbid_unless(Samen.Policy.MinterRoleCeiling)
+       authorize_if(always())
+     end
+   end
