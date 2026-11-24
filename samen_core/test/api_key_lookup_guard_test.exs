@@ -11,8 +11,35 @@ defmodule Samen.ApiKeyLookupGuardTest do
 
   @root Path.expand("../..", __DIR__)
 
-  # a hand-rolled lookup: an `...ApiKey` module piped straight into a `token_digest` filter
-  @bypass ~r/ApiKey\s*\n\s*\|>\s*Ash\.Query\.filter\(\s*token_digest/
+  # A hand-rolled key lookup, caught by SHAPE rather than by one spelling. A file is a suspect when it
+  # names an api-key resource (`ApiKey`, an alias of it, or an `…api_key` table) AND keys a read on
+  # `token_digest` in any of the forms below. Spellings this catches (each has a control case below):
+  #   * `ApiKey |> Ash.Query.filter(token_digest == ^d)`        (the original, newline or not)
+  #   * `Ash.Query.filter(Mod, token_digest == ^d)`             (module as the FIRST argument)
+  #   * `Key |> …` after `alias …ApiKey, as: Key`               (alias — the file still names ApiKey)
+  #   * `Ash.read_one(Mod, …)` / `Ash.get(Mod, …, token_digest: d)` / `get_by: [token_digest: d]`
+  #   * Ecto: `from k in "…api_key", where: k.token_digest == ^d`
+  #   * the revoked filter first, digest second (any order: the digest filter is matched on its own)
+  # What it cannot see: a lookup built in another file from a helper that hides `token_digest`. That is
+  # why the known sites below are ALSO pinned to the shared query, and why this stays a tripwire.
+  @names_a_key_resource ~r/ApiKey|[a-z_]*api_key\b/
+  @keys_a_read_on_digest [
+    # filter(…token_digest ==…) — module first or piped, other conditions before it, digest on its own line
+    ~r/\bfilter\((?:[^()]|\([^()]*\))*?\btoken_digest\s*==/s,
+    # Ecto: from k in "…api_key", where: k.token_digest == ^d
+    ~r/\bwhere:[^\n]*\btoken_digest\s*==/,
+    ~r/\bget_by\s*:\s*\[?\s*token_digest/,
+    ~r/\bAsh\.get!?\([^\n]*\btoken_digest\b/
+  ]
+
+  # comments and docs name the lookup without being one; strip `# …` (not `#{…}` interpolation)
+  defp code_only(src), do: Regex.replace(~r/(?m)(?<!#)#(?!\{).*$/, src, "")
+
+  @doc false
+  def hand_rolled_lookup?(src) do
+    code = code_only(src)
+    Regex.match?(@names_a_key_resource, code) and Enum.any?(@keys_a_read_on_digest, &Regex.match?(&1, code))
+  end
 
   # every site that authenticates a bearer key, relative to the repo root
   @key_check_sites [
@@ -28,9 +55,16 @@ defmodule Samen.ApiKeyLookupGuardTest do
         do: file
   end
 
+  # the one module that BUILDS the lookup, and this guard's own detector text
+  @allowed ~w(samen_core/lib/samen/scope/api_key.ex)
+
   test "no host lib or template hand-rolls an ApiKey token_digest lookup" do
     offenders =
-      for file <- scanned_files(), File.read!(file) =~ @bypass, do: Path.relative_to(file, @root)
+      for file <- scanned_files(),
+          rel = Path.relative_to(file, @root),
+          rel not in @allowed,
+          hand_rolled_lookup?(File.read!(file)),
+          do: rel
 
     assert offenders == [], "build the lookup with Samen.Scope.ApiKey.active_query/3: #{inspect(offenders)}"
   end
@@ -50,16 +84,25 @@ defmodule Samen.ApiKeyLookupGuardTest do
     end
   end
 
-  test "control: the detector flags a bypassing lookup and passes the shared one" do
-    bypass = """
-    PawChart.Operator.ApiKey
-    |> Ash.Query.filter(token_digest == ^digest)
-    |> Ash.Query.filter(is_nil(revoked_at))
-    """
+  test "control: the detector flags every cheap evasion of the shared lookup and passes the shared one" do
+    evasions = %{
+      "original (pipe, newline)" => "PawChart.Operator.ApiKey\n|> Ash.Query.filter(token_digest == ^digest)\n",
+      "module as the first filter argument" => "Ash.Query.filter(PawChart.Operator.ApiKey, token_digest == ^digest)",
+      "alias" => "alias Demo.Identity.ApiKey, as: Key\nKey\n|> Ash.Query.filter(token_digest == ^d)",
+      "revoked filter first" => "ApiKey |> Ash.Query.filter(is_nil(revoked_at)) |> Ash.Query.filter(token_digest == ^d)",
+      "Ash.read_one with a filter" => "Ash.read_one(Ash.Query.filter(Demo.Identity.ApiKey, token_digest == ^d), authorize?: false)",
+      "Ash.get by digest" => "Ash.get(Demo.Identity.ApiKey, %{token_digest: d}, get_by: [token_digest: d])",
+      "get_by" => "Ash.get(Demo.Identity.ApiKey, get_by: [token_digest: d])",
+      "Ecto from on the api_key table" => ~s|from(k in "dak_api_key", where: k.token_digest == ^d)|
+    }
+
+    for {name, src} <- evasions, do: assert(hand_rolled_lookup?(src), "the detector missed: #{name}")
 
     shared = "Samen.Scope.ApiKey.active_query(PawChart.Operator.ApiKey, digest)\n"
-    assert bypass =~ @bypass
-    refute shared =~ @bypass
+    refute hand_rolled_lookup?(shared)
+
+    # control: a digest lookup on something that is NOT an api key is not flagged (invitations, auth tokens)
+    refute hand_rolled_lookup?("Invitation |> Ash.Query.filter(token_digest == ^d)")
   end
 
   test "active_query/3 raises for a resource with no :expires_at that is not allowlisted; the allowlist is named" do
