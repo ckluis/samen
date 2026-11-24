@@ -1,0 +1,19 @@
+# SABOTAGE: the settings/wizard role resolver counts a suspended or invited membership as authority
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/settings_membership_status_test.exs
+# MUST_FAIL: a suspended or invited membership resolves to no membership
+diff --git a/samen_web/lib/samen/web/settings/reads.ex b/samen_web/lib/samen/web/settings/reads.ex
+index 394ca3e7..d0139dcd 100644
+--- a/samen_web/lib/samen/web/settings/reads.ex
++++ b/samen_web/lib/samen/web/settings/reads.ex
+@@ -168,7 +168,7 @@ defmodule Samen.Web.Settings.Reads do
+            # Only an ACTIVE membership carries authority: a suspended or invited one is "no membership" here, as it is for
+            # a key's minter (`Samen.Scope.ApiKey.effective_role/2`). If a user somehow holds several active rows in
+            # the org the LOWEST role wins, so the answer never depends on row order.
+-           |> Ash.Query.filter(user_id == ^user_id and org_id == ^org_id and status == "active")
++           |> Ash.Query.filter(user_id == ^user_id and org_id == ^org_id)
+            # a bounded read (the reads lint): a user holds one membership per org, a handful at the very most
+            |> Ash.Query.limit(25)
+            |> Ash.read!(scope: scope)

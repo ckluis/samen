@@ -155,7 +155,7 @@ defmodule Samen.Web.Settings.Reads do
   end
 
   @doc """
-  Tagged sibling of `current_membership/4` (WP6): `{:error, :not_found}` is "no membership"
+  Tagged sibling of `current_membership/4` (WP6): only an ACTIVE membership counts; `{:error, :not_found}` is "no (active) membership"
   (a real answer: fail-closed, no authority); `{:error, :unavailable}` is "the lookup FAILED" —
   still fail-closed (no authority is granted), but a screen can say "couldn't check your role"
   instead of "no membership in context".
@@ -165,11 +165,15 @@ defmodule Samen.Web.Settings.Reads do
     case Guard.run(:settings_current_membership, scope, fn ->
            Mount.resource(mount, Membership)
            |> Ash.Query.ensure_selected([:role, :status, :org_id, :id, :user_id])
-           |> Ash.Query.filter(user_id == ^user_id and org_id == ^org_id)
-           |> Ash.Query.limit(1)
+           # Only an ACTIVE membership carries authority: a suspended or invited one is "no membership" here, as it is for
+           # a key's minter (`Samen.Scope.ApiKey.effective_role/2`). If a user somehow holds several active rows in
+           # the org the LOWEST role wins, so the answer never depends on row order.
+           |> Ash.Query.filter(user_id == ^user_id and org_id == ^org_id and status == "active")
+           # a bounded read (the reads lint): a user holds one membership per org, a handful at the very most
+           |> Ash.Query.limit(25)
            |> Ash.read!(scope: scope)
          end) do
-      {:ok, [membership | _]} -> {:ok, membership}
+      {:ok, [_ | _] = memberships} -> {:ok, Enum.min_by(memberships, &{Samen.Scope.Role.rank(&1.role), to_string(&1.id)})}
       {:ok, []} -> {:error, :not_found}
       {:error, :forbidden} -> {:error, :not_found}
       {:error, :unavailable} = unavailable -> unavailable
