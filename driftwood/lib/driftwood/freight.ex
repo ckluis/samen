@@ -477,17 +477,11 @@ defmodule Driftwood.Freight.ApiKey do
       accept([])
       require_atomic?(false)
 
-      change(fn changeset, _ctx ->
-        if is_nil(changeset.data.revoked_at) do
-          Ash.Changeset.force_change_attribute(
-            changeset,
-            :revoked_at,
-            DateTime.utc_now() |> DateTime.truncate(:second)
-          )
-        else
-          changeset
-        end
-      end)
+      # `revoked_at` becomes `coalesce(revoked_at, now)` IN THE UPDATE: it never depends on what the
+      # record in hand happens to carry (a row read with `select` omitting `revoked_at` is
+      # `%Ash.NotLoaded{}`; an `is_nil` test on it failed OPEN, answering `{:ok, _}` with the key
+      # still live), and a second revoke keeps the original instant even under concurrency.
+      change(Samen.Scope.ApiKey.RevokeOnce)
     end
   end
 

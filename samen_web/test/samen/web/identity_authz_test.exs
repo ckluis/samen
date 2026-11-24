@@ -334,6 +334,23 @@ defmodule Samen.Web.IdentityAuthzTest do
       assert again.revoked_at == revoked.revoked_at
     end
 
+    test "RED: revoking a row read WITHOUT revoked_at still revokes it (the action never trusts unloaded data)" do
+      r = register!()
+      row = mint!(r, :admin)
+      partial = ApiKey |> Ash.Query.filter(id == ^row.id) |> Ash.Query.select([:id, :org_id]) |> Ash.read_one!(authorize?: false)
+      assert %Ash.NotLoaded{} = partial.revoked_at
+
+      assert {:ok, _} = key_update(partial, :revoke, %{}, scope(r, :admin))
+      fresh = Ash.get!(ApiKey, row.id, authorize?: false)
+      assert %DateTime{} = fresh.revoked_at
+      assert [] = KeyScope.active_query(ApiKey, row.token_digest) |> Ash.read!(authorize?: false)
+
+      # CONTROL: an already revoked row read the same partial way keeps its ORIGINAL instant
+      partial2 = ApiKey |> Ash.Query.filter(id == ^row.id) |> Ash.Query.select([:id, :org_id]) |> Ash.read_one!(authorize?: false)
+      assert {:ok, _} = key_update(partial2, :revoke, %{}, scope(r, :admin))
+      assert Ash.get!(ApiKey, row.id, authorize?: false).revoked_at == fresh.revoked_at
+    end
+
     test "POSITIVE CONTROL: an admin can revoke through :revoke; a member cannot" do
       r = register!()
       row = mint!(r, :admin)

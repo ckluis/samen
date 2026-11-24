@@ -6,6 +6,8 @@ defmodule Driftwood.FreightApiKeyAuthzTest do
   """
   use Driftwood.ApiCase, async: false
 
+  require Ash.Query
+
   defp scope(org_id, role),
     do: %Samen.Scope{actor: %{id: "u-1", org_id: org_id, role: role, verified?: true, kind: :tenant, plane: :tenant}}
 
@@ -143,5 +145,21 @@ defmodule Driftwood.FreightApiKeyAuthzTest do
 
       refute reads?(raw)
     end
+  end
+
+  test "RED: revoking a row read WITHOUT revoked_at still revokes it; the original instant survives a second revoke" do
+    org = mk_org()
+    {raw, key} = mk_api_key(org, minter_role: :admin)
+    s = scope(org, :admin)
+    partial = fn -> Driftwood.Freight.ApiKey |> Ash.Query.filter(id == ^key.id) |> Ash.Query.select([:id, :org_id]) |> Ash.read_one!(authorize?: false) end
+
+    assert %Ash.NotLoaded{} = partial.().revoked_at
+    assert {:ok, _} = partial.() |> Ash.Changeset.for_update(:revoke, %{}, scope: s) |> Ash.update(scope: s)
+    first = Ash.get!(Driftwood.Freight.ApiKey, key.id, authorize?: false).revoked_at
+    assert %DateTime{} = first
+    refute is_nil(Driftwood.Freight.ApiKey |> Ash.Query.filter(id == ^key.id and not is_nil(revoked_at)) |> Ash.read_one!(authorize?: false))
+
+    assert {:ok, _} = partial.() |> Ash.Changeset.for_update(:revoke, %{}, scope: s) |> Ash.update(scope: s)
+    assert Ash.get!(Driftwood.Freight.ApiKey, key.id, authorize?: false).revoked_at == first
   end
 end
