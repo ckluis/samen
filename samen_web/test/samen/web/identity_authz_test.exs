@@ -1408,7 +1408,7 @@ defmodule Samen.Web.IdentityAuthzTest do
       end
     end
 
-    test "RED: a credential in several orgs (one suspended) resolves the same orgs with ONE membership read; CONTROL: the result, the error path and the single-org case" do
+    test "RED: a credential in several orgs (one suspended) resolves the same orgs with ONE membership read; CONTROL: the result and the single-org case" do
       h1 = register!()
       h2 = register!()
       guest = register!()
@@ -1439,7 +1439,7 @@ defmodule Samen.Web.IdentityAuthzTest do
       assert {:ok, []} = OrgActor.authorized_org_ids_result(mods, Ash.UUID.generate())
 
       # the single statement of the rule still answers a suspended row as "none", an active one as the member
-      assert :none = OrgActor.active_membership(Membership, guest.user.id, h2.org.id) |> then(fn _ -> OrgActor.active_membership(Membership, List.last(joined).user_id, h2.org.id) end)
+      assert :none = OrgActor.active_membership(Membership, List.last(joined).user_id, h2.org.id)
       assert {:ok, %{role: :member}} = OrgActor.active_membership(Membership, List.first(joined).user_id, h1.org.id)
     end
   end
