@@ -36,6 +36,11 @@ All notable changes to Samen are recorded here. The format follows
   `status == "active"` too.
   An already-mounted LiveView keeps the org set it mounted with until it remounts.
   `ManageRole` returns an error tuple (not `{:ok, false}`) when it cannot read the stored role. Sabotages 1324 to 1327.
+- **Fixed: the session cap evicted a live session because of an abandoned expired one.** `Samen.Auth.SessionCreate`
+  counted every unrevoked session toward `Org.max_concurrent_sessions`, expired ones included, so with a cap of 2 an old
+  session still in use plus a newer expired one made the next sign-in revoke the in-use session. Only sessions that can still
+  resolve (unrevoked and not past `expires_at`) count toward the cap now. **Upgrade notes:** none; a credential that sat at its
+  cap with expired sessions now keeps its live ones. Sabotage 1328.
 
 ### Security: authorization and erasure, round 4
 

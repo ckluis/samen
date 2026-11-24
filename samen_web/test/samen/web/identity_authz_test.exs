@@ -1101,4 +1101,44 @@ defmodule Samen.Web.IdentityAuthzTest do
       assert {:ok, _} = upd(user, %{handle: "renamed-by-owner"}, scope(host, :owner))
     end
   end
+
+  describe "J. The session cap counts only LIVE sessions" do
+    alias Samen.Auth.SessionCreate
+    alias Samen.WebTest.Operator.Session
+
+    defp j_mods, do: %{session: Session, org: Org, membership: Membership, user: User}
+
+    defp j_capped_credential!(cap) do
+      r = register!()
+
+      Org
+      |> Ash.get!(r.org.id, authorize?: false)
+      |> Ash.Changeset.for_update(:update, %{max_concurrent_sessions: cap}, authorize?: false)
+      |> Ash.update!()
+
+      r
+    end
+
+    defp j_revoked?(id), do: reread(Session, id).revoked_at != nil
+
+    test "RED: an abandoned EXPIRED session does not occupy a slot, so the live session is not evicted; CONTROL: two live sessions still evict the oldest" do
+      r = j_capped_credential!(2)
+      cred = r.credential.id
+
+      {:ok, a, _} = SessionCreate.create(j_mods(), cred)
+      {:ok, b_expired, _} = SessionCreate.create(j_mods(), cred, ttl_seconds: -60)
+      {:ok, c, _} = SessionCreate.create(j_mods(), cred)
+
+      refute j_revoked?(a.id), "the oldest LIVE session was revoked to make room for an expired one"
+      refute j_revoked?(c.id)
+      # the expired one is neither counted nor revoked on its behalf
+      assert reread(Session, b_expired.id).expires_at < DateTime.utc_now()
+
+      # CONTROL: now a and c are both live and the cap is 2: the next sign-in evicts the oldest live one (a)
+      {:ok, d, _} = SessionCreate.create(j_mods(), cred)
+      assert j_revoked?(a.id)
+      refute j_revoked?(c.id)
+      refute j_revoked?(d.id)
+    end
+  end
 end
