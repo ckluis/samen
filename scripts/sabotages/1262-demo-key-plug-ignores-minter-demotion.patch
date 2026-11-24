@@ -1,0 +1,20 @@
+# SABOTAGE: demo key plug stops capping the role by the minter's current membership: a demoted owner's key 
+#   still acts as owner
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_auth_red_path_test.exs
+# MUST_FAIL: RED: an owner-rank key whose minter was demoted acts with
+diff --git a/demo/lib/demo_web/api/key_auth_plug.ex b/demo/lib/demo_web/api/key_auth_plug.ex
+index 7d7df84b..e2e611fc 100644
+--- a/demo/lib/demo_web/api/key_auth_plug.ex
++++ b/demo/lib/demo_web/api/key_auth_plug.ex
+@@ -170,7 +170,7 @@ defmodule DemoWeb.Api.KeyAuthPlug do
+         # The role is then capped by the minting membership's CURRENT role; a removed/suspended
+         # membership refuses the key (`Samen.Scope.ApiKey.effective_role/2`).
+         with {:ok, _stored} <- Samen.Scope.ApiKey.acting_role(key_row),
+-             {:ok, role} <- Samen.Scope.ApiKey.effective_role(key_row, mbr) do
++             {:ok, role} <- {:ok, key_row.minter_role} do
+           org_id = fetch(mbr, [:org_id, :mbs_org_id])
+           user_id = fetch(mbr, [:user_id, :mbs_user_id])
+ 

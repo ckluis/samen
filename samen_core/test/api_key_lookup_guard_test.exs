@@ -43,10 +43,10 @@ defmodule Samen.ApiKeyLookupGuardTest do
     end
   end
 
-  test "every known key-check site refuses a role-less key through acting_role" do
-    for site <- @key_check_sites do
-      assert File.read!(Path.join(@root, site)) =~ "Samen.Scope.ApiKey.acting_role(",
-             "#{site} builds an actor without Samen.Scope.ApiKey.acting_role/1 (a nil-role key would authenticate)"
+  test "every known key-check site refuses a role-less key and caps the role by the minter's current membership" do
+    for site <- @key_check_sites, fun <- ["acting_role(", "effective_role("] do
+      assert File.read!(Path.join(@root, site)) =~ "Samen.Scope.ApiKey." <> fun,
+             "#{site} builds an actor without Samen.Scope.ApiKey.#{fun}…) (a nil-role or demoted-minter key would act with a stale role)"
     end
   end
 

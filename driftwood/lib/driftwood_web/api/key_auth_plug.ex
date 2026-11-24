@@ -100,7 +100,12 @@ defmodule DriftwoodWeb.Api.KeyAuthPlug do
   defp build_actor(key_row) do
     # A key with no/unknown `minter_role` authorizes nothing (`Samen.Scope.ApiKey.acting_role/1`): refused here
     # rather than given `role: nil`.
-    with {:ok, role} <- Samen.Scope.ApiKey.acting_role(key_row) do
+    # The role is then capped by the minter's CURRENT membership role (a Freight key records a minter
+    # USER id, so the membership is found by user + org); a removed or suspended minter refuses the key.
+    with {:ok, _stored} <- Samen.Scope.ApiKey.acting_role(key_row),
+         {:ok, mbr} <-
+           Samen.Scope.ApiKey.membership_for_user(Driftwood.Operator.Membership, key_row.org_id, key_row.minter_user_id),
+         {:ok, role} <- Samen.Scope.ApiKey.effective_role(key_row, mbr) do
       org_id = to_string(key_row.org_id)
 
       key = %{
@@ -111,7 +116,7 @@ defmodule DriftwoodWeb.Api.KeyAuthPlug do
       }
 
       actor = %{
-        id: key_row.minter_user_id || ("apikey:" <> to_string(key_row.id)),
+        id: to_string(key_row.minter_user_id),
         org_id: org_id,
         role: role,
         plane: key_row.plane,

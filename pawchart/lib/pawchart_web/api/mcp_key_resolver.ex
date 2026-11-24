@@ -50,7 +50,9 @@ defmodule PawChartWeb.Api.McpKeyResolver do
         # A key with no/unknown `minter_role` authorizes nothing (`Samen.Scope.ApiKey.authorized?/4`
         # denies it), so it is refused here — never promoted to a default role.
         with true <- Plug.Crypto.secure_compare(digest, to_string(row.token_digest)),
-             {:ok, role} <- Samen.Scope.ApiKey.acting_role(row) do
+             {:ok, _stored} <- Samen.Scope.ApiKey.acting_role(row),
+             {:ok, mbr} <- membership(row),
+             {:ok, role} <- Samen.Scope.ApiKey.effective_role(row, mbr) do
           {:ok, scope_for(row, role)}
         else
           _ -> :error
@@ -72,7 +74,7 @@ defmodule PawChartWeb.Api.McpKeyResolver do
   # rejected. The `token_digest == ^digest` equality is the enforcing filter for forged-rejection.
   defp lookup(digest) do
     Samen.Scope.ApiKey.active_query(PawChart.Operator.ApiKey, digest)
-    |> Ash.Query.ensure_selected([:id, :org_id, :plane, :scopes, :minter_role, :token_digest, :expires_at])
+    |> Ash.Query.ensure_selected([:id, :org_id, :plane, :scopes, :minter_role, :membership_id, :token_digest, :expires_at])
     # authz-scope: MCP API-key AUTH-STEP lookup keyed on the unique token digest — no actor/org
     # exists until this row resolves (revoked/expired filtered out; unmatched digest => :error, fail closed)
     |> Ash.read_one(authorize?: false)
@@ -84,6 +86,18 @@ defmodule PawChartWeb.Api.McpKeyResolver do
       {:error, error} ->
         Samen.Web.Reads.Guard.report(:pawchart_mcp_key_lookup, nil, error)
         {:error, :unavailable}
+    end
+  end
+
+  # The key's minting membership as it is NOW (role + status): the acting role is capped by it and a
+  # removed/suspended minter refuses the key (`Samen.Scope.ApiKey.effective_role/2`).
+  defp membership(row) do
+    case Ash.load(row, [membership: Ash.Query.select(PawChart.Operator.Membership, [:id, :org_id, :role, :status])],
+           # authz-scope: MCP API-key AUTH-STEP load of the key's own minting membership — no actor exists yet
+           authorize?: false
+         ) do
+      {:ok, %{membership: %{} = mbr}} -> {:ok, mbr}
+      _ -> :error
     end
   end
 

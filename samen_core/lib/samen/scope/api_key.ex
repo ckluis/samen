@@ -214,6 +214,49 @@ defmodule Samen.Scope.ApiKey do
   defp load_uuid(other), do: other
 
   @doc """
+  The role a key ACTS with at use time: the LOWER of its stored `minter_role` and the role its
+  minting membership holds NOW. `membership` is the key's membership as read at the auth step
+  (`%{role:, status:}`); a key whose membership is missing (`nil`), not `"active"`, or has an
+  out-of-set role is refused (`:error`). So demoting a member lowers every key they minted, and
+  removing or suspending them kills those keys, with no per-key sweep.
+
+  Every key-check site calls this (after `acting_role/1`); it is the single place that knows the rule.
+  """
+  @spec effective_role(map(), map() | nil) :: {:ok, atom()} | :error
+  def effective_role(key_row, %{role: membership_role, status: "active"}) do
+    with {:ok, stored} <- acting_role(key_row),
+         {:ok, current} <- acting_role(%{minter_role: membership_role}) do
+      {:ok, if(Role.rank(stored) <= Role.rank(current), do: stored, else: current)}
+    end
+  end
+
+  def effective_role(_key_row, _membership), do: :error
+
+  @doc """
+  The ACTIVE membership of `user_id` in `org_id` (for a key that records a minter user id rather
+  than a membership FK — driftwood's Freight keys). `{:ok, membership}` | `:error` (none, not a
+  UUID, or the lookup failed — all fail closed).
+  """
+  @spec membership_for_user(module(), term(), term()) :: {:ok, map()} | :error
+  def membership_for_user(membership_resource, org_id, user_id) do
+    with {:ok, uid} <- Ecto.UUID.cast(to_string(user_id)),
+         {:ok, oid} <- Ecto.UUID.cast(to_string(org_id)) do
+      membership_resource
+      |> Ash.Query.filter(user_id == ^uid and org_id == ^oid and status == "active")
+      |> Ash.Query.select([:id, :org_id, :user_id, :role, :status])
+      |> Ash.Query.limit(1)
+      # authz-scope: API-key AUTH-STEP membership lookup (no actor exists yet), keyed on the key's own user + org
+      |> Ash.read(authorize?: false)
+      |> case do
+        {:ok, [membership]} -> {:ok, membership}
+        _ -> :error
+      end
+    else
+      _ -> :error
+    end
+  end
+
+  @doc """
   Is this key past its bounded expiry at `now`? (F3.4 deny-on-read predicate.)
 
   `true` iff the key carries an `expires_at` that is at or before `now` (an expiry

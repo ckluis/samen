@@ -1,0 +1,19 @@
+# SABOTAGE: pawchart MCP resolver stops capping the role by the minter's current membership
+#
+# Flips the named test(s).
+# APP: pawchart
+# TEST_FILES: test/mcp_auth_test.exs
+# MUST_FAIL: RED: an owner-rank key whose minter was demoted resolves
+diff --git a/pawchart/lib/pawchart_web/api/mcp_key_resolver.ex b/pawchart/lib/pawchart_web/api/mcp_key_resolver.ex
+index f0adb373..272e7001 100644
+--- a/pawchart/lib/pawchart_web/api/mcp_key_resolver.ex
++++ b/pawchart/lib/pawchart_web/api/mcp_key_resolver.ex
+@@ -52,7 +52,7 @@ defmodule PawChartWeb.Api.McpKeyResolver do
+         with true <- Plug.Crypto.secure_compare(digest, to_string(row.token_digest)),
+              {:ok, _stored} <- Samen.Scope.ApiKey.acting_role(row),
+              {:ok, mbr} <- membership(row),
+-             {:ok, role} <- Samen.Scope.ApiKey.effective_role(row, mbr) do
++             {:ok, role} <- {:ok, row.minter_role} do
+           {:ok, scope_for(row, role)}
+         else
+           _ -> :error

@@ -51,15 +51,42 @@ defmodule PawChart.McpAuthTest do
     :ok
   end
 
+  # The key is bound to a real, ACTIVE membership (the resolver caps the acting role by it and refuses a
+  # key whose minter is gone or suspended); `:membership_role` / `:membership_status` shape that membership.
   defp mint_key(org_id, raw, opts \\ []) do
-    Ash.Seed.seed!(PawChart.Operator.ApiKey, %{
-      org_id: org_id,
-      token_digest: McpKeyResolver.digest(raw),
-      plane: :tenant,
-      minter_role: :admin,
-      revoked_at: Keyword.get(opts, :revoked_at),
-      expires_at: Keyword.get(opts, :expires_at)
-    })
+    user =
+      PawChart.Operator.User
+      |> Ash.Changeset.for_create(:create, %{org_id: org_id, handle: "u-#{System.unique_integer([:positive])}"})
+      |> Ash.create!(authorize?: false)
+
+    membership =
+      PawChart.Operator.Membership
+      |> Ash.Changeset.for_create(:create, %{
+        org_id: org_id,
+        user_id: user.id,
+        role: Keyword.get(opts, :membership_role, :admin),
+        status: Keyword.get(opts, :membership_status, "active")
+      })
+      |> Ash.create!(authorize?: false)
+
+    key =
+      PawChart.Operator.ApiKey
+      |> Ash.Changeset.for_create(:create, %{
+        org_id: org_id,
+        membership_id: membership.id,
+        plane: :tenant,
+        minter_role: Keyword.get(opts, :minter_role, :admin),
+        expires_at: Keyword.get(opts, :expires_at)
+      })
+      |> Ash.Changeset.force_change_attribute(:token_digest, McpKeyResolver.digest(raw))
+      |> Ash.create!(authorize?: false)
+
+    # born live and clamped by the resource; the helper then shapes the legacy/expired/revoked rows the tests need
+    key
+    |> Ash.Changeset.for_update(:mark_used, %{}, authorize?: false)
+    |> Ash.Changeset.force_change_attribute(:revoked_at, Keyword.get(opts, :revoked_at))
+    |> Ash.Changeset.force_change_attribute(:expires_at, Keyword.get(opts, :expires_at))
+    |> Ash.update!(authorize?: false)
   end
 
   defp mcp_post(body, token) do
@@ -99,14 +126,32 @@ defmodule PawChart.McpAuthTest do
   end
 
   test "a key with NO minter_role ⇒ 401 (fail closed; it must not be promoted to :member)" do
-    Ash.Seed.seed!(PawChart.Operator.ApiKey, %{
-      org_id: @org_a,
-      token_digest: McpKeyResolver.digest("roleless-token-www"),
-      plane: :tenant,
-      minter_role: nil
-    })
+    # control: the same key with a role (and an active membership) authenticates
+    row = mint_key(@org_a, "roleless-token-www")
+    assert mcp_post(%{"method" => "ping", "id" => 1}, "roleless-token-www").status == 200
+
+    row
+    |> Ash.Changeset.for_update(:mark_used, %{}, authorize?: false)
+    |> Ash.Changeset.force_change_attribute(:minter_role, nil)
+    |> Ash.update!(authorize?: false)
 
     assert mcp_post(%{"method" => "ping", "id" => 1}, "roleless-token-www").status == 401
+  end
+
+  test "RED: a key whose minter's membership is suspended ⇒ 401; CONTROL: an active one authenticates" do
+    mint_key(@org_a, "active-minter-token", membership_status: "active")
+    mint_key(@org_a, "suspended-minter-token", membership_status: "suspended")
+
+    assert mcp_post(%{"method" => "ping", "id" => 1}, "active-minter-token").status == 200
+    assert mcp_post(%{"method" => "ping", "id" => 1}, "suspended-minter-token").status == 401
+  end
+
+  test "RED: an owner-rank key whose minter was demoted resolves with the membership's CURRENT role" do
+    mint_key(@org_a, "demoted-owner-token", minter_role: :owner, membership_role: :viewer)
+    mint_key(@org_a, "owner-token", minter_role: :owner, membership_role: :owner)
+
+    assert {:ok, %Samen.Scope{actor: %{role: :viewer}}} = McpKeyResolver.resolve_scope("demoted-owner-token")
+    assert {:ok, %Samen.Scope{actor: %{role: :owner}}} = McpKeyResolver.resolve_scope("owner-token")
   end
 
   test "a VALID per-operator token authenticates (200, JSON-RPC ping/initialize)" do

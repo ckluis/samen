@@ -65,19 +65,38 @@ defmodule Driftwood.ApiCase do
     raw = "sk_" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
     digest = DriftwoodWeb.Api.KeyAuthPlug.digest(raw)
 
+    # The key authenticates only while its minter still has an ACTIVE membership in the org, and acts with the
+    # LOWER of `minter_role` and that membership's role — so the minter is a real user holding `membership_role`.
+    {user_id, _mbr} = mk_minter(org_id, Keyword.get(opts, :membership_role, minter_role))
+
     {:ok, key} =
       Driftwood.Freight.ApiKey
       |> Ash.Changeset.for_create(:create, %{
         plane: plane,
         scopes: scopes,
         minter_role: minter_role,
-        minter_user_id: "user-#{System.unique_integer([:positive])}",
+        minter_user_id: user_id,
         org_id: org_id
       })
       |> Ash.Changeset.force_change_attribute(:token_digest, digest)
       |> Ash.create(authorize?: false)
 
     {raw, key}
+  end
+
+  @doc "A real user + membership (`role`) in `org_id` — the minter a Freight key is attributed to."
+  def mk_minter(org_id, role) do
+    {:ok, user} =
+      Driftwood.Operator.User
+      |> Ash.Changeset.for_create(:create, %{org_id: org_id, handle: "minter-#{System.unique_integer([:positive])}"})
+      |> Ash.create(authorize?: false)
+
+    {:ok, mbr} =
+      Driftwood.Operator.Membership
+      |> Ash.Changeset.for_create(:create, %{org_id: org_id, user_id: user.id, role: role})
+      |> Ash.create(authorize?: false)
+
+    {user.id, mbr}
   end
 
   # --- driving -------------------------------------------------------------

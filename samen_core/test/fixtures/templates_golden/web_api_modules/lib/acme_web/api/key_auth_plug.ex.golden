@@ -108,13 +108,16 @@ defmodule AcmeWeb.Api.KeyAuthPlug do
     # key row.
     membership_query =
       Acme.Operator.Membership
-      |> Ash.Query.select([:id, :org_id, :user_id, :role])
+      |> Ash.Query.select([:id, :org_id, :user_id, :role, :status])
 
     case Ash.load(key_row, [membership: membership_query], authorize?: false) do
       {:ok, %{membership: %{} = mbr} = key_row} ->
         # A key with no/unknown `minter_role` authorizes nothing (`Samen.Scope.ApiKey.acting_role/1`):
         # refuse it here rather than build an actor with `role: nil` that an OrgScope-only resource serves.
-        with {:ok, role} <- Samen.Scope.ApiKey.acting_role(key_row) do
+        # The role is then capped by the minting membership's CURRENT role; a removed/suspended
+        # membership refuses the key (`Samen.Scope.ApiKey.effective_role/2`).
+        with {:ok, _stored} <- Samen.Scope.ApiKey.acting_role(key_row),
+             {:ok, role} <- Samen.Scope.ApiKey.effective_role(key_row, mbr) do
           org_id = fetch(mbr, [:org_id, :aom_org_id])
           user_id = fetch(mbr, [:user_id, :aom_user_id])
 

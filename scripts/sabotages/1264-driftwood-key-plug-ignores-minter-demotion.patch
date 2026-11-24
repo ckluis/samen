@@ -1,0 +1,19 @@
+# SABOTAGE: driftwood key plug stops capping the role by the minter's current membership
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/freight_api_key_authz_test.exs
+# MUST_FAIL: RED: an owner-rank key whose minter was demoted to viewer
+diff --git a/driftwood/lib/driftwood_web/api/key_auth_plug.ex b/driftwood/lib/driftwood_web/api/key_auth_plug.ex
+index 3d506849..1e57492f 100644
+--- a/driftwood/lib/driftwood_web/api/key_auth_plug.ex
++++ b/driftwood/lib/driftwood_web/api/key_auth_plug.ex
+@@ -105,7 +105,7 @@ defmodule DriftwoodWeb.Api.KeyAuthPlug do
+     with {:ok, _stored} <- Samen.Scope.ApiKey.acting_role(key_row),
+          {:ok, mbr} <-
+            Samen.Scope.ApiKey.membership_for_user(Driftwood.Operator.Membership, key_row.org_id, key_row.minter_user_id),
+-         {:ok, role} <- Samen.Scope.ApiKey.effective_role(key_row, mbr) do
++         {:ok, role} <- {:ok, key_row.minter_role} do
+       org_id = to_string(key_row.org_id)
+ 
+       key = %{

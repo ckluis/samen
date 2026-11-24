@@ -5,14 +5,17 @@
 # TEST_FILES: test/freight_api_key_authz_test.exs
 # MUST_FAIL: RED: a key row with a nil minter_role resolves no actor
 diff --git a/driftwood/lib/driftwood_web/api/key_auth_plug.ex b/driftwood/lib/driftwood_web/api/key_auth_plug.ex
-index 2bd346fc..7801304c 100644
+index 3d506849..9a29a486 100644
 --- a/driftwood/lib/driftwood_web/api/key_auth_plug.ex
 +++ b/driftwood/lib/driftwood_web/api/key_auth_plug.ex
-@@ -100,7 +100,7 @@ defmodule DriftwoodWeb.Api.KeyAuthPlug do
-   defp build_actor(key_row) do
-     # A key with no/unknown `minter_role` authorizes nothing (`Samen.Scope.ApiKey.acting_role/1`): refused here
+@@ -102,10 +102,7 @@ defmodule DriftwoodWeb.Api.KeyAuthPlug do
      # rather than given `role: nil`.
--    with {:ok, role} <- Samen.Scope.ApiKey.acting_role(key_row) do
+     # The role is then capped by the minter's CURRENT membership role (a Freight key records a minter
+     # USER id, so the membership is found by user + org); a removed or suspended minter refuses the key.
+-    with {:ok, _stored} <- Samen.Scope.ApiKey.acting_role(key_row),
+-         {:ok, mbr} <-
+-           Samen.Scope.ApiKey.membership_for_user(Driftwood.Operator.Membership, key_row.org_id, key_row.minter_user_id),
+-         {:ok, role} <- Samen.Scope.ApiKey.effective_role(key_row, mbr) do
 +    with {:ok, role} <- {:ok, key_row.minter_role} do
        org_id = to_string(key_row.org_id)
  

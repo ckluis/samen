@@ -76,4 +76,31 @@ defmodule Demo.ApiAuthRedPathTest do
     assert conn.status in [200, 401, 403]
     refute conn.resp_body =~ "Guarded"
   end
+
+  defp actor_for(raw) do
+    Plug.Test.conn(:get, "/contacts")
+    |> Plug.Conn.put_req_header("authorization", "Bearer " <> raw)
+    |> DemoWeb.Api.KeyAuthPlug.call(DemoWeb.Api.KeyAuthPlug.init([]))
+    |> then(& &1.private[:samen_api_actor])
+  end
+
+  defp membership_of(key), do: Ash.get!(Demo.Identity.Membership, key.membership_id, authorize?: false)
+
+  test "RED: an owner-rank key whose minter was demoted acts with the membership's CURRENT role", %{org: org} do
+    {raw, key} = mk_api_key(org.id, minter_role: :owner)
+    assert %{role: :owner} = actor_for(raw)
+
+    membership_of(key) |> Ash.Changeset.for_update(:update, %{role: :viewer}, authorize?: false) |> Ash.update!()
+
+    assert %{role: :viewer, api_key: %{minter_role: :viewer}} = actor_for(raw)
+  end
+
+  test "RED: a key whose minter's membership was suspended (a removal is refused by the FK while keys exist) authenticates no more", %{org: org} do
+    {raw1, key1} = mk_api_key(org.id, minter_role: :admin)
+    assert actor_for(raw1)
+
+    membership_of(key1) |> Ash.Changeset.for_update(:update, %{status: "suspended"}, authorize?: false) |> Ash.update!()
+    refute actor_for(raw1)
+    refute api_get("/contacts", raw1).resp_body =~ "Guarded"
+  end
 end

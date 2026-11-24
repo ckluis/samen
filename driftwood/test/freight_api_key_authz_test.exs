@@ -72,6 +72,76 @@ defmodule Driftwood.FreightApiKeyAuthzTest do
     assert key.minter_user_id == "u-1"
 
     {_raw, seeded} = mk_api_key(org, minter_role: :admin)
-    assert String.starts_with?(seeded.minter_user_id, "user-")
+    assert {:ok, _} = Ecto.UUID.cast(seeded.minter_user_id)
+  end
+
+  describe "the key's rank follows its minter's CURRENT membership" do
+    defp reads?(raw), do: api_get("/drivers", raw).resp_body =~ "Guarded"
+
+    defp set_membership(org, user_id, attrs) do
+      mbr =
+        Driftwood.Operator.Membership
+        |> Ash.read!(authorize?: false)
+        |> Enum.find(&(&1.user_id == user_id))
+
+      mbr |> Ash.Changeset.for_update(:update, attrs, authorize?: false) |> Ash.update!()
+    end
+
+    defp actor_for(raw) do
+      conn =
+        Plug.Test.conn(:get, "/drivers")
+        |> Plug.Conn.put_req_header("authorization", "Bearer " <> raw)
+        |> DriftwoodWeb.Api.KeyAuthPlug.call(DriftwoodWeb.Api.KeyAuthPlug.init([]))
+
+      conn.private[:samen_api_actor]
+    end
+
+    setup do
+      org = mk_org()
+      mk_driver(org, %{full_name: %{first: "Guarded", last: "Driver"}})
+      {:ok, org: org}
+    end
+
+    test "RED: a removed minter's key stops authenticating; CONTROL: it read while the membership existed", %{org: org} do
+      {raw, key} = mk_api_key(org, minter_role: :admin)
+      assert reads?(raw)
+
+      Driftwood.Operator.Membership
+      |> Ash.read!(authorize?: false)
+      |> Enum.find(&(&1.user_id == key.minter_user_id))
+      |> Ash.destroy!(authorize?: false)
+
+      refute reads?(raw)
+    end
+
+    test "RED: a suspended minter's key stops authenticating", %{org: org} do
+      {raw, key} = mk_api_key(org, minter_role: :admin)
+      assert reads?(raw)
+      set_membership(org, key.minter_user_id, %{status: "suspended"})
+      refute reads?(raw)
+    end
+
+    test "RED: an owner-rank key whose minter was demoted to viewer no longer acts as owner", %{org: org} do
+      {raw, key} = mk_api_key(org, minter_role: :owner)
+      {raw_owner_control, _} = mk_api_key(org, minter_role: :owner)
+      assert reads?(raw)
+      assert %{role: :owner} = actor_for(raw)
+      set_membership(org, key.minter_user_id, %{role: :viewer})
+      assert %{role: :viewer} = actor_for(raw)
+      assert %{role: :owner} = actor_for(raw_owner_control)
+    end
+
+    test "RED: a key with no minter user id resolves no actor", %{org: org} do
+      {raw, key} = mk_api_key(org, minter_role: :admin)
+      assert reads?(raw)
+
+      key
+      |> Ash.Changeset.for_update(:revoke, %{}, authorize?: false)
+      |> Ash.Changeset.force_change_attribute(:revoked_at, nil)
+      |> Ash.Changeset.force_change_attribute(:minter_user_id, nil)
+      |> Ash.update!(authorize?: false)
+
+      refute reads?(raw)
+    end
   end
 end
