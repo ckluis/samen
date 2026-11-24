@@ -61,4 +61,12 @@ defmodule Samen.ApiKeyLookupGuardTest do
     assert bypass =~ @bypass
     refute shared =~ @bypass
   end
+
+  test "active_query/3 raises for a resource with no :expires_at that is not allowlisted; the allowlist is named" do
+    assert_raise ArgumentError, ~r/no :expires_at attribute and is not in/, fn ->
+      Samen.Scope.ApiKey.active_query(SamenCore.Support.Archivable.Widget, "digest")
+    end
+
+    assert Samen.Scope.ApiKey.expiryless_resources() == [Driftwood.Freight.ApiKey]
+  end
 end

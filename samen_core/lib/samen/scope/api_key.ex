@@ -121,7 +121,8 @@ defmodule Samen.Scope.ApiKey do
     * `token_digest == digest` (the SHA-256 of the presented key);
     * not revoked (`revoked_at` is nil);
     * not expired — `expires_at` is nil (a legacy, non-expiring row) or `> now`. A resource
-      with no `expires_at` column (driftwood's `Freight.ApiKey`) has no expiry to enforce.
+      with no `expires_at` column must be on `expiryless_resources/0` (driftwood's `Freight.ApiKey`),
+      else this RAISES.
 
   Returns an `Ash.Query`; the CALLER reads it `authorize?: false` (this IS the auth step — no
   actor exists yet) and carries the `# authz-scope:` marker. A guard test
@@ -130,15 +131,40 @@ defmodule Samen.Scope.ApiKey do
   """
   @spec active_query(module(), String.t(), DateTime.t()) :: Ash.Query.t()
   def active_query(resource, digest, now \\ DateTime.utc_now()) when is_binary(digest) do
+    expiry? = expiry_enforced?(resource)
+
     query =
       resource
       |> Ash.Query.filter(token_digest == ^digest)
       |> Ash.Query.filter(is_nil(revoked_at))
 
-    if Ash.Resource.Info.attribute(resource, :expires_at) do
+    if expiry? do
       Ash.Query.filter(query, is_nil(expires_at) or expires_at > ^now)
     else
       query
+    end
+  end
+
+  # Resources that authenticate keys but have NO expiry column, by name. Driftwood's
+  # `Freight.ApiKey` is the one today (no `expires_at`: F3.4 does not hold for its API keys; see
+  # CHANGELOG). A resource NOT on this list that lacks an `:expires_at` attribute — typically a
+  # column named something else, e.g. `:expiry` — used to get no expiry filter and no warning; it
+  # now RAISES, so a forgotten or renamed column cannot silently turn expiry off.
+  @expiryless_resources [Driftwood.Freight.ApiKey]
+
+  @doc "The resources that may authenticate keys without an `expires_at` column (a named allowlist)."
+  @spec expiryless_resources() :: [module()]
+  def expiryless_resources, do: @expiryless_resources
+
+  defp expiry_enforced?(resource) do
+    cond do
+      Ash.Resource.Info.attribute(resource, :expires_at) -> true
+      resource in @expiryless_resources -> false
+      true ->
+        raise ArgumentError,
+              "#{inspect(resource)} has no :expires_at attribute and is not in " <>
+                "Samen.Scope.ApiKey.expiryless_resources/0 — refusing to build a key lookup that would " <>
+                "silently skip the expiry gate (name the column :expires_at, or allowlist the resource)"
     end
   end
 
