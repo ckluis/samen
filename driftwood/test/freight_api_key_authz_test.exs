@@ -61,11 +61,8 @@ defmodule Driftwood.FreightApiKeyAuthzTest do
     mk_driver(org, %{full_name: %{first: "Guarded", last: "Driver"}})
     assert api_get("/drivers", raw).resp_body =~ "Guarded"
 
-    key
-    |> Ash.Changeset.for_update(:revoke, %{}, authorize?: false)
-    |> Ash.Changeset.force_change_attribute(:revoked_at, nil)
-    |> Ash.Changeset.force_change_attribute(:minter_role, nil)
-    |> Ash.update!(authorize?: false)
+    # a legacy / seeded row: `Ash.Seed` writes what no action would accept
+    Ash.Seed.update!(key, %{minter_role: nil})
 
     conn = api_get("/drivers", raw)
     assert conn.status in [200, 401, 403]
@@ -152,11 +149,7 @@ defmodule Driftwood.FreightApiKeyAuthzTest do
       {raw, key} = mk_api_key(org, minter_role: :admin)
       assert reads?(raw)
 
-      key
-      |> Ash.Changeset.for_update(:revoke, %{}, authorize?: false)
-      |> Ash.Changeset.force_change_attribute(:revoked_at, nil)
-      |> Ash.Changeset.force_change_attribute(:minter_user_id, nil)
-      |> Ash.update!(authorize?: false)
+      Ash.Seed.update!(key, %{minter_user_id: nil})
 
       refute reads?(raw)
     end
