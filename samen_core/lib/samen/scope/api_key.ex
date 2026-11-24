@@ -269,7 +269,7 @@ defmodule Samen.Scope.ApiKey do
   defp same_org(_key_row, _membership), do: :error
 
   @doc """
-  The ACTIVE membership of `user_id` in `org_id` (for a key that records a minter user id rather
+  The ACTIVE membership of `user_id` in `org_id` — the LOWEST-ranked one if the user holds several (for a key that records a minter user id rather
   than a membership FK — driftwood's Freight keys). `{:ok, membership}` | `:error` (none, not a
   UUID — all fail closed) | `{:error, reason}` (the READ itself failed: an outage, not "no such
   membership", so a caller answers "could not check" and reports it, never "bad key").
@@ -281,11 +281,13 @@ defmodule Samen.Scope.ApiKey do
       membership_resource
       |> Ash.Query.filter(user_id == ^uid and org_id == ^oid and status == "active")
       |> Ash.Query.select([:id, :org_id, :user_id, :role, :status])
-      |> Ash.Query.limit(1)
       # authz-scope: API-key AUTH-STEP membership lookup (no actor exists yet), keyed on the key's own user + org
       |> Ash.read(authorize?: false)
       |> case do
-        {:ok, [membership]} -> {:ok, membership}
+        # Nothing in the schema forbids two active memberships of one user in one org (no unique index on
+        # (org_id, user_id)): take the LOWEST-ranked one (id breaks a tie), so the key's cap never depends on row
+        # order and a second, higher-ranked row can never raise it.
+        {:ok, [_ | _] = memberships} -> {:ok, Enum.min_by(memberships, &{Role.rank(&1.role), to_string(&1.id)})}
         {:ok, []} -> :error
         {:error, error} -> {:error, error}
       end

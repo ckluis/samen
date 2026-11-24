@@ -778,5 +778,26 @@ defmodule Samen.Web.IdentityAuthzTest do
     end
   end
 
+  describe "F. membership_for_user is deterministic: the LOWEST-ranked active membership wins" do
+    test "RED: a user holding an owner and a viewer membership in one org resolves the viewer, in either insertion order; CONTROL: one membership resolves as is" do
+      for order <- [[:owner, :viewer], [:viewer, :owner]] do
+        r = register!()
+        user = User |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, handle: "dup-#{System.unique_integer([:positive])}"}, authorize?: false) |> Ash.create!()
+
+        for role <- order do
+          Membership |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, user_id: user.id, role: role}, authorize?: false) |> Ash.create!()
+        end
+
+        for _ <- 1..3 do
+          assert {:ok, %{role: :viewer}} = Samen.Scope.ApiKey.membership_for_user(Membership, r.org.id, user.id)
+        end
+      end
+
+      r = register!()
+      assert {:ok, %{role: :owner}} = Samen.Scope.ApiKey.membership_for_user(Membership, r.org.id, r.user.id)
+      assert :error = Samen.Scope.ApiKey.membership_for_user(Membership, Ash.UUID.generate(), r.user.id)
+    end
+  end
+
   def plans(_org_id), do: [%{key: "free", label: "Free"}, %{key: "pro", label: "Pro"}]
 end

@@ -5,7 +5,7 @@
 # TEST_FILES: test/scope_api_key_effective_role_test.exs
 # MUST_FAIL: a membership in another org (or with no/unloaded org) yields no role
 diff --git a/samen_core/lib/samen/scope/api_key.ex b/samen_core/lib/samen/scope/api_key.ex
-index 32aa9bfe..907714ae 100644
+index 19fd27c..25145f2 100644
 --- a/samen_core/lib/samen/scope/api_key.ex
 +++ b/samen_core/lib/samen/scope/api_key.ex
 @@ -249,9 +249,8 @@ defmodule Samen.Scope.ApiKey do
@@ -33,4 +33,4 @@ index 32aa9bfe..907714ae 100644
 +  def same_org(_key_row, _membership), do: :error
  
    @doc """
-   The ACTIVE membership of `user_id` in `org_id` (for a key that records a minter user id rather
+   The ACTIVE membership of `user_id` in `org_id` — the LOWEST-ranked one if the user holds several (for a key that records a minter user id rather
