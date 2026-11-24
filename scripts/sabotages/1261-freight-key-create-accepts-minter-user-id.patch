@@ -6,16 +6,15 @@
 # TEST_FILES: test/freight_api_key_authz_test.exs
 # MUST_FAIL: RED: an admin cannot attribute a key to another user
 diff --git a/driftwood/lib/driftwood/freight.ex b/driftwood/lib/driftwood/freight.ex
-index 07ea1b73..26738c10 100644
+index 6d523f76..b2e42538 100644
 --- a/driftwood/lib/driftwood/freight.ex
 +++ b/driftwood/lib/driftwood/freight.ex
-@@ -459,7 +459,8 @@ defmodule Driftwood.Freight.ApiKey do
+@@ -465,7 +465,7 @@ defmodule Driftwood.Freight.ApiKey do
        change(fn changeset, ctx ->
          case ctx.actor do
            %{id: id} when not is_nil(id) ->
--            Ash.Changeset.force_change_attribute(changeset, :minter_user_id, to_string(id))
-+            _ = id
-+            changeset
+-            changeset = Ash.Changeset.force_change_attribute(changeset, :minter_user_id, to_string(id))
++            changeset = changeset
+             org_id = Ash.Changeset.get_attribute(changeset, :org_id)
  
-           nil ->
-             changeset
+             case Samen.Scope.ApiKey.membership_for_user(Driftwood.Operator.Membership, org_id, id) do

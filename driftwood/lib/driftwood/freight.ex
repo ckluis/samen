@@ -456,10 +456,28 @@ defmodule Driftwood.Freight.ApiKey do
       # `minter_user_id` is overridden, because at use time it becomes the key's `actor.id`
       # (an admin must not mint a key that acts as the owner's user). Only a system/seed path
       # (`authorize?: false`, no actor) may attribute a key to someone else.
+      #
+      # And that actor must be a USER who can actually be that minter at use time: a UUID with an ACTIVE membership in
+      # the key's own org (`Samen.Scope.ApiKey.membership_for_user/3`, the very lookup the key plug runs). Otherwise
+      # a key is minted that can never authenticate (an opaque or fixture id such as "user-7"), which looks live in
+      # the settings list and fails every request. A lookup that FAILS refuses too: an unverifiable minter is not a
+      # valid one.
       change(fn changeset, ctx ->
         case ctx.actor do
           %{id: id} when not is_nil(id) ->
-            Ash.Changeset.force_change_attribute(changeset, :minter_user_id, to_string(id))
+            changeset = Ash.Changeset.force_change_attribute(changeset, :minter_user_id, to_string(id))
+            org_id = Ash.Changeset.get_attribute(changeset, :org_id)
+
+            case Samen.Scope.ApiKey.membership_for_user(Driftwood.Operator.Membership, org_id, id) do
+              {:ok, _membership} ->
+                changeset
+
+              _ ->
+                Ash.Changeset.add_error(changeset,
+                  field: :minter_user_id,
+                  message: "the minting actor must be a user with an active membership in this org"
+                )
+            end
 
           nil ->
             changeset
