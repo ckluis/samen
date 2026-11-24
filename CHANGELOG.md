@@ -19,22 +19,33 @@ All notable changes to Samen are recorded here. The format follows
   now out-rank BOTH the role the row holds in the database and the role being set. The stored role is read by primary key
   on the write repo, never from the record in hand (which may be stale or carry `%Ash.NotLoaded{}` for `role`); a row it
   cannot read refuses the write. `Samen.Scope.Role.may_manage?/2` is strict, so an owner cannot demote, suspend or remove
-  another owner either, and no write through `ManageRole` can leave an org without an owner. A caller that relied on an admin
+  another owner either: no update or destroy of an owner's membership passes `ManageRole`. A caller that relied on an admin
   editing an owner's or a peer admin's membership now needs an owner (for an admin) or no longer can (for an owner).
   Sabotages 1322 and 1323.
+- **Fixed: an admin could demote an owner or a peer admin by adding a second, lower membership row.** The session resolver
+  takes a user's lowest-ranked active membership in an org, so `Membership :create` for an existing member's `user_id`
+  with role `:viewer` made that member resolve as a viewer, and the member could not remove the row (that needs an
+  admin). `Membership :create` now refuses when a row for the same `org_id` and `user_id` exists, on every path including
+  `authorize?: false`, and refuses when that check cannot run. Registration, OIDC link, invitation accept and the operator
+  seeds each create the user and its one membership together and are unaffected. **Upgrade notes:** code that created a
+  second membership for a user in an org now fails with `already has a membership in this org`; change the existing
+  row's role or status instead. Sabotages 1334 and 1335.
+- **Fixed: `ManageRole` did not see a role set through `Ash.Changeset.atomic_update(:role, …)`.** An admin could make a
+  member an owner that way. The check now refuses (errors) any write that sets `:role` through the changeset's atomics.
+  Sabotage 1336.
 - **Fixed: a suspended member kept their role and their org in an existing signed-in session.** A membership whose
   `status` is not `"active"` (suspended, invited) now confers no role and no org access, the rule an API key's acting role
-  and the settings role lookup already applied. `Samen.Auth.OrgActor` is the one resolver: `active_membership/3` (the
-  lowest-ranked ACTIVE membership of a user in an org, `:none` otherwise) decides `resolve/3` and `resolve_result/3` (the
-  session actor's role), `authorized_org_ids/2` and `authorized_org_ids_result/2` (the orgs a session may act in, so the org
-  switcher and `?org=` no longer reach an org the member is suspended in), and `Samen.AI.Agent.Approver` (a suspended
+  and the settings role lookup already applied. `Samen.Auth.OrgActor.active_membership/3` (the
+  lowest-ranked ACTIVE membership of a user in an org, `:none` otherwise) now decides `resolve/3` and `resolve_result/3` (the
+  session actor's role), `Samen.Scope.ApiKey.membership_for_user/3` (an API key's minter), `authorized_org_ids/2` and `authorized_org_ids_result/2` (the orgs a session may act in, so the org
+  switcher and `?org=` no longer reach an org the member is suspended in; it reads every active membership of the
+  credential's users in one query), and `Samen.AI.Agent.Approver` (a suspended
   member can no longer approve an agent action). `PawChart.Auth.authorized_org_ids/1` filters on `status == "active"`.
   A suspended user whose only org is the suspended one resolves no org, the same answer as a credential with no
   membership. `Samen.Policy.ManageUser` still ranks a suspended target by its role, on purpose: an admin cannot suspend
   an admin to get around the rank rule. **Upgrade notes:** `authorized_org_ids/2` now needs an active membership as well
   as a `User` row in the org; a host seam that lists orgs from its own membership table must filter on
   `status == "active"` too.
-  An already-mounted LiveView keeps the org set it mounted with until it remounts.
   `ManageRole` returns an error tuple (not `{:ok, false}`) when it cannot read the stored role. Sabotages 1324 to 1327.
 - **Fixed: the session cap evicted a live session because of an abandoned expired one.** `Samen.Auth.SessionCreate`
   counted every unrevoked session toward `Org.max_concurrent_sessions`, expired ones included, so with a cap of 2 an old
@@ -42,18 +53,18 @@ All notable changes to Samen are recorded here. The format follows
   resolve (unrevoked and not past `expires_at`) count toward the cap now. **Upgrade notes:** none; a credential that sat at its
   cap with expired sessions now keeps its live ones. Sabotage 1328.
 - **Fixed: a direct `Invitation` create could set any `status` and left no expiry.** The default `create: :*` accepted the
-  public `status` (an admin could create an `"accepted"`, `"revoked"` or junk row) and left `expires_at` and `token_digest`
-  empty (a pending row that can never be accepted). `Invitation :create` now accepts `org_id`, `role` and `email` only, and
+  public `status` (an admin could create an `"accepted"`, `"revoked"` or junk row) and left `expires_at` empty. `Invitation :create` now accepts `org_id`, `role` and `email` only, and
   every create is `pending` with the 14-day expiry (`Samen.Identity.Invite.ttl_seconds/0`); `Samen.Identity.Invite.create/3`
-  keeps setting only the credential-class columns (`token_digest`, `email_bidx`) on top. **Upgrade notes:** code that created
+  keeps setting only the credential-class columns (`token_digest`, `email_bidx`) on top. The default create does not set
+  either of them. **Upgrade notes:** code that created
   an invitation directly with a `status:` input now fails with a no-such-input error; use `Samen.Identity.Invite.create/3`.
   Sabotages 1329 and 1330.
 - **Fixed: an org admin could set its slug to another org's slug or id.** `Samen.Identity.SlugFree` guarded only
   `Org :open_account`, yet the operator console joins an account's admins, customer, subscription and tickets by
   `org.slug`, so two orgs sharing a slug (or one org's slug equal to another's id) each showed the other's admins, customer, subscription and tickets. `Org
-  :update` and `Org :create` now apply the same rule: a slug being set must not be another org's slug or id (an update that
-  keeps the org's own slug passes; a check that cannot run refuses the write). **Upgrade notes:** a rename or create onto a
-  taken slug now fails with `slug is already taken`. Existing duplicates are not rewritten. Sabotages 1331 and 1332.
+  :update` and `Org :create` now apply the same rule: a slug being set must not be another org's slug or id (an update never collides with the org's own row; slugs are compared trimmed and case-insensitively, so `Acme` and
+  ` acme ` collide with `acme`; a check that cannot run refuses the write). **Upgrade notes:** a rename or create onto a
+  taken slug now fails with `slug is already taken`. Sabotages 1331 and 1332.
 - **Fixed: `ApiKey :mark_used` could be written by an authorized admin.** The action stamps `last_used_at`, the evidence that
   a key was presented, and the admin-gated update policy let an org admin or owner set it to any time. It is now a
   system action: no actor may run it, and the key check's internal `authorize?: false` call (the demo plug, the hosts'

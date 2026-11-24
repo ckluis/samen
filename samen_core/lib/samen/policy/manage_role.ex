@@ -25,7 +25,9 @@ defmodule Samen.Policy.ManageRole do
 
   A create has no stored row, so only the role being set counts. Because `may_manage?/2` is strict, an
   `owner` cannot demote, suspend or remove another `owner` either (`Samen.Scope.Role`: "no lateral
-  escalation"), which also means no write through this check can leave an org without an owner.
+  escalation"): no update or destroy of an owner's membership passes this check. That is all it states: a write
+  that does not go through this policy (`authorize?: false`, raw SQL, deleting the User or Org) is not covered, and a
+  role set through `changeset.atomics` is refused outright because `get_attribute(:role)` cannot see it.
 
   ## Why a second check beyond `RoleAtLeast`
 
