@@ -168,6 +168,58 @@ defmodule Samen.Gen.DocCommandsTest do
     assert :ok = DocCommands.verify([{"t.md", doc}], sources())
   end
 
+  test "RED PATH: gen.resource with --live REQUIRES a non-empty --description (the task refuses the old shape)" do
+    fenced = fn cmd -> "```bash\n#{cmd}\n```\n" end
+    good = ~S|mix samen.gen.resource --scope Crm --resource Widget --abbrev wdg --description "A widget a team keeps." --live|
+
+    # positive control: the current shape is covered (so the refusals below are not a broken rule matching nothing)
+    assert :ok = DocCommands.verify([{"t.md", fenced.(good)}], sources())
+
+    for bad <- [
+          "mix samen.gen.resource --scope Crm --resource Widget --abbrev wdg --live",
+          ~S|mix samen.gen.resource --scope Crm --resource Widget --abbrev wdg --description "" --live|,
+          ~S|mix samen.gen.resource --scope Crm --resource Widget --abbrev wdg --description "   " --live|,
+          ~S|mix samen.gen.resource --scope Crm --resource Widget --abbrev wdg --description "" |,
+          "mix samen.gen.resource --scope Crm --resource Widget --abbrev wdg"
+        ] do
+      assert {:error, [failure]} = DocCommands.verify([{"t.md", fenced.(bad)}], sources()), "must be refused: #{bad}"
+      assert failure =~ "aspirational"
+    end
+  end
+
+  test "RED PATH: a command the shell-style split cannot read is a failure naming doc:line, not a crash" do
+    for {cmd, _why} <- [
+          {~S|mix samen.gen.resource --scope Crm --description "unbalanced|, "unbalanced quote"},
+          {"mix samen.gen.resource --scope Crm --description it's here", "apostrophe in unquoted text"}
+        ] do
+      doc = "# t\n\n```bash\n#{cmd}\n```\n"
+      assert {:error, [failure]} = DocCommands.verify([{"guide.md", doc}], sources())
+      assert failure =~ "guide.md:4"
+      assert failure =~ "cannot be split into shell words"
+    end
+
+    # an explicitly-human command may be unsplittable
+    assert :ok = DocCommands.verify([{"t.md", "```bash operator-todo\necho it's a human step\n```\n"}], sources())
+  end
+
+  test "the comment strip is quote-aware: a `#` inside a quoted --description is data, a trailing comment is not" do
+    doc = ~S"""
+    ```bash
+    mix samen.gen.resource --scope Crm --resource Widget --abbrev wdg --description "x #y is kept" # a trailing comment
+    mix samen.gen.scope --scope Crm # operator-TODO marked inline
+    mix samen.gen.scope --scope 'Crm #not a comment'
+    ```
+    """
+
+    assert [resource, scope, quoted] = DocCommands.extract("t.md", doc)
+    assert resource.argv |> Enum.at(8) == "--description"
+    assert Enum.at(resource.argv, 9) == "x #y is kept"
+    assert resource.split_error == nil
+    assert resource.raw =~ "x #y is kept" and not (resource.raw =~ "trailing comment")
+    assert scope.operator_todo?
+    assert quoted.argv == ["mix", "samen.gen.scope", "--scope", "Crm #not a comment"]
+  end
+
   test "operator-TODO marker: an explicitly-human command is allowed; unmarked it fails" do
     marked = """
     ```bash

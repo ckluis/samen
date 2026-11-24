@@ -106,6 +106,19 @@ defmodule Samen.Gen.PostTest do
     end
   end
 
+  describe "the next-step hint names the required --description" do
+    test "RED: the scope task's success message and the emitted scope moduledoc show the CURRENT gen.resource shape" do
+      dir = fake_app!()
+
+      out =
+        ExUnit.CaptureIO.capture_io(fn -> Mix.Tasks.Samen.Gen.Scope.run(~w(--scope Crm --app-dir #{dir})) end)
+
+      shape = ~S|--resource <Name> --abbrev <abc> --description "<what it is>"|
+      assert out =~ shape
+      assert File.read!(Path.join(dir, "lib/widgetco/crm.ex")) =~ shape
+    end
+  end
+
   # ---------------------------------------------------------------------------
   describe "write_scope!/1 registers the domain in BOTH :ash_domains lists" do
     for web? <- [true, false] do

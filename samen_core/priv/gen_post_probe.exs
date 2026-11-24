@@ -13,7 +13,7 @@
 #      FRESH registry-safe abbrevs; compile + dump baselines (Gen.compile_and_dump!/1).
 #   2. `mix samen.gen.scope --scope Crm` — emits the empty authored domain + registers it
 #      in BOTH :ash_domains lists.
-#   3. `mix samen.gen.resource --scope Crm --resource Widget --abbrev <abc>` — emits the
+#   3. `mix samen.gen.resource --scope Crm --resource Widget --abbrev <abc> --description "…"` — emits the
 #      Tier-0 resource + its migration + the abbrev reservation + the FOUR G26 test files
 #      + the per-resource anti-tautology probe, wired into the Crm domain.
 #   4. Re-dump `schema.dict.json` (the drift baseline now includes the new table — the same

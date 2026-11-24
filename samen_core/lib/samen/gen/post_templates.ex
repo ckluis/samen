@@ -28,7 +28,7 @@ defmodule Samen.Gen.PostTemplates do
       <%= module %>'s `<%= scope %>` authored scope — a vertical namespace the app owns.
 
       Emitted by `mix samen.gen.scope` (WS-D D7a). Starts EMPTY;
-      `mix samen.gen.resource --scope <%= scope %> --resource <Name> --abbrev <abc>`
+      `mix samen.gen.resource --scope <%= scope %> --resource <Name> --abbrev <abc> --description "<what it is>"`
       lands Tier-0 config resources into it (org-scoped, admin-gated writes, catalogued
       in the app's `tam_table`/`fld_field`, PII vault-routed) and wires each into the
       `resources do … end` block below. Registered in both `:ash_domains` lists so the
