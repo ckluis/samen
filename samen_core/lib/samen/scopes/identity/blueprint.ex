@@ -676,6 +676,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
           # No escalation: a minted key may not act above the actor that mints it.
           policy action(:create) do
             forbid_unless(Samen.Policy.MinterRoleCeiling)
+            forbid_unless(Samen.Policy.KeyBoundToMinter)
             authorize_if(always())
           end
         end

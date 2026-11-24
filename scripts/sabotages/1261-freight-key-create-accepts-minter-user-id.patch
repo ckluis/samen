@@ -1,0 +1,21 @@
+# SABOTAGE: Freight ApiKey create stops force-setting minter_user_id from the actor: an admin attributes a 
+#   key to the owner
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/freight_api_key_authz_test.exs
+# MUST_FAIL: RED: an admin cannot attribute a key to another user
+diff --git a/driftwood/lib/driftwood/freight.ex b/driftwood/lib/driftwood/freight.ex
+index 07ea1b73..26738c10 100644
+--- a/driftwood/lib/driftwood/freight.ex
++++ b/driftwood/lib/driftwood/freight.ex
+@@ -459,7 +459,8 @@ defmodule Driftwood.Freight.ApiKey do
+       change(fn changeset, ctx ->
+         case ctx.actor do
+           %{id: id} when not is_nil(id) ->
+-            Ash.Changeset.force_change_attribute(changeset, :minter_user_id, to_string(id))
++            _ = id
++            changeset
+ 
+           nil ->
+             changeset

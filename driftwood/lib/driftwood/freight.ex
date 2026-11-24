@@ -451,6 +451,23 @@ defmodule Driftwood.Freight.ApiKey do
       primary?(true)
       accept([:org_id, :plane, :scopes, :minter_role, :minter_user_id])
       validate(present(:minter_role))
+
+      # A key minted through an authorized actor is attributed to THAT actor: the supplied
+      # `minter_user_id` is overridden, because at use time it becomes the key's `actor.id`
+      # (an admin must not mint a key that acts as the owner's user). Only a system/seed path
+      # (`authorize?: false`, no actor) may attribute a key to someone else.
+      change(fn changeset, ctx ->
+        case ctx.actor do
+          %{id: id} when not is_nil(id) ->
+            Ash.Changeset.force_change_attribute(changeset, :minter_user_id, to_string(id))
+
+          nil ->
+            changeset
+
+          _ ->
+            Ash.Changeset.add_error(changeset, field: :minter_user_id, message: "the minting actor has no id")
+        end
+      end)
     end
 
     # No generic update: role/plane/scopes/digest are immutable after mint and revocation

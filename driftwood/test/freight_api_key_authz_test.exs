@@ -54,4 +54,24 @@ defmodule Driftwood.FreightApiKeyAuthzTest do
     assert conn.status in [200, 401, 403]
     refute conn.resp_body =~ "Guarded"
   end
+
+  test "RED: an admin cannot attribute a key to another user (minter_user_id is the actor's); CONTROL: a system path may" do
+    org = mk_org()
+    s = scope(org, :admin)
+
+    {:ok, key} =
+      Driftwood.Freight.ApiKey
+      |> Ash.Changeset.for_create(
+        :create,
+        %{org_id: org, minter_role: :admin, scopes: %{}, minter_user_id: "the-owners-user-id"},
+        scope: s
+      )
+      |> Ash.Changeset.force_change_attribute(:token_digest, "d-#{System.unique_integer([:positive])}")
+      |> Ash.create(scope: s)
+
+    assert key.minter_user_id == "u-1"
+
+    {_raw, seeded} = mk_api_key(org, minter_role: :admin)
+    assert String.starts_with?(seeded.minter_user_id, "user-")
+  end
 end

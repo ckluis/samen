@@ -162,6 +162,58 @@ defmodule Samen.Scope.ApiKey do
   def acting_role(_), do: :error
 
   @doc """
+  The membership a key row is bound to, read with a bare repo query (no policy can hide it from
+  the check that must see it): `{:ok, %{user_id, org_id, role, status}}` | `:not_found` |
+  `{:error, reason}`. `resource` is the key resource (its `:membership` relationship names the
+  table); `membership_id` is the key's FK.
+  """
+  @spec membership_row(module(), term()) :: {:ok, map()} | :not_found | {:error, term()}
+  def membership_row(resource, membership_id) do
+    with %{type: :belongs_to} = rel <- Ash.Resource.Info.relationship(resource, :membership),
+         dest = rel.destination,
+         repo when not is_nil(repo) <-
+           AshPostgres.DataLayer.Info.repo(dest, :read) || AshPostgres.DataLayer.Info.repo(dest),
+         table when not is_nil(table) <- AshPostgres.DataLayer.Info.table(dest),
+         [pk, user, org, role, status] <-
+           Enum.map([rel.destination_attribute, :user_id, :org_id, :role, :status], &source(dest, &1)),
+         false <- Enum.any?([pk, user, org, role, status], &is_nil/1),
+         {:ok, bin} <- Ecto.UUID.dump(to_string(membership_id)) do
+      sql = "SELECT #{user}, #{org}, #{role}, #{status} FROM #{table} WHERE #{pk} = $1 LIMIT 1"
+
+      case repo.query(sql, [bin]) do
+        {:ok, %{rows: [[u, o, r, st]]}} ->
+          {:ok, %{user_id: load_uuid(u), org_id: load_uuid(o), role: r, status: st}}
+
+        {:ok, %{rows: []}} ->
+          :not_found
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      _ -> {:error, :membership_unresolvable}
+    end
+  end
+
+  defp source(resource, name) do
+    case Ash.Resource.Info.attribute(resource, name) do
+      nil -> nil
+      attr -> to_string(attr.source || attr.name)
+    end
+  end
+
+  defp load_uuid(nil), do: nil
+
+  defp load_uuid(bin) when byte_size(bin) == 16 do
+    case Ecto.UUID.load(bin) do
+      {:ok, uuid} -> uuid
+      :error -> bin
+    end
+  end
+
+  defp load_uuid(other), do: other
+
+  @doc """
   Is this key past its bounded expiry at `now`? (F3.4 deny-on-read predicate.)
 
   `true` iff the key carries an `expires_at` that is at or before `now` (an expiry

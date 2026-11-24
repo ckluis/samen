@@ -198,6 +198,66 @@ defmodule Samen.Web.IdentityAuthzTest do
       assert {:ok, %{minter_role: :owner}} = direct_create(r, :owner, %{minter_role: :owner})
     end
 
+    # a second user holding `role` in the registrant's org (a result-shaped map, usable with `scope/3`)
+    defp member_of(r, role) do
+      user =
+        User
+        |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, handle: "m-#{System.unique_integer([:positive])}"}, authorize?: false)
+        |> Ash.create!()
+
+      mbr =
+        Membership
+        |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, user_id: user.id, role: role}, authorize?: false)
+        |> Ash.create!()
+
+      %{org: r.org, user: user, membership: mbr}
+    end
+
+    defp create_for(actor, membership, minter_role, role \\ nil) do
+      s = scope(actor, role || minter_role)
+
+      ApiKey
+      |> Ash.Changeset.for_create(
+        :create,
+        %{org_id: actor.org.id, membership_id: membership.id, plane: :tenant, minter_role: minter_role, scopes: %{all: [:read]}},
+        scope: s
+      )
+      |> Ash.Changeset.force_change_attribute(:token_digest, "d-#{System.unique_integer([:positive])}")
+      |> Ash.create(scope: s)
+    end
+
+    test "RED: an admin cannot mint a key bound to the OWNER's membership (actor identity spoof); CONTROL: its own" do
+      r = register!()
+      admin = member_of(r, :admin)
+
+      assert {:error, _} = create_for(admin, r.membership, :admin)
+      assert [] = ApiKey |> Ash.Query.filter(membership_id == ^r.membership.id) |> Ash.read!(authorize?: false)
+
+      assert {:ok, %{membership_id: mid}} = create_for(admin, admin.membership, :admin)
+      assert mid == admin.membership.id
+      assert {:ok, _} = create_for(admin, admin.membership, :member, :admin)
+    end
+
+    test "RED: minter_role may not exceed the bound membership's CURRENT role (an admin claiming :owner via an owner-scoped actor)" do
+      r = register!()
+      admin = member_of(r, :admin)
+
+      # the scope CLAIMS owner, the membership row says admin: the row wins
+      assert {:error, _} = create_for(admin, admin.membership, :owner, :owner)
+      assert {:ok, _} = create_for(admin, admin.membership, :admin, :owner)
+    end
+
+    test "RED: a key cannot be bound to a membership that is no longer active" do
+      r = register!()
+      admin = member_of(r, :admin)
+
+      admin.membership
+      |> Ash.Changeset.for_update(:update, %{status: "suspended"}, authorize?: false)
+      |> Ash.update!()
+
+      assert {:error, _} = create_for(admin, admin.membership, :admin)
+    end
+
     test "RED: a key must carry a minter_role (a role-less key is refused at create)" do
       r = register!()
       assert {:error, _} = direct_create(r, :admin, %{minter_role: nil})
