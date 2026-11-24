@@ -13,8 +13,8 @@ index 78c3e151..f789e1ae 100644
            attribute(:minter_role, :atom,
              public?: true,
              constraints: [one_of: Samen.Scope.Role.all()],
--            description: "Role the key acts with (owner, admin, member or viewer); required on create; no action changes it afterwards. Made through an actor it cannot exceed the actor's role or the bound membership's. effective_role takes the lower of this and that membership's current role, refusing a non-active one."
-+            description: "Role the key acts with (owner, admin, member or viewer); required on create; no action changes it afterwards. Made through an actor it cannot exceed the actor's role or the bound membership's. effective_role takes the higher of this and that membership's current role, refusing a non-active one."
+-            description: "Role recorded at mint (owner, admin, member or viewer); required on create; no action changes it afterwards. Made through an actor it cannot exceed the actor's role or the bound membership's. effective_role takes the lower of this and that membership's current role, refusing a non-active one."
++            description: "Role recorded at mint (owner, admin, member or viewer); required on create; no action changes it afterwards. Made through an actor it cannot exceed the actor's role or the bound membership's. effective_role takes the higher of this and that membership's current role, refusing a non-active one."
            )
  
            attribute(:revoked_at, :utc_datetime,

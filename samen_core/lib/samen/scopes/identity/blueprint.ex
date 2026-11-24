@@ -123,7 +123,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
           )
           attribute(:slug, :string,
             public?: true,
-            description: "Optional short text identifier of the organization; no format rule. The create, update and account-opening actions refuse a slug that matches another organization's slug (trimmed, ignoring case) or id; a blank slug is not checked, and the database has no unique index on it."
+            description: "Optional short text identifier of the organization; no format rule. The create, update and account-opening actions refuse a non-empty slug that matches another organization's slug (trimmed, ignoring case) or id; an empty slug is not checked."
           )
           # Tier-0 config: plan is a bounded config value on the org row.
           attribute(:plan, :string,
@@ -144,7 +144,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
             public?: true,
             allow_nil?: true,
             constraints: [min: 1],
-            description: "Optional cap, at least 1, on a credential's live (unrevoked, unexpired) sessions; empty means unlimited. Each sign-in revokes the oldest to make room, without a lock, so concurrent sign-ins can exceed it until the next one. The smallest cap across the organizations it has memberships in applies."
+            description: "Optional cap, at least 1, on a credential's live (unrevoked, unexpired) sessions, applied at sign-in: each sign-in revokes the credential's oldest live sessions beyond cap - 1 before creating its own; empty means unlimited. The smallest cap across the organizations it has memberships in applies."
           )
 
           # ADR-035 §5 A8 (T08) — the onboarding-wizard COMPLETION marker: a Tier-0
@@ -165,7 +165,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
           attribute(:org_id, :uuid,
             public?: true,
             allow_nil?: true,
-            description: "Optional here: the organization is the tenant boundary, so its policies decide access by the row's own id, not by this column. Only the operator account-opening action accepts it, and it must be the acting operator's own organization, under which the account is filed."
+            description: "Optional here: the organization is the tenant boundary, so its policies decide access by the row's own id, not by this column. Only the operator account-opening action accepts it, and it must be the acting actor's own organization (the operator console's), under which the account is filed."
           )
         end
 
@@ -321,10 +321,10 @@ defmodule Samen.Scopes.Identity.Blueprint do
     # `preparations` block above exists only when the host mounted the public API).
     {full_name_desc, emails_desc} =
       if api? do
-        tail = "vault-routed; the actor's plane decides the read. A tenant-plane actor gets it in clear, an operator only under a reveal grant (else omitted; masked while impersonating), a plane-less actor a masked value. AI egress is masked unless the host opts in and a grant covers it."
+        tail = "vault-routed. A tenant-plane actor reads it in clear, an operator only under a reveal grant (else omitted; masked while impersonating), a plane-less actor masked. AI egress masks it; only a completion call can carry it in clear, if the host opts in and a grant covers it."
         {"The user's full name; " <> tail, "The user's email addresses; " <> tail}
       else
-        tail = "vault-routed, so the row holds a masked vault reference and the plain value lives only in the vault; Samen.Api.PiiResolution decides, by the actor's plane, when a read gets it in clear."
+        tail = "vault-routed, so the row holds a masked vault reference and the plain value lives only in the vault; a plain read returns the masked reference, and code that resolves it through Samen.Api.PiiResolution gets it in clear on the planes that rule allows."
         {"The user's full name; " <> tail, "The user's email addresses; " <> tail}
       end
 
@@ -344,7 +344,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
 
         resource do
           description(
-            "A person's account inside one organization, optionally linked to the organization-less sign-in credential. Full name and emails are vault-routed. Creating needs the admin role; users edit their own profile but not their status; changing or deleting another user needs a role strictly above theirs."
+            "A person's account inside one organization, optionally linked to the sign-in credential. Full name and emails are vault-routed. Creating needs the admin role; users edit their own profile but not their status; changing or deleting another user needs the admin role and a role strictly above theirs."
           )
         end
 
@@ -525,7 +525,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
 
         resource do
           description(
-            "Gives a user an RBAC role in the organization; a create is refused when the user already has a membership there (no unique index). Reads are organization-scoped; writes need the admin role, and any role being set and any role the row holds must each be strictly below the writer's own."
+            "Gives a user an RBAC role in the organization; a create is refused when the user already has a membership there. Reads are organization-scoped; writes need the admin role, and any role being set and any role the row holds must each be strictly below the writer's own."
           )
         end
 
@@ -548,7 +548,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
           attribute(:status, :string,
             public?: true,
             default: "active",
-            description: "Membership status as text, active by default; no fixed list of values is enforced. Only an active membership gives a signed-in session or an API key a role in the organization; any other status gives it none."
+            description: "Membership status as text, active by default; no fixed list of values is enforced. Only an active membership resolves a role in the organization for a signed-in session or an API key; any other status resolves none."
           )
         end
 
@@ -754,14 +754,14 @@ defmodule Samen.Scopes.Identity.Blueprint do
           attribute(:scopes, :map,
             public?: true,
             default: %{},
-            description: "Requested scopes as a map of resource family to read and write, empty by default; no action changes it after creation. Where a host mounts the settings surface, its mint trims them to the minter's role. They are recorded only: no request path checks them, and a key acts with its effective role."
+            description: "Requested scopes as a map of resource family to read and write, empty by default; no action changes it after creation. Where a host mounts the settings surface, its mint trims them to the minter's role. A key's authority at use is its effective role (see minter_role)."
           )
 
           # The role of the minting membership — the actor ceiling this key inherits.
           attribute(:minter_role, :atom,
             public?: true,
             constraints: [one_of: Samen.Scope.Role.all()],
-            description: "Role the key acts with (owner, admin, member or viewer); required on create; no action changes it afterwards. Made through an actor it cannot exceed the actor's role or the bound membership's. effective_role takes the lower of this and that membership's current role, refusing a non-active one."
+            description: "Role recorded at mint (owner, admin, member or viewer); required on create; no action changes it afterwards. Made through an actor it cannot exceed the actor's role or the bound membership's. effective_role takes the lower of this and that membership's current role, refusing a non-active one."
           )
 
           attribute(:revoked_at, :utc_datetime,
@@ -776,7 +776,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
           # minter never produces one.
           attribute(:expires_at, :utc_datetime,
             public?: true,
-            description: "Hard expiry instant. Create clamps it to at most 365 days ahead (90 days when empty); update can only shorten it and refuses a revoked or expired key. Samen.Scope.ApiKey.active_query refuses a key at or past it; keys from before the expiry gate may have none."
+            description: "Hard expiry instant. Create clamps it to at most 365 days ahead (90 days when empty); an update that sets it can only shorten it and refuses a revoked or expired key. Samen.Scope.ApiKey.active_query refuses a key at or past it; a key with none (from before the expiry gate) does not expire."
           )
 
           # F3.4 — last-use observability. Best-effort stamped by the auth path on a
@@ -918,7 +918,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
 
         resource do
           description(
-            "An invitation for an email address to join the organization with a role. Every create is pending with a 14-day expiry; it becomes accepted, revoked (only while pending) or expired, and the generic update is refused. Only a digest of the invite token is stored; the invited email is vault-routed."
+            "An invitation for an email address to join the organization with a role. Every create is pending with a 14-day expiry; it becomes accepted, revoked or expired, each only from pending; the generic update is refused. Only a digest of the invite token is stored; the invited email is vault-routed."
           )
         end
 
@@ -982,7 +982,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
           vault(:pii_email)
           pii_attribute(:email, Samen.Type.Emails,
             vault: :pii_email,
-            description: "The invited email addresses; vault-routed, so the row holds a masked vault reference and the plain value lives only in the vault. The declared reveal_invitation action only reports whether a reveal grant covers the subject and never returns the address."
+            description: "The invited email addresses; vault-routed, so the row holds a masked vault reference and the plain value lives only in the vault. reveal_invitation only reports whether a grant covers the subject; the settings invitations list resolves it by plane through Samen.Api.PiiResolution."
           )
           reveal(:reveal_invitation)
         end
@@ -1260,7 +1260,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
           attribute(:hash_scheme, :string,
             public?: false,
             allow_nil?: true,
-            description: "Name of the hashing scheme (with its parameters) that produced password_hash; verification receives it so older hashes still verify under their own scheme. Empty for SSO-only credentials."
+            description: "Name of the hashing scheme (with its parameters) that produced password_hash; verification receives it, so a hash made with older parameters of the configured hasher still verifies. Empty for SSO-only credentials."
           )
 
           attribute(:verified_at, :utc_datetime,
@@ -1287,7 +1287,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
           attribute(:totp_last_verified_at, :utc_datetime,
             public?: false,
             allow_nil?: true,
-            description: "When a TOTP code was last accepted, written under a row lock and passed to the code validator as a replay watermark so the same code cannot verify twice. Empty before any acceptance, and reset when two-factor is enrolled or disabled."
+            description: "When a TOTP code was last accepted, written under a row lock and passed to the code validator as a replay watermark; the framework validator then refuses a code from a time step already accepted. Empty before any acceptance, and reset when two-factor is enrolled or disabled."
           )
         end
 
@@ -1358,7 +1358,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
 
         resource do
           description(
-            "A single-use, expiring token issued to a credential: emailed for email verification or password reset, or held in the browser session for a pending two-factor step (email_change is allowed but no code mints it). Only the SHA-256 digest is stored; its policies refuse every actor."
+            "A single-use, expiring token issued to a credential: emailed for email verification or password reset, or held in the browser session for a pending two-factor step (email_change is a permitted context value). Only the SHA-256 digest is stored; its policies refuse every actor."
           )
         end
 
@@ -1391,7 +1391,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
             public?: false,
             allow_nil?: false,
             constraints: [one_of: [:email_verify, :password_reset, :email_change, :totp_pending]],
-            description: "What the token is for: email_verify, password_reset, email_change or totp_pending; required. Consuming a token matches its context as well as its digest. No framework code mints email_change."
+            description: "What the token is for: email_verify, password_reset, email_change or totp_pending; required. Consuming a token matches its context as well as its digest."
           )
 
           # Binds the token to the address it was emailed to (ADR-035 §4.2) — an
@@ -1789,7 +1789,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
 
         resource do
           description(
-            "Durable brute-force counter: one row per failure key, an email blind index or a credential id, holding the failure count and window. Samen.Identity.LoginFailure upserts it atomically and a successful sign-in deletes it. Its policies refuse every actor."
+            "Brute-force counter: one row per failure key, an email blind index or a credential id, holding the failure count and window. Samen.Identity.LoginFailure upserts it atomically; a successful password or two-factor sign-in deletes that credential's rows. Its policies refuse every actor."
           )
         end
 

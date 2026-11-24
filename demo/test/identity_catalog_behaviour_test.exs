@@ -15,6 +15,13 @@ defmodule Demo.IdentityCatalogBehaviourTest do
   alias Demo.Identity.{ApiKey, Invitation, Membership, Org, User}
   alias Samen.AI.Catalog
 
+  # An approving reveal-grant checker: the operator-with-grant positive control.
+  defmodule ApproveAll do
+    @behaviour Samen.Reveal.Grant
+    @impl true
+    def granted?(_ctx), do: true
+  end
+
   defp described(table, field) do
     Catalog.schema()["tables"]
     |> Enum.find(&(&1["table_name"] == table))
@@ -34,8 +41,11 @@ defmodule Demo.IdentityCatalogBehaviourTest do
   end
 
   defp mk_user(org, attrs) do
+    {cred, attrs} = Map.pop(attrs, :credential_id)
+
     User
     |> Ash.Changeset.for_create(:create, Map.merge(%{org_id: org.id, handle: "u-#{n()}"}, attrs))
+    |> then(&if cred, do: Ash.Changeset.force_change_attribute(&1, :credential_id, cred), else: &1)
     |> Ash.create!(authorize?: false)
   end
 
@@ -60,10 +70,11 @@ defmodule Demo.IdentityCatalogBehaviourTest do
     do: record |> Ash.Changeset.for_update(action, attrs, actor: actor) |> Ash.update(actor: actor)
 
   test "Membership: a write must out-rank the stored role as well as the role set, and a user holds one membership per org" do
-    assert resource_text("mbs_membership") =~ "a create is refused when the user already has a membership there (no unique index)"
+    assert resource_text("mbs_membership") =~ "a create is refused when the user already has a membership there"
     assert resource_text("mbs_membership") =~ "any role being set and any role the row holds must each be strictly below the writer's own"
     assert described("mbs_membership", "role") =~ "changing or deleting a row also needs its stored role strictly below"
-    assert described("mbs_membership", "status") =~ "Only an active membership gives a signed-in session or an API key a role"
+    assert described("mbs_membership", "status") =~ "Only an active membership resolves a role in the organization for a signed-in session or an API key"
+    assert described("mbs_membership", "status") =~ "any other status resolves none"
 
     org = mk_org()
     owner = mk_member(org, :owner)
@@ -81,20 +92,50 @@ defmodule Demo.IdentityCatalogBehaviourTest do
 
     # RED: a second membership for the same user is refused at create, whatever its role
     second = Membership |> Ash.Changeset.for_create(:create, %{org_id: org.id, user_id: owner.user.id, role: :viewer})
-    assert {:error, _} = Ash.create(second, actor: admin)
+    assert {:error, %Ash.Error.Invalid{} = refused} = Ash.create(second, actor: admin)
+    assert Exception.message(refused) =~ ~r/already|membership/i
     assert [_one] = Membership |> Ash.Query.filter(user_id == ^owner.user.id) |> Ash.read!(authorize?: false)
+
+    # CONTROL (same test): a fresh user with no membership can be added by the same actor
+    fresh = mk_user(org, %{})
+    assert {:ok, %{role: :viewer}} =
+             Membership
+             |> Ash.Changeset.for_create(:create, %{org_id: org.id, user_id: fresh.id, role: :viewer})
+             |> Ash.create(actor: admin)
 
     # CONTROL: the same actor demotes a lower-ranked member, and an owner demotes an admin
     assert {:ok, %{role: :viewer}} = upd(lower.membership, :update, %{role: :viewer}, admin)
     assert {:ok, %{role: :member}} = upd(peer.membership, :update, %{role: :member}, actor(org, owner, :owner))
   end
 
+  test "Membership status: only an active membership resolves a role for a session's credential; any other status resolves none" do
+    org = mk_org()
+    cred = Ash.UUID.generate()
+    %{membership: mbr} = mk_member(org, :admin, %{credential_id: cred})
+    mods = %{user: User, membership: Membership}
+
+    # CONTROL: active resolves the role and the org
+    assert {:ok, %{role: :admin, org_id: org_id}} = Samen.Auth.OrgActor.resolve(mods, cred, org.id)
+    assert org_id == org.id
+    assert org.id in Samen.Auth.OrgActor.authorized_org_ids(mods, cred)
+
+    # RED: any other status resolves no role and no org
+    for status <- ["suspended", "invited"] do
+      {:ok, _} = mbr |> Ash.Changeset.for_update(:update, %{status: status}, authorize?: false) |> Ash.update()
+      assert :error = Samen.Auth.OrgActor.resolve(mods, cred, org.id), "status #{status} still resolved a role"
+      refute org.id in Samen.Auth.OrgActor.authorized_org_ids(mods, cred)
+    end
+
+    {:ok, _} = Ash.get!(Membership, mbr.id, authorize?: false) |> Ash.Changeset.for_update(:update, %{status: "active"}, authorize?: false) |> Ash.update()
+    assert {:ok, %{role: :admin}} = Samen.Auth.OrgActor.resolve(mods, cred, org.id)
+  end
+
   test "ApiKey: expiry is clamped at create and only shortened by update, revoke is one-way, mark_used is system-only" do
     assert described("key_api_key", "expires_at") =~ "Create clamps it to at most 365 days ahead (90 days when empty)"
-    assert described("key_api_key", "expires_at") =~ "update can only shorten it and refuses a revoked or expired key"
+    assert described("key_api_key", "expires_at") =~ "an update that sets it can only shorten it and refuses a revoked or expired key"
     assert described("key_api_key", "revoked_at") =~ "the revoke action sets it once and keeps the original instant on a repeat"
     assert described("key_api_key", "last_used_at") =~ "through the system-only mark_used action"
-    assert described("key_api_key", "scopes") =~ "recorded only: no request path checks them"
+    assert described("key_api_key", "scopes") =~ "A key's authority at use is its effective role (see minter_role)"
 
     org = mk_org()
     admin_member = mk_member(org, :admin)
@@ -131,7 +172,11 @@ defmodule Demo.IdentityCatalogBehaviourTest do
     Process.sleep(1100)
     {:ok, again} = upd(Ash.get!(ApiKey, key.id, authorize?: false), :revoke, %{}, admin)
     assert again.revoked_at == revoked.revoked_at
-    assert {:error, _} = upd(Ash.get!(ApiKey, key.id, authorize?: false), :update, %{expires_at: DateTime.add(sooner, -1, :day)}, admin)
+    assert {:error, retimed} = upd(Ash.get!(ApiKey, key.id, authorize?: false), :update, %{expires_at: DateTime.add(sooner, -1, :day)}, admin)
+    assert Exception.message(retimed) =~ ~r/stale|not found|StaleRecord/i
+    # CONTROL: the same re-time on a live key succeeds
+    live = mint.(%{})
+    assert {:ok, _} = upd(live, :update, %{expires_at: DateTime.add(live.expires_at, -1, :day) |> DateTime.truncate(:second)}, admin)
 
     # mark_used: no actor, an admin included, may run it; the auth path (no actor) stamps it
     fresh = mint.(%{})
@@ -143,7 +188,7 @@ defmodule Demo.IdentityCatalogBehaviourTest do
 
   test "Invitation: every create is pending with a 14-day expiry, status is not an input, update is refused, revoke only while pending" do
     assert resource_text("inv_invitation") =~ "Every create is pending with a 14-day expiry"
-    assert resource_text("inv_invitation") =~ "revoked (only while pending)"
+    assert resource_text("inv_invitation") =~ "revoked or expired, each only from pending"
     assert described("inv_invitation", "expires_at") =~ "14 days after creation, set by every create"
     assert described("inv_invitation", "status") =~ "pending by default and on every create"
     assert described("inv_invitation", "role") =~ "Creating needs a verified admin or owner and a role strictly below their own"
@@ -182,8 +227,7 @@ defmodule Demo.IdentityCatalogBehaviourTest do
   end
 
   test "Org: a slug is refused when it matches another organization's slug (trimmed, ignoring case) or id" do
-    assert described("ido_org", "slug") =~ "refuse a slug that matches another organization's slug (trimmed, ignoring case) or id"
-    assert described("ido_org", "slug") =~ "the database has no unique index on it"
+    assert described("ido_org", "slug") =~ "refuse a non-empty slug that matches another organization's slug (trimmed, ignoring case) or id"
 
     slug = "b1-slug-#{n()}"
     first = mk_org(slug)
@@ -199,16 +243,17 @@ defmodule Demo.IdentityCatalogBehaviourTest do
 
     # update: another org's slug is refused, the org's own slug re-sent is not
     admin = %{org_id: other.id, role: :admin, plane: :tenant, kind: :tenant, id: "a"}
-    assert {:error, _} = upd(other, :update, %{slug: String.upcase(slug)}, admin)
+    assert {:error, %Ash.Error.Invalid{} = refused} = upd(other, :update, %{slug: String.upcase(slug)}, admin)
+    assert Exception.message(refused) =~ ~r/slug/i
     assert {:ok, _} = upd(other, :update, %{slug: other.slug}, admin)
   end
 
   test "User vault fields: the actor's plane decides whether a read gets plain text, an omission or a mask" do
     full = described("usr_user", "full_name")
-    assert full =~ "A tenant-plane actor gets it in clear"
+    assert full =~ "A tenant-plane actor reads it in clear"
     assert full =~ "an operator only under a reveal grant (else omitted; masked while impersonating)"
-    assert full =~ "a plane-less actor a masked value"
-    assert full =~ "AI egress is masked unless the host opts in and a grant covers it"
+    assert full =~ "a plane-less actor masked"
+    assert full =~ "AI egress masks it; only a completion call can carry it in clear"
 
     org = mk_org()
     subject = mk_user(org, %{full_name: %{first: "Plain", last: "Reader"}, emails: ["plain@example.test"]})
@@ -233,5 +278,12 @@ defmodule Demo.IdentityCatalogBehaviourTest do
     assert %Ash.ForbiddenField{} = read.(Map.put(base, :plane, :operator)).full_name
     assert %Samen.Masked{} = read.(Map.merge(base, %{plane: :operator, impersonation: %{session_id: "s"}})).full_name
     assert %Samen.Masked{} = read.(base).full_name
+
+    # operator WITH a reveal grant (positive control for the omission above): clear
+    Application.put_env(:samen_core, :reveal_grant, ApproveAll)
+    granted = read.(Map.put(base, :plane, :operator))
+    refute match?(%Ash.ForbiddenField{}, granted.full_name)
+    refute match?(%Samen.Masked{}, granted.full_name)
+    assert inspect(granted.full_name) =~ "Plain"
   end
 end
