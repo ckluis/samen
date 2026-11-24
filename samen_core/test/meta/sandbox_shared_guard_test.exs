@@ -67,15 +67,28 @@ defmodule Samen.TestSandboxGuardTest do
     end
   end
 
-  defp scanned_files do
-    tests = for app <- @apps, file <- Samen.SourceScan.files(Path.join([@root, app, "test"]), ~w(.ex .exs)), do: file
-    spikes = for dir <- Samen.SourceScan.dirs(@root, "spikes/*/test"), file <- Samen.SourceScan.files(dir, ~w(.ex .exs)), do: file
+  # {files, errors}: errors are the directories the walk could not list and the entries it could not stat (a dangling
+  # symlink, a permission failure). `files/2` skips those silently, so a gate must use `files_checked/2` and assert none.
+  defp scan do
+    results =
+      for app <- @apps, do: Samen.SourceScan.files_checked(Path.join([@root, app, "test"]), ~w(.ex .exs))
 
-    (tests ++ spikes ++ flat(Path.join(@root, "scripts/landing"), [".exs"]) ++ flat(Path.join(@root, "samen_core/priv/templates"), [".eex"]))
-    |> Enum.map(&Path.relative_to(&1, @root))
-    |> Enum.uniq()
-    |> Enum.sort()
+    spike_results =
+      for dir <- Samen.SourceScan.dirs(@root, "spikes/*/test"), do: Samen.SourceScan.files_checked(dir, ~w(.ex .exs))
+
+    walked = results ++ spike_results
+
+    files =
+      (Enum.flat_map(walked, &elem(&1, 0)) ++
+         flat(Path.join(@root, "scripts/landing"), [".exs"]) ++ flat(Path.join(@root, "samen_core/priv/templates"), [".eex"]))
+      |> Enum.map(&Path.relative_to(&1, @root))
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    {files, Enum.flat_map(walked, &elem(&1, 1))}
   end
+
+  defp scanned_files, do: elem(scan(), 0)
 
   defp read!(rel), do: Samen.SourceScan.read!(Path.join(@root, rel))
 
@@ -126,6 +139,22 @@ defmodule Samen.TestSandboxGuardTest do
     refute raw_pair?("    Ecto.Adapters.SQL.Sandbox.mode(TestRepo, :manual)\n")
     refute raw_pair?("Sandbox.mode(TestRepo, :automatic_thing)")
     refute raw_pair?("# Ecto.Adapters.SQL.Sandbox.mode(TestRepo, :auto) in a comment\n")
+  end
+
+  test "the scan saw the whole tree: no unlistable directory and no dangling or unreadable entry was skipped" do
+    assert {_files, []} = scan()
+  end
+
+  test "positive control: a walk over a dangling symlink REPORTS it (files/2 would skip it silently)" do
+    dir = Path.join(System.tmp_dir!(), "samen_guard_walk_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+    File.write!(Path.join(dir, "a_test.exs"), "")
+    :ok = File.ln_s(Path.join(dir, "nowhere.exs"), Path.join(dir, "dangling_test.exs"))
+
+    assert {[_a], [{bad, :enoent}]} = Samen.SourceScan.files_checked(dir, ~w(.exs))
+    assert Path.basename(bad) == "dangling_test.exs"
+    assert [_a] = Samen.SourceScan.files(dir, ~w(.exs))
   end
 
   test "the scan is not vacuous: it sees the migrated suites and the demonstration file" do
