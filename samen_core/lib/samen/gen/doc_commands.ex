@@ -215,7 +215,7 @@ defmodule Samen.Gen.DocCommands do
         id: :deps_get,
         match: fn argv -> argv == ["mix", "deps.get"] end,
         evidence: [
-          {:gen_engine, ~s|run_mix!(s, ["deps.get"])|},
+          {:gen_engine, ~s|run.(s, ["deps.get"])|},
           {:flagship_probe, "Gen.compile_and_dump!(spec)"}
         ]
       },
@@ -273,7 +273,7 @@ defmodule Samen.Gen.DocCommands do
           argv == ["mix", "samen.verify.api_contract", "--version", "v1", "--update"]
         end,
         evidence: [
-          {:gen_engine, ~s|run_mix!(s, ["samen.verify.api_contract", "--version", "v1", "--update"])|},
+          {:gen_engine, ~s|run.(s, ["samen.verify.api_contract", "--version", "v1", "--update"])|},
           {:flagship_probe, "Gen.compile_and_dump!(spec)"}
         ]
       },
