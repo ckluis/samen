@@ -199,6 +199,101 @@ defmodule Samen.Web.Auth.OnboardingTest do
   end
 
   # ===========================================================================
+  # 1b. Who may write the Org through the wizard (review 2026-11-13 findings 4 + 11)
+  # ===========================================================================
+
+  describe "wizard Org writes are role-gated, and a refusal is visible" do
+    defp role_scope(reg, role),
+      do: %Samen.Scope{actor: %{id: reg.user.id, org_id: reg.org.id, role: role, verified?: true, kind: :tenant, plane: :tenant}}
+
+    # a second user holding `role` in the registrant's org (real membership row, so the LiveView resolves it)
+    defp member_of(reg, role) do
+      user =
+        User
+        |> Ash.Changeset.for_create(:create, %{org_id: reg.org.id, handle: "w-#{System.unique_integer([:positive])}"}, authorize?: false)
+        |> Ash.create!()
+
+      Membership
+      |> Ash.Changeset.for_create(:create, %{org_id: reg.org.id, user_id: user.id, role: role}, authorize?: false)
+      |> Ash.create!()
+
+      user
+    end
+
+    test "RED: a member and a viewer cannot name the org or complete setup; CONTROL: an admin can" do
+      reg = register!()
+      mount = build_mount(:settings)
+
+      for role <- [:member, :viewer] do
+        assert {:error, _} = Onboarding.name_org(mount, role_scope(reg, role), reg.org.id, "Pwned #{role}")
+        assert {:error, _} = Onboarding.complete!(mount, role_scope(reg, role), reg.org.id)
+      end
+
+      assert reread_org(reg.org.id).name == reg.org.name
+      assert is_nil(reread_org(reg.org.id).onboarded_at)
+
+      assert {:ok, %{name: "By Admin"}} = Onboarding.name_org(mount, role_scope(reg, :admin), reg.org.id, "By Admin")
+      assert {:ok, _} = Onboarding.complete!(mount, role_scope(reg, :admin), reg.org.id)
+    end
+
+    test "RED: an ADMIN (not the owner) cannot choose the plan; the owner can" do
+      reg = register!()
+
+      assert {:error, :forbidden} = Onboarding.select_plan(plan_mount(), role_scope(reg, :admin), reg.org.id, "growth")
+      assert {:error, :forbidden} = Onboarding.select_plan(plan_mount(), role_scope(reg, :member), reg.org.id, "growth")
+      assert reread_org(reg.org.id).plan == "free"
+
+      assert {:ok, %{plan: "growth"}} = Onboarding.select_plan(plan_mount(), role_scope(reg, :owner), reg.org.id, "growth")
+    end
+
+    test "RED: once the org is onboarded not even the owner can replay the plan step" do
+      reg = register!()
+      assert {:ok, _} = Onboarding.complete!(plan_mount(), role_scope(reg, :owner), reg.org.id)
+
+      assert {:error, :already_onboarded} = Onboarding.select_plan(plan_mount(), role_scope(reg, :owner), reg.org.id, "growth")
+      assert {:error, :forbidden} = Onboarding.select_plan(plan_mount(), role_scope(reg, :admin), reg.org.id, "growth")
+      assert reread_org(reg.org.id).plan == "free"
+    end
+
+    test "RED: a member clicking finish sees why it did nothing; CONTROL: an admin's finish completes" do
+      reg = register!()
+      member = member_of(reg, :member)
+      admin = member_of(reg, :admin)
+
+      refused = mount_socket(reg.org.id, member.id) |> goto(:invite) |> event("finish")
+      assert refused.assigns.invite_error =~ "Only a workspace admin can finish setup"
+      assert html(refused) =~ "Only a workspace admin can finish setup"
+      assert is_nil(reread_org(reg.org.id).onboarded_at)
+
+      done = mount_socket(reg.org.id, admin.id) |> goto(:invite) |> event("finish")
+      assert is_nil(done.assigns[:invite_error])
+      refute is_nil(reread_org(reg.org.id).onboarded_at)
+    end
+
+    test "RED: a non-owner choosing a plan in the wizard sees why; CONTROL: the owner's selection writes" do
+      reg = register!()
+      admin = member_of(reg, :admin)
+
+      refused =
+        mount_socket(plan_mount(), reg.org.id, admin.id)
+        |> goto(:plan)
+        |> event("select_plan", %{"plan" => %{"key" => "growth"}})
+
+      assert refused.assigns.step == :plan
+      assert refused.assigns.org_error =~ "Only the workspace owner can choose a plan"
+      assert reread_org(reg.org.id).plan == "free"
+
+      ok =
+        mount_socket(plan_mount(), reg.org.id, reg.user.id)
+        |> goto(:plan)
+        |> event("select_plan", %{"plan" => %{"key" => "growth"}})
+
+      assert ok.assigns.step == :invite
+      assert reread_org(reg.org.id).plan == "growth"
+    end
+  end
+
+  # ===========================================================================
   # 2. WizardLive — step 1: org naming
   # ===========================================================================
 

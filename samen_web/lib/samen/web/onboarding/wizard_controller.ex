@@ -115,12 +115,16 @@ defmodule Samen.Web.Onboarding.WizardController do
   def finish(conn, params) do
     {conn, mount, org_id, user_id} = context(conn, params)
 
-    case authorized_scope(mount, conn, org_id, user_id) do
-      nil -> :ok
-      scope -> _ = Onboarding.complete!(mount, scope, org_id)
-    end
+    refused? =
+      case authorized_scope(mount, conn, org_id, user_id) do
+        nil -> true
+        scope -> match?({:error, _}, Onboarding.complete!(mount, scope, org_id))
+      end
 
-    redirect(conn, to: base_path(conn, org_id, user_id))
+    # A refused finish must say so (a silent re-render looked like a broken button).
+    if refused?,
+      do: redirect(conn, to: step_path(conn, org_id, user_id, "invite", "&finish_error=1")),
+      else: redirect(conn, to: base_path(conn, org_id, user_id))
   end
 
   # -- private: session-derived context (B-SEC / S11) --------------------------

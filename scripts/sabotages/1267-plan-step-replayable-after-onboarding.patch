@@ -1,0 +1,20 @@
+# SABOTAGE: Onboarding.select_plan stops refusing once onboarded_at is set: the owner replays the plan step 
+#   on a live org
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/auth/onboarding_test.exs
+# MUST_FAIL: RED: once the org is onboarded not even the owner can replay the plan step
+diff --git a/samen_web/lib/samen/web/onboarding.ex b/samen_web/lib/samen/web/onboarding.ex
+index f5f35d89..8f2d361b 100644
+--- a/samen_web/lib/samen/web/onboarding.ex
++++ b/samen_web/lib/samen/web/onboarding.ex
+@@ -181,7 +181,7 @@ defmodule Samen.Web.Onboarding do
+   def select_plan(%Mount{} = mount, scope, org_id, plan_key) when is_binary(org_id) and is_binary(plan_key) do
+     with :ok <- require_owner(scope),
+          {:ok, org} <- org(mount, scope, org_id),
+-         :ok <- require_not_onboarded(org),
++         :ok <- (fn _ -> :ok end).(org),
+          {:ok, choices} <- offered_plans(mount, org_id),
+          true <- Enum.any?(choices, &(&1.key == plan_key)) || {:error, :invalid_plan} do
+       org
