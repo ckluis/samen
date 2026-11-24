@@ -87,10 +87,14 @@ defmodule Samen.TestDbTest do
     assert e.message =~ ~s(application_name="#{app}")
     assert e.message =~ "another checkout or worktree"
     refute e.message =~ "SELECT"
-    # both are client backends (a Postgrex connection): neither is waited for, and no query text is printed for them
-    assert e.message =~ ~s(backend_type="client backend")
-    refute e.message =~ ~s(backend_type="autovacuum worker")
-    refute e.message =~ "query="
+    # both are client backends (a Postgrex connection): neither is waited for, and no query text is printed for them.
+    # Asserted per session line, not on the whole message: Postgres may attach a real autovacuum worker to this database
+    # at any moment, and its line (backend_type="autovacuum worker", with its generated query) is then listed too.
+    for pid <- [holder_pid, bystander_pid] do
+      line = e.message |> String.split("\n") |> Enum.find(&String.contains?(&1, "pid=#{pid} "))
+      assert line =~ ~s(backend_type="client backend")
+      refute line =~ "query="
+    end
     refute e.message =~ "pg_backend_pid"
     # no credential in the message: a configured password must not appear (a blank one, as here, is `""`, which a listed
     # session with an empty application_name legitimately contains -- so only a non-empty password is searched for), and
