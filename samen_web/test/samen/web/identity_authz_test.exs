@@ -141,6 +141,54 @@ defmodule Samen.Web.IdentityAuthzTest do
     end
   end
 
+  describe "A2. Invitation :destroy is admin-gated; :revoke only moves a pending invite" do
+    test "RED: a viewer/member cannot destroy an invitation (single or bulk); CONTROL: an admin can" do
+      inviter = register!()
+      invitee = register!()
+      other = register!()
+      {:ok, inv1, _} = Invite.create(invite_mods(), scope(inviter, :owner), %{email: invitee.email})
+      {:ok, inv2, _} = Invite.create(invite_mods(), scope(inviter, :owner), %{email: other.email})
+
+      for role <- [:viewer, :member] do
+        s = scope(inviter, role)
+        assert {:error, _} = reread(Invitation, inv1.id) |> Ash.destroy(scope: s)
+
+        result = Invitation |> Ash.Query.filter(org_id == ^inviter.org.id) |> Ash.bulk_destroy(:destroy, %{}, scope: s, strategy: [:stream, :atomic], return_errors?: true)
+        assert result.status == :error or result.error_count > 0
+      end
+
+      assert reread(Invitation, inv1.id) && reread(Invitation, inv2.id)
+
+      assert :ok = reread(Invitation, inv1.id) |> Ash.destroy(scope: scope(inviter, :admin))
+      assert is_nil(reread(Invitation, inv1.id))
+    end
+
+    test "RED: an admin cannot relabel an ACCEPTED invite as revoked through the :revoke action; CONTROL: a pending one revokes" do
+      inviter = register!()
+      invitee = register!()
+      other = register!()
+      {:ok, inv, raw} = Invite.create(invite_mods(), scope(inviter, :owner), %{email: invitee.email})
+      {:ok, pending, _} = Invite.create(invite_mods(), scope(inviter, :owner), %{email: other.email})
+      assert {:ok, _} = Invite.accept(invite_mods(), raw)
+
+      admin = scope(inviter, :admin)
+      accepted = reread(Invitation, inv.id)
+      assert accepted.status == "accepted"
+
+      assert {:error, _} =
+               accepted
+               |> Ash.Changeset.for_update(:revoke, %{revoked_at: DateTime.utc_now() |> DateTime.truncate(:second)}, scope: admin)
+               |> Ash.update(scope: admin)
+
+      assert reread(Invitation, inv.id).status == "accepted"
+
+      assert {:ok, %{status: "revoked"}} =
+               reread(Invitation, pending.id)
+               |> Ash.Changeset.for_update(:revoke, %{revoked_at: DateTime.utc_now() |> DateTime.truncate(:second)}, scope: admin)
+               |> Ash.update(scope: admin)
+    end
+  end
+
   # ===========================================================================
   # B. ApiKey default create/update
   # ===========================================================================

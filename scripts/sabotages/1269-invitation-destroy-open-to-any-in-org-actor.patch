@@ -1,0 +1,18 @@
+# SABOTAGE: Invitation :destroy loses its admin gate: a viewer deletes the org's invitations
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: RED: a viewer/member cannot destroy an invitation
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index 6f78c818..4996e695 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -876,7 +876,6 @@ defmodule Samen.Scopes.Identity.Blueprint do
+           # Deleting an invitation erases the record (pending ones are a DoS, accepted/revoked ones are
+           # history): admin+, exactly like `:revoke`. Covers bulk destroy too (the check reads only the actor).
+           policy action_type(:destroy) do
+-            forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})
+             authorize_if(always())
+           end
+ 

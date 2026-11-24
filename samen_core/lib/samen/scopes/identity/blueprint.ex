@@ -824,6 +824,16 @@ defmodule Samen.Scopes.Identity.Blueprint do
             accept([])
             argument(:revoked_at, :utc_datetime, allow_nil?: false)
             require_atomic?(false)
+
+            # Only a PENDING invite can be revoked: an accepted/expired/revoked row is history and
+            # must not be relabelled (fail closed on a row read without `status`).
+            validate(fn changeset, _ctx ->
+              case changeset.data do
+                %{status: "pending"} -> :ok
+                _ -> {:error, field: :status, message: "only a pending invitation can be revoked"}
+              end
+            end)
+
             change(set_attribute(:status, "revoked"))
             change(set_attribute(:revoked_at, arg(:revoked_at)))
           end
@@ -860,6 +870,13 @@ defmodule Samen.Scopes.Identity.Blueprint do
           policy action(:create) do
             forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})
             forbid_unless(Samen.Policy.ManageRole)
+            authorize_if(always())
+          end
+
+          # Deleting an invitation erases the record (pending ones are a DoS, accepted/revoked ones are
+          # history): admin+, exactly like `:revoke`. Covers bulk destroy too (the check reads only the actor).
+          policy action_type(:destroy) do
+            forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})
             authorize_if(always())
           end
 
