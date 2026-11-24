@@ -26,17 +26,22 @@ defmodule Samen.TestDb do
 
   The drop is a plain `DROP DATABASE IF EXISTS "<db>"` over the maintenance database (`:maintenance_database`,
   default `postgres`, as `storage_down/1` does). **There is no `WITH (FORCE)`, no session termination and no
-  sleep-retry**: terminating sessions would silently kill ANOTHER run's sessions when two checkouts or worktrees
+  blind sleep-retry**: terminating sessions would silently kill ANOTHER run's sessions when two checkouts or worktrees
   share a database name (`demo_test`, ...), which used to fail loudly and must keep failing loudly.
 
     * The statement runs with an infinite client timeout, so the client never abandons a DROP the server is still
       executing (mechanism 2 is removed by construction). The wait is bounded by the caller's budget (ExUnit, the CI
       step timeout), not by this module.
     * Postgres itself waits about 5 s for other sessions to leave before answering 55006, which covers a predecessor
-      that is genuinely still shutting down. This module adds no wait of its own.
+      that is genuinely still shutting down. During that wait Postgres SIGTERMs the AUTOVACUUM WORKERS in the target
+      database (they are not clients); a worker slower than the 5 s makes the DROP give up with 55006 although nobody
+      is attached (seen on GitHub Actions: `backend_type` `autovacuum worker`, no user, no client address). So when
+      EVERY blocker has `backend_type = 'autovacuum worker'` (classified on that column only, never on an empty
+      name) and `pg_prepared_xacts` has no row for the database, this module waits (bounded, by pid) for those pids
+      to leave `pg_stat_activity` and re-issues the DROP exactly once. Any other blocker raises at once.
     * 55006 (matched on the SQLSTATE, not the message text) raises naming the database and listing the other sessions
-      from `pg_stat_activity` (pid, role, `application_name`, client address, state, start time and age; never query
-      text), with the likely causes. Nothing was dropped or killed.
+      from `pg_stat_activity` (pid, role, `application_name`, client address, state, start time and age, `backend_type`, wait event; query
+      text ONLY for autovacuum workers, whose text Postgres generates; and the count of prepared transactions), with the likely causes. Nothing was dropped or killed.
     * Any other failure raises with the database name and the real Postgres/driver error (code and message). A
       failed maintenance connection raises with the connect error itself (refused, unknown role, bad password, ...).
     * `{:error, :already_up}` from the create after a successful drop raises.
@@ -61,6 +66,8 @@ defmodule Samen.TestDb do
   @maintenance_default "postgres"
   @test_name ~r/\A(?:[A-Za-z0-9]+_)*test\d*(?:_lane\d+)*(?:_scratch_[A-Za-z][A-Za-z0-9]*_\d+(?:_\d+)*)*\z|\A[A-Za-z0-9_]+_downcheck_[0-9a-f]{8}\z/
   @in_use "55006"
+  @autovacuum_wait_ms 30_000
+  @poll_ms 100
 
   @doc "Drop (if present) and create the database of `config`. Raises with the real error on any failure."
   @spec reset!(keyword()) :: :ok
@@ -85,15 +92,95 @@ defmodule Samen.TestDb do
     db = db!(config)
     guard!(db)
 
-    case run(config, "DROP DATABASE IF EXISTS #{quote_ident(db)}", :infinity) do
+    case run(config, drop_sql(db), :infinity) do
       {:ok, _} ->
         :ok
 
       {:error, %Postgrex.Error{postgres: %{pg_code: @in_use}} = error} ->
-        raise in_use_message(config, db, error)
+        retry_or_raise!(config, db, error)
 
       {:error, error} ->
         raise "Samen.TestDb: could not drop database #{inspect(db)}: #{format(error)}"
+    end
+  end
+
+  defp drop_sql(db), do: "DROP DATABASE IF EXISTS #{quote_ident(db)}"
+
+  # 55006. Postgres 16 itself SIGTERMs autovacuum workers in the target database while DROP DATABASE waits (about 5 s);
+  # a worker that takes longer makes the DROP give up although no client is attached. When EVERY blocker is such a
+  # worker (and no prepared transaction pins the database) wait, by pid, for those workers to go and re-issue the DROP
+  # exactly once. Anything else raises at once, terminating nothing.
+  defp retry_or_raise!(config, db, error), do: resolve_in_use(config, db, error, &run/3, @autovacuum_wait_ms)
+
+  @doc false
+  # The 55006 policy with the statement runner and the wait bound injectable (`run.(config, sql, timeout)` returns
+  # what `run/3` does). Returns :ok when the single re-issued DROP succeeded, raises otherwise.
+  @spec resolve_in_use(keyword(), String.t(), term(), function(), non_neg_integer()) :: :ok
+  def resolve_in_use(config, db, error, run, bound_ms) do
+    {rows, prepared} = blockers(config, db, run)
+
+    case classify(rows, prepared) do
+      {:wait, pids} ->
+        case await_gone(config, pids, bound_ms, run) do
+          :gone ->
+            case run.(config, drop_sql(db), :infinity) do
+              {:ok, _} ->
+                :ok
+
+              {:error, %Postgrex.Error{postgres: %{pg_code: @in_use}} = second} ->
+                {rows, prepared} = blockers(config, db, run)
+                raise in_use_message(db, second, "the second DROP, after the autovacuum workers left, also failed", rows, prepared)
+
+              {:error, second} ->
+                raise "Samen.TestDb: could not drop database #{inspect(db)}: the second DROP, after the autovacuum workers left, failed: #{format(second)}"
+            end
+
+          {:still_there, left} ->
+            {rows, prepared} = blockers(config, db, run)
+            raise in_use_message(db, error, "autovacuum workers #{inspect(left)} did not leave within #{bound_ms} ms", rows, prepared)
+        end
+
+      :raise ->
+        raise in_use_message(db, error, nil, rows, prepared)
+    end
+  end
+
+  @doc false
+  # Pure. `rows` are the maps `blockers/2` lists; `prepared` is the number of prepared transactions in the database
+  # (they block the DROP and never appear in pg_stat_activity). Classified on `backend_type` ONLY: a client backend
+  # with an empty application name, user or address is still a client.
+  @spec classify([map()], non_neg_integer() | :unknown) :: {:wait, [integer()]} | :raise
+  def classify(rows, prepared) do
+    if rows != [] and prepared == 0 and Enum.all?(rows, &(Map.get(&1, :backend_type) == "autovacuum worker")) do
+      {:wait, Enum.map(rows, & &1.pid)}
+    else
+      :raise
+    end
+  end
+
+  @doc false
+  # Waits (bounded) until none of `pids` is in pg_stat_activity. Terminates nothing: Postgres has already asked them to exit.
+  @spec await_gone(keyword(), [integer()], non_neg_integer(), function()) :: :gone | {:still_there, [integer()]}
+  def await_gone(config, pids, bound_ms, run \\ &run/3) do
+    deadline = System.monotonic_time(:millisecond) + bound_ms
+    do_await(config, pids, deadline, run)
+  end
+
+  defp do_await(config, pids, deadline, run) do
+    list = Enum.map_join(pids, ",", &Integer.to_string(&1))
+
+    left =
+      case run.(config, "SELECT pid FROM pg_stat_activity WHERE pid IN (#{list})", 15_000) do
+        {:ok, %{rows: rows}} -> Enum.map(rows, fn [pid] -> String.to_integer(pid) end)
+        {:error, _} -> pids
+      end
+
+    cond do
+      left == [] -> :gone
+      System.monotonic_time(:millisecond) >= deadline -> {:still_there, left}
+      true ->
+        Process.sleep(@poll_ms)
+        do_await(config, left, deadline, run)
     end
   end
 
@@ -125,37 +212,72 @@ defmodule Samen.TestDb do
   defp format(other), do: inspect(other)
 
   defp activity_sql(db) do
-    # simple protocol: the name is embedded as a (quote-doubled) literal
+    # simple protocol: the name is embedded as a (quote-doubled) literal. The query text is selected ONLY for autovacuum
+    # workers (Postgres-generated, names a table); every other backend's query text is never read.
     """
     SELECT pid, usename, application_name, client_addr::text, state, backend_start::text,
-           (now() - backend_start)::text AS age
+           (now() - backend_start)::text AS age, backend_type, wait_event_type, wait_event,
+           CASE WHEN backend_type = 'autovacuum worker' THEN query END AS query
       FROM pg_stat_activity
      WHERE datname = '#{String.replace(db, "'", "''")}' AND pid <> pg_backend_pid()
      ORDER BY backend_start
     """
   end
 
-  defp in_use_message(config, db, error) do
-    sessions =
-      case run(config, activity_sql(db), 15_000) do
-        {:ok, %{rows: []}} ->
-          "  (none visible in pg_stat_activity now: they may have just left, or belong to a role this user cannot see)"
+  defp prepared_sql(db), do: "SELECT count(*) FROM pg_prepared_xacts WHERE database = '#{String.replace(db, "'", "''")}'"
 
-        {:ok, %{rows: rows}} ->
-          Enum.map_join(rows, "\n", fn [pid, user, app, addr, state, started, age] ->
-            "  pid=#{pid} usename=#{inspect(user)} application_name=#{inspect(app)} client_addr=#{inspect(addr)} " <>
-              "state=#{inspect(state)} backend_start=#{started} (#{age} ago)"
-          end)
+  @keys [:pid, :usename, :application_name, :client_addr, :state, :backend_start, :age, :backend_type, :wait_event_type, :wait_event, :query]
+
+  # {rows | {:error, reason}, prepared | :unknown}
+  defp blockers(config, db, run) do
+    rows =
+      case run.(config, activity_sql(db), 15_000) do
+        {:ok, %{rows: rows}} -> Enum.map(rows, fn r -> @keys |> Enum.zip(r) |> Map.new() |> Map.update!(:pid, &String.to_integer/1) end)
+        {:error, reason} -> {:error, reason}
+      end
+
+    prepared =
+      case run.(config, prepared_sql(db), 15_000) do
+        {:ok, %{rows: [[n]]}} -> String.to_integer(n)
+        _ -> :unknown
+      end
+
+    case rows do
+      {:error, reason} -> {{:error, reason}, prepared}
+      rows -> {rows, prepared}
+    end
+  end
+
+  defp in_use_message(db, error, note, rows, prepared) do
+    sessions =
+      case rows do
+        [] ->
+          "  (none visible in pg_stat_activity now: they may have just left, or belong to a role this user cannot see)"
 
         {:error, reason} ->
           "  (could not list them: #{format(reason)})"
+
+        rows ->
+          Enum.map_join(rows, "\n", fn r ->
+            "  pid=#{r.pid} usename=#{inspect(r.usename)} application_name=#{inspect(r.application_name)} " <>
+              "client_addr=#{inspect(r.client_addr)} state=#{inspect(r.state)} backend_start=#{r.backend_start} (#{r.age} ago) " <>
+              "backend_type=#{inspect(r.backend_type)} wait_event=#{inspect({r.wait_event_type, r.wait_event})}" <>
+              if(r.backend_type == "autovacuum worker", do: " query=#{inspect(r.query)}", else: "")
+          end)
+      end
+
+    prepared_line =
+      case prepared do
+        n when is_integer(n) and n > 0 -> "\n  #{n} prepared transaction(s) in this database (they block DROP DATABASE and are not in pg_stat_activity)"
+        :unknown -> "\n  (prepared transactions could not be counted)"
+        _ -> ""
       end
 
     """
-    Samen.TestDb: could not drop database #{inspect(db)}: it is in use by other sessions (#{format(error)}).
+    Samen.TestDb: could not drop database #{inspect(db)}: it is in use by other sessions (#{format(error)}).#{if note, do: " " <> note <> ".", else: ""}
     Nothing was dropped and no session was terminated. Postgres had already waited about 5 s for them to leave.
     Other sessions on #{inspect(db)}:
-    #{sessions}
+    #{sessions}#{prepared_line}
     Likely causes: another checkout or worktree (or another CI/sabotage lane) running this app's tests against the
     same database name, or a psql/iex session left attached. Wait for that run to finish or stop it, or set
     SAMEN_TEST_DB_SUFFIX to give this run its own database.\
