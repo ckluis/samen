@@ -1134,6 +1134,59 @@ defmodule Samen.Gen.AppTest do
       end
     end
 
+    defp recording_run(own_entries) do
+      {:ok, log} = Agent.start_link(fn -> [] end)
+
+      run = fn %Gen{app_dir: dir}, args ->
+        Agent.update(log, &[args | &1])
+
+        if args == ["samen.verify.catalog_meaning", "--init"] do
+          File.mkdir_p!(dir)
+          File.write!(Path.join(dir, "catalog_meaning.baseline"), Samen.CatalogMeaning.Baseline.render(own_entries))
+        end
+
+        :ok
+      end
+
+      {run, fn -> Agent.get(log, &Enum.reverse/1) end}
+    end
+
+    test "RED: compile_and_dump! runs the dump, then --init, then the API snapshot, in that order" do
+      target = Path.join(System.tmp_dir!(), "gen_app_init_#{System.unique_integer([:positive])}")
+      s = Gen.build_spec(module: "Widgetco", prefix: "wg", abbrev: "wid", target: target, web: true, api: true)
+      {run, calls} = recording_run(["cus_customer.name"])
+
+      assert Gen.compile_and_dump!(s, run) == :ok
+
+      assert calls.() == [
+               ["deps.get"],
+               ["compile", "--warnings-as-errors"],
+               ["samen.catalog.dump", "--output", "schema.dict.json"],
+               ["samen.verify.catalog_meaning", "--init"],
+               ["samen.verify.api_contract", "--version", "v1", "--update"]
+             ]
+    end
+
+    test "RED: compile_and_dump! raises when the written baseline holds the app's OWN generated entries" do
+      target = Path.join(System.tmp_dir!(), "gen_app_own_#{System.unique_integer([:positive])}")
+      s = Gen.build_spec(module: "Widgetco", prefix: "wg", abbrev: "wid", target: target, web: true, api: true)
+      {run, _calls} = recording_run(["wid_record.name"])
+
+      assert_raise RuntimeError, ~r/OWN generated resources as undescribed \(wid_record\.name\)/, fn ->
+        Gen.compile_and_dump!(s, run)
+      end
+    end
+
+    test "RED: compile_and_dump! raises when --init left no baseline file" do
+      target = Path.join(System.tmp_dir!(), "gen_app_nofile_#{System.unique_integer([:positive])}")
+      s = Gen.build_spec(module: "Widgetco", prefix: "wg", abbrev: "wid", target: target, web: false, api: false)
+      File.mkdir_p!(s.app_dir)
+
+      assert_raise RuntimeError, ~r/left no .*catalog_meaning\.baseline/, fn ->
+        Gen.compile_and_dump!(s, fn _s, _args -> :ok end)
+      end
+    end
+
     test "own_debt/2: only the app's OWN tables count; inherited scope debt is allowed" do
       s = spec()
       inherited = Samen.CatalogMeaning.Baseline.render(["cus_customer", "cus_customer.name", "zzz_other.x"])

@@ -534,18 +534,19 @@ defmodule Samen.Gen.App do
   matches the compiled schema (the gate's step 1b). With the API layer (WS-D D3) also
   dumps the committed `api_contract.v1.json` structural-break snapshot so the generated
   ci.sh's `samen.verify.api_contract` step is green on first run. Runs in the app dir via
-  `System.cmd` so it does not disturb the generator's own build.
+  `System.cmd` so it does not disturb the generator's own build. `run` (`fn spec, mix_args -> :ok end`) is the
+  seam a test replaces to record the invocations without compiling an app.
   """
-  def compile_and_dump!(%__MODULE__{} = s) do
-    run_mix!(s, ["deps.get"])
+  def compile_and_dump!(%__MODULE__{} = s, run \\ &run_mix!/2) when is_function(run, 2) do
+    run.(s, ["deps.get"])
     deps_cache!(s, "seed")
-    run_mix!(s, ["compile", "--warnings-as-errors"])
+    run.(s, ["compile", "--warnings-as-errors"])
     deps_cache!(s, "store")
 
-    for args <- dump_steps(s), do: run_mix!(s, args)
+    for args <- dump_steps(s), do: run.(s, args)
 
     if s.api? do
-      run_mix!(s, ["samen.verify.api_contract", "--version", "v1", "--update"])
+      run.(s, ["samen.verify.api_contract", "--version", "v1", "--update"])
     end
 
     own_debt_in_baseline!(s)
