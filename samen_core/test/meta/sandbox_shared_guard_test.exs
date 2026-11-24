@@ -47,31 +47,44 @@ defmodule Samen.TestSandboxGuardTest do
     |> then(&(Regex.match?(@raw, &1) or Regex.match?(@raw_any, &1)))
   end
 
+  # Every walk and read goes through Samen.SourceScan (:prim_file), not Path.wildcard / File.read!: those are one call each
+  # into the node's single `:file_server_2` (~1,400 files here), which queues behind every other test's file I/O -- this
+  # scan took 156 ms alone and 2,191 ms behind 40 processes doing file I/O (and outran ExUnit's 60 s on a loaded machine).
+  @apps ~w(samen_core samen_web demo driftwood pawchart samen_stripe samen_postmark samen_ses samen_resend samen_anthropic)
+
+  # the regular files directly in `dir` with one of `exts` (what `dir/*.{ext}` matched: dot-entries skipped)
+  defp flat(dir, exts) do
+    case :prim_file.list_dir(dir) do
+      {:ok, names} ->
+        for name <- Enum.map(names, &to_string/1),
+            not String.starts_with?(name, "."),
+            Path.extname(name) in exts,
+            match?({:ok, info} when elem(info, 2) == :regular, :prim_file.read_file_info(Path.join(dir, name))),
+            do: Path.join(dir, name)
+
+      {:error, _} ->
+        []
+    end
+  end
+
   defp scanned_files do
-    apps =
-      ~w(samen_core samen_web demo driftwood pawchart samen_stripe samen_postmark samen_ses samen_resend samen_anthropic)
+    tests = for app <- @apps, file <- Samen.SourceScan.files(Path.join([@root, app, "test"]), ~w(.ex .exs)), do: file
+    spikes = for dir <- Samen.SourceScan.dirs(@root, "spikes/*/test"), file <- Samen.SourceScan.files(dir, ~w(.ex .exs)), do: file
 
-    globs =
-      Enum.flat_map(apps, &["#{&1}/test/**/*.{ex,exs}"]) ++
-        [
-          "spikes/*/test/**/*.{ex,exs}",
-          "scripts/landing/*.exs",
-          "samen_core/priv/templates/*.eex"
-        ]
-
-    globs
-    |> Enum.flat_map(&Path.wildcard(Path.join(@root, &1)))
+    (tests ++ spikes ++ flat(Path.join(@root, "scripts/landing"), [".exs"]) ++ flat(Path.join(@root, "samen_core/priv/templates"), [".eex"]))
     |> Enum.map(&Path.relative_to(&1, @root))
     |> Enum.uniq()
     |> Enum.sort()
   end
+
+  defp read!(rel), do: Samen.SourceScan.read!(Path.join(@root, rel))
 
   test "no test file or emitted template switches the sandbox to shared or :auto mode by hand" do
     offenders =
       for rel <- scanned_files(),
           rel not in @demonstrates,
           rel != @self,
-          raw_pair?(File.read!(Path.join(@root, rel))),
+          raw_pair?(read!(rel)),
           do: rel
 
     assert offenders == [],
@@ -117,7 +130,7 @@ defmodule Samen.TestSandboxGuardTest do
 
   test "the scan is not vacuous: it sees the migrated suites and the demonstration file" do
     files = scanned_files()
-    migrated = Enum.count(files, &Regex.match?(@helper_call, File.read!(Path.join(@root, &1))))
+    migrated = Enum.count(files, &Regex.match?(@helper_call, read!(&1)))
 
     assert migrated >= 100,
            "only #{migrated} files call Samen.TestSandbox.shared!/1 — the scan globs drifted"
@@ -129,7 +142,7 @@ defmodule Samen.TestSandboxGuardTest do
 
   test "an allowlist entry that no longer holds the raw pair is OBSOLETE (the list only shrinks)" do
     for rel <- @demonstrates do
-      source = File.read!(Path.join(@root, rel))
+      source = read!(rel)
 
       assert raw_pair?(source),
              "#{rel} no longer contains the raw pair it exists to demonstrate: drop it from @demonstrates"

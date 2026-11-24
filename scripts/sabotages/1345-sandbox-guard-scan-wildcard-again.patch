@@ -1,0 +1,20 @@
+# SABOTAGE: the sandbox-guard scan walks the test trees with Path.wildcard again, one file-server call per 
+#   directory
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/source_scan_test.exs
+# MUST_FAIL: no scan test calls Path.wildcard or File.read!/regular?/dir?/ls through the file server
+diff --git a/samen_core/test/meta/sandbox_shared_guard_test.exs b/samen_core/test/meta/sandbox_shared_guard_test.exs
+index fce338bb..7d41d902 100644
+--- a/samen_core/test/meta/sandbox_shared_guard_test.exs
++++ b/samen_core/test/meta/sandbox_shared_guard_test.exs
+@@ -68,7 +68,7 @@ defmodule Samen.TestSandboxGuardTest do
+   end
+ 
+   defp scanned_files do
+-    tests = for app <- @apps, file <- Samen.SourceScan.files(Path.join([@root, app, "test"]), ~w(.ex .exs)), do: file
++    tests = for app <- @apps, file <- Path.wildcard(Path.join([@root, app, "test", "**/*.{ex,exs}"])), do: file
+     spikes = for dir <- Samen.SourceScan.dirs(@root, "spikes/*/test"), file <- Samen.SourceScan.files(dir, ~w(.ex .exs)), do: file
+ 
+     (tests ++ spikes ++ flat(Path.join(@root, "scripts/landing"), [".exs"]) ++ flat(Path.join(@root, "samen_core/priv/templates"), [".eex"]))

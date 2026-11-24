@@ -28,7 +28,7 @@ defmodule Samen.ChokepointTest do
   end
 
   test "the sanctioned chokepoint function is do_decrypt in vault.ex" do
-    vault_src = File.read!(Path.join(@lib_dir, "samen/vault.ex"))
+    vault_src = Samen.SourceScan.read!(Path.join(@lib_dir, "samen/vault.ex"))
     assert vault_src =~ "defp do_decrypt(dek, ciphertext)"
     # The decrypt call lives inside do_decrypt only.
     assert vault_src =~ "Crypto.decrypt(dek, ciphertext)"
@@ -37,6 +37,36 @@ defmodule Samen.ChokepointTest do
   # ===================================================================
   # RED PATH / anti-tautology: a planted SECOND decrypt call site is caught
   # ===================================================================
+
+  # `File.cp_r!` is ~750 calls (list, stat, copy per entry) into the node's single `:file_server_2`, queued behind every
+  # other test's file I/O: 267 ms alone, 3,096 ms behind 40 processes doing file I/O, and it outran ExUnit's 60 s in this
+  # setup on a loaded machine. This copies the tree through `:prim_file` (what `:raw` mode uses), which never queues.
+  defp copy_tree!(src, dst) do
+    case :prim_file.make_dir(dst) do
+      r when r in [:ok, {:error, :eexist}] -> :ok
+      {:error, reason} -> raise File.Error, reason: reason, action: "make directory", path: dst
+    end
+
+    {:ok, names} = :prim_file.list_dir(src)
+
+    for name <- Enum.map(names, &to_string/1) do
+      from = Path.join(src, name)
+      to = Path.join(dst, name)
+
+      case :prim_file.read_file_info(from) do
+        {:ok, info} when elem(info, 2) == :directory ->
+          copy_tree!(from, to)
+
+        {:ok, info} when elem(info, 2) == :regular ->
+          case :prim_file.write_file(to, Samen.SourceScan.read!(from)) do
+            :ok -> :ok
+            {:error, reason} -> raise File.Error, reason: reason, action: "write to file", path: to
+          end
+      end
+    end
+
+    :ok
+  end
 
   describe "RED PATH — a second decrypt call site is caught" do
     setup do
@@ -47,10 +77,19 @@ defmodule Samen.ChokepointTest do
       File.mkdir_p!(Path.join(scratch, "samen"))
 
       # Copy the real lib tree into the scratch dir.
-      File.cp_r!(@lib_dir, scratch)
+      copy_tree!(@lib_dir, scratch)
 
       on_exit(fn -> File.rm_rf!(scratch) end)
       {:ok, scratch: scratch}
+    end
+
+    test "the scratch copy is the real tree: same files, same bytes", %{scratch: scratch} do
+      real = Samen.SourceScan.files(@lib_dir, [".ex"])
+      copy = Samen.SourceScan.files(scratch, [".ex"])
+
+      assert length(real) > 500
+      assert Enum.map(copy, &Path.relative_to(&1, scratch)) == Enum.map(real, &Path.relative_to(&1, @lib_dir))
+      assert Enum.map(copy, &Samen.SourceScan.read!/1) == Enum.map(real, &Samen.SourceScan.read!/1)
     end
 
     test "scanner flips to error when a second Crypto.decrypt( is planted", %{scratch: scratch} do
