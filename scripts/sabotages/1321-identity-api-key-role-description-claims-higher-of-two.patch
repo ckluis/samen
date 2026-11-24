@@ -1,0 +1,20 @@
+# SABOTAGE: ApiKey.minter_role's catalog description claims the key acts with the higher of its stored role 
+#   and the membership's role
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/ai_grounding_catalog_test.exs
+# MUST_FAIL: the Identity security sentences in demo's catalog match the rules their witnesses prove
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index 78c3e151..f789e1ae 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -761,7 +761,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
+           attribute(:minter_role, :atom,
+             public?: true,
+             constraints: [one_of: Samen.Scope.Role.all()],
+-            description: "Role the key acts with (owner, admin, member or viewer); required on create; no action changes it afterwards. Made through an actor it cannot exceed the actor's role or the bound membership's. effective_role takes the lower of this and that membership's current role, refusing a non-active one."
++            description: "Role the key acts with (owner, admin, member or viewer); required on create; no action changes it afterwards. Made through an actor it cannot exceed the actor's role or the bound membership's. effective_role takes the higher of this and that membership's current role, refusing a non-active one."
+           )
+ 
+           attribute(:revoked_at, :utc_datetime,

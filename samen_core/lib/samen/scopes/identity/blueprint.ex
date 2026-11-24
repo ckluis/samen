@@ -102,6 +102,12 @@ defmodule Samen.Scopes.Identity.Blueprint do
           extensions: unquote(extensions),
           abbrev: unquote(abbrev)
 
+        resource do
+          description(
+            "The tenant anchor: one row per organization. The generic create takes only a name and slug and is open to anyone; read is limited to the actor's own organization row, update needs the admin role and destroy needs the owner role."
+          )
+        end
+
         postgres do
           table("#{unquote(abbrev)}_org")
           repo(unquote(repo))
@@ -110,10 +116,21 @@ defmodule Samen.Scopes.Identity.Blueprint do
         unquote(json_api_block)
 
         attributes do
-          attribute(:name, :string, public?: true, allow_nil?: false)
-          attribute(:slug, :string, public?: true)
+          attribute(:name, :string,
+            public?: true,
+            allow_nil?: false,
+            description: "Display name of the organization; required, and no uniqueness rule is enforced on it."
+          )
+          attribute(:slug, :string,
+            public?: true,
+            description: "Optional short text identifier of the organization; no format rule. The create, update and account-opening actions refuse a slug that matches another organization's slug (trimmed, ignoring case) or id; a blank slug is not checked, and the database has no unique index on it."
+          )
           # Tier-0 config: plan is a bounded config value on the org row.
-          attribute(:plan, :string, public?: true, default: "free")
+          attribute(:plan, :string,
+            public?: true,
+            default: "free",
+            description: "Plan key as text, free by default. The generic create and update do not accept it; the onboarding plan step writes it (owner only, configured plan choices only, closed once onboarded), as does the operator account-opening action."
+          )
 
           # ADR-035 §4.3/§5 A4 (spec-questions c3) — the OPTIONAL org-level concurrent-
           # session cap: nil = unlimited (the default). When set, `Samen.Auth.SessionCreate`
@@ -126,7 +143,8 @@ defmodule Samen.Scopes.Identity.Blueprint do
           attribute(:max_concurrent_sessions, :integer,
             public?: true,
             allow_nil?: true,
-            constraints: [min: 1]
+            constraints: [min: 1],
+            description: "Optional cap, at least 1, on a credential's live (unrevoked, unexpired) sessions; empty means unlimited. Each sign-in revokes the oldest to make room, without a lock, so concurrent sign-ins can exceed it until the next one. The smallest cap across the organizations it has memberships in applies."
           )
 
           # ADR-035 §5 A8 (T08) — the onboarding-wizard COMPLETION marker: a Tier-0
@@ -134,13 +152,21 @@ defmodule Samen.Scopes.Identity.Blueprint do
           # is what makes the wizard "never re-trap" (its own moduledoc): every
           # mount checks THIS column, never client-side/session state, so the
           # checklist cannot resurrect itself on a later visit once finished.
-          attribute(:onboarded_at, :utc_datetime, public?: true, allow_nil?: true)
+          attribute(:onboarded_at, :utc_datetime,
+            public?: true,
+            allow_nil?: true,
+            description: "When the onboarding wizard was completed. Samen.Web.Onboarding.complete! sets it as an admin write; the wizard is offered only while it is empty. Not an input of the generic create or update."
+          )
 
           # The org anchor is org-LESS: it IS the tenant boundary, so its own
           # `org_id` is meaningless. Declare it nullable here so `CoreAttributes`
           # does not inject a NOT-NULL `org_id` the anchor can never satisfy. The
           # `OrgIsSelf` policy scopes by `id`, not `org_id`.
-          attribute(:org_id, :uuid, public?: true, allow_nil?: true)
+          attribute(:org_id, :uuid,
+            public?: true,
+            allow_nil?: true,
+            description: "Optional here: the organization is the tenant boundary, so its policies decide access by the row's own id, not by this column. Only the operator account-opening action accepts it, and it must be the acting operator's own organization, under which the account is filed."
+          )
         end
 
         actions do
@@ -291,6 +317,17 @@ defmodule Samen.Scopes.Identity.Blueprint do
         end
       end
 
+    # Plane wording only where the resource really resolves through Samen.Api.PiiResolution (the
+    # `preparations` block above exists only when the host mounted the public API).
+    {full_name_desc, emails_desc} =
+      if api? do
+        tail = "vault-routed; the actor's plane decides the read. A tenant-plane actor gets it in clear, an operator only under a reveal grant (else omitted; masked while impersonating), a plane-less actor a masked value. AI egress is masked unless the host opts in and a grant covers it."
+        {"The user's full name; " <> tail, "The user's email addresses; " <> tail}
+      else
+        tail = "vault-routed, so the row holds a masked vault reference and the plain value lives only in the vault; Samen.Api.PiiResolution decides, by the actor's plane, when a read gets it in clear."
+        {"The user's full name; " <> tail, "The user's email addresses; " <> tail}
+      end
+
     quote do
       defmodule unquote(module) do
         @moduledoc """
@@ -305,6 +342,12 @@ defmodule Samen.Scopes.Identity.Blueprint do
           extensions: unquote(extensions),
           abbrev: unquote(abbrev)
 
+        resource do
+          description(
+            "A person's account inside one organization, optionally linked to the organization-less sign-in credential. Full name and emails are vault-routed. Creating needs the admin role; users edit their own profile but not their status; changing or deleting another user needs a role strictly above theirs."
+          )
+        end
+
         postgres do
           table("#{unquote(abbrev)}_user")
           repo(unquote(repo))
@@ -314,22 +357,39 @@ defmodule Samen.Scopes.Identity.Blueprint do
 
         attributes do
           # A non-PII display handle (safe to log/label — like the CRM display_name).
-          attribute(:handle, :string, public?: true)
-          attribute(:status, :string, public?: true, default: "active")
+          attribute(:handle, :string,
+            public?: true,
+            description: "Display handle of the user as plain free text, not vault-routed; no format or uniqueness rule is enforced."
+          )
+          attribute(:status, :string,
+            public?: true,
+            default: "active",
+            description: "Account status as text, active by default; no fixed list of values is enforced. An actor's write cannot change their own status; changing another user's needs an admin role that strictly out-ranks that user's role in the organization."
+          )
 
           # ADR-035 §3.1 — additive, nullable FK to the org-less Credential (THE
           # authentication principal; one human, N orgs, N per-org Users). Nullable
           # so existing User rows created before the identity spine mounted (or by
           # a host still on BYO-auth/ADR-031) are unaffected — no migration break.
-          attribute(:credential_id, :uuid, public?: false, allow_nil?: true)
+          attribute(:credential_id, :uuid,
+            public?: false,
+            allow_nil?: true,
+            description: "Id of the sign-in credential this user is linked to; empty for a user created without one. Not publicly writable: set when registration, invitation acceptance or SSO provisioning creates the user."
+          )
         end
 
         pii do
           vault(:pii_name)
           vault(:pii_email)
 
-          pii_attribute(:full_name, Samen.Type.FullName, vault: :pii_name)
-          pii_attribute(:emails, Samen.Type.Emails, vault: :pii_email)
+          pii_attribute(:full_name, Samen.Type.FullName,
+            vault: :pii_name,
+            description: unquote(full_name_desc)
+          )
+          pii_attribute(:emails, Samen.Type.Emails,
+            vault: :pii_email,
+            description: unquote(emails_desc)
+          )
 
           reveal(:reveal_user)
         end
@@ -463,6 +523,12 @@ defmodule Samen.Scopes.Identity.Blueprint do
           extensions: unquote(extensions),
           abbrev: unquote(abbrev)
 
+        resource do
+          description(
+            "Gives a user an RBAC role in the organization; a create is refused when the user already has a membership there (no unique index). Reads are organization-scoped; writes need the admin role, and any role being set and any role the row holds must each be strictly below the writer's own."
+          )
+        end
+
         postgres do
           table("#{unquote(abbrev)}_membership")
           repo(unquote(repo))
@@ -475,14 +541,20 @@ defmodule Samen.Scopes.Identity.Blueprint do
           attribute(:role, :atom,
             public?: true,
             default: :member,
-            constraints: [one_of: Samen.Scope.Role.all()]
+            constraints: [one_of: Samen.Scope.Role.all()],
+            description: "RBAC role of the member: owner, admin, member or viewer, member by default. Roles are ranked. An actor's write must set a role strictly below its own, and changing or deleting a row also needs its stored role strictly below, so an admin can neither assign admin nor change an admin or owner."
           )
 
-          attribute(:status, :string, public?: true, default: "active")
+          attribute(:status, :string,
+            public?: true,
+            default: "active",
+            description: "Membership status as text, active by default; no fixed list of values is enforced. Only an active membership gives a signed-in session or an API key a role in the organization; any other status gives it none."
+          )
         end
 
         relationships do
           belongs_to :user, unquote(user_mod) do
+            description("The user this membership grants a role to; required, in the same organization, and no action changes it after creation.")
             public?(true)
             attribute_type(:uuid)
             allow_nil?(false)
@@ -560,6 +632,12 @@ defmodule Samen.Scopes.Identity.Blueprint do
           authorizers: [Ash.Policy.Authorizer],
           abbrev: unquote(abbrev)
 
+        resource do
+          description(
+            "Per-organization configuration rows for the RBAC roles, holding a label, a rank and an enabled flag; reads are organization-scoped and writes need the admin role. Authorization checks use the fixed ranks of Samen.Scope.Role, not these rows."
+          )
+        end
+
         postgres do
           table("#{unquote(abbrev)}_role")
           repo(unquote(repo))
@@ -569,12 +647,24 @@ defmodule Samen.Scopes.Identity.Blueprint do
           attribute(:name, :atom,
             public?: true,
             allow_nil?: false,
-            constraints: [one_of: Samen.Scope.Role.all()]
+            constraints: [one_of: Samen.Scope.Role.all()],
+            description: "Which RBAC role this row configures: owner, admin, member or viewer; required."
           )
 
-          attribute(:label, :string, public?: true)
-          attribute(:rank, :integer, public?: true, allow_nil?: false)
-          attribute(:enabled, :boolean, public?: true, default: true)
+          attribute(:label, :string,
+            public?: true,
+            description: "Optional display label for the role as free text; no format is enforced."
+          )
+          attribute(:rank, :integer,
+            public?: true,
+            allow_nil?: false,
+            description: "Required whole number ranking the role on this row; authorization uses the fixed ranks of Samen.Scope.Role, and no range or uniqueness rule is enforced here."
+          )
+          attribute(:enabled, :boolean,
+            public?: true,
+            default: true,
+            description: "Whether the role is marked enabled in this organization's configuration, true by default; no authorization check reads it."
+          )
         end
 
         actions do
@@ -632,6 +722,12 @@ defmodule Samen.Scopes.Identity.Blueprint do
           authorizers: [Ash.Policy.Authorizer],
           abbrev: unquote(abbrev)
 
+        resource do
+          description(
+            "An API credential bound to one plane and to the membership that minted it. Only a SHA-256 digest of the key is stored. Creating, re-timing, revoking or deleting one needs the admin role, and a key created through an actor cannot carry a role above the creator's."
+          )
+        end
+
         postgres do
           table("#{unquote(abbrev)}_api_key")
           repo(unquote(repo))
@@ -639,41 +735,61 @@ defmodule Samen.Scopes.Identity.Blueprint do
 
         attributes do
           # SHA-256 digest of the key material. One-way; the raw key is never stored.
-          attribute(:token_digest, :string, public?: false, allow_nil?: false)
+          attribute(:token_digest, :string,
+            public?: false,
+            allow_nil?: false,
+            description: "SHA-256 hex digest of the key material; required and unique across keys (a database index), and the raw key is never stored. Not public and never an action input: the minting code sets it, e.g. Samen.Web.Settings.ApiKeys.mint where a host mounts the settings surface."
+          )
 
           attribute(:plane, :atom,
             public?: true,
             allow_nil?: false,
             default: :tenant,
-            constraints: [one_of: [:tenant, :operator]]
+            constraints: [one_of: [:tenant, :operator]],
+            description: "Kind of key, tenant by default: tenant or operator; no action changes it after creation. A host that authenticates keys from this table gives the request actor this plane; where PII is resolved through Samen.Api.PiiResolution an operator key gets a vault-routed field only under a reveal grant."
           )
 
           # Declared scopes as a bounded map: %{family => [:read,:write]}. The
           # effective authority is the intersection with the minter's role at use.
-          attribute(:scopes, :map, public?: true, default: %{})
+          attribute(:scopes, :map,
+            public?: true,
+            default: %{},
+            description: "Requested scopes as a map of resource family to read and write, empty by default; no action changes it after creation. The settings mint trims them to what the minter's role allows. They are recorded only: no request path checks them, and a key acts with its effective role."
+          )
 
           # The role of the minting membership — the actor ceiling this key inherits.
           attribute(:minter_role, :atom,
             public?: true,
-            constraints: [one_of: Samen.Scope.Role.all()]
+            constraints: [one_of: Samen.Scope.Role.all()],
+            description: "Role the key acts with (owner, admin, member or viewer); required on create; no action changes it afterwards. Made through an actor it cannot exceed the actor's role or the bound membership's. effective_role takes the lower of this and that membership's current role, refusing a non-active one."
           )
 
-          attribute(:revoked_at, :utc_datetime, public?: true)
+          attribute(:revoked_at, :utc_datetime,
+            public?: true,
+            description: "When the key was revoked, empty while it is live. No action accepts it as input; the revoke action sets it once and keeps the original instant on a repeat, and Samen.Scope.ApiKey.active_query skips rows where it is set."
+          )
 
           # F3.4 — bounded expiry (deny-on-read). Every minted key carries a hard
           # time ceiling (`Samen.Scope.ApiKey.bounded_expiry/2`); the auth lookup
           # filters `expires_at > now` so an expired row is never resolved to an
           # actor. `nil` is a legacy pre-gate row (non-expiring predicate); the
           # minter never produces one.
-          attribute(:expires_at, :utc_datetime, public?: true)
+          attribute(:expires_at, :utc_datetime,
+            public?: true,
+            description: "Hard expiry instant. Create clamps it to at most 365 days ahead (90 days when empty); update can only shorten it and refuses a revoked or expired key. Samen.Scope.ApiKey.active_query refuses a key at or past it; keys from before the expiry gate may have none."
+          )
 
           # F3.4 — last-use observability. Best-effort stamped by the auth path on a
           # successful resolve; supports stale-key hygiene reporting. Never gates auth.
-          attribute(:last_used_at, :utc_datetime, public?: true)
+          attribute(:last_used_at, :utc_datetime,
+            public?: true,
+            description: "When a host's key check last stamped the key as used, through the system-only mark_used action; best-effort, empty where the host does not stamp it, and never used to decide whether a key authenticates."
+          )
         end
 
         relationships do
           belongs_to :membership, unquote(membership_mod) do
+            description("The membership that minted the key; required, in the same organization, and no action changes it after creation. Creating a key through an actor needs it to be that actor's own active membership.")
             public?(true)
             attribute_type(:uuid)
             allow_nil?(false)
@@ -800,6 +916,16 @@ defmodule Samen.Scopes.Identity.Blueprint do
           authorizers: [Ash.Policy.Authorizer],
           abbrev: unquote(abbrev)
 
+        resource do
+          description(
+            "An invitation for an email address to join the organization with a role. Every create is pending with a 14-day expiry; it becomes accepted, revoked (only while pending) or expired, and the generic update is refused. Only a digest of the invite token is stored; the invited email is vault-routed."
+          )
+        end
+
+        meaning do
+          synonyms(["invite"])
+        end
+
         postgres do
           table("#{unquote(abbrev)}_invitation")
           repo(unquote(repo))
@@ -809,30 +935,55 @@ defmodule Samen.Scopes.Identity.Blueprint do
           attribute(:role, :atom,
             public?: true,
             default: :member,
-            constraints: [one_of: Samen.Scope.Role.all()]
+            constraints: [one_of: Samen.Scope.Role.all()],
+            description: "Role a new member gets on accepting (owner, admin, member or viewer), member by default; an invitee who already has a membership there keeps it. Creating needs a verified admin or owner and a role strictly below their own; no actor can edit it afterwards."
           )
 
-          attribute(:status, :string, public?: true, default: "pending")
+          attribute(:status, :string,
+            public?: true,
+            default: "pending",
+            description: "Lifecycle state as text, pending by default and on every create. After that only the accept, revoke and expire actions change it, and no actor can run accept or expire or edit it directly; the column itself does not constrain the values."
+          )
 
           # Credential-class columns (ApiKey `token_digest` precedent) —
           # `public?: false`, never allowlisted, set ONLY via
           # `force_change_attribute` from `Samen.Identity.Invite` (never a
           # public create/update input).
-          attribute(:token_digest, :string, public?: false)
+          attribute(:token_digest, :string,
+            public?: false,
+            description: "SHA-256 hex digest of the emailed invite token, unique across invitations (a database index); the raw token is never stored. Not public: set only by Samen.Identity.Invite.create when the invitation is issued."
+          )
 
           # ADR-035 §4.1 — the non-reversible keyed-HMAC lookup index binding
           # the invite to the address it was sent to. Accept-time credential
           # matching reads THIS, never the vault (no reveal at accept).
-          attribute(:email_bidx, :string, public?: false)
+          attribute(:email_bidx, :string,
+            public?: false,
+            description: "Keyed-HMAC blind index of the invited email address, used to match the invitation to an existing credential without a vault reveal. One-way, never the address itself; set by Samen.Identity.Invite.create and not public."
+          )
 
-          attribute(:expires_at, :utc_datetime, public?: false)
-          attribute(:accepted_at, :utc_datetime, public?: false, allow_nil?: true)
-          attribute(:revoked_at, :utc_datetime, public?: false, allow_nil?: true)
+          attribute(:expires_at, :utc_datetime,
+            public?: false,
+            description: "When the invitation stops being acceptable: 14 days after creation, set by every create. Accepting only matches a pending invitation still before this instant."
+          )
+          attribute(:accepted_at, :utc_datetime,
+            public?: false,
+            allow_nil?: true,
+            description: "When the invitation was accepted, set by the accept action together with status accepted; empty before."
+          )
+          attribute(:revoked_at, :utc_datetime,
+            public?: false,
+            allow_nil?: true,
+            description: "When the invitation was revoked, set by the revoke action (admin only, pending invitations only) together with status revoked; empty before."
+          )
         end
 
         pii do
           vault(:pii_email)
-          pii_attribute(:email, Samen.Type.Emails, vault: :pii_email)
+          pii_attribute(:email, Samen.Type.Emails,
+            vault: :pii_email,
+            description: "The invited email addresses; vault-routed, so the row holds a masked vault reference and the plain value lives only in the vault. The declared reveal_invitation action only reports whether a reveal grant covers the subject and never returns the address."
+          )
           reveal(:reveal_invitation)
         end
 
@@ -1066,6 +1217,12 @@ defmodule Samen.Scopes.Identity.Blueprint do
           authorizers: [Ash.Policy.Authorizer],
           abbrev: unquote(abbrev)
 
+        resource do
+          description(
+            "The authentication principal: one row per sign-in identity, not tied to any organization. Holds the email blind index, password hash and scheme, verification time and two-factor state. Its policies refuse every actor; framework code reaches it with authorization off."
+          )
+        end
+
         postgres do
           table("#{unquote(abbrev)}_credential")
           repo(unquote(repo))
@@ -1075,35 +1232,63 @@ defmodule Samen.Scopes.Identity.Blueprint do
           # Org-less anchor (like Identity.Org itself): declaring org_id here
           # (nullable) stops CoreAttributes injecting a NOT-NULL org_id this
           # resource can never satisfy — a Credential predates any org actor.
-          attribute(:org_id, :uuid, public?: false, allow_nil?: true)
+          attribute(:org_id, :uuid,
+            public?: false,
+            allow_nil?: true,
+            description: "Always optional here: a credential exists before any organization is chosen, so it is not scoped by this column."
+          )
 
           # Non-reversible keyed-HMAC lookup index (ADR-035 §4.1). Unique = the
           # global "one account per email" invariant. NEVER the plaintext email.
-          attribute(:email_bidx, :string, public?: false, allow_nil?: false)
+          attribute(:email_bidx, :string,
+            public?: false,
+            allow_nil?: false,
+            description: "Keyed-HMAC blind index of the normalized email address, unique across credentials (database index); sign-in and password reset match on it. One-way, never the address. Erasing the credential as a subject replaces it (Samen.Auth.BlindIndexErasure) with a random value of the same shape."
+          )
 
           # PBKDF2-SHA256-encoded hash (Samen.Auth.Hasher). `nil` is a valid,
           # deliberate state for an SSO-only (passwordless) credential (A6) —
           # password sign-in simply fails for it; never treated as "unset".
-          attribute(:password_hash, :string, public?: false, allow_nil?: true)
+          attribute(:password_hash, :string,
+            public?: false,
+            allow_nil?: true,
+            description: "Encoded password hash from the configured hasher (PBKDF2-SHA256 by default), never the password. Empty for a passwordless SSO-only credential, for which password sign-in always fails."
+          )
 
           # e.g. "pbkdf2-sha256$600000" — travels with the hash so a future
           # iteration-count bump can still verify old rows under their own params.
-          attribute(:hash_scheme, :string, public?: false, allow_nil?: true)
+          attribute(:hash_scheme, :string,
+            public?: false,
+            allow_nil?: true,
+            description: "Name of the hashing scheme (with its parameters) that produced password_hash; verification receives it so older hashes still verify under their own scheme. Empty for SSO-only credentials."
+          )
 
-          attribute(:verified_at, :utc_datetime, public?: false, allow_nil?: true)
+          attribute(:verified_at, :utc_datetime,
+            public?: false,
+            allow_nil?: true,
+            description: "When the credential's email address was confirmed: set by email verification, by invitation acceptance that creates the credential, or by SSO sign-up with a provider-verified address; empty until then."
+          )
 
           # ADR-035 §5 A7 — nil until enrollment is CONFIRMED (a valid code was
           # entered); `Samen.Identity.Totp.enroll/4` is the ONLY writer, and it
           # sets this in the SAME atomic update as the secret/recovery codes —
           # no window where a secret exists but 2FA isn't really on yet.
-          attribute(:totp_enabled_at, :utc_datetime, public?: false, allow_nil?: true)
+          attribute(:totp_enabled_at, :utc_datetime,
+            public?: false,
+            allow_nil?: true,
+            description: "When two-factor enrollment was confirmed; empty until then and cleared when two-factor is disabled. Samen.Identity.Totp.enroll writes it in the same update as the secret and recovery codes."
+          )
 
           # ADR-035 §5 A7 anti-replay watermark — the last TOTP timestep
           # ACCEPTED (not merely attempted). `Samen.Identity.Totp.verify_totp_code/3`
           # is the only writer, inside the SAME locked transaction that checked
           # the code, so a concurrent replay of the identical code cannot both
           # succeed. Non-PII (a timestamp), never gates auth on its own.
-          attribute(:totp_last_verified_at, :utc_datetime, public?: false, allow_nil?: true)
+          attribute(:totp_last_verified_at, :utc_datetime,
+            public?: false,
+            allow_nil?: true,
+            description: "When a TOTP code was last accepted, written under a row lock and passed to the code validator as a replay watermark so the same code cannot verify twice. Empty before any acceptance, and reset when two-factor is enrolled or disabled."
+          )
         end
 
         pii do
@@ -1116,11 +1301,17 @@ defmodule Samen.Scopes.Identity.Blueprint do
           # below) — the sole read path is `Samen.Vault.reveal/3` called
           # directly by `Samen.Identity.Totp`, bound to the credential as its
           # own subject.
-          pii_attribute(:totp_secret, :string, vault: :pii_secret)
+          pii_attribute(:totp_secret, :string,
+            vault: :pii_secret,
+            description: "The TOTP shared secret, base64-encoded and stored in the pii_secret vault, never in this row. The resource has no reveal action and its policies refuse every actor; Samen.Identity.Totp decrypts it bound to this credential. Empty before enrollment and after two-factor is disabled."
+          )
 
           # ADR-035 §5 A7 — 🔒 the recovery-code set (JSON: digest + used_at per
           # code). Same posture as `totp_secret` — vaulted, no reveal action.
-          pii_attribute(:recovery_codes, :string, vault: :pii_secret)
+          pii_attribute(:recovery_codes, :string,
+            vault: :pii_secret,
+            description: "The two-factor recovery codes as JSON entries of a SHA-256 digest and a used-at time, never the codes themselves; stored in the pii_secret vault. The resource has no reveal action and its policies refuse every actor; Samen.Identity.Totp decrypts it bound to this credential."
+          )
         end
 
         actions do
@@ -1165,6 +1356,12 @@ defmodule Samen.Scopes.Identity.Blueprint do
           authorizers: [Ash.Policy.Authorizer],
           abbrev: unquote(abbrev)
 
+        resource do
+          description(
+            "A single-use, expiring token issued to a credential: emailed for email verification or password reset, or held in the browser session for a pending two-factor step (email_change is allowed but no code mints it). Only the SHA-256 digest is stored; its policies refuse every actor."
+          )
+        end
+
         postgres do
           table("#{unquote(abbrev)}_auth_token")
           repo(unquote(repo))
@@ -1173,11 +1370,19 @@ defmodule Samen.Scopes.Identity.Blueprint do
         attributes do
           # Org-less (like Credential): no org actor exists at mint/consume time
           # for most contexts (email_verify rides the pre-actor signup flow).
-          attribute(:org_id, :uuid, public?: false, allow_nil?: true)
+          attribute(:org_id, :uuid,
+            public?: false,
+            allow_nil?: true,
+            description: "Always optional here: the token belongs to an organization-less credential, so it is not scoped by this column."
+          )
 
           # SHA-256 digest of the 32-random-byte raw token. One-way; the raw
           # token is never stored (ADR-035 §4.2 — the ApiKey precedent).
-          attribute(:token_digest, :string, public?: false, allow_nil?: false)
+          attribute(:token_digest, :string,
+            public?: false,
+            allow_nil?: false,
+            description: "SHA-256 hex digest of the token, required and unique across tokens (a database index); the raw token is never stored. Not public: set only when the token is minted."
+          )
 
           # Bounded enum (ADR-035 §4.2 table). Only :email_verify is minted by
           # A1 (T02); the others are reserved for their owning requirements
@@ -1185,20 +1390,34 @@ defmodule Samen.Scopes.Identity.Blueprint do
           attribute(:context, :atom,
             public?: false,
             allow_nil?: false,
-            constraints: [one_of: [:email_verify, :password_reset, :email_change, :totp_pending]]
+            constraints: [one_of: [:email_verify, :password_reset, :email_change, :totp_pending]],
+            description: "What the token is for: email_verify, password_reset, email_change or totp_pending; required. Consuming a token matches its context as well as its digest. No framework code mints email_change."
           )
 
           # Binds the token to the address it was emailed to (ADR-035 §4.2) — an
           # email change invalidates in-flight tokens. Non-reversible bidx, never
           # the plaintext.
-          attribute(:sent_to_bidx, :string, public?: false, allow_nil?: true)
+          attribute(:sent_to_bidx, :string,
+            public?: false,
+            allow_nil?: true,
+            description: "Keyed-HMAC blind index of the email address the token was sent to, recorded at mint; never the address itself. Empty when none was given."
+          )
 
-          attribute(:expires_at, :utc_datetime, public?: false, allow_nil?: false)
-          attribute(:consumed_at, :utc_datetime, public?: false, allow_nil?: true)
+          attribute(:expires_at, :utc_datetime,
+            public?: false,
+            allow_nil?: false,
+            description: "When the token stops being usable; required. Consuming only matches a token still before this instant."
+          )
+          attribute(:consumed_at, :utc_datetime,
+            public?: false,
+            allow_nil?: true,
+            description: "When the token was consumed, set by the atomic consume action; a token with this set no longer matches. Empty while unused."
+          )
         end
 
         relationships do
           belongs_to :credential, unquote(credential_mod) do
+            description("The credential the token was issued to; required.")
             public?(false)
             attribute_type(:uuid)
             allow_nil?(false)
@@ -1275,6 +1494,12 @@ defmodule Samen.Scopes.Identity.Blueprint do
           authorizers: [Ash.Policy.Authorizer],
           abbrev: unquote(abbrev)
 
+        resource do
+          description(
+            "A revocable, database-backed login session for a credential, found by the SHA-256 digest of its session token. It resolves only while neither revoked nor expired. Its policies refuse every actor; framework code reaches it with authorization off."
+          )
+        end
+
         postgres do
           table("#{unquote(abbrev)}_session")
           repo(unquote(repo))
@@ -1282,26 +1507,50 @@ defmodule Samen.Scopes.Identity.Blueprint do
 
         attributes do
           # Org-less anchor, same reasoning as Credential/AuthToken above.
-          attribute(:org_id, :uuid, public?: false, allow_nil?: true)
+          attribute(:org_id, :uuid,
+            public?: false,
+            allow_nil?: true,
+            description: "Always optional here: a session authenticates a credential before any organization is chosen, so it is not scoped by this column."
+          )
 
           # SHA-256 digest of the 32-random-byte raw session token. One-way; the
           # raw token lives only in the signed+encrypted Phoenix session cookie
           # (ADR-035 §4.3 — the `"samen_session_token"` key), never here.
-          attribute(:token_digest, :string, public?: false, allow_nil?: false)
+          attribute(:token_digest, :string,
+            public?: false,
+            allow_nil?: false,
+            description: "SHA-256 hex digest of the session token, required and unique across sessions; the raw token is never stored. Not public: set only when the session is created."
+          )
 
           # Best-effort/throttled touch (the ApiKey `mark_used` precedent) —
           # never gates auth.
-          attribute(:last_seen_at, :utc_datetime, public?: false, allow_nil?: true)
+          attribute(:last_seen_at, :utc_datetime,
+            public?: false,
+            allow_nil?: true,
+            description: "When the session was last seen, advanced by a best-effort touch throttled to once per five minutes; it never decides whether a session authenticates."
+          )
 
           # Sessions slide: expires_at = last_seen + remember-me window (A4).
-          attribute(:expires_at, :utc_datetime, public?: false, allow_nil?: false)
+          attribute(:expires_at, :utc_datetime,
+            public?: false,
+            allow_nil?: false,
+            description: "When the session stops resolving: 60 days after creation, moved to 60 days after each throttled touch; required. A session at or past this instant does not resolve."
+          )
 
           # nil = live session; set = revoked (immediate, row-level).
-          attribute(:revoked_at, :utc_datetime, public?: false, allow_nil?: true)
+          attribute(:revoked_at, :utc_datetime,
+            public?: false,
+            allow_nil?: true,
+            description: "When the session was revoked, empty while live. A revoked session does not resolve; revoke actions and the sign-in cap eviction set it."
+          )
 
           # Bounded browser-family + OS-family string (e.g. "Safari on macOS") —
           # NEVER the raw user-agent, NEVER an IP (ADR-035 §4.3 non-PII posture).
-          attribute(:device_label, :string, public?: false, allow_nil?: true)
+          attribute(:device_label, :string,
+            public?: false,
+            allow_nil?: true,
+            description: "Coarse label such as a browser family on an OS family, or Unknown device, derived from the User-Agent at sign-in. The raw user-agent and the client IP are not stored."
+          )
 
           # ADR-035 §4.3 A4 (T104) — MICROSECOND-precision creation timestamp,
           # session-local override of the universal second-precision
@@ -1324,12 +1573,14 @@ defmodule Samen.Scopes.Identity.Blueprint do
             public?: true,
             allow_nil?: false,
             writable?: false,
-            default: &DateTime.utc_now/0
+            default: &DateTime.utc_now/0,
+            description: "When the session was created, with microsecond precision; set by default and not writable. Cap eviction sorts on it, then on id, to find the oldest live session."
           )
         end
 
         relationships do
           belongs_to :credential, unquote(credential_mod) do
+            description("The credential this session authenticates; required.")
             public?(false)
             attribute_type(:uuid)
             allow_nil?(false)
@@ -1413,6 +1664,12 @@ defmodule Samen.Scopes.Identity.Blueprint do
           authorizers: [Ash.Policy.Authorizer],
           abbrev: unquote(abbrev)
 
+        resource do
+          description(
+            "The link between a credential and an external SSO identity, given by provider and the provider's subject id; the pair is unique (a database index). Its policies refuse every actor; framework code reaches it with authorization off."
+          )
+        end
+
         postgres do
           table("#{unquote(abbrev)}_user_identity")
           repo(unquote(repo))
@@ -1420,7 +1677,11 @@ defmodule Samen.Scopes.Identity.Blueprint do
 
         attributes do
           # Org-less anchor, same reasoning as Credential/Session/AuthToken above.
-          attribute(:org_id, :uuid, public?: false, allow_nil?: true)
+          attribute(:org_id, :uuid,
+            public?: false,
+            allow_nil?: true,
+            description: "Always optional here: the link belongs to an organization-less credential, so it is not scoped by this column."
+          )
 
           # Bounded provider name (ADR-035 §5 A6 — OIDC-only build, Google the
           # built reference; SAML is a documented seam, not a value here). An
@@ -1430,18 +1691,28 @@ defmodule Samen.Scopes.Identity.Blueprint do
           attribute(:provider, :atom,
             public?: false,
             allow_nil?: false,
-            constraints: [one_of: [:google]]
+            constraints: [one_of: [:google]],
+            description: "The SSO identity provider; currently only google is allowed, and the value is required."
           )
 
           # The opaque IdP subject identifier (OIDC `sub`). NOT PII — an
           # IdP-scoped opaque handle, never an email/name.
-          attribute(:provider_uid, :string, public?: false, allow_nil?: false)
+          attribute(:provider_uid, :string,
+            public?: false,
+            allow_nil?: false,
+            description: "Opaque subject identifier the provider issued for the account, stored as received; required, and unique together with provider."
+          )
 
-          attribute(:linked_at, :utc_datetime, public?: false, allow_nil?: false)
+          attribute(:linked_at, :utc_datetime,
+            public?: false,
+            allow_nil?: false,
+            description: "When the SSO identity was linked to the credential, set at link time; required."
+          )
         end
 
         relationships do
           belongs_to :credential, unquote(credential_mod) do
+            description("The credential this SSO identity signs in as; required.")
             public?(false)
             attribute_type(:uuid)
             allow_nil?(false)
@@ -1516,6 +1787,12 @@ defmodule Samen.Scopes.Identity.Blueprint do
           authorizers: [Ash.Policy.Authorizer],
           abbrev: unquote(abbrev)
 
+        resource do
+          description(
+            "Durable brute-force counter: one row per failure key, an email blind index or a credential id, holding the failure count and window. Samen.Identity.LoginFailure upserts it atomically and a successful sign-in deletes it. Its policies refuse every actor."
+          )
+        end
+
         postgres do
           table("#{unquote(abbrev)}_login_failure")
           repo(unquote(repo))
@@ -1523,24 +1800,46 @@ defmodule Samen.Scopes.Identity.Blueprint do
 
         attributes do
           # Org-less anchor, same reasoning as Credential/AuthToken/Session above.
-          attribute(:org_id, :uuid, public?: false, allow_nil?: true)
+          attribute(:org_id, :uuid,
+            public?: false,
+            allow_nil?: true,
+            description: "Always optional here: failures are keyed by email blind index or credential id, not by organization, so it is not scoped by this column."
+          )
 
           # Bounded key-kind enum — the two independent axes T103 already bumps
           # (ADR-038 §6.2/§6.4). Never a plaintext identifier either way.
           attribute(:key_kind, :atom,
             public?: false,
             allow_nil?: false,
-            constraints: [one_of: [:email_bidx, :credential]]
+            constraints: [one_of: [:email_bidx, :credential]],
+            description: "Kind of key the row counts failures for: email_bidx or credential; required."
           )
 
           # The non-reversible bidx OR a credential id (as a string) — never PII.
-          attribute(:key_value, :string, public?: false, allow_nil?: false)
+          attribute(:key_value, :string,
+            public?: false,
+            allow_nil?: false,
+            description: "The counted key, an email blind index or a credential id as text matching key_kind; unique together with key_kind, and never a plaintext email."
+          )
 
-          attribute(:failure_count, :integer, public?: false, allow_nil?: false, default: 1)
+          attribute(:failure_count, :integer,
+            public?: false,
+            allow_nil?: false,
+            default: 1,
+            description: "Failed attempts counted in the current window, 1 by default; each failure adds one, and a failure after the window has expired resets it to 1."
+          )
 
-          attribute(:window_started_at, :utc_datetime_usec, public?: false, allow_nil?: false)
+          attribute(:window_started_at, :utc_datetime_usec,
+            public?: false,
+            allow_nil?: false,
+            description: "When the current failure window began, with microsecond precision; required. A failure after the window length restarts it."
+          )
 
-          attribute(:last_failed_at, :utc_datetime_usec, public?: false, allow_nil?: false)
+          attribute(:last_failed_at, :utc_datetime_usec,
+            public?: false,
+            allow_nil?: false,
+            description: "When the most recent failure was recorded, with microsecond precision; required."
+          )
         end
 
         actions do
