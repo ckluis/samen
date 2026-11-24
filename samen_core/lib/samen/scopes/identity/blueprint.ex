@@ -144,7 +144,24 @@ defmodule Samen.Scopes.Identity.Blueprint do
         end
 
         actions do
-          defaults([:read, :destroy, create: :*, update: :*])
+          defaults([:read, create: :*])
+
+          # Settings update (admin+, policy below): name/slug/session cap only. `plan` and
+          # `onboarded_at` are NOT inputs — a tenant actor must never write `plan` to an
+          # arbitrary string. The onboarding steps (`Samen.Web.Onboarding.select_plan/4`,
+          # `complete!/3`) validate the plan against the host's configured choices and
+          # `force_change_attribute` it; billing/operator paths set it the same way.
+          update :update do
+            primary?(true)
+            accept([:name, :slug, :max_concurrent_sessions])
+            # the admin+ SimpleCheck cannot be folded into an atomic UPDATE ... WHERE
+            require_atomic?(false)
+          end
+
+          # Destroy is the owner's alone (policy below).
+          destroy :destroy do
+            primary?(true)
+          end
 
           # Bounded-by-default API read the JSON:API routes bind to (WS-A design §1.1,
           # ADR-016 §3). Distinct from `:read` so internal `Ash.read!` callers keep
@@ -175,6 +192,19 @@ defmodule Samen.Scopes.Identity.Blueprint do
             # self-scope). Named FilterCheck — an inline `expr(id == …)` here would
             # be hygiene-captured inside the blueprint's quote.
             authorize_if(Samen.Policy.OrgIsSelf)
+          end
+
+          # RBAC on top of self-scope (`Samen.Scope.Role`: owner = "full control of the org,
+          # including billing + destroy", admin = manage the org's settings): a viewer/member
+          # could previously rewrite or DELETE its own org on `OrgIsSelf` alone.
+          policy action_type(:update) do
+            forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})
+            authorize_if(always())
+          end
+
+          policy action_type(:destroy) do
+            forbid_unless({Samen.Policy.RoleAtLeast, role: :owner})
+            authorize_if(always())
           end
         end
       end

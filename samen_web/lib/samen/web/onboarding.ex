@@ -179,7 +179,11 @@ defmodule Samen.Web.Onboarding do
         if Enum.any?(choices, &(&1.key == plan_key)) do
           with {:ok, org} <- org(mount, scope, org_id) do
             org
-            |> Ash.Changeset.for_update(:update, %{plan: plan_key}, scope: scope)
+            |> Ash.Changeset.for_update(:update, %{}, scope: scope)
+            # `plan` is NOT an `Org.:update` input (a tenant actor can never write it as an
+            # arbitrary string): the value was just validated against the host's configured
+            # `plan_choices/2` above, so only THIS path force-sets it.
+            |> Ash.Changeset.force_change_attribute(:plan, plan_key)
             |> Ash.update(scope: scope)
           end
         else

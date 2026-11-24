@@ -1,0 +1,18 @@
+# SABOTAGE: Org destroy passes on OrgIsSelf alone: a viewer deletes its own organization
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: RED: a viewer/member/admin cannot destroy the org
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index 4569b637..8b157939 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -203,7 +203,6 @@ defmodule Samen.Scopes.Identity.Blueprint do
+           end
+ 
+           policy action_type(:destroy) do
+-            forbid_unless({Samen.Policy.RoleAtLeast, role: :owner})
+             authorize_if(always())
+           end
+         end

@@ -241,12 +241,18 @@ defmodule Samen.Web.Onboarding.WizardLive do
 
   defp membership(_mount, _org_id, _user_id), do: {:error, :not_found}
 
-  # A plain own-org actor for the org-naming/plan-selection writes — `Org`'s
-  # own policy (`OrgIsSelf`) checks only `actor.org_id == org.id`, no rank
-  # ceiling, so the real membership role is not required here the way the
-  # invite ceiling needs it (`invite_scope/4` below carries the real role).
-  defp actor_scope(_mount, org_id, user_id) do
-    %Samen.Scope{actor: %{id: user_id, org_id: org_id, role: :member, kind: :tenant, plane: :tenant, verified?: true}}
+  # The own-org actor for the org-naming/plan-selection/completion writes. `Org.:update` needs
+  # an admin+ role (`Samen.Scopes.Identity.Blueprint.define_org/6`), so the scope carries the
+  # caller's REAL membership role — a hardcoded `:member` would be refused for everyone. No
+  # membership in context → no role → the policy refuses (fail closed).
+  defp actor_scope(mount, org_id, user_id) do
+    role =
+      case membership(mount, org_id, user_id) do
+        {:ok, %{role: role}} -> role
+        _ -> nil
+      end
+
+    %Samen.Scope{actor: %{id: user_id, org_id: org_id, role: role, kind: :tenant, plane: :tenant, verified?: true}}
   end
 
   # The SAME "real inviter authority" scope `InvitationsLive` builds — carries

@@ -11,6 +11,30 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Security: identity authorization (evaluation 2026-11-13, findings 1, 5, 7, 10, 13, 16)
+
+- **Fixed: any in-org actor could raise a pending invitation to `:owner`, or reopen a revoked one.** `Invitation`'s
+  generic `:update` accepted `role` and `status` on org scope alone. `:update` now takes no input and is forbidden to
+  every actor; the lifecycle moves only through `:accept`, `:revoke` and `:expire`.
+- **Fixed: an admin could mint or edit an API key acting as `:owner`, clear `revoked_at`, or push `expires_at` past the
+  365-day ceiling.** On the `ApiKey` resource: create is bounded by `Samen.Policy.MinterRoleCeiling` (actor role >=
+  `minter_role`, role required); `Samen.Scope.ApiKey.ClampExpiry` clamps every write that sets `expires_at`; `:update`
+  accepts `expires_at` only; revocation is the new one-way `:revoke` action (`Settings.ApiKeys.revoke/3` uses it).
+  `Driftwood.Freight.ApiKey` gets the same ceiling and `:revoke`.
+- **Fixed: pawchart's MCP resolver authenticated expired keys and promoted a role-less key to `:member`.** The digest +
+  not-revoked + not-expired lookup is now `Samen.Scope.ApiKey.active_query/3`, used by demo, driftwood, pawchart and the
+  generated key plug; `Samen.Scope.ApiKey.acting_role/1` refuses a key with no real role.
+  **Upgrade notes for generated apps:** re-generate or hand-apply `lib/<app>_web/api/key_auth_plug.ex` (the lookup becomes
+  `Samen.Scope.ApiKey.active_query(<App>.Operator.ApiKey, digest, now)`; the `# authz-scope:` marker stays on the read);
+  any custom key check should do the same. Code that revokes a key through `:update, %{revoked_at: ...}` must call
+  `:revoke`; code that sets `Org.org_id`/`plan`/`onboarded_at` through `:update` input must `force_change_attribute` it.
+- **Fixed: a viewer could update or delete its own organization.** `Org` update now needs admin+ and destroy needs owner
+  (`Samen.Scope.Role`: owner has "full control, including destroy"; the ADRs are silent, so admin-for-update is a
+  decision). `Org.:update` accepts `name`, `slug` and `max_concurrent_sessions` only: `plan` and `onboarded_at` are no
+  longer inputs, and `Samen.Web.Onboarding.select_plan/4` force-sets a plan it validated against the host's choices. The
+  onboarding wizard now acts with the caller's real membership role instead of a hardcoded `:member`.
+  Sabotages 1246-1255.
+
 ### Added: meaning in the catalog (ADR-043 §8a)
 
 - **Added: resources and fields carry meaning that the catalog dump and the AI catalogue expose.** Ash `description`

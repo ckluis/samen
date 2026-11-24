@@ -328,4 +328,74 @@ defmodule Samen.Web.IdentityAuthzTest do
       assert {:ok, :member} = Samen.Scope.ApiKey.acting_role(%{minter_role: :member})
     end
   end
+
+  # ===========================================================================
+  # D. Org update / destroy need a role
+  # ===========================================================================
+
+  describe "D. Org update needs admin, destroy needs owner; plan is not tenant-writable" do
+    defp org_scope(org, role),
+      do: %Samen.Scope{actor: %{id: Ash.UUID.generate(), org_id: org.id, role: role, verified?: true, kind: :tenant, plane: :tenant}}
+
+    defp bare_org! do
+      Org |> Ash.Changeset.for_create(:create, %{name: "Bare #{System.unique_integer([:positive])}"}, authorize?: false) |> Ash.create!()
+    end
+
+    defp org_update(org, attrs, role) do
+      s = org_scope(org, role)
+      org |> Ash.Changeset.for_update(:update, attrs, scope: s) |> Ash.update(scope: s)
+    end
+
+    test "RED: a viewer cannot update its org's settings; CONTROL: an admin can rename it" do
+      org = bare_org!()
+
+      assert {:error, _} = org_update(org, %{max_concurrent_sessions: 1}, :viewer)
+      assert {:error, _} = org_update(org, %{name: "Pwned"}, :member)
+      assert Ash.get!(Org, org.id, authorize?: false).name == org.name
+
+      assert {:ok, %{name: "Renamed"}} = org_update(org, %{name: "Renamed"}, :admin)
+      assert {:ok, %{max_concurrent_sessions: 3}} = org_update(org, %{max_concurrent_sessions: 3}, :owner)
+    end
+
+    test "RED: no tenant actor can write `plan` or `onboarded_at` as input, whatever its role" do
+      org = bare_org!()
+
+      for role <- [:viewer, :admin, :owner] do
+        assert {:error, _} = org_update(org, %{plan: "enterprise-free-forever"}, role)
+        assert {:error, _} = org_update(org, %{onboarded_at: DateTime.utc_now()}, role)
+      end
+
+      assert Ash.get!(Org, org.id, authorize?: false).plan == "free"
+    end
+
+    test "RED: a viewer/member/admin cannot destroy the org; CONTROL: an owner can; another org's owner cannot" do
+      org = bare_org!()
+      other = bare_org!()
+
+      for role <- [:viewer, :member, :admin] do
+        s = org_scope(org, role)
+        assert {:error, _} = org |> Ash.Changeset.for_destroy(:destroy, %{}, scope: s) |> Ash.destroy(scope: s)
+      end
+
+      s = org_scope(other, :owner)
+      assert {:error, _} = org |> Ash.Changeset.for_destroy(:destroy, %{}, scope: s) |> Ash.destroy(scope: s)
+      assert Ash.get!(Org, org.id, authorize?: false)
+
+      s = org_scope(org, :owner)
+      assert :ok = org |> Ash.Changeset.for_destroy(:destroy, %{}, scope: s) |> Ash.destroy(scope: s)
+      assert {:error, _} = Ash.get(Org, org.id, authorize?: false)
+    end
+
+    test "POSITIVE CONTROL: the onboarding plan step (owner) still selects an OFFERED plan, and refuses an unoffered one" do
+      r = register!()
+      mount = Samen.Web.Mount.new(:settings, Samen.WebTest.Operator, Samen.WebTest.Repo, plane: Samen.Web.Plane.tenant(), labels: %{plan_labels: {__MODULE__, :plans, []}})
+      s = scope(r, :owner)
+
+      assert {:ok, %{plan: "pro"}} = Samen.Web.Onboarding.select_plan(mount, s, r.org.id, "pro")
+      assert {:error, :invalid_plan} = Samen.Web.Onboarding.select_plan(mount, s, r.org.id, "enterprise-free-forever")
+      assert {:ok, %{onboarded_at: %DateTime{}}} = Samen.Web.Onboarding.complete!(mount, s, r.org.id)
+    end
+  end
+
+  def plans(_org_id), do: [%{key: "free", label: "Free"}, %{key: "pro", label: "Pro"}]
 end

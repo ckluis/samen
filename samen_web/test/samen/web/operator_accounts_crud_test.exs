@@ -37,7 +37,8 @@ defmodule Samen.Web.OperatorAccountsCrudTest do
       |> Ash.create!()
 
     org
-    |> Ash.Changeset.for_update(:update, %{org_id: org.id}, authorize?: false)
+    |> Ash.Changeset.for_update(:update, %{}, authorize?: false)
+    |> Ash.Changeset.force_change_attribute(:org_id, org.id)
     |> Ash.update!()
   end
 

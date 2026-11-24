@@ -1,0 +1,18 @@
+# SABOTAGE: Org update passes on OrgIsSelf alone: a viewer rewrites its org settings
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: RED: a viewer cannot update its org's settings
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index 4569b637..3e71f4f8 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -198,7 +198,6 @@ defmodule Samen.Scopes.Identity.Blueprint do
+           # including billing + destroy", admin = manage the org's settings): a viewer/member
+           # could previously rewrite or DELETE its own org on `OrgIsSelf` alone.
+           policy action_type(:update) do
+-            forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})
+             authorize_if(always())
+           end
+ 
