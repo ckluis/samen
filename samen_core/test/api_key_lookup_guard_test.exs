@@ -43,6 +43,13 @@ defmodule Samen.ApiKeyLookupGuardTest do
     end
   end
 
+  test "every known key-check site refuses a role-less key through acting_role" do
+    for site <- @key_check_sites do
+      assert File.read!(Path.join(@root, site)) =~ "Samen.Scope.ApiKey.acting_role(",
+             "#{site} builds an actor without Samen.Scope.ApiKey.acting_role/1 (a nil-role key would authenticate)"
+    end
+  end
+
   test "control: the detector flags a bypassing lookup and passes the shared one" do
     bypass = """
     PawChart.Operator.ApiKey

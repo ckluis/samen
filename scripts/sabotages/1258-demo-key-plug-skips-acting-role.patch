@@ -1,0 +1,19 @@
+# SABOTAGE: demo key plug stops calling acting_role: a nil-role key authenticates with role nil
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_auth_red_path_test.exs
+# MUST_FAIL: a key row with a nil minter_role resolves no actor
+diff --git a/demo/lib/demo_web/api/key_auth_plug.ex b/demo/lib/demo_web/api/key_auth_plug.ex
+index 80ccf7ee..1a1fe965 100644
+--- a/demo/lib/demo_web/api/key_auth_plug.ex
++++ b/demo/lib/demo_web/api/key_auth_plug.ex
+@@ -167,7 +167,7 @@ defmodule DemoWeb.Api.KeyAuthPlug do
+       {:ok, %{membership: %{} = mbr} = key_row} ->
+         # A key with no/unknown `minter_role` authorizes nothing (`Samen.Scope.ApiKey.acting_role/1`):
+         # refuse it here rather than build an actor with `role: nil` that an OrgScope-only resource serves.
+-        with {:ok, role} <- Samen.Scope.ApiKey.acting_role(key_row) do
++        with {:ok, role} <- {:ok, key_row.minter_role} do
+           org_id = fetch(mbr, [:org_id, :mbs_org_id])
+           user_id = fetch(mbr, [:user_id, :mbs_user_id])
+ 

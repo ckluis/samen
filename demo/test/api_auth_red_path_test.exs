@@ -62,4 +62,18 @@ defmodule Demo.ApiAuthRedPathTest do
 
     refute conn.resp_body =~ "Guarded"
   end
+
+  test "a key row with a nil minter_role resolves no actor (never `role: nil` through an OrgScope-only read)", %{org: org} do
+    {raw, key} = mk_api_key(org.id, plane: :tenant)
+    assert api_get("/contacts", raw).resp_body =~ "Guarded"
+
+    key
+    |> Ash.Changeset.for_update(:mark_used, %{}, authorize?: false)
+    |> Ash.Changeset.force_change_attribute(:minter_role, nil)
+    |> Ash.update!(authorize?: false)
+
+    conn = api_get("/contacts", raw)
+    assert conn.status in [200, 401, 403]
+    refute conn.resp_body =~ "Guarded"
+  end
 end

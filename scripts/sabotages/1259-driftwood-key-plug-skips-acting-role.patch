@@ -1,0 +1,19 @@
+# SABOTAGE: driftwood key plug stops calling acting_role: a nil-role key authenticates with role nil
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/freight_api_key_authz_test.exs
+# MUST_FAIL: RED: a key row with a nil minter_role resolves no actor
+diff --git a/driftwood/lib/driftwood_web/api/key_auth_plug.ex b/driftwood/lib/driftwood_web/api/key_auth_plug.ex
+index 2bd346fc..7801304c 100644
+--- a/driftwood/lib/driftwood_web/api/key_auth_plug.ex
++++ b/driftwood/lib/driftwood_web/api/key_auth_plug.ex
+@@ -100,7 +100,7 @@ defmodule DriftwoodWeb.Api.KeyAuthPlug do
+   defp build_actor(key_row) do
+     # A key with no/unknown `minter_role` authorizes nothing (`Samen.Scope.ApiKey.acting_role/1`): refused here
+     # rather than given `role: nil`.
+-    with {:ok, role} <- Samen.Scope.ApiKey.acting_role(key_row) do
++    with {:ok, role} <- {:ok, key_row.minter_role} do
+       org_id = to_string(key_row.org_id)
+ 
+       key = %{

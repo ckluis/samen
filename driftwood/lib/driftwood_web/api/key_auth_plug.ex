@@ -98,23 +98,27 @@ defmodule DriftwoodWeb.Api.KeyAuthPlug do
   end
 
   defp build_actor(key_row) do
-    org_id = to_string(key_row.org_id)
+    # A key with no/unknown `minter_role` authorizes nothing (`Samen.Scope.ApiKey.acting_role/1`): refused here
+    # rather than given `role: nil`.
+    with {:ok, role} <- Samen.Scope.ApiKey.acting_role(key_row) do
+      org_id = to_string(key_row.org_id)
 
-    key = %{
-      org_id: org_id,
-      plane: key_row.plane,
-      scopes: key_row.scopes || %{},
-      minter_role: key_row.minter_role
-    }
+      key = %{
+        org_id: org_id,
+        plane: key_row.plane,
+        scopes: key_row.scopes || %{},
+        minter_role: role
+      }
 
-    actor = %{
-      id: key_row.minter_user_id || ("apikey:" <> to_string(key_row.id)),
-      org_id: org_id,
-      role: key_row.minter_role,
-      plane: key_row.plane,
-      api_key: key
-    }
+      actor = %{
+        id: key_row.minter_user_id || ("apikey:" <> to_string(key_row.id)),
+        org_id: org_id,
+        role: role,
+        plane: key_row.plane,
+        api_key: key
+      }
 
-    {:ok, actor}
+      {:ok, actor}
+    end
   end
 end

@@ -144,8 +144,11 @@ defmodule Samen.Scope.ApiKey do
 
   @doc """
   The role a resolved key row acts with: its `minter_role` if it is a real, in-set role, else
-  `:error`. A key with no/unknown role authorizes nothing (`authorized?/4` denies it), so a host
-  must refuse to authenticate it rather than substitute a default role.
+  `:error`. Every key-check site (demo's and driftwood's plugs, pawchart's MCP resolver, the
+  generated plug) calls this and REFUSES to authenticate on `:error` — it never substitutes a
+  default role, because an actor with `role: nil` would pass OrgScope-only resources. (The pure
+  `authorized?/4` predicate would also deny such a key, but no host calls `authorized?/4` at
+  request time today: declared `scopes` are not enforced per request.)
   """
   @spec acting_role(%{optional(:minter_role) => term(), optional(atom()) => term()}) ::
           {:ok, atom()} | :error

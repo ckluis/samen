@@ -37,4 +37,21 @@ defmodule Driftwood.FreightApiKeyAuthzTest do
     assert {:ok, again} = revoked |> Ash.Changeset.for_update(:revoke, %{}, scope: s) |> Ash.update(scope: s)
     assert again.revoked_at == revoked.revoked_at
   end
+
+  test "RED: a key row with a nil minter_role resolves no actor; CONTROL: the same key with a role reads" do
+    org = mk_org()
+    {raw, key} = mk_api_key(org, minter_role: :admin, scopes: %{"freight" => ["read"]})
+    mk_driver(org, %{full_name: %{first: "Guarded", last: "Driver"}})
+    assert api_get("/drivers", raw).resp_body =~ "Guarded"
+
+    key
+    |> Ash.Changeset.for_update(:revoke, %{}, authorize?: false)
+    |> Ash.Changeset.force_change_attribute(:revoked_at, nil)
+    |> Ash.Changeset.force_change_attribute(:minter_role, nil)
+    |> Ash.update!(authorize?: false)
+
+    conn = api_get("/drivers", raw)
+    assert conn.status in [200, 401, 403]
+    refute conn.resp_body =~ "Guarded"
+  end
 end

@@ -165,28 +165,32 @@ defmodule DemoWeb.Api.KeyAuthPlug do
 
     case Ash.load(key_row, [membership: membership_query], authorize?: false) do
       {:ok, %{membership: %{} = mbr} = key_row} ->
-        org_id = fetch(mbr, [:org_id, :mbs_org_id])
-        user_id = fetch(mbr, [:user_id, :mbs_user_id])
+        # A key with no/unknown `minter_role` authorizes nothing (`Samen.Scope.ApiKey.acting_role/1`):
+        # refuse it here rather than build an actor with `role: nil` that an OrgScope-only resource serves.
+        with {:ok, role} <- Samen.Scope.ApiKey.acting_role(key_row) do
+          org_id = fetch(mbr, [:org_id, :mbs_org_id])
+          user_id = fetch(mbr, [:user_id, :mbs_user_id])
 
-        key = %{
-          org_id: org_id,
-          plane: key_row.plane,
-          scopes: key_row.scopes || %{},
-          minter_role: key_row.minter_role,
-          # F3.4 — carry expiry so the use-time gate can also refuse an expired key
-          # (defence-in-depth over the deny-on-read query).
-          expires_at: Map.get(key_row, :expires_at)
-        }
+          key = %{
+            org_id: org_id,
+            plane: key_row.plane,
+            scopes: key_row.scopes || %{},
+            minter_role: role,
+            # F3.4 — carry expiry so the use-time gate can also refuse an expired key
+            # (defence-in-depth over the deny-on-read query).
+            expires_at: Map.get(key_row, :expires_at)
+          }
 
-        actor = %{
-          id: user_id,
-          org_id: org_id,
-          role: key_row.minter_role,
-          plane: key_row.plane,
-          api_key: key
-        }
+          actor = %{
+            id: user_id,
+            org_id: org_id,
+            role: role,
+            plane: key_row.plane,
+            api_key: key
+          }
 
-        {:ok, actor}
+          {:ok, actor}
+        end
 
       {:error, error} ->
         Samen.Observability.Failure.report(:demo_api_key_membership_load, nil, error)
