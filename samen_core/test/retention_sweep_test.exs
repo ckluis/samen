@@ -149,6 +149,39 @@ defmodule Samen.RetentionSweepTest do
   end
 
   describe ":shred sweep — an expired subject-bearing row crypto-shreds its subject" do
+    test "a shred the erasure PRECONDITION refuses is REPORTED, not counted, and the subject's key is untouched" do
+      doomed = "retention-refused-#{System.unique_integer([:positive])}"
+      {:ok, _} = Vault.store_field(doomed, :pii_email, :emails, "d@example.com", @repo)
+      _old = company_aged!(doomed, 400)
+
+      spec = %Spec{resource: Company, ttl_seconds: 365 * 24 * 60 * 60, action: :shred, subject_field: :name}
+
+      # A host whose `:ash_domains` derive nothing: erasure cannot know which blind indexes to clear.
+      prev = Application.get_env(:samen_core, :ash_domains)
+      Application.put_env(:samen_core, :ash_domains, [])
+
+      on_exit(fn ->
+        if prev, do: Application.put_env(:samen_core, :ash_domains, prev), else: Application.delete_env(:samen_core, :ash_domains)
+      end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert %{swept: 0} = Retention.sweep([spec], now: @now, repo: @repo)
+        end)
+
+      # reported, value-free, naming the operation and the tag
+      assert log =~ "write=retention_shred"
+      assert log =~ "cause=blind_index_no_resources"
+      # nothing irreversible happened: the key is live, so the next sweep (after the fix) can still erase
+      assert Samen.Kms.adapter().key_material_present?(doomed)
+      refute Samen.Erasure.erased?(doomed, repo: @repo)
+
+      # CONTROL: the same row erases once the lookup is healthy, so the refusal above was the precondition's
+      Application.put_env(:samen_core, :ash_domains, prev)
+      assert %{swept: 1} = Retention.sweep([spec], now: @now, repo: @repo)
+      assert Samen.Erasure.erased?(doomed, repo: @repo)
+    end
+
     test "the subject on an over-TTL row is shredded via Samen.Erasure; a fresh subject survives" do
       shred_subject = "retention-subj-#{System.unique_integer([:positive])}"
       keep_subject = "retention-keep-#{System.unique_integer([:positive])}"

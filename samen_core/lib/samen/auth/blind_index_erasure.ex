@@ -77,10 +77,13 @@ defmodule Samen.Auth.BlindIndexErasure do
 
   ### Fail-honest
 
-  Erasure that cannot clear a blind index must not report success. Unless `:bidx_specs` is given, the
-  arm checks the live schema first: a `_bidx` column that is not registered in `Samen.DerivedLinkable`
-  (so no arm can be derived for it) raises, the erasure transaction rolls back, and the operator
-  sees the column named. The subject's DEK is destroyed before the transaction; a retry is safe.
+  Erasure that cannot clear a blind index must not report success, and must not be attempted: `plan/1`
+  runs as a PRECONDITION of `Samen.Erasure.shred/2`, before the subject's key is destroyed. A `_bidx` column
+  that is not registered in `Samen.DerivedLinkable` (so no arm can be derived for it), or a lookup that
+  derives no resources at all, refuses the erasure with `{:error, {:blind_index_uncovered, columns}}` /
+  `{:error, {:blind_index_no_resources, lookup}}`; the key is untouched and nothing is written, so the
+  operator fixes the registration and retries. (`erase_subject/3` called directly raises `ArgumentError`
+  with the same facts, unless `:bidx_specs` is given.)
 
   ### Login-failure counters
 
@@ -124,16 +127,10 @@ defmodule Samen.Auth.BlindIndexErasure do
   """
   @spec erase_subject(String.t(), module(), keyword()) :: [map()]
   def erase_subject(subject_id, repo, opts \\ []) when is_binary(subject_id) do
-    {specs, login_failures} =
-      case Keyword.get(opts, :bidx_specs) do
-        nil ->
-          resources = Samen.Erasure.Completeness.resources(Keyword.take(opts, [:resources, :domains, :otp_app]))
-          assert_covered!(resources)
-          configured = Application.get_env(:samen_core, :blind_index_erasure_specs, [])
-          {Enum.uniq_by(configured ++ derived_specs(resources), &spec_key/1), login_failure_tables(resources)}
-
-        explicit ->
-          {explicit, Keyword.get(opts, :login_failure_specs, [])}
+    %{specs: specs, login_failures: login_failures} =
+      case plan(opts) do
+        {:ok, plan} -> plan
+        {:error, reason} -> raise ArgumentError, refusal_message(reason)
       end
 
     reports = Enum.map(specs, &tombstone_one(&1, subject_id, repo))
@@ -143,6 +140,54 @@ defmodule Samen.Auth.BlindIndexErasure do
     end
 
     Enum.map(reports, &Map.delete(&1, "old_values"))
+  end
+
+  @doc """
+  Decide, WITHOUT touching the database, whether erasure can clear every blind index, and with which specs.
+
+  `{:ok, %{specs: [...], login_failures: [...]}}`, or:
+
+    * `{:error, {:blind_index_uncovered, [{resource, column}]}}`: a `_bidx` column of the live schema is not
+      registered in `Samen.DerivedLinkable` (no arm can be derived for it);
+    * `{:error, {:blind_index_no_resources, opts}}`: the lookup derived NO resources at all (a host whose
+      domains are not configured), which would otherwise read as "nothing to clear".
+
+  `Samen.Erasure.shred/2` calls this BEFORE it destroys the subject's key. With `:bidx_specs` given the specs are
+  explicit and nothing is derived or checked (tests of one fixture table). Other options as `erase_subject/3`.
+  """
+  @spec plan(keyword()) ::
+          {:ok, %{specs: [map()], login_failures: [map()]}}
+          | {:error, {:blind_index_uncovered, [{module(), atom()}]} | {:blind_index_no_resources, keyword()}}
+  def plan(opts) do
+    case Keyword.get(opts, :bidx_specs) do
+      nil ->
+        resources = Samen.Erasure.Completeness.resources(Keyword.take(opts, [:resources, :domains, :otp_app]))
+
+        with :ok <- assert_derived(resources, opts),
+             :ok <- assert_covered(resources) do
+          configured = Application.get_env(:samen_core, :blind_index_erasure_specs, [])
+
+          {:ok,
+           %{
+             specs: Enum.uniq_by(configured ++ derived_specs(resources), &spec_key/1),
+             login_failures: login_failure_tables(resources)
+           }}
+        end
+
+      explicit ->
+        {:ok, %{specs: explicit, login_failures: Keyword.get(opts, :login_failure_specs, [])}}
+    end
+  end
+
+  defp refusal_message({:blind_index_uncovered, missing}) do
+    "blind-index erasure cannot clear #{inspect(missing)}: register the column in " <>
+      "Samen.DerivedLinkable (erasure would otherwise report success and leave a keyed hash " <>
+      "of the erased person's email in place)"
+  end
+
+  defp refusal_message({:blind_index_no_resources, _opts}) do
+    "blind-index erasure derived no resources to clear: configure the host's :ash_domains " <>
+      "(or pass :resources / :domains / :otp_app); an empty derivation must not read as success"
   end
 
   defp spec_key(spec),
@@ -177,16 +222,13 @@ defmodule Samen.Auth.BlindIndexErasure do
     end
   end
 
-  defp assert_covered!(resources) do
-    case uncovered(resources) do
-      [] ->
-        :ok
+  defp assert_derived([], opts), do: {:error, {:blind_index_no_resources, Keyword.take(opts, [:resources, :domains, :otp_app])}}
+  defp assert_derived(_resources, _opts), do: :ok
 
-      missing ->
-        raise ArgumentError,
-              "blind-index erasure cannot clear #{inspect(missing)}: register the column in " <>
-                "Samen.DerivedLinkable (erasure would otherwise report success and leave a keyed hash " <>
-                "of the erased person's email in place)"
+  defp assert_covered(resources) do
+    case uncovered(resources) do
+      [] -> :ok
+      missing -> {:error, {:blind_index_uncovered, missing}}
     end
   end
 

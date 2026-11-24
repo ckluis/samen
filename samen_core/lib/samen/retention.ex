@@ -298,7 +298,15 @@ defmodule Samen.Retention do
 
           acc
 
-        {:error, _} ->
+        # Any other refusal or failure (a blind index erasure cannot clear, a key store outage, ...): the subject
+        # was NOT erased, so it is not counted, and the failure is REPORTED (the tag only, never a value), every
+        # sweep, until it is fixed. It never vanishes into the tally.
+        {:error, reason} ->
+          Samen.Observability.Failure.report(:write, :retention_shred, org_id, error_tag(reason),
+            tag: "[Samen.Retention]",
+            locate: [resource: spec.resource, record: subject_id]
+          )
+
           acc
       end
     end)
@@ -307,6 +315,12 @@ defmodule Samen.Retention do
       Logger.error("[Samen.Retention] shred sweep failed for #{inspect(spec.resource)}: #{inspect(e)}")
       0
   end
+
+  # The value-free name of an erasure error: its tag (`{:blind_index_uncovered, _}` -> `:blind_index_uncovered`),
+  # never the payload.
+  defp error_tag({tag, _detail}) when is_atom(tag), do: tag
+  defp error_tag(tag) when is_atom(tag), do: tag
+  defp error_tag(_other), do: :unknown
 
   # Purge each expired blob-backed row through the governed ref-counted chokepoint. A row
   # with no blob (nil/blank `storage_key`) has no bytes to purge, so it takes the ordinary

@@ -8,8 +8,14 @@ defmodule Driftwood.BlindIndexErasureGuardTest do
   use ExUnit.Case, async: true
 
   test "no blind-index column goes uncovered, and the identity mount's are all derived" do
-    resources = Samen.Erasure.Completeness.resources(otp_app: :driftwood)
+    # The PRODUCTION lookup (what `Samen.Erasure.shred/2` runs): no options, so the host app resolves exactly as
+    # it does at runtime. Passing `otp_app: :driftwood` here would prove a lookup the runtime does not make.
+    resources = Samen.Erasure.Completeness.resources()
     assert resources != []
+
+    # A release has no Mix: the same lookup then reads `:samen_core`'s `:ash_domains`, which the host config
+    # must populate with the same domains, or erasure would derive a different (smaller) schema there.
+    assert MapSet.new(Samen.Erasure.Completeness.resources(otp_app: :samen_core)) == MapSet.new(resources)
 
     assert Samen.Auth.BlindIndexErasure.uncovered(resources) == []
 

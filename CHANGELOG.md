@@ -24,25 +24,46 @@ All notable changes to Samen are recorded here. The format follows
   **Upgrade notes:** an update that sent `org_id: <the same org>` as input now fails (`org_id cannot be changed`): drop it.
   An update that needs `org_id` on the record (custom-field validation) loads it with `Ash.load!(record, :org_id)`.
   `Samen.Policy.SameOrgFk` now reads a record's stored `org_id` when the record in hand has it unloaded, where it
-  previously skipped the check. `Samen.OrgIdPinnedGuard.walk/2` is the walk the per-host guard tests use.
+  previously skipped the check. It does so only on an update that actually writes a foreign key (any other update
+  costs no query), through the WRITE repo (`:mutate`, the caller's transaction, never a read replica), matching every
+  primary-key column (a composite key reads exactly its own row). A row whose stored `org_id` cannot be found refuses
+  the foreign-key write (`same-org FK check could not read this record's org_id`); it never skips the check.
+  Sending the value a row already has as `org_id` passes only when the record in hand has `org_id` loaded; with it
+  unloaded the write is refused, because the pin cannot tell the value is unchanged (load it with `Ash.load!/2`).
+  `Samen.OrgIdPinnedGuard.walk/2` is the walk the per-host guard tests use.
 - **Fixed: a viewer could edit another user's handle, name and emails, suspend an admin, or reactivate themselves; any
   in-org actor could create or destroy a user row.** `Identity.User` writes rested on `OrgScope` alone. A user now edits
   their own profile fields; changing another user's row, anyone's `status`, or destroying a user needs the rank rule
   membership updates use (`Samen.Policy.ManageUser`: at least `admin` and strictly above the target's highest membership
   role in the org; nobody changes their own `status` or destroys themselves), and creating a user row needs `admin`.
   **Upgrade notes:** `Samen.Scopes.Identity.Blueprint.define_user` takes the membership module (the `use
-  Samen.Scopes.Identity` mount passes it, so mounts are unaffected). A screen that edits a profile on a mount-level
-  scope must act as the user it edits: `Samen.Web.Settings.Profile.update/4` now does so on the tenant plane. A test that
+  Samen.Scopes.Identity` mount passes it, so mounts are unaffected). A screen that edits a profile must act as the user it
+  edits: `Samen.Web.Settings.Profile.update/4` refuses (`{:error, :forbidden}`) any scope whose actor is not the user
+  being edited, so build the scope with `Samen.Web.Settings.Reads.user_scope/3` from the identity the session resolved
+  (`ProfileLive` does). It never rewrites the actor itself. A test that
   changes a user's own `status` as that user must act as an admin over a lower-ranked user instead.
 - **Fixed: erasing a principal account could leave a keyed hash of the erased person's email in place.** The blind-index
   arm only ran for specs a host had installed (`Samen.Erasure.install_default_specs/1` at application start), so a host
   that did not call it reported a successful erasure with `email_bidx` still matching the email if the person
   re-registered, and no host cleared the `Identity.LoginFailure` counters keyed on that index. The arm now derives its
   specs from the host's live schema at erasure time (`Samen.Auth.BlindIndexErasure.derived_specs/1`: Credential and
-  Invitation `email_bidx`, AuthToken `sent_to_bidx`), purges the login-failure counters keyed on the erased index and on
-  the credential id, and fails the erasure (transaction rolled back) when the live schema has a `_bidx` column it cannot
-  clear. A per-tenant data-subject shred still leaves the shared credential alone. `uncovered/1` and a per-host guard
-  test assert every blind-index column is covered.
+  Invitation `email_bidx`, AuthToken `sent_to_bidx`), and purges the login-failure counters keyed on the erased index
+  and on the credential id. A per-tenant data-subject shred still leaves the shared credential alone. `uncovered/1` and
+  a per-host guard test assert every blind-index column is covered, through the same domain lookup the runtime uses.
+  An invitation is the inviting organisation's own record with its own subject (ADR-046 section 4.1, decision 1b): a
+  principal-account erasure clears the person's credential index and does NOT reach the invitations other
+  organisations addressed to that person (their `email_bidx` and email vault rows stay until the invitation itself is
+  erased as a subject, which does tombstone its index).
+- **Fixed: an erasure that could not clear a blind index destroyed the subject's key and only then failed.** The
+  coverage check now runs BEFORE anything irreversible (`Samen.Auth.BlindIndexErasure.plan/1`, called first by
+  `Samen.Erasure.shred/2`): an unregistered `_bidx` column returns `{:error, {:blind_index_uncovered, [{resource,
+  column}]}}`, and a derivation that finds no resources at all returns `{:error, {:blind_index_no_resources,
+  lookup_options}}` (the `:resources` / `:domains` / `:otp_app` that were given), instead of reading as "nothing to
+  clear". Either way the key is live, nothing is sealed and no report is written, so the operator fixes
+  the registration and retries. `shred/2` takes `:resources`, `:domains` and `:otp_app` for that derivation; an explicit
+  `:bidx_specs` list is the caller's own scope and is neither derived nor checked. `Samen.Retention`'s shred sweep
+  reports any refused or failed shred through `Samen.Observability.Failure` (`write=retention_shred`, the error tag,
+  the subject's record id) every sweep, and never counts that subject as erased.
 - **Fixed: a subject export decrypted authentication secrets.** `Samen.Dsar.export_subject/2` walked every vault row of
   the subject id, and a Credential vaults its TOTP secret and recovery-code digests under `:pii_secret` keyed on the
   credential id, so a tenant-plane export of that id returned them in clear. Authentication secrets are never part of a

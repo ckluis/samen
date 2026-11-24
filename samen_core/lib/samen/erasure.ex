@@ -237,6 +237,17 @@ defmodule Samen.Erasure do
   end
 
   defp do_shred(subject_id, opts) do
+    # PRECONDITION, before anything is read, recorded or destroyed: erasure must be able to clear every blind
+    # index (and must have derived the schema it clears from at all). A refusal here leaves the subject's key
+    # live and writes nothing, so the operator fixes the registration and retries. Run any later, it would
+    # fail AFTER `Kms.shred/1` had destroyed the key, which is the one step that cannot be taken back.
+    case Samen.Auth.BlindIndexErasure.plan(opts) do
+      {:ok, plan} -> do_shred(subject_id, opts, plan)
+      {:error, _} = refused -> refused
+    end
+  end
+
+  defp do_shred(subject_id, opts, bidx_plan) do
     r = Keyword.get(opts, :repo) || default_repo()
     actor_id = Keyword.get(opts, :actor_id, "system:erasure")
     # Optional: the subject's org, so the erasure event rides that org's T4.3 chain
@@ -258,11 +269,12 @@ defmodule Samen.Erasure do
       actor_id: actor_id
     ]
 
-    # The blind-index erasure arm (ADR-046 §4.1 D1; amends ADR-035 §4.1): the registered
-    # `email_bidx` specs (or the config default). Fires ONLY on principal-account erasure
+    # The blind-index erasure arm (ADR-046 §4.1 D1; amends ADR-035 §4.1): the specs and login-failure tables
+    # `BlindIndexErasure.plan/1` already derived and checked as the precondition above (the registered
+    # `email_bidx` specs, or the config default). Fires ONLY on principal-account erasure
     # (subject == the credential/invitation owner — matched on the row's own key), never a
     # per-tenant data-subject shred (which would break the org-less human's cross-org login).
-    bidx_specs = Keyword.get(opts, :bidx_specs)
+    bidx_specs = [bidx_specs: bidx_plan.specs, login_failure_specs: bidx_plan.login_failures]
 
     # The Tier-1 custom-bag erasure arm (ADR-046 §4.2 D3): the registered `custom` bag
     # specs (or the config default). Per-KEY redaction of `pii_declared: true` plaintext
@@ -593,12 +605,9 @@ defmodule Samen.Erasure do
       # own key; a per-tenant data-subject shred matches zero rows, so the org-less human's
       # cross-org login is never broken). Runs INSIDE the tx, fail-closed (pure in-DB write).
       |> Ecto.Multi.run(:blind_index, fn repo, _changes ->
-        # Fail-honest: a blind index erasure cannot clear fails the erasure (the transaction rolls back).
-        try do
-          {:ok, Samen.Auth.BlindIndexErasure.erase_subject(subject_id, repo, bidx_specs: bidx_specs)}
-        rescue
-          e in ArgumentError -> {:error, {:blind_index_uncovered, Exception.message(e)}}
-        end
+        # Coverage was checked as the precondition (`BlindIndexErasure.plan/1`), so nothing here can need a
+        # rescue: a failure of the in-DB write itself raises and rolls the transaction back.
+        {:ok, Samen.Auth.BlindIndexErasure.erase_subject(subject_id, repo, bidx_specs)}
       end)
       # STEP 3e — Tier-1 custom-bag erasure arm (ADR-046 §4.2 D3). A `pii_declared: true`
       # custom field stores PLAINTEXT in the sealed `custom` jsonb bag (never vaulted), so

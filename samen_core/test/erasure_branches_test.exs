@@ -53,6 +53,51 @@ defmodule Samen.ErasureBranchesTest do
     end
   end
 
+  defmodule UncoveredBidx do
+    use Ash.Resource, domain: nil, data_layer: Ash.DataLayer.Ets
+
+    attributes do
+      uuid_primary_key(:id)
+      attribute(:phone_bidx, :string)
+    end
+  end
+
+  describe "the blind-index precondition runs BEFORE the irreversible key destruction" do
+    test "RED: an uncovered _bidx column refuses the shred - the key is live, no report, nothing sealed" do
+      mine = subj()
+      seed(mine, 2)
+      assert Samen.Kms.adapter().key_material_present?(mine)
+
+      assert {:error, {:blind_index_uncovered, [{UncoveredBidx, :phone_bidx}]}} =
+               Erasure.shred(mine, repo: @repo, resources: [UncoveredBidx])
+
+      assert Samen.Kms.adapter().key_material_present?(mine), "refused AFTER the key was destroyed"
+      assert @repo.aggregate(from(v in Samen.Vault.VaultRow, where: v.subject_id == ^mine and v.state == "active"), :count) == 2
+      assert @repo.aggregate(from(r in Samen.Erasure.Report, where: r.subject_id == ^mine), :count) == 0
+
+      # CONTROL: the identical call with a schema erasure can clear erases
+      assert {:ok, _} = Erasure.shred(mine, repo: @repo)
+      refute Samen.Kms.adapter().key_material_present?(mine)
+    end
+
+    test "RED: a derivation that finds NO resources is refused, not reported as nothing-to-clear" do
+      mine = subj()
+      seed(mine, 1)
+
+      assert {:error, {:blind_index_no_resources, [resources: []]}} = Erasure.shred(mine, repo: @repo, resources: [])
+      assert Samen.Kms.adapter().key_material_present?(mine)
+    end
+
+    test "the refusal matches only the coverage errors: a spec naming a missing table still fails the write, loudly" do
+      mine = subj()
+      seed(mine, 1)
+
+      bad = [%{table_name: "no_such_table_zzz", bidx_column: "email_bidx", subject_column: "id"}]
+
+      assert_raise Postgrex.Error, fn -> Erasure.shred(mine, repo: @repo, bidx_specs: bad) end
+    end
+  end
+
   describe "the report is about THIS subject" do
     test "vault tier counts only the erased subject's rows; another subject's rows stay active" do
       other = subj()

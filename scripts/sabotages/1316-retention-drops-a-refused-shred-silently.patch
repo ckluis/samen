@@ -1,0 +1,24 @@
+# SABOTAGE: The retention shred sweep drops a refused shred without a report, as before
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/retention_sweep_test.exs
+# MUST_FAIL: a shred the erasure PRECONDITION refuses is REPORTED
+diff --git a/samen_core/lib/samen/retention.ex b/samen_core/lib/samen/retention.ex
+index e007b103..6bd13cf3 100644
+--- a/samen_core/lib/samen/retention.ex
++++ b/samen_core/lib/samen/retention.ex
+@@ -301,12 +301,7 @@ defmodule Samen.Retention do
+         # Any other refusal or failure (a blind index erasure cannot clear, a key store outage, ...): the subject
+         # was NOT erased, so it is not counted, and the failure is REPORTED (the tag only, never a value), every
+         # sweep, until it is fixed. It never vanishes into the tally.
+-        {:error, reason} ->
+-          Samen.Observability.Failure.report(:write, :retention_shred, org_id, error_tag(reason),
+-            tag: "[Samen.Retention]",
+-            locate: [resource: spec.resource, record: subject_id]
+-          )
+-
++        {:error, _reason} ->
+           acc
+       end
+     end)
