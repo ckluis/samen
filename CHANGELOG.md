@@ -22,6 +22,20 @@ All notable changes to Samen are recorded here. The format follows
   another owner either, and no write through `ManageRole` can leave an org without an owner. A caller that relied on an admin
   editing an owner's or a peer admin's membership now needs an owner (for an admin) or no longer can (for an owner).
   Sabotages 1322 and 1323.
+- **Fixed: a suspended member kept their role and their org in an existing signed-in session.** A membership whose
+  `status` is not `"active"` (suspended, invited) now confers no role and no org access, the rule an API key's acting role
+  and the settings role lookup already applied. `Samen.Auth.OrgActor` is the one resolver: `active_membership/3` (the
+  lowest-ranked ACTIVE membership of a user in an org, `:none` otherwise) decides `resolve/3` and `resolve_result/3` (the
+  session actor's role), `authorized_org_ids/2` and `authorized_org_ids_result/2` (the orgs a session may act in, so the org
+  switcher and `?org=` no longer reach an org the member is suspended in), and `Samen.AI.Agent.Approver` (a suspended
+  member can no longer approve an agent action). `PawChart.Auth.authorized_org_ids/1` filters on `status == "active"`.
+  A suspended user whose only org is the suspended one resolves no org, the same answer as a credential with no
+  membership. `Samen.Policy.ManageUser` still ranks a suspended target by its role, on purpose: an admin cannot suspend
+  an admin to get around the rank rule. **Upgrade notes:** `authorized_org_ids/2` now needs an active membership as well
+  as a `User` row in the org; a host seam that lists orgs from its own membership table must filter on
+  `status == "active"` too.
+  An already-mounted LiveView keeps the org set it mounted with until it remounts.
+  `ManageRole` returns an error tuple (not `{:ok, false}`) when it cannot read the stored role. Sabotages 1324 to 1327.
 
 ### Security: authorization and erasure, round 4
 

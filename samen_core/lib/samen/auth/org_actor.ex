@@ -29,7 +29,8 @@ defmodule Samen.Auth.OrgActor do
   @type result(t) :: {:ok, t} | {:error, :unavailable}
 
   @doc """
-  Every org id `credential_id` holds a live `User` row in, as a TAGGED result: `{:ok, ids}` (an empty list is the
+  Every org id `credential_id` holds a live `User` row AND an ACTIVE membership in (a suspended or invited
+  membership gives no access to its org), as a TAGGED result: `{:ok, ids}` (an empty list is the
   honest \"no org anywhere\") or `{:error, :unavailable}` when the read itself failed (an outage, a decrypt
   failure). Nothing is swallowed and nothing is logged here — the caller owns the decision (the landing page
   answers 503; a tenant gate fails closed). Used to build the `:authorized_orgs` seam's return set.
@@ -51,7 +52,7 @@ defmodule Samen.Auth.OrgActor do
     # :authorized_orgs set everything else scopes by
     |> Ash.read(authorize?: false)
     |> case do
-      {:ok, users} -> {:ok, users |> Enum.map(& &1.org_id) |> Enum.uniq()}
+      {:ok, users} -> active_org_ids(mods, users)
       {:error, reason} -> {:error, reason}
     end
   end
@@ -99,8 +100,7 @@ defmodule Samen.Auth.OrgActor do
        when is_binary(credential_id) and is_binary(org_id) do
     with {:ok, users} <- find_user(mods, credential_id, org_id),
          [user] <- users,
-         {:ok, memberships} <- find_membership(mods, user.id, org_id),
-         [membership] <- memberships do
+         {:ok, membership} <- active_membership(mods.membership, user.id, org_id) do
       {:ok, %{user_id: user.id, role: membership.role, org_id: org_id}}
     else
       {:error, reason} -> {:error, reason}
@@ -149,11 +149,44 @@ defmodule Samen.Auth.OrgActor do
     |> Ash.read(authorize?: false)
   end
 
-  defp find_membership(mods, user_id, org_id) do
-    mods.membership
-    |> Ash.Query.filter(user_id == ^user_id and org_id == ^org_id)
-    |> Ash.Query.ensure_selected([:id, :role])
-    |> Ash.Query.limit(1)
+  # The ONE place a membership becomes an actor's role or an org's access (a suspended or invited membership
+  # confers neither; `Samen.Scope.ApiKey.effective_role/2` applies the same rule to a key). Every call site that
+  # turns a membership into authority goes through `active_membership/3` or `active_org_ids/2`, so a new site
+  # cannot forget the status. If a user somehow holds several active rows in the org, the LOWEST role wins, so the
+  # answer never depends on row order.
+  @doc """
+  The user's ACTIVE membership in `org_id` (the lowest-ranked one if several): `{:ok, membership}`, `:none` when
+  there is no active row (a suspended or invited membership is "no membership"), or `{:error, reason}` when the
+  read failed. `membership_mod` is the host's Membership resource.
+  """
+  @spec active_membership(module(), String.t(), String.t()) :: {:ok, map()} | :none | {:error, term()}
+  def active_membership(membership_mod, user_id, org_id) do
+    membership_mod
+    |> Ash.Query.filter(user_id == ^user_id and org_id == ^org_id and status == "active")
+    |> Ash.Query.ensure_selected([:id, :role, :status])
+    # a user holds one membership per org, a handful at the very most
+    |> Ash.Query.limit(25)
     |> Ash.read(authorize?: false)
+    |> case do
+      {:ok, []} -> :none
+      {:ok, rows} -> {:ok, Enum.min_by(rows, &{Samen.Scope.Role.rank(&1.role), to_string(&1.id)})}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # The orgs among `users` in which the user holds an active membership: one `active_membership/3` per user row
+  # (a credential holds one user per org, a handful at the very most), so the shared rule is the only one.
+  defp active_org_ids(mods, users) do
+    Enum.reduce_while(users, {:ok, []}, fn user, {:ok, acc} ->
+      case active_membership(mods.membership, user.id, user.org_id) do
+        {:ok, _membership} -> {:cont, {:ok, [user.org_id | acc]}}
+        :none -> {:cont, {:ok, acc}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, ids} -> {:ok, ids |> Enum.reverse() |> Enum.uniq()}
+      error -> error
+    end
   end
 end

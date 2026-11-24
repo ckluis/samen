@@ -1022,4 +1022,83 @@ defmodule Samen.Web.IdentityAuthzTest do
       assert :ok = Ash.destroy(member, scope: admin)
     end
   end
+
+  describe "I. A membership that is not active confers no role and no org access" do
+    alias Samen.Auth.SessionCreate
+    alias Samen.Web.Auth, as: WebAuth
+    alias Samen.Web.CurrentOrg
+    alias Samen.Web.Mount
+    alias Samen.Web.Plane
+    alias Samen.WebTest.Operator.Session
+
+    defp i_mount, do: Mount.new(:settings, Samen.WebTest.Operator, Repo, plane: Plane.tenant(), labels: %{authn: :required})
+
+    # a credential that registered its own org (Y) and joins `host` (X) as a member through a real invitation
+    defp i_join!(host, role) do
+      guest = register!()
+      {:ok, _inv, raw} = Invite.create(invite_mods(), scope(host, :owner), %{email: guest.email, role: role})
+      {:ok, joined} = Invite.accept(invite_mods(), raw)
+      {guest, joined.membership}
+    end
+
+    defp i_session!(guest) do
+      {:ok, _row, raw} = SessionCreate.create(%{session: Session, org: Org, membership: Membership, user: User}, guest.credential.id)
+      %{WebAuth.session_token_key() => raw}
+    end
+
+    test "RED: a suspended member's EXISTING session resolves no actor and no access to the org; CONTROL: active, and active again after reactivation" do
+      host = register!()
+      {guest, membership} = i_join!(host, :member)
+      session = i_session!(guest)
+      mount = i_mount()
+      x = host.org.id
+      y = guest.org.id
+      admin = scope(host, :admin)
+
+      # CONTROL: while active the same session holds the role and the org
+      assert %{role: :member, org_id: ^x} = CurrentOrg.resolve_actor(mount, guest.credential.id, x)
+      assert x in CurrentOrg.authorized_orgs(mount, session)
+      assert CurrentOrg.resolve(mount, %{"org" => x}, session) == x
+
+      assert {:ok, %{status: "suspended"}} = h_upd(membership, %{status: "suspended"}, admin)
+
+      # the same session: no role, no org (its OWN org is untouched)
+      assert CurrentOrg.resolve_actor(mount, guest.credential.id, x) == nil
+      refute x in CurrentOrg.authorized_orgs(mount, session)
+      assert y in CurrentOrg.authorized_orgs(mount, session)
+      assert CurrentOrg.resolve(mount, %{"org" => x}, session) == y
+      assert CurrentOrg.resolve_actor(mount, guest.credential.id, y).role == :owner
+
+      assert {:ok, %{status: "active"}} = h_upd(reread(Membership, membership.id), %{status: "active"}, admin)
+      assert %{role: :member} = CurrentOrg.resolve_actor(mount, guest.credential.id, x)
+      assert x in CurrentOrg.authorized_orgs(mount, session)
+    end
+
+    test "RED: a suspended ADMIN keeps no authority (the role it held is not resolved); the resolver answers the lowest ACTIVE row" do
+      host = register!()
+      {guest, membership} = i_join!(host, :admin)
+      mount = i_mount()
+      assert %{role: :admin} = CurrentOrg.resolve_actor(mount, guest.credential.id, host.org.id)
+
+      {:ok, _} = h_upd(membership, %{status: "suspended"}, scope(host, :owner))
+      assert CurrentOrg.resolve_actor(mount, guest.credential.id, host.org.id) == nil
+
+      # a second, ACTIVE, lower row for the same user: that one answers, never the suspended admin row
+      Membership
+      |> Ash.Changeset.for_create(:create, %{org_id: host.org.id, user_id: membership.user_id, role: :viewer}, authorize?: false)
+      |> Ash.create!()
+
+      assert %{role: :viewer} = CurrentOrg.resolve_actor(mount, guest.credential.id, host.org.id)
+    end
+
+    test "CONTROL: ManageUser still ranks a SUSPENDED target (an admin cannot suspend an admin to get around the rank rule)" do
+      host = register!()
+      {_guest, membership} = i_join!(host, :admin)
+      {:ok, _} = h_upd(membership, %{status: "suspended"}, scope(host, :owner))
+      user = reread(User, membership.user_id)
+
+      assert {:error, _} = upd(user, %{handle: "renamed-by-peer"}, scope(host, :admin))
+      assert {:ok, _} = upd(user, %{handle: "renamed-by-owner"}, scope(host, :owner))
+    end
+  end
 end

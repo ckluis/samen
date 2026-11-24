@@ -465,6 +465,30 @@ defmodule PawChart.ReadsHonestFailureP4Test do
       refute log =~ user.id
     end
 
+    require Ash.Query
+
+    test "RED: a SUSPENDED membership gives no org through the seam; CONTROL: active, and active again after reactivation" do
+      org_id = Ecto.UUID.generate()
+      user = seed_member!(org_id)
+      assert PawChart.Auth.authorized_org_ids(user.id) == [org_id]
+
+      uid = user.id
+
+      set_status = fn status ->
+        PawChart.Operator.Membership
+        |> Ash.Query.filter(user_id == ^uid)
+        |> Ash.read_one!(authorize?: false)
+        |> Ash.Changeset.for_update(:update, %{status: status}, authorize?: false)
+        |> Ash.update!()
+      end
+
+      set_status.("suspended")
+      assert PawChart.Auth.authorized_org_ids(user.id) == []
+
+      set_status.("active")
+      assert PawChart.Auth.authorized_org_ids(user.id) == [org_id]
+    end
+
     test "the seam itself raises on a failed read instead of answering 'no orgs'" do
       user = seed_member!(Ecto.UUID.generate())
       break_select!("pom_membership", "pom_org_id")

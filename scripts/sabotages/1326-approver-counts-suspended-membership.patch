@@ -1,0 +1,19 @@
+# SABOTAGE: the approver resolver counts a suspended membership
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/ai/agent_surface_test.exs
+# MUST_FAIL: a SUSPENDED member is not an approver
+diff --git a/samen_core/lib/samen/auth/org_actor.ex b/samen_core/lib/samen/auth/org_actor.ex
+index a964ef13..94fca1c9 100644
+--- a/samen_core/lib/samen/auth/org_actor.ex
++++ b/samen_core/lib/samen/auth/org_actor.ex
+@@ -162,7 +162,7 @@ defmodule Samen.Auth.OrgActor do
+   @spec active_membership(module(), String.t(), String.t()) :: {:ok, map()} | :none | {:error, term()}
+   def active_membership(membership_mod, user_id, org_id) do
+     membership_mod
+-    |> Ash.Query.filter(user_id == ^user_id and org_id == ^org_id and status == "active")
++    |> Ash.Query.filter(user_id == ^user_id and org_id == ^org_id)
+     |> Ash.Query.ensure_selected([:id, :role, :status])
+     # a user holds one membership per org, a handful at the very most
+     |> Ash.Query.limit(25)

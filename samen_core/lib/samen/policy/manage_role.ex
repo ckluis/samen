@@ -45,11 +45,12 @@ defmodule Samen.Policy.ManageRole do
   def match?(actor, %{changeset: %Ash.Changeset{} = changeset}, _opts) do
     actor_role = actor_role(actor)
 
-    with {:ok, stored} <- stored_role(changeset),
-         true <- stored == :none or Samen.Scope.Role.may_manage?(actor_role, stored) do
-      {:ok, new_role_ok?(changeset, actor_role)}
-    else
-      _ -> {:ok, false}
+    case stored_role(changeset) do
+      {:ok, :none} -> {:ok, new_role_ok?(changeset, actor_role)}
+      {:ok, stored} -> {:ok, Samen.Scope.Role.may_manage?(actor_role, stored) and new_role_ok?(changeset, actor_role)}
+      # the row's role could not be established: the check itself errors, so the write is refused (fail closed,
+      # never a guess and never an `{:ok, false}` that reads as an ordinary denial)
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -67,7 +68,7 @@ defmodule Samen.Policy.ManageRole do
 
   defp new_role_ok?(_changeset, _actor_role), do: true
 
-  # `:none` — a create (no stored row). `{:ok, role}` — the role the row holds now. Anything else denies.
+  # `{:ok, :none}` — a create (no stored row). `{:ok, role}` — the role the row holds now. `{:error, _}` denies.
   defp stored_role(%Ash.Changeset{action_type: :create}), do: {:ok, :none}
 
   defp stored_role(%Ash.Changeset{resource: resource, data: data}) do
@@ -83,13 +84,19 @@ defmodule Samen.Policy.ManageRole do
 
       case repo.query("SELECT #{role_src} FROM #{table} WHERE #{where} LIMIT 1", Enum.map(params, &elem(&1, 1))) do
         {:ok, %{rows: [[role]]}} when is_binary(role) ->
-          if Samen.Scope.Role.valid?(role), do: {:ok, String.to_existing_atom(role)}, else: :error
+          if Samen.Scope.Role.valid?(role), do: {:ok, String.to_existing_atom(role)}, else: {:error, :unknown_role}
 
-        _ ->
-          :error
+        {:ok, %{rows: []}} ->
+          {:error, :unreadable}
+
+        {:ok, _other} ->
+          {:error, :unreadable}
+
+        {:error, reason} ->
+          {:error, {:unreadable, reason}}
       end
     else
-      _ -> :error
+      _ -> {:error, :unreadable}
     end
   end
 

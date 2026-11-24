@@ -5,12 +5,12 @@
 # TEST_FILES: test/samen/web/identity_authz_test.exs
 # MUST_FAIL: the stored role is read from the database, not the record in hand
 diff --git a/samen_core/lib/samen/policy/manage_role.ex b/samen_core/lib/samen/policy/manage_role.ex
-index a7a67590..19ee8e1a 100644
+index 3be1a6f..7f1a698 100644
 --- a/samen_core/lib/samen/policy/manage_role.ex
 +++ b/samen_core/lib/samen/policy/manage_role.ex
-@@ -69,6 +69,7 @@ defmodule Samen.Policy.ManageRole do
+@@ -70,6 +70,7 @@ defmodule Samen.Policy.ManageRole do
  
-   # `:none` — a create (no stored row). `{:ok, role}` — the role the row holds now. Anything else denies.
+   # `{:ok, :none}` — a create (no stored row). `{:ok, role}` — the role the row holds now. `{:error, _}` denies.
    defp stored_role(%Ash.Changeset{action_type: :create}), do: {:ok, :none}
 +  defp stored_role(%Ash.Changeset{data: %{role: role}}) when is_atom(role), do: {:ok, role}
  

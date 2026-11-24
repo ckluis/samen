@@ -99,8 +99,6 @@ defmodule Samen.AI.Agent.Approver do
   named `nil`-role tests in `samen_core/test/ai/agent_write_test.exs`.
   """
 
-  require Ash.Query
-
   @type resolution :: {:ok, Samen.Scope.t()} | {:error, :not_authorized | :approver_unresolvable}
 
   @doc """
@@ -176,15 +174,12 @@ defmodule Samen.AI.Agent.Approver do
       true
   end
 
+  # Only an ACTIVE membership approves: a suspended or invited one is "no membership" (the shared rule,
+  # `Samen.Auth.OrgActor.active_membership/3`, that resolves a session's role and a key's role).
   defp read_membership(resource, approver_id, org_id) do
-    resource
-    |> Ash.Query.filter(user_id == ^approver_id and org_id == ^org_id)
-    |> Ash.Query.ensure_selected([:id, :role])
-    |> Ash.Query.limit(1)
-    |> Ash.read(authorize?: false)
-    |> case do
-      {:ok, [membership]} -> scope_for(approver_id, org_id, membership)
-      {:ok, []} -> {:error, :not_authorized}
+    case Samen.Auth.OrgActor.active_membership(resource, approver_id, org_id) do
+      {:ok, membership} -> scope_for(approver_id, org_id, membership)
+      :none -> {:error, :not_authorized}
       {:error, _} -> {:error, :approver_unresolvable}
     end
   rescue
