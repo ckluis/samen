@@ -149,44 +149,67 @@ defmodule Samen.Auth.OrgActor do
     |> Ash.read(authorize?: false)
   end
 
-  # The ONE place a membership becomes an actor's role or an org's access (a suspended or invited membership
-  # confers neither; `Samen.Scope.ApiKey.effective_role/2` applies the same rule to a key). Every call site that
-  # turns a membership into authority goes through `active_membership/3` or `active_org_ids/2`, so a new site
-  # cannot forget the status. If a user somehow holds several active rows in the org, the LOWEST role wins, so the
-  # answer never depends on row order.
+  # The rule that turns a membership into authority, stated ONCE: only an ACTIVE row counts (a suspended or invited
+  # membership confers neither role nor org), and if a user holds several active rows in an org the LOWEST role wins
+  # (id breaks a tie), so the answer never depends on row order. `Samen.Auth.OrgActor` (`active_membership/3`,
+  # `authorized_org_ids/2`, `resolve/3`) and `Samen.Scope.ApiKey.membership_for_user/3` (an API key's minter) are built
+  # on `active_memberships/3` + `lowest/1` below. Other call sites still carry their own copy of the same rule:
+  # `Samen.Web.Settings.Reads.current_membership_result/4` (it reads under the caller's scope, not `authorize?: false`),
+  # `PawChart.Auth.authorized_org_ids/1` and `Samen.Scope.KeyBoundToMinter`. A change to the rule must be made in each.
   @doc """
   The user's ACTIVE membership in `org_id` (the lowest-ranked one if several): `{:ok, membership}`, `:none` when
   there is no active row (a suspended or invited membership is "no membership"), or `{:error, reason}` when the
-  read failed. `membership_mod` is the host's Membership resource.
+  read failed. `membership_mod` is the host's Membership resource. A database that already holds several active rows
+  for one user in one org keeps resolving the lowest-ranked (the safe direction: a duplicate never raises authority);
+  `Samen.Identity.OneMembership` stops new ones being created.
   """
   @spec active_membership(module(), String.t(), String.t()) :: {:ok, map()} | :none | {:error, term()}
   def active_membership(membership_mod, user_id, org_id) do
-    membership_mod
-    |> Ash.Query.filter(user_id == ^user_id and org_id == ^org_id and status == "active")
-    |> Ash.Query.ensure_selected([:id, :role, :status])
-    # a user holds one membership per org, a handful at the very most
-    |> Ash.Query.limit(25)
-    |> Ash.read(authorize?: false)
-    |> case do
+    case active_memberships(membership_mod, [user_id], [org_id]) do
       {:ok, []} -> :none
-      {:ok, rows} -> {:ok, Enum.min_by(rows, &{Samen.Scope.Role.rank(&1.role), to_string(&1.id)})}
+      {:ok, rows} -> {:ok, lowest(rows)}
       {:error, reason} -> {:error, reason}
     end
   end
 
-  # The orgs among `users` in which the user holds an active membership: one `active_membership/3` per user row
-  # (a credential holds one user per org, a handful at the very most), so the shared rule is the only one.
+  @doc """
+  Every ACTIVE membership of any of `user_ids` in any of `org_ids`, in ONE read: `{:ok, rows}` (each with `:id`,
+  `:user_id`, `:org_id`, `:role`, `:status`) or `{:error, reason}`. The caller pairs rows with the (user, org) it asked
+  about: the two lists are independent, so a row may pair a user with an org it was not asked about.
+  """
+  @spec active_memberships(module(), [String.t()], [String.t()]) :: {:ok, [map()]} | {:error, term()}
+  def active_memberships(_membership_mod, [], _org_ids), do: {:ok, []}
+  def active_memberships(_membership_mod, _user_ids, []), do: {:ok, []}
+
+  def active_memberships(membership_mod, user_ids, org_ids) do
+    membership_mod
+    |> Ash.Query.filter(user_id in ^user_ids and org_id in ^org_ids and status == "active")
+    |> Ash.Query.ensure_selected([:id, :user_id, :org_id, :role, :status])
+    # a user holds one membership per org, a handful at the very most
+    |> Ash.Query.limit(25 * length(user_ids))
+    |> Ash.read(authorize?: false)
+  end
+
+  @doc false
+  @spec lowest([map()]) :: map()
+  def lowest(rows), do: Enum.min_by(rows, &{Samen.Scope.Role.rank(&1.role), to_string(&1.id)})
+
+  # The orgs among `users` in which the user holds an active membership: ONE `active_memberships/3` read for all the
+  # user rows (a credential holds one user per org), then each user is paired with its own org.
+  defp active_org_ids(_mods, []), do: {:ok, []}
+
   defp active_org_ids(mods, users) do
-    Enum.reduce_while(users, {:ok, []}, fn user, {:ok, acc} ->
-      case active_membership(mods.membership, user.id, user.org_id) do
-        {:ok, _membership} -> {:cont, {:ok, [user.org_id | acc]}}
-        :none -> {:cont, {:ok, acc}}
-        {:error, reason} -> {:halt, {:error, reason}}
-      end
-    end)
-    |> case do
-      {:ok, ids} -> {:ok, ids |> Enum.reverse() |> Enum.uniq()}
-      error -> error
+    case active_memberships(mods.membership, Enum.map(users, & &1.id), Enum.map(users, & &1.org_id)) do
+      {:ok, rows} ->
+        active = MapSet.new(rows, &{&1.user_id, &1.org_id})
+
+        ids =
+          for user <- users, MapSet.member?(active, {user.id, user.org_id}), do: user.org_id
+
+        {:ok, Enum.uniq(ids)}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 end

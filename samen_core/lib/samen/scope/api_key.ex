@@ -282,17 +282,12 @@ defmodule Samen.Scope.ApiKey do
   def membership_for_user(membership_resource, org_id, user_id) do
     with {:ok, uid} <- Ecto.UUID.cast(to_string(user_id)),
          {:ok, oid} <- Ecto.UUID.cast(to_string(org_id)) do
-      membership_resource
-      |> Ash.Query.filter(user_id == ^uid and org_id == ^oid and status == "active")
-      |> Ash.Query.select([:id, :org_id, :user_id, :role, :status])
-      # authz-scope: API-key AUTH-STEP membership lookup (no actor exists yet), keyed on the key's own user + org
-      |> Ash.read(authorize?: false)
-      |> case do
-        # Nothing in the schema forbids two active memberships of one user in one org (no unique index on
-        # (org_id, user_id)): take the LOWEST-ranked one (id breaks a tie), so the key's cap never depends on row
-        # order and a second, higher-ranked row can never raise it.
-        {:ok, [_ | _] = memberships} -> {:ok, Enum.min_by(memberships, &{Role.rank(&1.role), to_string(&1.id)})}
-        {:ok, []} -> :error
+      # The shared rule (`Samen.Auth.OrgActor.active_membership/3`): only an ACTIVE row counts, and with several the
+      # LOWEST-ranked one wins (id breaks a tie), so the key's cap never depends on row order and a second,
+      # higher-ranked row can never raise it.
+      case Samen.Auth.OrgActor.active_membership(membership_resource, uid, oid) do
+        {:ok, membership} -> {:ok, membership}
+        :none -> :error
         {:error, error} -> {:error, error}
       end
     else

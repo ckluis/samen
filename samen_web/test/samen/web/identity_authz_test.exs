@@ -1381,6 +1381,69 @@ defmodule Samen.Web.IdentityAuthzTest do
     end
   end
 
+  describe "Q. authorized_org_ids reads memberships once, not once per org" do
+    alias Samen.Auth.OrgActor
+
+    defp q_queries(fun) do
+      parent = self()
+      id = {:q_count, System.unique_integer([:positive])}
+
+      :telemetry.attach(
+        id,
+        [:samen, :web_test, :repo, :query],
+        fn _event, _measure, meta, _ -> send(parent, {id, meta.source}) end,
+        nil
+      )
+
+      result = fun.()
+      :telemetry.detach(id)
+      {result, drain(id, [])}
+    end
+
+    defp drain(id, acc) do
+      receive do
+        {^id, source} -> drain(id, [source | acc])
+      after
+        0 -> acc
+      end
+    end
+
+    test "RED: a credential in several orgs (one suspended) resolves the same orgs with ONE membership read; CONTROL: the result, the error path and the single-org case" do
+      h1 = register!()
+      h2 = register!()
+      guest = register!()
+
+      joined =
+        for host <- [h1, h2] do
+          {:ok, _inv, raw} = Invite.create(invite_mods(), scope(host, :owner), %{email: guest.email, role: :member})
+          {:ok, j} = Invite.accept(invite_mods(), raw)
+          j.membership
+        end
+
+      {:ok, _} = h_upd(List.last(joined), %{status: "suspended"}, scope(h2, :owner))
+      mods = %{user: User, membership: Membership}
+      membership_table = AshPostgres.DataLayer.Info.table(Membership)
+
+      {result, sources} = q_queries(fn -> OrgActor.authorized_org_ids_result(mods, guest.credential.id) end)
+
+      assert {:ok, ids} = result
+      assert Enum.sort(ids) == Enum.sort([guest.org.id, h1.org.id])
+      assert Enum.count(sources, &(&1 == membership_table)) == 1, "one membership read for all the credential's users, got #{inspect(sources)}"
+      assert length(sources) == 2
+
+      assert Enum.sort(OrgActor.authorized_org_ids(mods, guest.credential.id)) == Enum.sort(ids)
+
+      # CONTROL: a credential in one org, and one in none
+      assert {:ok, [only]} = OrgActor.authorized_org_ids_result(mods, h1.credential.id)
+      assert only == h1.org.id
+      assert {:ok, []} = OrgActor.authorized_org_ids_result(mods, Ash.UUID.generate())
+
+      # the single statement of the rule still answers a suspended row as "none", an active one as the member
+      assert :none = OrgActor.active_membership(Membership, guest.user.id, h2.org.id) |> then(fn _ -> OrgActor.active_membership(Membership, List.last(joined).user_id, h2.org.id) end)
+      assert {:ok, %{role: :member}} = OrgActor.active_membership(Membership, List.first(joined).user_id, h1.org.id)
+    end
+  end
+
   describe "O. A forged struct (own org_id, another org's primary key) cannot write another org's membership" do
     test "RED: update (role, status) and destroy are refused and the foreign row is unchanged; CONTROL: the admin's own org's row is writable" do
       a = register!()
