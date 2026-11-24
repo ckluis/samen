@@ -5,11 +5,11 @@
 # TEST_FILES: test/org_id_pinned_test.exs
 # MUST_FAIL: RED: an in-org actor cannot move the row into another org through :update
 diff --git a/samen_core/lib/samen/policy/org_id_pinned.ex b/samen_core/lib/samen/policy/org_id_pinned.ex
-index 67d8c4fe..6783a0ec 100644
+index 3dfa963..90063ec 100644
 --- a/samen_core/lib/samen/policy/org_id_pinned.ex
 +++ b/samen_core/lib/samen/policy/org_id_pinned.ex
-@@ -54,7 +54,7 @@ defmodule Samen.Policy.OrgIdPinned do
-   defp applies?(context), do: context.authorize? != false
+@@ -113,7 +113,7 @@ defmodule Samen.Policy.OrgIdPinned do
+   end
  
    defp check(%{action_type: :update} = changeset, _context) do
 -    if changing_org_id?(changeset) do
