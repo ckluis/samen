@@ -1,0 +1,20 @@
+# SABOTAGE: A second membership row for an owner or peer admin is allowed, so the lowest-wins resolver 
+#   demotes them
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: an admin cannot add a second :viewer row for the owner or a peer admin
+diff --git a/samen_core/lib/samen/identity/one_membership.ex b/samen_core/lib/samen/identity/one_membership.ex
+index b3df0963..ee039e46 100644
+--- a/samen_core/lib/samen/identity/one_membership.ex
++++ b/samen_core/lib/samen/identity/one_membership.ex
+@@ -28,7 +28,7 @@ defmodule Samen.Identity.OneMembership do
+ 
+       case exists?(changeset.resource, org_id, user_id) do
+         {:ok, false} -> changeset
+-        {:ok, true} -> Ash.Changeset.add_error(changeset, field: :user_id, message: "already has a membership in this org")
++        {:ok, true} -> changeset
+         {:error, _} -> Ash.Changeset.add_error(changeset, field: :user_id, message: "could not be checked")
+       end
+     end)

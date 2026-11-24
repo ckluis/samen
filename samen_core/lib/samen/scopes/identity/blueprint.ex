@@ -492,6 +492,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
         # F3.5 same-org FK: a membership may only reference a same-org user.
         changes do
           change({Samen.Policy.SameOrgFk, relationships: [:user]})
+          change(Samen.Identity.OneMembership, on: [:create])
         end
 
         actions do

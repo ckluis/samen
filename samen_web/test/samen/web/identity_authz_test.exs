@@ -70,6 +70,22 @@ defmodule Samen.Web.IdentityAuthzTest do
     mod |> Ash.Query.filter(id == ^id) |> Ash.read!(authorize?: false) |> List.first()
   end
 
+  # A pre-existing duplicate membership for (org, user), as an older database may hold one. It is written by moving
+  # a freshly created row's `user_id` with raw SQL, because `Membership :create` now refuses a second row.
+  defp dup_membership!(org_id, user_id, role) do
+    donor =
+      User
+      |> Ash.Changeset.for_create(:create, %{org_id: org_id, handle: "dup-#{System.unique_integer([:positive])}"}, authorize?: false)
+      |> Ash.create!()
+
+    row = Membership |> Ash.Changeset.for_create(:create, %{org_id: org_id, user_id: donor.id, role: role}, authorize?: false) |> Ash.create!()
+    table = AshPostgres.DataLayer.Info.table(Membership)
+    col = fn name -> Ash.Resource.Info.attribute(Membership, name).source |> to_string() end
+
+    Repo.query!("UPDATE #{table} SET #{col.(:user_id)} = $1 WHERE #{col.(:id)} = $2", [Ecto.UUID.dump!(user_id), Ecto.UUID.dump!(row.id)])
+    reread(Membership, row.id)
+  end
+
   # ===========================================================================
   # A. Invitation default :update
   # ===========================================================================
@@ -799,9 +815,9 @@ defmodule Samen.Web.IdentityAuthzTest do
         r = register!()
         user = User |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, handle: "dup-#{System.unique_integer([:positive])}"}, authorize?: false) |> Ash.create!()
 
-        for role <- order do
-          Membership |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, user_id: user.id, role: role}, authorize?: false) |> Ash.create!()
-        end
+        [first, second] = order
+        Membership |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, user_id: user.id, role: first}, authorize?: false) |> Ash.create!()
+        dup_membership!(r.org.id, user.id, second)
 
         for _ <- 1..3 do
           assert {:ok, %{role: :viewer}} = Samen.Scope.ApiKey.membership_for_user(Membership, r.org.id, user.id)
@@ -1074,7 +1090,7 @@ defmodule Samen.Web.IdentityAuthzTest do
       assert x in CurrentOrg.authorized_orgs(mount, session)
     end
 
-    test "RED: a suspended ADMIN keeps no authority (the role it held is not resolved); the resolver answers the lowest ACTIVE row" do
+    test "RED: a suspended ADMIN keeps no authority (the role it held is not resolved); a PRE-EXISTING duplicate resolves the lowest ACTIVE row" do
       host = register!()
       {guest, membership} = i_join!(host, :admin)
       mount = i_mount()
@@ -1083,10 +1099,9 @@ defmodule Samen.Web.IdentityAuthzTest do
       {:ok, _} = h_upd(membership, %{status: "suspended"}, scope(host, :owner))
       assert CurrentOrg.resolve_actor(mount, guest.credential.id, host.org.id) == nil
 
-      # a second, ACTIVE, lower row for the same user: that one answers, never the suspended admin row
-      Membership
-      |> Ash.Changeset.for_create(:create, %{org_id: host.org.id, user_id: membership.user_id, role: :viewer}, authorize?: false)
-      |> Ash.create!()
+      # a pre-existing second, ACTIVE, lower row for the same user (the create path now refuses to add one): that one
+      # answers, never the suspended admin row
+      dup_membership!(host.org.id, membership.user_id, :viewer)
 
       assert %{role: :viewer} = CurrentOrg.resolve_actor(mount, guest.credential.id, host.org.id)
     end
@@ -1236,6 +1251,85 @@ defmodule Samen.Web.IdentityAuthzTest do
                key |> Ash.Changeset.for_update(:mark_used, %{last_used_at: stamped}) |> Ash.update(authorize?: false)
 
       assert reread(ApiKey, key.id).last_used_at == stamped
+    end
+  end
+
+  describe "N. A user holds ONE membership per org (a second, lower row would demote the owner)" do
+    test "RED: an admin cannot add a second :viewer row for the owner or a peer admin; CONTROL: the owner still resolves as owner, and a fresh user can be added" do
+      r = register!()
+      peer = h_member(r, :admin)
+      admin = scope(r, :admin)
+      mods = %{user: User, membership: Membership}
+
+      for {user_id, role} <- [{r.user.id, :owner}, {peer.user_id, :admin}] do
+        assert {:error, _} =
+                 Membership
+                 |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, user_id: user_id, role: :viewer}, scope: admin)
+                 |> Ash.create(scope: admin)
+
+        rows = Membership |> Ash.Query.filter(user_id == ^user_id and org_id == ^r.org.id) |> Ash.read!(authorize?: false)
+        assert [%{role: ^role}] = rows
+        assert {:ok, %{role: ^role}} = Samen.Auth.OrgActor.active_membership(Membership, user_id, r.org.id)
+      end
+
+      assert %{role: :owner} = elem(Samen.Auth.OrgActor.resolve(%{user: User, membership: Membership}, r.credential.id, r.org.id), 1)
+      _ = mods
+
+      # CONTROL: a membership for a user that has none is still created
+      fresh = User |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, handle: "n-#{System.unique_integer([:positive])}"}, authorize?: false) |> Ash.create!()
+
+      assert {:ok, %{role: :viewer}} =
+               Membership
+               |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, user_id: fresh.id, role: :viewer}, scope: admin)
+               |> Ash.create(scope: admin)
+    end
+
+    test "RED: the refusal also holds for authorize?: false creates, whatever the existing row's status" do
+      r = register!()
+      member = h_member(r, :member)
+      {:ok, _} = h_upd(member, %{status: "suspended"}, scope(r, :owner))
+
+      assert {:error, _} =
+               Membership
+               |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, user_id: member.user_id, role: :viewer}, authorize?: false)
+               |> Ash.create()
+
+      assert Membership |> Ash.Query.filter(user_id == ^member.user_id) |> Ash.read!(authorize?: false) |> length() == 1
+    end
+
+    test "RED: a probe that cannot run is an ERROR, never `{:ok, false}` (fail closed); CONTROL: a readable probe answers true and false" do
+      r = register!()
+      probe = &Samen.Identity.OneMembership.exists?/3
+
+      assert {:ok, true} = probe.(Membership, r.org.id, r.user.id)
+      assert {:ok, false} = probe.(Membership, r.org.id, Ash.UUID.generate())
+
+      # a value that cannot be dumped and a missing id: none of them reads as "free"
+      assert {:error, _} = probe.(Membership, r.org.id, "not-a-uuid")
+      assert {:error, _} = probe.(Membership, nil, r.user.id)
+      assert {:error, _} = probe.(Membership, r.org.id, nil)
+    end
+  end
+
+  describe "O. A forged struct (own org_id, another org's primary key) cannot write another org's membership" do
+    test "RED: update (role, status) and destroy are refused and the foreign row is unchanged; CONTROL: the admin's own org's row is writable" do
+      a = register!()
+      b = register!()
+      foreign = h_member(b, :member)
+      admin_a = scope(a, :admin)
+
+      forged = %{foreign | org_id: a.org.id}
+
+      assert {:error, _} = h_upd(forged, %{role: :viewer}, admin_a)
+      assert {:error, _} = h_upd(forged, %{status: "suspended"}, admin_a)
+      assert {:error, _} = Ash.destroy(forged, scope: admin_a)
+
+      assert reread(Membership, foreign.id) |> Map.take([:role, :status]) == %{role: :member, status: "active"}
+      in_b = Membership |> Ash.Query.filter(id == ^foreign.id and org_id == ^b.org.id) |> Ash.read!(authorize?: false)
+      assert [_] = in_b
+
+      own = h_member(a, :member)
+      assert {:ok, %{role: :viewer}} = h_upd(own, %{role: :viewer}, admin_a)
     end
   end
 end
