@@ -14,6 +14,7 @@ defmodule Samen.Gen.PostTest do
   use ExUnit.Case, async: true
 
   alias Samen.CatalogMeaning
+  alias Samen.Gen.App
   alias Samen.Gen.Post
 
   @description "A configurable widget a team offers, with a status and one vault-routed value."
@@ -737,8 +738,7 @@ defmodule Samen.Gen.PostTest do
             {"TODO describe the widget soon", "placeholder"},
             {"The vault holds vt_abc for it", "vault-token sentinel"},
             {"The widget of widgets", "restates the name"},
-            {String.duplicate("long words here ", 30), "longer than 300"},
-            {"A widget named <%= abbrev %> here", "template syntax"}
+            {String.duplicate("long words here ", 30), "longer than 300"}
           ] do
         assert_raise ArgumentError, ~r/--description .*#{Regex.escape(rule)}/, fn -> Post.validate_resource!(spec.(bad), %{}) end
       end
@@ -763,6 +763,49 @@ defmodule Samen.Gen.PostTest do
       Post.write_resource!(r)
 
       assert described(File.read!(Path.join(dir, "lib/widgetco/crm/widget.ex"))).resource == d
+    end
+  end
+
+  describe "the description literal" do
+    test "RED: a valid description above 4096 codepoints (inspect's default printable_limit) is emitted whole" do
+      dir = fake_app!()
+      Post.write_scope!(Post.build_scope_spec(app_dir: dir, scope: "Crm"))
+
+      # 283 graphemes (the rules count graphemes) but 4183 codepoints: each filler word is one letter plus 30 combining marks.
+      filler = String.duplicate(" a" <> String.duplicate("\u0301", 30), 130)
+      d = "A team keeps this label" <> filler
+      assert String.length(d) <= 300 and length(String.to_charlist(d)) > 4096
+      assert Post.description_problems(d, "Widget", "wdg_widget") == []
+
+      r = Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg", description: d)
+      Post.validate_resource!(r, %{})
+      Post.write_resource!(r)
+
+      src = File.read!(Path.join(dir, "lib/widgetco/crm/widget.ex"))
+      assert described(src).resource == d, "the emitted literal is the description, not a truncated `\"...\" <> ...` expression"
+    end
+  end
+
+  describe "the renderer is single-pass" do
+    test "RED: a description holding `<%= table %>` (a key bound AFTER description_literal) is emitted literally and round-trips" do
+      dir = fake_app!()
+      Post.write_scope!(Post.build_scope_spec(app_dir: dir, scope: "Crm"))
+      d = "A widget the team keeps; writes <%= table %> and <%= abbrev %> and <%= module %> as text only"
+
+      r = Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg", description: d)
+      assert Post.description_problems(d, "Widget", "wdg_widget") == [], "template syntax is not refused: the renderer never re-scans a value"
+      Post.validate_resource!(r, %{})
+      Post.write_resource!(r)
+
+      src = File.read!(Path.join(dir, "lib/widgetco/crm/widget.ex"))
+      assert described(src).resource == d
+      assert src =~ "<%= table %>"
+    end
+
+    test "App.render/2 never expands a substituted value, leaves an unbound key as written, and the first duplicate binding wins" do
+      assert App.render("<%= a %>|<%= b %>", a: "<%= b %>", b: "B") == "<%= b %>|B"
+      assert App.render("<%= zz %> <%= a %>", %{"a" => 1}) == "<%= zz %> 1"
+      assert App.render("<%= a %>", [{:a, "first"}, {:a, "second"}]) == "first"
     end
   end
 

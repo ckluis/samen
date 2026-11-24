@@ -255,10 +255,7 @@ defmodule Samen.Gen.Post do
   def description_problems(nil, _resource, _table), do: ["is missing"]
 
   def description_problems(description, resource, table) when is_binary(description) do
-    template_problem = if String.contains?(description, "<%"), do: ["contains `<%` (template syntax)"], else: []
-
-    Samen.CatalogMeaning.description_problems(description, [resource, Macro.underscore(resource), table]) ++
-      template_problem
+    Samen.CatalogMeaning.description_problems(description, [resource, Macro.underscore(resource), table])
   end
 
   @doc """
@@ -471,10 +468,11 @@ defmodule Samen.Gen.Post do
       # MaterializePii's OWN scalar-vs-composite routing (D4) — see
       # FieldTypeMenu's moduledoc "T15 attempt-1 defect" note.
       "field_vault_column" => FieldTypeMenu.vault_column(s.field_type, s.abbrev),
-      # ADR-043 §8a (A3): the resource description as an Elixir string literal (escaped by `inspect/1`). The
-      # renderer substitutes key by key, so `description_problems/3` refuses a description holding `<%` (it would be
-      # expanded by a later key).
-      "description_literal" => inspect(s.description),
+      # ADR-043 §8a (A3): the resource description as an Elixir string literal (escaped by `inspect/1`).
+      # `printable_limit: :infinity`: the default (4096 codepoints) cuts a long description to `"…" <> ...`, which does not
+      # compile, and the rules count graphemes (300), not codepoints. `App.render/2` is single-pass, so a description
+      # holding `<%= key %>` is emitted as written.
+      "description_literal" => inspect(s.description, printable_limit: :infinity),
       # ADR-040 §5.8 (T37h) `--archivable`: pre-resolved (not re-templated) insertion
       # strings so the tiny `<%= key %>` engine (single-pass, no conditionals) can emit
       # the E6 substrate ONLY when requested — "" leaves pre-T37h output byte-identical.

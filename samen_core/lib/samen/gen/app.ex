@@ -1014,8 +1014,16 @@ defmodule Samen.Gen.App do
 
   @doc false
   def render(template, bindings) do
-    Enum.reduce(bindings, template, fn {k, v}, acc ->
-      String.replace(acc, "<%= #{k} %>", to_string(v))
+    # ONE pass over the template: a substituted value is never scanned again, so a value that itself holds `<%= key %>`
+    # (a free-text `--description`) is emitted literally instead of being expanded by whichever binding comes later. A
+    # key with no binding is left as written; for a duplicated key the first binding wins (as the sequential form did).
+    lookup = Enum.reduce(bindings, %{}, fn {k, v}, acc -> Map.put_new(acc, to_string(k), v) end)
+
+    Regex.replace(~r/<%= (\w+) %>/, template, fn whole, key ->
+      case lookup do
+        %{^key => value} -> to_string(value)
+        _ -> whole
+      end
     end)
   end
 
