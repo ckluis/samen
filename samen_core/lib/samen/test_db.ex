@@ -131,15 +131,20 @@ defmodule Samen.TestDb do
   # what `run/3` does). Returns :ok when the single re-issued DROP succeeded, raises otherwise.
   @spec resolve_in_use(keyword(), String.t(), term(), function(), non_neg_integer()) :: :ok
   def resolve_in_use(config, db, error, run, bound_ms) do
+    guard!(db)
     {rows, prepared} = blockers(config, db, run)
 
     case classify(rows, prepared) do
       {:wait, pids} ->
-        case await_gone(config, pids, bound_ms, run) do
+        started = System.monotonic_time(:millisecond)
+
+        case await_gone(Keyword.put(config, :database, db), pids, bound_ms, run) do
           :gone ->
+            waited = System.monotonic_time(:millisecond) - started
+
             case run.(config, drop_sql(db), :infinity) do
               {:ok, _} ->
-                :ok
+                note("DROP of #{inspect(db)} hit 55006; waited #{waited} ms for autovacuum pids #{inspect(pids, charlists: :as_lists)} to leave, then re-issued the DROP: ok")
 
               {:error, %Postgrex.Error{postgres: %{pg_code: @in_use}} = second} ->
                 {rows, prepared} = blockers(config, db, run)
@@ -151,7 +156,18 @@ defmodule Samen.TestDb do
 
           {:still_there, left} ->
             {rows, prepared} = blockers(config, db, run)
-            raise in_use_message(db, error, "autovacuum workers #{inspect(left)} did not leave within #{bound_ms} ms", rows, prepared)
+            raise in_use_message(db, error, "autovacuum workers #{inspect(left, charlists: :as_lists)} did not leave within #{bound_ms} ms", rows, prepared)
+
+          {:poll_failed, left, reason} ->
+            {rows, prepared} = blockers(config, db, run)
+
+            raise in_use_message(
+                    db,
+                    error,
+                    "autovacuum workers #{inspect(left, charlists: :as_lists)} could not be polled within #{bound_ms} ms (the last poll failed: #{format(reason)}); whether they left was not observed",
+                    rows,
+                    prepared
+                  )
         end
 
       :retry_now ->
@@ -160,7 +176,7 @@ defmodule Samen.TestDb do
         # succeeds nobody was attached; if it fails, raise with the FRESH listing and say the first one was empty.
         case run.(config, drop_sql(db), :infinity) do
           {:ok, _} ->
-            :ok
+            note("DROP of #{inspect(db)} hit 55006 but the first listing was empty (the blocker had left before it ran); re-issued the DROP once at once: ok")
 
           {:error, %Postgrex.Error{postgres: %{pg_code: @in_use}} = second} ->
             {rows, prepared} = blockers(config, db, run)
@@ -182,11 +198,16 @@ defmodule Samen.TestDb do
     end
   end
 
+  # A recovery is never silent: one stderr line, so a recurrence of the flake stays visible in the CI log.
+  defp note(line) do
+    IO.puts(:stderr, "Samen.TestDb: " <> line)
+  end
+
   @doc false
   # Pure. `rows` are the maps `blockers/2` lists; `prepared` is the number of prepared transactions in the database
   # (they block the DROP and never appear in pg_stat_activity). Classified on `backend_type` ONLY: a client backend
   # with an empty application name, user or address is still a client.
-  @spec classify([map()], non_neg_integer() | :unknown) :: {:wait, [integer()]} | :retry_now | :raise
+  @spec classify([map()] | {:error, term()}, non_neg_integer() | :unknown | {:unknown, String.t()}) :: {:wait, [integer()]} | :retry_now | :raise
   # An empty listing with a KNOWN prepared count of 0 means the blocker left before the listing ran: `:retry_now`
   # (one immediate DROP, no wait). Empty with prepared > 0 or unknown raises. ANY non-autovacuum backend raises.
   def classify([], 0), do: :retry_now
@@ -198,30 +219,43 @@ defmodule Samen.TestDb do
   def classify(_rows, _prepared), do: :raise
 
   @doc false
-  # Waits (bounded) until none of `pids` is in pg_stat_activity. Terminates nothing: Postgres has already asked them to exit.
-  @spec await_gone(keyword(), [integer()], non_neg_integer(), function()) :: :gone | {:still_there, [integer()]}
-  def await_gone(config, pids, bound_ms, run \\ &run/3) do
+  # Waits (bounded) until none of `pids` is in pg_stat_activity. Terminates nothing. What is known: Postgres signalled the
+  # autovacuum workers that existed during the DROP's own wait. A worker launched after its last signalling pass was never
+  # asked to exit and may run a whole vacuum, which is why the wait is bounded (30 s) and raises when it expires.
+  @spec await_gone(keyword(), [integer()], non_neg_integer(), function()) ::
+          :gone | {:still_there, [integer()]} | {:poll_failed, [integer()], term()}
+  def await_gone(config, pids, bound_ms, run) do
     deadline = System.monotonic_time(:millisecond) + bound_ms
-    do_await(config, pids, deadline, run)
+    do_await(config, Keyword.fetch!(config, :database), pids, deadline, run)
   end
 
-  defp do_await(config, pids, deadline, run) do
+  # Each poll is scoped to autovacuum workers of THIS database, so a pid that was reused by some other backend is not
+  # waited on. `{:still_there, pids}` = the last poll succeeded and still saw them; `{:poll_failed, pids, reason}` = the
+  # last poll itself failed, so nothing was observed about them (the reason is carried, never reported as "still there").
+  defp do_await(config, db, pids, deadline, run) do
     list = Enum.map_join(pids, ",", &Integer.to_string(&1))
 
-    left =
-      case run.(config, "SELECT pid FROM pg_stat_activity WHERE pid IN (#{list})", 15_000) do
-        {:ok, %{rows: rows}} -> Enum.map(rows, fn [pid] -> String.to_integer(pid) end)
-        {:error, _} -> pids
+    sql =
+      "SELECT pid FROM pg_stat_activity WHERE pid IN (#{list}) AND backend_type = 'autovacuum worker' " <>
+        "AND datname = '#{String.replace(db, "'", "''")}'"
+
+    {left, failure} =
+      case run.(config, sql, 15_000) do
+        {:ok, %{rows: rows}} -> {Enum.map(rows, fn [pid] -> to_int(pid) end), nil}
+        {:error, reason} -> {pids, {:error, reason}}
       end
 
     cond do
       left == [] -> :gone
-      System.monotonic_time(:millisecond) >= deadline -> {:still_there, left}
+      System.monotonic_time(:millisecond) >= deadline -> if failure, do: {:poll_failed, left, elem(failure, 1)}, else: {:still_there, left}
       true ->
         Process.sleep(@poll_ms)
-        do_await(config, left, deadline, run)
+        do_await(config, db, left, deadline, run)
     end
   end
+
+  defp to_int(n) when is_integer(n), do: n
+  defp to_int(n) when is_binary(n), do: String.to_integer(n)
 
   @doc "True when `name` is a database these helpers will drop."
   @spec test_database?(String.t()) :: boolean()
@@ -277,8 +311,9 @@ defmodule Samen.TestDb do
 
     prepared =
       case run.(config, prepared_sql(db), 15_000) do
-        {:ok, %{rows: [[n]]}} -> String.to_integer(n)
-        _ -> :unknown
+        {:ok, %{rows: [[n]]}} -> to_int(n)
+        {:error, reason} -> {:unknown, format(reason)}
+        other -> {:unknown, "unexpected result #{inspect(other)}"}
       end
 
     case rows do
@@ -308,6 +343,7 @@ defmodule Samen.TestDb do
     prepared_line =
       case prepared do
         n when is_integer(n) and n > 0 -> "\n  #{n} prepared transaction(s) in this database (they block DROP DATABASE and are not in pg_stat_activity)"
+        {:unknown, reason} -> "\n  (prepared transactions could not be counted: #{reason})"
         :unknown -> "\n  (prepared transactions could not be counted)"
         _ -> ""
       end

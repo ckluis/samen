@@ -1,0 +1,19 @@
+# SABOTAGE: TestDb.await_gone reports a failed poll as workers still attached
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/test_db_test.exs
+# MUST_FAIL: every poll FAILED
+diff --git a/samen_core/lib/samen/test_db.ex b/samen_core/lib/samen/test_db.ex
+index 34380f9d..3613cbf6 100644
+--- a/samen_core/lib/samen/test_db.ex
++++ b/samen_core/lib/samen/test_db.ex
+@@ -247,7 +247,7 @@ defmodule Samen.TestDb do
+ 
+     cond do
+       left == [] -> :gone
+-      System.monotonic_time(:millisecond) >= deadline -> if failure, do: {:poll_failed, left, elem(failure, 1)}, else: {:still_there, left}
++      System.monotonic_time(:millisecond) >= deadline -> {:still_there, left}
+       true ->
+         Process.sleep(@poll_ms)
+         do_await(config, db, left, deadline, run)

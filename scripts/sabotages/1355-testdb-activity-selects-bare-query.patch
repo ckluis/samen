@@ -1,0 +1,19 @@
+# SABOTAGE: TestDb selects a bare query column, leaking every backend's query text
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/test_db_test.exs
+# MUST_FAIL: the statements read pg_stat_activity query text only for autovacuum workers
+diff --git a/samen_core/lib/samen/test_db.ex b/samen_core/lib/samen/test_db.ex
+index 34380f9d..196c2bc6 100644
+--- a/samen_core/lib/samen/test_db.ex
++++ b/samen_core/lib/samen/test_db.ex
+@@ -288,7 +288,7 @@ defmodule Samen.TestDb do
+     # simple protocol: the name is embedded as a (quote-doubled) literal. The query text is selected ONLY for autovacuum
+     # workers (Postgres-generated, names a table); every other backend's query text is never read.
+     """
+-    SELECT pid, usename, application_name, client_addr::text, state, backend_start::text,
++    SELECT pid, query, usename, application_name, client_addr::text, state, backend_start::text,
+            (now() - backend_start)::text AS age, backend_type, wait_event_type, wait_event,
+            CASE WHEN backend_type = 'autovacuum worker' THEN query END AS query
+       FROM pg_stat_activity
