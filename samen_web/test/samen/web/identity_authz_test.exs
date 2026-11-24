@@ -729,8 +729,8 @@ defmodule Samen.Web.IdentityAuthzTest do
   describe "E. Membership/User/Role :update cannot move a row to another org" do
     defp org_of(mod, id), do: mod |> Ash.Query.filter(id == ^id) |> Ash.Query.ensure_selected([:org_id]) |> Ash.read!(authorize?: false) |> hd() |> Map.fetch!(:org_id)
 
-    defp mk_org_member(role) do
-      r = register!()
+    defp mk_org_member(role, r \\ nil) do
+      r = r || register!()
       # a second user in the registrant's org holding `role`
       user =
         User
@@ -741,15 +741,30 @@ defmodule Samen.Web.IdentityAuthzTest do
       {r, user, mbr}
     end
 
+    # The input is not an input of the action at all (`NoSuchInput`), which is what the accept-list guarantees: a
+    # widened accept-list would turn this into the org_id pin's refusal (an `InvalidAttribute`) or into no error.
+    defp assert_not_accepted({:error, %Ash.Error.Invalid{errors: errors}}, input) do
+      assert Enum.any?(errors, &match?(%Ash.Error.Invalid.NoSuchInput{input: ^input}, &1)),
+             "expected #{inspect(input)} to be refused as an unknown input, got: #{inspect(Enum.map(errors, & &1.__struct__))}"
+    end
+
+    defp assert_not_accepted(other, input), do: flunk("expected #{inspect(input)} to be refused as an unknown input, got: #{inspect(other)}")
+
     test "RED: an admin cannot move a lower-ranked membership to another org or re-point its user; CONTROL: role and status changes still work" do
       {r, user, mbr} = mk_org_member(:member)
+      {_r, same_org_user, _same_org_mbr} = mk_org_member(:viewer, r)
       other = register!()
       s = scope(r, :admin)
       upd = fn attrs -> mbr |> Ash.Changeset.for_update(:update, attrs, scope: s) |> Ash.update(scope: s) end
 
-      assert {:error, _} = upd.(%{org_id: other.org.id})
-      assert {:error, _} = upd.(%{user_id: other.user.id})
+      # (the accept-list, not the org_id pin or SameOrgFk, is what refuses each of these)
+      assert_not_accepted(upd.(%{org_id: other.org.id}), :org_id)
+      assert_not_accepted(upd.(%{user_id: other.user.id}), :user_id)
       assert org_of(Membership, mbr.id) == r.org.id
+      assert reread(Membership, mbr.id).user_id == user.id
+
+      # ... including a re-point to another user of the SAME org, which no cross-org check could ever catch
+      assert_not_accepted(upd.(%{user_id: same_org_user.id}), :user_id)
       assert reread(Membership, mbr.id).user_id == user.id
 
       # CONTROL: role/status keep working, under the same ManageRole rule (an admin may set :member/:viewer, never :owner)
@@ -763,7 +778,7 @@ defmodule Samen.Web.IdentityAuthzTest do
       other = register!()
       s = scope(r, :admin)
 
-      assert {:error, _} = user |> Ash.Changeset.for_update(:update, %{org_id: other.org.id}, scope: s) |> Ash.update(scope: s)
+      assert_not_accepted(user |> Ash.Changeset.for_update(:update, %{org_id: other.org.id}, scope: s) |> Ash.update(scope: s), :org_id)
       assert org_of(User, user.id) == r.org.id
       assert {:ok, %{handle: "renamed-e"}} = user |> Ash.Changeset.for_update(:update, %{handle: "renamed-e"}, scope: s) |> Ash.update(scope: s)
 
@@ -772,7 +787,7 @@ defmodule Samen.Web.IdentityAuthzTest do
         |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, name: :member, rank: 1, label: "M"}, authorize?: false)
         |> Ash.create!()
 
-      assert {:error, _} = role |> Ash.Changeset.for_update(:update, %{org_id: other.org.id}, scope: s) |> Ash.update(scope: s)
+      assert_not_accepted(role |> Ash.Changeset.for_update(:update, %{org_id: other.org.id}, scope: s) |> Ash.update(scope: s), :org_id)
       assert org_of(Samen.WebTest.Operator.Role, role.id) == r.org.id
       assert {:ok, %{label: "Renamed"}} = role |> Ash.Changeset.for_update(:update, %{label: "Renamed"}, scope: s) |> Ash.update(scope: s)
     end
