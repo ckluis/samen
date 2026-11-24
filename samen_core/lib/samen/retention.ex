@@ -320,7 +320,6 @@ defmodule Samen.Retention do
   # never the payload.
   defp error_tag({tag, _detail}) when is_atom(tag), do: tag
   defp error_tag(tag) when is_atom(tag), do: tag
-  defp error_tag(_other), do: :unknown
 
   # Purge each expired blob-backed row through the governed ref-counted chokepoint. A row
   # with no blob (nil/blank `storage_key`) has no bytes to purge, so it takes the ordinary
