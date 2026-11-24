@@ -1,0 +1,18 @@
+# SABOTAGE: Org update does not check the slug against other orgs
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: an org admin cannot take another org's slug or id
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index 12d042ec..27f74739 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -173,7 +173,6 @@ defmodule Samen.Scopes.Identity.Blueprint do
+           update :update do
+             primary?(true)
+             accept([:name, :slug, :max_concurrent_sessions])
+-            change(Samen.Identity.SlugFree)
+             # the admin+ SimpleCheck cannot be folded into an atomic UPDATE ... WHERE
+             require_atomic?(false)
+           end

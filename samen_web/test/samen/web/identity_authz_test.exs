@@ -1192,4 +1192,29 @@ defmodule Samen.Web.IdentityAuthzTest do
       assert {:ok, %{status: :joined}} = Invite.accept(invite_mods(), raw)
     end
   end
+  describe "L. An org's slug is unique on update and on the generic create" do
+    defp l_org!(slug),
+      do: Org |> Ash.Changeset.for_create(:create, %{name: "L #{slug}", slug: slug}, authorize?: false) |> Ash.create!()
+
+    test "RED: an org admin cannot take another org's slug or id; CONTROL: a normal rename, and re-sending its own slug, work" do
+      a = l_org!("l-a-#{System.unique_integer([:positive])}")
+      b = l_org!("l-b-#{System.unique_integer([:positive])}")
+
+      assert {:error, _} = org_update(a, %{slug: b.slug}, :admin)
+      assert {:error, _} = org_update(a, %{slug: b.id}, :admin)
+      assert Ash.get!(Org, a.id, authorize?: false).slug == a.slug
+
+      fresh = "l-fresh-#{System.unique_integer([:positive])}"
+      assert {:ok, %{slug: ^fresh}} = org_update(a, %{slug: fresh}, :admin)
+      assert {:ok, %{slug: ^fresh}} = org_update(Ash.get!(Org, a.id, authorize?: false), %{slug: fresh}, :admin)
+    end
+
+    test "RED: the generic create refuses a taken slug; CONTROL: a free one works" do
+      taken = l_org!("l-taken-#{System.unique_integer([:positive])}")
+
+      assert {:error, _} = Org |> Ash.Changeset.for_create(:create, %{name: "Dup", slug: taken.slug}, authorize?: false) |> Ash.create()
+      assert {:error, _} = Org |> Ash.Changeset.for_create(:create, %{name: "Dup", slug: taken.id}, authorize?: false) |> Ash.create()
+      assert {:ok, _} = Org |> Ash.Changeset.for_create(:create, %{name: "Ok", slug: "l-free-#{System.unique_integer([:positive])}"}, authorize?: false) |> Ash.create()
+    end
+  end
 end

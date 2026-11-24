@@ -153,6 +153,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
           create :create do
             primary?(true)
             accept([:name, :slug])
+            change(Samen.Identity.SlugFree)
           end
 
           # The OPERATOR's account create (`Samen.Web.Operator.AccountsLive` "New account"): an account
@@ -172,6 +173,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
           update :update do
             primary?(true)
             accept([:name, :slug, :max_concurrent_sessions])
+            change(Samen.Identity.SlugFree)
             # the admin+ SimpleCheck cannot be folded into an atomic UPDATE ... WHERE
             require_atomic?(false)
           end

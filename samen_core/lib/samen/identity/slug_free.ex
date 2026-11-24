@@ -1,7 +1,7 @@
 defmodule Samen.Identity.SlugFree do
   @moduledoc """
-  `Identity.Org :open_account` validation: the new account's `slug` must not already be taken, either as another
-  org's `slug` or as another org's `id`.
+  `Identity.Org` validation (`:create`, `:update` and `:open_account`): a slug being SET must not already be taken, either as
+  another org's `slug` or as another org's `id`. An update that leaves the org's own slug as it is is not checked.
 
   An account's slug is how a host names the tenant it stands for (driftwood's `Directory.orgs/0` keys the
   workspace switcher by slug), so a second row carrying an existing tenant's slug or id would render a forged name
@@ -19,11 +19,19 @@ defmodule Samen.Identity.SlugFree do
   def change(changeset, _opts, _ctx) do
     Ash.Changeset.before_action(changeset, fn changeset ->
       case Ash.Changeset.get_attribute(changeset, :slug) do
-        slug when is_binary(slug) and slug != "" -> check(changeset, slug)
-        _ -> changeset
+        slug when is_binary(slug) and slug != "" ->
+          if changing?(changeset), do: check(changeset, slug), else: changeset
+
+        _ ->
+          changeset
       end
     end)
   end
+
+  # An update that leaves the slug as it is has nothing to check (the org holds its own slug). A create, or an
+  # update that sets a different slug, is checked against every OTHER org.
+  defp changing?(%{action_type: :update} = changeset), do: Ash.Changeset.changing_attribute?(changeset, :slug)
+  defp changing?(_changeset), do: true
 
   defp check(changeset, slug) do
     resource = changeset.resource

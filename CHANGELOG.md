@@ -48,6 +48,12 @@ All notable changes to Samen are recorded here. The format follows
   keeps setting only the credential-class columns (`token_digest`, `email_bidx`) on top. **Upgrade notes:** code that created
   an invitation directly with a `status:` input now fails with a no-such-input error; use `Samen.Identity.Invite.create/3`.
   Sabotages 1329 and 1330.
+- **Fixed: an org admin could set its slug to another org's slug or id.** `Samen.Identity.SlugFree` guarded only
+  `Org :open_account`, yet the operator console joins an account's admins, customer, subscription and tickets by
+  `org.slug`, so two orgs sharing a slug (or one org's slug equal to another's id) were merged into one account row. `Org
+  :update` and `Org :create` now apply the same rule: a slug being set must not be another org's slug or id (an update that
+  keeps the org's own slug passes; a check that cannot run refuses the write). **Upgrade notes:** a rename or create onto a
+  taken slug now fails with `slug is already taken`. Existing duplicates are not rewritten. Sabotages 1331 and 1332.
 
 ### Security: authorization and erasure, round 4
 
