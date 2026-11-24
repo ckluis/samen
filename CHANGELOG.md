@@ -11,6 +11,21 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Security: authorization and erasure, round 4
+
+- **Fixed: an in-org actor could move a row into another organisation, or file one under a foreign `org_id`, on any
+  resource.** `org_id` is a public, writable core attribute and `Samen.Policy.OrgScope` filters the pre-image of an
+  update only, so every resource whose actions accept `org_id` (every `defaults([update: :*])` resource: CRM, billing,
+  support, CMS, work and the host-written ones) let an authorized update write the row into another tenant, and a
+  resource whose create policy did not bind `org_id` let an actor create into one. `Samen.Transformers.OrgIdPinned`
+  now adds `Samen.Policy.OrgIdPinned` to every resource that has an `org_id`: an authorized update cannot change it
+  (an input, or any change an action makes), and an actor's create must carry the actor's own `org_id`. Code running
+  with `authorize?: false` (seeds, `Ash.Seed`, `force_change_attribute` in a system path) is unaffected.
+  **Upgrade notes:** an update that sent `org_id: <the same org>` as input now fails (`org_id cannot be changed`): drop it.
+  An update that needs `org_id` on the record (custom-field validation) loads it with `Ash.load!(record, :org_id)`.
+  `Samen.Policy.SameOrgFk` now reads a record's stored `org_id` when the record in hand has it unloaded, where it
+  previously skipped the check. `Samen.OrgIdPinnedGuard.walk/2` is the walk the per-host guard tests use.
+
 ### Security: identity authorization (evaluation 2026-11-13, findings 1, 5, 7, 10, 13, 16)
 
 - **Fixed: any in-org actor could raise a pending invitation to `:owner`, or reopen a revoked one.** `Invitation`'s

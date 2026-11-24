@@ -79,9 +79,29 @@ defmodule Samen.Policy.SameOrgFk do
     end
   end
 
-  defp data_org_id(%{data: %{org_id: %Ash.NotLoaded{}}}), do: nil
+  # `org_id` is not selected by default (`always_select?: false`) and is no longer an update input
+  # (`Samen.Policy.OrgIdPinned`), so on an update the record in hand usually has it NotLoaded. Read
+  # it from the table by primary key rather than skipping the check: a NotLoaded org_id must never
+  # turn the same-org FK guard into a no-op.
+  defp data_org_id(%{data: %{org_id: %Ash.NotLoaded{}}} = changeset), do: stored_org_id(changeset)
   defp data_org_id(%{data: %{org_id: org_id}}), do: org_id
   defp data_org_id(_), do: nil
+
+  defp stored_org_id(%{resource: resource, data: data}) do
+    with [pk] <- Ash.Resource.Info.primary_key(resource),
+         pk_value when not is_nil(pk_value) <- Map.get(data, pk),
+         repo when not is_nil(repo) <-
+           AshPostgres.DataLayer.Info.repo(resource, :read) || AshPostgres.DataLayer.Info.repo(resource),
+         table when not is_nil(table) <- AshPostgres.DataLayer.Info.table(resource),
+         org_src when not is_nil(org_src) <- attribute_source(resource, :org_id),
+         pk_src when not is_nil(pk_src) <- attribute_source(resource, pk),
+         {:ok, %{rows: [[org_bin]]}} when not is_nil(org_bin) <-
+           repo.query("SELECT #{org_src} FROM #{table} WHERE #{pk_src} = $1 LIMIT 1", [dump_uuid(pk_value)]) do
+      load_uuid(org_bin)
+    else
+      _ -> nil
+    end
+  end
 
   defp relationships_to_check(changeset, opts) do
     case Keyword.get(opts, :relationships) do

@@ -1,0 +1,19 @@
+# SABOTAGE: OrgIdPinned lets an update change org_id
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/org_id_pinned_test.exs
+# MUST_FAIL: RED: an in-org actor cannot move the row into another org through :update
+diff --git a/samen_core/lib/samen/policy/org_id_pinned.ex b/samen_core/lib/samen/policy/org_id_pinned.ex
+index 67d8c4fe..6783a0ec 100644
+--- a/samen_core/lib/samen/policy/org_id_pinned.ex
++++ b/samen_core/lib/samen/policy/org_id_pinned.ex
+@@ -54,7 +54,7 @@ defmodule Samen.Policy.OrgIdPinned do
+   defp applies?(context), do: context.authorize? != false
+ 
+   defp check(%{action_type: :update} = changeset, _context) do
+-    if changing_org_id?(changeset) do
++    if false and changing_org_id?(changeset) do
+       Changeset.add_error(changeset,
+         field: :org_id,
+         message: "org_id cannot be changed: a record stays in the organisation it was created in"

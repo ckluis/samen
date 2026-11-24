@@ -159,6 +159,9 @@ defmodule Samen.Extension do
       # whose actor carries the :impersonation marker, REGARDLESS of the resource's
       # `versioned`/E7 opt-in. A no-op for non-impersonated writes.
       Samen.Transformers.ImpersonationAudit,
+      # OrgIdPinned: the tenant column is immutable after create and an actor's create is bound to
+      # the actor's own org, on EVERY resource with an `org_id` (Samen.Policy.OrgIdPinned).
+      Samen.Transformers.OrgIdPinned,
       # VersionedSelect adds Samen.Versioning.SelectForVersion to any `versioned true`
       # resource (ADR-040 §6): a change that loads the write result's attributes so
       # ash_paper_trail can build its diff (vault fields as vt_* tokens, INV-1). A no-op

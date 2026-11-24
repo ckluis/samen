@@ -1275,8 +1275,11 @@ defmodule DriftwoodWeb.BrokerLive do
       Guard.write(:driftwood_update_load, scope, fn ->
         :ok = maybe_define_lane_field(org_id, attrs)
 
+        # `org_id` is not an update input (`Samen.Policy.OrgIdPinned`); load it onto the record, which the
+        # custom-field validator reads off the changeset data.
         load
-        |> Ash.Changeset.for_update(:update, attrs, scope: scope)
+        |> Ash.load!(:org_id, scope: scope)
+        |> Ash.Changeset.for_update(:update, Map.delete(attrs, :org_id), scope: scope)
         |> Ash.update(scope: scope)
       end)
     end
