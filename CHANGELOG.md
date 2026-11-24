@@ -107,13 +107,6 @@ red test through the real authorization path (a `scope:`/actor, never `authorize
 - Resource changes only; there is no migration. Test helpers that seed a driftwood Freight key need a real user and
   membership for `minter_user_id` (see `Driftwood.ApiCase.mk_minter/2`); an Identity key's membership must be active.
 
-**Left open (not built)**
-
-- `ApiKey.scopes` are declared but never enforced at request time on any host; clamping them on the resource changes
-  nothing until a policy calls `authorized?/5` from `actor.api_key`.
-- driftwood's settings mint `Driftwood.Operator.ApiKey` while its API authenticates `Driftwood.Freight.ApiKey`, so keys
-  minted in the UI never authenticate on `/api/v1`; Freight keys also have no expiry column, so F3.4 does not hold there.
-
 ### Security: identity authorization, round 3 (second read-only review of round 2)
 
 A second read-only review found no bypass introduced by round 2, but one contract regression and several holes round 2's
@@ -176,17 +169,6 @@ need a fix (item 10 below). Sabotages 1279-1296.
 - Hosts that call `Org :open_account` must set `context: %{samen_operator_write: true}` after their own operator-role check
   (the console does); a host with no `:plan_labels` hook must leave the plan blank.
 - Resource changes only; there is no migration.
-
-**Left open (round 3, not built)**
-
-- `ApiKey.scopes` are still never enforced at request time on any host.
-- driftwood's settings mint `Driftwood.Operator.ApiKey` while its API authenticates `Driftwood.Freight.ApiKey` (keys minted in
-  the UI never authenticate on `/api/v1`).
-- A unique index on membership `(org_id, user_id)` would make the lowest-rank rule unnecessary; it needs a migration in every
-  host and was not added.
-- The same writable `org_id` on the generic `update: :*` of the non-identity scopes (billing, support, and others): the
-  Identity resources are closed here, the rest are not.
-- `User :update` is gated by `OrgScope` alone as the policy reads (any in-org actor, viewer included, may edit a user's handle/status); read from the policy, not reproduced.
 
 ### Added: meaning in the catalog (ADR-043 §8a)
 
