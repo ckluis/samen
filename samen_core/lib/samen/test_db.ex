@@ -344,7 +344,6 @@ defmodule Samen.TestDb do
       case prepared do
         n when is_integer(n) and n > 0 -> "\n  #{n} prepared transaction(s) in this database (they block DROP DATABASE and are not in pg_stat_activity)"
         {:unknown, reason} -> "\n  (prepared transactions could not be counted: #{reason})"
-        :unknown -> "\n  (prepared transactions could not be counted)"
         _ -> ""
       end
 
