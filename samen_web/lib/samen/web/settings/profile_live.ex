@@ -113,11 +113,16 @@ defmodule Samen.Web.Settings.ProfileLive do
   # "save" is refused while nobody is acting; "retry_load" must still work from the unavailable state.
   TenantActor.refuse_events(["save"])
 
+  # No acting scope (nobody was resolved: no org, no user) is a refusal, never a scope rebuilt with a nil role that
+  # would fall back to `:member`.
+  def handle_event("save", _params, %{assigns: %{acting_scope: nil}} = socket),
+    do: {:noreply, assign(socket, flash_ok: nil, save_error: "This change was refused: nobody is signed in to this workspace.")}
+
   def handle_event("save", %{"profile" => params}, socket) do
-    %{samen_mount: mount, org_id: org_id, user_id: user_id} = socket.assigns
+    %{samen_mount: mount, org_id: org_id, user_id: user_id, acting_scope: acting} = socket.assigns
     # The acting scope carries the SESSION-resolved user (`user_id` was resolved by `Reads.current_user_id/3` /
     # `reresolve_user/3`); `Profile.update/4` refuses a scope whose actor is not that user.
-    scope = Reads.user_scope(mount, org_id, user_id, socket.assigns[:acting_role])
+    scope = Reads.user_scope(mount, org_id, user_id, acting.actor.role)
 
     case Profile.update(mount, scope, user_id, attrs_from_params(params)) do
       {:ok, _user} ->

@@ -593,6 +593,33 @@ defmodule Samen.Web.TenantRoleSurfacesTest do
     end
   end
 
+  # -- ProfileLive save needs an acting scope (authz-5 round 3, item 6) --------------------------------
+
+  describe "ProfileLive save" do
+    alias Samen.Web.Settings.ProfileLive
+
+    defp handle_of(user_id), do: Op.User |> Ash.get!(user_id, authorize?: false) |> Map.get(:handle)
+
+    defp profile_socket(account, org_id), do: live_socket(log_in(account), ProfileLive, "/settings/profile", org_id)
+
+    test "saves as the resolved person; with NO acting scope it refuses instead of falling back to :member", ctx do
+      socket = profile_socket(ctx.viewer, ctx.org_id)
+      assert socket.assigns.acting_scope.actor.role == :viewer
+      uid = socket.assigns.user_id
+
+      # positive control: the person's own scope saves their profile (a viewer may edit their own)
+      {:noreply, saved} = ProfileLive.handle_event("save", %{"profile" => %{"handle" => "own-handle"}}, socket)
+      assert handle_of(uid) == "own-handle"
+      assert saved.assigns.flash_ok == "Profile saved."
+
+      # no acting scope (the state a page is in with no org): the save is refused, nothing is written
+      orphan = Phoenix.Component.assign(socket, acting_scope: nil, acting_role: nil)
+      {:noreply, refused} = ProfileLive.handle_event("save", %{"profile" => %{"handle" => "hijacked"}}, orphan)
+      assert handle_of(uid) == "own-handle"
+      assert refused.assigns.save_error
+    end
+  end
+
   # -- the shared resolver, in every posture ---------------------------------------------------
 
   describe "TenantActor.scope/3" do
