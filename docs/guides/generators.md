@@ -154,8 +154,13 @@ into the router naming exactly what to author first (a `Samen.Scopes.Chat` mount
 Presence child) and the one line to add afterward:
 
 ```elixir
-samen_chat_routes(:chat, <App>.Chat, repo: <App>.Repo, labels: %{pubsub: <App>.PubSub})
+samen_chat_routes(:chat, <App>.Chat, repo: <App>.Repo,
+  labels: %{pubsub: <App>.PubSub, identity_namespace: <App>.Operator})
 ```
+
+`:identity_namespace` names the mount that holds the Identity spine (`Session`, `User`, `Membership`); without it
+the chat, inbox and preferences mounts look the login session up under the wrong namespace and report
+"unavailable" on every request, so the label is required, not decorative.
 
 (Driftwood is the reference: it mounts chat because it materializes `Driftwood.Chat` and adds
 `Samen.Web.Chat.Presence` to its supervision tree — see `driftwood/lib/driftwood_web/router.ex`.)
