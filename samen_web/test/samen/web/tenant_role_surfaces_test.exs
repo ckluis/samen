@@ -213,6 +213,117 @@ defmodule Samen.Web.TenantRoleSurfacesTest do
     refute html =~ "No contacts yet."
   end
 
+  # -- a denial leaves no stale list scope behind (authz-5 item 1) --------------------------------
+
+  # Archived rows are hidden by the default read: look in the live set and in the `:archived` one.
+  defp person!(org_id, name) do
+    sel = [:org_id, :display_name, :archived_at]
+    live = Samen.WebTest.Crm.Person |> Ash.Query.ensure_selected(sel) |> Ash.read!(authorize?: false)
+
+    archived =
+      Samen.WebTest.Crm.Person |> Samen.Archival.archived_query() |> Ash.Query.ensure_selected(sel) |> Ash.read!(authorize?: false)
+
+    Enum.find(live ++ archived, &(&1.org_id == org_id and &1.display_name == name))
+  end
+
+  defp person_archived?(org_id, name), do: person!(org_id, name).archived_at != nil
+
+  defp seed_archived_person!(login, org_id, name) do
+    socket = live_socket(login, ContactsLive, "/crm/contacts", org_id)
+    {:noreply, socket} = ContactsLive.handle_event("new_contact", %{}, socket)
+    {:noreply, _} = ContactsLive.handle_event("save_new", %{"form" => %{"display_name" => name}}, socket)
+    {:ok, _} = Samen.Archival.archive(person!(org_id, name), scope: socket.assigns.acting_scope)
+    assert person_archived?(org_id, name)
+  end
+
+  # The `ListLive` hook, as the lifecycle runs it on a mounted socket (a harness socket has none).
+  defp list_event(socket, event, params) do
+    {:halt, socket} = Samen.Web.ListLive.on_event(event, params, socket)
+    socket
+  end
+
+  defp archived_names(socket), do: Enum.map(socket.assigns.page.items, & &1.display_name)
+
+  describe "ListLive after a denial" do
+    test "a suspended member's open contacts page reads nothing and writes nothing", ctx do
+      login = log_in(ctx.member)
+      seed_archived_person!(login, ctx.org_id, "Open Person")
+      seed_archived_person!(login, ctx.org_id, "Control Person")
+
+      # positive control: while the membership is active the same two events DO read and write
+      live = live_socket(login, ContactsLive, "/crm/contacts", ctx.org_id)
+      live = list_event(live, "toggle_archived", %{})
+      assert "Open Person" in archived_names(live) and "Control Person" in archived_names(live)
+      list_event(live, "restore", %{"id" => person!(ctx.org_id, "Control Person").id})
+      refute person_archived?(ctx.org_id, "Control Person")
+
+      socket = live_socket(login, ContactsLive, "/crm/contacts", ctx.org_id)
+      suspend!(ctx.member, ctx.org_id)
+      {:noreply, socket} = ContactsLive.handle_params(%{"org" => ctx.org_id}, "http://localhost/crm/contacts", socket)
+      assert socket.assigns.actor_state == :denied
+
+      socket = list_event(socket, "toggle_archived", %{})
+      assert socket.assigns.page.items == []
+      socket = list_event(socket, "restore", %{"id" => person!(ctx.org_id, "Open Person").id})
+      assert socket.assigns.page.items == []
+      assert person_archived?(ctx.org_id, "Open Person")
+    end
+
+    test "a suspended member's open companies page reads nothing", ctx do
+      login = log_in(ctx.member)
+      create_company(login, ctx.org_id)
+
+      live = live_socket(login, CompaniesLive, "/crm/companies", ctx.org_id)
+      assert Enum.map(live.assigns.page.items, & &1.name) == ["Acme"]
+      assert Enum.map(list_event(live, "list_retry", %{}).assigns.page.items, & &1.name) == ["Acme"]
+
+      suspend!(ctx.member, ctx.org_id)
+      {:noreply, live} = CompaniesLive.handle_params(%{"org" => ctx.org_id}, "http://localhost/crm/companies", live)
+      assert live.assigns.actor_state == :denied
+
+      for event <- ["toggle_archived", "list_retry", "filter", "sort", "paginate"] do
+        refused = list_event(live, event, %{"filter" => "Acme", "field" => "name", "dir" => "next"})
+        assert refused.assigns.page.items == [], "#{event} read after the denial"
+      end
+    end
+
+    test "every list event on a denied page is a no-op", ctx do
+      login = log_in(ctx.member)
+      socket = live_socket(login, ContactsLive, "/crm/contacts", ctx.org_id)
+      assert socket.assigns.samen_list_ctx.scope.actor.role == :member
+      suspend!(ctx.member, ctx.org_id)
+      {:noreply, socket} = ContactsLive.handle_params(%{"org" => ctx.org_id}, "http://localhost/crm/contacts", socket)
+      assert socket.assigns.actor_state == :denied
+
+      for event <- Samen.Web.ListLive.events() do
+        refused = list_event(socket, event, %{"id" => Ash.UUID.generate(), "field" => "display_name", "dir" => "next", "action" => "x", "filter" => "a"})
+        assert refused.assigns.page == socket.assigns.page
+        assert refused.assigns.list_state == socket.assigns.list_state
+      end
+    end
+
+    test "org A -> org B (denied): no further reads or writes of org A", ctx do
+      uid = user_id(ctx.member, ctx.org_id)
+      other = register!()
+      SecurityHost.grant!(uid, [ctx.org_id, other.org.id])
+      on_exit(&SecurityHost.revoke_all!/0)
+      login = %{session: %{"samen_current_user" => uid}}
+
+      seed_archived_person!(log_in(ctx.member), ctx.org_id, "Org A Person")
+      socket = live_socket(login, ContactsLive, "/crm/contacts", ctx.org_id)
+      assert socket.assigns.actor_state == :ok
+
+      {:noreply, socket} = ContactsLive.handle_params(%{"org" => other.org.id}, "http://localhost/crm/contacts", socket)
+      assert socket.assigns.org_id == other.org.id
+      assert socket.assigns.actor_state == :denied
+
+      socket = list_event(socket, "toggle_archived", %{})
+      assert socket.assigns.page.items == []
+      list_event(socket, "restore", %{"id" => person!(ctx.org_id, "Org A Person").id})
+      assert person_archived?(ctx.org_id, "Org A Person")
+    end
+  end
+
   # -- the shared resolver, in every posture ---------------------------------------------------
 
   describe "TenantActor.scope/3" do

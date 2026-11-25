@@ -1,0 +1,20 @@
+# SABOTAGE: a denied surface keeps the list context of the scope it acted with, so a later list event still 
+#   reads and writes
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_surfaces_test.exs
+# MUST_FAIL: suspended member's open contacts page reads nothing and writes nothing
+diff --git a/samen_web/lib/samen/web/list_live.ex b/samen_web/lib/samen/web/list_live.ex
+index a0e57f15..24412a05 100644
+--- a/samen_web/lib/samen/web/list_live.ex
++++ b/samen_web/lib/samen/web/list_live.ex
+@@ -359,7 +359,7 @@ defmodule Samen.Web.ListLive do
+   refusal, the hook stays attached and keeps halting the events it owns.
+   """
+   @spec refuse(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
+-  def refuse(socket), do: Phoenix.Component.assign(socket, :samen_list_ctx, nil)
++  def refuse(socket), do: socket
+ 
+   @doc "The list events this mixin owns (the hook halts exactly these)."
+   def events, do: @events

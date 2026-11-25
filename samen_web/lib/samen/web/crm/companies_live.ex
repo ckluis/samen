@@ -55,6 +55,7 @@ defmodule Samen.Web.CRM.CompaniesLive do
   @doc false
   def load(socket, nil) do
     socket
+    |> Samen.Web.ListLive.refuse()
     |> ensure_return_to()
     |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, metrics: nil, metric_errors: [])
     |> assign(acting_scope: nil, actor_state: :ok)
@@ -76,6 +77,7 @@ defmodule Samen.Web.CRM.CompaniesLive do
 
   defp load_refused(socket, org_id, state) do
     socket
+    |> Samen.Web.ListLive.refuse()
     |> ensure_return_to()
     |> assign(no_org: false, org_id: org_id, metrics: nil, metric_errors: [], acting_scope: nil, actor_state: state)
     |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{}, list_error: nil)
