@@ -38,7 +38,6 @@ defmodule AcmeWeb.Api.KeyAuthPlug do
   request is halted (`Samen.Web.Api.KeyCheckUnavailable`): a good key is never reported as bad during an outage.
   """
   import Plug.Conn
-  require Ash.Query
 
   @doc "The canonical key digest — SHA-256 hex of the raw key material."
   @spec digest(String.t()) :: String.t()
@@ -87,10 +86,9 @@ defmodule AcmeWeb.Api.KeyAuthPlug do
     # is rejected, and so is an EXPIRED one (F3.4 deny-on-read: expires_at <= now is
     # never resolved, so no actor is built; a row with no expires_at is a legacy,
     # non-expiring key).
-    Acme.Operator.ApiKey
-    |> Ash.Query.filter(token_digest == ^digest)
-    |> Ash.Query.filter(is_nil(revoked_at))
-    |> Ash.Query.filter(is_nil(expires_at) or expires_at > ^now)
+    Samen.Scope.ApiKey.active_query(Acme.Operator.ApiKey, digest, now)
+    # `org_id` is not selected by default: the actor's org is checked against the key's own org (`effective_role/2`).
+    |> Ash.Query.ensure_selected([:id, :org_id, :plane, :scopes, :minter_role, :membership_id, :expires_at])
     # authz-scope: API-key AUTH-STEP lookup keyed on the SHA-256 digest of a server-minted random token — no
     # actor/org exists until this row resolves (revoked/expired filtered out; unmatched digest => :error, fail
     # closed; a duplicate digest makes read_one error => :unavailable, also fail closed)
@@ -112,29 +110,36 @@ defmodule AcmeWeb.Api.KeyAuthPlug do
     # key row.
     membership_query =
       Acme.Operator.Membership
-      |> Ash.Query.select([:id, :org_id, :user_id, :role])
+      |> Ash.Query.select([:id, :org_id, :user_id, :role, :status])
 
     case Ash.load(key_row, [membership: membership_query], authorize?: false) do
       {:ok, %{membership: %{} = mbr} = key_row} ->
-        org_id = fetch(mbr, [:org_id, :aom_org_id])
-        user_id = fetch(mbr, [:user_id, :aom_user_id])
+        # A key with no/unknown `minter_role` authorizes nothing (`Samen.Scope.ApiKey.acting_role/1`):
+        # refuse it here rather than build an actor with `role: nil` that an OrgScope-only resource serves.
+        # The role is then capped by the minting membership's CURRENT role; a removed/suspended
+        # membership refuses the key (`Samen.Scope.ApiKey.effective_role/2`).
+        with {:ok, _stored} <- Samen.Scope.ApiKey.acting_role(key_row),
+             {:ok, role} <- Samen.Scope.ApiKey.effective_role(key_row, mbr) do
+          org_id = fetch(mbr, [:org_id, :aom_org_id])
+          user_id = fetch(mbr, [:user_id, :aom_user_id])
 
-        key = %{
-          org_id: org_id,
-          plane: key_row.plane,
-          scopes: key_row.scopes || %{},
-          minter_role: key_row.minter_role
-        }
+          key = %{
+            org_id: org_id,
+            plane: key_row.plane,
+            scopes: key_row.scopes || %{},
+            minter_role: key_row.minter_role
+          }
 
-        actor = %{
-          id: user_id,
-          org_id: org_id,
-          role: key_row.minter_role,
-          plane: key_row.plane,
-          api_key: key
-        }
+          actor = %{
+            id: user_id,
+            org_id: org_id,
+            role: role,
+            plane: key_row.plane,
+            api_key: key
+          }
 
-        {:ok, actor}
+          {:ok, actor}
+        end
 
       {:error, error} ->
         Samen.Web.Reads.Guard.report(:api_key_membership_load, nil, error)

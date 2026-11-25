@@ -39,7 +39,6 @@ defmodule DriftwoodWeb.Api.KeyAuthPlug do
   request is halted (`Samen.Web.Api.KeyCheckUnavailable`).
   """
   import Plug.Conn
-  require Ash.Query
 
   @doc "The canonical key digest — SHA-256 hex of the raw key material."
   @spec digest(String.t()) :: String.t()
@@ -82,9 +81,7 @@ defmodule DriftwoodWeb.Api.KeyAuthPlug do
 
     # This IS the auth step — the key row lookup cannot itself require an actor. A
     # revoked key (revoked_at set) is rejected.
-    Driftwood.Freight.ApiKey
-    |> Ash.Query.filter(token_digest == ^digest)
-    |> Ash.Query.filter(is_nil(revoked_at))
+    Samen.Scope.ApiKey.active_query(Driftwood.Freight.ApiKey, digest)
     |> Ash.Query.ensure_selected([:id, :org_id, :plane, :scopes, :minter_role, :minter_user_id])
     # authz-scope: API-key AUTH-STEP lookup keyed on the SHA-256 digest of a server-minted random token — no actor/org
     # exists until this row resolves (revoked filtered out; unmatched digest => :error; a duplicate digest makes read_one error => :unavailable — both fail closed)
@@ -101,23 +98,46 @@ defmodule DriftwoodWeb.Api.KeyAuthPlug do
   end
 
   defp build_actor(key_row) do
-    org_id = to_string(key_row.org_id)
+    # A key with no/unknown `minter_role` authorizes nothing (`Samen.Scope.ApiKey.acting_role/1`): refused here
+    # rather than given `role: nil`.
+    # The role is then capped by the minter's CURRENT membership role (a Freight key records a minter
+    # USER id, so the membership is found by user + org); a removed or suspended minter refuses the key.
+    with {:ok, _stored} <- Samen.Scope.ApiKey.acting_role(key_row),
+         {:ok, mbr} <- load_membership(key_row),
+         {:ok, role} <- Samen.Scope.ApiKey.effective_role(key_row, mbr) do
+      org_id = to_string(key_row.org_id)
 
-    key = %{
-      org_id: org_id,
-      plane: key_row.plane,
-      scopes: key_row.scopes || %{},
-      minter_role: key_row.minter_role
-    }
+      key = %{
+        org_id: org_id,
+        plane: key_row.plane,
+        scopes: key_row.scopes || %{},
+        minter_role: role
+      }
 
-    actor = %{
-      id: key_row.minter_user_id || ("apikey:" <> to_string(key_row.id)),
-      org_id: org_id,
-      role: key_row.minter_role,
-      plane: key_row.plane,
-      api_key: key
-    }
+      actor = %{
+        id: to_string(key_row.minter_user_id),
+        org_id: org_id,
+        role: role,
+        plane: key_row.plane,
+        api_key: key
+      }
 
-    {:ok, actor}
+      {:ok, actor}
+    end
+  end
+
+  # A membership read that FAILED is an outage, not a bad key: reported once by name, answered 503 (`:unavailable`).
+  defp load_membership(key_row) do
+    case Samen.Scope.ApiKey.membership_for_user(Driftwood.Operator.Membership, key_row.org_id, key_row.minter_user_id) do
+      {:ok, mbr} ->
+        {:ok, mbr}
+
+      {:error, error} ->
+        Samen.Web.Reads.Guard.report(:driftwood_api_key_membership_load, nil, error)
+        :unavailable
+
+      _ ->
+        :error
+    end
   end
 end

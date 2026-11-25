@@ -83,13 +83,15 @@ defmodule Samen.WebTest.Operator.Seeds do
       Op.Org
       |> Ash.Changeset.for_create(
         :create,
-        %{name: "Samen SaaS, Inc.", plan: "operator"},
+        %{name: "Samen SaaS, Inc."},
         authorize?: false
       )
+      |> Ash.Changeset.force_change_attribute(:plan, "operator")
       |> Ash.create!()
 
     org
-    |> Ash.Changeset.for_update(:update, %{org_id: org.id}, authorize?: false)
+    |> Ash.Changeset.for_update(:update, %{}, authorize?: false)
+    |> Ash.Changeset.force_change_attribute(:org_id, org.id)
     |> Ash.update!()
   end
 
@@ -156,14 +158,11 @@ defmodule Samen.WebTest.Operator.Seeds do
     Op.Org
     |> Ash.Changeset.for_create(
       :create,
-      %{
-        org_id: operator_org_id,
-        name: "Blue Ridge Logistics #{i}",
-        slug: tenant_org_id,
-        plan: "growth"
-      },
+      %{name: "Blue Ridge Logistics #{i}", slug: tenant_org_id},
       authorize?: false
     )
+    |> Ash.Changeset.force_change_attribute(:org_id, operator_org_id)
+    |> Ash.Changeset.force_change_attribute(:plan, "growth")
     |> Ash.create!()
   end
 

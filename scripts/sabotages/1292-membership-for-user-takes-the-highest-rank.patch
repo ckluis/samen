@@ -1,0 +1,19 @@
+# SABOTAGE: membership_for_user takes the highest-ranked active membership instead of the lowest
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: a user holding an owner and a viewer membership in one org resolves the viewer
+diff --git a/samen_core/lib/samen/scope/api_key.ex b/samen_core/lib/samen/scope/api_key.ex
+index 19fd27c2..ddc308ee 100644
+--- a/samen_core/lib/samen/scope/api_key.ex
++++ b/samen_core/lib/samen/scope/api_key.ex
+@@ -287,7 +287,7 @@ defmodule Samen.Scope.ApiKey do
+         # Nothing in the schema forbids two active memberships of one user in one org (no unique index on
+         # (org_id, user_id)): take the LOWEST-ranked one (id breaks a tie), so the key's cap never depends on row
+         # order and a second, higher-ranked row can never raise it.
+-        {:ok, [_ | _] = memberships} -> {:ok, Enum.min_by(memberships, &{Role.rank(&1.role), to_string(&1.id)})}
++        {:ok, [_ | _] = memberships} -> {:ok, Enum.max_by(memberships, &{Role.rank(&1.role), to_string(&1.id)})}
+         {:ok, []} -> :error
+         {:error, error} -> {:error, error}
+       end

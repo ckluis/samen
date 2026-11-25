@@ -1,0 +1,26 @@
+# SABOTAGE: ApiKey create/update without ClampExpiry: a direct write buys a key past the 365-day ceiling
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: RED: expiry is clamped on every write that sets it
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index 8304aee8..ddd8e83b 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -588,7 +588,6 @@ defmodule Samen.Scopes.Identity.Blueprint do
+           create :create do
+             primary?(true)
+             accept([:org_id, :plane, :scopes, :minter_role, :expires_at, :membership_id])
+-            change(Samen.Scope.ApiKey.ClampExpiry)
+             validate(present(:minter_role))
+           end
+ 
+@@ -599,7 +598,6 @@ defmodule Samen.Scopes.Identity.Blueprint do
+             primary?(true)
+             accept([:expires_at])
+             require_atomic?(false)
+-            change(Samen.Scope.ApiKey.ClampExpiry)
+           end
+ 
+           # Revocation is one-way: sets `revoked_at` once (a second revoke keeps the

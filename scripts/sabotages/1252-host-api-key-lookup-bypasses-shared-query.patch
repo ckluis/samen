@@ -1,0 +1,21 @@
+# SABOTAGE: a host hand-rolls its api-key lookup (digest + revoked only) instead of the shared active_query
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/api_key_lookup_guard_test.exs
+# MUST_FAIL: no host lib or template hand-rolls an ApiKey token_digest lookup
+diff --git a/pawchart/lib/pawchart_web/api/mcp_key_resolver.ex b/pawchart/lib/pawchart_web/api/mcp_key_resolver.ex
+index f0adb373..f9bfbae9 100644
+--- a/pawchart/lib/pawchart_web/api/mcp_key_resolver.ex
++++ b/pawchart/lib/pawchart_web/api/mcp_key_resolver.ex
+@@ -73,7 +73,9 @@ defmodule PawChartWeb.Api.McpKeyResolver do
+   # token digests to a value that matches NO row → :error. A revoked key (revoked_at set) is
+   # rejected. The `token_digest == ^digest` equality is the enforcing filter for forged-rejection.
+   defp lookup(digest) do
+-    Samen.Scope.ApiKey.active_query(PawChart.Operator.ApiKey, digest)
++    PawChart.Operator.ApiKey
++    |> Ash.Query.filter(token_digest == ^digest)
++    |> Ash.Query.filter(is_nil(revoked_at))
+     |> Ash.Query.ensure_selected([:id, :org_id, :plane, :scopes, :minter_role, :membership_id, :token_digest, :expires_at])
+     # authz-scope: MCP API-key AUTH-STEP lookup keyed on the unique token digest — no actor/org
+     # exists until this row resolves (revoked/expired filtered out; unmatched digest => :error, fail closed)

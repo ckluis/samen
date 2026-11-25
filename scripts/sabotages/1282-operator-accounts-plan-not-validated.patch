@@ -1,0 +1,20 @@
+# SABOTAGE: the accounts console accepts any plan string instead of the host's offered plans
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/operator_accounts_crud_test.exs
+# MUST_FAIL: a plan the host does not offer is refused
+diff --git a/samen_web/lib/samen/web/operator/accounts_live.ex b/samen_web/lib/samen/web/operator/accounts_live.ex
+index bb0ddf08..dfcb30a4 100644
+--- a/samen_web/lib/samen/web/operator/accounts_live.ex
++++ b/samen_web/lib/samen/web/operator/accounts_live.ex
+@@ -164,6 +164,9 @@ defmodule Samen.Web.Operator.AccountsLive do
+ 
+   defp check_plan(params, socket) do
+     case params |> Map.get("plan") |> to_string() |> String.trim() do
++      plan when plan != "" ->
++        {:ok, Map.put(params, "plan", plan)}
++
+       "" ->
+         {:ok, Map.delete(params, "plan")}
+ 

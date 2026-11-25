@@ -1,0 +1,19 @@
+# SABOTAGE: Identity ApiKey create drops KeyBoundToMinter: an admin mints a key bound to the owner's 
+#   membership
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: RED: an admin cannot mint a key bound to the OWNER's membership
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index 2b83e774..4569b637 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -676,7 +676,6 @@ defmodule Samen.Scopes.Identity.Blueprint do
+           # No escalation: a minted key may not act above the actor that mints it.
+           policy action(:create) do
+             forbid_unless(Samen.Policy.MinterRoleCeiling)
+-            forbid_unless(Samen.Policy.KeyBoundToMinter)
+             authorize_if(always())
+           end
+         end

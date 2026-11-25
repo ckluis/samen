@@ -1,0 +1,19 @@
+# SABOTAGE: Onboarding.select_plan drops the owner requirement: an admin changes Org.plan
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/auth/onboarding_test.exs
+# MUST_FAIL: RED: an ADMIN (not the owner) cannot choose the plan
+diff --git a/samen_web/lib/samen/web/onboarding.ex b/samen_web/lib/samen/web/onboarding.ex
+index f5f35d89..a05e5a59 100644
+--- a/samen_web/lib/samen/web/onboarding.ex
++++ b/samen_web/lib/samen/web/onboarding.ex
+@@ -179,7 +179,7 @@ defmodule Samen.Web.Onboarding do
+   @spec select_plan(Mount.t(), Samen.Scope.t() | map(), String.t(), String.t()) ::
+           {:ok, term()} | {:error, term()}
+   def select_plan(%Mount{} = mount, scope, org_id, plan_key) when is_binary(org_id) and is_binary(plan_key) do
+-    with :ok <- require_owner(scope),
++    with :ok <- :ok,
+          {:ok, org} <- org(mount, scope, org_id),
+          :ok <- require_not_onboarded(org),
+          {:ok, choices} <- offered_plans(mount, org_id),

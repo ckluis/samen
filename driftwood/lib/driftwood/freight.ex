@@ -415,6 +415,11 @@ defmodule Driftwood.Freight.ApiKey do
     repo(Driftwood.Repo)
   end
 
+  # This resource has NO expiry column (F3.4 does not hold for Freight keys; see CHANGELOG). Declared here, on the
+  # resource, so `Samen.Scope.ApiKey.active_query/3` builds the lookup without an expiry filter instead of raising.
+  @doc false
+  def samen_key_expiryless?, do: true
+
   attributes do
     # SHA-256 digest of the key material. One-way; the raw key is never stored.
     attribute(:token_digest, :string, public?: false, allow_nil?: false)
@@ -443,7 +448,64 @@ defmodule Driftwood.Freight.ApiKey do
   end
 
   actions do
-    defaults([:read, :destroy, create: :*, update: :*])
+    defaults([:read, :destroy])
+
+    # `minter_role` is bounded by `Samen.Policy.MinterRoleCeiling` (policy below); a key is
+    # born live (`revoked_at` is not an input) and `token_digest` is `public?: false`.
+    create :create do
+      primary?(true)
+      accept([:org_id, :plane, :scopes, :minter_role, :minter_user_id])
+      validate(present(:minter_role))
+
+      # A key minted through an authorized actor is attributed to THAT actor: the supplied
+      # `minter_user_id` is overridden, because at use time it becomes the key's `actor.id`
+      # (an admin must not mint a key that acts as the owner's user). Only a system/seed path
+      # (`authorize?: false`, no actor) may attribute a key to someone else.
+      #
+      # And that actor must be a USER who can actually be that minter at use time: a UUID with an ACTIVE membership in
+      # the key's own org (`Samen.Scope.ApiKey.membership_for_user/3`, the very lookup the key plug runs). Otherwise
+      # a key is minted that can never authenticate (an opaque or fixture id such as "user-7"), which looks live in
+      # the settings list and fails every request. A lookup that FAILS refuses too: an unverifiable minter is not a
+      # valid one.
+      change(fn changeset, ctx ->
+        case ctx.actor do
+          %{id: id} when not is_nil(id) ->
+            changeset = Ash.Changeset.force_change_attribute(changeset, :minter_user_id, to_string(id))
+            org_id = Ash.Changeset.get_attribute(changeset, :org_id)
+
+            case Samen.Scope.ApiKey.membership_for_user(Driftwood.Operator.Membership, org_id, id) do
+              {:ok, _membership} ->
+                changeset
+
+              _ ->
+                Ash.Changeset.add_error(changeset,
+                  field: :minter_user_id,
+                  message: "the minting actor must be a user with an active membership in this org"
+                )
+            end
+
+          nil ->
+            changeset
+
+          _ ->
+            Ash.Changeset.add_error(changeset, field: :minter_user_id, message: "the minting actor has no id")
+        end
+      end)
+    end
+
+    # No generic update: role/plane/scopes/digest are immutable after mint and revocation
+    # is one-way (sets `revoked_at` once, takes no input).
+    update :revoke do
+      primary?(true)
+      accept([])
+      require_atomic?(false)
+
+      # `revoked_at` becomes `coalesce(revoked_at, now)` IN THE UPDATE: it never depends on what the
+      # record in hand happens to carry (a row read with `select` omitting `revoked_at` is
+      # `%Ash.NotLoaded{}`; an `is_nil` test on it failed OPEN, answering `{:ok, _}` with the key
+      # still live), and a second revoke keeps the original instant even under concurrency.
+      change(Samen.Scope.ApiKey.RevokeOnce)
+    end
   end
 
   policies do
@@ -455,6 +517,12 @@ defmodule Driftwood.Freight.ApiKey do
     policy action_type([:create, :update, :destroy]) do
       forbid_unless(Samen.Policy.OrgScope)
       forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})
+      authorize_if(always())
+    end
+
+    # No escalation: a minted key may not act above the actor that mints it.
+    policy action(:create) do
+      forbid_unless(Samen.Policy.MinterRoleCeiling)
       authorize_if(always())
     end
   end

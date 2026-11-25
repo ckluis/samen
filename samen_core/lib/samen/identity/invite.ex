@@ -551,7 +551,9 @@ defmodule Samen.Identity.Invite do
           {:ok, updated}
 
         {:error, reason} ->
-          {:error, reason}
+          # A row that stopped being pending between the read and the write (an accept won the race) matches zero
+          # rows: the same one outcome as any other not-pending invite.
+          if stale?(reason), do: {:error, :not_found}, else: {:error, reason}
       end
     else
       _ -> {:error, :not_found}
@@ -559,6 +561,9 @@ defmodule Samen.Identity.Invite do
   rescue
     e -> {:error, e}
   end
+
+  defp stale?(%{errors: errors}) when is_list(errors), do: Enum.any?(errors, &match?(%Ash.Error.Changes.StaleRecord{}, &1))
+  defp stale?(_), do: false
 
   defp find_pending_for_scope(mods, scope, invitation_id) do
     mods.invitation

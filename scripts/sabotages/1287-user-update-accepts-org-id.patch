@@ -1,0 +1,19 @@
+# SABOTAGE: the generic update accepts org_id again (user-update-accepts-org-id)
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: an admin cannot update a User or Role into another org
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index 3af9f71a..6a97ecaa 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -342,7 +342,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
+           update :update do
+             primary?(true)
+             require_atomic?(false)
+-            accept([:handle, :status, :full_name, :emails])
++            accept([:handle, :status, :full_name, :emails, :org_id])
+           end
+ 
+           # Bounded-by-default API read the JSON:API routes bind to (WS-A design §1.1,

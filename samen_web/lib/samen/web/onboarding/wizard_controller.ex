@@ -115,12 +115,16 @@ defmodule Samen.Web.Onboarding.WizardController do
   def finish(conn, params) do
     {conn, mount, org_id, user_id} = context(conn, params)
 
-    case authorized_scope(mount, conn, org_id, user_id) do
-      nil -> :ok
-      scope -> _ = Onboarding.complete!(mount, scope, org_id)
-    end
+    refused? =
+      case authorized_scope(mount, conn, org_id, user_id) do
+        nil -> true
+        scope -> match?({:error, _}, Onboarding.complete!(mount, scope, org_id))
+      end
 
-    redirect(conn, to: base_path(conn, org_id, user_id))
+    # A refused finish must say so (a silent re-render looked like a broken button).
+    if refused?,
+      do: redirect(conn, to: step_path(conn, org_id, user_id, "invite", "&finish_error=1")),
+      else: redirect(conn, to: base_path(conn, org_id, user_id))
   end
 
   # -- private: session-derived context (B-SEC / S11) --------------------------
@@ -148,15 +152,22 @@ defmodule Samen.Web.Onboarding.WizardController do
   defp maybe_put(map, key, value) when is_binary(value), do: Map.put(map, key, value)
   defp maybe_put(map, _key, _value), do: map
 
-  # The own-org actor scope for the `OrgIsSelf`-policed org writes. `nil` (refuse) unless BOTH
+  # The own-org actor scope for the `OrgIsSelf` + admin-policed org writes. `nil` (refuse) unless BOTH
   # the org and the user resolved from the session, and `verified?` is the REAL credential fact
   # (fail-CLOSED with no principal) — never the hardcoded `true` this used to carry.
   defp authorized_scope(mount, conn, org_id, user_id) when is_binary(org_id) and is_binary(user_id) do
+    # `Org.:update` needs admin+: carry the caller's REAL membership role (none → nil → refused).
+    role =
+      case membership(mount, org_id, user_id) do
+        {:ok, %{role: role}} -> role
+        _ -> nil
+      end
+
     %Samen.Scope{
       actor: %{
         id: user_id,
         org_id: org_id,
-        role: :member,
+        role: role,
         kind: :tenant,
         plane: :tenant,
         verified?: verified?(mount, get_session(conn))

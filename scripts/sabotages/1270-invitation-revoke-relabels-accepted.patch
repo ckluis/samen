@@ -1,0 +1,25 @@
+# SABOTAGE: Invitation :revoke stops requiring a pending row: an accepted invite is relabelled revoked
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: RED: an admin cannot relabel an ACCEPTED invite as revoked
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index a6b80b6d..db339eb5 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -885,13 +885,12 @@ defmodule Samen.Scopes.Identity.Blueprint do
+             validate(fn changeset, _ctx ->
+               case changeset.data do
+                 %{status: "pending"} -> :ok
+-                _ -> {:error, field: :status, message: "only a pending invitation can be revoked"}
++                _ -> :ok
+               end
+             end)
+ 
+             # ...and the DATABASE decides again in the UPDATE (`status = 'pending'`): an accept that commits between
+             # the caller's read and this write matches zero rows instead of being relabelled "revoked".
+-            change(Samen.Identity.OnlyPending)
+             change(set_attribute(:status, "revoked"))
+             change(set_attribute(:revoked_at, arg(:revoked_at)))
+           end

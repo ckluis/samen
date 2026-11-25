@@ -168,28 +168,49 @@ defmodule Samen.Web.Onboarding do
   Step 2 write — set `Org.plan` to `plan_key`, but ONLY when `plan_key` is
   one of `plan_choices/2`'s CURRENT offerings (the hook is the single source
   of truth for what a plan even is — never an actor-forged value).
-  `{:error, :invalid_plan}` when the hook is unconfigured or `plan_key`
-  isn't currently offered; otherwise `{:ok, org}` / `{:error, reason}`.
+
+  The plan is the org's billing identity (`Samen.Scope.Role`: billing is the OWNER's), so the
+  step needs an OWNER, and it is closed once the org is onboarded (`onboarded_at` set): the
+  onboarding wizard is not a back door for re-planning a live org. Refusals are explicit —
+  `{:error, :forbidden}` (not an owner), `{:error, :already_onboarded}`,
+  `{:error, :invalid_plan}` (hook unconfigured or `plan_key` not offered); otherwise
+  `{:ok, org}` / `{:error, reason}`.
   """
   @spec select_plan(Mount.t(), Samen.Scope.t() | map(), String.t(), String.t()) ::
           {:ok, term()} | {:error, term()}
   def select_plan(%Mount{} = mount, scope, org_id, plan_key) when is_binary(org_id) and is_binary(plan_key) do
-    case plan_choices(mount, org_id) do
-      {:ok, choices} ->
-        if Enum.any?(choices, &(&1.key == plan_key)) do
-          with {:ok, org} <- org(mount, scope, org_id) do
-            org
-            |> Ash.Changeset.for_update(:update, %{plan: plan_key}, scope: scope)
-            |> Ash.update(scope: scope)
-          end
-        else
-          {:error, :invalid_plan}
-        end
-
-      :not_configured ->
-        {:error, :invalid_plan}
+    with :ok <- require_owner(scope),
+         {:ok, org} <- org(mount, scope, org_id),
+         :ok <- require_not_onboarded(org),
+         {:ok, choices} <- offered_plans(mount, org_id),
+         true <- Enum.any?(choices, &(&1.key == plan_key)) || {:error, :invalid_plan} do
+      org
+      |> Ash.Changeset.for_update(:update, %{}, scope: scope)
+      # `plan` is NOT an `Org.:update` input (a tenant actor can never write it as an
+      # arbitrary string): the value was just validated against the host's configured
+      # `plan_choices/2` above, so only THIS path force-sets it.
+      |> Ash.Changeset.force_change_attribute(:plan, plan_key)
+      |> Ash.update(scope: scope)
     end
   end
+
+  defp offered_plans(mount, org_id) do
+    case plan_choices(mount, org_id) do
+      {:ok, choices} -> {:ok, choices}
+      :not_configured -> {:error, :invalid_plan}
+    end
+  end
+
+  defp require_owner(scope) do
+    if Samen.Scope.Role.at_least?(actor_role(scope), :owner), do: :ok, else: {:error, :forbidden}
+  end
+
+  defp actor_role(%{actor: %{} = actor}), do: Map.get(actor, :role)
+  defp actor_role(%{} = actor), do: Map.get(actor, :role)
+  defp actor_role(_), do: nil
+
+  defp require_not_onboarded(%{onboarded_at: nil}), do: :ok
+  defp require_not_onboarded(_org), do: {:error, :already_onboarded}
 
   @doc """
   Completion — sets `Org.onboarded_at` (the Tier-0 setting `needed?/3`

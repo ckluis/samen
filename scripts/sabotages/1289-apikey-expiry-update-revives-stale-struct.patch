@@ -1,0 +1,19 @@
+# SABOTAGE: ClampExpiry's update drops the liveness filter: a stale struct revives a retired key
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: a STALE struct cannot revive a key another actor already retired or revoked
+diff --git a/samen_core/lib/samen/scope/api_key_expiry.ex b/samen_core/lib/samen/scope/api_key_expiry.ex
+index 98d2ca8b..c82caf57 100644
+--- a/samen_core/lib/samen/scope/api_key_expiry.ex
++++ b/samen_core/lib/samen/scope/api_key_expiry.ex
+@@ -66,7 +66,7 @@ defmodule Samen.Scope.ApiKey.ClampExpiry do
+ 
+       changeset
+       |> Ash.Changeset.clear_change(:expires_at)
+-      |> Ash.Changeset.filter(Ash.Expr.expr(is_nil(revoked_at) and (is_nil(expires_at) or expires_at > ^now)))
++      |> then(fn c -> _ = now; c end)
+       |> Ash.Changeset.atomic_update(:expires_at, shortened(requested, now))
+     else
+       changeset

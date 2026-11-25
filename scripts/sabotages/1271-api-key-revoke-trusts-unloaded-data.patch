@@ -1,0 +1,25 @@
+# SABOTAGE: ApiKey :revoke decides in Elixir from the record in hand again: a partially selected row 
+#   answers ok with the key still live
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: RED: revoking a row read WITHOUT revoked_at still revokes it
+diff --git a/samen_core/lib/samen/scope/api_key_revoke.ex b/samen_core/lib/samen/scope/api_key_revoke.ex
+index 7f74a391..c97c3155 100644
+--- a/samen_core/lib/samen/scope/api_key_revoke.ex
++++ b/samen_core/lib/samen/scope/api_key_revoke.ex
+@@ -18,10 +18,8 @@ defmodule Samen.Scope.ApiKey.RevokeOnce do
+   def change(changeset, _opts, _ctx) do
+     now = DateTime.utc_now() |> DateTime.truncate(:second)
+ 
+-    Ash.Changeset.atomic_update(
+-      changeset,
+-      :revoked_at,
+-      Ash.Expr.expr(if is_nil(revoked_at), do: ^now, else: revoked_at)
+-    )
++    if is_nil(changeset.data.revoked_at),
++      do: Ash.Changeset.force_change_attribute(changeset, :revoked_at, now),
++      else: changeset
+   end
+ end

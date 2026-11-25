@@ -11,6 +11,165 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Security: identity authorization (evaluation 2026-11-13, findings 1, 5, 7, 10, 13, 16)
+
+- **Fixed: any in-org actor could raise a pending invitation to `:owner`, or reopen a revoked one.** `Invitation`'s
+  generic `:update` accepted `role` and `status` on org scope alone. `:update` now takes no input and is forbidden to
+  every actor; the lifecycle moves only through `:accept`, `:revoke` and `:expire`.
+- **Fixed: an admin could mint or edit an API key acting as `:owner`, clear `revoked_at`, or push `expires_at` past the
+  365-day ceiling.** On the `ApiKey` resource: create is bounded by `Samen.Policy.MinterRoleCeiling` (actor role >=
+  `minter_role`, role required); `Samen.Scope.ApiKey.ClampExpiry` clamps every write that sets `expires_at`; `:update`
+  accepts `expires_at` only; revocation is the new one-way `:revoke` action (`Settings.ApiKeys.revoke/3` uses it).
+  `Driftwood.Freight.ApiKey` gets the same ceiling and `:revoke`.
+- **Fixed: pawchart's MCP resolver authenticated expired keys and promoted a role-less key to `:member`.** The digest +
+  not-revoked + not-expired lookup is now `Samen.Scope.ApiKey.active_query/3`, used by demo, driftwood, pawchart and the
+  generated key plug; `Samen.Scope.ApiKey.acting_role/1` refuses a key with no real role.
+  **Upgrade notes for generated apps:** re-generate or hand-apply `lib/<app>_web/api/key_auth_plug.ex` (the lookup becomes
+  `Samen.Scope.ApiKey.active_query(<App>.Operator.ApiKey, digest, now)`; the `# authz-scope:` marker stays on the read);
+  any custom key check should do the same. Code that revokes a key through `:update, %{revoked_at: ...}` must call
+  `:revoke`; code that sets `Org.org_id`/`plan`/`onboarded_at` through `:update` input must `force_change_attribute` it.
+- **Fixed: a viewer could update or delete its own organization.** `Org` update now needs admin+ and destroy needs owner
+  (`Samen.Scope.Role`: owner has "full control, including destroy"; the ADRs are silent, so admin-for-update is a
+  decision). `Org.:update` accepts `name`, `slug` and `max_concurrent_sessions` only: `plan` and `onboarded_at` are no
+  longer inputs, and `Samen.Web.Onboarding.select_plan/4` force-sets a plan it validated against the host's choices. The
+  onboarding wizard now acts with the caller's real membership role instead of a hardcoded `:member`.
+  Sabotages 1246-1255.
+
+### Security: identity authorization, round 2 (review of the round above)
+
+A read-only review of the work above found that several of its claims did not hold. Each finding was reproduced with a
+red test through the real authorization path (a `scope:`/actor, never `authorize?: false`) before it was fixed.
+
+- **Fixed (blocker): `ApiKey :update` extended live keys and revived expired ones**, so "never extends" was false: `nil`
+  became `now + 90d`, any later time was accepted, and an admin could do it to an owner-rank key. An update may now only
+  SHORTEN: `min(requested, 365-day ceiling, current expires_at)`; `nil` keeps the current value; a legacy row with a
+  `nil` expiry may be given a clamped one (the only direction open to it); an already-expired or revoked key refuses
+  every update. `MinterRoleCeiling` stays on `:create` only, by decision: an admin shortening or revoking an owner's key
+  is the permitted, desirable direction and gains nothing from it. Sabotages 1256, 1257.
+- **Fixed: a key row with no `minter_role` authenticated on demo and driftwood with `role: nil`** and passed
+  OrgScope-only resources. All four key-check sites (demo, driftwood, pawchart, the generated plug) now call
+  `Samen.Scope.ApiKey.acting_role/1` and refuse such a key; the guard test requires it at each site. The
+  `acting_role` doc now says only what is wired: no host calls `authorized?/4` at request time. Sabotages 1258, 1259.
+- **Fixed: a key's actor identity was not bound to its minter.** Creating a key through an actor now requires
+  `membership.user_id == actor.id`, an active membership, and `minter_role <=` that membership's CURRENT role
+  (`Samen.Policy.KeyBoundToMinter`); `Driftwood.Freight.ApiKey` force-sets `minter_user_id` from the actor. An
+  `authorize?: false` system or seed path remains the only way to attribute a key to someone else. Sabotages 1260, 1261.
+- **Fixed: a demoted or removed minter's key kept acting with its old rank.** The acting role is the LOWER of the stored
+  `minter_role` and the minting membership's current role (`Samen.Scope.ApiKey.effective_role/2`), computed at use time
+  at all four sites, so no per-key sweep is needed. A key whose membership is not `"active"` authenticates no more.
+  driftwood's Freight keys record a minter USER id, so the plug finds that user's active membership in the key's org
+  (`Samen.Scope.ApiKey.membership_for_user/3`, `Driftwood.Operator.Membership`); a Freight key with no minter user id
+  no longer falls back to a synthetic `apikey:` actor and is refused. A membership row cannot be deleted while it still
+  has keys (foreign key), so suspension (`status`) is the removal that matters for Identity keys. Sabotages 1262-1265.
+- **Fixed: an admin could change `Org.plan` after onboarding.** `Samen.Web.Onboarding.select_plan/4` now needs an
+  OWNER (billing is the owner's, per `Samen.Scope.Role`) and refuses once `onboarded_at` is set
+  (`{:error, :forbidden}` / `{:error, :already_onboarded}`); the wizard is its only caller (no other tenant path writes
+  `Org.plan`). A refused choice or a member's "finish" now shows why instead of re-rendering silently. Sabotages 1266-1268.
+- **Fixed: `Invitation :destroy` passed on org scope alone** (a viewer could delete every invitation, singly or in
+  bulk). It now needs an admin, like `:revoke`; `:revoke` also refuses a row that is not `pending`. Sabotages 1269, 1270.
+- **Fixed: `:revoke` failed OPEN on a partially selected row** (Identity and Freight): a record read without
+  `revoked_at` made the in-Elixir `is_nil` check false, so the action answered `{:ok, _}` and the key stayed live. Revocation
+  is now `Samen.Scope.ApiKey.RevokeOnce`, an atomic `if is_nil(revoked_at), do: now, else: revoked_at` in the UPDATE
+  statement (it keeps the original instant on a second revoke). Sabotages 1271, 1272. Not tested for concurrency: a
+  deterministic two-writer interleaving is not constructible in the sandbox.
+- **Fixed: `Org :create` accepted `plan`, `onboarded_at` and `org_id`.** It takes `name` and `slug` only. The operator
+  console's "New account" uses the new `Org :open_account` (name, slug, plan, org_id), allowed only to an actor scoped to
+  the org it files the account under (`Samen.Policy.FilesUnderActorOrg`). Sabotages 1273, 1274.
+- **Fixed: `active_query/3` silently skipped the expiry filter for a resource without an `:expires_at` attribute.** It
+  now raises unless the resource is on `Samen.Scope.ApiKey.expiryless_resources/0` (today only
+  `Driftwood.Freight.ApiKey`, which has no expiry column). Sabotage 1275.
+- **Changed: the key-lookup guard test** now detects the cheap evasions (filter with the module first, an alias,
+  `Ash.get`/`get_by`, an Ecto `from` on an api-key table, the revoked filter first) and keeps its control cases.
+- **Tests: sabotage twins** for the Freight create ceiling, admin floor and `:revoke` (1276-1278); red tests that a
+  member or viewer is refused by the wizard's Org writes.
+
+**Upgrade notes (everything in this security series, for a host or a generated app)**
+
+- Keys whose minter was demoted lose rank immediately; keys whose minter's membership is suspended (or, for driftwood
+  Freight keys, whose minter has no active membership in the org) stop authenticating. A key with a nil or unknown
+  `minter_role` is now refused at every site, including pawchart (previously it was promoted to `:member`, then
+  refused there only).
+- `ApiKey :update` can only shorten `expires_at`; it accepts `expires_at` and nothing else, and now REJECTS
+  `scopes`, `plane`, `minter_role` and `membership_id` (a wider key is a new key). `:create` now REQUIRES `minter_role`
+  and a `membership_id` that is the actor's own active membership. Anything that extended a key through `:update` must
+  mint a new one.
+- `Invitation :update` rejects all input, even with `authorize?: false` (system paths go through `force_change_attribute`
+  on a purpose-built action); `Invitation :destroy` needs an admin; `:revoke` needs a pending row.
+- `Org :destroy` is owner-only; `Org :update` needs admin+; `Org :create` accepts `name` and `slug` only (seeds and
+  helpers `force_change_attribute` `plan`, `org_id` and `onboarded_at` under `authorize?: false`; the operator "New
+  account" form calls `:open_account`). Any custom scope that writes the Org with `role: :member` (the old wizard pattern)
+  is refused.
+- `Samen.Web.Onboarding.select_plan/4` needs an owner and is closed after onboarding.
+- Legacy key rows with a nil `expires_at` stay non-expiring: there is no backfill (an update may now give them a
+  clamped expiry). Apps generated before this series keep working (their plug already filtered expiry, and the generated
+  `api_case` mints with `minter_role`); re-generating the plug is hygiene for the first fix and REQUIRED to pick up the
+  role cap and the active-membership check (`acting_role/1` and `effective_role/2`).
+- Resource changes only; there is no migration. Test helpers that seed a driftwood Freight key need a real user and
+  membership for `minter_user_id` (see `Driftwood.ApiCase.mk_minter/2`); an Identity key's membership must be active.
+
+### Security: identity authorization, round 3 (second read-only review of round 2)
+
+A second read-only review found no bypass introduced by round 2, but one contract regression and several holes round 2's
+wording assumed closed. Each finding was reproduced with a red test through the real path before it was fixed; one did not
+need a fix (item 10 below). Sabotages 1279-1296.
+
+- **Fixed (regression): driftwood and pawchart answered a membership READ error as a bad key (401), unreported.** Both
+  moduledocs promise "a lookup that fails is 503 + Retry-After, reported once". `Samen.Scope.ApiKey.membership_for_user/3`
+  now returns `{:error, reason}` for a failed read (distinct from `:error`, no active membership); driftwood's key plug and
+  pawchart's MCP resolver report it by name (`driftwood_api_key_membership_load`, `pawchart_mcp_key_membership_load`) and
+  answer 503. Demo and the generated plug already did. Sabotages 1279, 1280.
+- **Fixed: `Org :open_account` (the operator console's "New account") had no operator role floor, and its comment was false.**
+  `save_new` checked no operator role, so an `:operator_readonly` operator could push the event and create an account; `plan`
+  was free text; a slug equal to an existing org's slug or id created a second row under that tenant with a forged name. Now:
+  `save_new` requires `Samen.Web.Operator.Authz.write_role?/1` (`:operator_admin` or `:operator_support`, the one list the
+  webhook DLQ now shares); `plan` must be one the host offers (`Samen.Web.Onboarding.plan_choices/2`, the source `select_plan/4`
+  validates against) or blank (the column default), so a host that wires no `:plan_labels` offers none and the plan field
+  must stay blank; the resource refuses a taken slug (`Samen.Identity.SlugFree`). **The resource cannot see the operator role**
+  (the console acts through the plane's synthetic `:member` scope), so the role gate lives in the console; the action
+  additionally requires `context: %{samen_operator_write: true}` (`Samen.Policy.OperatorConsoleWrite`), which the console sets
+  only after that role check, so a tenant viewer, member or admin calling `:open_account` directly with its own org id is refused.
+  That flag is not a credential: code that can set it can already pass `authorize?: false`. Sabotages 1281-1284.
+- **Fixed: a membership's org could be rewritten, and demo/the generated plug trusted the membership's org.**
+  `effective_role/2` (every key-check site) now refuses a membership whose `org_id` differs from the key's, and demo's and the
+  generated plug's key lookup now select `org_id` (it is not selected by default). `Membership :update` accepts `role` and
+  `status` only (`org_id` and `user_id` are fixed at create; `ManageRole` is unchanged); `User :update` and `Role :update` no
+  longer accept `org_id`. Sabotages 1285-1288.
+- **Fixed: `ApiKey :update` judged liveness and "current expiry" from the struct in hand.** A stale struct of a key another
+  actor had just retired could write a later expiry and revive it. The update now carries the filter `revoked_at IS NULL AND
+  (expires_at IS NULL OR expires_at > now)` and writes `least(stored expires_at, min(requested, ceiling))` in the statement; a
+  stale struct matches zero rows and the update fails. Sabotages 1289, 1290.
+- **Fixed: `Invitation :revoke`'s pending check was read-then-write**, so an accept that committed in between was relabelled
+  "revoked" while the membership existed. The update is filtered on `status = 'pending'` (`Samen.Identity.OnlyPending`);
+  `Invite.revoke/3` answers `{:error, :not_found}` for a stale row. Sabotage 1291.
+- **Fixed: `membership_for_user/3` was `limit(1)` with no sort.** Nothing forbids two active memberships of one user in one org
+  (there is no unique index on `(org_id, user_id)`), so a Freight key's cap depended on row order. The LOWEST-ranked active
+  membership wins. Sabotage 1292.
+- **Fixed: a Freight key minted by an actor whose id is not a UUID with an active membership in the key's org was created and
+  dead on arrival.** **Behaviour change:** a Freight key's `minter_user_id` must now be the UUID of a
+  `Driftwood.Operator.User` with an ACTIVE membership in the key's org; creating one through an actor refuses anything else
+  (old fixture-shaped ids such as `"u-1"` or `"user-N"` are refused; a seed or system path with no actor may still attribute a
+  key). Freight keys are minted in tests and fixtures only, not in-product. Sabotage 1293.
+- **Fixed: wizard and settings role resolution ignored membership status.** `Samen.Web.Settings.Reads.current_membership_result/4`
+  (behind the plan step and the API-key, invitation, billing and reveal-approval screens) counted a suspended or invited
+  membership as authority; only an active one resolves now. Sabotage 1294.
+- **Changed: the expiry-less allow-list no longer lives in samen_core.** A key resource without an `:expires_at` column declares
+  `def samen_key_expiryless?, do: true` itself (`Samen.Scope.ApiKey.expiry_enforced?/1`; `expiryless_resources/0` is removed).
+  Demo, driftwood and pawchart each test their key-check site's resource, so a renamed column fails in CI instead of as a 500 on
+  every request. Sabotages 1295, 1296.
+- **Not changed (finding 10):** the per-site `acting_role/1` call is redundant with `effective_role/2`, but the guard test pins
+  both calls at all four sites by string and sabotages 1258/1259 mutate that exact site-level call; removing it would force
+  rewriting those patches' mutation, so it stays.
+
+**Upgrade notes (round 3)**
+
+- Anything that updated a Membership with `org_id` or `user_id`, or a User or Role with `org_id`, through the default `:update`
+  must create the row correctly instead (or `force_change_attribute` under `authorize?: false`); role and status updates are
+  unchanged.
+- A key resource without `:expires_at` must define `samen_key_expiryless?/0`; the old name-based list is gone.
+- Hosts that call `Org :open_account` must set `context: %{samen_operator_write: true}` after their own operator-role check
+  (the console does); a host with no `:plan_labels` hook must leave the plan blank.
+- Resource changes only; there is no migration.
+
 ### Added: meaning in the catalog (ADR-043 §8a)
 
 - **Added: resources and fields carry meaning that the catalog dump and the AI catalogue expose.** Ash `description`

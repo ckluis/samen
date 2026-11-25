@@ -144,7 +144,42 @@ defmodule Samen.Scopes.Identity.Blueprint do
         end
 
         actions do
-          defaults([:read, :destroy, create: :*, update: :*])
+          defaults([:read])
+
+          # Create takes the org's `name` and `slug` ONLY. The default `create: :*` also accepted
+          # `plan`, `onboarded_at` and `org_id` (an operator-host Org created with `org_id` = the
+          # operator org shows up as a fake account). Seeds/helpers that need those set them with
+          # `force_change_attribute` under `authorize?: false`, never as input.
+          create :create do
+            primary?(true)
+            accept([:name, :slug])
+          end
+
+          # The OPERATOR's account create (`Samen.Web.Operator.AccountsLive` "New account"): an account
+          # row lives in the operator org's own book, so it carries `org_id` (server-side, never client
+          # input) and a `plan`. Unlike `:create` this one is policy-gated (below): the actor must be
+          # scoped to that very org.
+          create :open_account do
+            accept([:name, :slug, :plan, :org_id])
+            change(Samen.Identity.SlugFree)
+          end
+
+          # Settings update (admin+, policy below): name/slug/session cap only. `plan` and
+          # `onboarded_at` are NOT inputs — a tenant actor must never write `plan` to an
+          # arbitrary string. The onboarding steps (`Samen.Web.Onboarding.select_plan/4`,
+          # `complete!/3`) validate the plan against the host's configured choices and
+          # `force_change_attribute` it; billing/operator paths set it the same way.
+          update :update do
+            primary?(true)
+            accept([:name, :slug, :max_concurrent_sessions])
+            # the admin+ SimpleCheck cannot be folded into an atomic UPDATE ... WHERE
+            require_atomic?(false)
+          end
+
+          # Destroy is the owner's alone (policy below).
+          destroy :destroy do
+            primary?(true)
+          end
 
           # Bounded-by-default API read the JSON:API routes bind to (WS-A design §1.1,
           # ADR-016 §3). Distinct from `:read` so internal `Ash.read!` callers keep
@@ -170,11 +205,41 @@ defmodule Samen.Scopes.Identity.Blueprint do
             authorize_if(always())
           end
 
+          # `:open_account` writes `org_id`/`plan`, two checks (both must hold):
+          #   1. the actor must be scoped to the very org the row is filed under (the operator org);
+          #   2. the changeset must carry `context: %{samen_operator_write: true}`.
+          # The operator console acts through the plane's synthetic `:member` scope
+          # (`Samen.Web.Plane.scope/2`), so THIS policy cannot see the authenticated operator role. The
+          # console gates the event on the operator write roles itself (`Samen.Web.Operator.Authz.write_role?/1`,
+          # the same gate as the webhook DLQ) and only then sets the flag; the flag keeps a tenant actor
+          # (viewer/member/admin) from calling this action directly. `plan` is validated against the host's
+          # offered plans, and `slug` against existing orgs, by the console / `Samen.Identity.SlugFree`.
+          # The always-authorized `:create` above stays the registration/bootstrap path and accepts neither
+          # column.
+          policy action(:open_account) do
+            forbid_unless(Samen.Policy.FilesUnderActorOrg)
+            forbid_unless(Samen.Policy.OperatorConsoleWrite)
+            authorize_if(always())
+          end
+
           policy action_type([:read, :update, :destroy]) do
             # The org row's own id must equal the actor's org_id (org anchor
             # self-scope). Named FilterCheck — an inline `expr(id == …)` here would
             # be hygiene-captured inside the blueprint's quote.
             authorize_if(Samen.Policy.OrgIsSelf)
+          end
+
+          # RBAC on top of self-scope (`Samen.Scope.Role`: owner = "full control of the org,
+          # including billing + destroy", admin = manage the org's settings): a viewer/member
+          # could previously rewrite or DELETE its own org on `OrgIsSelf` alone.
+          policy action_type(:update) do
+            forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})
+            authorize_if(always())
+          end
+
+          policy action_type(:destroy) do
+            forbid_unless({Samen.Policy.RoleAtLeast, role: :owner})
+            authorize_if(always())
           end
         end
       end
@@ -270,7 +335,15 @@ defmodule Samen.Scopes.Identity.Blueprint do
         unquote(api_preparations)
 
         actions do
-          defaults([:read, :destroy, create: :*, update: :*])
+          defaults([:read, :destroy, create: :*])
+
+          # `org_id` is NOT an update input (the default `update: :*` accepted it: a user could be moved into another
+          # org, identity-authz review 2, #3); a user's org is fixed at create.
+          update :update do
+            primary?(true)
+            require_atomic?(false)
+            accept([:handle, :status, :full_name, :emails])
+          end
 
           # Bounded-by-default API read the JSON:API routes bind to (WS-A design §1.1,
           # ADR-016 §3). PII on `:api_read` resolves per plane via the resource-level
@@ -406,7 +479,17 @@ defmodule Samen.Scopes.Identity.Blueprint do
         end
 
         actions do
-          defaults([:read, :destroy, create: :*, update: :*])
+          defaults([:read, :destroy, create: :*])
+
+          # A membership UPDATE changes its `role` and `status` only (still under `ManageRole`, below). The default
+          # `update: :*` also accepted `org_id` and `user_id`, so an admin could move a lower-ranked membership into
+          # another org or re-point it at another user (identity-authz review 2, #3). A membership's org and user are
+          # fixed at create.
+          update :update do
+            primary?(true)
+            require_atomic?(false)
+            accept([:role, :status])
+          end
 
           # Bounded-by-default API read the JSON:API routes bind to (WS-A design §1.1,
           # ADR-016 §3). `action_type(:read)` policies below cover it.
@@ -478,7 +561,15 @@ defmodule Samen.Scopes.Identity.Blueprint do
         end
 
         actions do
-          defaults([:read, :destroy, create: :*, update: :*])
+          defaults([:read, :destroy, create: :*])
+
+          # The generic update takes the role definition's own fields. `org_id` is NOT an input: the default
+          # `update: :*` accepted it, so an admin could move a role row into another org (identity-authz review 2, #3).
+          update :update do
+            primary?(true)
+            require_atomic?(false)
+            accept([:name, :label, :rank, :enabled])
+          end
         end
 
         policies do
@@ -578,7 +669,42 @@ defmodule Samen.Scopes.Identity.Blueprint do
         end
 
         actions do
-          defaults([:read, :destroy, create: :*, update: :*])
+          defaults([:read, :destroy])
+
+          # Default create: `minter_role` is bounded by `Samen.Policy.MinterRoleCeiling`
+          # (policy below) and `expires_at` is ALWAYS clamped into `(now, now + max_ttl]`
+          # by `Samen.Scope.ApiKey.ClampExpiry`. `revoked_at` is NOT an input (a key is
+          # born live; revocation is `:revoke`); `token_digest` is `public?: false`, so
+          # it can only be force-set by the minter, never supplied as input.
+          create :create do
+            primary?(true)
+            accept([:org_id, :plane, :scopes, :minter_role, :expires_at, :membership_id])
+            change(Samen.Scope.ApiKey.ClampExpiry)
+            validate(present(:minter_role))
+          end
+
+          # The ONLY actor-facing update: re-time a key. Role, plane, scopes, digest and
+          # revocation are immutable after mint (a wider key is a NEW key, minted under
+          # the ceiling check); expiry is re-clamped on every change.
+          update :update do
+            primary?(true)
+            accept([:expires_at])
+            require_atomic?(false)
+            change(Samen.Scope.ApiKey.ClampExpiry)
+          end
+
+          # Revocation is one-way: sets `revoked_at` once (a second revoke keeps the
+          # original instant) and takes no input, so nothing can clear or back-date it.
+          update :revoke do
+            accept([])
+            require_atomic?(false)
+
+            # `revoked_at` becomes `coalesce(revoked_at, now)` IN THE UPDATE: it never depends on what the
+            # record in hand happens to carry (a row read with `select` omitting `revoked_at` is
+            # `%Ash.NotLoaded{}`; an `is_nil` test on it failed OPEN, answering `{:ok, _}` with the key
+            # still live), and a second revoke keeps the original instant even under concurrency.
+            change(Samen.Scope.ApiKey.RevokeOnce)
+          end
 
           # F3.4 — least-privilege touch action: the auth path stamps ONLY
           # `last_used_at` (never expiry/scopes/plane), best-effort, authorize?: false.
@@ -599,6 +725,13 @@ defmodule Samen.Scopes.Identity.Blueprint do
           policy action_type([:create, :update, :destroy]) do
             forbid_unless(Samen.Policy.OrgScope)
             forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})
+            authorize_if(always())
+          end
+
+          # No escalation: a minted key may not act above the actor that mints it.
+          policy action(:create) do
+            forbid_unless(Samen.Policy.MinterRoleCeiling)
+            forbid_unless(Samen.Policy.KeyBoundToMinter)
             authorize_if(always())
           end
         end
@@ -681,7 +814,20 @@ defmodule Samen.Scopes.Identity.Blueprint do
         end
 
         actions do
-          defaults([:read, :destroy, create: :*, update: :*])
+          defaults([:read, :destroy, create: :*])
+
+          # No actor-writable generic update. The default `update: :*` accepted
+          # `role`/`status`/`email` under the org-scope policy alone, so ANY in-org
+          # actor could raise a pending invite to `:owner` (accept then lands
+          # `invitation.role`) or flip a revoked one back to `"pending"`. The
+          # lifecycle moves only through `:accept`/`:revoke`/`:expire`; this
+          # `:update` takes NO input and is refused to every actor (the policy
+          # below) — system paths that must touch an internal column go through
+          # `force_change_attribute` + `authorize?: false`.
+          update :update do
+            accept([])
+            require_atomic?(false)
+          end
 
           action :reveal_invitation, :map do
             argument(:actor_id, :string, allow_nil?: false)
@@ -733,6 +879,19 @@ defmodule Samen.Scopes.Identity.Blueprint do
             accept([])
             argument(:revoked_at, :utc_datetime, allow_nil?: false)
             require_atomic?(false)
+
+            # Only a PENDING invite can be revoked: an accepted/expired/revoked row is history and
+            # must not be relabelled (fail closed on a row read without `status`).
+            validate(fn changeset, _ctx ->
+              case changeset.data do
+                %{status: "pending"} -> :ok
+                _ -> {:error, field: :status, message: "only a pending invitation can be revoked"}
+              end
+            end)
+
+            # ...and the DATABASE decides again in the UPDATE (`status = 'pending'`): an accept that commits between
+            # the caller's read and this write matches zero rows instead of being relabelled "revoked".
+            change(Samen.Identity.OnlyPending)
             change(set_attribute(:status, "revoked"))
             change(set_attribute(:revoked_at, arg(:revoked_at)))
           end
@@ -772,6 +931,13 @@ defmodule Samen.Scopes.Identity.Blueprint do
             authorize_if(always())
           end
 
+          # Deleting an invitation erases the record (pending ones are a DoS, accepted/revoked ones are
+          # history): admin+, exactly like `:revoke`. Covers bulk destroy too (the check reads only the actor).
+          policy action_type(:destroy) do
+            forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})
+            authorize_if(always())
+          end
+
           # The admin-gated cancel — org-scoped (broad policy above) + admin+.
           policy action(:revoke) do
             forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})
@@ -784,6 +950,13 @@ defmodule Samen.Scopes.Identity.Blueprint do
           # calls; any actor-based attempt is refused (defense in depth, the
           # same fail-closed posture `Credential`/`AuthToken`/`Session` use).
           policy action([:accept, :expire]) do
+            forbid_if(always())
+          end
+
+          # The generic `:update` is closed to actors (it would otherwise pass on
+          # org scope alone); role/status changes are a create-time or lifecycle
+          # transition, never an in-place edit.
+          policy action(:update) do
             forbid_if(always())
           end
 

@@ -95,6 +95,7 @@ defmodule Samen.Web.Onboarding.WizardLive do
     |> then(fn s -> if params["invited"] == "1", do: assign(s, invited?: true), else: s end)
     |> then(fn s -> if params["invite_error"] == "1", do: assign(s, invite_error: invite_refused_copy()), else: s end)
     |> then(fn s -> if params["invite_error"] == "unavailable", do: assign(s, invite_error: invite_unavailable_copy()), else: s end)
+    |> then(fn s -> if params["finish_error"] == "1", do: assign(s, invite_error: finish_refused_copy()), else: s end)
     |> then(fn s -> if params["error"] == "1", do: assign(s, org_error: "Could not save — try again."), else: s end)
   end
 
@@ -195,6 +196,8 @@ defmodule Samen.Web.Onboarding.WizardLive do
 
     case Onboarding.select_plan(mount, actor_scope(mount, org_id, user_id), org_id, key) do
       {:ok, _org} -> {:noreply, socket |> assign(step: :invite) |> load(org_id, user_id)}
+      {:error, :forbidden} -> {:noreply, assign(socket, org_error: "Only the workspace owner can choose a plan.")}
+      {:error, :already_onboarded} -> {:noreply, assign(socket, org_error: "Setup is already complete — plan changes are made in billing.")}
       {:error, _reason} -> {:noreply, assign(socket, org_error: "Could not save the plan selection.")}
     end
   end
@@ -224,11 +227,16 @@ defmodule Samen.Web.Onboarding.WizardLive do
 
   def handle_event("finish", _params, socket) do
     %{samen_mount: mount, org_id: org_id, user_id: user_id} = socket.assigns
-    _ = Onboarding.complete!(mount, actor_scope(mount, org_id, user_id), org_id)
-    {:noreply, load(socket, org_id, user_id)}
+
+    case Onboarding.complete!(mount, actor_scope(mount, org_id, user_id), org_id) do
+      {:ok, _org} -> {:noreply, load(socket, org_id, user_id)}
+      {:error, _reason} -> {:noreply, assign(socket, invite_error: finish_refused_copy())}
+    end
   end
 
   # -- private -------------------------------------------------------------
+
+  defp finish_refused_copy, do: "Only a workspace admin can finish setup."
 
   defp blank_org_form, do: to_form(%{"name" => ""}, as: :org)
   defp org_form(nil), do: blank_org_form()
@@ -241,12 +249,18 @@ defmodule Samen.Web.Onboarding.WizardLive do
 
   defp membership(_mount, _org_id, _user_id), do: {:error, :not_found}
 
-  # A plain own-org actor for the org-naming/plan-selection writes — `Org`'s
-  # own policy (`OrgIsSelf`) checks only `actor.org_id == org.id`, no rank
-  # ceiling, so the real membership role is not required here the way the
-  # invite ceiling needs it (`invite_scope/4` below carries the real role).
-  defp actor_scope(_mount, org_id, user_id) do
-    %Samen.Scope{actor: %{id: user_id, org_id: org_id, role: :member, kind: :tenant, plane: :tenant, verified?: true}}
+  # The own-org actor for the org-naming/plan-selection/completion writes. `Org.:update` needs
+  # an admin+ role (`Samen.Scopes.Identity.Blueprint.define_org/6`), so the scope carries the
+  # caller's REAL membership role — a hardcoded `:member` would be refused for everyone. No
+  # membership in context → no role → the policy refuses (fail closed).
+  defp actor_scope(mount, org_id, user_id) do
+    role =
+      case membership(mount, org_id, user_id) do
+        {:ok, %{role: role}} -> role
+        _ -> nil
+      end
+
+    %Samen.Scope{actor: %{id: user_id, org_id: org_id, role: role, kind: :tenant, plane: :tenant, verified?: true}}
   end
 
   # The SAME "real inviter authority" scope `InvitationsLive` builds — carries

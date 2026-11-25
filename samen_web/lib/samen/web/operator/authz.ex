@@ -55,6 +55,21 @@ defmodule Samen.Web.Operator.Authz do
   @roles Actor.roles()
   @default_login_path "/login"
 
+  # The operator roles that may MUTATE through the console. `:operator_readonly`'s contract is "read the operator
+  # CRM only" (`Samen.OperatorPlane.Actor`): it may render a page, never write through it.
+  @write_roles [:operator_admin, :operator_support]
+
+  @doc "The operator roles that may write through the console (every console write gate reads this one list)."
+  @spec write_roles() :: [Actor.operator_role()]
+  def write_roles, do: @write_roles
+
+  @doc """
+  May this operator role write through the console? `role` is ONLY ever the `:samen_operator_role` assign (derived
+  from the authenticated session principal), never a param. `nil`, unknown and read-only roles fail closed.
+  """
+  @spec write_role?(term()) :: boolean()
+  def write_role?(role), do: role in @write_roles
+
   @doc """
   The `on_mount {Samen.Web.Operator.Authz, :require_operator}` hook `samen_operator_routes/2`
   attaches to the operator `live_session`. Resolves operator authority from the authenticated

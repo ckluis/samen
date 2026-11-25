@@ -1,0 +1,19 @@
+# SABOTAGE: WizardLive finish swallows a refusal again: a member clicking finish sees nothing
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/auth/onboarding_test.exs
+# MUST_FAIL: RED: a member clicking finish sees why it did nothing
+diff --git a/samen_web/lib/samen/web/onboarding/wizard_live.ex b/samen_web/lib/samen/web/onboarding/wizard_live.ex
+index 78ecdd79..e711bc4c 100644
+--- a/samen_web/lib/samen/web/onboarding/wizard_live.ex
++++ b/samen_web/lib/samen/web/onboarding/wizard_live.ex
+@@ -230,7 +230,7 @@ defmodule Samen.Web.Onboarding.WizardLive do
+ 
+     case Onboarding.complete!(mount, actor_scope(mount, org_id, user_id), org_id) do
+       {:ok, _org} -> {:noreply, load(socket, org_id, user_id)}
+-      {:error, _reason} -> {:noreply, assign(socket, invite_error: finish_refused_copy())}
++      {:error, _reason} -> {:noreply, load(socket, org_id, user_id)}
+     end
+   end
+ 

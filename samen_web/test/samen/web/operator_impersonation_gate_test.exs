@@ -40,7 +40,8 @@ defmodule Samen.Web.OperatorImpersonationGateTest do
   defp seed_tenant do
     org =
       Op.Org
-      |> Ash.Changeset.for_create(:create, %{name: "T150 Gate Tenant", plan: "growth"}, authorize?: false)
+      |> Ash.Changeset.for_create(:create, %{name: "T150 Gate Tenant"}, authorize?: false)
+      |> Ash.Changeset.force_change_attribute(:plan, "growth")
       |> Ash.create!()
 
     user =

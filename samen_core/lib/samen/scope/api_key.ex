@@ -39,6 +39,8 @@ defmodule Samen.Scope.ApiKey do
 
   alias Samen.Scope.Role
 
+  require Ash.Query
+
   @type plane :: :tenant | :operator
   @type action :: :read | :write
 
@@ -109,6 +111,194 @@ defmodule Samen.Scope.ApiKey do
   end
 
   def authorized?(_key, _action, _family, _org_id, _now), do: false
+
+  @doc """
+  THE api-key auth-step lookup query — the one place that knows which rows may authenticate.
+
+  Every host's key check (demo's plug, driftwood's plug, pawchart's MCP resolver, the generated
+  app's plug) builds its lookup from THIS query, so a host cannot forget a condition:
+
+    * `token_digest == digest` (the SHA-256 of the presented key);
+    * not revoked (`revoked_at` is nil);
+    * not expired — `expires_at` is nil (a legacy, non-expiring row) or `> now`. A resource
+      with no `expires_at` column must declare `samen_key_expiryless?/0` (driftwood's `Freight.ApiKey`; see
+      `expiry_enforced?/1`), else this RAISES.
+
+  Returns an `Ash.Query`; the CALLER reads it `authorize?: false` (this IS the auth step — no
+  actor exists yet) and carries the `# authz-scope:` marker. A guard test
+  (`Samen.ApiKeyLookupGuardTest`) fails if a host or template keys a lookup on `token_digest`
+  without going through here.
+  """
+  @spec active_query(module(), String.t(), DateTime.t()) :: Ash.Query.t()
+  def active_query(resource, digest, now \\ DateTime.utc_now()) when is_binary(digest) do
+    expiry? = expiry_enforced?(resource)
+
+    query =
+      resource
+      |> Ash.Query.filter(token_digest == ^digest)
+      |> Ash.Query.filter(is_nil(revoked_at))
+
+    if expiry? do
+      Ash.Query.filter(query, is_nil(expires_at) or expires_at > ^now)
+    else
+      query
+    end
+  end
+
+  @doc """
+  Does the key resource enforce an expiry (`true`), or has it DECLARED that it has none (`false`)? A resource
+  with an `:expires_at` attribute is enforced. A resource that authenticates keys with NO expiry column must say
+  so on itself by defining `samen_key_expiryless?/0` returning `true` (driftwood's `Freight.ApiKey` is the one
+  today: F3.4 does not hold for its API keys; see CHANGELOG). The declaration lives on the resource, so this
+  framework module names no host. A resource that is neither (typically a column named something else, e.g.
+  `:expiry`) RAISES: a forgotten or renamed column can never silently turn expiry off. The host test suites call
+  this over every key-check site's resource, so the mistake fails in CI, not as a 500 on every request.
+  """
+  @spec expiry_enforced?(module()) :: boolean()
+  def expiry_enforced?(resource) do
+    cond do
+      Ash.Resource.Info.attribute(resource, :expires_at) -> true
+      expiryless_declared?(resource) -> false
+      true ->
+        raise ArgumentError,
+              "#{inspect(resource)} has no :expires_at attribute and does not declare `def samen_key_expiryless?, do: true` " <>
+                "— refusing to build a key lookup that would silently skip the expiry gate (name the column " <>
+                ":expires_at, or declare the resource expiryless)"
+    end
+  end
+
+  defp expiryless_declared?(resource) do
+    Code.ensure_loaded?(resource) and function_exported?(resource, :samen_key_expiryless?, 0) and
+      resource.samen_key_expiryless?() == true
+  end
+
+  @doc """
+  The role a resolved key row acts with: its `minter_role` if it is a real, in-set role, else
+  `:error`. Every key-check site (demo's and driftwood's plugs, pawchart's MCP resolver, the
+  generated plug) calls this and REFUSES to authenticate on `:error` — it never substitutes a
+  default role, because an actor with `role: nil` would pass OrgScope-only resources. (The pure
+  `authorized?/4` predicate would also deny such a key, but no host calls `authorized?/4` at
+  request time today: declared `scopes` are not enforced per request.)
+  """
+  @spec acting_role(%{optional(:minter_role) => term(), optional(atom()) => term()}) ::
+          {:ok, atom()} | :error
+  def acting_role(%{minter_role: role}) do
+    case Enum.find(Role.all(), &(&1 == role or Atom.to_string(&1) == role)) do
+      nil -> :error
+      valid -> {:ok, valid}
+    end
+  end
+
+  def acting_role(_), do: :error
+
+  @doc """
+  The membership a key row is bound to, read with a bare repo query (no policy can hide it from
+  the check that must see it): `{:ok, %{user_id, org_id, role, status}}` | `:not_found` |
+  `{:error, reason}`. `resource` is the key resource (its `:membership` relationship names the
+  table); `membership_id` is the key's FK.
+  """
+  @spec membership_row(module(), term()) :: {:ok, map()} | :not_found | {:error, term()}
+  def membership_row(resource, membership_id) do
+    with %{type: :belongs_to} = rel <- Ash.Resource.Info.relationship(resource, :membership),
+         dest = rel.destination,
+         repo when not is_nil(repo) <-
+           AshPostgres.DataLayer.Info.repo(dest, :read) || AshPostgres.DataLayer.Info.repo(dest),
+         table when not is_nil(table) <- AshPostgres.DataLayer.Info.table(dest),
+         [pk, user, org, role, status] <-
+           Enum.map([rel.destination_attribute, :user_id, :org_id, :role, :status], &source(dest, &1)),
+         false <- Enum.any?([pk, user, org, role, status], &is_nil/1),
+         {:ok, bin} <- Ecto.UUID.dump(to_string(membership_id)) do
+      sql = "SELECT #{user}, #{org}, #{role}, #{status} FROM #{table} WHERE #{pk} = $1 LIMIT 1"
+
+      case repo.query(sql, [bin]) do
+        {:ok, %{rows: [[u, o, r, st]]}} ->
+          {:ok, %{user_id: load_uuid(u), org_id: load_uuid(o), role: r, status: st}}
+
+        {:ok, %{rows: []}} ->
+          :not_found
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      _ -> {:error, :membership_unresolvable}
+    end
+  end
+
+  defp source(resource, name) do
+    case Ash.Resource.Info.attribute(resource, name) do
+      nil -> nil
+      attr -> to_string(attr.source || attr.name)
+    end
+  end
+
+  defp load_uuid(nil), do: nil
+
+  defp load_uuid(bin) when byte_size(bin) == 16 do
+    case Ecto.UUID.load(bin) do
+      {:ok, uuid} -> uuid
+      :error -> bin
+    end
+  end
+
+  defp load_uuid(other), do: other
+
+  @doc """
+  The role a key ACTS with at use time: the LOWER of its stored `minter_role` and the role its
+  minting membership holds NOW. `membership` is the key's membership as read at the auth step
+  (`%{org_id:, role:, status:}`); a key whose membership is missing (`nil`), not `"active"`, in a
+  DIFFERENT org than the key's own `org_id`, or has an out-of-set role is refused (`:error`). So demoting a member lowers every key they minted, and
+  removing or suspending them kills those keys, with no per-key sweep.
+
+  Every key-check site calls this (after `acting_role/1`); it is the single place that knows the rule.
+  """
+  @spec effective_role(map(), map() | nil) :: {:ok, atom()} | :error
+  def effective_role(key_row, %{role: membership_role, status: "active"} = membership) do
+    with :ok <- same_org(key_row, membership),
+         {:ok, stored} <- acting_role(key_row),
+         {:ok, current} <- acting_role(%{minter_role: membership_role}) do
+      {:ok, if(Role.rank(stored) <= Role.rank(current), do: stored, else: current)}
+    end
+  end
+
+  def effective_role(_key_row, _membership), do: :error
+
+  # The membership must belong to the KEY's org. A site that builds its actor's `org_id` from the membership
+  # (demo, the generated plug) would otherwise act in whatever org a rewritten membership row names. Both orgs
+  # must be present and equal; anything else (a missing or unloaded column) fails closed.
+  defp same_org(%{org_id: key_org}, %{org_id: mbr_org}) when is_binary(key_org) and is_binary(mbr_org) do
+    if key_org == mbr_org, do: :ok, else: :error
+  end
+
+  defp same_org(_key_row, _membership), do: :error
+
+  @doc """
+  The ACTIVE membership of `user_id` in `org_id` — the LOWEST-ranked one if the user holds several (for a key that records a minter user id rather
+  than a membership FK — driftwood's Freight keys). `{:ok, membership}` | `:error` (none, not a
+  UUID — all fail closed) | `{:error, reason}` (the READ itself failed: an outage, not "no such
+  membership", so a caller answers "could not check" and reports it, never "bad key").
+  """
+  @spec membership_for_user(module(), term(), term()) :: {:ok, map()} | :error | {:error, term()}
+  def membership_for_user(membership_resource, org_id, user_id) do
+    with {:ok, uid} <- Ecto.UUID.cast(to_string(user_id)),
+         {:ok, oid} <- Ecto.UUID.cast(to_string(org_id)) do
+      membership_resource
+      |> Ash.Query.filter(user_id == ^uid and org_id == ^oid and status == "active")
+      |> Ash.Query.select([:id, :org_id, :user_id, :role, :status])
+      # authz-scope: API-key AUTH-STEP membership lookup (no actor exists yet), keyed on the key's own user + org
+      |> Ash.read(authorize?: false)
+      |> case do
+        # Nothing in the schema forbids two active memberships of one user in one org (no unique index on
+        # (org_id, user_id)): take the LOWEST-ranked one (id breaks a tie), so the key's cap never depends on row
+        # order and a second, higher-ranked row can never raise it.
+        {:ok, [_ | _] = memberships} -> {:ok, Enum.min_by(memberships, &{Role.rank(&1.role), to_string(&1.id)})}
+        {:ok, []} -> :error
+        {:error, error} -> {:error, error}
+      end
+    else
+      _ -> :error
+    end
+  end
 
   @doc """
   Is this key past its bounded expiry at `now`? (F3.4 deny-on-read predicate.)

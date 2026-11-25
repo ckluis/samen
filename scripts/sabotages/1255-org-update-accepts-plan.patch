@@ -1,0 +1,19 @@
+# SABOTAGE: Org :update accepts plan/onboarded_at: an owner sets plan to an arbitrary string
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: RED: no tenant actor can write
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index 4569b637..10370d2d 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -153,7 +153,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
+           # `force_change_attribute` it; billing/operator paths set it the same way.
+           update :update do
+             primary?(true)
+-            accept([:name, :slug, :max_concurrent_sessions])
++            accept([:name, :slug, :max_concurrent_sessions, :plan, :onboarded_at])
+             # the admin+ SimpleCheck cannot be folded into an atomic UPDATE ... WHERE
+             require_atomic?(false)
+           end

@@ -1,0 +1,21 @@
+# SABOTAGE: pawchart MCP resolver promotes a role-less key to :member instead of refusing it
+#
+# Flips the named test(s).
+# APP: pawchart
+# TEST_FILES: test/mcp_auth_test.exs
+# MUST_FAIL: a key with NO minter_role
+diff --git a/pawchart/lib/pawchart_web/api/mcp_key_resolver.ex b/pawchart/lib/pawchart_web/api/mcp_key_resolver.ex
+index 24d2ca9..fc98970 100644
+--- a/pawchart/lib/pawchart_web/api/mcp_key_resolver.ex
++++ b/pawchart/lib/pawchart_web/api/mcp_key_resolver.ex
+@@ -50,9 +50,7 @@ defmodule PawChartWeb.Api.McpKeyResolver do
+         # A key with no/unknown `minter_role` authorizes nothing (`Samen.Scope.ApiKey.authorized?/4`
+         # denies it), so it is refused here — never promoted to a default role.
+         with true <- Plug.Crypto.secure_compare(digest, to_string(row.token_digest)),
+-             {:ok, _stored} <- Samen.Scope.ApiKey.acting_role(row),
+-             {:ok, mbr} <- membership(row),
+-             {:ok, role} <- Samen.Scope.ApiKey.effective_role(row, mbr) do
++             {:ok, role} <- {:ok, row.minter_role || :member} do
+           {:ok, scope_for(row, role)}
+         else
+           # The minting membership could not be READ: "could not check", not "bad key" (503, reported by `membership/1`).

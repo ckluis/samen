@@ -1,0 +1,18 @@
+# SABOTAGE: Org :open_account stops refusing a slug that collides with an existing org
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: Org :open_account refuses a slug that is another org's slug or id
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index ac2af80c..797ad1be 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -161,7 +161,6 @@ defmodule Samen.Scopes.Identity.Blueprint do
+           # scoped to that very org.
+           create :open_account do
+             accept([:name, :slug, :plan, :org_id])
+-            change(Samen.Identity.SlugFree)
+           end
+ 
+           # Settings update (admin+, policy below): name/slug/session cap only. `plan` and
