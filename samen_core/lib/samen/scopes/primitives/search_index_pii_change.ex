@@ -86,6 +86,8 @@ defmodule Samen.Scopes.Primitives.SearchIndexPiiChange do
 
     {:ok, Enum.map(names, &to_string/1) ++ storage}
   rescue
-    _ -> {:error, "the PII declarations of #{inspect(module)} cannot be read, so the field cannot be cleared"}
+    e ->
+      Samen.Observability.Failure.report(:search_index_pii_read, nil, e)
+      {:error, "the PII declarations of #{inspect(module)} cannot be read, so the field cannot be cleared"}
   end
 end

@@ -86,7 +86,9 @@ defmodule Samen.Policy.SubjectInOrg do
       not is_nil(Ash.Resource.Info.attribute(module, :org_id)) and
       Ash.Resource.Info.data_layer(module) == AshPostgres.DataLayer
   rescue
-    _ -> false
+    e ->
+      Samen.Observability.Failure.report(:subject_in_org_resource, nil, e)
+      false
   end
 
   defp exists_in_org?(subject, id, org_id) do
@@ -112,7 +114,9 @@ defmodule Samen.Policy.SubjectInOrg do
       _ -> {:error, :unreadable}
     end
   rescue
-    _ -> {:error, :unreadable}
+    e ->
+      Samen.Observability.Failure.report(:subject_in_org_lookup, nil, e)
+      {:error, :unreadable}
   end
 
   defp source(attr), do: to_string(attr.source || attr.name)
