@@ -20,7 +20,11 @@ defmodule Samen.Web.Csv.ExportController do
        download would be posture; masking the cells is the guarantee.
 
   Mount/session posture mirrors `Samen.Web.Files.BytesController`: mount from
-  `conn.assigns[:samen_mount]`, org via `CurrentOrg.resolve/3`.
+  `conn.assigns[:samen_mount]` (set by the route: `samen_csv_routes/3` emits `assigns: %{samen_mount: mount}`),
+  org via `CurrentOrg.resolve/3`.
+
+    4. **Row limit** — an export is built in memory, so `Csv.export/3` refuses an org above
+       `Csv.max_export_rows/0` rows: 413, never a truncated file.
   """
   use Phoenix.Controller, formats: [:html]
 
@@ -64,8 +68,12 @@ defmodule Samen.Web.Csv.ExportController do
             )
             |> send_resp(200, csv)
 
-          {:error, reason} ->
-            conn |> put_status(422) |> text("export failed: #{inspect(reason)}")
+          # Fixed, value-free copy: the reason is for the log, never the body.
+          {:error, {:too_many_rows, _max}} ->
+            conn |> put_status(413) |> text("export too large")
+
+          {:error, _reason} ->
+            conn |> put_status(422) |> text("export failed")
         end
     end
   end

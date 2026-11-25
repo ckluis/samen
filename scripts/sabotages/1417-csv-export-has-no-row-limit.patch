@@ -1,0 +1,19 @@
+# SABOTAGE: an export is built in memory whatever the org's row count
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/files_csv_router_test.exs
+# MUST_FAIL: an export larger than the row limit is refused
+diff --git a/samen_web/lib/samen/web/csv.ex b/samen_web/lib/samen/web/csv.ex
+index e9ac2e4c..3af8783b 100644
+--- a/samen_web/lib/samen/web/csv.ex
++++ b/samen_web/lib/samen/web/csv.ex
+@@ -226,7 +226,7 @@ defmodule Samen.Web.Csv do
+     page = page(base, scope, state, cols)
+     count = count + length(page.items)
+ 
+-    if count > max_rows do
++    if false and count > max_rows do
+       {:error, {:too_many_rows, max_rows}}
+     else
+       resolved =

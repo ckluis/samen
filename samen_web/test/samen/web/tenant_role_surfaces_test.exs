@@ -199,8 +199,6 @@ defmodule Samen.Web.TenantRoleSurfacesTest do
 
   test "ARMED + a failed membership lookup is an ERROR state, never an empty page", ctx do
     login = log_in(ctx.member)
-    {_p, mount_session} = {nil, nil}
-    _ = mount_session
 
     socket = live_socket(login, ContactsLive, "/crm/contacts", ctx.org_id)
     broken = %{socket.assigns.samen_mount | labels: Map.put(socket.assigns.samen_mount.labels, :identity_namespace, Samen.WebTest.NoSuchIdentity)}
@@ -443,7 +441,9 @@ defmodule Samen.Web.TenantRoleSurfacesTest do
     end
   end
 
-  # -- (c) CSV export + file bytes ------------------------------------------------------------
+  # -- (c) CSV export + file bytes, called directly -------------------------------------------
+  # These call the controllers with the mount set by hand: they prove the resolver the controllers use, not
+  # the route. `files_csv_router_test.exs` drives the same requests through the real router and a real login.
 
   defp controller_conn(login, mount, org_id) do
     build_conn(:get, "/x?org=#{org_id}")
@@ -472,9 +472,37 @@ defmodule Samen.Web.TenantRoleSurfacesTest do
     |> Samen.Web.Csv.ExportController.export(%{"resource" => "Person", "org" => org_id})
   end
 
-  defp bytes(login, mount, org_id) do
+  defp bytes(login, mount, org_id, file_id) do
     controller_conn(login, mount, org_id)
-    |> Samen.Web.Files.BytesController.serve(%{"id" => Ash.UUID.generate(), "org" => org_id})
+    |> Samen.Web.Files.BytesController.serve(%{"id" => file_id, "org" => org_id})
+  end
+
+  # A REAL active file in `org_id` (uploaded through the chokepoint, promoted), so the controller reads a row
+  # and serves its bytes: the role assertion is made on a served file, not on a 404 for a random id.
+  defp active_file!(org_id) do
+    root = Path.join(System.tmp_dir!(), "role_surfaces_files_#{System.unique_integer([:positive])}")
+    prev = Application.get_env(:samen_core, Samen.Files, [])
+    Application.put_env(:samen_core, Samen.Files, storage: Samen.Files.Storage.Local, storage_config: %{root: root})
+
+    on_exit(fn ->
+      File.rm_rf!(root)
+      Application.put_env(:samen_core, Samen.Files, prev)
+    end)
+
+    {:ok, file} =
+      Samen.Files.upload(
+        %{org_id: org_id},
+        %{filename: "role.txt", content_type: "text/plain", binary: "ROLE-BYTES"},
+        file_module: Samen.WebTest.Primitives.File,
+        repo: Samen.WebTest.Repo,
+        storage: Samen.Files.Storage.Local,
+        storage_config: %{root: root},
+        allowed_content_types: ~w(text/plain),
+        max_bytes: 1_048_576
+      )
+
+    {:ok, active} = file |> Ash.Changeset.for_update(:promote, %{}) |> Ash.update(authorize?: false)
+    active
   end
 
   defp files_mount(labels \\ @labels), do: Mount.new(:files, Samen.WebTest.Primitives, Samen.WebTest.Repo, labels: labels)
@@ -505,21 +533,26 @@ defmodule Samen.Web.TenantRoleSurfacesTest do
   end
 
   test "file bytes act as the RESOLVED role and refuse no-membership / failed lookups", ctx do
-    for {who, role} <- [viewer: :viewer, member: :member] do
-      conn = bytes(log_in(Map.fetch!(ctx, who)), files_mount(), ctx.org_id)
+    file = active_file!(ctx.org_id)
+
+    for {who, role} <- [viewer: :viewer, member: :member, owner: :owner] do
+      conn = bytes(log_in(Map.fetch!(ctx, who)), files_mount(), ctx.org_id, file.id)
       assert conn.assigns[:samen_acting_role] == role
-      assert conn.status == 404
+      assert conn.status == 200
+      assert conn.resp_body == "ROLE-BYTES"
     end
 
     uid = user_id(ctx.member, ctx.org_id)
     suspend!(ctx.member, ctx.org_id)
-    conn = bytes(legacy_login(uid, ctx.org_id), files_mount(), ctx.org_id)
+    conn = bytes(legacy_login(uid, ctx.org_id), files_mount(), ctx.org_id, file.id)
     assert conn.status == 403
+    refute conn.resp_body =~ "ROLE-BYTES"
     refute Map.has_key?(conn.assigns, :samen_acting_role)
 
     broken = files_mount(Map.put(@labels, :identity_namespace, Samen.WebTest.NoSuchIdentity))
-    conn = ExUnit.CaptureLog.with_log(fn -> bytes(legacy_login(user_id(ctx.viewer, ctx.org_id), ctx.org_id), broken, ctx.org_id) end) |> elem(0)
+    conn = ExUnit.CaptureLog.with_log(fn -> bytes(legacy_login(user_id(ctx.viewer, ctx.org_id), ctx.org_id), broken, ctx.org_id, file.id) end) |> elem(0)
     assert conn.status == 503
+    refute conn.resp_body =~ "ROLE-BYTES"
   end
 
   # -- profile ---------------------------------------------------------------------------------

@@ -123,8 +123,10 @@ defmodule Samen.Web.Csv do
   end
 
   @doc """
-  Export `resource` rows for `scope` as an RFC-4180 CSV binary — `{:ok, csv}` or
-  `{:error, {:unknown_columns, cols}}`.
+  Export `resource` rows for `scope` as an RFC-4180 CSV binary — `{:ok, csv}`,
+  `{:error, {:unknown_columns, cols}}`, or `{:error, {:too_many_rows, max}}` when the org holds more
+  than `:max_rows` rows (refused as soon as the page that crosses the limit is read: an export is built
+  in memory, so it is never unbounded, and never silently truncated).
 
   Options:
 
@@ -135,20 +137,34 @@ defmodule Samen.Web.Csv do
       names are rejected, never silently dropped).
     * `:page_size` — keyset page size (clamped by `Reads`; default `#{Reads.default_page_size()}`).
     * `:query`     — optional pre-scoped `Ash.Query` base (defaults to `resource`).
+    * `:max_rows`  — the row limit (default `max_export_rows/0`).
   """
   def export(resource, scope, opts \\ []) do
     with {:ok, cols} <- validate_columns(resource, Keyword.get(opts, :columns)) do
       page_size = Keyword.get(opts, :page_size, Reads.default_page_size())
       base = Keyword.get(opts, :query, resource)
 
-      rows = export_rows(base, resource, scope, cols, page_size, opts, nil, [])
-      # WS-F5 F5.2 — row-count histogram sample through the bounded Samen.Metrics
-      # machinery (`samen.csv.export.row_count`). The count is a measurement; the only
-      # tag is the bounded `:result`. Best-effort — never fails an export.
-      emit_export_telemetry(length(rows))
-      {:ok, serialize([Enum.map(cols, &to_string/1) | rows])}
+      max_rows = Keyword.get(opts, :max_rows) || max_export_rows()
+
+      with {:ok, rows} <- export_rows(base, resource, scope, cols, page_size, opts, nil, [], 0, max_rows) do
+        # WS-F5 F5.2 — row-count histogram sample through the bounded Samen.Metrics
+        # machinery (`samen.csv.export.row_count`). The count is a measurement; the only
+        # tag is the bounded `:result`. Best-effort — never fails an export.
+        emit_export_telemetry(length(rows))
+        {:ok, serialize([Enum.map(cols, &to_string/1) | rows])}
+      end
     end
   end
+
+  @default_max_export_rows 100_000
+
+  @doc """
+  The most rows one export may hold (`config :samen_web, Samen.Web.Csv, max_export_rows: n`; default
+  #{@default_max_export_rows}). An export is assembled in memory, so a larger org is refused with
+  `{:error, {:too_many_rows, n}}` rather than built.
+  """
+  @spec max_export_rows() :: pos_integer()
+  def max_export_rows, do: Application.get_env(:samen_web, __MODULE__, [])[:max_export_rows] || @default_max_export_rows
 
   defp emit_export_telemetry(row_count) do
     :telemetry.execute([:samen, :csv, :export, :stop], %{row_count: row_count}, %{result: :ok})
@@ -204,30 +220,35 @@ defmodule Samen.Web.Csv do
 
   # Keyset-iterate pages via page/4 → Reads.page!/3 (AC-G15-4) and resolve every
   # page through PiiResolution BEFORE serialization (AC-G15-2).
-  defp export_rows(base, resource, scope, cols, page_size, opts, cursor, acc) do
+  defp export_rows(base, resource, scope, cols, page_size, opts, cursor, acc, count, max_rows) do
     state = %ListState{page_size: page_size, sort: {:id, :asc}, cursor: cursor}
 
     page = page(base, scope, state, cols)
+    count = count + length(page.items)
 
-    resolved =
-      Samen.Api.PiiResolution.resolve(
-        page.items,
-        resource,
-        actor_of(scope),
-        repo: Keyword.fetch!(opts, :repo)
-      )
-
-    row_values =
-      Enum.map(resolved, fn record ->
-        Enum.map(cols, fn col -> cell_for_column(Map.get(record, col), resource, col) end)
-      end)
-
-    acc = acc ++ row_values
-
-    if page.has_more do
-      export_rows(base, resource, scope, cols, page_size, opts, page.next_cursor, acc)
+    if count > max_rows do
+      {:error, {:too_many_rows, max_rows}}
     else
-      acc
+      resolved =
+        Samen.Api.PiiResolution.resolve(
+          page.items,
+          resource,
+          actor_of(scope),
+          repo: Keyword.fetch!(opts, :repo)
+        )
+
+      row_values =
+        Enum.map(resolved, fn record ->
+          Enum.map(cols, fn col -> cell_for_column(Map.get(record, col), resource, col) end)
+        end)
+
+      acc = [row_values | acc]
+
+      if page.has_more do
+        export_rows(base, resource, scope, cols, page_size, opts, page.next_cursor, acc, count, max_rows)
+      else
+        {:ok, acc |> Enum.reverse() |> Enum.concat()}
+      end
     end
   end
 

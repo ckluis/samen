@@ -123,6 +123,19 @@ defmodule Samen.WebTest.SecurityRouter do
     # (`notifications_spine_session_test.exs`).
     samen_auth_routes(namespace: Samen.WebTest.Operator, repo: Samen.WebTest.Repo)
 
+    # The plain-controller routes the files and CSV macros emit (`/files/:id/bytes`,
+    # `/csv/export/:resource`): mounted so a REAL router carries the mount to the controllers
+    # (`files_csv_router_test.exs`), the way a host's router does.
+    samen_files_routes(:files, Samen.WebTest.Primitives,
+      repo: Samen.WebTest.Repo,
+      labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)
+    )
+
+    samen_csv_routes(:csv, Samen.WebTest.Crm,
+      repo: Samen.WebTest.Repo,
+      labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)
+    )
+
     samen_notifications_routes(:notifications, Samen.WebTest.Primitives,
       repo: Samen.WebTest.Repo,
       labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)

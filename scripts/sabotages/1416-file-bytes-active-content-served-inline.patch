@@ -1,0 +1,21 @@
+# SABOTAGE: an uploaded HTML file is served inline with no sandbox CSP, so it runs as a page on the app's 
+#   origin
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/files_csv_router_test.exs
+# MUST_FAIL: a stored file cannot run as a page on the app's origin
+diff --git a/samen_web/lib/samen/web/files/bytes_controller.ex b/samen_web/lib/samen/web/files/bytes_controller.ex
+index 85ee8828..1649e916 100644
+--- a/samen_web/lib/samen/web/files/bytes_controller.ex
++++ b/samen_web/lib/samen/web/files/bytes_controller.ex
+@@ -151,8 +151,7 @@ defmodule Samen.Web.Files.BytesController do
+       put_resp_header(conn, "content-disposition", ~s(inline; filename="#{name}"))
+     else
+       conn
+-      |> put_resp_header("content-disposition", ~s(attachment; filename="#{name}"))
+-      |> put_resp_header("content-security-policy", "default-src 'none'; sandbox")
++      |> put_resp_header("content-disposition", ~s(inline; filename="#{name}"))
+     end
+   end
+ 

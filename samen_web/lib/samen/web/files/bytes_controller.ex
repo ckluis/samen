@@ -25,14 +25,16 @@ defmodule Samen.Web.Files.BytesController do
 
   ## Mount / session
 
-  The mount is read from `conn.assigns[:samen_mount]` (populated by the host's
-  `live_session` plug chain — the same mount the LiveViews receive). The `org_id` is
+  The mount is read from `conn.assigns[:samen_mount]`, which the route itself sets
+  (`Samen.Web.Router.samen_files_routes/3` emits `assigns: %{samen_mount: mount}`, as the ICS
+  route does): no host pipeline sets it, and without it every request is a 503 "no mount". The `org_id` is
   resolved from the session via `Samen.Web.CurrentOrg.resolve/3` so the byte-serve
   route participates in the SAME org-scoping as the LiveViews.
 
   The route is mounted by `Samen.Web.Router.samen_files_routes/3` as
-  `GET /<path>/:id` → `Samen.Web.Files.BytesController, :serve`. A host's
+  `GET /<path>/:id/bytes` → `Samen.Web.Files.BytesController, :serve`. A host's
   `:browser` pipeline plug chain (including the session plug) must wrap this route.
+  The route is driven through a real router in `Samen.Web.FilesCsvRouterTest`.
   """
   use Phoenix.Controller, formats: [:html]
 
@@ -118,10 +120,8 @@ defmodule Samen.Web.Files.BytesController do
 
         conn
         |> put_resp_content_type(content_type)
-        |> put_resp_header(
-          "content-disposition",
-          ~s(inline; filename="#{safe_filename(file)}")
-        )
+        |> put_resp_header("x-content-type-options", "nosniff")
+        |> put_disposition(content_type, file)
         |> send_resp(200, binary)
 
       {:error, :not_previewable} ->
@@ -133,6 +133,26 @@ defmodule Samen.Web.Files.BytesController do
         # The kind (atom / exception module) is logged for the operator; nothing else.
         Logger.error("[Samen.Web.Files] storage read failed kind=#{reason_kind(reason)}")
         conn |> put_status(500) |> text("storage error")
+    end
+  end
+
+  # The bytes are an UPLOAD: its content type is whatever the host allowed through `Samen.Files.upload/3`, and
+  # this route serves it from the app's own origin. So it never sniffs (`nosniff`), and only the types a browser
+  # renders without running script (`@inline_types`) are shown inline; everything else (an HTML upload, an SVG)
+  # is an attachment under a `sandbox` CSP, so it can neither run as a page on this origin nor be framed.
+  # (The sandbox CSP is not put on the inline types: it would stop a browser's PDF viewer.)
+  @inline_types ~w(image/png image/jpeg image/gif image/webp application/pdf text/plain)
+
+  defp put_disposition(conn, content_type, file) do
+    base = content_type |> String.split(";") |> hd() |> String.trim() |> String.downcase()
+    name = safe_filename(file)
+
+    if base in @inline_types do
+      put_resp_header(conn, "content-disposition", ~s(inline; filename="#{name}"))
+    else
+      conn
+      |> put_resp_header("content-disposition", ~s(attachment; filename="#{name}"))
+      |> put_resp_header("content-security-policy", "default-src 'none'; sandbox")
     end
   end
 
