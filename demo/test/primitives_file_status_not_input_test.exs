@@ -66,7 +66,7 @@ defmodule Demo.PrimitivesFileStatusNotInputTest do
     assert Ash.get!(File, file.id, authorize?: false).status == :quarantined
   end
 
-  test "RED: an admin cannot either, and status is no input on create" do
+  test "RED: an admin cannot either" do
     org = mk_org()
     admin = mk_actor(org.id, :admin)
     file = quarantined(org.id)
@@ -76,14 +76,33 @@ defmodule Demo.PrimitivesFileStatusNotInputTest do
              |> Ash.Changeset.for_update(:update, %{status: :active}, actor: admin.actor)
              |> Ash.update(actor: admin.actor)
 
-    assert {:error, _} =
-             File
-             |> Ash.Changeset.for_create(
-               :create,
-               %{filename: "n.pdf", org_id: org.id, status: :active},
-               actor: admin.actor
-             )
-             |> Ash.create(actor: admin.actor)
+    assert Ash.get!(File, file.id, authorize?: false).status == :quarantined
+  end
+
+  test "RED: status is no input on create: an otherwise VALID governed create naming it is refused for THAT input" do
+    org = mk_org()
+
+    attrs = %{
+      filename: "n.pdf",
+      content_type: "application/pdf",
+      size_bytes: 64,
+      storage_key: "#{org.id}/valid-key",
+      org_id: org.id
+    }
+
+    changeset = fn extra ->
+      File
+      |> Ash.Changeset.for_create(:create, Map.merge(attrs, extra), authorize?: false)
+      |> Ash.Changeset.set_context(%{private: %{samen_files_chokepoint: true}})
+    end
+
+    # positive control: the same create WITHOUT status succeeds, and takes the quarantine default
+    assert {:ok, ok} = Ash.create(changeset.(%{}))
+    assert ok.status == :quarantined
+
+    # with status: it fails, and the error is about the `status` INPUT (not allow_nil or the chokepoint)
+    assert {:error, %Ash.Error.Invalid{errors: errors}} = Ash.create(changeset.(%{status: :active}))
+    assert Enum.any?(errors, &match?(%Ash.Error.Invalid.NoSuchInput{input: :status}, &1))
   end
 
   test "RED: no actor may run the :promote system action" do
