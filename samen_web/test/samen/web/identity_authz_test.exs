@@ -729,8 +729,8 @@ defmodule Samen.Web.IdentityAuthzTest do
   describe "E. Membership/User/Role :update cannot move a row to another org" do
     defp org_of(mod, id), do: mod |> Ash.Query.filter(id == ^id) |> Ash.Query.ensure_selected([:org_id]) |> Ash.read!(authorize?: false) |> hd() |> Map.fetch!(:org_id)
 
-    defp mk_org_member(role) do
-      r = register!()
+    defp mk_org_member(role, r \\ nil) do
+      r = r || register!()
       # a second user in the registrant's org holding `role`
       user =
         User
@@ -741,15 +741,30 @@ defmodule Samen.Web.IdentityAuthzTest do
       {r, user, mbr}
     end
 
+    # The input is not an input of the action at all (`NoSuchInput`), which is what the accept-list guarantees: a
+    # widened accept-list would turn this into the org_id pin's refusal (an `InvalidAttribute`) or into no error.
+    defp assert_not_accepted({:error, %Ash.Error.Invalid{errors: errors}}, input) do
+      assert Enum.any?(errors, &match?(%Ash.Error.Invalid.NoSuchInput{input: ^input}, &1)),
+             "expected #{inspect(input)} to be refused as an unknown input, got: #{inspect(Enum.map(errors, & &1.__struct__))}"
+    end
+
+    defp assert_not_accepted(other, input), do: flunk("expected #{inspect(input)} to be refused as an unknown input, got: #{inspect(other)}")
+
     test "RED: an admin cannot move a lower-ranked membership to another org or re-point its user; CONTROL: role and status changes still work" do
       {r, user, mbr} = mk_org_member(:member)
+      {_r, same_org_user, _same_org_mbr} = mk_org_member(:viewer, r)
       other = register!()
       s = scope(r, :admin)
       upd = fn attrs -> mbr |> Ash.Changeset.for_update(:update, attrs, scope: s) |> Ash.update(scope: s) end
 
-      assert {:error, _} = upd.(%{org_id: other.org.id})
-      assert {:error, _} = upd.(%{user_id: other.user.id})
+      # (the accept-list, not the org_id pin or SameOrgFk, is what refuses each of these)
+      assert_not_accepted(upd.(%{org_id: other.org.id}), :org_id)
+      assert_not_accepted(upd.(%{user_id: other.user.id}), :user_id)
       assert org_of(Membership, mbr.id) == r.org.id
+      assert reread(Membership, mbr.id).user_id == user.id
+
+      # ... including a re-point to another user of the SAME org, which no cross-org check could ever catch
+      assert_not_accepted(upd.(%{user_id: same_org_user.id}), :user_id)
       assert reread(Membership, mbr.id).user_id == user.id
 
       # CONTROL: role/status keep working, under the same ManageRole rule (an admin may set :member/:viewer, never :owner)
@@ -763,7 +778,7 @@ defmodule Samen.Web.IdentityAuthzTest do
       other = register!()
       s = scope(r, :admin)
 
-      assert {:error, _} = user |> Ash.Changeset.for_update(:update, %{org_id: other.org.id}, scope: s) |> Ash.update(scope: s)
+      assert_not_accepted(user |> Ash.Changeset.for_update(:update, %{org_id: other.org.id}, scope: s) |> Ash.update(scope: s), :org_id)
       assert org_of(User, user.id) == r.org.id
       assert {:ok, %{handle: "renamed-e"}} = user |> Ash.Changeset.for_update(:update, %{handle: "renamed-e"}, scope: s) |> Ash.update(scope: s)
 
@@ -772,7 +787,7 @@ defmodule Samen.Web.IdentityAuthzTest do
         |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, name: :member, rank: 1, label: "M"}, authorize?: false)
         |> Ash.create!()
 
-      assert {:error, _} = role |> Ash.Changeset.for_update(:update, %{org_id: other.org.id}, scope: s) |> Ash.update(scope: s)
+      assert_not_accepted(role |> Ash.Changeset.for_update(:update, %{org_id: other.org.id}, scope: s) |> Ash.update(scope: s), :org_id)
       assert org_of(Samen.WebTest.Operator.Role, role.id) == r.org.id
       assert {:ok, %{label: "Renamed"}} = role |> Ash.Changeset.for_update(:update, %{label: "Renamed"}, scope: s) |> Ash.update(scope: s)
     end
@@ -800,4 +815,130 @@ defmodule Samen.Web.IdentityAuthzTest do
   end
 
   def plans(_org_id), do: [%{key: "free", label: "Free"}, %{key: "pro", label: "Pro"}]
+
+  # ===========================================================================
+  # G. User :update / :destroy / :create are not gated on org scope alone
+  # ===========================================================================
+
+  describe "G. User writes follow the role model: a user edits their own profile; everything else is a strictly-below manage" do
+    defp mk_user(r, role, handle) do
+      user =
+        User
+        |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, handle: handle}, authorize?: false)
+        |> Ash.create!()
+
+      Membership |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, user_id: user.id, role: role}, authorize?: false) |> Ash.create!()
+      user
+    end
+
+    defp as_user(r, user, role),
+      do: %Samen.Scope{actor: %{id: user.id, org_id: r.org.id, role: role, verified?: true, kind: :tenant, plane: :tenant}}
+
+    defp upd(user, attrs, s), do: user |> Ash.Changeset.for_update(:update, attrs, scope: s) |> Ash.update(scope: s)
+
+    test "RED: a viewer or member cannot edit another user's handle or status; CONTROL: they edit their own handle" do
+      r = register!()
+      victim = mk_user(r, :member, "g-victim")
+      viewer = mk_user(r, :viewer, "g-viewer")
+      member = mk_user(r, :member, "g-member")
+
+      for {u, role} <- [{viewer, :viewer}, {member, :member}] do
+        s = as_user(r, u, role)
+        assert {:error, _} = upd(victim, %{handle: "hijacked-#{role}"}, s)
+        assert {:error, _} = upd(victim, %{status: "suspended"}, s)
+      end
+
+      assert reread(User, victim.id).handle == "g-victim"
+      assert reread(User, victim.id).status == "active"
+
+      # CONTROL: self-edit of the profile fields
+      assert {:ok, %{handle: "g-viewer-2"}} = upd(viewer, %{handle: "g-viewer-2"}, as_user(r, viewer, :viewer))
+      assert {:ok, %{handle: "g-member-2"}} = upd(member, %{handle: "g-member-2"}, as_user(r, member, :member))
+    end
+
+    test "RED: nobody changes their OWN status (a member cannot reactivate or suspend itself); an admin does so only for a lower rank" do
+      r = register!()
+      member = mk_user(r, :member, "g-self")
+      admin = mk_user(r, :admin, "g-admin")
+      other_admin = mk_user(r, :admin, "g-admin2")
+
+      assert {:error, _} = upd(member, %{status: "suspended"}, as_user(r, member, :member))
+      assert {:error, _} = upd(admin, %{status: "suspended"}, as_user(r, admin, :admin))
+      assert reread(User, member.id).status == "active"
+
+      # an admin may not suspend a peer; may suspend a member (CONTROL)
+      assert {:error, _} = upd(other_admin, %{status: "suspended"}, as_user(r, admin, :admin))
+      assert {:ok, %{status: "suspended"}} = upd(member, %{status: "suspended"}, as_user(r, admin, :admin))
+
+      # the suspended member cannot reactivate itself
+      assert {:error, _} = upd(reread(User, member.id), %{status: "active"}, as_user(r, member, :member))
+      assert reread(User, member.id).status == "suspended"
+    end
+
+    test "RED: an admin cannot edit the owner; CONTROL: the owner edits an admin" do
+      r = register!()
+      admin = mk_user(r, :admin, "g-adm")
+      owner_user = reread(User, r.user.id)
+
+      assert {:error, _} = upd(owner_user, %{handle: "pwned"}, as_user(r, admin, :admin))
+      assert reread(User, r.user.id).handle != "pwned"
+      assert {:ok, %{handle: "renamed-by-owner"}} = upd(admin, %{handle: "renamed-by-owner"}, scope(r, :owner))
+    end
+
+    test "RED: a viewer or member cannot destroy a user, nobody destroys themselves; CONTROL: an admin destroys a member" do
+      r = register!()
+      viewer = mk_user(r, :viewer, "g-del-viewer")
+      admin = mk_user(r, :admin, "g-del-admin")
+      # users WITHOUT a membership row, so a refusal here is the policy and not the membership FK
+      bare = fn h -> User |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, handle: h}, authorize?: false) |> Ash.create!() end
+      victim = bare.("g-del")
+
+      assert {:error, %Ash.Error.Forbidden{}} = Ash.destroy(victim, scope: as_user(r, viewer, :viewer))
+      assert {:error, %Ash.Error.Forbidden{}} = Ash.destroy(victim, scope: as_user(r, victim, :member))
+      assert {:error, %Ash.Error.Forbidden{}} = Ash.destroy(admin, scope: as_user(r, admin, :admin))
+      assert reread(User, victim.id)
+
+      assert :ok = Ash.destroy(victim, scope: as_user(r, admin, :admin))
+      assert reread(User, victim.id) == nil
+    end
+
+    test "RED: a viewer or member cannot create a user row (and so cannot link one to a credential); CONTROL: an admin can" do
+      r = register!()
+      viewer = mk_user(r, :viewer, "g-c-viewer")
+      create = fn s -> User |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, handle: "g-new"}, scope: s) |> Ash.create(scope: s) end
+
+      assert {:error, _} = create.(as_user(r, viewer, :viewer))
+      assert {:ok, _} = create.(scope(r, :admin))
+    end
+
+    test "RED: a target with no id (the template record of a bulk or query-based write) is refused, even for an admin" do
+      r = register!()
+      lower = mk_user(r, :member, "g-template-lower")
+      admin = scope(r, :admin).actor
+      match = fn data -> Samen.Policy.ManageUser.match?(admin, %{changeset: Ash.Changeset.for_update(data, :update, %{handle: "bulk"}, authorize?: false)}, membership: Membership) end
+
+      # No id: the target's rank cannot be looked up, so it must not read as "a viewer an admin may manage"
+      assert {:ok, false} = match.(struct(User, id: nil, org_id: r.org.id))
+      # an actor whose own id is blank must not "own" a row with no id either
+      assert {:ok, false} = Samen.Policy.ManageUser.match?(%{admin | id: nil}, %{changeset: Ash.Changeset.for_update(struct(User, id: nil, org_id: r.org.id), :update, %{handle: "bulk"}, authorize?: false)}, membership: Membership)
+
+      # CONTROL: the same admin over a real, lower-ranked row is allowed
+      assert {:ok, true} = match.(User |> Ash.Query.filter(id == ^lower.id) |> Ash.read_one!(authorize?: false))
+    end
+
+    test "CONTROL: Membership :destroy and Role writes keep their rank / admin gates (they were already closed)" do
+      r = register!()
+      member = mk_user(r, :member, "g-m-destroy")
+      viewer = mk_user(r, :viewer, "g-m-viewer")
+      mbr = Membership |> Ash.Query.filter(user_id == ^member.id) |> Ash.read!(authorize?: false) |> hd()
+
+      assert {:error, _} = Ash.destroy(mbr, scope: as_user(r, viewer, :viewer))
+      assert {:error, _} =
+               Samen.WebTest.Operator.Role
+               |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, name: :member, rank: 1, label: "M"}, scope: as_user(r, viewer, :viewer))
+               |> Ash.create(scope: as_user(r, viewer, :viewer))
+
+      assert :ok = Ash.destroy(mbr, scope: scope(r, :admin))
+    end
+  end
 end

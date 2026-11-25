@@ -1,0 +1,20 @@
+# SABOTAGE: Samen.Erasure.shred/2 skips the blind-index precondition, so an uncovered column is discovered 
+#   (or not) only after the key is destroyed
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/erasure_branches_test.exs
+# MUST_FAIL: RED: an uncovered _bidx column refuses the shred
+diff --git a/samen_core/lib/samen/erasure.ex b/samen_core/lib/samen/erasure.ex
+index 8292b10a..0923e6d1 100644
+--- a/samen_core/lib/samen/erasure.ex
++++ b/samen_core/lib/samen/erasure.ex
+@@ -241,7 +241,7 @@ defmodule Samen.Erasure do
+     # index (and must have derived the schema it clears from at all). A refusal here leaves the subject's key
+     # live and writes nothing, so the operator fixes the registration and retries. Run any later, it would
+     # fail AFTER `Kms.shred/1` had destroyed the key, which is the one step that cannot be taken back.
+-    case Samen.Auth.BlindIndexErasure.plan(opts) do
++    case {:ok, %{specs: [], login_failures: []}} do
+       {:ok, plan} -> do_shred(subject_id, opts, plan)
+       {:error, _} = refused -> refused
+     end

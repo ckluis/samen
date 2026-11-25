@@ -205,7 +205,7 @@ defmodule PawChartWeb.ClinicReads do
          {:ok, existing} <- get_owner_result(scope, id) do
       Guard.write(:pawchart_update_owner, scope, fn ->
         owner
-        |> Ash.Changeset.for_update(:update, owner_attrs(params, org_id, existing), scope: scope)
+        |> Ash.Changeset.for_update(:update, owner_attrs(params, org_id, existing) |> Map.delete(:org_id), scope: scope)
         |> Ash.update(scope: scope)
       end)
     end
@@ -238,7 +238,7 @@ defmodule PawChartWeb.ClinicReads do
          {:ok, pet} <- fetch_result(Pet, scope, id, :pawchart_fetch_pet) do
       Guard.write(:pawchart_update_pet, scope, fn ->
         pet
-        |> Ash.Changeset.for_update(:update, pet_attrs(params, org_id), scope: scope)
+        |> Ash.Changeset.for_update(:update, pet_attrs(params, org_id) |> Map.delete(:org_id), scope: scope)
         |> Ash.update(scope: scope)
       end)
     end

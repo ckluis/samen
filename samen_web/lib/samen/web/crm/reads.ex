@@ -317,13 +317,14 @@ defmodule Samen.Web.CRM.Reads do
       value = if is_binary(id) and String.trim(id) != "", do: String.trim(id), else: nil
       custom = Map.put(company.custom || %{}, Samen.CRM.AccountLink.anchor_field(), value)
 
-      # `org_id` is included explicitly (a same-value no-op write): `get_company/3`
-      # doesn't SELECT it (non-PII detail reads never needed it before), so
-      # `changeset.data.org_id` would otherwise be `Ash.NotLoaded` — and
-      # `Samen.CustomFields.Change`'s validator reads `org_id` straight off the
-      # changeset/data (not the scope) to resolve the Tier-1 field's tenant boundary.
+      # `get_company/3` doesn't SELECT `org_id` (non-PII detail reads never needed it), so
+      # `changeset.data.org_id` would be `Ash.NotLoaded` — and `Samen.CustomFields.Change`'s
+      # validator reads `org_id` straight off the changeset/data (not the scope) to resolve the
+      # Tier-1 field's tenant boundary. Load it onto the record; `org_id` is not an update input
+      # (`Samen.Policy.OrgIdPinned` refuses any write to it).
       company
-      |> Ash.Changeset.for_update(:update, %{custom: custom, org_id: org_id}, scope: scope)
+      |> Ash.load!(:org_id, scope: scope)
+      |> Ash.Changeset.for_update(:update, %{custom: custom}, scope: scope)
       |> Ash.update()
     else
       _ -> {:error, :no_org}

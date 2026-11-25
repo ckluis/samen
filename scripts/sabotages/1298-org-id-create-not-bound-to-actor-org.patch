@@ -1,0 +1,19 @@
+# SABOTAGE: OrgIdPinned lets an actor create a row under a foreign org_id
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/org_id_pinned_test.exs
+# MUST_FAIL: RED: an actor cannot file a row under another org's org_id
+diff --git a/samen_core/lib/samen/policy/org_id_pinned.ex b/samen_core/lib/samen/policy/org_id_pinned.ex
+index 67d8c4fe..f170d203 100644
+--- a/samen_core/lib/samen/policy/org_id_pinned.ex
++++ b/samen_core/lib/samen/policy/org_id_pinned.ex
+@@ -67,7 +67,7 @@ defmodule Samen.Policy.OrgIdPinned do
+   defp check(%{action_type: :create} = changeset, context) do
+     with %{org_id: actor_org} when is_binary(actor_org) <- actor(context, changeset),
+          row_org when not is_nil(row_org) <- Changeset.get_attribute(changeset, :org_id),
+-         true <- to_string(row_org) != actor_org do
++         true <- false and to_string(row_org) != actor_org do
+       Changeset.add_error(changeset,
+         field: :org_id,
+         message: "org_id must be the acting organisation's own: a row cannot be created in another organisation"

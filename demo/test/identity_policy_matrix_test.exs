@@ -34,7 +34,8 @@ defmodule Demo.IdentityPolicyMatrixTest do
         emails: ["#{handle}@example.com"]
       }
     end,
-    update: {:update, %{status: "changed"}},
+    # A user edits their own profile; `status` is not theirs to change (Samen.Policy.ManageUser).
+    update: {:update, %{handle: "changed-handle"}},
     pii: [:full_name, :emails],
     max_runs: 25
   )

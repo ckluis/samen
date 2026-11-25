@@ -170,10 +170,19 @@ defmodule Samen.Dsar do
     }) === true
   end
 
-  # Walk the subject's ACTIVE vault rows → plane-correct field entries. NEVER emits a
+  # Walk the subject's vault rows (secret-class vaults excluded) → plane-correct field entries. NEVER emits a
   # token or ciphertext; on the operator plane without a grant the value is `••••`.
   defp walk_vault(subject_id, repo, masked?) do
-    repo.all(from(v in VaultRow, where: v.subject_id == ^subject_id, order_by: [asc: v.vault_name, asc: v.field_name]))
+    # Authentication secrets are never part of a subject export: excluded by VAULT CLASS
+    # (`Samen.Vault.Class`), not by field name, so a new secret-class field is out by construction.
+    secret_vaults = Samen.Vault.Class.secret_vaults()
+
+    repo.all(
+      from(v in VaultRow,
+        where: v.subject_id == ^subject_id and v.vault_name not in ^secret_vaults,
+        order_by: [asc: v.vault_name, asc: v.field_name]
+      )
+    )
     |> Enum.map(fn %VaultRow{} = v ->
       %{
         vault: v.vault_name,

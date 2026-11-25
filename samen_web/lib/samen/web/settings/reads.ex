@@ -62,6 +62,25 @@ defmodule Samen.Web.Settings.Reads do
   end
 
   @doc """
+  The ACTING scope for `user_id`: `Mount.scope/2`, with the tenant plane's synthetic org-level actor
+  (`broker:<org>`, which names no user) carrying the user the SESSION resolved. This is the one place a
+  user identity enters a settings scope, and `user_id` must be the value `current_user_id/3` /
+  `reresolve_user/2` produced, never a request argument of its own. `Samen.Web.Settings.Profile.update/4`
+  refuses any scope whose actor is not the user being edited. An operator-plane (impersonation) scope is
+  returned as it is: its actor is the operator, never the user.
+  """
+  @spec user_scope(Mount.t(), String.t() | nil, String.t() | nil) :: Samen.Scope.t()
+  def user_scope(%Mount{} = mount, org_id, user_id) do
+    case {Mount.scope(mount, org_id), user_id} do
+      {%Samen.Scope{actor: %{plane: :tenant} = actor} = scope, user_id} when is_binary(user_id) ->
+        %{scope | actor: %{actor | id: user_id}}
+
+      {scope, _no_session_user} ->
+        scope
+    end
+  end
+
+  @doc """
   Re-resolve the current user id inside `handle_params/3` — the shared helper the settings /
   billing-settings / onboarding surfaces call in place of the old
   `Map.get(params, "user") || socket.assigns.user_id` idiom (B-SEC / S2, the identity twin of

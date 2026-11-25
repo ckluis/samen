@@ -1,0 +1,18 @@
+# SABOTAGE: Identity User create is open to any in-org actor
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: RED: a viewer or member cannot create a user row
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index 2f6dc34a..a4cc6e82 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -388,7 +388,6 @@ defmodule Samen.Scopes.Identity.Blueprint do
+ 
+           # Creating a user row (which may carry a credential_id) is an admin act.
+           policy action_type(:create) do
+-            forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})
+             authorize_if(always())
+           end
+ 

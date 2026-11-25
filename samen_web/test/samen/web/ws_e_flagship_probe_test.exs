@@ -215,18 +215,24 @@ defmodule Samen.Web.WsEFlagshipProbeTest do
     assert hit.display == %{display_name: "Public #{@needle} Display"}
   end
 
-  test "flagship profile: an operator plaintext self-edit is REFUSED — DB unchanged (binds 11-e5)" do
+  test "flagship profile: an operator plaintext self-edit is REFUSED by WriteGuard - DB unchanged (binds 11-e5)" do
     org_id = Ash.UUID.generate()
     user = seed_user!(org_id)
     mount = build_mount(:settings, plane: :operator, target_org_id: org_id)
 
+    # An operator-plane actor that IS the edited row: `ManageUser` allows it, so only WriteGuard can refuse.
+    op = operator_scope(org_id)
+    scope = %{op | actor: %{op.actor | id: user.id}}
+
     before = raw_full_name(user.id)
 
-    # Sabotaging Profile.update's governed scope (11-e5) lets this write succeed.
-    assert {:error, _} =
-             Profile.update(mount, operator_scope(org_id), user.id, %{
+    # Sabotaging Profile.update's governed scope (11-e5), or WriteGuard's operator-plane refusal, lets this succeed.
+    assert {:error, error} =
+             Profile.update(mount, scope, user.id, %{
                full_name: %{first: @op_first, last: @op_last}
              })
+
+    assert Exception.message(error) =~ "no-operator-plaintext-write"
 
     after_write = raw_full_name(user.id)
     assert before == after_write

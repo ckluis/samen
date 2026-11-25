@@ -1,0 +1,19 @@
+# SABOTAGE: ManageUser lets a user change their own status
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: RED: nobody changes their OWN status
+diff --git a/samen_core/lib/samen/policy/manage_user.ex b/samen_core/lib/samen/policy/manage_user.ex
+index 06ea9115..e5f29143 100644
+--- a/samen_core/lib/samen/policy/manage_user.ex
++++ b/samen_core/lib/samen/policy/manage_user.ex
+@@ -32,7 +32,7 @@ defmodule Samen.Policy.ManageUser do
+     own? = to_string(Map.get(actor, :id)) == to_string(target_id)
+ 
+     cond do
+-      own? and changeset.action_type == :update and not Ash.Changeset.changing_attribute?(changeset, :status) ->
++      own? and changeset.action_type == :update ->
+         {:ok, true}
+ 
+       own? ->

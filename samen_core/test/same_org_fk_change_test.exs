@@ -88,10 +88,88 @@ defmodule Samen.SameOrgFkChangeTest do
     end
   end
 
+  # ── Update-path fixtures: the stored org_id read ───────────────────────────
+  #
+  # `UnreplicatedRepo` stands in for a read replica that has not received the row yet: it answers
+  # every query with no rows. A write's security read must never go through it.
+  defmodule UnreplicatedRepo do
+    @moduledoc false
+    def query(sql, _params) do
+      send(self(), {:replica_query, sql})
+      {:ok, %{rows: [], num_rows: 0}}
+    end
+  end
+
+  defmodule UpdSource do
+    @moduledoc "Single-PK update fixture: its READ repo is the unreplicated stand-in, its MUTATE repo is real."
+    use Ash.Resource,
+      domain: Samen.SameOrgFkChangeTest.Domain,
+      data_layer: AshPostgres.DataLayer
+
+    postgres do
+      table("sofk_upd_source")
+
+      repo(fn
+        _resource, :read -> Samen.SameOrgFkChangeTest.UnreplicatedRepo
+        _resource, _mutate -> SamenCore.TestRepo
+      end)
+    end
+
+    attributes do
+      uuid_primary_key(:id)
+      attribute(:org_id, :uuid, public?: true, allow_nil?: true)
+      attribute(:note, :string, public?: true)
+    end
+
+    relationships do
+      belongs_to :company, SamenCore.Support.Crm.Company do
+        public?(true)
+        attribute_type(:uuid)
+        allow_nil?(true)
+      end
+    end
+
+    actions do
+      defaults([:read, :destroy, create: :*, update: :*])
+    end
+  end
+
+  defmodule CompositeSource do
+    @moduledoc "Composite-PK update fixture (the stored org_id must be found by BOTH key columns)."
+    use Ash.Resource,
+      domain: Samen.SameOrgFkChangeTest.Domain,
+      data_layer: AshPostgres.DataLayer
+
+    postgres do
+      table("sofk_composite_source")
+      repo(SamenCore.TestRepo)
+    end
+
+    attributes do
+      attribute(:a, :uuid, primary_key?: true, allow_nil?: false, public?: true)
+      attribute(:b, :uuid, primary_key?: true, allow_nil?: false, public?: true)
+      attribute(:org_id, :uuid, public?: true, allow_nil?: true)
+    end
+
+    relationships do
+      belongs_to :company, SamenCore.Support.Crm.Company do
+        public?(true)
+        attribute_type(:uuid)
+        allow_nil?(true)
+      end
+    end
+
+    actions do
+      defaults([:read, :destroy, create: :*, update: :*])
+    end
+  end
+
   defmodule Domain do
     use Ash.Domain, validate_config_inclusion?: false
 
     resources do
+      resource(Samen.SameOrgFkChangeTest.UpdSource)
+      resource(Samen.SameOrgFkChangeTest.CompositeSource)
       resource(Samen.SameOrgFkChangeTest.OrgLessTarget)
       resource(Samen.SameOrgFkChangeTest.Source)
       resource(SamenCore.Support.Crm.Company)
@@ -173,6 +251,142 @@ defmodule Samen.SameOrgFkChangeTest do
 
       assert result.valid?, "a same-org FK must pass"
       assert result.errors == []
+    end
+  end
+  describe "the stored org_id of an UPDATE is read through the WRITE repo, only when a foreign key is written" do
+    setup do
+      Repo.query!("""
+      CREATE TABLE sofk_upd_source (
+        id uuid PRIMARY KEY, org_id uuid, note text, company_id uuid)
+      """)
+
+      Repo.query!("""
+      CREATE TABLE sofk_composite_source (
+        a uuid NOT NULL, b uuid NOT NULL, org_id uuid, company_id uuid, PRIMARY KEY (a, b))
+      """)
+
+      :ok
+    end
+
+    defp company!(org_id) do
+      Company
+      |> Ash.Changeset.for_create(:create, %{name: "co-#{org_id}", org_id: org_id})
+      |> Ash.create!(authorize?: false)
+    end
+
+    defp upd_row!(org_id) do
+      id = Ash.UUID.generate()
+      Repo.query!("INSERT INTO sofk_upd_source (id, org_id) VALUES ($1, $2)", [Ecto.UUID.dump!(id), Ecto.UUID.dump!(org_id)])
+      id
+    end
+
+    defp run_update(record, params) do
+      cs = Ash.Changeset.for_update(record, :update, params)
+      assert cs.valid?
+
+      cs
+      |> then(&Samen.Policy.SameOrgFk.change(&1, [], %{}))
+      |> Ash.Changeset.run_before_actions()
+      |> case do
+        {%Ash.Changeset{} = c, _} -> c
+        %Ash.Changeset{} = c -> c
+      end
+    end
+
+    test "RED/GREEN: a same-org FK write passes even though the replica has no copy of the row yet" do
+      org_a = Ash.UUID.generate()
+      id = upd_row!(org_a)
+      record = %{struct(UpdSource, id: id) | org_id: %Ash.NotLoaded{type: :attribute, field: :org_id}}
+
+      result = run_update(record, %{company_id: company!(org_a).id})
+
+      refute_received {:replica_query, _}, "the stored org_id must never be read through the read repo"
+
+      assert result.valid?, "the stored org_id must come from the write repo: #{inspect(Enum.map(result.errors, &Exception.message/1))}"
+    end
+
+    test "CONTROL: a cross-org FK write on the same row is still refused (the read is real, not a pass-through)" do
+      org_a = Ash.UUID.generate()
+      id = upd_row!(org_a)
+      record = %{struct(UpdSource, id: id) | org_id: %Ash.NotLoaded{type: :attribute, field: :org_id}}
+
+      result = run_update(record, %{company_id: company!(Ash.UUID.generate()).id})
+
+      refute result.valid?
+      assert Enum.any?(result.errors, &(Exception.message(&1) =~ "cross-org FK"))
+    end
+
+    test "an update that writes no foreign key issues NO query for the stored org_id" do
+      org_a = Ash.UUID.generate()
+      id = upd_row!(org_a)
+      record = %{struct(UpdSource, id: id) | org_id: %Ash.NotLoaded{type: :attribute, field: :org_id}}
+      me = self()
+
+      :telemetry.attach(
+        "sofk-count-#{inspect(me)}",
+        [:samen_core, :test_repo, :query],
+        fn _event, _m, meta, _c -> send(me, {:query, meta.query}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach("sofk-count-#{inspect(me)}") end)
+
+      result = run_update(record, %{note: "no foreign key here"})
+
+      assert result.valid?
+      refute_received {:query, _}, "an update writing no FK must not read the stored org_id"
+      refute_received {:replica_query, _}
+    end
+
+    test "a name that is not a belongs_to relationship is never 'written': no read, no refusal" do
+      # No stored row exists for this id, so ANY read of the stored org_id would be refused. The
+      # configured name is not a relationship at all, so nothing is being written and nothing is read.
+      record = %{struct(UpdSource, id: Ash.UUID.generate()) | org_id: %Ash.NotLoaded{type: :attribute, field: :org_id}}
+
+      cs = Ash.Changeset.for_update(record, :update, %{note: "x"})
+
+      result =
+        cs
+        |> then(&Samen.Policy.SameOrgFk.change(&1, [relationships: [:not_a_relationship]], %{}))
+        |> Ash.Changeset.run_before_actions()
+        |> case do
+          {%Ash.Changeset{} = c, _} -> c
+          %Ash.Changeset{} = c -> c
+        end
+
+      assert result.valid?, inspect(Enum.map(result.errors, &Exception.message/1))
+    end
+
+    test "CONTROL: a row whose stored org_id cannot be found refuses a write that sets a foreign key" do
+      record = %{struct(UpdSource, id: Ash.UUID.generate()) | org_id: %Ash.NotLoaded{type: :attribute, field: :org_id}}
+
+      result = run_update(record, %{company_id: company!(Ash.UUID.generate()).id})
+
+      refute result.valid?
+      assert Enum.any?(result.errors, &(Exception.message(&1) =~ "could not read this record's org_id"))
+    end
+
+    test "a composite primary key is read by every key column (no refusal, no wrong row)" do
+      org_a = Ash.UUID.generate()
+      org_b = Ash.UUID.generate()
+      {a, b} = {Ash.UUID.generate(), Ash.UUID.generate()}
+
+      # A sibling sharing the first key column but owned by another org must never be the row that is read.
+      for {x, y, o} <- [{a, b, org_a}, {a, Ash.UUID.generate(), org_b}] do
+        Repo.query!("INSERT INTO sofk_composite_source (a, b, org_id) VALUES ($1, $2, $3)", [
+          Ecto.UUID.dump!(x),
+          Ecto.UUID.dump!(y),
+          Ecto.UUID.dump!(o)
+        ])
+      end
+
+      record = %{struct(CompositeSource, a: a, b: b) | org_id: %Ash.NotLoaded{type: :attribute, field: :org_id}}
+
+      assert run_update(record, %{company_id: company!(org_a).id}).valid?
+
+      refuted = run_update(record, %{company_id: company!(org_b).id})
+      refute refuted.valid?
+      assert Enum.any?(refuted.errors, &(Exception.message(&1) =~ "cross-org FK"))
     end
   end
 end

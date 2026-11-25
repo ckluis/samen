@@ -1,0 +1,20 @@
+# SABOTAGE: BlindIndexErasure.plan/1 reports success for a derivation that found no resources, so an empty 
+#   derivation reads as nothing to clear
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/erasure_branches_test.exs
+# MUST_FAIL: RED: a derivation that finds NO resources is refused
+diff --git a/samen_core/lib/samen/auth/blind_index_erasure.ex b/samen_core/lib/samen/auth/blind_index_erasure.ex
+index 936eb796..1a76db4a 100644
+--- a/samen_core/lib/samen/auth/blind_index_erasure.ex
++++ b/samen_core/lib/samen/auth/blind_index_erasure.ex
+@@ -222,7 +222,7 @@ defmodule Samen.Auth.BlindIndexErasure do
+     end
+   end
+ 
+-  defp assert_derived([], opts), do: {:error, {:blind_index_no_resources, Keyword.take(opts, [:resources, :domains, :otp_app])}}
++  defp assert_derived([], _opts), do: :ok
+   defp assert_derived(_resources, _opts), do: :ok
+ 
+   defp assert_covered(resources) do

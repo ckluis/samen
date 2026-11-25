@@ -57,12 +57,14 @@ defmodule Samen.Auth.BlindIndexErasure do
   So `subject_column` MUST be the owning principal's key (the row's own pk). Pointing it
   at any other column is a misconfiguration that would break the scoping guarantee.
 
-  ## Spec-driven, framework-first (the registry)
+  ## Wired by construction, from the live schema (no host config to forget)
 
-  The kernel does not know a host's Credential/Invitation table names (materialized
-  per-host with host-specific abbrevs), so the arm is expressed as a list of specs the
-  host registers (`config :samen_core, :blind_index_erasure_specs`), exactly like the
-  file-erasure and rollup-erasure registries. Each spec is a map:
+  The kernel does not know a host's Credential/Invitation table names (materialized per-host with
+  host-specific abbrevs), so the arm is a list of specs. They are DERIVED from the host's own
+  resources AT ERASURE TIME (`derived_specs/1`: every registered derived-linkable `_bidx` column of
+  `Samen.DerivedLinkable`, keyed on its owning principal), unioned with anything a host still lists
+  under `config :samen_core, :blind_index_erasure_specs`. A host that never called
+  `Samen.Erasure.install_default_specs/1` is therefore covered all the same. Each spec is a map:
 
       %{
         table_name:     "cmp_credential",  # the physical (abbrev-prefixed) table
@@ -71,10 +73,24 @@ defmodule Samen.Auth.BlindIndexErasure do
         label:          "credential"       # optional; for the token-only report
       }
 
-  Absent any spec the arm is a no-op (returns `[]`) — a host that has not registered the
-  blind-index arm is unchanged, exactly as `Samen.NonPii` redacts nothing until a column
-  is registered. (The forthcoming erasure-completeness verifier (ADR-046 §6) will assert
-  every `email_bidx` column has such an arm, so a future one cannot ship unregistered.)
+  A `:bidx_specs` option replaces the whole list (tests of one fixture table).
+
+  ### Fail-honest
+
+  Erasure that cannot clear a blind index must not report success, and must not be attempted: `plan/1`
+  runs as a PRECONDITION of `Samen.Erasure.shred/2`, before the subject's key is destroyed. A `_bidx` column
+  that is not registered in `Samen.DerivedLinkable` (so no arm can be derived for it), or a lookup that
+  derives no resources at all, refuses the erasure with `{:error, {:blind_index_uncovered, columns}}` /
+  `{:error, {:blind_index_no_resources, lookup}}`; the key is untouched and nothing is written, so the
+  operator fixes the registration and retries. (`erase_subject/3` called directly raises `ArgumentError`
+  with the same facts, unless `:bidx_specs` is given.)
+
+  ### Login-failure counters
+
+  `Identity.LoginFailure` keys its brute-force counters on the person's `email_bidx` (and on the
+  credential id): a keyed hash of the erased person's email, in a table the `_bidx` column scan
+  cannot see. When a principal-account erasure tombstones a row, the arm first reads the old index
+  values, then deletes every counter keyed on them (and on the credential id).
 
   ## Fail-closed, in the erasure transaction
 
@@ -99,7 +115,10 @@ defmodule Samen.Auth.BlindIndexErasure do
 
   `repo` is the erasure transaction's repo. `opts`:
 
-    * `:bidx_specs` — override the registered specs (tests pass this).
+    * `:bidx_specs` — replace the specs (and skip the live-schema coverage check; tests of one fixture
+      table pass this), with `:login_failure_specs` the counter tables to purge alongside;
+    * `:resources` / `:domains` / `:otp_app` — which resources to derive from (default: the app's
+      `:ash_domains`).
 
   Fires only where `subject_column == subject_id` — i.e. only when `subject_id` IS the
   owning principal (a principal-account erasure); a per-tenant data-subject shred
@@ -108,11 +127,145 @@ defmodule Samen.Auth.BlindIndexErasure do
   """
   @spec erase_subject(String.t(), module(), keyword()) :: [map()]
   def erase_subject(subject_id, repo, opts \\ []) when is_binary(subject_id) do
-    specs =
-      Keyword.get(opts, :bidx_specs) ||
-        Application.get_env(:samen_core, :blind_index_erasure_specs, [])
+    %{specs: specs, login_failures: login_failures} =
+      case plan(opts) do
+        {:ok, plan} -> plan
+        {:error, reason} -> raise ArgumentError, refusal_message(reason)
+      end
 
-    Enum.map(specs, &tombstone_one(&1, subject_id, repo))
+    reports = Enum.map(specs, &tombstone_one(&1, subject_id, repo))
+
+    if Enum.any?(reports, &(&1["rows_tombstoned"] > 0)) do
+      purge_login_failures(login_failures, subject_id, reports, repo)
+    end
+
+    Enum.map(reports, &Map.delete(&1, "old_values"))
+  end
+
+  @doc """
+  Decide, WITHOUT touching the database, whether erasure can clear every blind index, and with which specs.
+
+  `{:ok, %{specs: [...], login_failures: [...]}}`, or:
+
+    * `{:error, {:blind_index_uncovered, [{resource, column}]}}`: a `_bidx` column of the live schema is not
+      registered in `Samen.DerivedLinkable` (no arm can be derived for it);
+    * `{:error, {:blind_index_no_resources, opts}}`: the lookup derived NO resources at all (a host whose
+      domains are not configured), which would otherwise read as "nothing to clear".
+
+  `Samen.Erasure.shred/2` calls this BEFORE it destroys the subject's key. With `:bidx_specs` given the specs are
+  explicit and nothing is derived or checked (tests of one fixture table). Other options as `erase_subject/3`.
+  """
+  @spec plan(keyword()) ::
+          {:ok, %{specs: [map()], login_failures: [map()]}}
+          | {:error, {:blind_index_uncovered, [{module(), atom()}]} | {:blind_index_no_resources, keyword()}}
+  def plan(opts) do
+    case Keyword.get(opts, :bidx_specs) do
+      nil ->
+        resources = Samen.Erasure.Completeness.resources(Keyword.take(opts, [:resources, :domains, :otp_app]))
+
+        with :ok <- assert_derived(resources, opts),
+             :ok <- assert_covered(resources) do
+          configured = Application.get_env(:samen_core, :blind_index_erasure_specs, [])
+
+          {:ok,
+           %{
+             specs: Enum.uniq_by(configured ++ derived_specs(resources), &spec_key/1),
+             login_failures: login_failure_tables(resources)
+           }}
+        end
+
+      explicit ->
+        {:ok, %{specs: explicit, login_failures: Keyword.get(opts, :login_failure_specs, [])}}
+    end
+  end
+
+  defp refusal_message({:blind_index_uncovered, missing}) do
+    "blind-index erasure cannot clear #{inspect(missing)}: register the column in " <>
+      "Samen.DerivedLinkable (erasure would otherwise report success and leave a keyed hash " <>
+      "of the erased person's email in place)"
+  end
+
+  defp refusal_message({:blind_index_no_resources, _opts}) do
+    "blind-index erasure derived no resources to clear: configure the host's :ash_domains " <>
+      "(or pass :resources / :domains / :otp_app); an empty derivation must not read as success"
+  end
+
+  defp spec_key(spec),
+    do: {to_string(spec.table_name), to_string(Map.get(spec, :bidx_column, "email_bidx")), to_string(Map.get(spec, :subject_column, "id"))}
+
+  @doc """
+  The blind-index erasure specs for `resources`, derived from the live schema: one per REGISTERED
+  derived-linkable column (`Samen.DerivedLinkable`). An unregistered `_bidx` column yields no spec;
+  `uncovered/1` names it.
+  """
+  @spec derived_specs([module()]) :: [map()]
+  def derived_specs(resources) do
+    for r <- Samen.DerivedLinkable.discover(resources), r.registered?, r.subject_column != nil do
+      %{
+        table_name: r.table,
+        bidx_column: r.column,
+        subject_column: r.subject_column,
+        label: r.resource |> Module.split() |> Enum.take(-2) |> Enum.join(".")
+      }
+    end
+  end
+
+  @doc """
+  The blind-index columns in `resources` that erasure does NOT cover: every `_bidx` column of the live
+  schema that is not a registered derived-linkable column with a resolvable owning key. `[]` means
+  every one is covered. (The guard tests assert `[]` per host.)
+  """
+  @spec uncovered([module()]) :: [{module(), atom()}]
+  def uncovered(resources) do
+    for r <- Samen.DerivedLinkable.discover(resources), not r.registered? or r.subject_column == nil do
+      {r.resource, r.logical}
+    end
+  end
+
+  defp assert_derived([], opts), do: {:error, {:blind_index_no_resources, Keyword.take(opts, [:resources, :domains, :otp_app])}}
+  defp assert_derived(_resources, _opts), do: :ok
+
+  defp assert_covered(resources) do
+    case uncovered(resources) do
+      [] -> :ok
+      missing -> {:error, {:blind_index_uncovered, missing}}
+    end
+  end
+
+  @doc """
+  The `LoginFailure`-shaped tables among `resources` (a `key_kind` + `key_value` pair): the counters
+  keyed on an email blind index or a credential id that a principal-account erasure must purge.
+  """
+  @spec login_failure_tables([module()]) :: [map()]
+  def login_failure_tables(resources) do
+    for resource <- resources,
+        kind = Ash.Resource.Info.attribute(resource, :key_kind),
+        value = Ash.Resource.Info.attribute(resource, :key_value),
+        table = AshPostgres.DataLayer.Info.table(resource) do
+      %{
+        table_name: table,
+        kind_column: to_string(kind.source || kind.name),
+        value_column: to_string(value.source || value.name)
+      }
+    end
+  end
+
+  defp purge_login_failures(tables, subject_id, reports, repo) do
+    old_values = reports |> Enum.flat_map(&Map.get(&1, "old_values", [])) |> Enum.uniq()
+
+    for t <- tables do
+      table = safe_ident!(t.table_name)
+      kind = safe_ident!(t.kind_column)
+      value = safe_ident!(t.value_column)
+
+      Ecto.Adapters.SQL.query!(
+        repo,
+        "DELETE FROM #{table} WHERE (#{kind} = 'email_bidx' AND #{value} = ANY($1)) OR (#{kind} = 'credential' AND #{value} = $2)",
+        [old_values, subject_id]
+      )
+    end
+
+    :ok
   end
 
   @doc """
@@ -136,13 +289,19 @@ defmodule Samen.Auth.BlindIndexErasure do
     # Cast the subject column to text so both `:uuid` and `:text` principal keys compare
     # against the string subject_id without Postgrex needing a uuid-binary encode. The
     # `subject_column = id` match is what scopes this to principal-account erasure only.
+    # The index values about to be overwritten: the login-failure counters are keyed on them.
+    %{rows: old_rows} =
+      Ecto.Adapters.SQL.query!(repo, "SELECT #{column} FROM #{table} WHERE #{subject_column}::text = $1", [subject_id])
+
+    old_values = for [v] <- old_rows, is_binary(v), do: v
+
     sql =
       "UPDATE #{table} SET #{column} = $1 " <>
         "WHERE #{subject_column}::text = $2"
 
     %{num_rows: n} = Ecto.Adapters.SQL.query!(repo, sql, [sentinel, subject_id])
 
-    %{"resource" => label, "rows_tombstoned" => n}
+    %{"resource" => label, "rows_tombstoned" => n, "old_values" => old_values}
   end
 
   # A physical identifier must be a plain snake_case token. Hard gate, not sanitization —

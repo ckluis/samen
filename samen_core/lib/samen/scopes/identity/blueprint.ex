@@ -250,7 +250,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
   # User — 🔒 PII: full_name (vault :pii_name), emails (vault :pii_email).
   # Org-scoped. A user belongs to an org (the org_id core column).
   # ---------------------------------------------------------------------------
-  defmacro define_user(module, otp_app, domain, repo, abbrev, json_api? \\ false) do
+  defmacro define_user(module, otp_app, domain, repo, abbrev, membership_mod, json_api? \\ false) do
     api? = api_enabled!(json_api?)
     extensions = if api?, do: [AshJsonApi.Resource], else: []
 
@@ -384,6 +384,20 @@ defmodule Samen.Scopes.Identity.Blueprint do
         policies do
           policy action_type([:read, :create, :update, :destroy]) do
             authorize_if(Samen.Policy.OrgScope)
+          end
+
+          # Creating a user row (which may carry a credential_id) is an admin act.
+          policy action_type(:create) do
+            forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})
+            authorize_if(always())
+          end
+
+          # A user edits their own profile; changing another user, or anyone's status, or
+          # destroying a user, needs the rank rule membership updates use (identity-authz
+          # review 3, B). OrgScope above is the tenant boundary, this is the intra-org rule.
+          policy action_type([:update, :destroy]) do
+            forbid_unless({Samen.Policy.ManageUser, membership: unquote(membership_mod)})
+            authorize_if(always())
           end
 
           # The reveal action is generic (not a data read/write); its own grant gate

@@ -40,14 +40,20 @@ defmodule Samen.Web.Settings.Profile do
   already-shaped attribute map (`:handle`, `:full_name` as `%{first:, last:}`,
   `:emails` as `[%{address:}]`) — only the KEYS present are updated.
 
-  Returns `{:ok, user}` on success, or `{:error, reason}` (`:not_found` if the user
+  Returns `{:ok, user}` on success, or `{:error, reason}` (`:forbidden` unless the scope's actor IS
+  `user_id`; `:not_found` if the user
   is not readable under the scope; an `%Ash.Changeset{}`/`%Ash.Error...{}` when the
   write is refused — an operator-plane plaintext PII write is refused HERE by
   `WriteGuard`, the DB unchanged).
   """
   def update(mount, scope, user_id, attrs) when is_binary(user_id) and is_map(attrs) do
     Guard.write(:settings_profile_update, scope, fn ->
-      with {:ok, user} <- fetch_user(mount, scope, user_id) do
+      # The scope's actor must BE the user being edited. This module never rewrites the actor: a scope that
+      # names someone else (or no user at all, like the synthetic `broker:<org>` mount actor) is refused, so a
+      # caller cannot turn "edit user X" into "edit user X as X" and walk past the role-rank rule.
+      # `Samen.Web.Settings.Reads.user_scope/3` builds the scope from the session-resolved identity.
+      with :ok <- acting_as?(scope, user_id),
+           {:ok, user} <- fetch_user(mount, scope, user_id) do
         user
         |> Ash.Changeset.for_update(:update, sanitize(attrs), scope: scope)
         |> Ash.update(scope: scope)
@@ -60,6 +66,12 @@ defmodule Samen.Web.Settings.Profile do
   end
 
   def update(_mount, _scope, _user_id, _attrs), do: {:error, :invalid}
+
+  defp acting_as?(%Samen.Scope{actor: %{id: id}}, user_id) when is_binary(id) or is_atom(id) do
+    if to_string(id) == user_id, do: :ok, else: {:error, :forbidden}
+  end
+
+  defp acting_as?(_scope, _user_id), do: {:error, :forbidden}
 
   # Read the raw row to update (scope-authorized). We update on the SAME scope the
   # actor read on — the governed changes see the acting actor at build time.

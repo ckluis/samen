@@ -1,0 +1,19 @@
+# SABOTAGE: erasure leaves the login-failure counters keyed on the erased email's blind index
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_erasure_test.exs
+# MUST_FAIL: RED: the login-failure counters keyed on the erased email's bidx and on the credential are deleted
+diff --git a/samen_core/lib/samen/auth/blind_index_erasure.ex b/samen_core/lib/samen/auth/blind_index_erasure.ex
+index 75510cb2..153430ba 100644
+--- a/samen_core/lib/samen/auth/blind_index_erasure.ex
++++ b/samen_core/lib/samen/auth/blind_index_erasure.ex
+@@ -138,7 +138,7 @@ defmodule Samen.Auth.BlindIndexErasure do
+ 
+     reports = Enum.map(specs, &tombstone_one(&1, subject_id, repo))
+ 
+-    if Enum.any?(reports, &(&1["rows_tombstoned"] > 0)) do
++    if false and Enum.any?(reports, &(&1["rows_tombstoned"] > 0)) do
+       purge_login_failures(login_failures, subject_id, reports, repo)
+     end
+ 

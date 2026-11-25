@@ -1,0 +1,19 @@
+# SABOTAGE: the transformer adds no OrgIdPinned change to any resource
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/org_id_pinned_guard_test.exs
+# MUST_FAIL: no resource lets an authorized actor move or file a row under another org_id
+diff --git a/samen_core/lib/samen/transformers/org_id_pinned.ex b/samen_core/lib/samen/transformers/org_id_pinned.ex
+index a7f60ef1..cea699b2 100644
+--- a/samen_core/lib/samen/transformers/org_id_pinned.ex
++++ b/samen_core/lib/samen/transformers/org_id_pinned.ex
+@@ -19,7 +19,7 @@ defmodule Samen.Transformers.OrgIdPinned do
+       |> Transformer.get_entities([:attributes])
+       |> Enum.any?(&(&1.name == :org_id))
+ 
+-    if has_org_id? do
++    if has_org_id? and false do
+       {:ok, change} =
+         Ash.Resource.Builder.build_change(Samen.Policy.OrgIdPinned, on: [:create, :update])
+ 

@@ -1,0 +1,19 @@
+# SABOTAGE: ManageUser reads a target with no id as a membership-less viewer, so an admin passes for the 
+#   template record of a bulk write
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: RED: a target with no id (the template record of a bulk or query-based write) is refused
+diff --git a/samen_core/lib/samen/policy/manage_user.ex b/samen_core/lib/samen/policy/manage_user.ex
+index 932b2661..c30b7f58 100644
+--- a/samen_core/lib/samen/policy/manage_user.ex
++++ b/samen_core/lib/samen/policy/manage_user.ex
+@@ -28,7 +28,6 @@ defmodule Samen.Policy.ManageUser do
+   # A target with no id is the template record of a bulk or query-based write (no row to look a rank up for).
+   # It must not read as "a membership-less viewer an admin may manage" (that would pass an admin for every row,
+   # owners included), nor as "the actor's own row".
+-  def match?(actor, %{changeset: %Ash.Changeset{data: %{id: nil}}}, _opts) when is_map(actor), do: {:ok, false}
+ 
+   def match?(actor, %{changeset: %Ash.Changeset{} = changeset}, opts) when is_map(actor) do
+     target_id = changeset.data.id

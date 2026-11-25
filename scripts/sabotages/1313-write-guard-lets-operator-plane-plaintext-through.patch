@@ -1,0 +1,20 @@
+# SABOTAGE: WriteGuard stops treating the operator plane as the operator plane, so an operator who passes 
+#   every other gate writes plaintext into a vaulted field
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/profile_masking_test.exs test/samen/web/ws_e_flagship_probe_test.exs
+# MUST_FAIL: RED: an operator-impersonation plaintext PII write is REFUSED by WriteGuard
+# MUST_FAIL: flagship profile: an operator plaintext self-edit is REFUSED by WriteGuard
+diff --git a/samen_core/lib/samen/pii/write_guard.ex b/samen_core/lib/samen/pii/write_guard.ex
+index 21a7b7b2..3b398d1c 100644
+--- a/samen_core/lib/samen/pii/write_guard.ex
++++ b/samen_core/lib/samen/pii/write_guard.ex
+@@ -139,6 +139,6 @@ defmodule Samen.Pii.WriteGuard do
+     end
+   end
+ 
+-  defp operator_plane?(actor) when is_map(actor), do: Map.get(actor, :plane) == :operator
++  defp operator_plane?(actor) when is_map(actor), do: Map.get(actor, :plane) == :operator and false
+   defp operator_plane?(_), do: false
+ end

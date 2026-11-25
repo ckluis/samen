@@ -8,12 +8,12 @@
 # MUST_FAIL: RED: an operator-impersonation plaintext PII write is REFUSED
 # MUST_FAIL: flagship profile: an operator plaintext self-edit is REFUSED
 diff --git a/samen_web/lib/samen/web/settings/profile.ex b/samen_web/lib/samen/web/settings/profile.ex
-index 29d546a6..a8876262 100644
+index 8e0acf4..bea522c 100644
 --- a/samen_web/lib/samen/web/settings/profile.ex
 +++ b/samen_web/lib/samen/web/settings/profile.ex
-@@ -49,8 +49,10 @@ defmodule Samen.Web.Settings.Profile do
-     Guard.write(:settings_profile_update, scope, fn ->
-       with {:ok, user} <- fetch_user(mount, scope, user_id) do
+@@ -55,8 +55,10 @@ defmodule Samen.Web.Settings.Profile do
+       with :ok <- acting_as?(scope, user_id),
+            {:ok, user} <- fetch_user(mount, scope, user_id) do
          user
 -        |> Ash.Changeset.for_update(:update, sanitize(attrs), scope: scope)
 -        |> Ash.update(scope: scope)

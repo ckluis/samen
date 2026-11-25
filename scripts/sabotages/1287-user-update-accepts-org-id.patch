@@ -5,7 +5,7 @@
 # TEST_FILES: test/samen/web/identity_authz_test.exs
 # MUST_FAIL: an admin cannot update a User or Role into another org
 diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
-index 3af9f71a..6a97ecaa 100644
+index 2f6dc34a..b06736b5 100644
 --- a/samen_core/lib/samen/scopes/identity/blueprint.ex
 +++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
 @@ -342,7 +342,7 @@ defmodule Samen.Scopes.Identity.Blueprint do

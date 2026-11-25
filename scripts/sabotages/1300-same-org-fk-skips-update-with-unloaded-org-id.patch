@@ -1,0 +1,19 @@
+# SABOTAGE: SameOrgFk treats a NotLoaded org_id as no org to compare against
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/org_id_pinned_test.exs
+# MUST_FAIL: RED: re-pointing a person at another org's company is refused
+diff --git a/samen_core/lib/samen/policy/same_org_fk.ex b/samen_core/lib/samen/policy/same_org_fk.ex
+index dfc8b3cf..9b996693 100644
+--- a/samen_core/lib/samen/policy/same_org_fk.ex
++++ b/samen_core/lib/samen/policy/same_org_fk.ex
+@@ -97,7 +97,7 @@ defmodule Samen.Policy.SameOrgFk do
+   # (`Samen.Policy.OrgIdPinned`), so on an update the record in hand usually has it NotLoaded. Read
+   # it from the table by primary key rather than skipping the check: a NotLoaded org_id must never
+   # turn the same-org FK guard into a no-op.
+-  defp data_org_id(%{action_type: :update, data: %{org_id: %Ash.NotLoaded{}}} = changeset), do: stored_org_id(changeset)
++  defp data_org_id(%{action_type: :update, data: %{org_id: %Ash.NotLoaded{}}} = _changeset), do: nil
+   defp data_org_id(%{data: %{org_id: %Ash.NotLoaded{}}}), do: nil
+   defp data_org_id(%{data: %{org_id: org_id}}), do: org_id
+   defp data_org_id(_), do: nil
