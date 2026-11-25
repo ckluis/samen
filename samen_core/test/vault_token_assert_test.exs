@@ -102,6 +102,34 @@ defmodule Samen.VaultTokenAssertTest do
     end
   end
 
+  describe "only text is accepted" do
+    test "nil, atoms, numbers, maps and non-iodata lists flunk with a message naming the input (refute AND assert)" do
+      for bad <- [nil, :ok, 42, %{"body" => "x"}, [:not, :iodata], {:ok, "x"}] do
+        assert {:error, msg} = run(fn -> refute_vault_token(bad) end), "refute accepted #{inspect(bad)}"
+        assert msg =~ "binary or iodata", msg
+        assert {:error, _} = run(fn -> assert_vault_token(bad) end), "assert accepted #{inspect(bad)}"
+        assert {:error, _} = run(fn -> leaks(bad) end), "leaks accepted #{inspect(bad)}"
+      end
+    end
+
+    test "iodata is read as the text it spells (control), and a token inside it still fails" do
+      clean = ["clean ", ["text", ?!]]
+      assert clean == refute_vault_token(clean)
+      t = token()
+      assert fails?(fn -> refute_vault_token(["a ", [t]]) end)
+      assert [^t] = assert_vault_token(["a ", [t]])
+    end
+  end
+
+  describe "the phx- blanking is anchored to an id attribute" do
+    test "a canary after a phx- word that is not an id=\"phx-…\" attribute fails; the real id carrier is blanked" do
+      assert fails?(fn -> refute_vault_token("<p>phx-vt_canary1234</p>") end)
+      assert fails?(fn -> refute_vault_token(~s(<div data-id="phx-vt_canary1234"></div>)) end)
+      assert fails?(fn -> refute_vault_token(~s(<div class="phx-vt_canary1234"></div>)) end)
+      assert "<div id=\"phx-Fvt_abcdefgh\"></div>" == refute_vault_token("<div id=\"phx-Fvt_abcdefgh\"></div>")
+    end
+  end
+
   describe "assert_vault_token/2 (presence, exact)" do
     test "finds a real token, in order" do
       [a, b] = [token(), token()]

@@ -19,7 +19,7 @@ defmodule Samen.VaultTokenAssert do
     2. **prefix** — the bare `"vt_"` marker the tests plant as a canary (`vt_realtoken`, `vt_secret_777`):
        any `vt_` left after the framework's own random tokens are blanked out. Only those carriers are
        blanked: the value of the `_csrf_token` input and the `csrf-token` meta, the `data-phx-session` /
-       `data-phx-static` attributes and `phx-<random>` ids. Everywhere else the prefix still fails.
+       `data-phx-static` attributes and `id="phx-<random>"` attributes. Everywhere else the prefix still fails.
 
   So the helper is never weaker than the bare substring check on anything a test can plant outside those
   carriers, and a real token fails in every position. Presence is asserted with `assert_vault_token/2`
@@ -32,22 +32,40 @@ defmodule Samen.VaultTokenAssert do
   @csrf_tag ~r/<[a-zA-Z][^>]*\b(?:name="_csrf_token"|name="csrf-token")[^>]*>/
   @csrf_attr ~r/\b(value|content)="[^"]*"/
   @phx_attr ~r/\b(data-phx-(?:session|static|main|parent-id)|data-csrf)="[^"]*"/
-  @phx_id ~r/\bphx-[A-Za-z0-9_-]{8,}/
+  # Only an `id="phx-…"` ATTRIBUTE: a `phx-vt_…` word anywhere else (text, `data-id`, a class, JSON) is not a LiveView id.
+  @phx_id ~r/(?<![\w-])id="phx-[A-Za-z0-9_-]{8,}"/
 
   @doc """
   The vault-token evidence in `text`: every grammar match (arm 1), then each prefix hit (arm 2) as a short
   snippet around it. `[]` means clean.
   """
-  @spec leaks(binary(), keyword()) :: [String.t()]
-  def leaks(text, opts \\ [])
-
-  def leaks(text, opts) when is_binary(text) do
+  @spec leaks(iodata(), keyword()) :: [String.t()]
+  def leaks(text, opts \\ []) do
+    text = text!(text, "leaks/2")
     grammar = Samen.Vault.tokens_in(text)
     prefix = text |> blank_framework_tokens() |> prefix_hits(Keyword.get(opts, :boundary, false))
     Enum.uniq(grammar ++ prefix)
   end
 
-  def leaks(other, opts), do: other |> to_string() |> leaks(opts)
+  # Only text is checked: a binary or iodata. `nil`, an atom, a map or a number is NOT "no token" — a test that
+  # passes the wrong thing (a field that is absent, a struct) must fail loudly, not pass because `to_string/1`
+  # turned it into "". The test's subject has to be present first.
+  defp text!(text, _who) when is_binary(text), do: text
+
+  defp text!(text, who) when is_list(text) do
+    IO.iodata_to_binary(text)
+  rescue
+    ArgumentError -> bad_input!(text, who)
+  end
+
+  defp text!(other, who), do: bad_input!(other, who)
+
+  defp bad_input!(other, who) do
+    flunk(
+      "Samen.VaultTokenAssert.#{who} expects a binary or iodata, got #{inspect(other, limit: 5, printable_limit: 80)}" <>
+        " — assert the field is present first, then check it for a token"
+    )
+  end
 
   @doc """
   `text` carries no vault token (see the moduledoc). Returns `text` so it pipes.
@@ -55,9 +73,9 @@ defmodule Samen.VaultTokenAssert do
   `boundary: true` makes the prefix arm `\\bvt_`, for a page that legitimately renders identifiers ending in
   `vt_` (an `evt_…` event id): the grammar arm is unaffected, so a real token still fails.
   """
-  @spec refute_vault_token(binary(), String.t() | nil, keyword()) :: binary()
+  @spec refute_vault_token(iodata(), String.t() | nil, keyword()) :: iodata()
   def refute_vault_token(text, message \\ nil, opts \\ []) do
-    text = if is_binary(text), do: text, else: to_string(text)
+    _ = text!(text, "refute_vault_token/3")
 
     case leaks(text, opts) do
       [] ->
@@ -75,9 +93,9 @@ defmodule Samen.VaultTokenAssert do
   `text` carries a vault token of the real grammar (`"vt_"` + 32 lowercase hex): the presence twin of
   `refute_vault_token/2`, exact (a bare `"vt_"` somewhere does not satisfy it). Returns the tokens found.
   """
-  @spec assert_vault_token(binary(), String.t() | nil) :: [String.t()]
+  @spec assert_vault_token(iodata(), String.t() | nil) :: [String.t()]
   def assert_vault_token(text, message \\ nil) do
-    text = if is_binary(text), do: text, else: to_string(text)
+    text = text!(text, "assert_vault_token/2")
 
     case Samen.Vault.tokens_in(text) do
       [] ->
@@ -100,7 +118,7 @@ defmodule Samen.VaultTokenAssert do
       &Regex.replace(@csrf_tag, &1, fn tag -> Regex.replace(@csrf_attr, tag, ~s(\\1="~")) end)
     )
     |> then(&Regex.replace(@phx_attr, &1, ~s(\\1="~")))
-    |> then(&Regex.replace(@phx_id, &1, "phx-~"))
+    |> then(&Regex.replace(@phx_id, &1, ~s(id="phx-~")))
   end
 
   # Each `vt_` with 20 characters of context either side, so a failure shows WHERE.
