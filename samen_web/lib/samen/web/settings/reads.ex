@@ -7,11 +7,13 @@ defmodule Samen.Web.Settings.Reads do
 
   Auth is HOST-OWNED: `samen_web` has no login LiveView and no session user store. The
   settings surfaces need to know WHICH `User` row is "me" — resolved the SAME way
-  `Samen.Web.CurrentOrg` resolves the current org (the notifications `:recipient_id`
-  precedent): `session["samen_current_user"]` → the host-wired
-  `Mount.label(:current_user_id)` → the DISARMED-ONLY `params["user"]` dev leg →
-  `nil` (the honest "no user wired" card). The framework never invents an identity;
-  it reads the one the host supplies.
+  `Samen.Web.CurrentOrg` resolves the current org: the legacy BYO
+  `session["samen_current_user"]` → the framework SPINE session (`samen_session_token`, what
+  `POST /login` writes; the credential's per-org `Identity.User` through `Samen.Auth.OrgActor`) →
+  the DISARMED-ONLY dev legs (the host-wired `Mount.label(:current_user_id)`, then `params["user"]`) →
+  `nil` (the honest "no user wired" card). The framework never invents an identity.
+  `actor_in_org/3` is the ONE resolver that also yields the member's real ROLE (and refuses a
+  principal with no active membership); the notifications surfaces use it.
 
   ## B-SEC / S2 — `params["user"]` is a DEV leg, gated exactly like `?org=`
 
@@ -50,16 +52,124 @@ defmodule Samen.Web.Settings.Reads do
 
   @doc """
   Resolve the current user id for `mount` given the LiveView `params` + `session`.
-  First hit wins: session → host-wired mount label → the DISARMED-ONLY `?user=` dev
-  param → `nil`. Never raises. See the moduledoc's B-SEC / S2 note for why the param
-  leg moved LAST and behind the arming gate.
+  First hit wins: the legacy BYO session key → the framework SPINE session (the credential's per-org
+  `Identity.User`, through `Samen.Auth.OrgActor`) → the DISARMED-ONLY dev legs (the host-wired
+  `:current_user_id` label, then `?user=`) → `nil`. Never raises. See the moduledoc's B-SEC / S2 note
+  for why the param leg is behind the arming gate.
+
+  A spine-authenticated session (`samen_session_token`, what `POST /login` writes) used to resolve to
+  `nil` here, so every surface keyed on "which user am I" saw "no user wired" for a real login.
   """
   @spec current_user_id(Mount.t() | nil, map(), map()) :: String.t() | nil
   def current_user_id(mount, params, session) do
-    present(session_user(session)) ||
-      present(label_user(mount)) ||
-      present(dev_param_user(mount, params))
+    present(session_user(session)) || spine_user_id(mount, params, session) ||
+      present(dev_label_user(mount)) || present(dev_param_user(mount, params))
   end
+
+  defp spine_user_id(%Mount{} = mount, params, session) do
+    org_id = Samen.Web.CurrentOrg.resolve(mount, params, session)
+
+    case current_actor(mount, org_id, params, session) do
+      {:ok, %{id: id}} -> id
+      _ -> nil
+    end
+  end
+
+  defp spine_user_id(_mount, _params, _session), do: nil
+
+  @typedoc """
+  Who is acting on a per-user surface: `{:ok, %{id:, role:}}` (the per-org `Identity.User` id and its ACTIVE
+  membership role), `:none` (no user resolved: the honest "nobody signed in" - a dev posture), `:denied` (a
+  principal that holds no ACTIVE membership in the org: no access), or `{:error, :unavailable}` (a lookup
+  failed - an error state, never an empty answer).
+  """
+  @type actor_result :: {:ok, %{id: String.t(), role: atom()}} | :none | :denied | {:error, :unavailable}
+
+  @typedoc "The principal a session carries, independent of any org (a credential is org-less; its user is per org)."
+  @type principal_ref :: {:credential, String.t()} | {:user, String.t()} | {:dev, String.t()} | :none | {:error, :unavailable}
+
+  @doc """
+  The session's PRINCIPAL, org-less: `{:credential, id}` (the spine session token resolved to a live session),
+  `{:user, id}` (the legacy BYO `samen_current_user` key), `{:dev, id}` (the DISARMED-ONLY `:current_user_id`
+  label / `?user=` legs), `:none`, or `{:error, :unavailable}` when the session lookup failed.
+  """
+  @spec principal_ref(Mount.t() | nil, map(), map()) :: principal_ref()
+  def principal_ref(%Mount{plane: %{kind: :operator}}, _params, _session), do: :none
+
+  def principal_ref(%Mount{} = mount, params, session) do
+    idmount = Samen.Web.CurrentOrg.identity_mount(mount)
+
+    case Samen.Web.Auth.resolve_principal(session, %{session: Mount.resource(idmount, Session)}) do
+      {:ok, %{credential_id: credential_id}} -> {:credential, credential_id}
+      {:ok, %{user_id: user_id}} -> {:user, user_id}
+      :error -> dev_ref(mount, params)
+    end
+  rescue
+    e ->
+      Guard.report(:settings_principal_ref, nil, e)
+      {:error, :unavailable}
+  end
+
+  def principal_ref(_mount, _params, _session), do: :none
+
+  defp dev_ref(mount, params) do
+    case present(dev_label_user(mount)) || present(dev_param_user(mount, params)) do
+      nil -> :none
+      id -> {:dev, id}
+    end
+  end
+
+  @doc """
+  The ACTING user for `principal_ref` in `org_id`: the per-org `Identity.User` id AND its real role, derived
+  from the spine's Membership rows through `Samen.Auth.OrgActor` - the ONE resolver. A principal without an
+  ACTIVE membership in the org is `:denied` (a suspended or invited membership gives no access); a failed
+  lookup is `{:error, :unavailable}`. The dev leg (disarmed only) has no credential: it acts as the named user
+  with that user's membership role when one exists, else `:member`.
+  """
+  @spec actor_in_org(Mount.t() | nil, String.t() | nil, principal_ref()) :: actor_result()
+  def actor_in_org(%Mount{plane: %{kind: :operator}}, _org_id, _ref), do: :none
+  def actor_in_org(_mount, nil, _ref), do: :none
+  def actor_in_org(_mount, _org_id, :none), do: :none
+  def actor_in_org(_mount, _org_id, {:error, :unavailable}), do: {:error, :unavailable}
+
+  def actor_in_org(%Mount{} = mount, org_id, ref) when is_binary(org_id) do
+    idmount = Samen.Web.CurrentOrg.identity_mount(mount)
+    mods = %{user: Mount.resource(idmount, User), membership: Mount.resource(idmount, Membership)}
+
+    case ref do
+      {:credential, credential_id} ->
+        case Samen.Auth.OrgActor.resolve_result(mods, credential_id, org_id) do
+          {:ok, %{user_id: user_id, role: role}} -> {:ok, %{id: user_id, role: role}}
+          :error -> :denied
+          {:error, :unavailable} -> {:error, :unavailable}
+        end
+
+      {:user, user_id} ->
+        member_actor(mods, user_id, org_id, :denied)
+
+      {:dev, user_id} ->
+        member_actor(mods, user_id, org_id, {:ok, %{id: user_id, role: :member}})
+    end
+  rescue
+    e ->
+      Guard.report(:settings_actor_in_org, org_id, e)
+      {:error, :unavailable}
+  end
+
+  def actor_in_org(_mount, _org_id, _ref), do: :none
+
+  defp member_actor(mods, user_id, org_id, when_none) do
+    case Samen.Auth.OrgActor.active_membership(mods.membership, user_id, org_id) do
+      {:ok, membership} -> {:ok, %{id: user_id, role: membership.role}}
+      :none -> when_none
+      {:error, _reason} -> {:error, :unavailable}
+    end
+  end
+
+  @doc "`principal_ref/3` then `actor_in_org/3`: who acts in `org_id` for this `params` + `session`."
+  @spec current_actor(Mount.t() | nil, String.t() | nil, map(), map()) :: actor_result()
+  def current_actor(mount, org_id, params, session),
+    do: actor_in_org(mount, org_id, principal_ref(mount, params, session))
 
   @doc """
   The ACTING scope for `user_id`: `Mount.scope/2`, with the tenant plane's synthetic org-level actor
@@ -69,11 +179,13 @@ defmodule Samen.Web.Settings.Reads do
   refuses any scope whose actor is not the user being edited. An operator-plane (impersonation) scope is
   returned as it is: its actor is the operator, never the user.
   """
-  @spec user_scope(Mount.t(), String.t() | nil, String.t() | nil) :: Samen.Scope.t()
-  def user_scope(%Mount{} = mount, org_id, user_id) do
+  @spec user_scope(Mount.t(), String.t() | nil, String.t() | nil, atom() | nil) :: Samen.Scope.t()
+  def user_scope(%Mount{} = mount, org_id, user_id, role \\ nil) do
     case {Mount.scope(mount, org_id), user_id} do
       {%Samen.Scope{actor: %{plane: :tenant} = actor} = scope, user_id} when is_binary(user_id) ->
-        %{scope | actor: %{actor | id: user_id}}
+        # `Plane.scope` gives every tenant actor `role: :member`; the role the session RESOLVED
+        # (`actor_in_org/3`) replaces it, so a viewer is not a member here.
+        %{scope | actor: %{actor | id: user_id, role: role || actor.role}}
 
       {scope, _no_session_user} ->
         scope
@@ -115,8 +227,13 @@ defmodule Samen.Web.Settings.Reads do
   defp session_user(session) when is_map(session), do: Map.get(session, @session_key)
   defp session_user(_), do: nil
 
-  defp label_user(%Mount{} = mount), do: Mount.label(mount, :current_user_id, nil)
-  defp label_user(_), do: nil
+  # The host-wired `:current_user_id` label names ONE fixed user for EVERY session on the mount, so it is
+  # a DEV leg (trusted only in the disarmed posture, like `?user=`): on an armed host it is `nil`, always.
+  defp dev_label_user(%Mount{} = mount) do
+    if Samen.Web.CurrentOrg.param_trust_disarmed?(mount), do: Mount.label(mount, :current_user_id, nil)
+  end
+
+  defp dev_label_user(_), do: nil
 
   defp present(v) when is_binary(v) do
     case String.trim(v) do

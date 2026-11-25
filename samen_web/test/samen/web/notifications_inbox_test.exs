@@ -187,7 +187,7 @@ defmodule Samen.Web.NotificationsInboxTest do
     assert socket.assigns.unread_count == 0
   end
 
-  test "RED: a session with no resolved user (the org broker) sees the org-addressed rows, not any user's" do
+  test "a session that genuinely has NO user (the disarmed dev posture) sees only the org-addressed rows, and says so" do
     org_id = Ash.UUID.generate()
     notify!(org_id, %{recipient_id: @other_user, rendered_body: "USER-ADDRESSED-SENTINEL"})
     notify!(org_id, %{recipient_id: org_id, rendered_body: "ORG-ADDRESSED-SENTINEL"})
@@ -197,10 +197,58 @@ defmodule Samen.Web.NotificationsInboxTest do
       |> Phoenix.Component.assign(:samen_mount, build_mount(:notifications, []))
       |> Phoenix.Component.assign(:samen_acting_as, false)
       |> Phoenix.Component.assign(:return_to, nil)
+      |> Phoenix.Component.assign(:user_id, nil)
       |> InboxLive.load(org_id)
 
     refute html(socket) =~ "USER-ADDRESSED-SENTINEL"
     assert html(socket) =~ "ORG-ADDRESSED-SENTINEL"
+    # it is not passed off as somebody's inbox: the page states that no user is signed in
+    assert html(socket) =~ ~s(id="notifications-no-user")
+    # ...and the signed-in user's page does not carry that note (positive control)
+    refute html(mount_socket(org_id)) =~ ~s(id="notifications-no-user")
+  end
+
+  test "RED: a principal with no ACTIVE membership gets no access: nothing is read, nothing is marked" do
+    org_id = Ash.UUID.generate()
+    row = notify!(org_id, %{rendered_body: "DENIED-SENTINEL"})
+
+    socket = mount_socket(org_id) |> Phoenix.Component.assign(:recipient_state, :denied) |> InboxLive.load(org_id)
+    rendered = html(socket)
+
+    refute rendered =~ "DENIED-SENTINEL"
+    refute rendered =~ "No notifications yet."
+    assert rendered =~ ~s(id="notifications-denied")
+
+    socket = event(socket, "mark_read", %{"id" => row.id})
+    event(socket, "mark_all_read", %{})
+    assert Ash.get!(Samen.WebTest.Primitives.Notification, row.id, authorize?: false).read_at == nil
+
+    # positive control: the same row, with the actor resolved, is shown
+    assert html(mount_socket(org_id)) =~ "DENIED-SENTINEL"
+  end
+
+  test "RED: a FAILED actor lookup is an error state with a retry, never an empty inbox" do
+    org_id = Ash.UUID.generate()
+    notify!(org_id, %{rendered_body: "UNAVAILABLE-SENTINEL"})
+
+    socket = mount_socket(org_id) |> Phoenix.Component.assign(:recipient_state, :unavailable) |> InboxLive.load(org_id)
+    rendered = html(socket)
+
+    assert rendered =~ ~s(id="notifications-unavailable")
+    assert rendered =~ ~s(id="notifications-retry")
+    refute rendered =~ "No notifications yet."
+    refute rendered =~ "UNAVAILABLE-SENTINEL"
+  end
+
+  test "the scope acts with the RESOLVED role: a viewer does not see the org-addressed rows a member does" do
+    org_id = Ash.UUID.generate()
+    notify!(org_id, %{recipient_id: org_id, rendered_body: "ORG-WIDE-SENTINEL"})
+
+    member = mount_socket(org_id) |> Phoenix.Component.assign(:user_role, :member) |> InboxLive.load(org_id)
+    viewer = mount_socket(org_id) |> Phoenix.Component.assign(:user_role, :viewer) |> InboxLive.load(org_id)
+
+    assert html(member) =~ "ORG-WIDE-SENTINEL"
+    refute html(viewer) =~ "ORG-WIDE-SENTINEL"
   end
 
   # ---------------------------------------------------------------------------

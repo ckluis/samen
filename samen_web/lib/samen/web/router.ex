@@ -1218,8 +1218,9 @@ defmodule Samen.Web.Router do
     * `GET /<path>/security`    → `Samen.Web.Settings.SecurityLive`
     * `GET /<path>/invitations` → `Samen.Web.Settings.InvitationsLive` (ADR-035 §5 A5)
 
-  The current user is host-supplied (auth is host-owned): an explicit `?user=` param,
-  else `session["samen_current_user"]`, else `Mount.label(mount, :current_user_id)`.
+  The current user comes from the session: the legacy `session["samen_current_user"]`, else the
+  spine session's per-org `Identity.User` (`samen_session_token`). The `?user=` param and the
+  `:current_user_id` mount label are DISARMED-ONLY dev legs.
 
   Options: as `samen_files_routes/3` (`:repo` required; `:domain`, `:plane`,
   `:operator_id`/`:target_org_id`, `:path` (default `/settings`), `:labels`,

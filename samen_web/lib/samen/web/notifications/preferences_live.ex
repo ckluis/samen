@@ -24,11 +24,13 @@ defmodule Samen.Web.Notifications.PreferencesLive do
 
   ## The recipient seam
 
-  Preferences are PER-RECIPIENT (`recipient_id`, an opaque UUID). The framework
-  resolves it from the mount's `:recipient_id` label (the host wires its
-  authenticated user — the same seam posture as chat's participant identity) or a
-  `?recipient=` param; with NEITHER, the panel renders an honest "no recipient
-  wired" card rather than guessing an identity.
+  Preferences are PER-RECIPIENT (`recipient_id`, the per-org `Identity.User` id). The
+  framework derives it from the SESSION - the spine credential (or the legacy BYO user)
+  resolved through `Samen.Auth.OrgActor`, which also yields the member's real role - or,
+  in the disarmed dev posture only, a `?recipient=` param. A principal with no active
+  membership gets "no access", a failed lookup is an error state, and with no user at
+  all the panel renders an honest "no recipient" card rather than guessing an identity.
+  No mount label names a recipient: a label would make every session one fixed person.
   """
   use Phoenix.LiveView
 
@@ -62,40 +64,49 @@ defmodule Samen.Web.Notifications.PreferencesLive do
   def mount(params, session, socket) do
     socket = assign_mount(socket, session)
     org_id = CurrentOrg.resolve(socket.assigns[:samen_mount], params, session)
-    user_id = Samen.Web.Settings.Reads.current_user_id(socket.assigns[:samen_mount], params, session)
-    socket = assign(socket, org_id: org_id, user_id: user_id)
+    ref = Samen.Web.Settings.Reads.principal_ref(socket.assigns[:samen_mount], params, session)
+    socket = socket |> assign(org_id: org_id, principal_ref: ref) |> assign_actor(org_id)
     {:ok, load(socket, org_id, recipient_id(socket, params))}
   end
 
   @impl true
   def handle_params(params, uri, socket) do
     org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
+    socket = socket |> assign(org_id: org_id, return_to: return_path(uri)) |> assign_actor(org_id)
 
-    {:noreply,
-     load(
-       assign(socket, org_id: org_id, return_to: return_path(uri)),
-       org_id,
-       recipient_id(socket, params)
-     )}
+    {:noreply, load(socket, org_id, recipient_id(socket, params))}
   end
 
-  # The recipient seam: the user the session resolved (`Settings.Reads.current_user_id/3`, stored as
-  # `:user_id` by `mount/3`), else the host-wired mount label, else nil (the honest "no recipient wired"
-  # card). An explicit ?recipient= param is honoured ONLY in the disarmed dev posture (the gate `?org=`
-  # and `?user=` use): it names whose settings to edit, and a user edits only their own.
+  # The user is PER ORG: re-derive the acting user + role from the principal `mount/3` resolved.
+  defp assign_actor(socket, org_id) do
+    ref = socket.assigns[:principal_ref] || :none
+
+    case Samen.Web.Settings.Reads.actor_in_org(socket.assigns[:samen_mount], org_id, ref) do
+      {:ok, %{id: id, role: role}} -> assign(socket, user_id: id, user_role: role, access: :ok)
+      :none -> assign(socket, user_id: nil, user_role: nil, access: :ok)
+      :denied -> assign(socket, user_id: nil, user_role: nil, access: :denied)
+      {:error, :unavailable} -> assign(socket, user_id: nil, user_role: nil, access: :unavailable)
+    end
+  end
+
+  # The recipient seam: the user the session resolved (`assign_actor/2`), else nil (the honest "no
+  # recipient" card). An explicit ?recipient= param is honoured ONLY in the disarmed dev posture (the gate
+  # `?org=` and `?user=` use): it names whose settings to edit, and a user edits only their own.
   defp recipient_id(socket, params) do
     mount = socket.assigns.samen_mount
 
     dev_param =
       if Samen.Web.CurrentOrg.param_trust_disarmed?(mount), do: Map.get(params, "recipient")
 
-    dev_param || socket.assigns[:user_id] || Mount.label(mount, :recipient_id, nil) ||
-      socket.assigns[:recipient_id]
+    dev_param || socket.assigns[:user_id]
   end
 
-  # Preferences are the recipient's OWN (policy: `recipient_id == actor.id`): the scope acts as them.
-  defp recipient_scope(mount, org_id, recipient_id),
-    do: Samen.Web.Settings.Reads.user_scope(mount, org_id, recipient_id)
+  # Preferences are the recipient's OWN (policy: `recipient_id == actor.id`): the scope acts as them, with
+  # the role the session resolved.
+  defp recipient_scope(socket, org_id, recipient_id) do
+    role = if recipient_id == socket.assigns[:user_id], do: socket.assigns[:user_role]
+    Samen.Web.Settings.Reads.user_scope(socket.assigns.samen_mount, org_id, recipient_id, role)
+  end
 
   @doc false
   def load(socket, nil, _recipient_id) do
@@ -112,7 +123,7 @@ defmodule Samen.Web.Notifications.PreferencesLive do
 
   def load(socket, org_id, recipient_id) do
     mount = socket.assigns.samen_mount
-    scope = recipient_scope(mount, org_id, recipient_id)
+    scope = recipient_scope(socket, org_id, recipient_id)
     # A FAILED read must not render the engine defaults as if they were this recipient's saved
     # settings (a toggle on that grid would then write over the real row): it is the error state.
     {rows, load_error} =
@@ -128,19 +139,26 @@ defmodule Samen.Web.Notifications.PreferencesLive do
     |> assign(rows: rows, form: to_form(form_params(rows), as: :prefs))
   end
 
+  defp access(%{assigns: assigns}), do: access(assigns)
+  defp access(assigns) when is_map(assigns), do: Map.get(assigns, :access) || :ok
+
   # -- events ----------------------------------------------------------------
 
   @impl true
-  def handle_event("retry_load", _params, socket),
-    do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.recipient_id)}
+  def handle_event("retry_load", _params, socket) do
+    # A retry re-derives the actor (a failed lookup may have recovered); the recipient a dev `?recipient=`
+    # named stays the one loaded.
+    socket = if Map.has_key?(socket.assigns, :principal_ref), do: assign_actor(socket, socket.assigns.org_id), else: socket
+    {:noreply, load(socket, socket.assigns.org_id, socket.assigns[:recipient_id] || recipient_id(socket, %{}))}
+  end
 
   def handle_event("save", %{"_target" => ["prefs", field]} = params, socket) do
     %{samen_mount: mount, org_id: org_id, recipient_id: recipient_id} = socket.assigns
 
-    with true <- writable?(mount) and org_id != nil and recipient_id != nil,
+    with true <- writable?(mount) and org_id != nil and recipient_id != nil and access(socket) == :ok,
          {:ok, event_type, changes} <- toggle_changes(field, get_in(params, ["prefs", field])) do
       saved =
-        Reads.set_preference(mount, recipient_scope(mount, org_id, recipient_id), %{
+        Reads.set_preference(mount, recipient_scope(socket, org_id, recipient_id), %{
           org_id: org_id,
           recipient_id: recipient_id,
           event_type: event_type,
@@ -274,13 +292,20 @@ defmodule Samen.Web.Notifications.PreferencesLive do
               <%= if @load_error do %>
                 <.error_state class="preferences-error" body={@load_error} retry_event="retry_load" />
               <% else %>
-              <%= if @recipient_id == nil do %>
-                <div id="no-recipient" style="padding:14px 0;color:var(--muted)">
-                  No recipient is wired on this mount. Pass a <code>:recipient_id</code>
-                  mount label (the authenticated user) or a <code>?recipient=</code> param
-                  to manage per-user notification preferences.
+              <%= cond do %>
+              <% access(assigns) == :denied -> %>
+                <div id="preferences-denied" style="padding:14px 0;color:var(--muted)">
+                  Your account holds no active membership in this workspace, so there are no
+                  preferences to manage here.
                 </div>
-              <% else %>
+              <% access(assigns) == :unavailable -> %>
+                <.error_state class="preferences-error" body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
+              <% @recipient_id == nil -> %>
+                <div id="no-recipient" style="padding:14px 0;color:var(--muted)">
+                  No signed-in user resolved for this session. Sign in to manage your
+                  notification preferences (a dev host may pass a <code>?recipient=</code> param).
+                </div>
+              <% true -> %>
                 <span id="preferences-recipient" style="display:none">{@recipient_id}</span>
                 <.simple_form for={@form} id="preferences-form" phx-change="save">
                   <table class="tbl" id="preferences-grid">
