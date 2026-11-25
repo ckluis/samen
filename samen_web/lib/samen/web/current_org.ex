@@ -188,6 +188,15 @@ defmodule Samen.Web.CurrentOrg do
     end
   end
 
+  @doc """
+  Whether the session's LEGACY key (`samen_current_user`) is the one `authorized_orgs/2` takes the org set from:
+  the key is present AND the host's `:authorized_orgs` seam grants it at least one org. When it is `false` the
+  org set comes from the spine session (or there is none). `Samen.Web.Settings.Reads.principal_ref/3` asks this
+  so that the org and the acting person's role come from the SAME key when a session carries both.
+  """
+  @spec legacy_authorizes?(Mount.t() | nil, map()) :: boolean()
+  def legacy_authorizes?(mount, session), do: legacy_authorized_orgs(mount, session) != []
+
   defp legacy_authorized_orgs(mount, session) do
     case Samen.Web.Auth.authenticated_user_id(session) do
       user_id when is_binary(user_id) -> authorized_org_ids(mount, user_id)

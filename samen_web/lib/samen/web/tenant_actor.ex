@@ -11,8 +11,9 @@ defmodule Samen.Web.TenantActor do
 
   ## Outcomes of `scope/3`
 
-    * `{:ok, scope}` — the actor carries the resolved role and user id, and is marked
-      `resolved: true` (so a second pass does not look it up again).
+    * `{:ok, scope}` — the actor carries the resolved role and user id, and is marked `resolved: true`: a
+      marker that the role came from a membership (the tests and diagnostics read it), NOT a cache — every
+      call does its own lookup.
     * `:denied` — ARMED host, no active membership in the org (or no principal at all). The surface
       refuses: it renders the honest denied state, it never falls back to a default role.
     * `{:error, :unavailable}` — the lookup failed. An error state, never an empty page, never access.
@@ -55,6 +56,11 @@ defmodule Samen.Web.TenantActor do
       {:ok, system_scope(mount, org_id)}
     end
   end
+
+  # The dev leg (`{:dev, _}`) is a DISARMED-only posture: `Reads.principal_ref/3` only produces it when the
+  # `?user=` / `:current_user_id` trust is on, and `actor_in_org/3` would act as the named user (or a default
+  # `:member`). On an armed mount it is refused, whatever produced it.
+  defp armed(_mount, _org_id, {:dev, _id}), do: :denied
 
   defp armed(mount, org_id, ref) do
     case Reads.actor_in_org(mount, org_id, ref) do
@@ -100,19 +106,22 @@ defmodule Samen.Web.TenantActor do
   def conn_ref(mount, params, session), do: Reads.principal_ref(mount, params, session)
 
   @doc """
-  The acting scope on a LiveView socket for `org_id`. A socket that never ran the tenant gate
-  (no `:samen_principal_ref` pinned: a synthetic mount outside the framework routes, which the
-  tenant-authn coverage tests forbid for real routes) acts through `system_scope/2`, named.
+  The acting scope on a LiveView socket for `org_id`, from the principal `Samen.Web.TenantAuthz` pinned as
+  `:samen_principal_ref`. A socket that never ran the tenant gate (no ref pinned) is `:denied` on an ARMED mount:
+  there is nobody to resolve, and a fixed `:member` is exactly the bug this module exists to close (a host that
+  mounts a converted LiveView in its own `live_session` without the hook gets the denied state, not a member).
+  On a DISARMED mount the dev posture applies (`system_scope/2`, named).
   """
   @spec socket_scope(Phoenix.LiveView.Socket.t() | map(), String.t() | nil) :: result()
   def socket_scope(socket, org_id) do
     assigns = assigns(socket)
     mount = assigns[:samen_mount]
 
-    if Map.has_key?(assigns, :samen_principal_ref) do
-      scope(mount, org_id, assigns[:samen_principal_ref])
-    else
-      {:ok, system_scope(mount, org_id)}
+    cond do
+      is_nil(mount) -> :denied
+      Map.has_key?(assigns, :samen_principal_ref) -> scope(mount, org_id, assigns[:samen_principal_ref])
+      CurrentOrg.tenant_gate_armed?(mount) -> :denied
+      true -> {:ok, system_scope(mount, org_id)}
     end
   end
 

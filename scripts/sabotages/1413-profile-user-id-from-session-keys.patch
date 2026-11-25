@@ -1,0 +1,20 @@
+# SABOTAGE: the profile page names the user from the session keys while the role comes from another 
+#   principal
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_surfaces_test.exs
+# MUST_FAIL: ProfileLive with BOTH keys acts as one person
+diff --git a/samen_web/lib/samen/web/settings/profile_live.ex b/samen_web/lib/samen/web/settings/profile_live.ex
+index ea76b1af..41e10e07 100644
+--- a/samen_web/lib/samen/web/settings/profile_live.ex
++++ b/samen_web/lib/samen/web/settings/profile_live.ex
+@@ -83,7 +83,7 @@ defmodule Samen.Web.Settings.ProfileLive do
+           {:ok, scope} ->
+             # On an armed host the person is the RESOLVED actor (one principal for the org and the role); the
+             # `user_id` the mount derived from the session keys is only the disarmed dev posture's answer.
+-            user_id = if Map.get(scope.actor, :resolved), do: scope.actor.id, else: user_id
++            user_id = if Map.get(scope.actor, :resolved), do: user_id, else: user_id
+             socket = assign(socket, acting_role: scope.actor.role, user_id: user_id)
+ 
+             # A FAILED read is the error state (retry), never "No user in context".

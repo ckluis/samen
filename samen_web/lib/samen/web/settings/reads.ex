@@ -100,7 +100,7 @@ defmodule Samen.Web.Settings.Reads do
     idmount = Samen.Web.CurrentOrg.identity_mount(mount)
 
     case Samen.Web.Auth.resolve_principal(session, %{session: Mount.resource(idmount, Session)}) do
-      {:ok, %{credential_id: credential_id}} -> {:credential, credential_id}
+      {:ok, %{credential_id: credential_id}} -> credential_or_legacy(mount, session, credential_id)
       {:ok, %{user_id: user_id}} -> {:user, user_id}
       :error -> dev_ref(mount, params)
     end
@@ -111,6 +111,17 @@ defmodule Samen.Web.Settings.Reads do
   end
 
   def principal_ref(_mount, _params, _session), do: :none
+
+  # A session carrying BOTH the spine token and the legacy `samen_current_user` key: the org set comes from the
+  # legacy key first (`CurrentOrg.authorized_orgs/2`: the host seam, then the spine), so the principal that acts
+  # in that org is the SAME key's person. Only when the legacy seam grants nothing does the spine's credential act.
+  defp credential_or_legacy(mount, session, credential_id) do
+    legacy = Samen.Web.Auth.authenticated_user_id(session)
+
+    if is_binary(legacy) and Samen.Web.CurrentOrg.legacy_authorizes?(mount, session),
+      do: {:user, legacy},
+      else: {:credential, credential_id}
+  end
 
   defp dev_ref(mount, params) do
     case present(dev_label_user(mount)) || present(dev_param_user(mount, params)) do

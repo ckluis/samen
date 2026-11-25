@@ -370,6 +370,70 @@ defmodule Samen.Web.TenantRoleSurfacesTest do
       assert scope.actor.id == "broker:#{ctx.org_id}"
     end
 
+    test "armed: a {:dev, id} principal is :denied (the dev leg is a disarmed-only posture)", ctx do
+      mount = Mount.new(:crm, Samen.WebTest.Crm, Samen.WebTest.Repo, labels: @labels)
+      uid = user_id(ctx.viewer, ctx.org_id)
+
+      assert TenantActor.scope(mount, ctx.org_id, {:dev, uid}) == :denied
+      assert TenantActor.access(mount, ctx.org_id, {:dev, uid}, :admin) == {:refused, :denied}
+
+      # positive control: the same person as a real principal resolves; disarmed, the dev leg still acts
+      assert {:ok, %{actor: %{role: :viewer}}} = TenantActor.scope(mount, ctx.org_id, {:user, uid})
+      SecurityHost.disarm!()
+      assert {:ok, %{actor: %{role: :member}}} = TenantActor.scope(mount, ctx.org_id, {:dev, uid})
+    end
+
+    test "armed: a socket that never ran the tenant gate (no pinned ref) is :denied, never the fixed :member", ctx do
+      mount = Mount.new(:crm, Samen.WebTest.Crm, Samen.WebTest.Repo, labels: @labels)
+      assert TenantActor.socket_scope(%{assigns: %{samen_mount: mount}}, ctx.org_id) == :denied
+
+      # positive controls: a pinned principal resolves; a pinned :none is denied; disarmed keeps the dev posture
+      pinned = %{assigns: %{samen_mount: mount, samen_principal_ref: {:credential, ctx.viewer.credential.id}}}
+      assert {:ok, %{actor: %{role: :viewer}}} = TenantActor.socket_scope(pinned, ctx.org_id)
+      assert TenantActor.socket_scope(%{assigns: %{samen_mount: mount, samen_principal_ref: :none}}, ctx.org_id) == :denied
+
+      SecurityHost.disarm!()
+      assert {:ok, %{actor: %{role: :member}}} = TenantActor.socket_scope(%{assigns: %{samen_mount: mount}}, ctx.org_id)
+    end
+
+    test "a session with BOTH keys: the org and the role come from the SAME key (the legacy key, as authorized_orgs orders them)", ctx do
+      mount = Mount.new(:crm, Samen.WebTest.Crm, Samen.WebTest.Repo, labels: @labels)
+      legacy_uid = user_id(ctx.member, ctx.org_id)
+      %{session: spine} = log_in(ctx.viewer)
+      both = Map.put(spine, "samen_current_user", legacy_uid)
+
+      # the legacy seam authorizes the org: it supplies the org AND the principal (a member), not the viewer's credential
+      SecurityHost.grant!(legacy_uid, [ctx.org_id])
+      on_exit(&SecurityHost.revoke_all!/0)
+      assert Samen.Web.CurrentOrg.authorized_orgs(mount, both) == [ctx.org_id]
+      assert Reads.principal_ref(mount, %{}, both) == {:user, legacy_uid}
+      assert TenantActor.conn_ref(mount, %{}, both) == {:user, legacy_uid}
+
+      # the legacy seam authorizes NOTHING: the org comes from the spine, so does the principal (the viewer)
+      SecurityHost.revoke_all!()
+      assert ctx.org_id in Samen.Web.CurrentOrg.authorized_orgs(mount, both)
+      assert {:credential, cred} = Reads.principal_ref(mount, %{}, both)
+      assert cred == ctx.viewer.credential.id
+    end
+
+    test "ProfileLive with BOTH keys acts as one person: the user id and the role agree", ctx do
+      legacy_uid = user_id(ctx.member, ctx.org_id)
+      SecurityHost.grant!(legacy_uid, [ctx.org_id])
+      on_exit(&SecurityHost.revoke_all!/0)
+      %{session: spine} = log_in(ctx.viewer)
+      both = %{session: Map.put(spine, "samen_current_user", legacy_uid)}
+
+      socket = live_socket(both, Samen.Web.Settings.ProfileLive, "/settings/profile", ctx.org_id)
+      assert socket.assigns.user_id == legacy_uid
+      assert socket.assigns.acting_role == :member
+
+      # the legacy key authorizes nothing: the spine supplies the org, so the viewer is the person AND the role
+      SecurityHost.revoke_all!()
+      socket = live_socket(both, Samen.Web.Settings.ProfileLive, "/settings/profile", ctx.org_id)
+      assert socket.assigns.user_id == user_id(ctx.viewer, ctx.org_id)
+      assert socket.assigns.acting_role == :viewer
+    end
+
     test "operator plane is unchanged", ctx do
       mount = Mount.new(:crm, Samen.WebTest.Crm, Samen.WebTest.Repo, labels: @labels, plane: Samen.Web.Plane.operator("op-1", ctx.org_id, "sess-1"))
       assert {:ok, scope} = TenantActor.scope(mount, ctx.org_id, :none)

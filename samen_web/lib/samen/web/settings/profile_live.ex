@@ -81,7 +81,10 @@ defmodule Samen.Web.Settings.ProfileLive do
         # an error state; neither reads anything.
         case TenantActor.socket_scope(socket, org_id) do
           {:ok, scope} ->
-            socket = assign(socket, acting_role: scope.actor.role)
+            # On an armed host the person is the RESOLVED actor (one principal for the org and the role); the
+            # `user_id` the mount derived from the session keys is only the disarmed dev posture's answer.
+            user_id = if Map.get(scope.actor, :resolved), do: scope.actor.id, else: user_id
+            socket = assign(socket, acting_role: scope.actor.role, user_id: user_id)
 
             # A FAILED read is the error state (retry), never "No user in context".
             case Reads.get_user_result(mount, scope, user_id) do
