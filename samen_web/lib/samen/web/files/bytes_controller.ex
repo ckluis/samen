@@ -44,6 +44,7 @@ defmodule Samen.Web.Files.BytesController do
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Files.Reads
   alias Samen.Web.Mount
+  alias Samen.Web.TenantActor
 
   @doc """
   Serve the bytes for the file identified by `:id`, enforcing org-scope, quarantine,
@@ -55,21 +56,30 @@ defmodule Samen.Web.Files.BytesController do
     session = get_session(conn)
     org_id = CurrentOrg.resolve(mount, params, session)
 
-    serve_bytes(conn, mount, org_id, file_id)
+    # WHO reads: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), not
+    # `Mount.scope/2`'s fixed `:member`. Denied -> 403, a failed lookup -> 503; never a default role.
+    actor = TenantActor.scope(mount, org_id, TenantActor.conn_ref(mount, params, session))
+
+    serve_bytes(conn, mount, org_id, file_id, actor)
   end
 
   # -- private -----------------------------------------------------------------
 
-  defp serve_bytes(conn, nil, _org_id, _file_id) do
+  defp serve_bytes(conn, nil, _org_id, _file_id, _actor) do
     conn |> put_status(503) |> text("no mount")
   end
 
-  defp serve_bytes(conn, _mount, nil, _file_id) do
+  defp serve_bytes(conn, _mount, nil, _file_id, _actor) do
     conn |> put_status(404) |> text("no org")
   end
 
-  defp serve_bytes(conn, mount, org_id, file_id) do
-    scope = Mount.scope(mount, org_id)
+  defp serve_bytes(conn, _mount, _org_id, _file_id, :denied), do: conn |> put_status(403) |> text("no access")
+
+  defp serve_bytes(conn, _mount, _org_id, _file_id, {:error, :unavailable}),
+    do: conn |> put_status(503) |> text("unavailable")
+
+  defp serve_bytes(conn, mount, _org_id, file_id, {:ok, scope}) do
+    conn = assign(conn, :samen_acting_role, scope.actor.role)
 
     # Plane gate: bytes have no %Masked{} partial-reveal; operator is refused outright.
     if operator_plane?(mount) do

@@ -28,6 +28,7 @@ defmodule Samen.Web.CRM.CompaniesLive do
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Reads.Guard
   alias Samen.Web.Mount
+  alias Samen.Web.TenantActor
 
   alias Samen.Web.CRM.Reads
 
@@ -56,14 +57,34 @@ defmodule Samen.Web.CRM.CompaniesLive do
     socket
     |> ensure_return_to()
     |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, metrics: nil, metric_errors: [])
+    |> assign(acting_scope: nil, actor_state: :ok)
     |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{}, list_error: nil)
     |> assign(show_new: false, new_form: nil)
     |> assign_new(:delete_error, fn -> nil end)
   end
 
+  # ADR-045 §4.4 — WHO acts: the signed-in person's resolved membership role
+  # (`Samen.Web.TenantActor`), never `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a
+  # STATE of the page: nothing is read, nothing can be written.
   def load(socket, org_id) do
+    case TenantActor.socket_scope(socket, org_id) do
+      {:ok, scope} -> load_for(assign(socket, acting_scope: scope, actor_state: :ok), org_id, scope)
+      :denied -> load_refused(socket, org_id, :denied)
+      {:error, :unavailable} -> load_refused(socket, org_id, :unavailable)
+    end
+  end
+
+  defp load_refused(socket, org_id, state) do
+    socket
+    |> ensure_return_to()
+    |> assign(no_org: false, org_id: org_id, metrics: nil, metric_errors: [], acting_scope: nil, actor_state: state)
+    |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{}, list_error: nil)
+    |> assign(show_new: false, new_form: nil)
+    |> assign_new(:delete_error, fn -> nil end)
+  end
+
+  defp load_for(socket, org_id, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
 
     {metrics, metric_errors} = Reads.metrics_status(mount, scope)
 
@@ -84,9 +105,10 @@ defmodule Samen.Web.CRM.CompaniesLive do
   # -- A3 CRUD events (list events belong to the ListLive hook) -----------------
 
   @impl true
+  def handle_event(_event, _params, %{assigns: %{acting_scope: nil}} = socket), do: {:noreply, socket}
+
   def handle_event("new_company", _params, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{samen_mount: mount, acting_scope: scope} = socket.assigns
     {:noreply, assign(socket, show_new: true, new_form: new_company_form(mount, scope))}
   end
 
@@ -122,8 +144,7 @@ defmodule Samen.Web.CRM.CompaniesLive do
   # never refused on their account; any `{:error, _}` here is a genuine failure
   # (e.g. an authorization denial), not the old FK-refusal case.
   def handle_event("delete", %{"id" => id}, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{samen_mount: mount, org_id: org_id, acting_scope: scope} = socket.assigns
 
     case Reads.delete_company(mount, scope, id) do
       :ok ->
@@ -170,9 +191,24 @@ defmodule Samen.Web.CRM.CompaniesLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state == :denied -> %>
+          <div class="wrap">
+            <div id="actor-denied" class="gtitle">
+              <h3>No access</h3>
+              <span class="lane">Your account holds no active membership in this workspace, so there are no companies to show.</span>
+            </div>
+          </div>
+        <% @actor_state == :unavailable -> %>
+          <div class="wrap">
+            <div id="actor-unavailable" class="gtitle">
+              <h3>Companies unavailable</h3>
+              <span class="lane">We couldn't check who you are in this workspace. Nothing is shown rather than a wrong list.</span>
+            </div>
+          </div>
+        <% true -> %>
           <span id="org-banner" style="display:none">CRM org: {@org_id}</span>
 
           <div :if={@delete_error} class="wrap" style="margin-bottom:0">

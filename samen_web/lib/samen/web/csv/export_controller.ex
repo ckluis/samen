@@ -28,30 +28,35 @@ defmodule Samen.Web.Csv.ExportController do
 
   alias Samen.Web.Csv
   alias Samen.Web.CurrentOrg
-  alias Samen.Web.Mount
+  alias Samen.Web.TenantActor
 
   def export(conn, params) do
     mount = conn.assigns[:samen_mount]
     session = get_session(conn)
     org_id = CurrentOrg.resolve(mount, params, session)
 
-    do_export(conn, mount, org_id, Map.get(params, "resource"))
+    # WHO exports: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), not
+    # `Mount.scope/2`'s fixed `:member`. Denied -> 403, a failed lookup -> 503; never a default role.
+    actor = TenantActor.scope(mount, org_id, TenantActor.conn_ref(mount, params, session))
+
+    do_export(conn, mount, org_id, Map.get(params, "resource"), actor)
   end
 
-  defp do_export(conn, nil, _org_id, _name), do: conn |> put_status(503) |> text("no mount")
-  defp do_export(conn, _mount, nil, _name), do: conn |> put_status(404) |> text("no org")
+  defp do_export(conn, nil, _org_id, _name, _actor), do: conn |> put_status(503) |> text("no mount")
+  defp do_export(conn, _mount, nil, _name, _actor), do: conn |> put_status(404) |> text("no org")
+  defp do_export(conn, _mount, _org_id, _name, :denied), do: conn |> put_status(403) |> text("no access")
+  defp do_export(conn, _mount, _org_id, _name, {:error, :unavailable}), do: conn |> put_status(503) |> text("unavailable")
 
-  defp do_export(conn, mount, org_id, name) do
+  defp do_export(conn, mount, _org_id, name, {:ok, scope}) do
     case Csv.resolve_resource(mount, name) do
       {:error, :unknown_resource} ->
         conn |> put_status(404) |> text("unknown resource")
 
       {:ok, resource} ->
-        scope = Mount.scope(mount, org_id)
-
         case Csv.export(resource, scope, repo: mount.repo) do
           {:ok, csv} ->
             conn
+            |> assign(:samen_acting_role, scope.actor.role)
             |> put_resp_content_type("text/csv")
             |> put_resp_header(
               "content-disposition",

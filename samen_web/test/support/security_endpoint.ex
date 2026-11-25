@@ -76,7 +76,12 @@ defmodule Samen.WebTest.SecurityRouter do
   scope "/" do
     pipe_through(:browser)
 
-    samen_module_routes(:crm, Samen.WebTest.Crm, repo: Samen.WebTest.Repo, labels: @labels)
+    # `:identity_namespace` wired like a real host (driftwood's router), so a REAL spine login
+    # resolves a principal + its membership role on the CRM mount (`tenant_role_surfaces_test.exs`).
+    samen_module_routes(:crm, Samen.WebTest.Crm,
+      repo: Samen.WebTest.Repo,
+      labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)
+    )
 
     samen_settings_routes(:settings, Samen.WebTest.Operator,
       repo: Samen.WebTest.Repo,

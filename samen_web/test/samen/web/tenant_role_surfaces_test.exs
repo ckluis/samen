@@ -1,0 +1,359 @@
+defmodule Samen.Web.TenantRoleSurfacesTest do
+  @moduledoc """
+  ADR-045 §4.4 residual (the `:member` default): a tenant surface acts with the role the signed-in
+  person's ACTIVE membership resolves to, through ONE resolver (`Samen.Web.TenantActor`), never with
+  `Plane.scope/2`'s fixed `:member`.
+
+  Driven with a REAL spine login (`POST /login`), as `notifications_spine_session_test.exs` does.
+  Every refusal is paired with a positive control (a member and an owner keep what they could do).
+
+  Policy note (the map): across the blueprints no READ is role-gated (`OrgScope` only); the writes
+  of CRM/Work/Tags/Docs/Locations are `RoleAtLeast :member`, billing/marketing/cms mostly `:admin`.
+  So for the CSV and file-bytes surfaces viewer and member read identically; their role is pinned
+  through the `:samen_acting_role` assign the controllers set.
+  """
+  use Samen.WebTest.DataCase, async: false
+
+  import Phoenix.ConnTest
+
+  require Ash.Query
+
+  alias Samen.Auth.OrgActor
+  alias Samen.Identity.Invite
+  alias Samen.Identity.Register
+  alias Samen.Web.CRM.CompaniesLive
+  alias Samen.Web.CRM.ContactsLive
+  alias Samen.Web.{Mount, TenantActor}
+  alias Samen.Web.Settings.Reads
+  alias Samen.WebTest.Operator, as: Op
+  alias Samen.WebTest.SecurityHost
+
+  @endpoint Samen.WebTest.SecurityEndpoint
+  @password "correct horse battery staple"
+
+  @labels %{
+    otp_app: :samen_web_security_test_host,
+    title: "Security Probe",
+    authn: {:app_env, :samen_web_security_test_host, :auth_required?},
+    authorized_orgs: {Samen.WebTest.SecurityHost, :authorized_org_ids, []},
+    identity_namespace: Samen.WebTest.Operator
+  }
+
+  setup do
+    prev = Application.get_env(SecurityHost.otp_app(), :auth_required?)
+    prev_delivery = Application.get_env(:samen_core, :delivery_env)
+    Application.put_env(:samen_core, :delivery_env, :test)
+    SecurityHost.arm!()
+
+    on_exit(fn ->
+      case prev do
+        nil -> Application.delete_env(SecurityHost.otp_app(), :auth_required?)
+        v -> Application.put_env(SecurityHost.otp_app(), :auth_required?, v)
+      end
+
+      case prev_delivery do
+        nil -> Application.delete_env(:samen_core, :delivery_env)
+        v -> Application.put_env(:samen_core, :delivery_env, v)
+      end
+    end)
+
+    owner = register!()
+    member = accept_into!(owner, :member)
+    viewer = accept_into!(owner, :viewer)
+    %{owner: owner, member: member, viewer: viewer, org_id: owner.org.id}
+  end
+
+  # -- harness (the notifications_spine_session_test.exs pattern) ----------------------------
+
+  defp register_mods,
+    do: %{org: Op.Org, credential: Op.Credential, user: Op.User, membership: Op.Membership, auth_token: Op.AuthToken, repo: Samen.WebTest.Repo}
+
+  defp invite_mods,
+    do: %{invitation: Op.Invitation, credential: Op.Credential, user: Op.User, membership: Op.Membership, repo: Samen.WebTest.Repo}
+
+  defp register! do
+    attrs = %{
+      org_name: "Role Co #{System.unique_integer([:positive])}",
+      first_name: "Ada",
+      last_name: "Lovelace",
+      email: "role-#{System.unique_integer([:positive])}@example.test",
+      password: @password
+    }
+
+    {:ok, result} = Register.register(attrs, register_mods())
+    Map.put(result, :email, attrs.email)
+  end
+
+  defp accept_into!(host, role) do
+    invitee = register!()
+
+    owner_scope = %Samen.Scope{
+      actor: %{id: host.user.id, org_id: host.org.id, role: :owner, verified?: true, kind: :tenant, plane: :tenant}
+    }
+
+    {:ok, _inv, raw_token} = Invite.create(invite_mods(), owner_scope, %{email: invitee.email, role: role})
+    {:ok, _joined} = Invite.accept(invite_mods(), raw_token)
+    invitee
+  end
+
+  defp log_in(account) do
+    conn = post(build_conn(), "/login", %{"login" => %{"email" => account.email, "password" => @password}})
+    assert redirected_to(conn)
+    %{conn: recycle(conn), session: Plug.Conn.get_session(conn)}
+  end
+
+  defp live_socket(%{session: login_session}, view, path, org_id) do
+    {_path, mount_session} =
+      Samen.WebTest.SecurityRouter
+      |> Phoenix.Router.routes()
+      |> Enum.filter(&Map.has_key?(&1.metadata, :phoenix_live_view))
+      |> Enum.map(fn r ->
+        {_v, _a, _o, ls} = r.metadata.phoenix_live_view
+        {r.path, get_in(ls, [:extra, :session])}
+      end)
+      |> Enum.find(fn {p, _} -> p == path end)
+
+    session = Map.merge(login_session, mount_session)
+    params = %{"org" => org_id}
+    socket = %Phoenix.LiveView.Socket{} |> Phoenix.Component.assign(:__changed__, %{})
+    socket = %{socket | assigns: Map.put(socket.assigns, :flash, %{})}
+    {:cont, socket} = Samen.Web.TenantAuthz.on_mount(:require_tenant, params, session, socket)
+    {:ok, socket} = view.mount(params, session, socket)
+    socket
+  end
+
+  defp suspend!(account, org_id) do
+    {:ok, %{user_id: user_id}} =
+      OrgActor.resolve(%{user: Op.User, membership: Op.Membership}, account.credential.id, org_id)
+
+    [m] = Op.Membership |> Ash.Query.filter(user_id == ^user_id and org_id == ^org_id) |> Ash.read!(authorize?: false)
+    m |> Ash.Changeset.for_update(:update, %{status: "suspended"}, authorize?: false) |> Ash.update!()
+  end
+
+  defp person_count(org_id) do
+    Samen.WebTest.Crm.Person
+    |> Ash.Query.ensure_selected([:org_id])
+    |> Ash.read!(authorize?: false)
+    |> Enum.count(&(&1.org_id == org_id))
+  end
+
+  defp company_count(org_id) do
+    Samen.WebTest.Crm.Company
+    |> Ash.Query.ensure_selected([:org_id])
+    |> Ash.read!(authorize?: false)
+    |> Enum.count(&(&1.org_id == org_id))
+  end
+
+  # `Company` writes are `RoleAtLeast :member` (the CRM blueprint); `Person` writes are OrgScope only,
+  # so for contacts viewer and member differ in NOTHING the policy can observe.
+  defp create_company(login, org_id) do
+    socket = live_socket(login, CompaniesLive, "/crm/companies", org_id)
+    {:noreply, socket} = CompaniesLive.handle_event("new_company", %{}, socket)
+    {:noreply, socket} = CompaniesLive.handle_event("save_new", %{"form" => %{"name" => "Acme"}}, socket)
+    socket
+  end
+
+  # -- (a) a write the policy reserves for member+ ----------------------------------------------
+
+  test "a VIEWER cannot create a company through the list surface; a member and an owner can", ctx do
+    before = company_count(ctx.org_id)
+
+    create_company(log_in(ctx.viewer), ctx.org_id)
+    assert company_count(ctx.org_id) == before
+
+    # positive controls: the same surface, the same call, a member and an owner
+    create_company(log_in(ctx.member), ctx.org_id)
+    assert company_count(ctx.org_id) == before + 1
+    create_company(log_in(ctx.owner), ctx.org_id)
+    assert company_count(ctx.org_id) == before + 2
+  end
+
+  test "the list surface acts with the RESOLVED role, not :member", ctx do
+    for {who, role} <- [viewer: :viewer, member: :member, owner: :owner] do
+      socket = live_socket(log_in(Map.fetch!(ctx, who)), ContactsLive, "/crm/contacts", ctx.org_id)
+      assert socket.assigns.acting_scope.actor.role == role
+      assert socket.assigns.acting_scope.actor.resolved == true
+    end
+  end
+
+  test "ARMED + no active membership: the list surface shows the honest denied state, never a default role", ctx do
+    login = log_in(ctx.member)
+    socket = live_socket(login, ContactsLive, "/crm/contacts", ctx.org_id)
+    assert socket.assigns.actor_state == :ok
+
+    suspend!(ctx.member, ctx.org_id)
+    {:noreply, socket} = ContactsLive.handle_params(%{"org" => ctx.org_id}, "http://localhost/crm/contacts", socket)
+
+    assert socket.assigns.actor_state == :denied
+    html = Samen.WebTest.DataCase.render_html(ContactsLive, socket.assigns)
+    assert html =~ ~s(id="actor-denied")
+    refute html =~ "No contacts yet."
+    before = person_count(ctx.org_id)
+    {:noreply, _} = ContactsLive.handle_event("new_contact", %{}, socket)
+
+    {:noreply, _} =
+      ContactsLive.handle_event("save_new", %{"form" => %{"display_name" => "Ghost"}}, socket)
+
+    assert person_count(ctx.org_id) == before
+  end
+
+  test "ARMED + a failed membership lookup is an ERROR state, never an empty page", ctx do
+    login = log_in(ctx.member)
+    {_p, mount_session} = {nil, nil}
+    _ = mount_session
+
+    socket = live_socket(login, ContactsLive, "/crm/contacts", ctx.org_id)
+    broken = %{socket.assigns.samen_mount | labels: Map.put(socket.assigns.samen_mount.labels, :identity_namespace, Samen.WebTest.NoSuchIdentity)}
+    socket = Phoenix.Component.assign(socket, :samen_mount, broken)
+    {:noreply, socket} = ContactsLive.handle_params(%{"org" => ctx.org_id}, "http://localhost/crm/contacts", socket)
+
+    assert socket.assigns.actor_state == :unavailable
+    html = Samen.WebTest.DataCase.render_html(ContactsLive, socket.assigns)
+    assert html =~ ~s(id="actor-unavailable")
+    refute html =~ "No contacts yet."
+  end
+
+  # -- the shared resolver, in every posture ---------------------------------------------------
+
+  describe "TenantActor.scope/3" do
+    test "armed: viewer/member/owner resolve to their membership role and per-org user", ctx do
+      for {who, role} <- [viewer: :viewer, member: :member, owner: :owner] do
+        mount = Mount.new(:crm, Samen.WebTest.Crm, Samen.WebTest.Repo, labels: @labels)
+        acct = Map.fetch!(ctx, who)
+        assert {:ok, %Samen.Scope{actor: actor}} = TenantActor.scope(mount, ctx.org_id, {:credential, acct.credential.id})
+        assert actor.role == role
+        assert actor.org_id == ctx.org_id
+        assert actor.plane == :tenant
+        refute String.starts_with?(actor.id, "broker:")
+      end
+    end
+
+    test "armed: legacy-session user resolves through the same membership lookup", ctx do
+      mount = Mount.new(:crm, Samen.WebTest.Crm, Samen.WebTest.Repo, labels: @labels)
+      {:ok, %{user_id: uid}} = OrgActor.resolve(%{user: Op.User, membership: Op.Membership}, ctx.viewer.credential.id, ctx.org_id)
+      assert {:ok, %{actor: %{role: :viewer, id: ^uid}}} = TenantActor.scope(mount, ctx.org_id, {:user, uid})
+    end
+
+    test "armed: no principal, or no active membership -> :denied (never a default role)", ctx do
+      mount = Mount.new(:crm, Samen.WebTest.Crm, Samen.WebTest.Repo, labels: @labels)
+      assert TenantActor.scope(mount, ctx.org_id, :none) == :denied
+      assert TenantActor.scope(mount, ctx.org_id, nil) == :denied
+      assert TenantActor.scope(mount, ctx.org_id, {:credential, Ash.UUID.generate()}) == :denied
+      suspend!(ctx.member, ctx.org_id)
+      assert TenantActor.scope(mount, ctx.org_id, {:credential, ctx.member.credential.id}) == :denied
+      # positive control: an active member still resolves
+      assert {:ok, _} = TenantActor.scope(mount, ctx.org_id, {:credential, ctx.viewer.credential.id})
+    end
+
+    test "armed: a failed lookup is {:error, :unavailable}, never :denied nor a scope", ctx do
+      mount = Mount.new(:crm, Samen.WebTest.Crm, Samen.WebTest.Repo, labels: Map.put(@labels, :identity_namespace, Samen.WebTest.NoSuchIdentity))
+      assert TenantActor.scope(mount, ctx.org_id, {:credential, ctx.member.credential.id}) == {:error, :unavailable}
+    end
+
+    test "disarmed dev posture keeps the synthetic :member scope, exactly", ctx do
+      SecurityHost.disarm!()
+      mount = Mount.new(:crm, Samen.WebTest.Crm, Samen.WebTest.Repo, labels: @labels)
+      assert {:ok, scope} = TenantActor.scope(mount, ctx.org_id, :none)
+      assert scope == Mount.scope(mount, ctx.org_id)
+      assert scope.actor.role == :member
+      assert scope.actor.id == "broker:#{ctx.org_id}"
+    end
+
+    test "operator plane is unchanged", ctx do
+      mount = Mount.new(:crm, Samen.WebTest.Crm, Samen.WebTest.Repo, labels: @labels, plane: Samen.Web.Plane.operator("op-1", ctx.org_id, "sess-1"))
+      assert {:ok, scope} = TenantActor.scope(mount, ctx.org_id, :none)
+      assert scope == Mount.scope(mount, ctx.org_id)
+      assert scope.actor.plane == :operator
+      assert scope.actor.role == :member
+    end
+  end
+
+  # -- (c) CSV export + file bytes ------------------------------------------------------------
+
+  defp controller_conn(login, mount, org_id) do
+    build_conn(:get, "/x?org=#{org_id}")
+    |> Plug.Test.init_test_session(login.session)
+    |> Map.put(:assigns, %{samen_mount: mount})
+  end
+
+  defp csv_mount(labels \\ @labels), do: Mount.new(:csv, Samen.WebTest.Crm, Samen.WebTest.Repo, labels: labels)
+
+  # A LEGACY-session principal (`samen_current_user`) the host's `:authorized_orgs` seam grants the org:
+  # the org resolves, so it is the membership lookup alone that decides the role (a suspended
+  # spine member would simply fall back to its own org and never reach the surface).
+  defp legacy_login(user_id, org_id) do
+    SecurityHost.grant!(user_id, [org_id])
+    on_exit(&SecurityHost.revoke_all!/0)
+    %{session: %{"samen_current_user" => user_id}}
+  end
+
+  defp user_id(account, org_id) do
+    {:ok, %{user_id: id}} = OrgActor.resolve(%{user: Op.User, membership: Op.Membership}, account.credential.id, org_id)
+    id
+  end
+
+  defp csv(login, mount, org_id) do
+    controller_conn(login, mount, org_id)
+    |> Samen.Web.Csv.ExportController.export(%{"resource" => "Person", "org" => org_id})
+  end
+
+  defp bytes(login, mount, org_id) do
+    controller_conn(login, mount, org_id)
+    |> Samen.Web.Files.BytesController.serve(%{"id" => Ash.UUID.generate(), "org" => org_id})
+  end
+
+  defp files_mount(labels \\ @labels), do: Mount.new(:files, Samen.WebTest.Primitives, Samen.WebTest.Repo, labels: labels)
+
+  test "CSV export acts as the RESOLVED role (a viewer is a viewer, not a member)", ctx do
+    for {who, role} <- [viewer: :viewer, member: :member, owner: :owner] do
+      conn = csv(log_in(Map.fetch!(ctx, who)), csv_mount(), ctx.org_id)
+      assert conn.status == 200
+      assert conn.assigns[:samen_acting_role] == role
+    end
+  end
+
+  test "CSV export: no active membership -> 403 (nothing exported); a failed lookup -> 503", ctx do
+    uid = user_id(ctx.member, ctx.org_id)
+
+    # positive control: the same legacy session while the membership is ACTIVE
+    assert csv(legacy_login(uid, ctx.org_id), csv_mount(), ctx.org_id).assigns[:samen_acting_role] == :member
+
+    suspend!(ctx.member, ctx.org_id)
+    conn = csv(legacy_login(uid, ctx.org_id), csv_mount(), ctx.org_id)
+    assert conn.status == 403
+    refute conn.resp_body =~ "display_name"
+
+    broken = csv_mount(Map.put(@labels, :identity_namespace, Samen.WebTest.NoSuchIdentity))
+    conn = ExUnit.CaptureLog.with_log(fn -> csv(legacy_login(user_id(ctx.viewer, ctx.org_id), ctx.org_id), broken, ctx.org_id) end) |> elem(0)
+    assert conn.status == 503
+    refute conn.resp_body =~ "display_name"
+  end
+
+  test "file bytes act as the RESOLVED role and refuse no-membership / failed lookups", ctx do
+    for {who, role} <- [viewer: :viewer, member: :member] do
+      conn = bytes(log_in(Map.fetch!(ctx, who)), files_mount(), ctx.org_id)
+      assert conn.assigns[:samen_acting_role] == role
+      assert conn.status == 404
+    end
+
+    uid = user_id(ctx.member, ctx.org_id)
+    suspend!(ctx.member, ctx.org_id)
+    conn = bytes(legacy_login(uid, ctx.org_id), files_mount(), ctx.org_id)
+    assert conn.status == 403
+    refute Map.has_key?(conn.assigns, :samen_acting_role)
+
+    broken = files_mount(Map.put(@labels, :identity_namespace, Samen.WebTest.NoSuchIdentity))
+    conn = ExUnit.CaptureLog.with_log(fn -> bytes(legacy_login(user_id(ctx.viewer, ctx.org_id), ctx.org_id), broken, ctx.org_id) end) |> elem(0)
+    assert conn.status == 503
+  end
+
+  # -- profile ---------------------------------------------------------------------------------
+
+  test "the profile surface acts with the resolved role", ctx do
+    socket = live_socket(log_in(ctx.viewer), Samen.Web.Settings.ProfileLive, "/settings/profile", ctx.org_id)
+    assert socket.assigns.acting_role == :viewer
+    socket = live_socket(log_in(ctx.member), Samen.Web.Settings.ProfileLive, "/settings/profile", ctx.org_id)
+    assert socket.assigns.acting_role == :member
+    assert Reads.user_scope(socket.assigns.samen_mount, ctx.org_id, socket.assigns.user_id, :viewer).actor.role == :viewer
+  end
+end
