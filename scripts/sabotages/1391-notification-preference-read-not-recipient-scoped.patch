@@ -1,0 +1,21 @@
+# SABOTAGE: the NotificationPreference read policy no longer narrows to the recipient: any member reads 
+#   every user's alert settings
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/primitives_notification_recipient_scope_test.exs
+# MUST_FAIL: a member cannot READ another user's preference
+diff --git a/samen_core/lib/samen/scopes/primitives/blueprint.ex b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+index a8a0335f..c79382c8 100644
+--- a/samen_core/lib/samen/scopes/primitives/blueprint.ex
++++ b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+@@ -362,9 +362,6 @@ defmodule Samen.Scopes.Primitives.Blueprint do
+             authorize_if(Samen.Policy.OrgScope)
+           end
+ 
+-          policy action_type(:read) do
+-            authorize_if({Samen.Policy.RecipientOnly, operator_reads: true})
+-          end
+ 
+           # A recipient manages ONLY their own preferences (member+); org-scoped. Nobody, an admin
+           # included, writes another user's: the notification engine and the digest read and advance
