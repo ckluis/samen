@@ -125,8 +125,9 @@ defmodule Samen.Web.Csv do
   @doc """
   Export `resource` rows for `scope` as an RFC-4180 CSV binary — `{:ok, csv}`,
   `{:error, {:unknown_columns, cols}}`, or `{:error, {:too_many_rows, max}}` when the org holds more
-  than `:max_rows` rows (refused as soon as the page that crosses the limit is read: an export is built
-  in memory, so it is never unbounded, and never silently truncated).
+  than `:max_rows` rows (refused by a scoped count BEFORE any row is read or vault-resolved; a growth between
+  the count and the read is caught again as the pages accumulate: an export is built in memory, so it is never
+  unbounded, and never silently truncated).
 
   Options:
 
@@ -146,13 +147,25 @@ defmodule Samen.Web.Csv do
 
       max_rows = Keyword.get(opts, :max_rows) || max_export_rows()
 
-      with {:ok, rows} <- export_rows(base, resource, scope, cols, page_size, opts, nil, [], 0, max_rows) do
+      # The limit is decided by a scoped COUNT (the same scope and base query as the read) BEFORE any row is read or
+      # resolved: an org above the limit costs one aggregate, not a full scan and a vault pass that ends in a 413.
+      with :ok <- within_limit(base, scope, max_rows),
+           {:ok, rows} <- export_rows(base, resource, scope, cols, page_size, opts, nil, [], 0, max_rows) do
         # WS-F5 F5.2 — row-count histogram sample through the bounded Samen.Metrics
         # machinery (`samen.csv.export.row_count`). The count is a measurement; the only
         # tag is the bounded `:result`. Best-effort — never fails an export.
         emit_export_telemetry(length(rows))
         {:ok, serialize([Enum.map(cols, &to_string/1) | rows])}
       end
+    end
+  end
+
+  defp within_limit(base, scope, max_rows) do
+    case Ash.count(Ash.Query.new(base), scope: scope) do
+      {:ok, n} when n > max_rows -> {:error, {:too_many_rows, max_rows}}
+      {:ok, _} -> :ok
+      # Unknown size: fail closed, never read on without having bounded the work.
+      {:error, _} -> {:error, :count_failed}
     end
   end
 

@@ -288,5 +288,57 @@ defmodule Samen.Web.FilesCsvRouterTest do
       assert conn.status == 413
       refute conn.resp_body =~ "Row 1"
     end
+
+    # Every SQL statement the repo runs while `fun` does: a COUNT is not a row read, and a vault read is a resolution.
+    defp queries_during(fun) do
+      parent = self()
+      id = {:csv_queries, System.unique_integer([:positive])}
+      event = Samen.WebTest.Repo.config()[:telemetry_prefix] ++ [:query]
+      :telemetry.attach(id, event, fn _e, _m, meta, _c -> send(parent, {id, meta.query}) end, nil)
+      result = fun.()
+      :telemetry.detach(id)
+      {result, drain(id, [])}
+    end
+
+    defp drain(id, acc) do
+      receive do
+        {^id, query} -> drain(id, [query | acc])
+      after
+        0 -> Enum.reverse(acc)
+      end
+    end
+
+    defp row_reads(queries), do: Enum.filter(queries, &(&1 =~ "swp_person" and not (&1 =~ "count(")))
+
+    test "an export above the row limit is refused after a scoped COUNT: no row is read and nothing is vault-resolved", ctx do
+      previous = Application.get_env(:samen_web, Samen.Web.Csv, [])
+      Application.put_env(:samen_web, Samen.Web.Csv, max_export_rows: 2)
+      on_exit(fn -> Application.put_env(:samen_web, Samen.Web.Csv, previous) end)
+
+      for n <- 1..3, do: person!(ctx.org_id, "Count Row #{n}")
+      member = log_in(ctx.member)
+
+      {conn, queries} = queries_during(fn -> export(member, "Person", ctx.org_id) end)
+      assert conn.status == 413
+      assert Enum.any?(queries, &(&1 =~ "swp_person" and &1 =~ "count(")), "the refusal must come from a COUNT"
+      assert row_reads(queries) == [], "a row was read before the refusal: #{inspect(row_reads(queries))}"
+      refute Enum.any?(queries, &(&1 =~ ~r/vault/i)), "a vault row was read before the refusal"
+
+      # positive control: under the limit the same detector DOES see the row reads and the vault resolution
+      Application.put_env(:samen_web, Samen.Web.Csv, max_export_rows: 10)
+      {ok, queries} = queries_during(fn -> export(member, "Person", ctx.org_id) end)
+      assert ok.status == 200
+      assert row_reads(queries) != []
+    end
+
+    test "the row limit counts what the read would return: archived rows are not counted", ctx do
+      previous = Application.get_env(:samen_web, Samen.Web.Csv, [])
+      Application.put_env(:samen_web, Samen.Web.Csv, max_export_rows: 2)
+      on_exit(fn -> Application.put_env(:samen_web, Samen.Web.Csv, previous) end)
+
+      for n <- 1..2, do: person!(ctx.org_id, "Live #{n}")
+      {:ok, _} = Samen.Archival.archive(person!(ctx.org_id, "Gone"), authorize?: false)
+      assert export(log_in(ctx.member), "Person", ctx.org_id).status == 200
+    end
   end
 end
