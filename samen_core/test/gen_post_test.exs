@@ -13,7 +13,11 @@ defmodule Samen.Gen.PostTest do
   """
   use ExUnit.Case, async: true
 
+  alias Samen.CatalogMeaning
+  alias Samen.Gen.App
   alias Samen.Gen.Post
+
+  @description "A configurable widget a team offers, with a status and one vault-routed value."
 
   # A minimal fake generated-app tree in a temp dir: mix.exs (identity) + config
   # (both :ash_domains lists) + priv/repo/migrations. `web?` toggles single-line vs.
@@ -102,6 +106,19 @@ defmodule Samen.Gen.PostTest do
     end
   end
 
+  describe "the next-step hint names the required --description" do
+    test "RED: the scope task's success message and the emitted scope moduledoc show the CURRENT gen.resource shape" do
+      dir = fake_app!()
+
+      out =
+        ExUnit.CaptureIO.capture_io(fn -> Mix.Tasks.Samen.Gen.Scope.run(~w(--scope Crm --app-dir #{dir})) end)
+
+      shape = ~S|--resource <Name> --abbrev <abc> --description "<what it is>"|
+      assert out =~ shape
+      assert File.read!(Path.join(dir, "lib/widgetco/crm.ex")) =~ shape
+    end
+  end
+
   # ---------------------------------------------------------------------------
   describe "write_scope!/1 registers the domain in BOTH :ash_domains lists" do
     for web? <- [true, false] do
@@ -144,7 +161,7 @@ defmodule Samen.Gen.PostTest do
       dir = fake_app!()
       Post.write_scope!(Post.build_scope_spec(app_dir: dir, scope: "Crm"))
 
-      r = Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg")
+      r = Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg", description: @description)
       assert r.resource_module == "Widgetco.Crm.Widget"
       assert r.table == "wdg_widget"
       assert Post.test_stem(r) == "crm_widget"
@@ -156,7 +173,7 @@ defmodule Samen.Gen.PostTest do
       dir = fake_app!()
       Post.write_scope!(Post.build_scope_spec(app_dir: dir, scope: "Crm"))
 
-      r = Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg")
+      r = Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg", description: @description)
       assert r.field_type == "string"
       assert Post.resource_bindings(r)["field_ash_type"] == ":string"
     end
@@ -190,6 +207,7 @@ defmodule Samen.Gen.PostTest do
             scope: "Crm",
             resource: "Widget",
             abbrev: "wdg",
+            description: @description,
             field_type: field_type
           )
 
@@ -214,6 +232,7 @@ defmodule Samen.Gen.PostTest do
           scope: "Crm",
           resource: "Widget",
           abbrev: "wdg",
+          description: @description,
           field_type: "geopoint"
         )
 
@@ -230,6 +249,7 @@ defmodule Samen.Gen.PostTest do
           scope: "Crm",
           resource: "Widget",
           abbrev: "wdg",
+          description: @description,
           field_type: "money"
         )
 
@@ -237,7 +257,7 @@ defmodule Samen.Gen.PostTest do
       Post.write_resource!(r)
 
       resource_src = File.read!(Path.join(dir, "lib/widgetco/crm/widget.ex"))
-      assert resource_src =~ "pii_attribute(:secret, Samen.Type.Money, vault: :pii_secret)"
+      assert resource_src =~ "pii_attribute(:secret, Samen.Type.Money,\n      vault: :pii_secret,"
 
       policy = File.read!(Path.join(dir, "test/crm_widget_policy_matrix_test.exs"))
       assert policy =~ ~s(secret: "USD 12.34")
@@ -266,6 +286,7 @@ defmodule Samen.Gen.PostTest do
           scope: "Crm",
           resource: "Widget",
           abbrev: "wdg",
+          description: @description,
           field_type: "address"
         )
 
@@ -273,7 +294,7 @@ defmodule Samen.Gen.PostTest do
       Post.write_resource!(r)
 
       resource_src = File.read!(Path.join(dir, "lib/widgetco/crm/widget.ex"))
-      assert resource_src =~ "pii_attribute(:secret, Samen.Type.Address, vault: :pii_secret)"
+      assert resource_src =~ "pii_attribute(:secret, Samen.Type.Address,\n      vault: :pii_secret,"
 
       policy = File.read!(Path.join(dir, "test/crm_widget_policy_matrix_test.exs"))
       assert policy =~ ~s(secret: %{line1: "123 Test St",)
@@ -321,6 +342,7 @@ defmodule Samen.Gen.PostTest do
             scope: "Crm",
             resource: resource_name,
             abbrev: abbrev,
+            description: @description,
             field_type: field_type
           )
 
@@ -365,7 +387,8 @@ defmodule Samen.Gen.PostTest do
         app_dir: dir,
         scope: opts[:scope] || "Crm",
         resource: opts[:resource] || "Widget",
-        abbrev: opts[:abbrev] || "wdg"
+        abbrev: opts[:abbrev] || "wdg",
+        description: Keyword.get(opts, :description, @description)
       )
     end
 
@@ -440,7 +463,7 @@ defmodule Samen.Gen.PostTest do
            dir: dir,
            path: path
          } do
-      r = Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg")
+      r = Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg", description: @description)
       assert Post.reserve_abbrevs!(r, path) == :ok
 
       decoded = File.read!(path) |> Jason.decode!()
@@ -453,7 +476,7 @@ defmodule Samen.Gen.PostTest do
     end
 
     test "is idempotent — a second reservation is a no-op", %{dir: dir, path: path} do
-      r = Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg")
+      r = Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg", description: @description)
       Post.reserve_abbrevs!(r, path)
       before = File.read!(path)
       Post.reserve_abbrevs!(r, path)
@@ -463,7 +486,7 @@ defmodule Samen.Gen.PostTest do
     test "refuses to hand a reserved abbrev to a different owner", %{dir: dir, path: path} do
       # aaa is already Pre.Existing.
       r =
-        Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "aaa")
+        Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "aaa", description: @description)
 
       assert_raise ArgumentError, ~r/already owned by Pre.Existing/, fn ->
         Post.reserve_abbrevs!(r, path)
@@ -476,7 +499,7 @@ defmodule Samen.Gen.PostTest do
     test "emits the resource, migration, four G26 files, probe; wires into the scope" do
       dir = fake_app!()
       Post.write_scope!(Post.build_scope_spec(app_dir: dir, scope: "Crm"))
-      r = Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg")
+      r = Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg", description: @description)
       Post.write_resource!(r)
 
       # Resource module.
@@ -488,7 +511,7 @@ defmodule Samen.Gen.PostTest do
       assert res =~ "forbid_unless(Samen.Policy.OrgScope)"
       assert res =~ "forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})"
       # One scalar vault field so vault-routing is non-vacuous.
-      assert res =~ "pii_attribute(:secret, :string, vault: :pii_secret)"
+      assert res =~ "pii_attribute(:secret, :string,\n      vault: :pii_secret,"
 
       # Migration with catalog_sync.
       mig = Path.wildcard(Path.join(dir, "priv/repo/migrations/*_add_widget.exs"))
@@ -526,7 +549,7 @@ defmodule Samen.Gen.PostTest do
       Post.write_scope!(Post.build_scope_spec(app_dir: dir, scope: "Crm"))
 
       Post.write_resource!(
-        Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg")
+        Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg", description: @description)
       )
 
       Post.write_resource!(
@@ -618,7 +641,7 @@ defmodule Samen.Gen.PostTest do
       fake_router!(dir)
       before = File.read!(Path.join(dir, "lib/widgetco_web/router.ex"))
 
-      Post.write_resource!(Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg"))
+      Post.write_resource!(Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg", description: @description))
 
       refute File.exists?(Path.join(dir, "lib/widgetco_web/crm/widget_index_live.ex"))
       refute File.exists?(Path.join(dir, "test/crm_widget_live_smoke_test.exs"))
@@ -637,6 +660,196 @@ defmodule Samen.Gen.PostTest do
       router = File.read!(Path.join(dir, "lib/widgetco_web/router.ex"))
       matches = router |> String.split(~s|live("/crm/widget", Crm.WidgetIndexLive, :index)|) |> length()
       assert matches == 2, "expected exactly one index route, found #{matches - 1}"
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  describe "ADR-043 §8a (A3): the generated resource is described by construction" do
+    # Every `description` the generated resource carries, keyed by what it describes — read from the AST of the
+    # EMITTED source (not a string match), so a template that drops one is caught here.
+    defp described(src) do
+      {:ok, ast} = Code.string_to_quoted(src)
+
+      {_, acc} =
+        Macro.prewalk(ast, %{resource: nil, fields: %{}}, fn
+          {:resource, _, [[do: {:description, _, [d]}]]} = n, acc when is_binary(d) ->
+            {n, %{acc | resource: d}}
+
+          {:attribute, _, [name, _type, [do: body]]} = n, acc ->
+            {n, put_field(acc, name, block_description(body))}
+
+          {:attribute, _, [name, _type, opts]} = n, acc when is_list(opts) ->
+            {n, put_field(acc, name, opts[:description])}
+
+          {:pii_attribute, _, [name, _type, opts]} = n, acc when is_list(opts) ->
+            {n, put_field(acc, name, opts[:description])}
+
+          n, acc ->
+            {n, acc}
+        end)
+
+      acc
+    end
+
+    defp put_field(acc, name, description), do: %{acc | fields: Map.put(acc.fields, name, description)}
+
+    defp block_description({:__block__, _, calls}), do: Enum.find_value(calls, &block_description/1)
+    defp block_description({:description, _, [d]}) when is_binary(d), do: d
+    defp block_description(_), do: nil
+
+    test "RED: the resource, name, label, status and the vault field are each described, for EVERY field type" do
+      for field_type <- Samen.Gen.FieldTypeMenu.menu() do
+        dir = fake_app!()
+        Post.write_scope!(Post.build_scope_spec(app_dir: dir, scope: "Crm"))
+
+        r =
+          Post.build_resource_spec(
+            app_dir: dir,
+            scope: "Crm",
+            resource: "Widget",
+            abbrev: "wdg",
+            description: @description,
+            field_type: field_type
+          )
+
+        Post.validate_resource!(r, %{})
+        Post.write_resource!(r)
+        %{resource: resource, fields: fields} = described(File.read!(Path.join(dir, "lib/widgetco/crm/widget.ex")))
+
+        assert resource == @description, "#{field_type}: the resource description is the --description, verbatim"
+        assert Map.keys(fields) |> Enum.sort() == [:label, :name, :secret, :status], "#{field_type}: fixed scaffold fields"
+
+        for {name, description} <- fields do
+          assert is_binary(description), "#{field_type}: field #{name} is emitted WITHOUT a description"
+
+          assert CatalogMeaning.description_problems(description, [to_string(name)]) == [],
+                 "#{field_type}: field #{name}: #{inspect(description)}"
+        end
+
+        refute inspect(fields) =~ "vt_", "a vault field's description describes the schema, never a value"
+
+        # Only what is enforced: `status` is a one_of with a default; create accepts any of the three values and nothing
+        # enforces a lifecycle, so the text claims neither "new entries start active" nor a "lifecycle".
+        assert fields[:status] =~ "one of active, paused or archived; defaults to active"
+        refute fields[:status] =~ ~r/lifecycle|new entries/i
+
+        # The vault field's planes are the ones `Samen.Api.PiiResolution` implements (pii_resolution_planes_test.exs).
+        assert fields[:secret] =~ "clear on the owning organization's tenant plane"
+        assert fields[:secret] =~ "masked or omitted on other planes"
+        refute fields[:secret] =~ "on every read"
+      end
+    end
+
+    test "RED: validate_resource! refuses a missing description and each rule the verifier applies" do
+      dir = fake_app!()
+      Post.write_scope!(Post.build_scope_spec(app_dir: dir, scope: "Crm"))
+      spec = fn d -> Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg", description: d) end
+
+      for {bad, rule} <- [
+            {nil, "is missing"},
+            {"Widget", "fewer than 3 words"},
+            {"TODO describe the widget soon", "placeholder"},
+            {"The vault holds vt_abc for it", "vault-token sentinel"},
+            {"The widget of widgets", "restates the name"},
+            {String.duplicate("long words here ", 30), "longer than 300"}
+          ] do
+        assert_raise ArgumentError, ~r/--description .*#{Regex.escape(rule)}/, fn -> Post.validate_resource!(spec.(bad), %{}) end
+      end
+
+      assert Post.validate_resource!(spec.(@description), %{}) == :ok
+    end
+
+    test "the generator's rule IS the verifier's: description_problems/3 delegates to Samen.CatalogMeaning" do
+      for d <- ["Widget", "TODO describe the widget soon", @description] do
+        verifier = CatalogMeaning.description_problems(d, ["Widget", "widget", "wdg_widget"])
+        assert Enum.all?(verifier, &(&1 in Post.description_problems(d, "Widget", "wdg_widget")))
+      end
+    end
+
+    test "a description with quotes or interpolation text is emitted as ONE escaped literal" do
+      dir = fake_app!()
+      Post.write_scope!(Post.build_scope_spec(app_dir: dir, scope: "Crm"))
+      d = ~S|A "quoted" widget with #{not_interpolated} text for teams|
+
+      r = Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg", description: d)
+      Post.validate_resource!(r, %{})
+      Post.write_resource!(r)
+
+      assert described(File.read!(Path.join(dir, "lib/widgetco/crm/widget.ex"))).resource == d
+    end
+  end
+
+  describe "the description literal" do
+    test "RED: a valid description above 4096 codepoints (inspect's default printable_limit) is emitted whole" do
+      dir = fake_app!()
+      Post.write_scope!(Post.build_scope_spec(app_dir: dir, scope: "Crm"))
+
+      # 283 graphemes (the rules count graphemes) but 4183 codepoints: each filler word is one letter plus 30 combining marks.
+      filler = String.duplicate(" a" <> String.duplicate("\u0301", 30), 130)
+      d = "A team keeps this label" <> filler
+      assert String.length(d) <= 300 and length(String.to_charlist(d)) > 4096
+      assert Post.description_problems(d, "Widget", "wdg_widget") == []
+
+      r = Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg", description: d)
+      Post.validate_resource!(r, %{})
+      Post.write_resource!(r)
+
+      src = File.read!(Path.join(dir, "lib/widgetco/crm/widget.ex"))
+      assert described(src).resource == d, "the emitted literal is the description, not a truncated `\"...\" <> ...` expression"
+    end
+  end
+
+  describe "the renderer is single-pass" do
+    test "RED: a description holding `<%= table %>` (a key bound AFTER description_literal) is emitted literally and round-trips" do
+      dir = fake_app!()
+      Post.write_scope!(Post.build_scope_spec(app_dir: dir, scope: "Crm"))
+      d = "A widget the team keeps; writes <%= table %> and <%= abbrev %> and <%= module %> as text only"
+
+      r = Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg", description: d)
+      assert Post.description_problems(d, "Widget", "wdg_widget") == [], "template syntax is not refused: the renderer never re-scans a value"
+      Post.validate_resource!(r, %{})
+      Post.write_resource!(r)
+
+      src = File.read!(Path.join(dir, "lib/widgetco/crm/widget.ex"))
+      assert described(src).resource == d
+      assert src =~ "<%= table %>"
+    end
+
+    test "App.render/2 never expands a substituted value, leaves an unbound key as written, and the first duplicate binding wins" do
+      assert App.render("<%= a %>|<%= b %>", a: "<%= b %>", b: "B") == "<%= b %>|B"
+      assert App.render("<%= zz %> <%= a %>", %{"a" => 1}) == "<%= zz %> 1"
+      assert App.render("<%= a %>", [{:a, "first"}, {:a, "second"}]) == "first"
+    end
+  end
+
+  describe "mix samen.gen.resource --description" do
+    test "RED: refuses a missing --description, with a hint showing the flag, before writing anything" do
+      dir = fake_app!()
+      Post.write_scope!(Post.build_scope_spec(app_dir: dir, scope: "Crm"))
+      before = Path.wildcard(Path.join(dir, "**/*"))
+
+      error =
+        assert_raise Mix.Error, fn ->
+          Mix.Tasks.Samen.Gen.Resource.run(~w(--scope Crm --resource Widget --abbrev wdg --app-dir #{dir} --no-reserve-abbrevs))
+        end
+
+      assert error.message =~ "missing required --description"
+      assert error.message =~ ~s(--description ")
+      assert Path.wildcard(Path.join(dir, "**/*")) == before
+    end
+
+    test "RED: refuses a description the verifier would flag, naming the rule" do
+      dir = fake_app!()
+      Post.write_scope!(Post.build_scope_spec(app_dir: dir, scope: "Crm"))
+
+      error =
+        assert_raise Mix.Error, fn ->
+          Mix.Tasks.Samen.Gen.Resource.run(
+            ~w(--scope Crm --resource Widget --abbrev wdg --app-dir #{dir} --no-reserve-abbrevs) ++ ["--description", "Widget"]
+          )
+        end
+
+      assert error.message =~ "fewer than 3 words"
     end
   end
 end

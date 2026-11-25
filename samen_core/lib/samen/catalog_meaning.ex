@@ -12,7 +12,8 @@ defmodule Samen.CatalogMeaning do
     * **R1/R2**: every catalogued table and field has a description (after the reader's derivations: a relationship
       describes its FK, the framework describes its injected fields).
     * **R3 quality**, for every PRESENT description: trimmed, at least 3 words, at most 300 characters, no
-      `TODO`/`TBD`/`FIXME`, no `vt_` (`Samen.AI.VtSentinel`), and not a restatement of the name (after dropping
+      `TODO`/`TBD`/`FIXME`, no `vt_` (`Samen.AI.VtSentinel`), printable (`String.printable?/1`: no NUL or other control
+      character, valid UTF-8), and not a restatement of the name (after dropping
       stopwords it must hold a word that is in neither the logical name nor the label).
     * **R4 synonyms**: 1-40 characters; unique within a resource, case-insensitively, across table and field
       synonyms; never equal to another field's logical name or label. Across tables of one app: a TABLE synonym may
@@ -38,6 +39,8 @@ defmodule Samen.CatalogMeaning do
   @max_description 300
   @max_synonym 40
   @max_units 40
+
+  @unprintable_problem "contains a non-printable character or invalid UTF-8"
 
   @stopwords ~w(the a an of this that these those record records field fields value values for to and or is are it its in on by with as be at from)
 
@@ -236,20 +239,39 @@ defmodule Samen.CatalogMeaning do
   defp description_findings(_key, nil, _name_words), do: []
 
   defp description_findings(key, description, name_words) do
+    for problem <- problems(description, name_words),
+        do: finding(:quality, key, "description #{problem} (#{inspect(description)})")
+  end
+
+  @doc """
+  The quality problems (R3) of ONE description against the NAMES it describes, as human-readable strings (`[]` = fine).
+  `names` is the list of identifiers the description must not merely restate (for a resource: its label, humanized
+  module name and table name). The verifier and the generators share this function, so a generator refuses exactly what
+  the verifier would flag.
+  """
+  @spec description_problems(String.t(), [String.t()]) :: [String.t()]
+  def description_problems(description, names) when is_binary(description) and is_list(names),
+    do: problems(description, words(names))
+
+  # A string that is not printable (NUL and other control characters, invalid UTF-8) is refused FIRST and alone: the
+  # other rules would otherwise raise a bare ArgumentError on invalid UTF-8, and a generator would emit it as an
+  # unreadable byte list. `String.printable?/1` is the very test `inspect/1` applies when it writes a string literal.
+  defp problems(description, name_words) do
+    if String.printable?(description), do: quality_problems(description, name_words), else: [@unprintable_problem]
+  end
+
+  defp quality_problems(description, name_words) do
     tokens = tokens(description)
 
-    problems =
-      [
-        {description != String.trim(description), "has leading or trailing whitespace"},
-        {length(String.split(description)) < @min_words, "has fewer than #{@min_words} words"},
-        {String.length(description) > @max_description, "is longer than #{@max_description} characters"},
-        {Regex.match?(~r/\b(todo|tbd|fixme)\b/i, description), "is a placeholder (TODO/TBD/FIXME)"},
-        {VtSentinel.in_string?(description), "contains the vault-token sentinel `#{VtSentinel.sentinel()}`"},
-        {restates?(tokens, name_words), "only restates the name — say what it IS or does, in words the name does not hold"}
-      ]
-
-    for {true, problem} <- problems,
-        do: finding(:quality, key, "description #{problem} (#{inspect(description)})")
+    for {true, problem} <- [
+          {description != String.trim(description), "has leading or trailing whitespace"},
+          {length(String.split(description)) < @min_words, "has fewer than #{@min_words} words"},
+          {String.length(description) > @max_description, "is longer than #{@max_description} characters"},
+          {Regex.match?(~r/\b(todo|tbd|fixme)\b/i, description), "is a placeholder (TODO/TBD/FIXME)"},
+          {VtSentinel.in_string?(description), "contains the vault-token sentinel `#{VtSentinel.sentinel()}`"},
+          {restates?(tokens, name_words), "only restates the name — say what it IS or does, in words the name does not hold"}
+        ],
+        do: problem
   end
 
   @doc false

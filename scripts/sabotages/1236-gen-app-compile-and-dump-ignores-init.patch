@@ -1,0 +1,19 @@
+# SABOTAGE: compile_and_dump! must execute the --init step, not just list it.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/gen_app_test.exs
+# MUST_FAIL: RED: compile_and_dump! runs the dump, then --init, then the API snapshot, in that order
+diff --git a/samen_core/lib/samen/gen/app.ex b/samen_core/lib/samen/gen/app.ex
+index 44609b5e..46353290 100644
+--- a/samen_core/lib/samen/gen/app.ex
++++ b/samen_core/lib/samen/gen/app.ex
+@@ -543,7 +543,7 @@ defmodule Samen.Gen.App do
+     run.(s, ["compile", "--warnings-as-errors"])
+     deps_cache!(s, "store")
+ 
+-    for args <- dump_steps(s), do: run.(s, args)
++    run.(s, ["samen.catalog.dump", "--output", "schema.dict.json"])
+ 
+     if s.api? do
+       run.(s, ["samen.verify.api_contract", "--version", "v1", "--update"])

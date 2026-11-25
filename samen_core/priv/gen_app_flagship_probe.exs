@@ -208,6 +208,23 @@ try do
     halt.(1, "FAIL: the generated --web --api --seeds --observability app did NOT pass its full ci.sh.")
   end
 
+  # ADR-043 §8a (A3): the gate RAN the catalog-meaning verifier (step 1c) and the new app's baseline holds NONE of its
+  # own generated tables (only what the mounted scopes inherit) — generated resources are described by construction.
+  unless gate_out =~ "mix samen.verify.catalog_meaning" and gate_out =~ ~r/samen\.verify\.catalog_meaning: \d+ table\(s\)/ do
+    halt.(1, "FAIL (A3): the generated app's ci.sh did not run samen.verify.catalog_meaning.")
+  end
+
+  baseline_path = Path.join(app_dir, Samen.CatalogMeaning.Baseline.file_name())
+
+  unless File.exists?(baseline_path) do
+    halt.(1, "FAIL (A3): `samen.gen.app` left no #{baseline_path} (the --init step did not run).")
+  end
+
+  case Gen.own_debt(spec, File.read!(baseline_path)) do
+    [] -> IO.puts("FLAGSHIP (A3): catalog_meaning.baseline holds no debt of the app's own generated resources.")
+    debt -> halt.(1, "FAIL (A3): the baseline lists the app's OWN generated entries: #{inspect(debt)}")
+  end
+
   # The gate suite must have RUN the gen'd seeds vault-routing red path (D4) — assert it
   # was present + green, not silently absent (a suite that skips it proves nothing).
   unless File.exists?(Path.join(app_dir, "test/seeds_vault_test.exs")) do

@@ -1,0 +1,33 @@
+# SABOTAGE: The gen_resource_live doc rule must require a non-empty --description; a doc may not drift back 
+#   to the shape the task refuses.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/doc_commands_test.exs
+# MUST_FAIL: RED PATH: gen.resource with --live REQUIRES a non-empty --description (the task refuses the old shape)
+diff --git a/samen_core/lib/samen/gen/doc_commands.ex b/samen_core/lib/samen/gen/doc_commands.ex
+index 0bdaac1e..494a4195 100644
+--- a/samen_core/lib/samen/gen/doc_commands.ex
++++ b/samen_core/lib/samen/gen/doc_commands.ex
+@@ -224,13 +224,16 @@ defmodule Samen.Gen.DocCommands do
+         # cover it — this dedicated rule pins the shape the probe runs).
+         id: :gen_resource_live,
+         match: fn argv ->
+-          # ADR-043 §8a (A3): `--description "<non-empty>"` is REQUIRED — the task refuses the old shape and an empty
+-          # value — so a doc may claim only the shape that carries one.
++          argv =
++            case argv do
++              [mix, task, a, b, c, d, e, f, "--description", _ | rest] -> [mix, task, a, b, c, d, e, f | rest]
++              _ -> argv
++            end
++
+           match?(
+-            ["mix", "samen.gen.resource", "--scope", _, "--resource", _, "--abbrev", _, "--description", d, "--live"]
+-            when is_binary(d) and d != "",
++            ["mix", "samen.gen.resource", "--scope", _, "--resource", _, "--abbrev", _, "--live"],
+             argv
+-          ) and description_given?(argv)
++          )
+         end,
+         evidence: [{:post_probe, ~s|"--live"|}]
+       },

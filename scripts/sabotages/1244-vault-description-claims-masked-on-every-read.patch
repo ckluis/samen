@@ -1,0 +1,20 @@
+# SABOTAGE: The generated vault-field description must state the planes PiiResolution implements (tenant 
+#   clear, other planes masked or omitted), not 'masked on every read'.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/templates_parity_test.exs
+# MUST_FAIL: every generated vertical resource describes itself and its name, segment and vault fields (ADR-043 §8a)
+diff --git a/samen_core/priv/templates/vertical_ex.eex b/samen_core/priv/templates/vertical_ex.eex
+index 312a3c80..367874ff 100644
+--- a/samen_core/priv/templates/vertical_ex.eex
++++ b/samen_core/priv/templates/vertical_ex.eex
+@@ -69,7 +69,7 @@ defmodule <%= module %>.Vertical.Record do
+     pii_attribute(:secret, :string,
+       vault: :pii_secret,
+       description:
+-        "Sensitive text kept only in the vault; read in clear on the owning organization's tenant plane, masked or omitted on other planes unless a reveal grant covers it."
++        "Sensitive text kept only in the vault and masked on every read unless a distinct-party reveal grant allows it."
+     )
+     reveal(:reveal_<%= abbrev %>)
+   end

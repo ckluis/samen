@@ -25,7 +25,8 @@ defmodule Mix.Tasks.Samen.Gen.Resource do
 
   ## Usage
 
-      mix samen.gen.resource --scope Crm --resource Widget --abbrev wdg [--app-dir /path]
+      mix samen.gen.resource --scope Crm --resource Widget --abbrev wdg \\
+        --description "A configurable widget a team offers, with a status and one vault-routed value." [--app-dir /path]
 
   Options:
 
@@ -34,6 +35,16 @@ defmodule Mix.Tasks.Samen.Gen.Resource do
     * `--resource` (required) — the resource base name, e.g. `Widget`
       (module `<App>.<Scope>.Widget`, table `<abbrev>_widget`).
     * `--abbrev`   (required) — the **3-letter lowercase** abbrev, reserved permanently.
+    * `--description` (required) — what the resource IS, in one sentence: its catalog description
+      (ADR-043 §8a), read by the catalog dump, the AI catalogue and MCP browse. It must pass the
+      rules of `mix samen.verify.catalog_meaning` (at least 3 words, at most 300 characters, no
+      TODO/TBD/FIXME, no `vt_`, not a restatement of the resource name); a description that would fail
+      them is refused at generation time, naming the rule. Write only what the generated code makes
+      true. The generator describes the fixed scaffold fields itself (`name`, `label`, `status`, the
+      vault field) and accepts NO other field specs: it never invents meaning for a field it cannot
+      describe — add a field by hand and describe it with `description:` in the same edit (the verifier
+      refuses it undescribed). A description that starts with `-` must be passed as
+      `--description="-…"` (with the `=`); written as a separate argument, the option parser reads it as a flag.
     * `--app-dir`  (optional) — the existing app root. Defaults to the current directory.
     * `--no-reserve-abbrevs` — do NOT append the abbrev to the registry (used by the
       red-path probe to prove the compile-time gate catches a missing reservation).
@@ -72,7 +83,8 @@ defmodule Mix.Tasks.Samen.Gen.Resource do
     reserve_abbrevs: :boolean,
     live: :boolean,
     field_type: :string,
-    archivable: :boolean
+    archivable: :boolean,
+    description: :string
   ]
 
   @impl Mix.Task
@@ -87,6 +99,7 @@ defmodule Mix.Tasks.Samen.Gen.Resource do
     live? = Keyword.get(opts, :live, false)
     field_type = Keyword.get(opts, :field_type, "string")
     archivable? = Keyword.get(opts, :archivable, false)
+    description = require_description!(opts, resource, abbrev)
 
     spec =
       Post.build_resource_spec(
@@ -96,7 +109,8 @@ defmodule Mix.Tasks.Samen.Gen.Resource do
         abbrev: abbrev,
         live: live?,
         field_type: field_type,
-        archivable: archivable?
+        archivable: archivable?,
+        description: description
       )
 
     Post.validate_resource!(spec)
@@ -118,6 +132,30 @@ defmodule Mix.Tasks.Samen.Gen.Resource do
     )
 
     :ok
+  end
+
+  # ADR-043 §8a (A3): the resource's catalog description is REQUIRED — a placeholder would fail the verifier the
+  # generated app's ci.sh runs, so there is no correct-by-construction default. The quality rules are the verifier's own.
+  defp require_description!(opts, resource, abbrev) do
+    description = Keyword.get(opts, :description)
+
+    if description in [nil, ""] do
+      Mix.raise(
+        "mix samen.gen.resource: missing required --description. State what the resource IS, in one sentence " <>
+          ~s|(e.g. --description "A configurable widget a team offers, with a status and one vault-routed value.")|
+      )
+    end
+
+    case Post.description_problems(description, resource, "#{abbrev}_#{Macro.underscore(resource)}") do
+      [] ->
+        description
+
+      problems ->
+        Mix.raise(
+          "mix samen.gen.resource: --description #{Enum.join(problems, "; ")} " <>
+            "(the rules of `mix samen.verify.catalog_meaning`; ADR-043 §8a)"
+        )
+    end
   end
 
   defp require_opt!(opts, key) do

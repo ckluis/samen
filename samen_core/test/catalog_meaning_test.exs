@@ -209,6 +209,17 @@ defmodule SamenCore.CatalogMeaningTest do
       assert one("Name", name: "title") |> Enum.any?(&(&1 =~ "fewer than 3 words"))
     end
 
+    test "RED: a non-printable description (NUL, invalid UTF-8) is ONE named problem, never an exception; newline and tab are fine" do
+      for bad <- ["Legal name of the company\0 as filed", "Legal name of the \xff company as filed"] do
+        assert Samen.CatalogMeaning.description_problems(bad, ["name"]) == ["contains a non-printable character or invalid UTF-8"]
+        assert [message] = one(bad)
+        assert message =~ "non-printable"
+      end
+
+      # green controls: printable whitespace is not refused, so no multi-line description in a host trips the rule
+      assert one("Legal name of the company,\nas filed\twith the registry") == []
+    end
+
     test "RED: a possessive or a stray letter is not a new word (\"The name's name\" restates `name`)" do
       for text <- ["The name's name", "The name\u2019s name", "The names' name", "Name's value of this record", "The name, i.e. the name e g"] do
         assert [message] = one(text), "#{inspect(text)} must be refused"

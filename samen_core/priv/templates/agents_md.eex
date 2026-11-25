@@ -38,8 +38,8 @@ Every failure message is indexed (error string -> verifier -> meaning -> fix) in
 
 ## Common tasks
 
-- Add a resource: `mix samen.gen.resource --scope <Scope> --resource <Name> --abbrev <abc> [--live]` (add
-  `mix samen.gen.scope --scope <Scope>` first for a new scope). It writes the resource, migration, tests and
+- Add a resource: `mix samen.gen.resource --scope <Scope> --resource <Name> --abbrev <abc> --description "<what it is>" [--live]` (add
+  `mix samen.gen.scope --scope <Scope>` first for a new scope; `--description` is required and must pass the catalog-meaning rules). It writes the resource, migration, tests and
   registry row. Then `MIX_ENV=test mix ecto.migrate`, `mix samen.catalog.dump --output schema.dict.json`, and
   (if the resource is exposed on the API) `mix samen.verify.api_contract --version v1 --update`.
 - Add a field: there is no generator. Edit the resource, write a migration (`use Samen.Migration`, end `up/0`

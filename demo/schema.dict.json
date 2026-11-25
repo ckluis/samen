@@ -2101,7 +2101,7 @@
       "table_name": "cmp_company"
     },
     {
-      "description": "A person known to the demo organization; name, emails and date of birth are vault-routed and masked unless revealed.",
+      "description": "A person known to the demo organization; name, emails and date of birth are vault-routed (clear on the owning organization's tenant plane, masked or omitted on other planes without a reveal grant).",
       "fields": [
         {
           "column_name": "cnt_active",
@@ -2121,7 +2121,7 @@
         },
         {
           "column_name": "cnt_emails",
-          "description": "The contact's email addresses; vault-routed and masked unless revealed.",
+          "description": "The contact's email addresses; vault-routed, read in clear on the owning organization's tenant plane, masked or omitted on other planes unless a reveal grant covers it.",
           "label": "Emails",
           "logical_name": "emails",
           "pii": true,
@@ -2129,7 +2129,7 @@
         },
         {
           "column_name": "cnt_full_name",
-          "description": "The contact's full name; vault-routed and masked unless revealed.",
+          "description": "The contact's full name; vault-routed, read in clear on the owning organization's tenant plane, masked or omitted on other planes unless a reveal grant covers it.",
           "label": "Full name",
           "logical_name": "full_name",
           "pii": true,
@@ -2169,7 +2169,7 @@
         },
         {
           "column_name": "pii_cnt_dob",
-          "description": "The contact's date of birth; vault-routed and masked unless revealed.",
+          "description": "The contact's date of birth; vault-routed, read in clear on the owning organization's tenant plane, masked or omitted on other planes unless a reveal grant covers it.",
           "label": "Dob",
           "logical_name": "dob",
           "pii": true,
@@ -5991,7 +5991,7 @@
       "table_name": "pae_product_event"
     },
     {
-      "description": "A person the organization deals with, such as a customer contact; name, emails and phones are vault-routed and masked unless revealed.",
+      "description": "A person the organization deals with, such as a customer contact; name, emails and phones are vault-routed (clear on the owning organization's tenant plane, masked or omitted on other planes without a reveal grant).",
       "fields": [
         {
           "column_name": "per_archived_at",
@@ -6027,7 +6027,7 @@
         },
         {
           "column_name": "per_emails",
-          "description": "The person's email addresses; vault-routed and masked unless revealed.",
+          "description": "The person's email addresses; vault-routed, read in clear on the owning organization's tenant plane, masked or omitted on other planes unless a reveal grant covers it.",
           "label": "Emails",
           "logical_name": "emails",
           "pii": true,
@@ -6035,7 +6035,7 @@
         },
         {
           "column_name": "per_full_name",
-          "description": "The person's full name; vault-routed and masked unless revealed.",
+          "description": "The person's full name; vault-routed, read in clear on the owning organization's tenant plane, masked or omitted on other planes unless a reveal grant covers it.",
           "label": "Full name",
           "logical_name": "full_name",
           "pii": true,
@@ -6075,7 +6075,7 @@
         },
         {
           "column_name": "per_phones",
-          "description": "The person's phone numbers; vault-routed and masked unless revealed.",
+          "description": "The person's phone numbers; vault-routed, read in clear on the owning organization's tenant plane, masked or omitted on other planes unless a reveal grant covers it.",
           "label": "Phones",
           "logical_name": "phones",
           "pii": true,

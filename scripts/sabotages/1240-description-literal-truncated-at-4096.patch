@@ -1,0 +1,20 @@
+# SABOTAGE: The description literal must be inspected without inspect's 4096-codepoint printable_limit: a 
+#   long valid description would be cut to a non-compiling expression.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/gen_post_test.exs
+# MUST_FAIL: RED: a valid description above 4096 codepoints (inspect's default printable_limit) is emitted whole
+diff --git a/samen_core/lib/samen/gen/post.ex b/samen_core/lib/samen/gen/post.ex
+index ab5ebbea..f085c801 100644
+--- a/samen_core/lib/samen/gen/post.ex
++++ b/samen_core/lib/samen/gen/post.ex
+@@ -472,7 +472,7 @@ defmodule Samen.Gen.Post do
+       # `printable_limit: :infinity`: the default (4096 codepoints) cuts a long description to `"…" <> ...`, which does not
+       # compile, and the rules count graphemes (300), not codepoints. `App.render/2` is single-pass, so a description
+       # holding `<%= key %>` is emitted as written.
+-      "description_literal" => inspect(s.description, printable_limit: :infinity),
++      "description_literal" => inspect(s.description),
+       # ADR-040 §5.8 (T37h) `--archivable`: pre-resolved (not re-templated) insertion
+       # strings so the tiny `<%= key %>` engine (single-pass, no conditionals) can emit
+       # the E6 substrate ONLY when requested — "" leaves pre-T37h output byte-identical.

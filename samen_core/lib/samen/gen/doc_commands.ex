@@ -40,7 +40,9 @@ defmodule Samen.Gen.DocCommands do
           raw: String.t(),
           env: [String.t()],
           argv: [String.t()],
-          operator_todo?: boolean()
+          operator_todo?: boolean(),
+          # why the shell-style split failed (an unbalanced quote, an apostrophe in unquoted text), or `nil`
+          split_error: String.t() | nil
         }
 
   @type rule :: %{
@@ -105,9 +107,9 @@ defmodule Samen.Gen.DocCommands do
     line = String.replace_prefix(line, "$ ", "")
 
     {line, inline_todo?} =
-      case String.split(line, "#", parts: 2) do
-        [cmd] -> {String.trim(cmd), false}
-        [cmd, comment] -> {String.trim(cmd), String.contains?(comment, "operator-TODO")}
+      case split_comment(line) do
+        {cmd, nil} -> {String.trim(cmd), false}
+        {cmd, comment} -> {String.trim(cmd), String.contains?(comment, "operator-TODO")}
       end
 
     line
@@ -115,10 +117,15 @@ defmodule Samen.Gen.DocCommands do
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == ""))
     |> Enum.map(fn part ->
-      {env, argv} =
-        part
-        |> String.split(~r/\s+/)
-        |> Enum.split_while(&Regex.match?(~r/\A[A-Z][A-Z0-9_]*=\S*\z/, &1))
+      {env, argv, split_error} =
+        case split_words(part) do
+          {:ok, words} ->
+            {env, argv} = Enum.split_while(words, &Regex.match?(~r/\A[A-Z][A-Z0-9_]*=\S*\z/, &1))
+            {env, argv, nil}
+
+          {:error, reason} ->
+            {[], [], reason}
+        end
 
       %{
         doc: doc,
@@ -126,10 +133,35 @@ defmodule Samen.Gen.DocCommands do
         raw: part,
         env: env,
         argv: argv,
-        operator_todo?: block_todo? or inline_todo?
+        operator_todo?: block_todo? or inline_todo?,
+        split_error: split_error
       }
     end)
   end
+
+  # shell-like split: a quoted argument (`--description "a b c"`) is ONE token. `OptionParser.split/1` raises on an
+  # unbalanced quote and on an apostrophe in unquoted text (`it's`); that is a failure naming doc:line, never a crash.
+  defp split_words(part) do
+    {:ok, OptionParser.split(part)}
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
+  # Cut a line at its comment: a `#` that starts a word OUTSIDE quotes. A `#` inside `"…"` / `'…'` (a description such
+  # as `--description "x #y"`) or in the middle of a word is data. Returns `{command, comment | nil}`.
+  defp split_comment(line), do: split_comment(String.graphemes(line), nil, " ", [])
+
+  defp split_comment([], _quote, _prev, acc), do: {acc |> Enum.reverse() |> Enum.join(), nil}
+
+  defp split_comment(["#" | rest], nil, prev, acc) when prev in [" ", "\t"],
+    do: {acc |> Enum.reverse() |> Enum.join(), Enum.join(rest)}
+
+  defp split_comment(["\\", next | rest], q, _prev, acc) when q != "'",
+    do: split_comment(rest, q, next, [next, "\\" | acc])
+
+  defp split_comment([c | rest], nil, _prev, acc) when c in ["\"", "'"], do: split_comment(rest, c, c, [c | acc])
+  defp split_comment([q | rest], q, _prev, acc), do: split_comment(rest, nil, q, [q | acc])
+  defp split_comment([c | rest], q, _prev, acc), do: split_comment(rest, q, c, [c | acc])
 
   # ------------------------------------------------------------------ coverage rules
 
@@ -180,7 +212,8 @@ defmodule Samen.Gen.DocCommands do
       %{
         id: :gen_resource,
         match: fn argv ->
-          task_with_flags?(argv, "samen.gen.resource", ~w(--scope --resource --abbrev))
+          task_with_flags?(argv, "samen.gen.resource", ~w(--scope --resource --abbrev --description)) and
+            description_given?(argv)
         end,
         evidence: [{:post_probe, ~s|"samen.gen.resource"|}]
       },
@@ -191,10 +224,13 @@ defmodule Samen.Gen.DocCommands do
         # cover it — this dedicated rule pins the shape the probe runs).
         id: :gen_resource_live,
         match: fn argv ->
+          # ADR-043 §8a (A3): `--description "<non-empty>"` is REQUIRED — the task refuses the old shape and an empty
+          # value — so a doc may claim only the shape that carries one.
           match?(
-            ["mix", "samen.gen.resource", "--scope", _, "--resource", _, "--abbrev", _, "--live"],
+            ["mix", "samen.gen.resource", "--scope", _, "--resource", _, "--abbrev", _, "--description", d, "--live"]
+            when is_binary(d) and d != "",
             argv
-          )
+          ) and description_given?(argv)
         end,
         evidence: [{:post_probe, ~s|"--live"|}]
       },
@@ -207,7 +243,7 @@ defmodule Samen.Gen.DocCommands do
         id: :deps_get,
         match: fn argv -> argv == ["mix", "deps.get"] end,
         evidence: [
-          {:gen_engine, ~s|run_mix!(s, ["deps.get"])|},
+          {:gen_engine, ~s|run.(s, ["deps.get"])|},
           {:flagship_probe, "Gen.compile_and_dump!(spec)"}
         ]
       },
@@ -265,7 +301,7 @@ defmodule Samen.Gen.DocCommands do
           argv == ["mix", "samen.verify.api_contract", "--version", "v1", "--update"]
         end,
         evidence: [
-          {:gen_engine, ~s|run_mix!(s, ["samen.verify.api_contract", "--version", "v1", "--update"])|},
+          {:gen_engine, ~s|run.(s, ["samen.verify.api_contract", "--version", "v1", "--update"])|},
           {:flagship_probe, "Gen.compile_and_dump!(spec)"}
         ]
       },
@@ -310,6 +346,13 @@ defmodule Samen.Gen.DocCommands do
 
   defp task_with_flags?(_argv, _task, _flags), do: false
 
+  # `--description` carries a value that is not blank (`--description ""` is refused by the task itself).
+  defp description_given?(argv) do
+    argv
+    |> Enum.chunk_every(2, 1, :discard)
+    |> Enum.any?(fn [flag, value] -> flag == "--description" and String.trim(value) != "" end)
+  end
+
   defp parse_flag_pairs([], acc), do: {:ok, acc}
 
   defp parse_flag_pairs(["--" <> _ = flag, value | rest], acc) do
@@ -342,6 +385,13 @@ defmodule Samen.Gen.DocCommands do
   end
 
   defp check_command(%{operator_todo?: true}, _sources), do: []
+
+  defp check_command(%{split_error: reason} = cmd, _sources) when is_binary(reason) do
+    [
+      "#{cmd.doc}:#{cmd.line}: `#{cmd.raw}` cannot be split into shell words (#{reason}) — " <>
+        "fix the quoting, or mark the command `# operator-TODO`."
+    ]
+  end
 
   defp check_command(cmd, sources) do
     case Enum.find(rules(), fn rule -> rule.match.(cmd.argv) end) do

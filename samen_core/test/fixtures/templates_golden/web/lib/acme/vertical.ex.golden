@@ -40,19 +40,37 @@ defmodule Acme.Vertical.Record do
     abbrev: "acm",
     archivable: true
 
+  resource do
+    description(
+      "A named, segmented item an organization keeps in this app; it also carries one vault-routed sensitive value."
+    )
+  end
+
   postgres do
     table("acm_record")
     repo(Acme.Repo)
   end
 
   attributes do
-    attribute(:name, :string, public?: true)
-    attribute(:segment, :string, public?: true)
+    attribute(:name, :string,
+      public?: true,
+      description: "Name of the item as entered; optional, with no format or uniqueness enforced."
+    )
+
+    attribute(:segment, :string,
+      public?: true,
+      description:
+        "Cohort label tagged on the item as free text; the aggregate summary table has a segment column of the same name, and no fixed set of segments is enforced."
+    )
   end
 
   pii do
     vault(:pii_secret)
-    pii_attribute(:secret, :string, vault: :pii_secret)
+    pii_attribute(:secret, :string,
+      vault: :pii_secret,
+      description:
+        "Sensitive text kept only in the vault; read in clear on the owning organization's tenant plane, masked or omitted on other planes unless a reveal grant covers it."
+    )
     reveal(:reveal_acm)
   end
 

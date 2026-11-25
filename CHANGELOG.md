@@ -27,6 +27,39 @@ All notable changes to Samen are recorded here. The format follows
 - **Changed: the CRM scope blueprint, `Samen.Fragments.CorePerson` and demo's CRM resources are described**; the three
   committed `schema.dict.json` files are regenerated. No database column, migration or `custom_objects` change.
 
+### Added: generators emit described resources (ADR-043 §8a, A3)
+
+- **Added: a generated app is correct by construction for the catalog-meaning verifier.** `vertical.ex`, `aggregate.ex`
+  and the `gen.resource` scaffold describe the resource and every field they emit (name, segment, secret, label, status,
+  the aggregate counters); a vault field's description describes the schema, never a value. `mix samen.gen.app` runs
+  `mix samen.verify.catalog_meaning --init` right after the catalog dump, so the new app's `catalog_meaning.baseline`
+  holds only the debt inherited from mounted scopes, and refuses (raises) if an entry of the app's own tables appears.
+  The generated `ci.sh` runs the verifier as step 1c, after the `schema.dict.json` drift check.
+- **Changed (breaking for scripts): `mix samen.gen.resource` requires `--description "…"`.** It is the resource's catalog
+  description; one that would fail the verifier (fewer than 3 words, over 300 characters, TODO/TBD/FIXME, `vt_`, a
+  restatement of the name, or a non-printable character / invalid UTF-8) is refused at generation time, naming the rule,
+  using the verifier's own rule function (`Samen.CatalogMeaning.description_problems/2`). The generator takes no other
+  field specs, so it never invents meaning for a field it cannot describe. Template syntax such as `<%= table %>` is NOT
+  refused: `Samen.Gen.App.render/2` substitutes in one pass, so a value is never expanded again and the text is emitted
+  as written. A description longer than 4096 codepoints is emitted whole. A description starting with `-` is passed as
+  `--description="-…"`.
+- **Changed: generated descriptions say only what the code enforces.** A vault field is described as read in clear on the
+  owning organization's tenant plane and masked or omitted on other planes unless a reveal grant covers it (what
+  `Samen.Api.PiiResolution` does; it was "masked on every read"); the same correction is made to the shared CRM Person,
+  demo's Contact and the three regenerated `schema.dict.json`. `status` is "one of active, paused or archived; defaults
+  to active"; aggregate and segment text names the `Samen.Aggregate` read path as where suppression happens and claims
+  nothing about what fills the summary table.
+- **Upgrade, for apps generated earlier:** (1) add to `ci.sh`, after the `schema.dict.json` drift check,
+  `echo "--- step 1c: mix samen.verify.catalog_meaning"` and `mix samen.verify.catalog_meaning`; (2) run
+  `mix samen.verify.catalog_meaning --init` once and commit `catalog_meaning.baseline`; (3) describe your own resources
+  and fields (`description:` on each attribute, `resource do description … end`, `pii_attribute … description:`), then
+  `mix samen.verify.catalog_meaning --shrink` and commit; `mix samen.catalog.dump --output schema.dict.json` as well.
+  Scripts calling `mix samen.gen.resource` add `--description`. `--init` writes undescribed entries only: if the old app
+  already has a quality violation (a too-short description, a `vt_`, a restated name), `--init` still writes the file
+  but exits 1 with the violation; fix that text first (a quality violation is never baselinable) and re-run it.
+  An app generated with `--no-compile` has no baseline (see `docs/guides/generators.md`), so its `ci.sh` runs strict until
+  you run `--init`.
+
 ### Added: the catalog-meaning verifier (ADR-043 §8a, A2)
 
 - **Added: `mix samen.verify.catalog_meaning`** (`Samen.CatalogMeaning`) fails a catalogued table or field with no description,

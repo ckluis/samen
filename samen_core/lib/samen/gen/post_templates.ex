@@ -28,7 +28,7 @@ defmodule Samen.Gen.PostTemplates do
       <%= module %>'s `<%= scope %>` authored scope — a vertical namespace the app owns.
 
       Emitted by `mix samen.gen.scope` (WS-D D7a). Starts EMPTY;
-      `mix samen.gen.resource --scope <%= scope %> --resource <Name> --abbrev <abc>`
+      `mix samen.gen.resource --scope <%= scope %> --resource <Name> --abbrev <abc> --description "<what it is>"`
       lands Tier-0 config resources into it (org-scoped, admin-gated writes, catalogued
       in the app's `tam_table`/`fld_field`, PII vault-routed) and wires each into the
       `resources do … end` block below. Registered in both `:ash_domains` lists so the
@@ -189,19 +189,32 @@ defmodule Samen.Gen.PostTemplates do
         authorizers: [Ash.Policy.Authorizer],
         abbrev: "<%= abbrev %>"<%= archivable_opt %>
 
+      resource do
+        description(<%= description_literal %>)
+      end
+
       postgres do
         table("<%= table %>")
         repo(<%= module %>.Repo)
       end
 
       attributes do
-        attribute(:name, :string, public?: true, allow_nil?: false)
-        attribute(:label, :string, public?: true)
+        attribute(:name, :string,
+          public?: true,
+          allow_nil?: false,
+          description: "Name of the entry; required, with no format or uniqueness enforced."
+        )
+
+        attribute(:label, :string,
+          public?: true,
+          description: "Optional secondary label for the entry; free text with no enforced format."
+        )
 
         # Bounded enum — a config-row status, NOT a freeform string (CDC-safe; no
         # non_pii! clearance needed).
         attribute :status, :atom do
           public?(true)
+          description("State of the entry, one of active, paused or archived; defaults to active.")
           constraints(one_of: [:active, :paused, :archived])
           default(:active)
         end
@@ -209,7 +222,13 @@ defmodule Samen.Gen.PostTemplates do
 
       pii do
         vault(:pii_secret)
-        pii_attribute(:secret, <%= field_ash_type %>, vault: :pii_secret)
+
+        pii_attribute(:secret, <%= field_ash_type %>,
+          vault: :pii_secret,
+          description:
+            "Sensitive value (logical type <%= field_type %>) kept only in the vault; read in clear on the owning organization's tenant plane, masked or omitted on other planes unless a reveal grant covers it."
+        )
+
         reveal(:reveal_<%= abbrev %>)
       end
 

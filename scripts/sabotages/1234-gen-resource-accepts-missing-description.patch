@@ -1,0 +1,40 @@
+# SABOTAGE: mix samen.gen.resource must refuse a missing --description (a placeholder would break the 
+#   generated gate).
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/gen_post_test.exs
+# MUST_FAIL: RED: refuses a missing --description, with a hint showing the flag, before writing anything
+diff --git a/samen_core/lib/mix/tasks/samen.gen.resource.ex b/samen_core/lib/mix/tasks/samen.gen.resource.ex
+index c354d534..d308da01 100644
+--- a/samen_core/lib/mix/tasks/samen.gen.resource.ex
++++ b/samen_core/lib/mix/tasks/samen.gen.resource.ex
+@@ -135,27 +135,7 @@ defmodule Mix.Tasks.Samen.Gen.Resource do
+ 
+   # ADR-043 §8a (A3): the resource's catalog description is REQUIRED — a placeholder would fail the verifier the
+   # generated app's ci.sh runs, so there is no correct-by-construction default. The quality rules are the verifier's own.
+-  defp require_description!(opts, resource, abbrev) do
+-    description = Keyword.get(opts, :description)
+-
+-    if description in [nil, ""] do
+-      Mix.raise(
+-        "mix samen.gen.resource: missing required --description. State what the resource IS, in one sentence " <>
+-          ~s|(e.g. --description "A configurable widget a team offers, with a status and one vault-routed value.")|
+-      )
+-    end
+-
+-    case Post.description_problems(description, resource, "#{abbrev}_#{Macro.underscore(resource)}") do
+-      [] ->
+-        description
+-
+-      problems ->
+-        Mix.raise(
+-          "mix samen.gen.resource: --description #{Enum.join(problems, "; ")} " <>
+-            "(the rules of `mix samen.verify.catalog_meaning`; ADR-043 §8a)"
+-        )
+-    end
+-  end
++  defp require_description!(opts, _resource, _abbrev), do: Keyword.get(opts, :description)
+ 
+   defp require_opt!(opts, key) do
+     case Keyword.get(opts, key) do

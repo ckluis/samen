@@ -1,0 +1,23 @@
+# SABOTAGE: A generator template that emits a field without a description makes the generated app's own 
+#   catalog-meaning verifier red.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/templates_parity_test.exs
+# MUST_FAIL: every generated vertical resource describes itself and its name, segment and vault fields (ADR-043 §8a)
+diff --git a/samen_core/priv/templates/vertical_ex.eex b/samen_core/priv/templates/vertical_ex.eex
+index 6fe037c9..60918b71 100644
+--- a/samen_core/priv/templates/vertical_ex.eex
++++ b/samen_core/priv/templates/vertical_ex.eex
+@@ -52,10 +52,7 @@ defmodule <%= module %>.Vertical.Record do
+   end
+ 
+   attributes do
+-    attribute(:name, :string,
+-      public?: true,
+-      description: "Name of the item as entered; optional, with no format or uniqueness enforced."
+-    )
++    attribute(:name, :string, public?: true)
+ 
+     attribute(:segment, :string,
+       public?: true,

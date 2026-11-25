@@ -1,0 +1,34 @@
+# SABOTAGE: A refused gen.resource run must not have reserved its abbrev: the description refusal comes 
+#   before the permanent reservation.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/gen_args_test.exs
+# MUST_FAIL: a missing --description is refused with the registry byte-identical (no --no-reserve-abbrevs)
+diff --git a/samen_core/lib/mix/tasks/samen.gen.resource.ex b/samen_core/lib/mix/tasks/samen.gen.resource.ex
+index 98b82155..f5c3e072 100644
+--- a/samen_core/lib/mix/tasks/samen.gen.resource.ex
++++ b/samen_core/lib/mix/tasks/samen.gen.resource.ex
+@@ -99,7 +99,7 @@ defmodule Mix.Tasks.Samen.Gen.Resource do
+     live? = Keyword.get(opts, :live, false)
+     field_type = Keyword.get(opts, :field_type, "string")
+     archivable? = Keyword.get(opts, :archivable, false)
+-    description = require_description!(opts, resource, abbrev)
++    description = Keyword.get(opts, :description)
+ 
+     spec =
+       Post.build_resource_spec(
+@@ -113,10 +113,11 @@ defmodule Mix.Tasks.Samen.Gen.Resource do
+         description: description
+       )
+ 
+-    Post.validate_resource!(spec)
+-
+     if reserve?, do: Post.reserve_abbrevs!(spec)
+ 
++    require_description!(opts, resource, abbrev)
++    Post.validate_resource!(spec)
++
+     Post.write_resource!(spec)
+ 
+     live_note =

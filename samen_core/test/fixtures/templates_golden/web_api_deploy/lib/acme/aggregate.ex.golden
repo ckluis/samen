@@ -27,17 +27,46 @@ defmodule Acme.Aggregate.RecordCountBySegment do
     authorizers: [Ash.Policy.Authorizer],
     abbrev: "aca"
 
+  resource do
+    description(
+      "Per-segment summary rows of cohort counts (organizations and items), exposed read-only and only to the token-blind aggregate actor."
+    )
+  end
+
   postgres do
     table("aca_record_count")
     repo(Acme.Repo)
   end
 
   attributes do
-    attribute(:org_id, :uuid, public?: true, allow_nil?: true)
-    attribute(:segment, :string, public?: true, allow_nil?: false)
-    attribute(:tenant_count, :integer, public?: true, default: 0)
-    attribute(:record_count, :integer, public?: true, default: 0)
-    attribute(:refreshed_at, :utc_datetime, public?: true)
+    attribute(:org_id, :uuid,
+      public?: true,
+      allow_nil?: true,
+      description: "Organization the summary row is attributed to, if any; the aggregate plane itself has no org boundary."
+    )
+
+    attribute(:segment, :string,
+      public?: true,
+      allow_nil?: false,
+      description: "Cohort label of the summary row, which is also its cohort key on the Samen.Aggregate read path; required free text with no enforced vocabulary."
+    )
+
+    attribute(:tenant_count, :integer,
+      public?: true,
+      default: 0,
+      description: "Number of organizations in the segment cohort; on the Samen.Aggregate read path it is the cohort size that decides whether record_count is suppressed."
+    )
+
+    attribute(:record_count, :integer,
+      public?: true,
+      default: 0,
+      description: "Number of items counted in the segment cohort; on the Samen.Aggregate read path it is suppressed when tenant_count is below the k-anonymity floor."
+    )
+
+    attribute(:refreshed_at, :utc_datetime,
+      public?: true,
+      description: "Optional timestamp of the last refresh of this summary row; empty unless something writes it."
+    )
   end
 
   actions do

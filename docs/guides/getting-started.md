@@ -139,7 +139,7 @@ Every resource after the first is scaffolded, not hand-copied. From `harbor/`:
 
 ```bash
 mix samen.gen.scope --scope Marina
-mix samen.gen.resource --scope Marina --resource Slip --abbrev hsl
+mix samen.gen.resource --scope Marina --resource Slip --abbrev hsl --description "A berth in the marina, with a status and one vault-routed value."
 ```
 
 `gen.scope` emits the empty `Harbor.Marina` domain and registers it in both

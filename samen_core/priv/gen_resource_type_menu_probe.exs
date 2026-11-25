@@ -16,7 +16,7 @@
 #      with FRESH registry-safe abbrevs; compile + dump baselines.
 #   2. `mix samen.gen.scope --scope Crm` once.
 #   3. For EACH menu entry: `mix samen.gen.resource --scope Crm --resource <Type>Item --abbrev
-#      <abc> --field-type <type>` (ten resources, ten distinct collision-free abbrevs,
+#      <abc> --description "…" --field-type <type>` (ten resources, ten distinct collision-free abbrevs,
 #      one scope). No `--live` — the `--live` × non-default-`--field-type` LiveView-render
 #      combination is a documented scope boundary (see the resource_show_live `render_secret/1`
 #      defensive fix; not exercised end-to-end by this probe).
@@ -182,6 +182,8 @@ try do
           resource_name,
           "--abbrev",
           abbrev,
+          "--description",
+          "Sample item whose one vault-routed value is of the #{field_type} field type.",
           "--field-type",
           field_type
         ])

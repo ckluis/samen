@@ -534,20 +534,69 @@ defmodule Samen.Gen.App do
   matches the compiled schema (the gate's step 1b). With the API layer (WS-D D3) also
   dumps the committed `api_contract.v1.json` structural-break snapshot so the generated
   ci.sh's `samen.verify.api_contract` step is green on first run. Runs in the app dir via
-  `System.cmd` so it does not disturb the generator's own build.
+  `System.cmd` so it does not disturb the generator's own build. `run` (`fn spec, mix_args -> :ok end`) is the
+  seam a test replaces to record the invocations without compiling an app.
   """
-  def compile_and_dump!(%__MODULE__{} = s) do
-    run_mix!(s, ["deps.get"])
+  def compile_and_dump!(%__MODULE__{} = s, run \\ &run_mix!/2) when is_function(run, 2) do
+    run.(s, ["deps.get"])
     deps_cache!(s, "seed")
-    run_mix!(s, ["compile", "--warnings-as-errors"])
+    run.(s, ["compile", "--warnings-as-errors"])
     deps_cache!(s, "store")
-    run_mix!(s, ["samen.catalog.dump", "--output", "schema.dict.json"])
+
+    for args <- dump_steps(s), do: run.(s, args)
 
     if s.api? do
-      run_mix!(s, ["samen.verify.api_contract", "--version", "v1", "--update"])
+      run.(s, ["samen.verify.api_contract", "--version", "v1", "--update"])
     end
 
+    own_debt_in_baseline!(s)
     :ok
+  end
+
+  @doc """
+  The `mix` invocations `compile_and_dump!/1` runs AFTER the compile, in order (ADR-043 §8a, A3). The catalog dump
+  comes first; then `samen.verify.catalog_meaning --init` writes the new app's `catalog_meaning.baseline` (the debt
+  inherited from the mounted scopes — the app's own generated resources are described, so they add none). With the
+  API layer the structural-break snapshot follows (run by `compile_and_dump!/1` itself). Pure so a test can pin the
+  order without compiling an app.
+  """
+  @spec dump_steps(%__MODULE__{}) :: [[String.t()]]
+  def dump_steps(%__MODULE__{}) do
+    [
+      ["samen.catalog.dump", "--output", "schema.dict.json"],
+      ["samen.verify.catalog_meaning", "--init"]
+    ]
+  end
+
+  @doc """
+  The baseline entries (`table` or `table.field`) that belong to the app's OWN generated resources (the authored
+  vertical record and the aggregate summary). Those are described by construction, so a non-empty result means a
+  template stopped describing a table or field the generator emits.
+  """
+  @spec own_debt(%__MODULE__{}, String.t()) :: [String.t()]
+  def own_debt(%__MODULE__{resource_table: record, agg_table: agg}, baseline_src) when is_binary(baseline_src) do
+    for entry <- Samen.CatalogMeaning.Baseline.parse(baseline_src).entries,
+        hd(String.split(entry, ".", parts: 2)) in [record, agg],
+        do: entry
+  end
+
+  defp own_debt_in_baseline!(%__MODULE__{app_dir: dir} = s) do
+    path = Path.join(dir, Samen.CatalogMeaning.Baseline.file_name())
+
+    case File.read(path) do
+      {:ok, src} ->
+        case own_debt(s, src) do
+          [] ->
+            :ok
+
+          debt ->
+            raise "samen.gen.app: the new app's #{path} lists its OWN generated resources as undescribed " <>
+                    "(#{Enum.join(debt, ", ")}) — a template emits a table or field without a description"
+        end
+
+      {:error, reason} ->
+        raise "samen.gen.app: `mix samen.verify.catalog_meaning --init` left no #{path} (#{inspect(reason)})"
+    end
   end
 
   # ADR-053 P6 — opt-in, set only by scripts/gen_probe_guard.sh for the gen probes: seed the app's `_build` with the
@@ -965,8 +1014,16 @@ defmodule Samen.Gen.App do
 
   @doc false
   def render(template, bindings) do
-    Enum.reduce(bindings, template, fn {k, v}, acc ->
-      String.replace(acc, "<%= #{k} %>", to_string(v))
+    # ONE pass over the template: a substituted value is never scanned again, so a value that itself holds `<%= key %>`
+    # (a free-text `--description`) is emitted literally instead of being expanded by whichever binding comes later. A
+    # key with no binding is left as written; for a duplicated key the first binding wins (as the sequential form did).
+    lookup = Enum.reduce(bindings, %{}, fn {k, v}, acc -> Map.put_new(acc, to_string(k), v) end)
+
+    Regex.replace(~r/<%= (\w+) %>/, template, fn whole, key ->
+      case lookup do
+        %{^key => value} -> to_string(value)
+        _ -> whole
+      end
     end)
   end
 

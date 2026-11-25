@@ -30,9 +30,13 @@ a `Samen.Migration` with abbrev-prefixed columns + `catalog_sync`, the append-on
 reservation, the domain wiring, the four G26 red-path test files and a per-resource
 anti-tautology probe.
 
+`--description` is required: it is the resource's catalog description (ADR-043 §8a), checked against the same rules
+`mix samen.verify.catalog_meaning` applies. The generator describes the fixed scaffold fields itself and takes no other
+field specs, so it never invents meaning; a field you add by hand needs its own `description:` in the same edit.
+
 ```bash
 mix samen.gen.scope --scope Crm
-mix samen.gen.resource --scope Crm --resource Widget --abbrev wdg
+mix samen.gen.resource --scope Crm --resource Widget --abbrev wdg --description "A configurable widget a team offers, with a status and one vault-routed value."
 mix ecto.migrate
 mix samen.catalog.dump --output schema.dict.json
 MIX_ENV=test bash ci.sh
@@ -272,7 +276,7 @@ inherited kit (no bespoke markup, no per-vertical UI library). Requires a `--web
 (the surfaces mount on samen_web's `Samen.UI`).
 
 ```bash
-mix samen.gen.resource --scope Crm --resource Widget --abbrev wdg --live
+mix samen.gen.resource --scope Crm --resource Widget --abbrev wdg --description "A configurable widget a team offers, with a status and one vault-routed value." --live
 ```
 
 This emits, alongside the headless output, three LiveViews under the app's
@@ -414,7 +418,7 @@ patch IS the change now; the tree should go back to green). Prove it flips befor
 it — `scripts/sabotage.sh` does all five steps for every committed patch: SHA-256 the touched
 files, apply, run `TEST_FILES` and assert the `MUST_FAIL` names are among the failures, revert,
 and re-SHA to confirm a byte-exact restore. Run it locally against your new patch, then run the
-whole committed suite (<!--count:sabotages-->1225<!--/count--> patches today; the number is generated) — both are opt-in (they deliberately
+whole committed suite (<!--count:sabotages-->1237<!--/count--> patches today; the number is generated) — both are opt-in (they deliberately
 break the tree and re-run DB-backed suites), so they're run explicitly, not by the default
 `bash ci.sh`:
 

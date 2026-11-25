@@ -1,0 +1,19 @@
+# SABOTAGE: A generated ci.sh without the catalog-meaning verifier would never enforce descriptions or the 
+#   baseline.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/templates_parity_test.exs
+# MUST_FAIL: every generated ci.sh runs samen.verify.catalog_meaning as step 1c, right after the dict drift check (ADR-043 §8a)
+diff --git a/samen_core/priv/templates/ci_sh.eex b/samen_core/priv/templates/ci_sh.eex
+index a1db58b7..c0fdea49 100644
+--- a/samen_core/priv/templates/ci_sh.eex
++++ b/samen_core/priv/templates/ci_sh.eex
+@@ -42,7 +42,6 @@ echo "    PASSED (schema.dict.json matches regenerated output)"
+ #     (written once by `mix samen.gen.app`, holding only what the mounted scopes inherit; `--shrink` lowers it,
+ #     nothing raises it). It reads compile-time metadata only — NO database.
+ echo "--- step 1c/18: mix samen.verify.catalog_meaning (catalog meaning + shrink-only baseline)"
+-mix samen.verify.catalog_meaning
+ echo "    PASSED"
+ 
+ echo "--- step 2/18: mix samen.verify.catalog_parity"

@@ -260,7 +260,7 @@ defmodule Demo.Crm.Contact do
 
   resource do
     description(
-      "A person known to the demo organization; name, emails and date of birth are vault-routed and masked unless revealed."
+      "A person known to the demo organization; name, emails and date of birth are vault-routed (clear on the owning organization's tenant plane, masked or omitted on other planes without a reveal grant)."
     )
   end
 
@@ -296,17 +296,17 @@ defmodule Demo.Crm.Contact do
     # Composite PII: FullName + Emails — the standard T1.9 composite pair.
     pii_attribute(:full_name, Samen.Type.FullName,
       vault: :pii_name,
-      description: "The contact's full name; vault-routed and masked unless revealed."
+      description: "The contact's full name; vault-routed, read in clear on the owning organization's tenant plane, masked or omitted on other planes unless a reveal grant covers it."
     )
     pii_attribute(:emails, Samen.Type.Emails,
       vault: :pii_email,
-      description: "The contact's email addresses; vault-routed and masked unless revealed."
+      description: "The contact's email addresses; vault-routed, read in clear on the owning organization's tenant plane, masked or omitted on other planes unless a reveal grant covers it."
     )
 
     # Scalar pii_ field: date of birth. Storage column: pii_cnt_dob.
     pii_attribute(:dob, :date,
       vault: :pii_dob,
-      description: "The contact's date of birth; vault-routed and masked unless revealed."
+      description: "The contact's date of birth; vault-routed, read in clear on the owning organization's tenant plane, masked or omitted on other planes unless a reveal grant covers it."
     )
 
     # Declare :reveal_contact as the reveal action. C3 pii_reads will not flag
