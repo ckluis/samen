@@ -1,0 +1,20 @@
+# SABOTAGE: a stray letter (the s of name's, e.g.) counts as a new word again, so a restatement with an 
+#   apostrophe-s passes
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_test.exs
+# MUST_FAIL: RED: a possessive or a stray letter is not a new word
+diff --git a/samen_core/lib/samen/catalog_meaning.ex b/samen_core/lib/samen/catalog_meaning.ex
+index 11d582a7..8e29c866 100644
+--- a/samen_core/lib/samen/catalog_meaning.ex
++++ b/samen_core/lib/samen/catalog_meaning.ex
+@@ -256,7 +256,7 @@ defmodule Samen.CatalogMeaning do
+   @spec restates?([String.t()], MapSet.t(String.t())) :: boolean()
+   def restates?(tokens, name_words) do
+     # A single letter is never a content word: the tokeniser splits "name's" into "name" and "s", and "e.g." into "e", "g".
+-    content = Enum.reject(tokens, &(&1 in @stopwords or String.length(&1) <= 1))
++    content = Enum.reject(tokens, &(&1 in @stopwords))
+     content == [] or Enum.all?(content, &MapSet.member?(name_words, stem(&1)))
+   end
+ 

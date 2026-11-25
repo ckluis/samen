@@ -1,0 +1,20 @@
+# SABOTAGE: demo/ci.sh comments out the catalog_meaning step, so the whole verifier is off for demo while 
+#   every other step stays green
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_ratchet_test.exs
+# MUST_FAIL: every host's ci.sh runs the verifier: the exact whole line
+diff --git a/demo/ci.sh b/demo/ci.sh
+index 2ce8908f..8d861655 100755
+--- a/demo/ci.sh
++++ b/demo/ci.sh
+@@ -72,7 +72,7 @@ echo "    PASSED (schema.dict.json matches regenerated output)"
+ #     (`--shrink` lowers it, nothing raises it; a samen_core test compares it with the merge base). It reads
+ #     compile-time metadata only — NO database — so it needs no DB bootstrap.
+ echo "--- step 1c/18: mix samen.verify.catalog_meaning (catalog meaning + shrink-only baseline)"
+-mix samen.verify.catalog_meaning
++# mix samen.verify.catalog_meaning
+ echo "    PASSED"
+ 
+ # 2. C1 catalog_parity

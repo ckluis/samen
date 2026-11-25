@@ -1,0 +1,19 @@
+# SABOTAGE: the introspection failure is dropped instead of reported, so an unreadable resource is skipped
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_test.exs
+# MUST_FAIL: RED: a resource that cannot be introspected is a violation
+diff --git a/samen_core/lib/samen/catalog_meaning.ex b/samen_core/lib/samen/catalog_meaning.ex
+index 9232d5ba..bc536050 100644
+--- a/samen_core/lib/samen/catalog_meaning.ex
++++ b/samen_core/lib/samen/catalog_meaning.ex
+@@ -83,7 +83,7 @@ defmodule Samen.CatalogMeaning do
+       |> Enum.map(&introspect_one/1)
+       |> Enum.split_with(&match?({:ok, _}, &1))
+ 
+-    {Enum.map(oks, fn {:ok, info} -> info end), Enum.map(errors, fn {:error, message} -> message end)}
++    {Enum.map(oks, fn {:ok, info} -> info end), Enum.map(errors, fn {:error, _message} -> nil end) |> Enum.reject(&is_nil/1)}
+   end
+ 
+   defp introspect_one(resource) do

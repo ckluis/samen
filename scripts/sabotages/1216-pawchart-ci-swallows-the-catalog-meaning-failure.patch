@@ -1,0 +1,19 @@
+# SABOTAGE: pawchart/ci.sh appends || true to the catalog_meaning step, so its failure never fails the gate
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_ratchet_test.exs
+# MUST_FAIL: every host's ci.sh runs the verifier: the exact whole line
+diff --git a/pawchart/ci.sh b/pawchart/ci.sh
+index 9a4ce3ca..48de5162 100755
+--- a/pawchart/ci.sh
++++ b/pawchart/ci.sh
+@@ -58,7 +58,7 @@ echo "    PASSED (schema.dict.json matches regenerated output)"
+ #     (`--shrink` lowers it, nothing raises it; a samen_core test compares it with the merge base). It reads
+ #     compile-time metadata only — NO database — so it needs no DB bootstrap.
+ echo "--- step 1c/17: mix samen.verify.catalog_meaning (catalog meaning + shrink-only baseline)"
+-mix samen.verify.catalog_meaning
++mix samen.verify.catalog_meaning || true
+ echo "    PASSED"
+ 
+ # 2. C1 catalog_parity

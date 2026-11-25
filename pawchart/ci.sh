@@ -6,6 +6,7 @@
 #
 #   mix compile --force --warnings-as-errors
 #   schema.dict.json drift check
+#   samen.verify.catalog_meaning (ADR-043 §8a: described catalog + shrink-only baseline)
 #   samen.verify.catalog_parity / prefixes / pii_reads / pii_classify / no_plaintext_pii
 #   samen.verify.migrations / sink_schema / metric_labels / vault_declared_parity
 #   samen.verify.tnt_catalog / tnt_boundary
@@ -51,6 +52,14 @@ if ! diff -q "$COMMITTED_DICT" "$FRESH_DICT" > /dev/null 2>&1; then
   exit 1
 fi
 echo "    PASSED (schema.dict.json matches regenerated output)"
+
+# 1c. catalog_meaning (ADR-043 §8a): every catalogued table and field is described, with description quality and
+#     synonym rules enforced. The undescribed debt is the exact, shrink-only list `catalog_meaning.baseline`
+#     (`--shrink` lowers it, nothing raises it; a samen_core test compares it with the merge base). It reads
+#     compile-time metadata only — NO database — so it needs no DB bootstrap.
+echo "--- step 1c/17: mix samen.verify.catalog_meaning (catalog meaning + shrink-only baseline)"
+mix samen.verify.catalog_meaning
+echo "    PASSED"
 
 # 2. C1 catalog_parity
 echo "--- step 2/17: mix samen.verify.catalog_parity"

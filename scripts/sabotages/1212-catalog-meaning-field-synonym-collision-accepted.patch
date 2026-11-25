@@ -1,0 +1,19 @@
+# SABOTAGE: a field synonym equal to another table's label is accepted, so person 'contact' names the 
+#   Contact table
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_test.exs
+# MUST_FAIL: RED: a field synonym that names another table's label or synonym is refused (cross-table)
+diff --git a/samen_core/lib/samen/catalog_meaning.ex b/samen_core/lib/samen/catalog_meaning.ex
+index 11d582a..fabd6a5 100644
+--- a/samen_core/lib/samen/catalog_meaning.ex
++++ b/samen_core/lib/samen/catalog_meaning.ex
+@@ -326,6 +326,7 @@ defmodule Samen.CatalogMeaning do
+       field_side =
+         for f <- t.fields,
+             s <- f.synonyms,
++            false,
+             {other, via, label} <- Map.get(index, norm(s), []),
+             other != t.table_name,
+             not twin?(t, label),

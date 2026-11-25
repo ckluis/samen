@@ -1,0 +1,19 @@
+# SABOTAGE: stale baseline entries are tolerated, so a described field stays listed forever
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_test.exs
+# MUST_FAIL: RED: a described field left in the baseline must be shrunk
+diff --git a/samen_core/lib/samen/catalog_meaning.ex b/samen_core/lib/samen/catalog_meaning.ex
+index 9232d5ba..937c2727 100644
+--- a/samen_core/lib/samen/catalog_meaning.ex
++++ b/samen_core/lib/samen/catalog_meaning.ex
+@@ -187,7 +187,7 @@ defmodule Samen.CatalogMeaning do
+     # Only "undescribed" is debt: a quality finding is reported whatever the file lists.
+     reported = Enum.reject(findings, &(&1.kind == :undescribed and MapSet.member?(listed, &1.key)))
+ 
+-    stale = for e <- Enum.sort(listed), not MapSet.member?(current, e), do: "#{e}: baseline entry is #{@stale_message}"
++    stale = []
+ 
+     ceiling =
+       cond do

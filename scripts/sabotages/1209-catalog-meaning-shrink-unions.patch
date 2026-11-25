@@ -1,0 +1,20 @@
+# SABOTAGE: shrink unions the file with what is undescribed instead of intersecting, so it absorbs new debt
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_test.exs
+# MUST_FAIL: RED: --shrink never adds an entry
+diff --git a/samen_core/lib/samen/catalog_meaning/baseline.ex b/samen_core/lib/samen/catalog_meaning/baseline.ex
+index 9a74b085..a129217d 100644
+--- a/samen_core/lib/samen/catalog_meaning/baseline.ex
++++ b/samen_core/lib/samen/catalog_meaning/baseline.ex
+@@ -75,7 +75,8 @@ defmodule Samen.CatalogMeaning.Baseline do
+   @spec shrink(String.t(), [String.t()]) :: String.t()
+   def shrink(src, undescribed) do
+     still = MapSet.new(undescribed)
+-    src |> parse() |> Map.fetch!(:entries) |> Enum.filter(&MapSet.member?(still, &1)) |> render()
++    _ = still
++    src |> parse() |> Map.fetch!(:entries) |> Kernel.++(undescribed) |> render()
+   end
+ 
+   @doc """

@@ -1,0 +1,20 @@
+# SABOTAGE: the twin exemption widened to any table, so a synonym that names a different-label table (file 
+#   on an attachment) is accepted
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_test.exs
+# MUST_FAIL: twin mounts are one concept: a table synonym does not collide with the twin (same label), still with any other label
+diff --git a/samen_core/lib/samen/catalog_meaning.ex b/samen_core/lib/samen/catalog_meaning.ex
+index 25ecea9d..7283bf83 100644
+--- a/samen_core/lib/samen/catalog_meaning.ex
++++ b/samen_core/lib/samen/catalog_meaning.ex
+@@ -350,7 +350,7 @@ defmodule Samen.CatalogMeaning do
+   # A scope mounted twice in a host (Billing, Support) gives every table a twin with the SAME label, and a blueprint
+   # synonym lands on both mounts. Twins are one concept: the label they share is already (equally) ambiguous, so
+   # their names and synonyms never collide with each other. A table with a DIFFERENT label still collides.
+-  defp twin?(t, other_label), do: norm(other_label) == norm(t.label)
++  defp twin?(_t, _other_label), do: true
+ 
+   # R5.
+   defp units_findings(t) do

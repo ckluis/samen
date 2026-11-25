@@ -18,7 +18,7 @@ FAIL: <task name> found N violation(s):
 
 On success each prints `<task name>: OK — no violations found.` Step numbers below are the
 generated app's <!--count:gate_steps_app-->18<!--/count-->-step `ci.sh` (emitted by `mix samen.gen.app`; the `--api` variant has <!--count:gate_steps_app_api-->19<!--/count-->); Driftwood's
-<!--count:gate_steps_driftwood-->20<!--/count-->-step and PawChart's <!--count:gate_steps_pawchart-->17<!--/count-->-step gates run the same tiers in the same order. There are <!--count:verifiers-->31<!--/count--> `samen.verify.*` tasks in
+<!--count:gate_steps_driftwood-->20<!--/count-->-step and PawChart's <!--count:gate_steps_pawchart-->17<!--/count-->-step gates run the same tiers in the same order. There are <!--count:verifiers-->32<!--/count--> `samen.verify.*` tasks in
 total; each has an entry below (`doc_recipes_test.exs` enforces it).
 
 ---
@@ -437,6 +437,37 @@ app, over that app's own `lib/`. A file it cannot read or parse, a subdirectory 
 **Fix:** pin the read with an `org_id`/`id` filter (or a by-id `Ash.get`, or a scalar aggregate). A read that is deliberately
 org-less (a system sweep, a pre-auth credential lookup) takes a `# authz-scope: <why it is safe>` marker on the read and a ceiling
 raised by one in `ci.sh`. Run it by hand: `mix samen.verify.read_scope [--source-dirs lib] [--max-sanctioned N]`.
+
+---
+
+## Step 1c — `mix samen.verify.catalog_meaning`
+
+**Error** (`samen_core/lib/mix/tasks/samen.verify.catalog_meaning.ex`, rules `samen_core/lib/samen/catalog_meaning.ex`):
+
+```text
+FAIL: samen.verify.catalog_meaning found N violation(s):
+  • crm_company.industry: undescribed — describe it — new tables and fields are described from day one; the baseline never grows
+  • crm_company.name: baseline entry is now described (or gone) — run mix samen.verify.catalog_meaning --shrink
+  • crm_company.size: description only restates the name — say what it IS or does, in words the name does not hold ("Size")
+  • crm_attachment: synonym "file" names another table (fnd_file, "File")
+  • baseline ceiling is 5 but it lists 4 entries — they must be equal
+```
+
+**Meaning:** every catalogued table and field needs a description of real quality, and the only tolerated gap is the exact list in
+`<app>/catalog_meaning.baseline`. **New undescribed:** a table or field is not in the baseline and has no description: describe
+it (resource `description`, attribute `description`, a relationship's `description` for its FK; see scope-authoring §5a).
+Never add a line to the baseline. **Now described:** an entry you described is still listed: run
+`mix samen.verify.catalog_meaning --shrink` and commit the smaller file. **Quality** (fewer than 3 words, over 300 characters,
+TODO/TBD/FIXME, `vt_`, a restatement of the name, an untrimmed text; a synonym that is empty, over 40 characters, repeated in the
+resource, another field's name or label, or another table's label, name or synonym; units over 40 characters or authored on a type
+that fixes its own) is never baselinable: rewrite the text. **No resources / unreadable resource:** the verifier fails closed,
+so fix the domains config or the resource it names; `--init` and `--shrink` refuse to run in that state. A renamed table makes its old
+entries stale and its new ones new: describe the new table rather than moving the entries. The samen_core ratchet test
+(`catalog_meaning_ratchet_test.exs`) additionally fails a baseline that gained an entry or raised its ceiling against the merge base, a baseline file that is
+missing at a merge base which already has the verifier (never delete the file: a host with no debt keeps it at `# ceiling: 0`),
+a `catalog_meaning.baseline` under an app the test does not list, and a host `ci.sh` that no longer runs the exact line
+`mix samen.verify.catalog_meaning` after the dict drift step.
+Run it by hand from a host: `mix samen.verify.catalog_meaning [--init | --shrink]`; it needs no database.
 
 ---
 

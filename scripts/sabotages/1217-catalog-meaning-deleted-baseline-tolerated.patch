@@ -1,0 +1,25 @@
+# SABOTAGE: a host baseline deleted and re-initialised after the verifier exists passes the ratchet, so new 
+#   debt can be hidden behind a fresh --init
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_ratchet_test.exs
+# MUST_FAIL: RED: a baseline missing at a merge base that already has the feature is refused
+diff --git a/samen_core/lib/samen/catalog_meaning/baseline.ex b/samen_core/lib/samen/catalog_meaning/baseline.ex
+index d108a30b..cf0490f3 100644
+--- a/samen_core/lib/samen/catalog_meaning/baseline.ex
++++ b/samen_core/lib/samen/catalog_meaning/baseline.ex
+@@ -134,12 +134,7 @@ defmodule Samen.CatalogMeaning.Baseline do
+   def ratchet(current_src, {:ok, base_src}, _feature_at_base?), do: growth(current_src, base_src)
+   def ratchet(_current_src, :missing, false), do: []
+ 
+-  def ratchet(_current_src, :missing, true) do
+-    [
+-      "the baseline is absent at the merge base although the verifier already exists there: it was deleted and " <>
+-        "re-initialised. Keep the file (the end state is `# ceiling: 0` with no entries) and never delete it"
+-    ]
+-  end
++  def ratchet(_current_src, :missing, true), do: []
+ 
+   @doc """
+   The baseline files in `paths` (repo-relative, e.g. from `git ls-files`) that no listed host guards: every path other

@@ -1,0 +1,19 @@
+# SABOTAGE: the baseline membership check is skipped, so a new undescribed field is never reported
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_test.exs
+# MUST_FAIL: RED: a new undescribed field not in the baseline is a violation
+diff --git a/samen_core/lib/samen/catalog_meaning.ex b/samen_core/lib/samen/catalog_meaning.ex
+index 9232d5ba..bed29a72 100644
+--- a/samen_core/lib/samen/catalog_meaning.ex
++++ b/samen_core/lib/samen/catalog_meaning.ex
+@@ -185,7 +185,7 @@ defmodule Samen.CatalogMeaning do
+     current = MapSet.new(undescribed)
+ 
+     # Only "undescribed" is debt: a quality finding is reported whatever the file lists.
+-    reported = Enum.reject(findings, &(&1.kind == :undescribed and MapSet.member?(listed, &1.key)))
++    reported = Enum.reject(findings, &(&1.kind == :undescribed))
+ 
+     stale = for e <- Enum.sort(listed), not MapSet.member?(current, e), do: "#{e}: baseline entry is #{@stale_message}"
+ 

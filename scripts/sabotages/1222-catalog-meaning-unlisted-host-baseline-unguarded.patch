@@ -1,0 +1,19 @@
+# SABOTAGE: a catalog_meaning.baseline under an app outside the ratchet's host list is no longer reported, 
+#   so a fourth host's baseline can grow unguarded
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_ratchet_test.exs
+# MUST_FAIL: RED: a catalog_meaning.baseline under an app that is not in the host list is refused
+diff --git a/samen_core/lib/samen/catalog_meaning/baseline.ex b/samen_core/lib/samen/catalog_meaning/baseline.ex
+index d108a30b..dd7b25bd 100644
+--- a/samen_core/lib/samen/catalog_meaning/baseline.ex
++++ b/samen_core/lib/samen/catalog_meaning/baseline.ex
+@@ -149,6 +149,6 @@ defmodule Samen.CatalogMeaning.Baseline do
+   @spec unguarded([String.t()], [String.t()]) :: [String.t()]
+   def unguarded(paths, hosts) do
+     guarded = Enum.map(hosts, &"#{&1}/#{file_name()}")
+-    paths |> Enum.reject(&(&1 in guarded)) |> Enum.sort()
++    paths |> Enum.reject(&(Path.basename(&1) == file_name() and Path.dirname(&1) != "" and guarded != [])) |> Enum.sort()
+   end
+ end
