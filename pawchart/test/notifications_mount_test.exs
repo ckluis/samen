@@ -27,6 +27,8 @@ defmodule PawChart.NotificationsMountTest do
   alias Samen.Web.Notifications.Reads
   alias Samen.Web.Plane
 
+  # The inbox is the recipient's own: tenant sessions act as this user.
+  @recipient "5e1f0000-0000-4000-8000-0000000000bb"
   @body "PAWCHART-INBOX-SENTINEL vaccine reminder: Biscuit is due for rabies."
 
   defp engine_opts do
@@ -42,7 +44,7 @@ defmodule PawChart.NotificationsMountTest do
       Engine.notify(
         %{
           org_id: org_id,
-          recipient_id: Ash.UUID.generate(),
+          recipient_id: @recipient,
           event_type: "vaccine.due",
           channel: :in_app,
           rendered_body: @body
@@ -72,6 +74,7 @@ defmodule PawChart.NotificationsMountTest do
       |> Phoenix.Component.assign(:samen_mount, mount)
       |> Phoenix.Component.assign(:samen_acting_as, false)
       |> Phoenix.Component.assign(:return_to, nil)
+      |> Phoenix.Component.assign(:user_id, @recipient)
       |> InboxLive.load(org_id)
 
     socket.assigns
@@ -99,7 +102,7 @@ defmodule PawChart.NotificationsMountTest do
     refute html =~ "••••"
 
     # The unread badge is lit.
-    assert Reads.unread_count(mount, Mount.scope(mount, org_id)) == 1
+    assert Reads.unread_count(mount, Samen.Web.Settings.Reads.user_scope(mount, org_id, @recipient)) == 1
   end
 
   test "RED PATH (MC-3): the SAME notification renders •••• on the operator plane — plaintext ABSENT" do

@@ -234,7 +234,7 @@ defmodule Demo.PrimitivesScopeRbacRedPathTest do
   # Notification and File — member can create (no admin gate)
   # =========================================================================
 
-  test "member can create a notification (no admin gate for notifications)" do
+  test "no actor creates a notification: the engine does (a member is refused, the system path is not)" do
     org = mk_org("rbac-ntf-member-ok")
     member = mk_actor(org.id, :member)
 
@@ -250,7 +250,21 @@ defmodule Demo.PrimitivesScopeRbacRedPathTest do
       })
       |> Ash.create(actor: member.actor, authorize?: true)
 
-    assert {:ok, _} = result
+    assert {:error, %Ash.Error.Forbidden{}} = result
+
+    # Positive control: the same attributes through the system path (`Samen.Notifications.Engine`
+    # writes with `authorize?: false`) are accepted.
+    assert {:ok, _} =
+             Notification
+             |> Ash.Changeset.for_create(:create, %{
+               recipient_id: Ash.UUID.generate(),
+               channel: :in_app,
+               event_type: "test.event",
+               status: :pending,
+               rendered_body: "Test notification body",
+               org_id: org.id
+             })
+             |> Ash.create(authorize?: false)
   end
 
   test "member is admitted by the member+ gate on the file create action" do
