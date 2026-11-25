@@ -75,6 +75,11 @@
 #          shard_each_s x 2 (rounded up to 5 min), never below the history value, never over 360; a small selection keeps the
 #          floor; a lister with no count line refuses the plan.
 #
+#   MUTRATE  a --changed mutation job is sized from per-target measured rates (scripts/mutation/rates.tsv): the estimate is the
+#          sum of count x rate, the limit 2 x that, a selection over actions_slice_max_s becomes matrix slices; per-target
+#          counts that do not sum to the total refuse the plan; a rate for a non-target fails the lint; verify checks the
+#          published plan.
+#
 #   GENDEPS  (P6) the gen probes' compiled-hex-dependency cache (scripts/gen_deps_cache.py): the key changes with the lock,
 #          a dependency's Application env, the toolchain, MIX_ENV and the build environment (and not with the app's name);
 #          only the lock's hex packages are ever stored or seeded (samen_*, samen_core, samen_web and the app compile fresh);
@@ -1925,6 +1930,70 @@ case_SELTMO() {
   has "$T/st6" 'cannot size big' "SELTMO: ... naming the step"
 }
 
+case_MUTRATE() {
+  # A --changed mutation job is sized from PER-TARGET measured rates (scripts/mutation/rates.tsv), not one flat rate: the
+  # estimate is the sum over the selected mutants of their target's rate (the flat `shard_each_s` for a target with no row),
+  # the limit is 2 x that, and an estimate over `actions_slice_max_s` becomes matrix slices. PR #177: 28 vault.ex mutants at
+  # 48.5 s each need ~1,360 s; the flat 20 s sized the job at 1,120 s and it was cancelled.
+  mkrepo mutrate
+  { echo "$APPS"; step mut core/ 'actions_job=alpha' \
+      'shard_list = printf "  core/vault.ex   ${CI_TEST_V:-28} mutants\\n  core/other.ex   ${CI_TEST_O:-0} mutants\\nMUTATION SELECTION: %d of 99 mutants selected\\n" $((${CI_TEST_V:-28}+${CI_TEST_O:-0}+${CI_TEST_X:-0}))' \
+      'shard_kind = modulo' 'shard_total = ^MUTATION SELECTION: ([0-9]+) of [0-9]+ mutants selected' 'shard_each_s = 20' \
+      'shard_rates = ci/rates.tsv' 'shard_rate_item = ^  (\S+)\s+(\d+) mutants\s*$' 'actions_slice_max_s = 1800'; } > "$SAMEN_CI_MANIFEST"
+  mkdir -p "$SAMEN_CI_REPO/ci"; cp "$SAMEN_CI_MANIFEST" "$SAMEN_CI_REPO/ci/steps.conf"
+  export SAMEN_CI_MANIFEST="$SAMEN_CI_REPO/ci/steps.conf"
+  printf 'alpha\t0.9\t15\t16\n' > "$SAMEN_CI_REPO/ci/actions_timeouts.tsv"
+  printf '# measured\ncore/vault.ex\t49\tPR #177 run: 679.4 s for 14 mutants on Actions = 48.5 s each\n' > "$SAMEN_CI_REPO/ci/rates.tsv"
+  local jobs='[(j["name"], j["slice"], j["timeout_min"]) for j in d["jobs"]]'
+  # the slow target: 28 x 49 = 1,372 s -> limit 2,744 s -> 50 min, ONE job (the flat 20 s said 20 min and was cancelled)
+  CI_TEST_V=28 drive "$T/mr1" actions plan pr --json --selection
+  eq "$RC" 0 "MUTRATE: a rated selection plans"
+  eq "$(jsonget "$T/mr1" "$jobs")" "[('alpha', '', 50)]" "MUTRATE: 28 slow-target mutants: limit >= 2 x the measured 1,372 s need (50 min, was 20), one job"
+  has "$T/mr1" 'est 1372s by rate' "MUTRATE: ... and the plan states the estimate it sized from"
+  # a target with no row costs the flat rate; mixed targets add up per target: 10 x 49 + 10 x 20 = 690 s -> 23 min -> 25
+  CI_TEST_V=10 CI_TEST_O=10 drive "$T/mr2" actions plan pr --json --selection
+  eq "$(jsonget "$T/mr2" "$jobs")" "[('alpha', '', 25)]" "MUTRATE: a mixed selection sums per-target rates (10 x 49 + 10 x 20 = 690 s -> 25 min); no row = the flat rate"
+  CI_TEST_V=0 CI_TEST_O=30 drive "$T/mr3" actions plan pr --json --selection
+  eq "$(jsonget "$T/mr3" "$jobs")" "[('alpha', '', 20)]" "MUTRATE: only unrated targets: 30 x 20 s x 2 = 20 min, as before"
+  # 3x the selection (84 x 49 = 4,116 s > 1,800 s per job): 3 slices, each ~1,372 s, each inside the 60 min ceiling
+  CI_TEST_V=84 drive "$T/mr4" actions plan pr --json --selection
+  eq "$(jsonget "$T/mr4" "$jobs")" "[('mut_01', '1/3', 50), ('mut_02', '2/3', 50), ('mut_03', '3/3', 50)]" "MUTRATE: a 3x selection is split into 3 slices of ~1,372 s, none over a 60 min limit"
+  eq "$(jsonget "$T/mr4" '[j["only"] for j in d["jobs"]]')" "['mut', 'mut', 'mut']" "MUTRATE: ... every slice runs the same step"
+  CI_TEST_V=84 drive "$T/mr4t" actions plan pr --selection
+  has "$T/mr4t" '3 slices of ~1372s' "MUTRATE: the text plan names the slices"
+  # a selection smaller than the slice count never makes an empty slice job
+  CI_TEST_V=1 drive "$T/mr5" actions plan pr --json --selection
+  eq "$(jsonget "$T/mr5" "$jobs")" "[('alpha', '', 15)]" "MUTRATE: one slow mutant = one job at the history floor"
+  # fail-honest: a listing whose per-target counts do not add up to the total refuses to size the job
+  CI_TEST_V=28 CI_TEST_X=5 drive "$T/mr6" actions plan pr --json --selection
+  eq "$RC" 2 "MUTRATE: per-target counts that do not sum to the selected total REFUSE the plan"
+  has "$T/mr6" 'partial listing' "MUTRATE: ... saying why"
+  # a rates row with no source / a bad rate is refused by the driver too
+  printf 'core/vault.ex\t49\tx\n' > "$SAMEN_CI_REPO/ci/rates.tsv"
+  CI_TEST_V=28 drive "$T/mr7" actions plan pr --json --selection
+  eq "$RC" 2 "MUTRATE: a rate row with no measurement source is refused"
+  # the published plan is what verify checks (a verifier cannot recompute a selection-sized plan)
+  printf 'core/vault.ex\t49\tPR #177 run: 679.4 s for 14 mutants on Actions = 48.5 s each\n' > "$SAMEN_CI_REPO/ci/rates.tsv"
+  CI_TEST_V=84 drive "$T/mr8.plan" actions plan pr --json --selection
+  mkdir -p "$T/mr8.res"
+  drive "$T/mr8a" actions verify pr --results "$T/mr8.res" --expect-head "$(git -C "$SAMEN_CI_REPO" rev-parse HEAD)" --from-plan "$T/mr8.plan"
+  eq "$RC" 1 "MUTRATE: verify --from-plan checks the published slices: no results -> FAIL"
+  has "$T/mr8a" 'job mut_03 produced no result' "MUTRATE: ... naming the missing slice job"
+  echo '{}' > "$T/mr8.bad"
+  drive "$T/mr8b" actions verify pr --results "$T/mr8.res" --expect-head "$(git -C "$SAMEN_CI_REPO" rev-parse HEAD)" --from-plan "$T/mr8.bad"
+  eq "$RC" 2 "MUTRATE: a file that is not a plan is refused"
+  # the committed table: the real lint names a rate whose file is no longer a target (never silently ignored)
+  local RT="$T/mr.rates"
+  printf 'samen_core/lib/samen/vault.ex\t49\tPR #177 run: 679.4 s for 14 mutants on Actions = 48.5 s each\n' > "$RT.ok"
+  printf 'samen_core/lib/samen/vault_renamed.ex\t49\tPR #177 run: 679.4 s for 14 mutants on Actions = 48.5 s each\n' > "$RT.bad"
+  ( cd "$ROOT" && bash scripts/mutation_lint.sh --rates "$RT.ok" > "$T/mr9a" 2>&1 ); eq "$?" 0 "MUTRATE: positive control — the real lint passes a rate naming a real target"
+  ( cd "$ROOT" && bash scripts/mutation_lint.sh --rates "$RT.bad" > "$T/mr9b" 2>&1 ); eq "$?" 1 "MUTRATE: a rate for a file that is not a mutation target FAILS the lint"
+  has "$T/mr9b" 'rates: samen_core/lib/samen/vault_renamed.ex is not a row of the targets file' "MUTRATE: ... naming the row"
+  # the committed table itself is lint-clean and its slow row is the measured one
+  has "$ROOT/scripts/mutation/rates.tsv" '^samen_core/lib/samen/vault.ex	49	PR #177' "MUTRATE: the committed table carries the vault.ex measurement"
+  has "$ROOT/scripts/mutate.sh" 'seconds per mutant: ' "MUTRATE: mutate.sh prints the per-target timing line"
+}
+
 case_GENDEPS() {
   # (P6) the compiled-dependency cache of the gen probes (scripts/gen_deps_cache.py) on a REAL tiny mix project with a
   # hand-written mix.lock and a hand-built _build: key sensitivity, path deps never cached, corruption fails closed.
@@ -2507,7 +2576,7 @@ STEP
   done
 }
 
-ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS LOCALPATHS GENPROBE GENHEX GENHEXRO NARROW RECHUNK COSTW TIMEOUT SELTMO GENDEPS ESCAPE MUTLINT MUTLOCK LAUNCHREC LAUNCHSEAM RERUNREC GROUPKILL)
+ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS LOCALPATHS GENPROBE GENHEX GENHEXRO NARROW RECHUNK COSTW TIMEOUT SELTMO MUTRATE GENDEPS ESCAPE MUTLINT MUTLOCK LAUNCHREC LAUNCHSEAM RERUNREC GROUPKILL)
 CASES=("$@")
 [[ ${#CASES[@]} -gt 0 ]] || CASES=("${ALL[@]}")
 for c in "${CASES[@]}"; do

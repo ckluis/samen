@@ -66,7 +66,7 @@ usage: scripts/ci quick|fast|pr|full [--budget S] [-j N] [--only STEP|GROUP[,…
                                                        step in no job, in two, or excluded without a reason;
                                                        --selection sizes the --changed jobs' timeouts from
                                                        the real selection vs --base)
-       scripts/ci actions verify MODE --results DIR --expect-head SHA [--expect-base SHA]
+       scripts/ci actions verify MODE --results DIR --expect-head SHA [--expect-base SHA] [--from-plan plan.json]
                                                       (every planned step ran, once, PASS, on commit SHA)
        scripts/ci actions summary [--last FILE]       (markdown verdict + failure digest for $GITHUB_STEP_SUMMARY)
 
@@ -179,7 +179,8 @@ def fmt_s(x):
 STEP_KEYS = {"cmd", "cwd", "modes", "inputs", "reads", "always", "serial", "locks", "est_s", "group",
              "marker", "marker_if", "skip_marker", "echo_log", "exunit_dir", "superseded_by",
              "shard_list", "shard_kind", "shard_item", "shard_total", "shard_each_s", "shard_target_s",
-             "shard_check", "shard_cost", "unsharded_cmd", "desc", "actions_job", "actions_skip", "actions_dirs", "actions_slices"}
+             "shard_check", "shard_cost", "unsharded_cmd", "desc", "actions_job", "actions_skip", "actions_dirs", "actions_slices",
+             "shard_rates", "shard_rate_item", "actions_slice_max_s"}
 
 
 class Step(object):
@@ -218,6 +219,15 @@ class Step(object):
         self.shard_each = float(d.get("shard_each_s", "30"))
         self.shard_target = float(d.get("shard_target_s", "300"))
         self.shard_check = d.get("shard_check", "").strip() or None
+        # (rates) a SELECTION is sized per item kind, not at one flat rate: `shard_rates` is a committed TSV
+        # (item path, seconds per item, measurement source) and `shard_rate_item` a regex over the lister's output with two
+        # groups (item path, count). `actions plan --selection` then sizes the job as the sum of count x rate (the flat
+        # `shard_each_s` for a path with no row) and, past `actions_slice_max_s` of work per job, splits it into slices.
+        self.shard_rates = d.get("shard_rates", "").strip() or None
+        self.shard_rate_item = d.get("shard_rate_item", "").strip() or None
+        self.slice_max = float(d["actions_slice_max_s"]) if d.get("actions_slice_max_s", "").strip() else None
+        if bool(self.shard_rates) != bool(self.shard_rate_item) or (self.slice_max and not self.shard_rates):
+            raise UsageError("manifest: step %s: shard_rates and shard_rate_item go together, and actions_slice_max_s needs them" % sid)
         # (P5) how to read a per-item wall-clock out of a sub-step's log: ONE regex, two groups (item name, seconds).
         # With it, `ranges` chunks are cost-weighted by what each item last cost on this machine.
         self.shard_cost = d.get("shard_cost", "").strip() or None
@@ -1690,10 +1700,37 @@ def selection_timeout(history_min, items):
     return min(MAX_TIMEOUT_MIN, max(history_min, 5 * int(math.ceil(2.0 * need / 60.0 / 5.0))))
 
 
+def load_rates(path):
+    """Committed per-item rates: {item path: seconds per item}. A malformed row, a non-positive rate, a duplicate or a row
+    with no measurement source is an error: a rate nobody can trace is folklore."""
+    full = os.path.join(REPO, path)
+    if not os.path.isfile(full):
+        raise UsageError("shard_rates: %s does not exist" % path)
+    rates = {}
+    with open(full) as f:
+        for n, line in enumerate(f, 1):
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            c = line.rstrip("\n").split("\t")
+            try:
+                if len(c) != 3 or len(c[2].strip()) < 20:
+                    raise ValueError("want 3 tab-separated columns (path, seconds per item, measurement source of 20+ chars)")
+                rate = float(c[1])
+                if not rate > 0 or c[0].strip() in rates:
+                    raise ValueError("rate must be > 0 and each path appears once")
+            except ValueError as e:
+                raise UsageError("%s:%d: %s" % (path, n, e))
+            rates[c[0].strip()] = rate
+    return rates
+
+
 def selection_counts(man, mode, base):
-    """(P6) {step id: selected item count} for every sharded step of `mode` that is not sliced into fixed Actions
-    jobs — read from the step's OWN lister (`shard_list`) vs `base`, exactly as the job will list it. A lister that
-    fails or whose count line is missing raises: the job it sizes would fail the same way."""
+    """(P6) {step id: (selected item count, estimated lane-seconds)} for every sharded step of `mode` that is not sliced
+    into fixed Actions jobs — read from the step's OWN lister (`shard_list`) vs `base`, exactly as the job will list it.
+    The estimate is count x `shard_each_s`, or, for a step with `shard_rates`, the sum over the lister's per-item-path
+    counts of count x that path's committed rate (the flat rate for a path with no row). A lister that fails or whose
+    count line is missing raises: the job it sizes would fail the same way; so does a rated step whose per-path counts do
+    not add up to its total (a rate model over a partial listing would under-size the job)."""
     ctx = Context(base, True)
     counts = {}
     for s in mode_steps(man, mode):
@@ -1704,11 +1741,21 @@ def selection_counts(man, mode, base):
         if rc != 0 or len(totals) != 1 or not totals[0].isdigit():
             raise UsageError("actions plan --selection: cannot size %s: its lister exited %d and matched shard_total /%s/ "
                              "%d time(s):\n%s" % (s.id, rc, s.shard_total, len(totals), text[-1500:]))
-        counts[s.id] = int(totals[0])
+        n = int(totals[0])
+        est = n * s.shard_each
+        if s.shard_rates:
+            rates = load_rates(s.shard_rates)
+            per = [(m.group(1), int(m.group(2))) for m in re.finditer(s.shard_rate_item, text, re.M)]
+            if sum(c for _p, c in per) != n:
+                raise UsageError("actions plan --selection: %s: the per-path counts matched by shard_rate_item /%s/ add up to %d, "
+                                 "but the lister selected %d — refusing to size the job from a partial listing\n%s"
+                                 % (s.id, s.shard_rate_item, sum(c for _p, c in per), n, text[-1500:]))
+            est = sum(c * rates.get(p, s.shard_each) for p, c in per)
+        counts[s.id] = (n, est)
     return counts
 
 
-def job_entry(man, name, steps, slice_, cache=None, timeouts=(), selection=None):
+def job_entry(man, name, steps, slice_, cache=None, timeouts=(), selection=None, history_name=None):
     dirs = []
     for x in steps:
         for d in step_dirs(man, x):
@@ -1719,11 +1766,18 @@ def job_entry(man, name, steps, slice_, cache=None, timeouts=(), selection=None)
         paths += [d + "/deps", d + "/_build"]
         if any(x.id.startswith("dialyzer_") for x in steps):
             paths.append(d + "/priv/plts")
-    tmo, basis = job_timeout(name, timeouts)
-    sized = [(selection[x.id], x.shard_each) for x in steps if selection and x.id in selection]
+    tmo, basis = job_timeout(history_name or name, timeouts)
+    sized = [(selection[x.id][0], x.shard_each) for x in steps if selection and x.id in selection and not x.shard_rates]
+    rated = [(x, selection[x.id]) for x in steps if selection and x.id in selection and x.shard_rates]
     if sized:  # (P6) the work scales with the selection, the history does not
         scaled = selection_timeout(tmo, sized)
         basis += "; selection %s -> %d min" % (", ".join("%d x %gs" % z for z in sized), scaled)
+        tmo = scaled
+    for x, (n, est) in rated:  # per-item rates: this job's share of the estimate, twice that, like the flat rule
+        share = est / float(slice_[1]) if slice_ else est
+        scaled = selection_timeout(tmo, [(share, 1.0)])
+        basis += "; selection %d items, est %ds by rate (%s)%s -> %d min" % (
+            n, round(est), x.shard_rates, ", %d slices of ~%ds" % (slice_[1], round(share)) if slice_ else "", scaled)
         tmo = scaled
     return {"name": name, "steps": [x.id for x in steps], "only": ",".join(x.id for x in steps),
             "slice": "%d/%d" % slice_ if slice_ else "", "est_s": round(sum(x.est for x in steps)),
@@ -1763,9 +1817,21 @@ def actions_plan(man, mode, selection=None):
     out_jobs = []
     timeouts = load_timeouts()
     for n, v in jobs.items():
-        plain = [x for x in v if not x.actions_slices]
+        dyn = []  # a rated step whose selection outgrows one job: the selection's own slices (never a fixed N)
+        for x in v:
+            if selection and x.id in selection and x.slice_max and not x.actions_slices:
+                k = min(selection[x.id][0], int(math.ceil(selection[x.id][1] / x.slice_max)))
+                if k >= 2:
+                    if len(v) > 1:
+                        raise UsageError("actions plan: %s needs %d slices but shares job %s with other steps" % (x.id, k, n))
+                    dyn.append((x, k))
+        plain = [x for x in v if not x.actions_slices and x not in [d[0] for d in dyn]]
         if plain:
             out_jobs.append(job_entry(man, n, plain, None, timeouts=timeouts, selection=selection))
+        for x, k in dyn:  # one job per slice: `--slice i/k` = mutate.sh --shard i/k, a round-robin share of every target
+            for i in range(1, k + 1):
+                out_jobs.append(job_entry(man, "%s_%02d" % (x.id, i), [x], (i, k), cache=x.id, timeouts=timeouts,
+                                          selection=selection, history_name=n))
         for x in v:
             if x.actions_slices:  # one job per slice: name_NN, `--slice i/N`
                 for i in range(1, x.actions_slices + 1):
@@ -1789,6 +1855,12 @@ def cmd_actions(pos, opts):
     if sub == "plan" and opts.get("selection"):
         selection = selection_counts(man, rest[0], opts["base"])
     plan = actions_plan(man, rest[0], selection)
+    if sub == "verify" and opts.get("from_plan"):
+        # the plan the `plan` job PUBLISHED (selection-sized jobs, with the slices this diff needed): the verifier cannot
+        # recompute it - it has no toolchain to list the selection - and must not guess how many slices ran
+        plan = read_json(opts["from_plan"])
+        if not isinstance(plan, dict) or plan.get("mode") != rest[0] or not plan.get("jobs"):
+            raise UsageError("--from-plan %s is not a %s plan" % (opts["from_plan"], rest[0]))
     if sub == "plan":
         if opts.get("json"):
             out(json.dumps(plan, indent=1))
@@ -2081,7 +2153,7 @@ def parse(argv):
         elif a == "--expect-total":
             opts["expect_total"] = (opts.get("expect_total") or []) + [val()]
             i += 2
-        elif a in ("--results", "--expect-base", "--expect-head", "--last"):
+        elif a in ("--results", "--expect-base", "--expect-head", "--last", "--from-plan"):
             opts[a[2:].replace("-", "_")] = val()
             i += 2
         elif a == "--apps":

@@ -1,0 +1,15 @@
+# scripts/mutation/rates.tsv - MEASURED seconds per mutant, per tier-1 target, on GitHub Actions (ubuntu-24.04).
+#
+# `scripts/ci actions plan pr --selection` sizes the `mutation_changed` job from this table: the estimate is the sum over the
+# selected mutants of their target's rate here (a target with NO row costs the flat `shard_each_s` of ci/steps.conf, 20 s,
+# whose own measurement is documented there), the job limit is 2 x the estimate, and a selection estimated above
+# `actions_slice_max_s` runs as matrix slices. One flat rate cannot be right for every target: a target whose owning tests are
+# slow costs a multiple of it, and the job that was sized flat was cancelled at its limit.
+#
+# Columns (tab-separated):  relpath <TAB> seconds per mutant <TAB> measurement source (20+ chars; where the number comes from)
+#
+# EVIDENCE, NOT FOLKLORE. Every `mutate.sh` run prints `seconds per mutant: <path> <rate> (<n> mutants, <s>s)` per target when
+# the target is done and again in its report - a cancelled or slow job's log carries it. Update a row from that line; never
+# raise a rate to make a job pass without one. `scripts/mutation_lint.sh` refuses a row whose path is not a tier-1 target in
+# targets.tsv (a renamed or dropped target must not leave a stale rate behind that the plan then silently ignores).
+samen_core/lib/samen/vault.ex	49	PR #177 mutation_changed[1/2]: 679.4 s for 14 vault.ex mutants on Actions = 48.5 s each (the job was cancelled at its 1,120 s flat-rate limit)

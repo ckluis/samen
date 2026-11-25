@@ -407,6 +407,23 @@ name a file that never left a laptop by what it is, not where it was. Placeholde
   history value, never over GitHub's ceiling. A lister that fails or has no count line REFUSES the plan. Without
   `--selection` (a local `actions plan`) the history value alone applies. Not distinguished: guard vs ordinary
   patches (one rate; the 2x margin and the cap carry it).
+  **`mutation_changed` is sized per TARGET, not at one flat rate.** Targets whose owning tests are slow cost a multiple of
+  the flat 20 s (PR #177: 28 `vault.ex` mutants, 48.5 s each; the flat rate gave a 1,120 s limit for ~1,360 s of work and the
+  job was cancelled). `scripts/mutation/rates.tsv` holds the measured seconds per mutant per target (a source for every
+  row; `vault.ex` = 49); a target with no row costs `shard_each_s`. The plan reads the per-target counts the lister prints
+  (`shard_rate_item`), estimates the job as the sum of count x rate, sets the limit to 2 x the estimate (5 min steps) and,
+  when the estimate exceeds `actions_slice_max_s` (1,800 s: the 2 x rule then gives the 60 min a job is allowed), splits the
+  step into `ceil(estimate / 1800)` matrix slices `mutation_changed_01..k` running `--slice i/k` (= `mutate.sh --shard i/k`,
+  a round-robin share of every target; a slice past the last mutant is an empty-slice PASS). Per-target counts that do not
+  sum to the lister's total refuse the plan. Because the slice count depends on the diff, the `plan` job publishes
+  `plan.json` as the `actions-plan` artifact and `ci-pr` runs `scripts/ci actions verify … --from-plan plan.json`: the
+  verifier checks the results against the plan that was actually run (each slice 1..k once, PROCESSED summing to the
+  selected total). A row is a measurement, never a guess: `scripts/mutation_lint.sh` refuses a row whose path is not a row of
+  `targets.tsv` (a renamed target must not leave a stale rate the lookup silently ignores), a non-positive rate, a duplicate,
+  or a source under 20 characters. **When a job is cancelled for time nothing learns from it, and CI never raises a limit
+  from its own history.** Instead every `mutate.sh` run prints, as each target finishes and again in its report,
+  `seconds per mutant: <path> <rate> (<n> mutants, <s>s)` - the measured wall clock per target (a target's baseline run is
+  charged to its first mutant); read it from a slow or cancelled job's log and update the row by hand, citing the run.
 - `.github/workflows/nightly.yml`: cron `17 3 * * *` (03:17 UTC) + `workflow_dispatch`; `scripts/ci full`, the
   same jobs as `pr` minus the two `--changed` jobs, plus `multinode`, 24 corpus slices (`--slice i/24`) and 6
   mutation slices; `ci-full` sums the slices against the lister's total and `ls scripts/sabotages/*.patch`.
@@ -417,8 +434,8 @@ name a file that never left a laptop by what it is, not where it was. Placeholde
 - Third-party actions are pinned to full SHAs; no `${{ }}` inside `run:`; no secrets.
 - Limits: a PR runs its OWN workflow files, `ci/steps.conf` and driver, so requiring `ci-pr` is only as
   strong as review of `.github/`, `ci/` and `scripts/ci*` (CODEOWNERS or a required workflow from `main`).
-  `sabotage_changed` and `mutation_changed` are one job each: a PR touching most of samen_core replays
-  hundreds of patches in a single job.
+  `sabotage_changed` is one job: a PR touching most of samen_core replays hundreds of patches in a single job.
+  `mutation_changed` is one job until its estimate passes the slice ceiling, then k slices (above).
 - Reading a failure: the job summary has the digest; artifact `ci-result-<job>` holds `last.json`.
   A FLAKY job turning green on a re-run shows as attempt 2 — a human action GitHub records.
 
