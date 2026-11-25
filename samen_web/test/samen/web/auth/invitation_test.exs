@@ -161,6 +161,13 @@ defmodule Samen.Web.Auth.InvitationTest do
       assert {:error, _} = Invite.create(invite_mods(), admin_scope(inviter), %{email: unique_email(), role: :owner})
     end
 
+    test "RED: an admin cannot invite another admin (the offered role must be STRICTLY below the inviter's own)" do
+      inviter = register!()
+
+      assert {:error, _} = Invite.create(invite_mods(), admin_scope(inviter), %{email: unique_email(), role: :admin})
+      assert {:ok, _invitation, _raw} = Invite.create(invite_mods(), admin_scope(inviter), %{email: unique_email(), role: :member})
+    end
+
     test "POSITIVE CONTROL: an owner CAN invite an admin (the rank ceiling is not a blanket deny)" do
       inviter = register!()
 

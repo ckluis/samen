@@ -139,11 +139,11 @@
       "table_name": "amr_mrr_by_tier"
     },
     {
-      "description": null,
+      "description": "A single-use, expiring token issued to a credential: emailed for email verification or password reset, or held in the browser session for a pending two-factor step (email_change is a permitted context value). Only the SHA-256 digest is stored; its policies refuse every actor.",
       "fields": [
         {
           "column_name": "atk_consumed_at",
-          "description": null,
+          "description": "When the token was consumed, set by the atomic consume action; a token with this set no longer matches. Empty while unused.",
           "label": "Consumed at",
           "logical_name": "consumed_at",
           "pii": false,
@@ -157,7 +157,7 @@
             "totp_pending"
           ],
           "column_name": "atk_context",
-          "description": null,
+          "description": "What the token is for: email_verify, password_reset, email_change or totp_pending; required. Consuming a token matches its context as well as its digest.",
           "label": "Context",
           "logical_name": "context",
           "pii": false,
@@ -165,7 +165,7 @@
         },
         {
           "column_name": "atk_credential_id",
-          "description": null,
+          "description": "The credential the token was issued to; required.",
           "label": "Credential id",
           "logical_name": "credential_id",
           "pii": false,
@@ -173,7 +173,7 @@
         },
         {
           "column_name": "atk_expires_at",
-          "description": null,
+          "description": "When the token stops being usable; required. Consuming only matches a token still before this instant.",
           "label": "Expires at",
           "logical_name": "expires_at",
           "pii": false,
@@ -197,7 +197,7 @@
         },
         {
           "column_name": "atk_org_id",
-          "description": null,
+          "description": "Always optional here: the token belongs to an organization-less credential, so it is not scoped by this column.",
           "label": "Org id",
           "logical_name": "org_id",
           "pii": false,
@@ -205,7 +205,7 @@
         },
         {
           "column_name": "atk_sent_to_bidx",
-          "description": null,
+          "description": "Keyed-HMAC blind index of the email address the token was sent to, recorded at mint; never the address itself. Empty when none was given.",
           "label": "Sent to bidx",
           "logical_name": "sent_to_bidx",
           "pii": false,
@@ -213,7 +213,7 @@
         },
         {
           "column_name": "atk_token_digest",
-          "description": null,
+          "description": "SHA-256 hex digest of the token, required and unique across tokens (a database index); the raw token is never stored. Not public: set only when the token is minted.",
           "label": "Token digest",
           "logical_name": "token_digest",
           "pii": false,
@@ -231,7 +231,7 @@
       "label": "Auth token",
       "relationships": [
         {
-          "description": null,
+          "description": "The credential the token was issued to; required.",
           "destination": "Demo.Identity.Credential",
           "destination_attribute": "id",
           "destination_table": "crd_credential",
@@ -2750,11 +2750,11 @@
       "table_name": "cpt_post_versions"
     },
     {
-      "description": null,
+      "description": "The authentication principal: one row per sign-in identity, not tied to any organization. Holds the email blind index, password hash and scheme, verification time and two-factor state. Its policies refuse every actor; framework code reaches it with authorization off.",
       "fields": [
         {
           "column_name": "crd_email_bidx",
-          "description": null,
+          "description": "Keyed-HMAC blind index of the normalized email address, unique across credentials (database index); sign-in and password reset match on it. One-way, never the address. Erasing the credential as a subject replaces it (Samen.Auth.BlindIndexErasure) with a random value of the same shape.",
           "label": "Email bidx",
           "logical_name": "email_bidx",
           "pii": false,
@@ -2762,7 +2762,7 @@
         },
         {
           "column_name": "crd_hash_scheme",
-          "description": null,
+          "description": "Name of the hashing scheme (with its parameters) that produced password_hash; verification receives it, so a hash made with older parameters of the configured hasher still verifies. Empty for SSO-only credentials.",
           "label": "Hash scheme",
           "logical_name": "hash_scheme",
           "pii": false,
@@ -2786,7 +2786,7 @@
         },
         {
           "column_name": "crd_org_id",
-          "description": null,
+          "description": "Always optional here: a credential exists before any organization is chosen, so it is not scoped by this column.",
           "label": "Org id",
           "logical_name": "org_id",
           "pii": false,
@@ -2794,7 +2794,7 @@
         },
         {
           "column_name": "crd_password_hash",
-          "description": null,
+          "description": "Encoded password hash from the configured hasher (PBKDF2-SHA256 by default), never the password. Empty for a passwordless SSO-only credential, for which password sign-in always fails.",
           "label": "Password hash",
           "logical_name": "password_hash",
           "pii": false,
@@ -2802,7 +2802,7 @@
         },
         {
           "column_name": "crd_totp_enabled_at",
-          "description": null,
+          "description": "When two-factor enrollment was confirmed; empty until then and cleared when two-factor is disabled. Samen.Identity.Totp.enroll writes it in the same update as the secret and recovery codes.",
           "label": "Totp enabled at",
           "logical_name": "totp_enabled_at",
           "pii": false,
@@ -2810,7 +2810,7 @@
         },
         {
           "column_name": "crd_totp_last_verified_at",
-          "description": null,
+          "description": "When a TOTP code was last accepted, written under a row lock and passed to the code validator as a replay watermark; the framework validator then refuses a code from a time step already accepted. Empty before any acceptance, and reset when two-factor is enrolled or disabled.",
           "label": "Totp last verified at",
           "logical_name": "totp_last_verified_at",
           "pii": false,
@@ -2826,7 +2826,7 @@
         },
         {
           "column_name": "crd_verified_at",
-          "description": null,
+          "description": "When the credential's email address was confirmed: set by email verification, by invitation acceptance that creates the credential, or by SSO sign-up with a provider-verified address; empty until then.",
           "label": "Verified at",
           "logical_name": "verified_at",
           "pii": false,
@@ -2834,7 +2834,7 @@
         },
         {
           "column_name": "pii_crd_recovery_codes",
-          "description": null,
+          "description": "The two-factor recovery codes as JSON entries of a SHA-256 digest and a used-at time, never the codes themselves; stored in the pii_secret vault. The resource has no reveal action and its policies refuse every actor; Samen.Identity.Totp decrypts it bound to this credential.",
           "label": "Recovery codes",
           "logical_name": "recovery_codes",
           "pii": true,
@@ -2842,7 +2842,7 @@
         },
         {
           "column_name": "pii_crd_totp_secret",
-          "description": null,
+          "description": "The TOTP shared secret, base64-encoded and stored in the pii_secret vault, never in this row. The resource has no reveal action and its policies refuse every actor; Samen.Identity.Totp decrypts it bound to this credential. Empty before enrollment and after two-factor is disabled.",
           "label": "Totp secret",
           "logical_name": "totp_secret",
           "pii": true,
@@ -3340,11 +3340,11 @@
       "table_name": "ddn_note"
     },
     {
-      "description": null,
+      "description": "Brute-force counter: one row per failure key, an email blind index or a credential id, holding the failure count and window. Samen.Identity.LoginFailure upserts it atomically; a successful password or two-factor sign-in deletes that credential's rows. Its policies refuse every actor.",
       "fields": [
         {
           "column_name": "dil_failure_count",
-          "description": null,
+          "description": "Failed attempts counted in the current window, 1 by default; each failure adds one, and a failure after the window has expired resets it to 1.",
           "label": "Failure count",
           "logical_name": "failure_count",
           "pii": false,
@@ -3372,7 +3372,7 @@
             "credential"
           ],
           "column_name": "dil_key_kind",
-          "description": null,
+          "description": "Kind of key the row counts failures for: email_bidx or credential; required.",
           "label": "Key kind",
           "logical_name": "key_kind",
           "pii": false,
@@ -3380,7 +3380,7 @@
         },
         {
           "column_name": "dil_key_value",
-          "description": null,
+          "description": "The counted key, an email blind index or a credential id as text matching key_kind; unique together with key_kind, and never a plaintext email.",
           "label": "Key value",
           "logical_name": "key_value",
           "pii": false,
@@ -3388,7 +3388,7 @@
         },
         {
           "column_name": "dil_last_failed_at",
-          "description": null,
+          "description": "When the most recent failure was recorded, with microsecond precision; required.",
           "label": "Last failed at",
           "logical_name": "last_failed_at",
           "pii": false,
@@ -3396,7 +3396,7 @@
         },
         {
           "column_name": "dil_org_id",
-          "description": null,
+          "description": "Always optional here: failures are keyed by email blind index or credential id, not by organization, so it is not scoped by this column.",
           "label": "Org id",
           "logical_name": "org_id",
           "pii": false,
@@ -3412,7 +3412,7 @@
         },
         {
           "column_name": "dil_window_started_at",
-          "description": null,
+          "description": "When the current failure window began, with microsecond precision; required. A failure after the window length restarts it.",
           "label": "Window started at",
           "logical_name": "window_started_at",
           "pii": false,
@@ -3974,7 +3974,7 @@
       "table_name": "dtt_tag"
     },
     {
-      "description": null,
+      "description": "The tenant anchor: one row per organization. The generic create takes only a name and slug and is open to anyone; read is limited to the actor's own organization row, update needs the admin role and destroy needs the owner role.",
       "fields": [
         {
           "column_name": "ido_id",
@@ -3994,7 +3994,7 @@
         },
         {
           "column_name": "ido_max_concurrent_sessions",
-          "description": null,
+          "description": "Optional cap, at least 1, on a credential's live (unrevoked, unexpired) sessions, applied at sign-in: each sign-in revokes the credential's oldest live sessions beyond cap - 1 before creating its own; empty means unlimited. The smallest cap across the organizations it has memberships in applies.",
           "label": "Max concurrent sessions",
           "logical_name": "max_concurrent_sessions",
           "pii": false,
@@ -4002,7 +4002,7 @@
         },
         {
           "column_name": "ido_name",
-          "description": null,
+          "description": "Display name of the organization; required, and no uniqueness rule is enforced on it.",
           "label": "Name",
           "logical_name": "name",
           "pii": false,
@@ -4010,7 +4010,7 @@
         },
         {
           "column_name": "ido_onboarded_at",
-          "description": null,
+          "description": "When the onboarding wizard was completed. Samen.Web.Onboarding.complete! sets it as an admin write; the wizard is offered only while it is empty. Not an input of the generic create or update.",
           "label": "Onboarded at",
           "logical_name": "onboarded_at",
           "pii": false,
@@ -4018,7 +4018,7 @@
         },
         {
           "column_name": "ido_org_id",
-          "description": null,
+          "description": "Optional here: the organization is the tenant boundary, so its policies decide access by the row's own id, not by this column. Only the operator account-opening action accepts it, and it must be the acting actor's own organization (the operator console's), under which the account is filed.",
           "label": "Org id",
           "logical_name": "org_id",
           "pii": false,
@@ -4026,7 +4026,7 @@
         },
         {
           "column_name": "ido_plan",
-          "description": null,
+          "description": "Plan key as text, free by default. The generic create and update do not accept it; the onboarding plan step writes it (owner only, configured plan choices only, closed once onboarded), as does the operator account-opening action.",
           "label": "Plan",
           "logical_name": "plan",
           "pii": false,
@@ -4034,7 +4034,7 @@
         },
         {
           "column_name": "ido_slug",
-          "description": null,
+          "description": "Optional short text identifier of the organization; no format rule. The create, update and account-opening actions refuse a non-empty slug that matches another organization's slug (trimmed, ignoring case) or id; an empty slug is not checked.",
           "label": "Slug",
           "logical_name": "slug",
           "pii": false,
@@ -4055,11 +4055,11 @@
       "table_name": "ido_org"
     },
     {
-      "description": null,
+      "description": "An invitation for an email address to join the organization with a role. Every create is pending with a 14-day expiry; it becomes accepted, revoked or expired, each only from pending; the generic update is refused. Only a digest of the invite token is stored; the invited email is vault-routed.",
       "fields": [
         {
           "column_name": "inv_accepted_at",
-          "description": null,
+          "description": "When the invitation was accepted, set by the accept action together with status accepted; empty before.",
           "label": "Accepted at",
           "logical_name": "accepted_at",
           "pii": false,
@@ -4067,7 +4067,7 @@
         },
         {
           "column_name": "inv_email",
-          "description": null,
+          "description": "The invited email addresses; vault-routed, so the row holds a masked vault reference and the plain value lives only in the vault. reveal_invitation only reports whether a grant covers the subject; the settings invitations list resolves it by plane through Samen.Api.PiiResolution.",
           "label": "Email",
           "logical_name": "email",
           "pii": true,
@@ -4075,7 +4075,7 @@
         },
         {
           "column_name": "inv_email_bidx",
-          "description": null,
+          "description": "Keyed-HMAC blind index of the invited email address, used to match the invitation to an existing credential without a vault reveal. One-way, never the address itself; set by Samen.Identity.Invite.create and not public.",
           "label": "Email bidx",
           "logical_name": "email_bidx",
           "pii": false,
@@ -4083,7 +4083,7 @@
         },
         {
           "column_name": "inv_expires_at",
-          "description": null,
+          "description": "When the invitation stops being acceptable: 14 days after creation, set by every create. Accepting only matches a pending invitation still before this instant.",
           "label": "Expires at",
           "logical_name": "expires_at",
           "pii": false,
@@ -4115,7 +4115,7 @@
         },
         {
           "column_name": "inv_revoked_at",
-          "description": null,
+          "description": "When the invitation was revoked, set by the revoke action (admin only, pending invitations only) together with status revoked; empty before.",
           "label": "Revoked at",
           "logical_name": "revoked_at",
           "pii": false,
@@ -4129,7 +4129,7 @@
             "viewer"
           ],
           "column_name": "inv_role",
-          "description": null,
+          "description": "Role a new member gets on accepting (owner, admin, member or viewer), member by default; an invitee who already has a membership there keeps it. Creating needs a verified admin or owner and a role strictly below their own; no actor can edit it afterwards.",
           "label": "Role",
           "logical_name": "role",
           "pii": false,
@@ -4137,7 +4137,7 @@
         },
         {
           "column_name": "inv_status",
-          "description": null,
+          "description": "Lifecycle state as text, pending by default and on every create. After that only the accept, revoke and expire actions change it, and no actor can run accept or expire or edit it directly; the column itself does not constrain the values.",
           "label": "Status",
           "logical_name": "status",
           "pii": false,
@@ -4145,7 +4145,7 @@
         },
         {
           "column_name": "inv_token_digest",
-          "description": null,
+          "description": "SHA-256 hex digest of the emailed invite token, unique across invitations (a database index); the raw token is never stored. Not public: set only by Samen.Identity.Invite.create when the invitation is issued.",
           "label": "Token digest",
           "logical_name": "token_digest",
           "pii": false,
@@ -4163,14 +4163,17 @@
       "label": "Invitation",
       "relationships": [],
       "resource": "Demo.Identity.Invitation",
+      "synonyms": [
+        "invite"
+      ],
       "table_name": "inv_invitation"
     },
     {
-      "description": null,
+      "description": "Per-organization configuration rows for the RBAC roles, holding a label, a rank and an enabled flag; reads are organization-scoped and writes need the admin role. Authorization checks use the fixed ranks of Samen.Scope.Role, not these rows.",
       "fields": [
         {
           "column_name": "iro_enabled",
-          "description": null,
+          "description": "Whether the role is marked enabled in this organization's configuration, true by default; no authorization check reads it.",
           "label": "Enabled",
           "logical_name": "enabled",
           "pii": false,
@@ -4194,7 +4197,7 @@
         },
         {
           "column_name": "iro_label",
-          "description": null,
+          "description": "Optional display label for the role as free text; no format is enforced.",
           "label": "Label",
           "logical_name": "label",
           "pii": false,
@@ -4208,7 +4211,7 @@
             "viewer"
           ],
           "column_name": "iro_name",
-          "description": null,
+          "description": "Which RBAC role this row configures: owner, admin, member or viewer; required.",
           "label": "Name",
           "logical_name": "name",
           "pii": false,
@@ -4224,7 +4227,7 @@
         },
         {
           "column_name": "iro_rank",
-          "description": null,
+          "description": "Required whole number ranking the role on this row; authorization uses the fixed ranks of Samen.Scope.Role, and no range or uniqueness rule is enforced here.",
           "label": "Rank",
           "logical_name": "rank",
           "pii": false,
@@ -4245,11 +4248,11 @@
       "table_name": "iro_role"
     },
     {
-      "description": null,
+      "description": "An API credential bound to one plane and to the membership that minted it. Only a SHA-256 digest of the key is stored. Creating, re-timing, revoking or deleting one needs the admin role, and a key created through an actor cannot carry a role above the creator's.",
       "fields": [
         {
           "column_name": "key_expires_at",
-          "description": null,
+          "description": "Hard expiry instant. Create clamps it to at most 365 days ahead (90 days when empty); an update that sets it can only shorten it and refuses a revoked or expired key. Samen.Scope.ApiKey.active_query refuses a key at or past it; a key with none (from before the expiry gate) does not expire.",
           "label": "Expires at",
           "logical_name": "expires_at",
           "pii": false,
@@ -4273,7 +4276,7 @@
         },
         {
           "column_name": "key_last_used_at",
-          "description": null,
+          "description": "When a host's key check last stamped the key as used, through the system-only mark_used action; best-effort, empty where the host does not stamp it, and never used to decide whether a key authenticates.",
           "label": "Last used at",
           "logical_name": "last_used_at",
           "pii": false,
@@ -4281,7 +4284,7 @@
         },
         {
           "column_name": "key_membership_id",
-          "description": null,
+          "description": "The membership that minted the key; required, in the same organization, and no action changes it after creation. Creating a key through an actor needs it to be that actor's own active membership.",
           "label": "Membership id",
           "logical_name": "membership_id",
           "pii": false,
@@ -4295,7 +4298,7 @@
             "viewer"
           ],
           "column_name": "key_minter_role",
-          "description": null,
+          "description": "Role recorded at mint (owner, admin, member or viewer); required on create; no action changes it afterwards. Made through an actor it cannot exceed the actor's role or the bound membership's. effective_role takes the lower of this and that membership's current role, refusing a non-active one.",
           "label": "Minter role",
           "logical_name": "minter_role",
           "pii": false,
@@ -4315,7 +4318,7 @@
             "operator"
           ],
           "column_name": "key_plane",
-          "description": null,
+          "description": "Kind of key, tenant by default: tenant or operator; no action changes it after creation. A host that authenticates keys from this table gives the request actor this plane; where PII is resolved through Samen.Api.PiiResolution an operator key gets a vault-routed field only under a reveal grant.",
           "label": "Plane",
           "logical_name": "plane",
           "pii": false,
@@ -4323,7 +4326,7 @@
         },
         {
           "column_name": "key_revoked_at",
-          "description": null,
+          "description": "When the key was revoked, empty while it is live. No action accepts it as input; the revoke action sets it once and keeps the original instant on a repeat, and Samen.Scope.ApiKey.active_query skips rows where it is set.",
           "label": "Revoked at",
           "logical_name": "revoked_at",
           "pii": false,
@@ -4331,7 +4334,7 @@
         },
         {
           "column_name": "key_scopes",
-          "description": null,
+          "description": "Requested scopes as a map of resource family to read and write, empty by default; no action changes it after creation. Where a host mounts the settings surface, its mint trims them to the minter's role. A key's authority at use is its effective role (see minter_role).",
           "label": "Scopes",
           "logical_name": "scopes",
           "pii": false,
@@ -4339,7 +4342,7 @@
         },
         {
           "column_name": "key_token_digest",
-          "description": null,
+          "description": "SHA-256 hex digest of the key material; required and unique across keys (a database index), and the raw key is never stored. Not public and never an action input: the minting code sets it, e.g. Samen.Web.Settings.ApiKeys.mint where a host mounts the settings surface.",
           "label": "Token digest",
           "logical_name": "token_digest",
           "pii": false,
@@ -4357,7 +4360,7 @@
       "label": "Api key",
       "relationships": [
         {
-          "description": null,
+          "description": "The membership that minted the key; required, in the same organization, and no action changes it after creation. Creating a key through an actor needs it to be that actor's own active membership.",
           "destination": "Demo.Identity.Membership",
           "destination_attribute": "id",
           "destination_table": "mbs_membership",
@@ -4447,7 +4450,7 @@
       "table_name": "mbr_membership"
     },
     {
-      "description": null,
+      "description": "Gives a user an RBAC role in the organization; a create is refused when the user already has a membership there. Reads are organization-scoped; writes need the admin role, and any role being set and any role the row holds must each be strictly below the writer's own.",
       "fields": [
         {
           "column_name": "mbs_id",
@@ -4481,7 +4484,7 @@
             "viewer"
           ],
           "column_name": "mbs_role",
-          "description": null,
+          "description": "RBAC role of the member: owner, admin, member or viewer, member by default. Roles are ranked. An actor's write must set a role strictly below its own, and changing or deleting a row also needs its stored role strictly below, so an admin can neither assign admin nor change an admin or owner.",
           "label": "Role",
           "logical_name": "role",
           "pii": false,
@@ -4489,7 +4492,7 @@
         },
         {
           "column_name": "mbs_status",
-          "description": null,
+          "description": "Membership status as text, active by default; no fixed list of values is enforced. Only an active membership resolves a role in the organization for a signed-in session or an API key; any other status resolves none.",
           "label": "Status",
           "logical_name": "status",
           "pii": false,
@@ -4505,7 +4508,7 @@
         },
         {
           "column_name": "mbs_user_id",
-          "description": null,
+          "description": "The user this membership grants a role to; required, in the same organization, and no action changes it after creation.",
           "label": "User id",
           "logical_name": "user_id",
           "pii": false,
@@ -4515,7 +4518,7 @@
       "label": "Membership",
       "relationships": [
         {
-          "description": null,
+          "description": "The user this membership grants a role to; required, in the same organization, and no action changes it after creation.",
           "destination": "Demo.Identity.User",
           "destination_attribute": "id",
           "destination_table": "usr_user",
@@ -7124,11 +7127,11 @@
       "table_name": "scv_conversation"
     },
     {
-      "description": null,
+      "description": "A revocable, database-backed login session for a credential, found by the SHA-256 digest of its session token. It resolves only while neither revoked nor expired. Its policies refuse every actor; framework code reaches it with authorization off.",
       "fields": [
         {
           "column_name": "ses_credential_id",
-          "description": null,
+          "description": "The credential this session authenticates; required.",
           "label": "Credential id",
           "logical_name": "credential_id",
           "pii": false,
@@ -7136,7 +7139,7 @@
         },
         {
           "column_name": "ses_device_label",
-          "description": null,
+          "description": "Coarse label such as a browser family on an OS family, or Unknown device, derived from the User-Agent at sign-in. The raw user-agent and the client IP are not stored.",
           "label": "Device label",
           "logical_name": "device_label",
           "pii": false,
@@ -7144,7 +7147,7 @@
         },
         {
           "column_name": "ses_expires_at",
-          "description": null,
+          "description": "When the session stops resolving: 60 days after creation, moved to 60 days after each throttled touch; required. A session at or past this instant does not resolve.",
           "label": "Expires at",
           "logical_name": "expires_at",
           "pii": false,
@@ -7160,7 +7163,7 @@
         },
         {
           "column_name": "ses_inserted_at",
-          "description": null,
+          "description": "When the session was created, with microsecond precision; set by default and not writable. Cap eviction sorts on it, then on id, to find the oldest live session.",
           "label": "Inserted at",
           "logical_name": "inserted_at",
           "pii": false,
@@ -7168,7 +7171,7 @@
         },
         {
           "column_name": "ses_last_seen_at",
-          "description": null,
+          "description": "When the session was last seen, advanced by a best-effort touch throttled to once per five minutes; it never decides whether a session authenticates.",
           "label": "Last seen at",
           "logical_name": "last_seen_at",
           "pii": false,
@@ -7176,7 +7179,7 @@
         },
         {
           "column_name": "ses_org_id",
-          "description": null,
+          "description": "Always optional here: a session authenticates a credential before any organization is chosen, so it is not scoped by this column.",
           "label": "Org id",
           "logical_name": "org_id",
           "pii": false,
@@ -7184,7 +7187,7 @@
         },
         {
           "column_name": "ses_revoked_at",
-          "description": null,
+          "description": "When the session was revoked, empty while live. A revoked session does not resolve; revoke actions and the sign-in cap eviction set it.",
           "label": "Revoked at",
           "logical_name": "revoked_at",
           "pii": false,
@@ -7192,7 +7195,7 @@
         },
         {
           "column_name": "ses_token_digest",
-          "description": null,
+          "description": "SHA-256 hex digest of the session token, required and unique across sessions; the raw token is never stored. Not public: set only when the session is created.",
           "label": "Token digest",
           "logical_name": "token_digest",
           "pii": false,
@@ -7210,7 +7213,7 @@
       "label": "Session",
       "relationships": [
         {
-          "description": null,
+          "description": "The credential this session authenticates; required.",
           "destination": "Demo.Identity.Credential",
           "destination_attribute": "id",
           "destination_table": "crd_credential",
@@ -7815,11 +7818,11 @@
       "table_name": "tdt_tagging"
     },
     {
-      "description": null,
+      "description": "The link between a credential and an external SSO identity, given by provider and the provider's subject id; the pair is unique (a database index). Its policies refuse every actor; framework code reaches it with authorization off.",
       "fields": [
         {
           "column_name": "uid_credential_id",
-          "description": null,
+          "description": "The credential this SSO identity signs in as; required.",
           "label": "Credential id",
           "logical_name": "credential_id",
           "pii": false,
@@ -7843,7 +7846,7 @@
         },
         {
           "column_name": "uid_linked_at",
-          "description": null,
+          "description": "When the SSO identity was linked to the credential, set at link time; required.",
           "label": "Linked at",
           "logical_name": "linked_at",
           "pii": false,
@@ -7851,7 +7854,7 @@
         },
         {
           "column_name": "uid_org_id",
-          "description": null,
+          "description": "Always optional here: the link belongs to an organization-less credential, so it is not scoped by this column.",
           "label": "Org id",
           "logical_name": "org_id",
           "pii": false,
@@ -7862,7 +7865,7 @@
             "google"
           ],
           "column_name": "uid_provider",
-          "description": null,
+          "description": "The SSO identity provider; currently only google is allowed, and the value is required.",
           "label": "Provider",
           "logical_name": "provider",
           "pii": false,
@@ -7870,7 +7873,7 @@
         },
         {
           "column_name": "uid_provider_uid",
-          "description": null,
+          "description": "Opaque subject identifier the provider issued for the account, stored as received; required, and unique together with provider.",
           "label": "Provider uid",
           "logical_name": "provider_uid",
           "pii": false,
@@ -7888,7 +7891,7 @@
       "label": "User identity",
       "relationships": [
         {
-          "description": null,
+          "description": "The credential this SSO identity signs in as; required.",
           "destination": "Demo.Identity.Credential",
           "destination_attribute": "id",
           "destination_table": "crd_credential",
@@ -7902,11 +7905,11 @@
       "table_name": "uid_user_identity"
     },
     {
-      "description": null,
+      "description": "A person's account inside one organization, optionally linked to the sign-in credential. Full name and emails are vault-routed. Creating needs the admin role; users edit their own profile but not their status; changing or deleting another user needs the admin role and a role strictly above theirs.",
       "fields": [
         {
           "column_name": "usr_credential_id",
-          "description": null,
+          "description": "Id of the sign-in credential this user is linked to; empty for a user created without one. Not publicly writable: set when registration, invitation acceptance or SSO provisioning creates the user.",
           "label": "Credential id",
           "logical_name": "credential_id",
           "pii": false,
@@ -7914,7 +7917,7 @@
         },
         {
           "column_name": "usr_emails",
-          "description": null,
+          "description": "The user's email addresses; vault-routed. A tenant-plane actor reads it in clear, an operator only under a reveal grant (else omitted; masked while impersonating), a plane-less actor masked. AI egress masks it; only a completion call can carry it in clear, if the host opts in and a grant covers it.",
           "label": "Emails",
           "logical_name": "emails",
           "pii": true,
@@ -7922,7 +7925,7 @@
         },
         {
           "column_name": "usr_full_name",
-          "description": null,
+          "description": "The user's full name; vault-routed. A tenant-plane actor reads it in clear, an operator only under a reveal grant (else omitted; masked while impersonating), a plane-less actor masked. AI egress masks it; only a completion call can carry it in clear, if the host opts in and a grant covers it.",
           "label": "Full name",
           "logical_name": "full_name",
           "pii": true,
@@ -7930,7 +7933,7 @@
         },
         {
           "column_name": "usr_handle",
-          "description": null,
+          "description": "Display handle of the user as plain free text, not vault-routed; no format or uniqueness rule is enforced.",
           "label": "Handle",
           "logical_name": "handle",
           "pii": false,
@@ -7962,7 +7965,7 @@
         },
         {
           "column_name": "usr_status",
-          "description": null,
+          "description": "Account status as text, active by default; no fixed list of values is enforced. An actor's write cannot change their own status; changing another user's needs an admin role that strictly out-ranks that user's role in the organization.",
           "label": "Status",
           "logical_name": "status",
           "pii": false,

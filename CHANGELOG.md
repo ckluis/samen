@@ -324,6 +324,17 @@ need a fix (item 10 below). Sabotages 1279-1296.
   Physical table and column names are not meaning text and are covered by a catalogue walk test in each host.
 - **Changed: the CRM scope blueprint, `Samen.Fragments.CorePerson` and demo's CRM resources are described**; the three
   committed `schema.dict.json` files are regenerated. No database column, migration or `custom_objects` change.
+- **Changed: the Identity scope blueprint is described** (11 resources, 80 entries per host): org, user, membership, role,
+  API key, invitation, credential, auth token, session, SSO identity and login-failure counter. Each sentence says what
+  the code does at this commit and, where it differs, which path it holds for (an actor's write, the invite flow, a host
+  that authenticates keys from the table); a field whose behaviour differs by host is described neutrally. The API key's
+  `scopes` are described as recorded at mint, with the key's authority at use given by its effective role, and
+  `last_used_at` as written only by the system-only `mark_used`. A vault field names the planes `Samen.Api.PiiResolution`
+  resolves only on a resource where it is prepared. The invitation gains the synonym `invite`. `catalog_meaning.baseline`
+  ceilings drop 499 to 419 (demo), 768 to 688 (driftwood) and 604 to 524 (pawchart). A demo test
+  (`Demo.IdentityCatalogBehaviourTest`) runs the membership, key, invitation, slug and vault-plane sentences through the
+  real actions, and `demo/test/ai_grounding_catalog_test.exs` pairs the rest with the suites that prove them. No column,
+  migration or behaviour change.
 
 ### Added: generators emit described resources (ADR-043 §8a, A3)
 

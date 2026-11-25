@@ -1,0 +1,19 @@
+# SABOTAGE: ApiKey.token_digest's catalog description claims the raw key is stored
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/ai_grounding_catalog_test.exs
+# MUST_FAIL: the Identity blueprint's descriptions reach demo's catalog
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index 78c3e151..f24fe710 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -738,7 +738,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
+           attribute(:token_digest, :string,
+             public?: false,
+             allow_nil?: false,
+-            description: "SHA-256 hex digest of the key material; required and unique across keys (a database index), and the raw key is never stored. Not public and never an action input: the minting code sets it, e.g. Samen.Web.Settings.ApiKeys.mint where a host mounts the settings surface."
++            description: "SHA-256 hex digest of the key material; required and unique across keys (a database index), and the raw key is stored. Not public and never an action input: the minting code sets it, e.g. Samen.Web.Settings.ApiKeys.mint where a host mounts the settings surface."
+           )
+ 
+           attribute(:plane, :atom,

@@ -29,6 +29,8 @@ defmodule Samen.Web.TenantAuthzLiveTest do
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
+  require Ash.Query
+
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest
 
@@ -36,6 +38,7 @@ defmodule Samen.Web.TenantAuthzLiveTest do
   alias Samen.Identity.Invite
   alias Samen.Identity.Register
   alias Samen.Web.Auth
+  alias Samen.Web.CurrentOrg
   alias Samen.Web.Flags.SettingsLive
   alias Samen.Web.Mount
   alias Samen.Web.TenantRole
@@ -492,6 +495,47 @@ defmodule Samen.Web.TenantAuthzLiveTest do
       SecurityHost.disarm!()
       # Disarmed → the byte-identical dev convenience, regardless of the caller's real role.
       assert TenantRole.admin_scope(mount, host.org.id, member.credential.id).actor.role == :admin
+    end
+
+    test "a SUSPENDED admin's already-open page keeps no admin authority: every admin-rank write it drives is refused; CONTROL: active, and active again" do
+      SecurityHost.arm!()
+      host = register_owner!()
+      admin = accept_into!(host, :admin)
+      flag = seed_flag(host.org.id)
+      mount = armed_flags_mount()
+
+      {:ok, %{user_id: user_id}} =
+        Samen.Auth.OrgActor.resolve(%{user: Op.User, membership: Op.Membership}, admin.credential.id, host.org.id)
+
+      set_status = fn status ->
+        Op.Membership
+        |> Ash.Query.filter(user_id == ^user_id and org_id == ^host.org.id)
+        |> Ash.read_one!(authorize?: false)
+        |> Ash.Changeset.for_update(:update, %{status: status}, authorize?: false)
+        |> Ash.update!()
+      end
+
+      # CONTROL: while active the page's principal toggles the flag and holds :admin
+      assert TenantRole.membership_role(mount, host.org.id, admin.credential.id) == :admin
+      _ = toggle_flag(admin.credential.id, host.org.id, flag.id)
+      assert raw_flag(flag.id).enabled == false
+
+      # suspended: the pinned principal (what an open LiveView still holds) resolves NO active membership, so
+      # `membership_role/3` falls back to :member (least privilege). That fallback is no authority: every
+      # `write_scope` caller drives a `RoleAtLeast :admin` write, so the toggle is refused (the gate).
+      set_status.("suspended")
+      assert TenantRole.membership_role(mount, host.org.id, admin.credential.id) == :member
+      assert CurrentOrg.resolve_actor(mount, admin.credential.id, host.org.id) == nil
+      assert TenantRole.admin_scope(mount, host.org.id, admin.credential.id).actor.role == :member
+      _ = toggle_flag(admin.credential.id, host.org.id, flag.id)
+      assert raw_flag(flag.id).enabled == false, "a suspended admin's open page flipped the flag"
+      _ = toggle_disclosure(admin.credential.id, host.org.id, true)
+      refute disclosure_on?(host.org.id), "a suspended admin's open page flipped org-wide disclosure"
+
+      # active again: the same principal toggles again
+      set_status.("active")
+      _ = toggle_flag(admin.credential.id, host.org.id, flag.id)
+      assert raw_flag(flag.id).enabled == true
     end
   end
 
