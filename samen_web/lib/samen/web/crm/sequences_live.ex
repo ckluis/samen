@@ -51,7 +51,6 @@ defmodule Samen.Web.CRM.SequencesLive do
   alias Samen.Web.Reads.Guard
   alias Samen.Web.TenantActor
   require TenantActor
-  import Samen.Web.TenantActor, only: [writable?: 2]
   import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @impl true
@@ -82,7 +81,7 @@ defmodule Samen.Web.CRM.SequencesLive do
       step_sends: %{},
       read_errors: []
     )
-    |> assign(acting_scope: nil, actor_state: :ok)
+    |> assign(acting_scope: nil, actor_state: :ok, can_write: false)
   end
 
   # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
@@ -264,7 +263,7 @@ defmodule Samen.Web.CRM.SequencesLive do
               </div>
 
               <%!-- Enroll flow — tenant plane only (writable?). Uses the EXISTING :enroll action. --%>
-              <div :if={writable?(@samen_mount, @acting_scope)} id="sequences-enroll">
+              <div :if={@can_write} id="sequences-enroll">
                 <%= cond do %>
                 <% :sequences in @read_errors -> %>
                   <%!-- the sequences list below shows the error; no "create one first" advice here --%>

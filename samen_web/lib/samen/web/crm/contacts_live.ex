@@ -46,7 +46,6 @@ defmodule Samen.Web.CRM.ContactsLive do
 
   alias Samen.Web.TenantActor
   require TenantActor
-  import Samen.Web.TenantActor, only: [writable?: 2]
   import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
   alias Samen.Web.CRM.Reads
   alias Samen.Web.Reads.Guard
@@ -82,7 +81,7 @@ defmodule Samen.Web.CRM.ContactsLive do
     |> Samen.Web.ListLive.refuse()
     |> default_return_to()
     |> assign(no_org: no_org?(socket, nil), org_id: nil, company_names: %{})
-    |> assign(acting_scope: nil, actor_state: :ok)
+    |> assign(acting_scope: nil, actor_state: :ok, can_write: false)
     |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{}, list_error: nil)
     |> assign(show_new: false, new_form: nil, first_run: false)
     |> assign_new(:delete_error, fn -> nil end)
@@ -255,7 +254,7 @@ defmodule Samen.Web.CRM.ContactsLive do
             <.button :if={not @no_org} phx-click="toggle_archived" id="toggle-archived-contacts">
               {if @list_state.show_archived, do: "Hide archived", else: "Show archived"}
             </.button>
-            <.button :if={writable?(@samen_mount, @acting_scope) and not @no_org} variant="primary" phx-click="new_contact" id="new-contact">
+            <.button :if={@can_write and not @no_org} variant="primary" phx-click="new_contact" id="new-contact">
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M12 3v18M3 12h18" />
@@ -288,7 +287,7 @@ defmodule Samen.Web.CRM.ContactsLive do
             </div>
           </div>
 
-          <div :if={@first_run and writable?(@samen_mount, @acting_scope)} class="wrap" style="margin-bottom:0">
+          <div :if={@first_run and @can_write} class="wrap" style="margin-bottom:0">
             <.first_run_card
               create_event="new_contact"
               create_label="Add your first contact"
@@ -315,10 +314,10 @@ defmodule Samen.Web.CRM.ContactsLive do
                 empty_icon="◉"
                 empty_body="Contacts are your people book — names, emails, and phones, all vault-protected."
               >
-                <:empty_actions :if={writable?(@samen_mount, @acting_scope)}>
+                <:empty_actions :if={@can_write}>
                   <.button variant="primary" phx-click="new_contact" id="empty-new-contact">New contact</.button>
                 </:empty_actions>
-                <:empty_sample :if={writable?(@samen_mount, @acting_scope) and SampleData.offer?(@samen_mount)}>
+                <:empty_sample :if={@can_write and SampleData.offer?(@samen_mount)}>
                   <.button phx-click="load_sample_data" id="load-sample-data">Load sample data</.button>
                 </:empty_sample>
                 <:head>
@@ -327,7 +326,7 @@ defmodule Samen.Web.CRM.ContactsLive do
                   <th scope="col" style="width:14%">Phone</th>
                   <th scope="col" style="width:20%">Company</th>
                   <.sort_header field={:job_title} label="Title" sort={@list_state.sort} width="14%" />
-                  <th :if={writable?(@samen_mount, @acting_scope)} scope="col" style="width:8%"><span class="sr-only">Actions</span></th>
+                  <th :if={@can_write} scope="col" style="width:8%"><span class="sr-only">Actions</span></th>
                 </:head>
                 <:row :let={p}>
                   <td class="p-name">
@@ -348,7 +347,7 @@ defmodule Samen.Web.CRM.ContactsLive do
                   </td>
                   <td class="p-company" style="color:var(--muted)">{(p.company_id && Map.get(@company_names, p.company_id)) || "—"}</td>
                   <td class="p-title" style="color:var(--muted);font-size:12px">{p.job_title || "—"}</td>
-                  <td :if={writable?(@samen_mount, @acting_scope)} class="p-actions">
+                  <td :if={@can_write} class="p-actions">
                     <%= if Map.get(p, :archived_at) do %>
                       <.pill variant="mut">archived</.pill>
                       <.button phx-click="restore" phx-value-id={p.id} class="restore-contact">Restore</.button>
@@ -361,7 +360,7 @@ defmodule Samen.Web.CRM.ContactsLive do
             </div>
           </div>
 
-          <.modal :if={@show_new and @new_form != nil and writable?(@samen_mount, @acting_scope)} id="new-contact-modal" title="New contact" on_cancel="cancel_new">
+          <.modal :if={@show_new and @new_form != nil and @can_write} id="new-contact-modal" title="New contact" on_cancel="cancel_new">
             <.simple_form :let={f} for={@new_form} id="new-contact-form" phx-change="validate_new" phx-submit="save_new">
               <.full_name_field field={f[:full_name]} label="Full name (🔒 PII)" />
               <.form_field field={f[:display_name]} label="Display name" />

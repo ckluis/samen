@@ -22,7 +22,6 @@ defmodule Samen.Web.Work.TaskLive do
   alias Samen.Web.Work.Reads
   alias Samen.Web.TenantActor
   require TenantActor
-  import Samen.Web.TenantActor, only: [writable?: 2]
   import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @impl true
@@ -50,7 +49,7 @@ defmodule Samen.Web.Work.TaskLive do
       load_error: nil,
       subtasks_failed: false
     )
-    |> assign(acting_scope: nil, actor_state: :ok)
+    |> assign(acting_scope: nil, actor_state: :ok, can_write: false)
   end
 
   # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
@@ -170,7 +169,7 @@ defmodule Samen.Web.Work.TaskLive do
                   </div>
                   <div>
                     <span style="font-size:11px;color:var(--muted);display:block">Status</span>
-                    <%= if writable?(@samen_mount, @acting_scope) do %>
+                    <%= if @can_write do %>
                       <form phx-change="update_status" id="status-form">
                         <select name="status">
                           <option :for={s <- Reads.task_statuses()} value={s} selected={s == @task.status}>

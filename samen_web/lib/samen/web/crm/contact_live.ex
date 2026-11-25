@@ -55,7 +55,6 @@ defmodule Samen.Web.CRM.ContactLive do
   alias Samen.Web.Reads.Guard
   alias Samen.Web.TenantActor
   require TenantActor
-  import Samen.Web.TenantActor, only: [writable?: 2]
   import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @impl true
@@ -216,7 +215,7 @@ defmodule Samen.Web.CRM.ContactLive do
 
     socket
     |> ensure_return_to()
-    |> assign(acting_scope: nil, actor_state: :ok)
+    |> assign(acting_scope: nil, actor_state: :ok, can_write: false)
     |> assign(
       no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil),
       org_id: nil,
@@ -400,7 +399,7 @@ defmodule Samen.Web.CRM.ContactLive do
               Edit contact
             </.button>
             <.delete_confirm
-              :if={writable?(@samen_mount, @acting_scope) and @contact != nil}
+              :if={@can_write and @contact != nil}
               id="delete-contact"
               message="Delete this contact? This cannot be undone."
               phx-click="delete_contact"

@@ -102,12 +102,13 @@ defmodule Samen.Web.TenantActor do
   Whether a page offers its WRITE controls (the create / edit / delete / enroll buttons): the plane may write
   (`Samen.Web.Live`'s `writable?/1`, an operator never authors into a tenant) AND the person acting holds at least the
   `:member` role every tenant write of these surfaces needs. A viewer's page renders no write control, a refused page
-  (`nil` scope) none either. This is what the page SHOWS; what it ALLOWS is the kernel policy, which is unchanged.
+  (`nil` scope) none either. `assign_actor/2` assigns the answer as `:can_write`, which is what the templates read. This is
+  what the page SHOWS; what it ALLOWS is the kernel policy, which is unchanged.
   """
   @spec writable?(Mount.t() | nil, Samen.Scope.t() | nil) :: boolean()
   def writable?(%Mount{plane: %{kind: :operator}}, _scope), do: false
   def writable?(%Mount{}, %Samen.Scope{actor: %{role: role}}), do: Samen.Scope.Role.at_least?(role, :member)
-  def writable?(_mount, _scope), do: false
+  def writable?(%Mount{}, _no_scope), do: false
 
   @doc """
   The principal reference for a request: pinned by `Samen.Web.TenantAuthz` as `:samen_principal_ref`
@@ -161,11 +162,19 @@ defmodule Samen.Web.TenantActor do
     |> resolve_into(org_id)
   end
 
+  # `can_write` is what the page SHOWS (its write controls): computed here, with the scope, as a plain assign, so a page
+  # that is replayed from its recorded assigns (a `Samen.Scope` is not recorded) renders the controls its person saw.
   defp resolve_into(socket, org_id) do
     case socket_scope(socket, org_id) do
-      {:ok, scope} -> {:ok, Phoenix.Component.assign(socket, acting_scope: scope, actor_state: :ok)}
-      :denied -> {:refused, Phoenix.Component.assign(socket, acting_scope: nil, actor_state: :denied)}
-      {:error, :unavailable} -> {:refused, Phoenix.Component.assign(socket, acting_scope: nil, actor_state: :unavailable)}
+      {:ok, scope} ->
+        mount = assigns(socket)[:samen_mount]
+        {:ok, Phoenix.Component.assign(socket, acting_scope: scope, actor_state: :ok, can_write: writable?(mount, scope))}
+
+      :denied ->
+        {:refused, Phoenix.Component.assign(socket, acting_scope: nil, actor_state: :denied, can_write: false)}
+
+      {:error, :unavailable} ->
+        {:refused, Phoenix.Component.assign(socket, acting_scope: nil, actor_state: :unavailable, can_write: false)}
     end
   end
 

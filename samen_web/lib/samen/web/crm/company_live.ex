@@ -34,7 +34,6 @@ defmodule Samen.Web.CRM.CompanyLive do
   alias Samen.Web.Reads.Guard
   alias Samen.Web.TenantActor
   require TenantActor
-  import Samen.Web.TenantActor, only: [writable?: 2]
   import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @impl true
@@ -224,7 +223,7 @@ defmodule Samen.Web.CRM.CompanyLive do
       account_health: nil,
       portfolio_health: nil
     )
-    |> assign(acting_scope: nil, actor_state: :ok)
+    |> assign(acting_scope: nil, actor_state: :ok, can_write: false)
   end
 
   # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
@@ -382,11 +381,11 @@ defmodule Samen.Web.CRM.CompanyLive do
               </span>
               Back to companies
             </a>
-            <.button :if={writable?(@samen_mount, @acting_scope) and @company != nil} phx-click="edit_company" id="edit-company">
+            <.button :if={@can_write and @company != nil} phx-click="edit_company" id="edit-company">
               Edit company
             </.button>
             <.delete_confirm
-              :if={writable?(@samen_mount, @acting_scope) and @company != nil}
+              :if={@can_write and @company != nil}
               id="delete-company"
               message="Delete this company? This cannot be undone."
               phx-click="delete_company"
@@ -477,7 +476,7 @@ defmodule Samen.Web.CRM.CompanyLive do
                 {@link_error}
               </div>
               <form
-                :if={writable?(@samen_mount, @acting_scope)}
+                :if={@can_write}
                 id="link-billing-customer-form"
                 phx-submit="link_billing_customer"
                 style="margin-top:6px;display:flex;gap:6px;align-items:center"
@@ -650,7 +649,7 @@ defmodule Samen.Web.CRM.CompanyLive do
                 </div>
             <% end %>
 
-            <.modal :if={@show_edit and @edit_form != nil and writable?(@samen_mount, @acting_scope)} id="edit-company-modal" title="Edit company" on_cancel="cancel_edit">
+            <.modal :if={@show_edit and @edit_form != nil and @can_write} id="edit-company-modal" title="Edit company" on_cancel="cancel_edit">
               <.simple_form :let={f} for={@edit_form} id="edit-company-form" phx-change="validate_edit" phx-submit="save_edit">
                 <.form_field field={f[:name]} label="Name" />
                 <.form_field field={f[:industry]} label="Industry" />

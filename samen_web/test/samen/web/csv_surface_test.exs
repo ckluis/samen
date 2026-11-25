@@ -63,15 +63,19 @@ defmodule Samen.Web.CsvSurfaceTest do
   end
 
   defp import_socket(org_id, plane_opts, extra \\ []) do
+    mount = build_mount(:csv, plane_opts)
+
     base =
       %Phoenix.LiveView.Socket{}
-      |> Phoenix.Component.assign(:samen_mount, build_mount(:csv, plane_opts))
+      |> Phoenix.Component.assign(:samen_mount, mount)
       |> Phoenix.Component.assign(:samen_acting_as, false)
       |> Phoenix.Component.assign(:return_to, nil)
       |> Phoenix.Component.assign(:org_id, org_id)
       |> Phoenix.Component.assign(:resource_name, "Person")
       |> Phoenix.Component.assign(:actor_state, :ok)
-      |> Phoenix.Component.assign(:acting_scope, nil)
+      # who is acting: the page offers the form to a person who may write, so the harness holds the scope the page would
+      |> Phoenix.Component.assign(:acting_scope, Samen.Web.TenantActor.system_scope(mount, org_id))
+      |> Phoenix.Component.assign(:can_write, Samen.Web.TenantActor.writable?(mount, Samen.Web.TenantActor.system_scope(mount, org_id)))
       |> Phoenix.Component.assign(:report, Keyword.get(extra, :report))
       |> Phoenix.Component.assign(:import_error, Keyword.get(extra, :import_error))
 

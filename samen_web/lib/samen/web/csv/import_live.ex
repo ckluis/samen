@@ -30,7 +30,6 @@ defmodule Samen.Web.Csv.ImportLive do
   alias Samen.Web.Mount
   alias Samen.Web.TenantActor
   require TenantActor
-  import Samen.Web.TenantActor, only: [writable?: 2]
   import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @upload_ref :csv_upload
@@ -76,7 +75,7 @@ defmodule Samen.Web.Csv.ImportLive do
   # `Mount.scope/2`'s fixed `:member`: the import is a governed create per row, so the person's role is what each row
   # is judged by. A denial or a failed lookup is a STATE of the page (re-resolved on every `handle_params`): no form,
   # and an `import` event is a no-op. With no org there is nobody to resolve (`acting_scope` nil: refused as well).
-  defp resolve_actor(socket, nil), do: assign(socket, acting_scope: nil, actor_state: :ok)
+  defp resolve_actor(socket, nil), do: assign(socket, acting_scope: nil, actor_state: :ok, can_write: false)
 
   defp resolve_actor(socket, org_id) do
     {_status, socket} = TenantActor.assign_actor(socket, org_id)
@@ -166,7 +165,7 @@ defmodule Samen.Web.Csv.ImportLive do
                 <span class="lane">every row through the governed create — bad mappings are rejected whole-file</span>
               </div>
 
-              <%= if writable?(@samen_mount, @acting_scope) do %>
+              <%= if @can_write do %>
                 <form id="csv-import-form" phx-submit="import" phx-change="validate">
                   <.live_file_input upload={@uploads.csv_upload} id="csv-import-input" />
 
