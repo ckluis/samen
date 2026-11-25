@@ -227,6 +227,35 @@ defmodule Samen.Web.NotificationsInboxTest do
     assert html(mount_socket(org_id)) =~ "DENIED-SENTINEL"
   end
 
+  test "RED: a realtime envelope for an org-addressed row, on a :denied or :unavailable socket, reads nothing and sets no count" do
+    org_id = Ash.UUID.generate()
+    row = notify!(org_id, %{recipient_id: org_id, rendered_body: "REALTIME-DENIED-SENTINEL"})
+
+    for state <- [:denied, :unavailable] do
+      socket =
+        mount_socket(org_id)
+        |> Phoenix.Component.assign(user_id: nil, user_role: nil, recipient_state: state)
+        |> InboxLive.load(org_id)
+
+      {:noreply, socket} = InboxLive.handle_info({:notification_created, %{id: row.id}}, socket)
+
+      assert socket.assigns.unread_count == 0, "#{state}: the broker re-read leaked a count"
+      assert socket.assigns.page.items == [], "#{state}: rows were read"
+      rendered = html(socket)
+      refute rendered =~ "REALTIME-DENIED-SENTINEL"
+      refute rendered =~ ~s(id="mark-all-read")
+    end
+
+    # positive control: with the actor resolved to no user (:ok, the dev posture) the SAME envelope is counted
+    ok_socket =
+      mount_socket(org_id)
+      |> Phoenix.Component.assign(user_id: nil, user_role: nil, recipient_state: :ok)
+      |> InboxLive.load(org_id)
+
+    {:noreply, ok_socket} = InboxLive.handle_info({:notification_created, %{id: row.id}}, ok_socket)
+    assert ok_socket.assigns.unread_count == 1
+  end
+
   test "RED: a FAILED actor lookup is an error state with a retry, never an empty inbox" do
     org_id = Ash.UUID.generate()
     notify!(org_id, %{rendered_body: "UNAVAILABLE-SENTINEL"})

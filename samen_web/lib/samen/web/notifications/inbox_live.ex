@@ -182,6 +182,12 @@ defmodule Samen.Web.Notifications.InboxLive do
   # session's OWN scope — the per-plane masking re-read (design §2.4). A cross-org /
   # unreadable id resolves to :error and is ignored (OrgScope; no existence oracle).
   @impl true
+  # A denied / unavailable actor reads NOTHING: the broker-scope fallback of `recipient_scope/2` is for the
+  # honest no-user posture (`:ok` with no user_id) only, never for a failed or refused actor lookup.
+  def handle_info({:notification_created, _envelope}, %{assigns: %{recipient_state: state}} = socket)
+      when state != :ok,
+      do: {:noreply, socket}
+
   def handle_info({:notification_created, %{id: id}}, socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
 
@@ -198,6 +204,8 @@ defmodule Samen.Web.Notifications.InboxLive do
 
   # Re-run the CURRENT bounded read (preserving sort/filter/cursor — unlike a full
   # load/2, which would reset the list state) and re-count the badge.
+  defp refresh(%{assigns: %{recipient_state: state}} = socket) when state != :ok, do: socket
+
   defp refresh(socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
     scope = recipient_scope(socket, org_id)

@@ -1,0 +1,29 @@
+# SABOTAGE: a realtime envelope re-reads under the broker scope for a denied or unavailable actor and sets 
+#   the unread count
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/notifications_inbox_test.exs
+# MUST_FAIL: reads nothing and sets no count
+diff --git a/samen_web/lib/samen/web/notifications/inbox_live.ex b/samen_web/lib/samen/web/notifications/inbox_live.ex
+index a1016b74..d9d44d25 100644
+--- a/samen_web/lib/samen/web/notifications/inbox_live.ex
++++ b/samen_web/lib/samen/web/notifications/inbox_live.ex
+@@ -185,7 +185,7 @@ defmodule Samen.Web.Notifications.InboxLive do
+   # A denied / unavailable actor reads NOTHING: the broker-scope fallback of `recipient_scope/2` is for the
+   # honest no-user posture (`:ok` with no user_id) only, never for a failed or refused actor lookup.
+   def handle_info({:notification_created, _envelope}, %{assigns: %{recipient_state: state}} = socket)
+-      when state != :ok,
++      when state == :never,
+       do: {:noreply, socket}
+ 
+   def handle_info({:notification_created, %{id: id}}, socket) do
+@@ -204,7 +204,7 @@ defmodule Samen.Web.Notifications.InboxLive do
+ 
+   # Re-run the CURRENT bounded read (preserving sort/filter/cursor — unlike a full
+   # load/2, which would reset the list state) and re-count the badge.
+-  defp refresh(%{assigns: %{recipient_state: state}} = socket) when state != :ok, do: socket
++  defp refresh(%{assigns: %{recipient_state: state}} = socket) when state == :never, do: socket
+ 
+   defp refresh(socket) do
+     %{samen_mount: mount, org_id: org_id} = socket.assigns
