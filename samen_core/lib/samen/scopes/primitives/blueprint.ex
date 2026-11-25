@@ -157,6 +157,15 @@ defmodule Samen.Scopes.Primitives.Blueprint do
             primary?(true)
             require_atomic?(false)
             accept([:read_at, :status])
+
+            # The one transition the inbox performs is "mark read" (`read_at` + `status: :read`). The engine and
+            # its delivery workers move a row through :pending/:sent/:delivered/:failed with `authorize?: false`;
+            # an actor, who can reach an ORG-addressed row that every member shares, may only set :read, so
+            # one member cannot flip a shared SLA or invoice alert back to :failed or :pending for everyone.
+            validate(attribute_equals(:status, :read),
+              where: [changing(:status)],
+              message: "an actor can only mark a notification read"
+            )
           end
 
           action :reveal_notification, :map do
@@ -206,11 +215,13 @@ defmodule Samen.Scopes.Primitives.Blueprint do
             authorize_if(always())
           end
 
-          # A recipient removes their own; an org admin may remove any of the org's.
+          # A recipient removes their own (a row addressed to them); an org admin may remove any of the org's. A row
+          # addressed to the ORGANISATION is one shared row, so removing it clears the alert for every member and
+          # admin: it needs an admin (marking it read stays a member's, as before).
           policy action(:destroy) do
             forbid_unless(Samen.Policy.OrgScope)
             authorize_if({Samen.Policy.RoleAtLeast, role: :admin})
-            authorize_if({Samen.Policy.RecipientOnly, org_addressed: true})
+            authorize_if(Samen.Policy.RecipientOnly)
           end
 
           policy action(:reveal_notification) do

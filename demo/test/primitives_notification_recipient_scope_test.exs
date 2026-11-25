@@ -170,6 +170,59 @@ defmodule Demo.PrimitivesNotificationRecipientScopeTest do
     end
   end
 
+  describe "Notification writes: the org-addressed row is ONE shared row" do
+    test "RED: a member cannot destroy an org-addressed notification; an admin can (it is shared state)",
+         %{org: org, a: a, viewer: viewer, admin: admin} do
+      shared = mk_notification(org.id, org.id)
+
+      for actor <- [a, viewer] do
+        assert {:error, %Ash.Error.Forbidden{}} = Ash.destroy(shared, actor: actor)
+      end
+
+      assert Ash.get!(Notification, shared.id, authorize?: false)
+
+      # positive control: the admin removes it
+      assert :ok = Ash.destroy(shared, actor: admin)
+    end
+
+    test "RED: the update takes only the transition the inbox performs (status :read); POSITIVE: that one works",
+         %{org: org, alice: alice, a: a} do
+      for status <- [:sent, :delivered, :failed] do
+        for row <- [mk_notification(org.id, alice.id), mk_notification(org.id, org.id)] do
+          assert {:error, %Ash.Error.Invalid{}} =
+                   row
+                   |> Ash.Changeset.for_update(:update, %{status: status}, actor: a)
+                   |> Ash.update(actor: a)
+
+          assert Ash.get!(Notification, row.id, authorize?: false).status == :pending
+        end
+      end
+
+      for row <- [mk_notification(org.id, alice.id), mk_notification(org.id, org.id)] do
+        assert {:ok, %{status: :read}} = mark_read(row, a)
+      end
+    end
+
+    test "marking an org-addressed row read stays what it was (shared state): a member can", %{org: org, a: a} do
+      assert {:ok, %{status: :read, read_at: %DateTime{}}} = mark_read(mk_notification(org.id, org.id), a)
+    end
+  end
+
+  describe "NotificationPreference reads" do
+    test "RED: a member cannot READ another user's preference; POSITIVE: they read their own",
+         %{org: org, alice: alice, bob: bob, a: a, admin: admin} do
+      mine = mk_pref(org.id, alice.id)
+      theirs = mk_pref(org.id, bob.id)
+
+      seen = ids(a, NotificationPreference)
+      assert mine.id in seen
+      refute theirs.id in seen
+
+      # not an admin either (the engine reads them with authorize?: false)
+      refute theirs.id in ids(admin, NotificationPreference)
+    end
+  end
+
   describe "NotificationPreference" do
     test "RED: a member cannot create a preference for another user", %{org: org, bob: bob, a: a} do
       assert {:error, %Ash.Error.Forbidden{}} =
