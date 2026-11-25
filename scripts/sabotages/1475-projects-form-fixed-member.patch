@@ -1,0 +1,21 @@
+# SABOTAGE: ProjectsLive opens its create form on the fixed member scope again, so a viewer's create runs 
+#   as member
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_crm_work_test.exs
+# MUST_FAIL: a VIEWER cannot create or archive a project
+diff --git a/samen_web/lib/samen/web/work/projects_live.ex b/samen_web/lib/samen/web/work/projects_live.ex
+index 083878cd..f2de22b6 100644
+--- a/samen_web/lib/samen/web/work/projects_live.ex
++++ b/samen_web/lib/samen/web/work/projects_live.ex
+@@ -87,7 +87,8 @@ defmodule Samen.Web.Work.ProjectsLive do
+   def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
+ 
+   def handle_event("new_project", _params, socket) do
+-    %{samen_mount: mount, acting_scope: scope} = socket.assigns
++    %{samen_mount: mount, org_id: org_id, acting_scope: _} = socket.assigns
++    scope = Mount.scope(mount, org_id)
+     {:noreply, assign(socket, show_new: true, new_form: new_project_form(mount, scope))}
+   end
+ 

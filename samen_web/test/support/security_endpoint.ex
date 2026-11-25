@@ -137,6 +137,13 @@ defmodule Samen.WebTest.SecurityRouter do
       labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)
     )
 
+    # The Work module surfaces (tasks, task detail, projects, timeline, tree) with the `:identity_namespace` seam, so
+    # a real login resolves the signed-in person's membership role on them (`tenant_role_crm_work_test.exs`).
+    samen_module_routes(:work, Samen.WebTest.Work,
+      repo: Samen.WebTest.Repo,
+      labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)
+    )
+
     samen_csv_routes(:csv, Samen.WebTest.Crm,
       repo: Samen.WebTest.Repo,
       labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)

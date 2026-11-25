@@ -1,0 +1,19 @@
+# SABOTAGE: Outreach Enrollment :enroll/:pause/:resume/:stop lose their member-or-above gate, so a viewer 
+#   enrolls again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/crm/sequence_send_test.exs
+# MUST_FAIL: a VIEWER cannot enroll, pause, resume or stop
+diff --git a/samen_core/lib/samen/scopes/outreach/blueprint.ex b/samen_core/lib/samen/scopes/outreach/blueprint.ex
+index 7e3c7085..b2500d22 100644
+--- a/samen_core/lib/samen/scopes/outreach/blueprint.ex
++++ b/samen_core/lib/samen/scopes/outreach/blueprint.ex
+@@ -373,7 +373,6 @@ defmodule Samen.Scopes.Outreach.Blueprint do
+           # sequence's emails to a contact), so a `:viewer` may read the list but not change it.
+           policy action([:enroll, :pause, :resume, :stop]) do
+             forbid_unless(Samen.Policy.OrgScope)
+-            forbid_unless({Samen.Policy.RoleAtLeast, role: :member})
+             authorize_if(always())
+           end
+ 

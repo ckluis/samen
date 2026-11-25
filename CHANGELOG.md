@@ -115,6 +115,18 @@ All notable changes to Samen are recorded here. The format follows
   the CSV import (Person and any other member-gated resource of the mounted domain) and the leads lens. Tests log in
   as a real viewer and a real member and assert the database. Sabotages 1418, 1419 and 1427 to 1430.
 
+- **Fixed: the rest of the CRM pages and the Work pages acted as a fixed `:member`, and a `:viewer` could enroll contacts into
+  email sequences.** These pages now act as the signed-in person (their membership role), and show the denied or the
+  unavailable state, reading nothing, when there is no active membership or the lookup fails: the CRM company detail page
+  (edit, delete, billing link, log activity), pipeline, calendar, dashboard, mailbox, contacts gallery and sequences (enroll),
+  and the Work tasks list, task detail (status), projects (create, archive), timeline and task tree. A viewer could create and
+  archive tasks and projects and edit and archive companies through them; they now get a refusal. **Policy gate added:**
+  Outreach `Enrollment` `:enroll`, `:pause`, `:resume` and `:stop` had no role rule (org scope only) and are now
+  member-or-above, like the other CRM and Work writes (`Sequence` writes and `Enrollment` destroy stay admin; reads and the
+  system advance are unchanged). **Upgrade note:** a host that enrolls or pauses enrollments with a `:viewer` actor (or with
+  an actor carrying no role) now gets a forbidden error; run those as a member or above, or with `authorize?: false` in a job.
+  No migration. Sabotages 1470 to 1478.
+
 - **Fixed: `Samen.Webhook.deliver/4` raised `FunctionClauseError` on any non-empty endpoint list, discarded the `:multi` it
   was given, and answered `{:ok, 0}` when no `:endpoints` were passed.** It now enqueues one job per active, subscribed
   endpoint. With `:multi` it returns `{:ok, count, multi}`: **upgrade note:** run the RETURNED multi (`Ecto.Multi` is
