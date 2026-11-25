@@ -15,6 +15,16 @@ defmodule Samen.OrgIdPinnedGuard do
   resource with no `org_id` attribute at all has nothing to move and is listed under
   `:no_org_id`. A host may declare an `exceptions` map (`%{Resource => "reason"}`) for a resource that
   legitimately needs a mutable `org_id`; every exception is carried in the report.
+
+  ## The walk needs no database
+
+  Building a changeset is not running an action: nothing it does may touch the database. A `change`
+  that queries at build time rides on whatever sandbox owner is shared at that moment (and dies with
+  it — the CI flake), and Ash turns a failed query into a changeset error that looks like validation.
+  So the walk treats ANY of these as `:unexercisable`, by resource and action, never as exercised:
+  a build that exits or raises, a changeset error that is an unexpected exception (Ash's
+  `Unknown` class — a swallowed crash) and a query on a `repos:` repo issued by the walking process.
+  A check that needs the database belongs in a `before_action` hook.
   """
 
   @org_a "00000000-0000-4000-8000-00000000000a"
@@ -29,8 +39,47 @@ defmodule Samen.OrgIdPinnedGuard do
           exceptions: %{module() => String.t()}
         }
 
-  @spec walk([module()], %{module() => String.t()}) :: report()
-  def walk(domains, exceptions \\ %{}) do
+  @spec walk([module()], %{module() => String.t()}, keyword()) :: report()
+  def walk(domains, exceptions \\ %{}, opts \\ []) do
+    handler = attach_query_watch(Keyword.get(opts, :repos, []))
+
+    try do
+      do_walk(domains, exceptions)
+    after
+      detach_query_watch(handler)
+    end
+  end
+
+  # Query events are emitted in the process that issues the query, so a handler that forwards only
+  # events from the walking process sees exactly the queries the walk caused (not a concurrent test's).
+  defp attach_query_watch(repos) do
+    walker = self()
+    id = {__MODULE__, make_ref()}
+
+    events =
+      for repo <- repos do
+        prefix = Keyword.get(repo.config(), :telemetry_prefix, [])
+        prefix ++ [:query]
+      end
+
+    if events != [] do
+      :ok =
+        :telemetry.attach_many(
+          id,
+          events,
+          fn _event, _measurements, meta, _config ->
+            if self() == walker, do: send(walker, {:org_pin_walk_query, meta[:query]})
+          end,
+          nil
+        )
+    end
+
+    id
+  end
+
+  defp detach_query_watch(id), do: :telemetry.detach(id)
+
+  defp do_walk(domains, exceptions) do
     resources =
       domains
       |> Enum.flat_map(&Ash.Domain.Info.resources/1)
@@ -60,17 +109,57 @@ defmodule Samen.OrgIdPinnedGuard do
     actor = %{id: Ash.UUID.generate(), org_id: @org_a, role: :owner, verified?: true, kind: :tenant, plane: :tenant}
 
     for action <- Ash.Resource.Info.actions(resource), action.type in [:create, :update] do
+      flush_queries()
+
       try do
         changeset = build(resource, action, actor)
 
-        if carries_foreign_org?(changeset) and not org_error?(changeset) do
-          {:violation, resource, action.name, action.type, "the changeset carries org_id #{@org_b}"}
-        else
-          {:ok, resource, action.name, action.type}
+        cond do
+          (why = swallowed_crash(changeset)) != nil ->
+            {:unexercisable, resource, action.name, why}
+
+          (query = queried()) != nil ->
+            {:unexercisable, resource, action.name, "the changeset build queried the database: #{inspect(query)}"}
+
+          carries_foreign_org?(changeset) and not org_error?(changeset) ->
+            {:violation, resource, action.name, action.type, "the changeset carries org_id #{@org_b}"}
+
+          true ->
+            {:ok, resource, action.name, action.type}
         end
       rescue
         e -> {:unexercisable, resource, action.name, Exception.message(e)}
+      catch
+        kind, reason -> {:unexercisable, resource, action.name, "#{kind}: #{inspect(reason)}"}
       end
+    end
+  end
+
+  # Ash rescues a raise inside a change and stores it as an `Unknown`-class error on the changeset; a
+  # failed query inside a change is such a raise (or an `{:error, _}` the change maps to validation, which
+  # the query watch above catches). Either way the resource was NOT exercised.
+  defp swallowed_crash(changeset) do
+    Enum.find_value(changeset.errors, fn
+      %Ash.Error.Unknown.UnknownError{} = e -> "a change crashed during the build: " <> Exception.message(e)
+      _ -> nil
+    end)
+  end
+
+  defp queried do
+    receive do
+      {:org_pin_walk_query, query} ->
+        flush_queries()
+        query || "<query>"
+    after
+      0 -> nil
+    end
+  end
+
+  defp flush_queries do
+    receive do
+      {:org_pin_walk_query, _} -> flush_queries()
+    after
+      0 -> :ok
     end
   end
 

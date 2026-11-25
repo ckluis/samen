@@ -11,7 +11,10 @@ defmodule Driftwood.OrgIdPinnedGuardTest do
   @exceptions %{}
 
   test "no resource lets an authorized actor move or file a row under another org_id" do
-    report = Samen.OrgIdPinnedGuard.walk(Application.fetch_env!(:driftwood, :ash_domains), @exceptions)
+    report =
+      Samen.OrgIdPinnedGuard.walk(Application.fetch_env!(:driftwood, :ash_domains), @exceptions,
+        repos: [Driftwood.Repo]
+      )
 
     assert report.walked > 0, "the walk visited no resource: the guard is vacuous"
     assert report.actions > 0

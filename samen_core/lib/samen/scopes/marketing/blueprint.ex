@@ -486,60 +486,70 @@ defmodule Samen.Scopes.Marketing.Blueprint do
             argument(:campaign_id, :uuid, allow_nil?: true)
             argument(:template_id, :uuid, allow_nil?: true)
 
+            # A `before_action` hook, NOT a build-time change body: the same-org FK and suppression
+            # checks query the database, and a changeset BUILD (`for_create`) must not need one — an
+            # `Ash.Changeset.for_create` that queries rides on whatever sandbox owner happens to be shared,
+            # dies with it, and swallows a database error as a validation error (the org_id-pinned guard
+            # walk builds this changeset). Same idiom as `Samen.Policy.SameOrgFk`. The checks still run
+            # before the row is written, inside the action's transaction.
             change(fn changeset, ctx ->
-              subscriber_id = Ash.Changeset.get_argument(changeset, :subscriber_id)
-              org_id = Ash.Changeset.get_argument(changeset, :org_id)
-              repo = unquote(repo)
-              subscriber_mod = unquote(subscriber_mod)
-              suppression_mod = unquote(suppression_mod)
               actor = Map.get(ctx, :actor)
+              Ash.Changeset.before_action(changeset, &check_send(&1, actor))
+            end)
+          end
+        end
 
-              # F3.2 same-org FK: BEFORE the suppression query, confirm the
-              # referenced subscriber belongs to THIS send's org. Otherwise an
-              # org-A actor could enqueue a send to an org-B subscriber and bypass
-              # org B's suppression list (the send's suppression query only sees
-              # org A's suppression rows). We read only the subscriber's org_id
-              # (bounded UUID, no PII) directly from its table — NOT via Ash.read,
-              # so OrgScope does not hide the foreign target from this check. Column
-              # names come from resource introspection (not string-sliced).
-              sub_table = AshPostgres.DataLayer.Info.table(subscriber_mod)
-              sub_id_col = to_string(Ash.Resource.Info.attribute(subscriber_mod, :id).source)
-              sub_org_col = to_string(Ash.Resource.Info.attribute(subscriber_mod, :org_id).source)
+        defp check_send(changeset, actor) do
+          subscriber_id = Ash.Changeset.get_argument(changeset, :subscriber_id)
+          org_id = Ash.Changeset.get_argument(changeset, :org_id)
+          repo = unquote(repo)
+          subscriber_mod = unquote(subscriber_mod)
+          suppression_mod = unquote(suppression_mod)
 
-              subscriber_org_id =
-                case repo.query(
-                       "SELECT #{sub_org_col} FROM #{sub_table} WHERE #{sub_id_col} = $1 LIMIT 1",
-                       [Ecto.UUID.dump!(subscriber_id)]
-                     ) do
-                  {:ok, %{rows: [[org_bin]]}} when is_binary(org_bin) ->
-                    case Ecto.UUID.load(org_bin) do
-                      {:ok, uuid} -> uuid
-                      :error -> nil
-                    end
+          # F3.2 same-org FK: BEFORE the suppression query, confirm the
+          # referenced subscriber belongs to THIS send's org. Otherwise an
+          # org-A actor could enqueue a send to an org-B subscriber and bypass
+          # org B's suppression list (the send's suppression query only sees
+          # org A's suppression rows). We read only the subscriber's org_id
+          # (bounded UUID, no PII) directly from its table — NOT via Ash.read,
+          # so OrgScope does not hide the foreign target from this check. Column
+          # names come from resource introspection (not string-sliced).
+          sub_table = AshPostgres.DataLayer.Info.table(subscriber_mod)
+          sub_id_col = to_string(Ash.Resource.Info.attribute(subscriber_mod, :id).source)
+          sub_org_col = to_string(Ash.Resource.Info.attribute(subscriber_mod, :org_id).source)
 
-                  _ ->
-                    nil
+          subscriber_org_id =
+            case repo.query(
+                   "SELECT #{sub_org_col} FROM #{sub_table} WHERE #{sub_id_col} = $1 LIMIT 1",
+                   [Ecto.UUID.dump!(subscriber_id)]
+                 ) do
+              {:ok, %{rows: [[org_bin]]}} when is_binary(org_bin) ->
+                case Ecto.UUID.load(org_bin) do
+                  {:ok, uuid} -> uuid
+                  :error -> nil
                 end
 
-              cond do
-                is_nil(subscriber_org_id) ->
-                  Ash.Changeset.add_error(changeset,
-                    field: :subscriber_id,
-                    message: "cross-org FK: subscriber not found for this org (same-org required)"
-                  )
+              _ ->
+                nil
+            end
 
-                subscriber_org_id != org_id ->
-                  Ash.Changeset.add_error(changeset,
-                    field: :subscriber_id,
-                    message:
-                      "cross-org FK: subscriber belongs to a different org — a send may not " <>
-                        "reference another org's subscriber (bypasses their suppression list)"
-                  )
+          cond do
+            is_nil(subscriber_org_id) ->
+              Ash.Changeset.add_error(changeset,
+                field: :subscriber_id,
+                message: "cross-org FK: subscriber not found for this org (same-org required)"
+              )
 
-                true ->
-                  send_checked(changeset, repo, org_id, subscriber_id, suppression_mod, actor)
-              end
-            end)
+            subscriber_org_id != org_id ->
+              Ash.Changeset.add_error(changeset,
+                field: :subscriber_id,
+                message:
+                  "cross-org FK: subscriber belongs to a different org — a send may not " <>
+                    "reference another org's subscriber (bypasses their suppression list)"
+              )
+
+            true ->
+              send_checked(changeset, repo, org_id, subscriber_id, suppression_mod, actor)
           end
         end
 

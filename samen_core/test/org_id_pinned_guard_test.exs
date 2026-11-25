@@ -45,6 +45,81 @@ defmodule Samen.OrgIdPinnedGuardCoreTest do
     end
   end
 
+  # A resource whose build-time change does what `Demo.MarketingScope.Send` used to: touch the database
+  # while the changeset is BUILT. `mode` picks how it fails: raise, exit (a shared owner that died), or
+  # query and map the `{:error, _}` to a validation error (the swallow that hid the CI flake).
+  for mode <- [:raise, :exit, :query_swallowed] do
+    mod = Module.concat(__MODULE__, "Builds#{Macro.camelize(Atom.to_string(mode))}")
+
+    defmodule mod do
+      use Ash.Resource, domain: Samen.OrgIdPinnedGuardCoreTest.BuildsDom, data_layer: Ash.DataLayer.Ets
+
+      attributes do
+        uuid_primary_key(:id)
+        attribute(:org_id, :uuid, public?: true, writable?: true)
+      end
+
+      changes do
+        change({Samen.Policy.OrgIdPinned, []}, on: [:create, :update])
+
+        change(
+          fn changeset, _ctx ->
+            case unquote(mode) do
+              :raise ->
+                raise "boom"
+
+              :exit ->
+                exit({:noproc, {DBConnection.Holder, :checkout, []}})
+
+              :query_swallowed ->
+                case SamenCore.TestRepo.query("SELECT 1") do
+                  {:ok, _} -> changeset
+                  {:error, _} -> Ash.Changeset.add_error(changeset, field: :id, message: "not found")
+                end
+            end
+          end,
+          on: [:create]
+        )
+      end
+
+      actions do
+        defaults([:read, create: :*, update: :*])
+      end
+    end
+  end
+
+  defmodule BuildsDom do
+    use Ash.Domain, validate_config_inclusion?: false
+
+    resources do
+      resource(Samen.OrgIdPinnedGuardCoreTest.BuildsRaise)
+      resource(Samen.OrgIdPinnedGuardCoreTest.BuildsExit)
+      resource(Samen.OrgIdPinnedGuardCoreTest.BuildsQuerySwallowed)
+    end
+  end
+
+  test "a resource whose build raises, exits or queries is UNEXERCISABLE by name, never exercised" do
+    report = Samen.OrgIdPinnedGuard.walk([BuildsDom], %{}, repos: [SamenCore.TestRepo])
+
+    assert Enum.sort(for {r, a, _why} <- report.unexercisable, do: {r, a}) ==
+             Enum.sort([
+               {Samen.OrgIdPinnedGuardCoreTest.BuildsRaise, :create},
+               {Samen.OrgIdPinnedGuardCoreTest.BuildsExit, :create},
+               {Samen.OrgIdPinnedGuardCoreTest.BuildsQuerySwallowed, :create}
+             ])
+
+    why = Map.new(report.unexercisable, fn {r, _a, why} -> {r, why} end)
+    assert why[Samen.OrgIdPinnedGuardCoreTest.BuildsQuerySwallowed] =~ "queried the database"
+    assert why[Samen.OrgIdPinnedGuardCoreTest.BuildsExit] =~ "exit"
+    # the update actions of the same resources do not touch the database and are exercised
+    assert report.actions == 3
+  end
+
+  test "watching a repo does not flag a database-free resource (positive control)" do
+    report = Samen.OrgIdPinnedGuard.walk([Dom], %{}, repos: [SamenCore.TestRepo])
+    assert report.unexercisable == []
+  end
+
   test "an unpinned resource is a violation on update and create; the pinned one is not" do
     report = Samen.OrgIdPinnedGuard.walk([Dom])
 
