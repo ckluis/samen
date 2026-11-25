@@ -29,6 +29,22 @@ All notable changes to Samen are recorded here. The format follows
   `status:` through `File :create`/`:update` must use `Samen.Files.promote/3`; to archive or restore a file use the
   archive and restore actions, not `archived_at`. Sabotages 1371 and 1372.
 
+- **Fixed: notifications were readable and writable across recipients.** `Notification` and `NotificationPreference` were
+  `OrgScope` only, so a viewer could create, update or destroy any recipient's notification, any member could read every
+  notification of the organisation, and any member could write another user's `NotificationPreference` and switch their alerts
+  off. New check `Samen.Policy.RecipientOnly`. Now: a user reads and marks read only their own notifications (and, for a
+  member or above, the rows the engine addresses to the organisation, `recipient_id == org_id`); the operator plane still reads
+  the org's rows, masked; no actor creates a notification (`Samen.Notifications.Engine` creates them with `authorize?: false`);
+  only the recipient or an org admin destroys one; nobody edits another recipient's notification, and an update takes only
+  `read_at` and `status`. A user creates, updates and destroys only their own `NotificationPreference` (an admin included
+  gets no exception: no screen needs one), and its `recipient_id` is not editable. In `samen_web` the inbox and the settings
+  panel act as the signed-in user (`Samen.Web.Settings.Reads.user_scope/3`), and the preferences panel takes the recipient
+  from the session user, then the `:recipient_id` mount label; the `?recipient=` parameter is honoured only in the disarmed dev
+  posture, like `?org=` and `?user=`. **Upgrade notes:** a host that created notifications or preferences with an actor must
+  use the engine or `authorize?: false`; a host that showed the whole org's notifications to every member now shows each
+  member their own plus the org-addressed ones; a host wiring the preferences panel by `?recipient=` must wire the
+  `:recipient_id` label or a session user. Sabotages 1373 to 1376.
+
 ### Security: identity authorization, round 3
 
 - **Fixed: an admin could demote, suspend or re-role an owner or a peer admin.** `Samen.Policy.ManageRole` judged only the

@@ -17,11 +17,13 @@ defmodule Samen.Web.NotificationsInboxTest do
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.Notifications.Engine
-  alias Samen.Web.Mount
   alias Samen.Web.Notifications.InboxLive
   alias Samen.Web.Notifications.Reads
 
   @body "INBOX-BODY-SENTINEL your invoice #INV-7 is ready."
+  # The signed-in user: the inbox is the RECIPIENT'S own (policy: `recipient_id == actor.id`).
+  @user "5e1f0000-0000-4000-8000-000000000001"
+  @other_user "5e1f0000-0000-4000-8000-000000000002"
 
   # -- harness -------------------------------------------------------------------
 
@@ -38,7 +40,7 @@ defmodule Samen.Web.NotificationsInboxTest do
       Map.merge(
         %{
           org_id: org_id,
-          recipient_id: Ash.UUID.generate(),
+          recipient_id: @user,
           event_type: "invoice.created",
           channel: :in_app,
           rendered_body: @body
@@ -55,6 +57,7 @@ defmodule Samen.Web.NotificationsInboxTest do
     |> Phoenix.Component.assign(:samen_mount, build_mount(:notifications, plane_opts))
     |> Phoenix.Component.assign(:samen_acting_as, false)
     |> Phoenix.Component.assign(:return_to, nil)
+    |> Phoenix.Component.assign(:user_id, @user)
     |> InboxLive.load(org_id)
   end
 
@@ -105,7 +108,7 @@ defmodule Samen.Web.NotificationsInboxTest do
     for _ <- 1..5, do: notify!(org_id)
 
     mount = build_mount(:notifications)
-    scope = Mount.scope(mount, org_id)
+    scope = Samen.Web.Settings.Reads.user_scope(mount, org_id, @user)
 
     # 5 rows > probe page size 2 — the lint would RAISE on an unbounded read.
     assert :ok = Samen.Web.Reads.bounded!(&Reads.notifications_page/3, mount, scope, page_size: 2)
@@ -160,6 +163,44 @@ defmodule Samen.Web.NotificationsInboxTest do
     raw = Ash.get!(Samen.WebTest.Primitives.Notification, foreign.id, authorize?: false)
     assert raw.read_at == nil
     assert socket.assigns.unread_count == 0
+  end
+
+  test "RED: the inbox shows, counts and marks only the signed-in user's own notifications" do
+    org_id = Ash.UUID.generate()
+    mine = notify!(org_id, %{rendered_body: "MINE-SENTINEL"})
+    theirs = notify!(org_id, %{recipient_id: @other_user, rendered_body: "THEIRS-SENTINEL"})
+
+    socket = mount_socket(org_id)
+    rendered = html(socket)
+
+    assert rendered =~ "MINE-SENTINEL"
+    refute rendered =~ "THEIRS-SENTINEL"
+    assert socket.assigns.unread_count == 1
+
+    # marking the other user's notification, one by one or all at once, leaves it unread
+    socket = event(socket, "mark_read", %{"id" => theirs.id})
+    socket = event(socket, "mark_all_read", %{})
+
+    assert Ash.get!(Samen.WebTest.Primitives.Notification, theirs.id, authorize?: false).read_at == nil
+    # positive control: the same calls DID mark the user's own
+    assert %DateTime{} = Ash.get!(Samen.WebTest.Primitives.Notification, mine.id, authorize?: false).read_at
+    assert socket.assigns.unread_count == 0
+  end
+
+  test "RED: a session with no resolved user (the org broker) sees the org-addressed rows, not any user's" do
+    org_id = Ash.UUID.generate()
+    notify!(org_id, %{recipient_id: @other_user, rendered_body: "USER-ADDRESSED-SENTINEL"})
+    notify!(org_id, %{recipient_id: org_id, rendered_body: "ORG-ADDRESSED-SENTINEL"})
+
+    socket =
+      %Phoenix.LiveView.Socket{}
+      |> Phoenix.Component.assign(:samen_mount, build_mount(:notifications, []))
+      |> Phoenix.Component.assign(:samen_acting_as, false)
+      |> Phoenix.Component.assign(:return_to, nil)
+      |> InboxLive.load(org_id)
+
+    refute html(socket) =~ "USER-ADDRESSED-SENTINEL"
+    assert html(socket) =~ "ORG-ADDRESSED-SENTINEL"
   end
 
   # ---------------------------------------------------------------------------

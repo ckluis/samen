@@ -144,7 +144,20 @@ defmodule Samen.Scopes.Primitives.Blueprint do
         end
 
         actions do
-          defaults([:read, :destroy, create: :*, update: :*])
+          defaults([:read, :destroy])
+
+          create :create do
+            primary?(true)
+            accept(:*)
+          end
+
+          # A recipient's own marker, nothing else: the recipient, channel, event and body of a
+          # delivered notification are not editable by an actor.
+          update :update do
+            primary?(true)
+            require_atomic?(false)
+            accept([:read_at, :status])
+          end
 
           action :reveal_notification, :map do
             argument(:actor_id, :string, allow_nil?: false)
@@ -169,8 +182,35 @@ defmodule Samen.Scopes.Primitives.Blueprint do
         end
 
         policies do
-          policy action_type([:read, :create, :update, :destroy]) do
+          # Two stacked axes (org, then recipient) on every read; the operator plane reads the org's
+          # rows masked.
+          policy action_type(:read) do
             authorize_if(Samen.Policy.OrgScope)
+          end
+
+          policy action_type(:read) do
+            authorize_if({Samen.Policy.RecipientOnly, operator_reads: true, org_addressed: true})
+          end
+
+          # Creating a notification is the notification engine's own write (`Samen.Notifications.Engine`
+          # runs it with `authorize?: false`); no actor creates one, so none can address another user.
+          policy action(:create) do
+            forbid_if(always())
+          end
+
+          # A recipient marks their own notification read (the org's own, for a row addressed to the org); nobody
+          # edits another recipient's.
+          policy action(:update) do
+            forbid_unless(Samen.Policy.OrgScope)
+            forbid_unless({Samen.Policy.RecipientOnly, org_addressed: true})
+            authorize_if(always())
+          end
+
+          # A recipient removes their own; an org admin may remove any of the org's.
+          policy action(:destroy) do
+            forbid_unless(Samen.Policy.OrgScope)
+            authorize_if({Samen.Policy.RoleAtLeast, role: :admin})
+            authorize_if({Samen.Policy.RecipientOnly, org_addressed: true})
           end
 
           policy action(:reveal_notification) do
@@ -285,7 +325,25 @@ defmodule Samen.Scopes.Primitives.Blueprint do
         end
 
         actions do
-          defaults([:read, :destroy, create: :*, update: :*])
+          defaults([:read, :destroy, create: :*])
+
+          # `recipient_id` is not editable: an update that repointed a row at another user would write
+          # that user's alert settings (the create/update policies check the PRE-image's recipient).
+          update :update do
+            primary?(true)
+            require_atomic?(false)
+
+            accept([
+              :org_id,
+              :event_type,
+              :in_app_enabled,
+              :email_enabled,
+              :quiet_hours,
+              :digest_cadence,
+              :digest_timezone,
+              :digest_last_sent_at
+            ])
+          end
         end
 
         policies do
@@ -293,9 +351,16 @@ defmodule Samen.Scopes.Primitives.Blueprint do
             authorize_if(Samen.Policy.OrgScope)
           end
 
-          # A recipient manages their own preferences (member+); org-scoped.
+          policy action_type(:read) do
+            authorize_if({Samen.Policy.RecipientOnly, operator_reads: true})
+          end
+
+          # A recipient manages ONLY their own preferences (member+); org-scoped. Nobody, an admin
+          # included, writes another user's: the notification engine and the digest read and advance
+          # the rows with `authorize?: false`.
           policy action_type([:create, :update, :destroy]) do
             forbid_unless(Samen.Policy.OrgScope)
+            forbid_unless(Samen.Policy.RecipientOnly)
             forbid_unless({Samen.Policy.RoleAtLeast, role: :member})
             authorize_if(always())
           end

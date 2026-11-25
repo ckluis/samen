@@ -62,7 +62,9 @@ defmodule Samen.Web.Notifications.PreferencesLive do
   def mount(params, session, socket) do
     socket = assign_mount(socket, session)
     org_id = CurrentOrg.resolve(socket.assigns[:samen_mount], params, session)
-    {:ok, load(assign(socket, org_id: org_id), org_id, recipient_id(socket, params))}
+    user_id = Samen.Web.Settings.Reads.current_user_id(socket.assigns[:samen_mount], params, session)
+    socket = assign(socket, org_id: org_id, user_id: user_id)
+    {:ok, load(socket, org_id, recipient_id(socket, params))}
   end
 
   @impl true
@@ -77,13 +79,23 @@ defmodule Samen.Web.Notifications.PreferencesLive do
      )}
   end
 
-  # The recipient seam: an explicit ?recipient= param wins; else the host-wired
-  # mount label; else nil (the honest "no recipient wired" card).
+  # The recipient seam: the user the session resolved (`Settings.Reads.current_user_id/3`, stored as
+  # `:user_id` by `mount/3`), else the host-wired mount label, else nil (the honest "no recipient wired"
+  # card). An explicit ?recipient= param is honoured ONLY in the disarmed dev posture (the gate `?org=`
+  # and `?user=` use): it names whose settings to edit, and a user edits only their own.
   defp recipient_id(socket, params) do
-    Map.get(params, "recipient") ||
-      Mount.label(socket.assigns.samen_mount, :recipient_id, nil) ||
+    mount = socket.assigns.samen_mount
+
+    dev_param =
+      if Samen.Web.CurrentOrg.param_trust_disarmed?(mount), do: Map.get(params, "recipient")
+
+    dev_param || socket.assigns[:user_id] || Mount.label(mount, :recipient_id, nil) ||
       socket.assigns[:recipient_id]
   end
+
+  # Preferences are the recipient's OWN (policy: `recipient_id == actor.id`): the scope acts as them.
+  defp recipient_scope(mount, org_id, recipient_id),
+    do: Samen.Web.Settings.Reads.user_scope(mount, org_id, recipient_id)
 
   @doc false
   def load(socket, nil, _recipient_id) do
@@ -100,7 +112,7 @@ defmodule Samen.Web.Notifications.PreferencesLive do
 
   def load(socket, org_id, recipient_id) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
+    scope = recipient_scope(mount, org_id, recipient_id)
     # A FAILED read must not render the engine defaults as if they were this recipient's saved
     # settings (a toggle on that grid would then write over the real row): it is the error state.
     {rows, load_error} =
@@ -128,7 +140,7 @@ defmodule Samen.Web.Notifications.PreferencesLive do
     with true <- writable?(mount) and org_id != nil and recipient_id != nil,
          {:ok, event_type, changes} <- toggle_changes(field, get_in(params, ["prefs", field])) do
       saved =
-        Reads.set_preference(mount, Mount.scope(mount, org_id), %{
+        Reads.set_preference(mount, recipient_scope(mount, org_id, recipient_id), %{
           org_id: org_id,
           recipient_id: recipient_id,
           event_type: event_type,

@@ -23,6 +23,8 @@ defmodule Samen.Web.NotificationsMaskingTest do
   alias Samen.Notifications.Engine
   alias Samen.Web.Notifications.InboxLive
 
+  # The inbox is the recipient's own: tenant sessions act as this user.
+  @recipient "5e1f0000-0000-4000-8000-0000000000aa"
   @body "MC3-BODY-SENTINEL please review the attached contact record."
 
   setup do
@@ -32,7 +34,7 @@ defmodule Samen.Web.NotificationsMaskingTest do
       Engine.notify(
         %{
           org_id: seeded.org_id,
-          recipient_id: Ash.UUID.generate(),
+          recipient_id: @recipient,
           event_type: "crm.person.flagged",
           channel: :in_app,
           rendered_body: @body,
@@ -53,6 +55,7 @@ defmodule Samen.Web.NotificationsMaskingTest do
     |> Phoenix.Component.assign(:samen_mount, mount)
     |> Phoenix.Component.assign(:samen_acting_as, false)
     |> Phoenix.Component.assign(:return_to, nil)
+    |> Phoenix.Component.assign(:user_id, @recipient)
     |> InboxLive.load(org_id)
     |> then(&render_html(InboxLive, &1.assigns))
   end
@@ -154,7 +157,7 @@ defmodule Samen.Web.NotificationsMaskingTest do
       Engine.notify(
         %{
           org_id: org_id,
-          recipient_id: Ash.UUID.generate(),
+          recipient_id: @recipient,
           event_type: "crm.person.flagged",
           channel: :in_app,
           rendered_body: "cross-org ref below",
@@ -177,7 +180,7 @@ defmodule Samen.Web.NotificationsMaskingTest do
       Engine.notify(
         %{
           org_id: org_id,
-          recipient_id: Ash.UUID.generate(),
+          recipient_id: @recipient,
           event_type: "system.plain",
           channel: :in_app,
           rendered_body: "no ref here"

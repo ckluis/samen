@@ -1,0 +1,20 @@
+# SABOTAGE: Notification reads lose the recipient axis, so every member reads every notification of the org
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/primitives_notification_recipient_scope_test.exs
+# MUST_FAIL: a member reads only their own notifications
+diff --git a/samen_core/lib/samen/scopes/primitives/blueprint.ex b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+index ee5712d6..bf14a369 100644
+--- a/samen_core/lib/samen/scopes/primitives/blueprint.ex
++++ b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+@@ -188,9 +188,6 @@ defmodule Samen.Scopes.Primitives.Blueprint do
+             authorize_if(Samen.Policy.OrgScope)
+           end
+ 
+-          policy action_type(:read) do
+-            authorize_if({Samen.Policy.RecipientOnly, operator_reads: true, org_addressed: true})
+-          end
+ 
+           # Creating a notification is the notification engine's own write (`Samen.Notifications.Engine`
+           # runs it with `authorize?: false`); no actor creates one, so none can address another user.

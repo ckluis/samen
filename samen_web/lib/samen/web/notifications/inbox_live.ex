@@ -75,13 +75,18 @@ defmodule Samen.Web.Notifications.InboxLive do
       NotificationsPubSub.subscribe_org(socket.assigns.samen_mount, org_id)
     end
 
-    {:ok, load(assign(socket, org_id: org_id), org_id)}
+    user_id =
+      Samen.Web.Settings.Reads.current_user_id(socket.assigns[:samen_mount], params, session) ||
+        Mount.label(socket.assigns[:samen_mount], :recipient_id, nil)
+
+    {:ok, load(assign(socket, org_id: org_id, user_id: user_id), org_id)}
   end
 
   @impl true
   def handle_params(params, uri, socket) do
     org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
-    {:noreply, load(assign(socket, org_id: org_id, return_to: return_path(uri)), org_id)}
+    user_id = Samen.Web.Settings.Reads.reresolve_user(socket, params)
+    {:noreply, load(assign(socket, org_id: org_id, user_id: user_id, return_to: return_path(uri)), org_id)}
   end
 
   @doc false
@@ -94,7 +99,7 @@ defmodule Samen.Web.Notifications.InboxLive do
 
   def load(socket, org_id) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
+    scope = recipient_scope(socket, org_id)
 
     socket
     |> default_return_to()
@@ -109,7 +114,7 @@ defmodule Samen.Web.Notifications.InboxLive do
   def handle_event("mark_read", %{"id" => id}, socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
 
-    case Reads.mark_read(mount, Mount.scope(mount, org_id), id) do
+    case Reads.mark_read(mount, recipient_scope(socket, org_id), id) do
       :ok -> {:noreply, refresh(socket)}
       # A missing / cross-org id is a no-op (OrgScope; no existence oracle) — not a failure.
       {:error, :not_found} -> {:noreply, refresh(socket)}
@@ -120,7 +125,7 @@ defmodule Samen.Web.Notifications.InboxLive do
   def handle_event("mark_all_read", _params, socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
 
-    case Reads.mark_all_read(mount, Mount.scope(mount, org_id)) do
+    case Reads.mark_all_read(mount, recipient_scope(socket, org_id)) do
       :ok -> {:noreply, refresh(socket)}
       {:error, _} -> {:noreply, socket |> write_failed("Couldn't mark all notifications read.") |> refresh()}
     end
@@ -139,7 +144,7 @@ defmodule Samen.Web.Notifications.InboxLive do
   def handle_info({:notification_created, %{id: id}}, socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
 
-    case org_id && Reads.get_notification_result(mount, Mount.scope(mount, org_id), id) do
+    case org_id && Reads.get_notification_result(mount, recipient_scope(socket, org_id), id) do
       {:ok, _notification} -> {:noreply, refresh(socket)}
       # The broadcast arrived but its re-read FAILED: re-run the list read, which then shows its
       # own error state if the outage persists (never silently stays stale).
@@ -154,13 +159,20 @@ defmodule Samen.Web.Notifications.InboxLive do
   # load/2, which would reset the list state) and re-count the badge.
   defp refresh(socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    scope = recipient_scope(socket, org_id)
     state = socket.assigns.list_state
     page = Reads.notifications_page(mount, scope, state)
 
     socket
     |> assign(page: %{page | prev_cursor: List.first(state.cursor_stack)})
     |> assign_unread(Reads.unread_count_result(mount, scope))
+  end
+
+  # The inbox is the signed-in user's OWN: the tenant plane's synthetic org broker names no user, so the
+  # scope carries the user the session resolved (`Notification` reads and writes are recipient-scoped by
+  # policy). With no user the actor stays the broker and the inbox is empty, never the org's.
+  defp recipient_scope(socket, org_id) do
+    Samen.Web.Settings.Reads.user_scope(socket.assigns.samen_mount, org_id, socket.assigns[:user_id])
   end
 
   # A failed count is NOT "0 unread": the badge goes unlit and the header says it is unavailable.
