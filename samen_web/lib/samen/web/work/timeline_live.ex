@@ -47,8 +47,10 @@ defmodule Samen.Web.Work.TimelineLive do
 
   alias Samen.Web.Board
   alias Samen.Web.CurrentOrg
-  alias Samen.Web.Mount
   alias Samen.Web.Work.Reads
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   # The default window length in days (a 4-week lens). prev/next shift by this.
   @window_days 28
@@ -85,12 +87,35 @@ defmodule Samen.Web.Work.TimelineLive do
       total_tasks: 0,
       load_error: nil
     )
+    |> assign(acting_scope: nil, actor_state: :ok)
     |> assign_window(nil)
   end
 
+  # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read.
   def load(socket, org_id, from) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, from, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id, from)
+    end
+  end
+
+  defp load_refused(socket, org_id, from) do
+    socket
+    |> ensure_return_to()
+    |> assign(
+      no_org: false,
+      org_id: org_id,
+      from: from || socket.assigns[:from] || default_from(),
+      board: %Board{groups: [], group_field: :status},
+      total_tasks: 0,
+      load_error: nil
+    )
+    |> assign_window(org_id)
+  end
+
+  defp load_for(socket, org_id, from, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
     from = from || socket.assigns[:from] || default_from()
     range = window_range(from)
 
@@ -174,6 +199,8 @@ defmodule Samen.Web.Work.TimelineLive do
   end
 
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
 
   @impl true
@@ -189,9 +216,12 @@ defmodule Samen.Web.Work.TimelineLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Timeline" nothing="there is no timeline to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">Work org: {@org_id}</span>
 
           <div class="metrics">

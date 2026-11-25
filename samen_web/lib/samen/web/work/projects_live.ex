@@ -14,6 +14,9 @@ defmodule Samen.Web.Work.ProjectsLive do
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Reads.Guard
   alias Samen.Web.Mount
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   alias Samen.Web.Work.Reads
 
@@ -40,12 +43,28 @@ defmodule Samen.Web.Work.ProjectsLive do
       show_new: false,
       new_form: nil
     )
+    |> assign(acting_scope: nil, actor_state: :ok)
     |> assign_new(:delete_error, fn -> nil end)
   end
 
+  # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read, nothing
+  # can be written, and the page is re-resolved on every `handle_params`.
   def load(socket, org_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id)
+    end
+  end
+
+  defp load_refused(socket, org_id) do
+    socket
+    |> assign(no_org: false, org_id: org_id, projects: [], load_error: nil, show_new: false, new_form: nil)
+    |> assign_new(:delete_error, fn -> nil end)
+  end
+
+  defp load_for(socket, org_id, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
 
     socket
     |> assign_projects(Reads.projects_result(mount, scope))
@@ -63,11 +82,13 @@ defmodule Samen.Web.Work.ProjectsLive do
     do: assign(socket, projects: [], load_error: Samen.Web.Reads.Guard.message())
 
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
 
   def handle_event("new_project", _params, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
-    {:noreply, assign(socket, show_new: true, new_form: new_project_form(mount, Mount.scope(mount, org_id)))}
+    %{samen_mount: mount, acting_scope: scope} = socket.assigns
+    {:noreply, assign(socket, show_new: true, new_form: new_project_form(mount, scope))}
   end
 
   def handle_event("cancel_new", _params, socket) do
@@ -90,9 +111,9 @@ defmodule Samen.Web.Work.ProjectsLive do
   end
 
   def handle_event("delete", %{"id" => id}, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    %{samen_mount: mount, org_id: org_id, acting_scope: scope} = socket.assigns
 
-    case Reads.delete_project(mount, Mount.scope(mount, org_id), id) do
+    case Reads.delete_project(mount, scope, id) do
       :ok -> {:noreply, load(assign(socket, delete_error: nil), org_id)}
       {:error, _reason} -> {:noreply, assign(socket, delete_error: "Could not archive this project.")}
     end
@@ -123,9 +144,12 @@ defmodule Samen.Web.Work.ProjectsLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Projects" nothing="there are no projects to show" />
+        <% true -> %>
           <div :if={@delete_error} class="wrap" style="margin-bottom:0">
             <div class="card form-error" id="delete-error" style="padding:10px 14px;color:var(--bad,#b91c1c);font-size:12px">
               {@delete_error}

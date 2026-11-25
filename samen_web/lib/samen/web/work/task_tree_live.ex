@@ -39,9 +39,11 @@ defmodule Samen.Web.Work.TaskTreeLive do
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
-  alias Samen.Web.Mount
   alias Samen.Web.Tree
   alias Samen.Web.Work.Reads
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @impl true
   def mount(params, session, socket) do
@@ -72,12 +74,35 @@ defmodule Samen.Web.Work.TaskTreeLive do
       total_nodes: 0,
       load_error: nil
     )
+    |> assign(acting_scope: nil, actor_state: :ok)
     |> assign_nav(nil)
   end
 
+  # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read.
   def load(socket, org_id, focus) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, focus, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id, focus)
+    end
+  end
+
+  defp load_refused(socket, org_id, focus) do
+    socket
+    |> ensure_return_to()
+    |> assign(
+      no_org: false,
+      org_id: org_id,
+      focus: focus || socket.assigns[:focus],
+      tree: %Tree{roots: [], parent_field: :parent_id},
+      total_nodes: 0,
+      load_error: nil
+    )
+    |> assign_nav(org_id)
+  end
+
+  defp load_for(socket, org_id, focus, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
     focus = focus || socket.assigns[:focus]
 
     # A failed walk is the kit error state (retry), never "No tasks".
@@ -127,6 +152,8 @@ defmodule Samen.Web.Work.TaskTreeLive do
   defp parse_focus(_), do: nil
 
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("retry_load", _params, socket),
     do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.focus)}
 
@@ -143,9 +170,12 @@ defmodule Samen.Web.Work.TaskTreeLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Task tree" nothing="there is no task tree to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">Work org: {@org_id}</span>
 
           <div class="metrics">

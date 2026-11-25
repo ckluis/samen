@@ -66,16 +66,11 @@ defmodule Samen.Web.TenantActorGuardTest do
     "samen/web/support/tickets_live.ex" => 3,
     "samen/web/tenant/analytics_live.ex" => 1,
     "samen/web/tenant_role.ex" => 1,
-    "samen/web/work/projects_live.ex" => 3,
-    "samen/web/work/task_live.ex" => 2,
-    "samen/web/work/task_tree_live.ex" => 1,
-    "samen/web/work/tasks_live.ex" => 3,
-    "samen/web/work/timeline_live.ex" => 1,
   }
 
   # The exact size of the work list: a silent bump of an entry (or a new entry) fails here, not only in the ratchet.
-  @baseline_total 78
-  @baseline_files 45
+  @baseline_total 68
+  @baseline_files 40
 
   @exempt ~w(samen/web/mount.ex samen/web/tenant_actor.ex samen/web/tenant_actor/guard.ex)
 
@@ -153,6 +148,9 @@ defmodule Samen.Web.TenantActorGuardTest do
     refute Map.has_key?(now, "samen/web/crm/companies_live.ex")
     for page <- ~w(calendar_live company_live contacts_gallery_live dashboard_live mailbox_live pipeline_live sequences_live),
         do: refute(Map.has_key?(now, "samen/web/crm/#{page}.ex"))
+
+    for page <- ~w(projects_live task_live task_tree_live tasks_live timeline_live),
+        do: refute(Map.has_key?(now, "samen/web/work/#{page}.ex"))
 
     refute Map.has_key?(now, "samen/web/csv/export_controller.ex")
     refute Map.has_key?(now, "samen/web/files/bytes_controller.ex")

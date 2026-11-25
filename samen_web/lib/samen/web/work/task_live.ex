@@ -19,9 +19,10 @@ defmodule Samen.Web.Work.TaskLive do
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
-  alias Samen.Web.Mount
-
   alias Samen.Web.Work.Reads
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @impl true
   def mount(params, session, socket) do
@@ -48,11 +49,33 @@ defmodule Samen.Web.Work.TaskLive do
       load_error: nil,
       subtasks_failed: false
     )
+    |> assign(acting_scope: nil, actor_state: :ok)
   end
 
+  # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read, nothing
+  # can be written, and the page is re-resolved on every `handle_params`.
   def load(socket, org_id, task_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, task_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id)
+    end
+  end
+
+  defp load_refused(socket, org_id) do
+    assign(socket,
+      no_org: false,
+      org_id: org_id,
+      task: nil,
+      subtasks: [],
+      load_error: nil,
+      subtasks_failed: false,
+      status_error: nil
+    )
+  end
+
+  defp load_for(socket, task_id, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
 
     # A FAILED read is the error state (retry), never "Task not found."; the subtasks read
     # fails on its own and blanks only its own list.
@@ -85,12 +108,13 @@ defmodule Samen.Web.Work.TaskLive do
   end
 
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("retry_load", _params, socket),
     do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.task_id)}
 
   def handle_event("update_status", %{"status" => status}, socket) do
-    %{samen_mount: mount, org_id: org_id, task_id: task_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{samen_mount: mount, org_id: org_id, task_id: task_id, acting_scope: scope} = socket.assigns
 
     case Reads.update_task_status(mount, scope, task_id, status) do
       {:ok, _task} -> {:noreply, load(socket, org_id, task_id)}
@@ -118,6 +142,8 @@ defmodule Samen.Web.Work.TaskLive do
         <%= cond do %>
           <% @no_org -> %>
             <.no_org_card mount={@samen_mount} />
+          <% @actor_state in [:denied, :unavailable] -> %>
+            <.actor_refused state={@actor_state} title="Task" nothing="there is no task to show" />
           <% is_nil(@task) and @load_error != nil -> %>
             <div class="wrap">
               <.error_state class="task-error" body={@load_error} retry_event="retry_load" />
