@@ -227,6 +227,19 @@ defmodule Samen.Web.FilesCsvRouterTest do
       assert get_resp_header(conn, "content-disposition") |> Enum.join() =~ "inline"
     end
 
+    test "the sandboxed response cannot be framed either: its CSP carries frame-ancestors 'none'; an inline type keeps the base CSP", ctx do
+      html = active_file!(ctx.org_id, ctx.root, filename: "x.html", content_type: "text/html", binary: "<b>x</b>")
+      png = active_file!(ctx.org_id, ctx.root, filename: "a.png", content_type: "image/png", binary: "PNG")
+      member = log_in(ctx.member)
+
+      csp = bytes(member, html, ctx.org_id) |> get_resp_header("content-security-policy") |> Enum.join()
+      assert csp =~ "sandbox"
+      assert csp =~ "frame-ancestors 'none'"
+
+      inline = bytes(member, png, ctx.org_id) |> get_resp_header("content-security-policy") |> Enum.join()
+      refute inline =~ "sandbox"
+    end
+
     test "the download name is a plain token: no path, quote or header-breaking byte survives", ctx do
       file = active_file!(ctx.org_id, ctx.root, filename: ~s(../../etc/pa"ss wd.txt))
       conn = bytes(log_in(ctx.member), file, ctx.org_id)

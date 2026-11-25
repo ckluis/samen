@@ -173,6 +173,9 @@ defmodule Samen.Web.Files.BytesController do
   # renders without running script (`@inline_types`) are shown inline; everything else (an HTML upload, an SVG)
   # is an attachment under a `sandbox` CSP, so it can neither run as a page on this origin nor be framed.
   # (The sandbox CSP is not put on the inline types: it would stop a browser's PDF viewer.)
+  # `frame-ancestors` is not covered by `default-src` and this header REPLACES the base CSP, so it is named here: the
+  # sandboxed response is neither a page on this origin nor frameable by any page.
+  @sandbox_csp "default-src 'none'; sandbox; frame-ancestors 'none'"
   @inline_types ~w(image/png image/jpeg image/gif image/webp application/pdf text/plain)
 
   defp put_disposition(conn, content_type, file) do
@@ -184,7 +187,7 @@ defmodule Samen.Web.Files.BytesController do
     else
       conn
       |> put_resp_header("content-disposition", ~s(attachment; filename="#{name}"))
-      |> put_resp_header("content-security-policy", "default-src 'none'; sandbox")
+      |> put_resp_header("content-security-policy", @sandbox_csp)
     end
   end
 
