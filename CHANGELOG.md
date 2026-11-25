@@ -54,6 +54,26 @@ All notable changes to Samen are recorded here. The format follows
   or seeds that tagged a made-up subject (a key no resource answers to, or an id with no row) now get an error; tag a real row
   of the same organisation. Sabotages 1377 and 1378.
 
+- **Fixed: an admin's direct `Analytics.ProductEvent :append` bypassed every gate `Samen.Analytics.track/1` applies** (registered
+  event name, catalogued prop keys, no PII-shaped `entity_ref` or value). `:append` is now the system door only: no actor, an
+  admin included, may run it, and `track/1` (which writes with `authorize?: false`) is the one way a `pae` row is written.
+  **Upgrade note:** code that appended product events with an actor must call `Samen.Analytics.track/1`. Sabotage 1379.
+- **Fixed: `Primitives.SearchIndex` could register a vault-routed field.** The create never ran `SearchIndexGuard` (only the
+  query path did). Create and update now refuse a `resource_name`/`field_name` that names a `pii_attribute` of the resource
+  (or its storage column), and refuse a `resource_name` that is not a loaded Ash resource, on every path including
+  `authorize?: false`: a resource whose PII declarations cannot be read is never registered. **Upgrade note:** a search index
+  row naming a resource module that does not exist is now an error. Sabotages 1380 and 1381.
+- **Fixed: a calendar event could end before it starts.** `Calendar.Event` create and update refuse `ends_at` earlier than
+  `starts_at` (equal instants are allowed; no end is allowed). On an update that changes only one of the two, it is compared
+  against the stored other; a stored value that cannot be read refuses the write. **Upgrade note:** an existing event whose
+  stored end precedes its start can still be edited in other fields, but an edit that touches either instant must leave
+  them ordered. Sabotage 1382.
+- **Fixed: a saved view could store typed filter-box text for a vault-routed field, and its documentation overstated what is
+  refused.** `Samen.Web.SavedViews.Params.serialize/4` now refuses (`{:error, {:vaulted_field, field}}`) a non-empty
+  filter-box text when any of the surface's `filter_fields` is vault-routed, and `restore/2` drops such a stored text. The
+  moduledocs now say exactly what is stored: the filter-box text of a surface whose filter fields are all non-vaulted, and
+  structured predicate values on non-vaulted fields, are stored as typed; no PII detection is attempted on them. Sabotage 1383.
+
 ### Security: identity authorization, round 3
 
 - **Fixed: an admin could demote, suspend or re-role an owner or a peer admin.** `Samen.Policy.ManageRole` judged only the

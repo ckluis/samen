@@ -9,9 +9,12 @@ defmodule Samen.Web.SavedViews.Params do
     * `serialize/4` (SAVE — STRICT): every field reference is validated against the surface
       `Whitelist` and the stored-filter PII gate. A reference to a NON-whitelisted field is
       REFUSED (`{:error, {:field_not_whitelisted, …}}`); a FILTER/SORT/GROUP/DATE reference
-      to a VAULT-ROUTED (🔒) field is REFUSED (`{:error, {:vaulted_field, field}}`) so
-      plaintext PII can never be persisted outside the vault (INV-1). Output is a JSON-safe,
-      string-keyed map.
+      to a VAULT-ROUTED (🔒) field is REFUSED (`{:error, {:vaulted_field, field}}`), and so
+      is a non-empty filter-box text when any of the surface's `filter_fields` is vault-routed, so a
+      value for a vaulted field is never persisted outside the vault (INV-1). The filter-box text of
+      a surface whose filter fields are all non-vaulted IS stored verbatim, as typed: no PII
+      detection is attempted on it, so text a user types into such a box is stored as typed.
+      Output is a JSON-safe, string-keyed map.
 
     * `restore/2` (RESTORE — UNTRUSTED, LENIENT): the stored blob is treated as HOSTILE. Every
       field reference is re-validated against the whitelist and re-checked for vault-routing;
@@ -87,7 +90,8 @@ defmodule Samen.Web.SavedViews.Params do
          {:ok, group_by} <- ser_field(Map.get(view_params, :group_by), :group, wl, vault_refuse: true),
          {:ok, date_field} <- ser_field(Map.get(view_params, :date_field), :date, wl, vault_refuse: true),
          {:ok, columns} <- ser_columns(Map.get(view_params, :columns, []), wl),
-         {:ok, filters} <- ser_filters(Map.get(view_params, :filters, %{}), wl) do
+         {:ok, filters} <- ser_filters(Map.get(view_params, :filters, %{}), wl),
+         :ok <- check_filter_box(state.filter, wl) do
       base =
         %{
           "view_type" => Atom.to_string(view_type),
@@ -122,7 +126,7 @@ defmodule Samen.Web.SavedViews.Params do
 
     state = %ListState{
       sort: restore_sort(Map.get(params, "sort"), wl),
-      filter: filter_string(Map.get(params, "filter")),
+      filter: restore_filter_box(Map.get(params, "filter"), wl),
       page_size: restore_page_size(params, wl),
       show_archived: Map.get(params, "show_archived") == true
     }
@@ -171,6 +175,24 @@ defmodule Samen.Web.SavedViews.Params do
         else
           {:ok, field}
         end
+    end
+  end
+
+  # The filter-box text targets the whitelist's `filter_fields`. Typed text is stored as the user typed it
+  # (no PII detection is attempted), so it is only stored when EVERY field it targets is non-vaulted: text
+  # aimed at a vault-routed field is a plaintext value for that field outside the vault.
+  defp check_filter_box(text, wl) do
+    case {filter_string(text), Enum.find(wl.filter_fields, &(not Whitelist.non_vaulted?(wl, &1)))} do
+      {"", _} -> :ok
+      {_text, nil} -> :ok
+      {_text, vaulted} -> {:error, {:vaulted_field, vaulted}}
+    end
+  end
+
+  defp restore_filter_box(text, wl) do
+    case check_filter_box(text, wl) do
+      :ok -> filter_string(text)
+      {:error, _} -> ""
     end
   end
 

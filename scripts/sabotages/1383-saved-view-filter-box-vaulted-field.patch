@@ -1,0 +1,21 @@
+# SABOTAGE: SavedViews.Params.serialize stores filter-box text even when a filter field of the surface is 
+#   vault-routed
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/saved_views_test.exs
+# MUST_FAIL: filter-box text is refused when the surface's filter fields include a vaulted
+diff --git a/samen_web/lib/samen/web/saved_views/params.ex b/samen_web/lib/samen/web/saved_views/params.ex
+index d3a65e7b..f89f8c97 100644
+--- a/samen_web/lib/samen/web/saved_views/params.ex
++++ b/samen_web/lib/samen/web/saved_views/params.ex
+@@ -90,8 +90,7 @@ defmodule Samen.Web.SavedViews.Params do
+          {:ok, group_by} <- ser_field(Map.get(view_params, :group_by), :group, wl, vault_refuse: true),
+          {:ok, date_field} <- ser_field(Map.get(view_params, :date_field), :date, wl, vault_refuse: true),
+          {:ok, columns} <- ser_columns(Map.get(view_params, :columns, []), wl),
+-         {:ok, filters} <- ser_filters(Map.get(view_params, :filters, %{}), wl),
+-         :ok <- check_filter_box(state.filter, wl) do
++         {:ok, filters} <- ser_filters(Map.get(view_params, :filters, %{}), wl) do
+       base =
+         %{
+           "view_type" => Atom.to_string(view_type),

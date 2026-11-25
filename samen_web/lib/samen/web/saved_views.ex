@@ -32,7 +32,11 @@ defmodule Samen.Web.SavedViews do
   Serialization + the untrusted-restore whitelist live in `Samen.Web.SavedViews.Params`:
 
     * a FILTER/SORT/GROUP/DATE reference to a vault-routed (🔒) field is REFUSED on save
-      (`{:error, {:vaulted_field, field}}`) — plaintext PII never lands in the params blob;
+      (`{:error, {:vaulted_field, field}}`), and so is any non-empty filter-box text when one of the
+      surface's `filter_fields` is vault-routed: a value for a vaulted field never lands in the
+      params blob. What IS stored verbatim: the filter-box text of a surface whose filter fields are
+      all non-vaulted, and the scalar values of structured predicates on non-vaulted fields, exactly
+      as typed. No PII detection is attempted on them, so text a user types into such a box is stored;
     * on restore the stored blob is UNTRUSTED — every field reference is re-validated against
       the surface whitelist (an unseen field, an `org_id` override, an injected raw query are
       dropped/ignored) and org/user scope is re-applied from the actor, never the blob.
