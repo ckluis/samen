@@ -57,8 +57,10 @@ defmodule Samen.Web.CRM.DashboardLive do
   alias Samen.Web.CRM.Reads
   alias Samen.Web.Reads.Guard
   alias Samen.Web.CurrentOrg
-  alias Samen.Web.Mount
   alias Samen.Web.Series
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @empty %{
     value_by_stage: %Series{points: [], measure: {:sum, :value}, dimension: :pipeline_id},
@@ -89,11 +91,20 @@ defmodule Samen.Web.CRM.DashboardLive do
     socket
     |> ensure_return_to()
     |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, dash: @empty)
+    |> assign(acting_scope: nil, actor_state: :ok)
   end
 
+  # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read.
   def load(socket, org_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
+      {:refused, socket} -> socket |> ensure_return_to() |> assign(no_org: false, org_id: org_id, dash: @empty)
+    end
+  end
+
+  defp load_for(socket, org_id, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
     dash = safe_dashboard(mount, scope)
 
     socket
@@ -107,6 +118,8 @@ defmodule Samen.Web.CRM.DashboardLive do
   defp safe_dashboard(mount, scope), do: Reads.crm_dashboard(mount, scope)
 
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("retry_load", _params, socket) do
     {:noreply, load(socket, socket.assigns.org_id)}
   end
@@ -131,9 +144,12 @@ defmodule Samen.Web.CRM.DashboardLive do
         <.topbar title="Dashboard" crumbs={crumbs(@samen_mount, @org_id, "Dashboard")} />
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Dashboard" nothing="there is no dashboard to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">CRM org: {@org_id}</span>
 
           <.error_state

@@ -36,8 +36,10 @@ defmodule Samen.Web.CRM.MailboxLive do
 
   alias Samen.Web.CRM.Reads
   alias Samen.Web.CurrentOrg
-  alias Samen.Web.Mount
   alias Samen.Web.Reads.Guard
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @impl true
   def mount(params, session, socket) do
@@ -65,11 +67,34 @@ defmodule Samen.Web.CRM.MailboxLive do
       scope_mounted: false,
       connect_notice: nil
     )
+    |> assign(acting_scope: nil, actor_state: :ok)
   end
 
+  # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read.
   def load(socket, org_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id)
+    end
+  end
+
+  defp load_refused(socket, org_id) do
+    socket
+    |> ensure_return_to()
+    |> assign(
+      no_org: false,
+      org_id: org_id,
+      connections: [],
+      connections_error: false,
+      provider_configured: Samen.Mailbox.provider_configured?(),
+      scope_mounted: false,
+      connect_notice: nil
+    )
+  end
+
+  defp load_for(socket, org_id, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
 
     # A FAILED read is not "No mailbox connected yet" (WP6) — that state offers "Connect mailbox".
     {connections, connections_error} =
@@ -109,9 +134,12 @@ defmodule Samen.Web.CRM.MailboxLive do
         <.topbar title="Mailbox" crumbs={[CurrentOrg.name(@samen_mount, @org_id), "CRM", "Mailbox"]} />
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Mailbox" nothing="there are no mailboxes to show" />
+        <% true -> %>
           <div class="wrap">
             <%= cond do %>
               <% not @provider_configured -> %>
@@ -178,6 +206,8 @@ defmodule Samen.Web.CRM.MailboxLive do
   # not and must not hold. It says exactly that instead of faking a spinner — the same
   # honesty the unconfigured empty state uses.
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("retry_load", _params, socket) do
     {:noreply, load(socket, socket.assigns.org_id)}
   end

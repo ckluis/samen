@@ -1060,6 +1060,47 @@ defmodule Samen.Crm.SequenceSendTest do
   end
 
   # ---------------------------------------------------------------------------
+  # Authz round 6: enrolling, pausing, resuming and stopping an enrollment are member-or-above writes (they had NO
+  # role rule: a `:viewer` could start a sequence's emails to a contact). Reads stay open to every role.
+  describe "enrollment writes are member-or-above" do
+    test "a VIEWER cannot enroll, pause, resume or stop; a member can, and a viewer still reads" do
+      org = Ash.UUID.generate()
+      admin = tenant_scope(org)
+      viewer = tenant_scope(org, :viewer)
+      member = tenant_scope(org, :member)
+      seq = new_sequence(admin, org, @two_steps)
+
+      attrs = %{org_id: org, sequence_id: seq.id, person_id: Ash.UUID.generate()}
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Enrollment |> Ash.Changeset.for_create(:enroll, attrs, scope: viewer) |> Ash.create()
+
+      assert [] = Ash.read!(Enrollment, authorize?: false) |> Enum.filter(&(&1.org_id == org))
+
+      # positive control: a member enrolls, pauses and resumes
+      {:ok, enrollment} = Enrollment |> Ash.Changeset.for_create(:enroll, attrs, scope: member) |> Ash.create()
+
+      for action <- [:pause, :resume, :stop] do
+        before = reload_enrollment(enrollment.id).status
+
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 reload_enrollment(enrollment.id) |> Ash.Changeset.for_update(action, %{}, scope: viewer) |> Ash.update()
+
+        assert reload_enrollment(enrollment.id).status == before, "a viewer's #{action} changed the enrollment"
+      end
+
+      assert {:ok, _} = reload_enrollment(enrollment.id) |> Ash.Changeset.for_update(:pause, %{}, scope: member) |> Ash.update()
+      assert reload_enrollment(enrollment.id).status == :paused
+      assert {:ok, _} = reload_enrollment(enrollment.id) |> Ash.Changeset.for_update(:resume, %{}, scope: member) |> Ash.update()
+      assert {:ok, _} = reload_enrollment(enrollment.id) |> Ash.Changeset.for_update(:stop, %{}, scope: member) |> Ash.update()
+      assert reload_enrollment(enrollment.id).status == :stopped
+
+      # reads are not role-gated
+      assert [_] = Enrollment |> Ash.read!(scope: viewer)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # LOW-6c (T75 fix round): the SendWorker's `status in [:active, :blocked]`
   # guard, pinned live — the verifier's ATK9 proved this race reachable (a
   # manual pause landing between "queued" and "the worker actually runs").

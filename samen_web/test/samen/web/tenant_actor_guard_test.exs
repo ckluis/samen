@@ -39,13 +39,6 @@ defmodule Samen.Web.TenantActorGuardTest do
     "samen/web/chat.ex" => 1,
     "samen/web/chat/thread_live.ex" => 3,
     "samen/web/chat/threads_live.ex" => 3,
-    "samen/web/crm/calendar_live.ex" => 1,
-    "samen/web/crm/company_live.ex" => 5,
-    "samen/web/crm/contacts_gallery_live.ex" => 1,
-    "samen/web/crm/dashboard_live.ex" => 1,
-    "samen/web/crm/mailbox_live.ex" => 1,
-    "samen/web/crm/pipeline_live.ex" => 2,
-    "samen/web/crm/sequences_live.ex" => 2,
     "samen/web/files/preview_live.ex" => 3,
     "samen/web/files/upload_live.ex" => 2,
     "samen/web/first_run.ex" => 1,
@@ -81,8 +74,8 @@ defmodule Samen.Web.TenantActorGuardTest do
   }
 
   # The exact size of the work list: a silent bump of an entry (or a new entry) fails here, not only in the ratchet.
-  @baseline_total 91
-  @baseline_files 52
+  @baseline_total 78
+  @baseline_files 45
 
   @exempt ~w(samen/web/mount.ex samen/web/tenant_actor.ex samen/web/tenant_actor/guard.ex)
 
@@ -154,10 +147,13 @@ defmodule Samen.Web.TenantActorGuardTest do
 
   test "non-vacuity: the sweep sees the whole tree and the converted surfaces are really clean" do
     now = found()
-    assert map_size(now) > 40
-    assert Enum.sum(Map.values(now)) > 90
+    assert map_size(now) > 35
+    assert Enum.sum(Map.values(now)) > 60
     refute Map.has_key?(now, "samen/web/crm/contacts_live.ex")
     refute Map.has_key?(now, "samen/web/crm/companies_live.ex")
+    for page <- ~w(calendar_live company_live contacts_gallery_live dashboard_live mailbox_live pipeline_live sequences_live),
+        do: refute(Map.has_key?(now, "samen/web/crm/#{page}.ex"))
+
     refute Map.has_key?(now, "samen/web/csv/export_controller.ex")
     refute Map.has_key?(now, "samen/web/files/bytes_controller.ex")
     refute Map.has_key?(now, "samen/web/settings/profile_live.ex")

@@ -369,8 +369,11 @@ defmodule Samen.Scopes.Outreach.Blueprint do
             authorize_if(Samen.Policy.OrgScope)
           end
 
+          # Member-or-above, like every other CRM/Work write: an enrollment is a send decision (it starts a
+          # sequence's emails to a contact), so a `:viewer` may read the list but not change it.
           policy action([:enroll, :pause, :resume, :stop]) do
             forbid_unless(Samen.Policy.OrgScope)
+            forbid_unless({Samen.Policy.RoleAtLeast, role: :member})
             authorize_if(always())
           end
 

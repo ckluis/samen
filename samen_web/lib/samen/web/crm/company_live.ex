@@ -32,6 +32,9 @@ defmodule Samen.Web.CRM.CompanyLive do
   alias Samen.Web.AccountHealth
   alias Samen.Web.CRM.Reads
   alias Samen.Web.Reads.Guard
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @impl true
   def mount(params, session, socket) do
@@ -61,7 +64,11 @@ defmodule Samen.Web.CRM.CompanyLive do
      )}
   end
 
+  # Every other event is refused while nobody is acting (a denial or a failed membership lookup): nothing is
+  # written with a scope from before the refusal.
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("retry_load", _params, socket) do
     {:noreply, load(socket, socket.assigns.org_id, socket.assigns.company_id)}
   end
@@ -79,8 +86,7 @@ defmodule Samen.Web.CRM.CompanyLive do
   end
 
   def handle_event("log_activity", %{"activity" => params}, socket) do
-    %{samen_mount: mount, org_id: org_id, company_id: company_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{samen_mount: mount, org_id: org_id, company_id: company_id, acting_scope: scope} = socket.assigns
 
     # ADR-041 §6.1: the composer writes a canonical Work Task anchored to this
     # (same-org) company via the generic `(subject_key, subject_id)` object-ref — not a
@@ -124,8 +130,7 @@ defmodule Samen.Web.CRM.CompanyLive do
   # -- A3 edit/delete (non-PII surface) -----------------------------------------
 
   def handle_event("edit_company", _params, socket) do
-    %{samen_mount: mount, org_id: org_id, company: company} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{company: company, acting_scope: scope} = socket.assigns
     {:noreply, assign(socket, show_edit: true, edit_form: edit_form(company, scope))}
   end
 
@@ -161,8 +166,7 @@ defmodule Samen.Web.CRM.CompanyLive do
   # (e.g. an authorization denial), not the old FK-refusal case. (Tasks are
   # anchored by a generic object-ref, not a CRM FK, and never blocked either way.)
   def handle_event("delete_company", %{"id" => id}, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{samen_mount: mount, org_id: org_id, acting_scope: scope} = socket.assigns
 
     case Reads.delete_company(mount, scope, id) do
       :ok ->
@@ -177,8 +181,7 @@ defmodule Samen.Web.CRM.CompanyLive do
   # (`Samen.CRM.AccountLink`). Tenant plane only (`writable?/1` gates the form in the
   # render); the kernel enforces org-scope + member role regardless.
   def handle_event("link_billing_customer", %{"billing_customer_id" => id}, socket) do
-    %{samen_mount: mount, org_id: org_id, company: company, company_id: company_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{samen_mount: mount, org_id: org_id, company: company, company_id: company_id, acting_scope: scope} = socket.assigns
 
     case Reads.link_billing_customer(mount, scope, company, id) do
       {:ok, _company} ->
@@ -215,11 +218,46 @@ defmodule Samen.Web.CRM.CompanyLive do
       account_health: nil,
       portfolio_health: nil
     )
+    |> assign(acting_scope: nil, actor_state: :ok)
   end
 
+  # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read, nothing
+  # can be written, and the page is re-resolved on every `handle_params`.
   def load(socket, org_id, company_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, company_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id, company_id)
+    end
+  end
+
+  defp load_refused(socket, org_id, company_id) do
+    socket
+    |> ensure_return_to()
+    |> assign(
+      no_org: false,
+      org_id: org_id,
+      company_id: company_id,
+      company: nil,
+      load_error: nil,
+      section_errors: [],
+      contacts: [],
+      activities: [],
+      mail: [],
+      deals: [],
+      active_tab: Map.get(socket.assigns, :active_tab, "overview"),
+      show_edit: false,
+      edit_form: nil,
+      activity_form: nil,
+      delete_error: nil,
+      link_error: nil,
+      account_health: nil,
+      portfolio_health: nil
+    )
+  end
+
+  defp load_for(socket, org_id, company_id, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
 
     # A FAILED read is not "not found" (WP6): `load_error` names it and the page shows the kit
     # error state with a retry; `company == nil` with no `load_error` is a genuinely missing
@@ -346,9 +384,12 @@ defmodule Samen.Web.CRM.CompanyLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Company" nothing="there is no company to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">CRM org: {@org_id}</span>
 
           <div :if={@delete_error} class="wrap" style="margin-bottom:0">
