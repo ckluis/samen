@@ -100,7 +100,7 @@ STUB
   printf '%s\n' "$ga" > "$F/docs/guides/generators.md"
 }
 
-mkfix() {
+build_fixture() { # build the pristine fixture repo at $F (done ONCE; see mkfix)
   rm -rf "$F"; mkdir -p "$F/scripts/sabotages" "$F/app1/lib" "$F/app1/test"
   local f
   for f in sabotage sabotage.sh sabotage_lint.sh sabotage_new.sh sabotage_reanchor.sh sabotage_reanchor.py double-sweep.sh counts counts.py; do
@@ -145,6 +145,18 @@ s = open(p).read().replace("end\n", '  test "limit is ten", do: assert(A.limit()
 open(p, "w").write(s)
 PY
   git_ add -A; git_ commit -q -m branch
+}
+# Every case starts from the SAME pristine fixture, so it is built once (~60 files, a git init, two commits) and
+# each case gets a copy-on-write clone of it (one clonefile(2) per tree on APFS, a plain copy elsewhere). Building
+# it 14 times was a few hundred file creations and renames, and file creation is what stalls on a loaded disk.
+TPL="$T/tpl"
+mkfix() {
+  if [[ ! -d "$TPL" ]]; then
+    local real_f="$F"; F="$TPL"; build_fixture; F="$real_f"
+  fi
+  rm -rf "$F"
+  if [[ "$(uname)" == Darwin ]]; then cp -Rpc "$TPL" "$F" 2>/dev/null || { rm -rf "$F"; cp -Rp "$TPL" "$F"; }
+  else cp -a --reflink=auto "$TPL" "$F"; fi
 }
 sab() { # sab <outfile> <args…> — run the fixture's scripts/sabotage; RC
   local o="$1"; shift
