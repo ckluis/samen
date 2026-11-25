@@ -4237,7 +4237,7 @@ defmodule Samen.AI.Agent do
 
     # EG5 (ADR-043 §3.1): an authored prompt artifact may never embed a vt_ vault-token
     # sentinel — the same scan the Prompt resource + verifier check (c) apply.
-    if String.contains?(goal_prompt, "vt_") do
+    if String.contains?(goal_prompt, "vt_") do # bare-vt_-ok: production refusal of an authored prompt embedding the marker, not a test assertion
       compile_error!(
         caller,
         "use Samen.AI.Agent: `goal_prompt:` contains a `vt_` vault-token sentinel — an " <>
