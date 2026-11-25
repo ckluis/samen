@@ -1,0 +1,22 @@
+# SABOTAGE: File :promote loses its forbid policy, so a member runs the promotion action and un-quarantines 
+#   a file
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/primitives_file_status_not_input_test.exs
+# MUST_FAIL: no actor may run the :promote system action
+diff --git a/samen_core/lib/samen/scopes/primitives/blueprint.ex b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+index c19c7769..32d4ef4b 100644
+--- a/samen_core/lib/samen/scopes/primitives/blueprint.ex
++++ b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+@@ -464,10 +464,6 @@ defmodule Samen.Scopes.Primitives.Blueprint do
+           end
+ 
+           # `:promote` marks a file clean: the scan verdict, never a request. No actor, an admin included.
+-          policy action(:promote) do
+-            forbid_if(always())
+-          end
+-
+           policy action_type([:create, :update, :destroy]) do
+             forbid_unless(Samen.Policy.OrgScope)
+             forbid_unless({Samen.Policy.RoleAtLeast, role: :member})

@@ -407,7 +407,32 @@ defmodule Samen.Scopes.Primitives.Blueprint do
         end
 
         actions do
-          defaults([:read, :destroy, create: :*, update: :*])
+          defaults([:read, :destroy])
+
+          # `status` is NOT an actor input on any write. A member who could write it could set
+          # `:active` on a quarantined file and skip the scan that `Samen.Files.promote/3`,
+          # `previewable?/1` and `fetch_bytes` rely on. A new row takes the resource default
+          # (`:quarantined`); only the system action `:promote` (below) sets `:active`. `archived_at` is no input either:
+          # archiving and restoring go through the audited `:archive`/`:restore` actions.
+          create :create do
+            primary?(true)
+            accept([:filename, :content_type, :size_bytes, :storage_key, :uploaded_by_id, :metadata, :org_id])
+          end
+
+          # Not atomic: the `:promote` forbid policy below cannot be rendered into an atomic filter.
+          update :update do
+            primary?(true)
+            require_atomic?(false)
+            accept([:filename, :content_type, :size_bytes, :storage_key, :uploaded_by_id, :metadata, :org_id])
+          end
+
+          # The promotion path's own write (`Samen.Files.promote/3` after a clean scan). No input; it is
+          # run only as that function's internal `authorize?: false` call, and no actor may run it.
+          update :promote do
+            require_atomic?(false)
+            accept([])
+            change(set_attribute(:status, :active))
+          end
         end
 
         # ADR-026 §2 decision 2 / RP-FI-1 / AC-G14-2 — governed-by-construction. The
@@ -436,6 +461,11 @@ defmodule Samen.Scopes.Primitives.Blueprint do
         policies do
           policy action_type(:read) do
             authorize_if(Samen.Policy.OrgScope)
+          end
+
+          # `:promote` marks a file clean: the scan verdict, never a request. No actor, an admin included.
+          policy action(:promote) do
+            forbid_if(always())
           end
 
           policy action_type([:create, :update, :destroy]) do

@@ -124,7 +124,7 @@ defmodule Samen.Web.FilePreviewMaskingTest do
 
     {:ok, active} =
       file
-      |> Ash.Changeset.for_update(:update, %{status: :active})
+      |> Ash.Changeset.for_update(:promote, %{})
       |> Ash.update(authorize?: false)
 
     # Re-read with the full attribute set loaded (org_id/id/inserted_at) — the same

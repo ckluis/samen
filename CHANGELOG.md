@@ -21,6 +21,14 @@ All notable changes to Samen are recorded here. The format follows
   and a failing lookup returns `{:error, :endpoint_lookup_failed}`, where it used to claim `{:ok, 0}`. A failed enqueue is
   `{:error, reason}`. Nothing in the framework or the three hosts calls `deliver/4` today.
 
+- **Fixed: a member could un-quarantine a File.** `status` was an input of the generic `File` `:create` and `:update`, so
+  `%{status: :active}` from any member skipped the scan that `Samen.Files.promote/3`, `previewable?/1` and `fetch_bytes`
+  rely on. `status` is no input of any actor write now (a new row is `:quarantined`); the scan-gated `Samen.Files.promote/3`
+  sets `:active` through a new system action `File :promote` that no actor, an admin included, may run. `archived_at` is no
+  input of `File :create`/`:update` either (use `:archive` and `:restore`). **Upgrade notes:** a host or test that wrote
+  `status:` through `File :create`/`:update` must use `Samen.Files.promote/3`; to archive or restore a file use the
+  archive and restore actions, not `archived_at`. Sabotages 1371 and 1372.
+
 ### Security: identity authorization, round 3
 
 - **Fixed: an admin could demote, suspend or re-role an owner or a peer admin.** `Samen.Policy.ManageRole` judged only the

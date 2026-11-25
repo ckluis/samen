@@ -270,7 +270,7 @@ defmodule Demo.PrimitivesScopePolicyMatrixTest do
     # Can update own org's file.
     {:ok, _updated} =
       file
-      |> Ash.Changeset.for_update(:update, %{status: :archived})
+      |> Ash.Changeset.for_update(:update, %{filename: "renamed.pdf"})
       |> Ash.update(actor: scope.actor, authorize?: true)
   end
 

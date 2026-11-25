@@ -1,0 +1,19 @@
+# SABOTAGE: File :update accepts status again, so a member un-quarantines a file without the scan
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/primitives_file_status_not_input_test.exs
+# MUST_FAIL: a member cannot set status on an update
+diff --git a/samen_core/lib/samen/scopes/primitives/blueprint.ex b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+index c19c7769..22be0686 100644
+--- a/samen_core/lib/samen/scopes/primitives/blueprint.ex
++++ b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+@@ -423,7 +423,7 @@ defmodule Samen.Scopes.Primitives.Blueprint do
+           update :update do
+             primary?(true)
+             require_atomic?(false)
+-            accept([:filename, :content_type, :size_bytes, :storage_key, :uploaded_by_id, :metadata, :org_id])
++            accept([:filename, :content_type, :size_bytes, :storage_key, :uploaded_by_id, :metadata, :org_id, :status])
+           end
+ 
+           # The promotion path's own write (`Samen.Files.promote/3` after a clean scan). No input; it is
