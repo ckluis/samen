@@ -6,12 +6,12 @@
 # TEST_FILES: test/test_db_test.exs
 # MUST_FAIL: reset! with another live session RAISES, lists the holder, and kills and drops nothing
 diff --git a/samen_core/lib/samen/test_db.ex b/samen_core/lib/samen/test_db.ex
-index 71bb9bb9..2d81c770 100644
+index e2e9f7d..1657acf 100644
 --- a/samen_core/lib/samen/test_db.ex
 +++ b/samen_core/lib/samen/test_db.ex
-@@ -129,7 +129,7 @@ defmodule Samen.TestDb do
-     SELECT pid, usename, application_name, client_addr::text, state, backend_start::text,
-            (now() - backend_start)::text AS age
+@@ -219,7 +219,7 @@ defmodule Samen.TestDb do
+            (now() - backend_start)::text AS age, backend_type, wait_event_type, wait_event,
+            CASE WHEN backend_type = 'autovacuum worker' THEN query END AS query
        FROM pg_stat_activity
 -     WHERE datname = '#{String.replace(db, "'", "''")}' AND pid <> pg_backend_pid()
 +     WHERE datname = '#{String.replace(db, "'", "''")}' AND false

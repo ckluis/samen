@@ -1,0 +1,19 @@
+# SABOTAGE: TestDb recovers from an autovacuum-blocked DROP without leaving any trace
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/test_db_test.exs
+# MUST_FAIL: item 5: a recovered autovacuum wait
+diff --git a/samen_core/lib/samen/test_db.ex b/samen_core/lib/samen/test_db.ex
+index 34380f9d..903561aa 100644
+--- a/samen_core/lib/samen/test_db.ex
++++ b/samen_core/lib/samen/test_db.ex
+@@ -144,7 +144,7 @@ defmodule Samen.TestDb do
+ 
+             case run.(config, drop_sql(db), :infinity) do
+               {:ok, _} ->
+-                note("DROP of #{inspect(db)} hit 55006; waited #{waited} ms for autovacuum pids #{inspect(pids, charlists: :as_lists)} to leave, then re-issued the DROP: ok")
++                _ = waited
+ 
+               {:error, %Postgrex.Error{postgres: %{pg_code: @in_use}} = second} ->
+                 {rows, prepared} = blockers(config, db, run)

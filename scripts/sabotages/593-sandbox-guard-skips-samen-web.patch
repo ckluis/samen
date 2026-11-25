@@ -5,15 +5,15 @@
 # TEST_FILES: test/meta/sandbox_shared_guard_test.exs
 # MUST_FAIL: the scan is not vacuous: it sees the migrated suites and the demonstration file
 diff --git a/samen_core/test/meta/sandbox_shared_guard_test.exs b/samen_core/test/meta/sandbox_shared_guard_test.exs
-index e7378f8..3be9546 100644
+index f0a755d7..0654ca68 100644
 --- a/samen_core/test/meta/sandbox_shared_guard_test.exs
 +++ b/samen_core/test/meta/sandbox_shared_guard_test.exs
-@@ -40,7 +40,7 @@ defmodule Samen.TestSandboxGuardTest do
-       ~w(samen_core samen_web demo driftwood pawchart samen_stripe samen_postmark samen_ses samen_resend samen_anthropic)
+@@ -71,7 +71,7 @@ defmodule Samen.TestSandboxGuardTest do
+   # symlink, a permission failure). `files/2` skips those silently, so a gate must use `files_checked/2` and assert none.
+   defp scan do
+     results =
+-      for app <- @apps, do: Samen.SourceScan.files_checked(Path.join([@root, app, "test"]), ~w(.ex .exs))
++      for app <- @apps -- ["samen_web"], do: Samen.SourceScan.files_checked(Path.join([@root, app, "test"]), ~w(.ex .exs))
  
-     globs =
--      Enum.flat_map(apps, &["#{&1}/test/**/*.{ex,exs}"]) ++
-+      Enum.flat_map(apps -- ["samen_web"], &["#{&1}/test/**/*.{ex,exs}"]) ++
-         [
-           "spikes/*/test/**/*.{ex,exs}",
-           "scripts/landing/*.exs",
+     spike_results =
+       for dir <- Samen.SourceScan.dirs(@root, "spikes/*/test"), do: Samen.SourceScan.files_checked(dir, ~w(.ex .exs))

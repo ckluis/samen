@@ -1,0 +1,18 @@
+# SABOTAGE: TestDb.resolve_in_use runs statements against a database the name guard would refuse
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/test_db_test.exs
+# MUST_FAIL: item 6: resolve_in_use on a non-test database
+diff --git a/samen_core/lib/samen/test_db.ex b/samen_core/lib/samen/test_db.ex
+index 34380f9d..4431152b 100644
+--- a/samen_core/lib/samen/test_db.ex
++++ b/samen_core/lib/samen/test_db.ex
+@@ -131,7 +131,6 @@ defmodule Samen.TestDb do
+   # what `run/3` does). Returns :ok when the single re-issued DROP succeeded, raises otherwise.
+   @spec resolve_in_use(keyword(), String.t(), term(), function(), non_neg_integer()) :: :ok
+   def resolve_in_use(config, db, error, run, bound_ms) do
+-    guard!(db)
+     {rows, prepared} = blockers(config, db, run)
+ 
+     case classify(rows, prepared) do

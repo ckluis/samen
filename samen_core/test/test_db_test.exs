@@ -69,8 +69,9 @@ defmodule Samen.TestDbTest do
     app = "samen_test_db_holder_#{System.unique_integer([:positive])}"
     {conn, holder_pid} = hold_named!(config, app)
     Postgrex.query!(conn, "CREATE TABLE marker (id int)", [])
-    # a SECOND, unnamed session (what a psql, an autovacuum worker or another run's backend looks like): its empty
-    # application_name is listed as application_name="" -- which is also what a blank configured password inspects to
+    # a SECOND, unnamed session (what a psql or another run's backend looks like; NOT an autovacuum worker, which has
+    # backend_type 'autovacuum worker', no user and no client address): its empty application_name is listed as
+    # application_name="" -- which is also what a blank configured password inspects to
     bystander = hold_open!(config)
     %{rows: [[bystander_pid]]} = Postgrex.query!(bystander, "SELECT pg_backend_pid()", [])
 
@@ -86,6 +87,15 @@ defmodule Samen.TestDbTest do
     assert e.message =~ ~s(application_name="#{app}")
     assert e.message =~ "another checkout or worktree"
     refute e.message =~ "SELECT"
+    # both are client backends (a Postgrex connection): neither is waited for, and no query text is printed for them.
+    # Asserted per session line, not on the whole message: Postgres may attach a real autovacuum worker to this database
+    # at any moment, and its line (backend_type="autovacuum worker", with its generated query) is then listed too.
+    for pid <- [holder_pid, bystander_pid] do
+      line = e.message |> String.split("\n") |> Enum.find(&String.contains?(&1, "pid=#{pid} "))
+      assert line =~ ~s(backend_type="client backend")
+      refute line =~ "query="
+    end
+    refute e.message =~ "pg_backend_pid"
     # no credential in the message: a configured password must not appear (a blank one, as here, is `""`, which a listed
     # session with an empty application_name legitimately contains -- so only a non-empty password is searched for), and
     # no URL / password word either way
@@ -107,6 +117,308 @@ defmodule Samen.TestDbTest do
     assert TestDb.reset!(config) == :ok
     fresh = hold_open!(config)
     assert %{num_rows: 0} = Postgrex.query!(fresh, "SELECT 1 FROM pg_tables WHERE tablename = 'marker'", [])
+  end
+
+  describe "classify/2 (autovacuum worker versus foreign session)" do
+    defp row(attrs) do
+      Map.merge(
+        %{pid: 1, usename: nil, application_name: "", client_addr: nil, state: "active", backend_type: "autovacuum worker"},
+        Map.new(attrs)
+      )
+    end
+
+    test "only autovacuum workers and no prepared transaction: wait for exactly those pids" do
+      assert TestDb.classify([row(pid: 10), row(pid: 11)], 0) == {:wait, [10, 11]}
+    end
+
+    test "a client backend raises, however anonymous it looks (nil user, no address, empty application_name)" do
+      assert TestDb.classify([row(backend_type: "client backend")], 0) == :raise
+      # POSITIVE CONTROL: the same row as an autovacuum worker is waited for
+      assert TestDb.classify([row([])], 0) == {:wait, [1]}
+    end
+
+    test "any mix raises; so does any other backend type or a missing one" do
+      assert TestDb.classify([row(pid: 1), row(pid: 2, backend_type: "client backend")], 0) == :raise
+
+      for type <- ["background worker", "walsender", "parallel worker", "logical replication worker", "autovacuum launcher", "", nil, "autovacuum worker "] do
+        assert TestDb.classify([row(backend_type: type)], 0) == :raise, inspect(type)
+      end
+
+      assert TestDb.classify([%{pid: 1, usename: nil, application_name: ""}], 0) == :raise
+    end
+
+    test "a prepared transaction in the database raises (it never shows in pg_stat_activity); an unknown count raises" do
+      assert TestDb.classify([row([])], 1) == :raise
+      assert TestDb.classify([row([])], :unknown) == :raise
+    end
+
+    test "an EMPTY listing with a known prepared count of 0 is retried once at once; with prepared > 0 or unknown it raises" do
+      assert TestDb.classify([], 0) == :retry_now
+      assert TestDb.classify([], 1) == :raise
+      assert TestDb.classify([], :unknown) == :raise
+    end
+  end
+
+  describe "resolve_in_use/5 (the 55006 policy, scripted statement runner)" do
+    @in_use_error %Postgrex.Error{postgres: %{code: :object_in_use, pg_code: "55006", message: "being accessed by other users", severity: "ERROR"}}
+
+    # Postgres' simple protocol answers every cell as text
+    defp activity_row(pid, type, query),
+      do: [Integer.to_string(pid), nil, "", nil, "active", "t", "1s", type, "Activity", "AutoVacuumMain", query]
+
+    # a runner scripted per statement kind; records every DROP and every poll
+    defp scripted(opts) do
+      {:ok, log} = Agent.start_link(fn -> [] end)
+      on_exit(fn -> if Process.alive?(log), do: Agent.stop(log) end)
+
+      run = fn _config, sql, _timeout ->
+        kind =
+          cond do
+            sql =~ "DROP DATABASE" -> :drop
+            sql =~ "pg_prepared_xacts" -> :prepared
+            sql =~ "WHERE datname" -> :activity
+            sql =~ "WHERE pid IN" -> :poll
+          end
+
+        Agent.update(log, &[kind | &1])
+        n = Enum.count(Agent.get(log, & &1), &(&1 == kind))
+
+        case kind do
+          :drop -> opts.drops.(n)
+          :prepared -> if opts.prepared == :error, do: {:error, "prepared boom"}, else: {:ok, %{rows: [[Integer.to_string(opts.prepared)]]}}
+          :activity ->
+            cond do
+              opts.rows == :error -> {:error, "activity boom"}
+              is_function(opts.rows) -> {:ok, %{rows: opts.rows.(n)}}
+              true -> {:ok, %{rows: opts.rows}}
+            end
+          :poll ->
+            case opts.poll.(n) do
+              :error -> {:error, "poll boom"}
+              rows -> {:ok, %{rows: rows}}
+            end
+        end
+      end
+
+      {run, fn -> log |> Agent.get(& &1) |> Enum.reverse() end}
+    end
+
+    defp av, do: [activity_row(77, "autovacuum worker", "autovacuum: VACUUM public.t")]
+
+    test "autovacuum-only: waits for that pid, re-issues the DROP exactly once, succeeds" do
+      {run, calls} =
+        scripted(%{rows: av(), prepared: 0, poll: fn n -> if n < 3, do: [["77"]], else: [] end, drops: fn _ -> {:ok, :dropped} end})
+
+      ExUnit.CaptureIO.capture_io(:stderr, fn -> assert TestDb.resolve_in_use([], "x_test", @in_use_error, run, 5_000) == :ok end)
+      assert Enum.count(calls.(), &(&1 == :drop)) == 1
+      assert Enum.count(calls.(), &(&1 == :poll)) == 3
+    end
+
+    test "the worker does not leave within the bound: raises with pid, type, wait event and the autovacuum query; no second DROP" do
+      {run, calls} = scripted(%{rows: av(), prepared: 0, poll: fn _ -> [["77"]] end, drops: fn _ -> flunk("DROP must not be re-issued") end})
+
+      e = assert_raise RuntimeError, fn -> TestDb.resolve_in_use([], "x_test", @in_use_error, run, 250) end
+      assert e.message =~ "did not leave within 250 ms"
+      assert e.message =~ "pid=77 "
+      assert e.message =~ ~s(backend_type="autovacuum worker")
+      assert e.message =~ ~s(wait_event={"Activity", "AutoVacuumMain"})
+      assert e.message =~ ~s(query="autovacuum: VACUUM public.t")
+      refute :drop in calls.()
+    end
+
+    test "every poll failing: raises saying the polls FAILED, with the poll error, not that the workers did not leave" do
+      {run, _calls} = scripted(%{rows: av(), prepared: 0, poll: fn _ -> :error end, drops: fn _ -> flunk("DROP must not be re-issued") end})
+
+      e = assert_raise RuntimeError, fn -> TestDb.resolve_in_use([], "x_test", @in_use_error, run, 250) end
+      assert e.message =~ "could not be polled"
+      assert e.message =~ "poll boom"
+      refute e.message =~ "did not leave"
+    end
+
+    test "the second DROP failing raises (and is not retried a third time)" do
+      {run, calls} = scripted(%{rows: av(), prepared: 0, poll: fn _ -> [] end, drops: fn _ -> {:error, @in_use_error} end})
+
+      e = assert_raise RuntimeError, fn -> TestDb.resolve_in_use([], "x_test", @in_use_error, run, 5_000) end
+      assert e.message =~ "the second DROP"
+      assert e.message =~ "pid=77 "
+      assert Enum.count(calls.(), &(&1 == :drop)) == 1
+    end
+
+    test "a client backend among the blockers raises at once: no wait, no DROP, and its query text is not printed" do
+      rows = [activity_row(5, "client backend", "SELECT secret FROM t") | av()]
+      {run, calls} = scripted(%{rows: rows, prepared: 0, poll: fn _ -> flunk("must not wait") end, drops: fn _ -> flunk("must not DROP") end})
+
+      e = assert_raise RuntimeError, fn -> TestDb.resolve_in_use([], "x_test", @in_use_error, run, 5_000) end
+      assert e.message =~ "pid=5 "
+      refute e.message =~ "SELECT secret"
+      refute :poll in calls.()
+      refute :drop in calls.()
+    end
+
+    test "an EMPTY listing and prepared 0 (the worker left before the listing ran): ONE immediate DROP, no wait; success is ok" do
+      {run, calls} = scripted(%{rows: [], prepared: 0, poll: fn _ -> flunk("must not wait") end, drops: fn _ -> {:ok, :dropped} end})
+
+      ExUnit.CaptureIO.capture_io(:stderr, fn -> assert TestDb.resolve_in_use([], "x_test", @in_use_error, run, 5_000) == :ok end)
+      assert calls.() == [:activity, :prepared, :drop]
+    end
+
+    test "an EMPTY listing, the single re-issued DROP fails too: raises naming both facts, with the FRESH listing; no third DROP" do
+      rows = fn n -> if n == 1, do: [], else: [activity_row(5, "client backend", "SELECT secret FROM t")] end
+      {run, calls} = scripted(%{rows: rows, prepared: 0, poll: fn _ -> flunk("must not wait") end, drops: fn _ -> {:error, @in_use_error} end})
+
+      e = assert_raise RuntimeError, fn -> TestDb.resolve_in_use([], "x_test", @in_use_error, run, 5_000) end
+      assert e.message =~ ~s("x_test")
+      assert e.message =~ "first listing was empty"
+      assert e.message =~ "re-issued"
+      assert e.message =~ "pid=5 "
+      refute e.message =~ "SELECT secret"
+      assert Enum.count(calls.(), &(&1 == :drop)) == 1
+      assert Enum.count(calls.(), &(&1 == :activity)) == 2
+    end
+
+    test "an EMPTY listing with prepared > 0 or an unknown count raises at once, no DROP" do
+      for prepared <- [2, :error] do
+        {run, calls} = scripted(%{rows: [], prepared: prepared, poll: fn _ -> flunk("must not wait") end, drops: fn _ -> flunk("must not DROP") end})
+        assert_raise RuntimeError, fn -> TestDb.resolve_in_use([], "x_test", @in_use_error, run, 5_000) end
+        refute :drop in calls.()
+      end
+    end
+
+    test "a FAILED pg_stat_activity listing with prepared 0 raises the honest could-not-list error, naming database and 55006" do
+      {run, calls} = scripted(%{rows: :error, prepared: 0, poll: fn _ -> flunk("must not wait") end, drops: fn _ -> flunk("must not DROP") end})
+
+      e = assert_raise RuntimeError, fn -> TestDb.resolve_in_use([], "x_test", @in_use_error, run, 5_000) end
+      assert e.message =~ ~s("x_test")
+      assert e.message =~ "55006"
+      assert e.message =~ "could not list them"
+      assert e.message =~ "activity boom"
+      refute :drop in calls.()
+      refute :poll in calls.()
+    end
+
+    test "a prepared transaction raises at once and is counted in the message" do
+      {run, calls} = scripted(%{rows: av(), prepared: 2, poll: fn _ -> flunk("must not wait") end, drops: fn _ -> flunk("must not DROP") end})
+
+      e = assert_raise RuntimeError, fn -> TestDb.resolve_in_use([], "x_test", @in_use_error, run, 5_000) end
+      assert e.message =~ "2 prepared transaction(s)"
+      refute :drop in calls.()
+    end
+
+    test "the statements read pg_stat_activity query text only for autovacuum workers and filter prepared xacts by database" do
+      {:ok, seen} = Agent.start_link(fn -> [] end)
+
+      run = fn _c, sql, _t ->
+        Agent.update(seen, &[sql | &1])
+        cond do
+          sql =~ "pg_prepared_xacts" -> {:ok, %{rows: [["0"]]}}
+          sql =~ "DROP DATABASE" -> {:error, @in_use_error}
+          true -> {:ok, %{rows: []}}
+        end
+      end
+
+      assert_raise RuntimeError, fn -> TestDb.resolve_in_use([], "x_test", @in_use_error, run, 100) end
+      sqls = Agent.get(seen, & &1)
+      assert Enum.any?(sqls, &(&1 =~ "CASE WHEN backend_type = 'autovacuum worker' THEN query END"))
+      # every `query` in the select list is inside the autovacuum CASE (a bare `query,` column before it would leak text)
+      [activity | _] = Enum.filter(sqls, &(&1 =~ "pg_backend_pid()"))
+      [select_list] = Regex.run(~r/\ASELECT(.*?)\bFROM\b/s, String.trim(activity), capture: :all_but_first)
+      case_expr = "CASE WHEN backend_type = 'autovacuum worker' THEN query END AS query"
+      assert String.contains?(select_list, case_expr)
+      assert Regex.scan(~r/\bquery\b/, String.replace(select_list, case_expr, "")) == []
+      assert Enum.any?(sqls, &(&1 =~ "pg_prepared_xacts WHERE database = 'x_test'"))
+    end
+  end
+
+  describe "recovery is visible, and the seams keep the safety contract" do
+    test "item 4: an unknown prepared count prints the reason it is unknown" do
+      {run, _} = scripted(%{rows: av(), prepared: :error, poll: fn _ -> flunk("must not wait") end, drops: fn _ -> flunk("must not DROP") end})
+      e = assert_raise RuntimeError, fn -> TestDb.resolve_in_use([], "x_test", @in_use_error, run, 5_000) end
+      assert e.message =~ "prepared transactions could not be counted"
+      assert e.message =~ "prepared boom"
+    end
+
+    test "item 5: a recovered autovacuum wait emits one stderr line with the pids and the ms waited" do
+      {run, _} = scripted(%{rows: av(), prepared: 0, poll: fn n -> if n < 2, do: [["77"]], else: [] end, drops: fn _ -> {:ok, :dropped} end})
+      err = ExUnit.CaptureIO.capture_io(:stderr, fn -> assert TestDb.resolve_in_use([], "x_test", @in_use_error, run, 5_000) == :ok end)
+      assert [line] = String.split(String.trim(err), "\n")
+      assert line =~ "[77]"
+      assert line =~ ~r/waited \d+ ms/
+      assert line =~ ~s("x_test")
+    end
+
+    test "item 5: a recovered empty-listing retry emits one stderr line saying so" do
+      {run, _} = scripted(%{rows: [], prepared: 0, poll: fn _ -> flunk("must not wait") end, drops: fn _ -> {:ok, :dropped} end})
+      err = ExUnit.CaptureIO.capture_io(:stderr, fn -> assert TestDb.resolve_in_use([], "x_test", @in_use_error, run, 5_000) == :ok end)
+      assert [line] = String.split(String.trim(err), "\n")
+      assert line =~ "listing was empty"
+      assert line =~ "re-issued"
+      assert line =~ ~s("x_test")
+    end
+
+    test "item 5: a failed recovery emits no success line" do
+      {run, _} = scripted(%{rows: [], prepared: 0, poll: fn _ -> flunk("must not wait") end, drops: fn _ -> {:error, @in_use_error} end})
+      err = ExUnit.CaptureIO.capture_io(:stderr, fn -> assert_raise RuntimeError, fn -> TestDb.resolve_in_use([], "x_test", @in_use_error, run, 5_000) end end)
+      assert err == ""
+    end
+
+    test "item 6: resolve_in_use on a non-test database refuses before any statement" do
+      run = fn _c, sql, _t -> flunk("no statement may run, got: " <> sql) end
+      for name <- ~w(app_production postgres samen_prod) do
+        assert_raise ArgumentError, ~r/refuses to drop "#{name}"/, fn -> TestDb.resolve_in_use([], name, @in_use_error, run, 100) end
+      end
+    end
+  end
+
+  describe "await_gone/4 (bounded wait by pid; terminates nothing; scoped to autovacuum workers of this database)" do
+    defp poll_runner(fun) do
+      fn _config, sql, _timeout ->
+        assert sql =~ "WHERE pid IN"
+        fun.(sql)
+      end
+    end
+
+    test "returns :gone once the polled pids have left" do
+      {:ok, n} = Agent.start_link(fn -> 0 end)
+      run = poll_runner(fn _ -> if Agent.get_and_update(n, &{&1 + 1, &1 + 1}) < 3, do: {:ok, %{rows: [["77"]]}}, else: {:ok, %{rows: []}} end)
+      assert TestDb.await_gone([database: "x_test"], [77], 5_000, run) == :gone
+      assert Agent.get(n, & &1) == 3
+    end
+
+    test "observed still attached at the bound: {:still_there, pids}" do
+      run = poll_runner(fn _ -> {:ok, %{rows: [["77"]]}} end)
+      assert TestDb.await_gone([database: "x_test"], [77], 250, run) == {:still_there, [77]}
+    end
+
+    test "every poll FAILED: {:poll_failed, pids, last error}, distinct from still_there" do
+      run = poll_runner(fn _ -> {:error, "poll boom"} end)
+      assert TestDb.await_gone([database: "x_test"], [77], 250, run) == {:poll_failed, [77], "poll boom"}
+    end
+
+    test "the poll is scoped to autovacuum workers of THIS database, so a reused pid is not waited on" do
+      {:ok, seen} = Agent.start_link(fn -> [] end)
+      run = poll_runner(fn sql -> Agent.update(seen, &[sql | &1]); {:ok, %{rows: []}} end)
+      assert TestDb.await_gone([database: "x_test"], [77], 250, run) == :gone
+      [sql | _] = Agent.get(seen, & &1)
+      assert sql =~ "backend_type = 'autovacuum worker'"
+      assert sql =~ "datname = 'x_test'"
+    end
+
+    test "against a real server: a pid that is a CLIENT backend is not waited on (the scoping), and nothing is killed", %{config: config} do
+      :ok = TestDb.reset!(config)
+      {conn, pid} = hold_named!(config, "samen_test_db_await")
+      {:ok, maint} = Postgrex.start_link(Keyword.merge(config, database: "postgres"))
+      on_exit(fn -> stop_quiet(maint) end)
+
+      run = fn _c, sql, _t ->
+        case Postgrex.query(maint, sql, []) do
+          {:ok, r} -> {:ok, r}
+          {:error, e} -> {:error, e}
+        end
+      end
+
+      assert TestDb.await_gone(config, [pid], 300, run) == :gone
+      assert %{rows: [[^pid]]} = Postgrex.query!(conn, "SELECT pg_backend_pid()", [])
+    end
   end
 
   test "the drop waits for the server's answer: a holder that leaves after the first second does not time it out",

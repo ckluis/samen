@@ -1,0 +1,20 @@
+# SABOTAGE: TestDb.await_gone polls by pid only, so a reused pid in another database is waited on
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/test_db_test.exs
+# MUST_FAIL: the poll is scoped to autovacuum workers of THIS database
+diff --git a/samen_core/lib/samen/test_db.ex b/samen_core/lib/samen/test_db.ex
+index 34380f9d..14236de2 100644
+--- a/samen_core/lib/samen/test_db.ex
++++ b/samen_core/lib/samen/test_db.ex
+@@ -236,8 +236,7 @@ defmodule Samen.TestDb do
+     list = Enum.map_join(pids, ",", &Integer.to_string(&1))
+ 
+     sql =
+-      "SELECT pid FROM pg_stat_activity WHERE pid IN (#{list}) AND backend_type = 'autovacuum worker' " <>
+-        "AND datname = '#{String.replace(db, "'", "''")}'"
++      "SELECT pid FROM pg_stat_activity WHERE pid IN (#{list}) AND backend_type = 'autovacuum worker'"
+ 
+     {left, failure} =
+       case run.(config, sql, 15_000) do

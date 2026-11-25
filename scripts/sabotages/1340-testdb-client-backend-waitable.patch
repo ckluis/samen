@@ -1,0 +1,19 @@
+# SABOTAGE: TestDb.classify treats a client backend as an autovacuum worker to wait for
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/test_db_test.exs
+# MUST_FAIL: a client backend raises, however anonymous it looks
+diff --git a/samen_core/lib/samen/test_db.ex b/samen_core/lib/samen/test_db.ex
+index 87a2bca2..17de4682 100644
+--- a/samen_core/lib/samen/test_db.ex
++++ b/samen_core/lib/samen/test_db.ex
+@@ -213,7 +213,7 @@ defmodule Samen.TestDb do
+   def classify([], 0), do: :retry_now
+ 
+   def classify([_ | _] = rows, 0) do
+-    if Enum.all?(rows, &(Map.get(&1, :backend_type) == "autovacuum worker")), do: {:wait, Enum.map(rows, & &1.pid)}, else: :raise
++    if Enum.all?(rows, &(Map.get(&1, :backend_type) in ["autovacuum worker", "client backend"])), do: {:wait, Enum.map(rows, & &1.pid)}, else: :raise
+   end
+ 
+   def classify(_rows, _prepared), do: :raise

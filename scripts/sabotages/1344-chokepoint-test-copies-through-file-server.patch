@@ -1,0 +1,19 @@
+# SABOTAGE: the chokepoint test copies the lib tree with File.cp_r! again, one file-server call per entry
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/source_scan_test.exs
+# MUST_FAIL: no scan test calls Path.wildcard or File.read!/regular?/dir?/ls through the file server
+diff --git a/samen_core/test/chokepoint_test.exs b/samen_core/test/chokepoint_test.exs
+index a438d27d..afe05773 100644
+--- a/samen_core/test/chokepoint_test.exs
++++ b/samen_core/test/chokepoint_test.exs
+@@ -77,7 +77,7 @@ defmodule Samen.ChokepointTest do
+       File.mkdir_p!(Path.join(scratch, "samen"))
+ 
+       # Copy the real lib tree into the scratch dir.
+-      copy_tree!(@lib_dir, scratch)
++      File.cp_r!(@lib_dir, scratch)
+ 
+       on_exit(fn -> File.rm_rf!(scratch) end)
+       {:ok, scratch: scratch}

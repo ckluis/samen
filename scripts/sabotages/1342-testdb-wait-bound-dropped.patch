@@ -1,0 +1,23 @@
+# SABOTAGE: TestDb re-issues the DROP although the autovacuum workers never left (the wait bound is dropped)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/test_db_test.exs
+# MUST_FAIL: the worker does not leave within the bound
+diff --git a/samen_core/lib/samen/test_db.ex b/samen_core/lib/samen/test_db.ex
+index 87a2bca2..01566ab7 100644
+--- a/samen_core/lib/samen/test_db.ex
++++ b/samen_core/lib/samen/test_db.ex
+@@ -154,9 +154,9 @@ defmodule Samen.TestDb do
+                 raise "Samen.TestDb: could not drop database #{inspect(db)}: the second DROP, after the autovacuum workers left, failed: #{format(second)}"
+             end
+ 
+-          {:still_there, left} ->
+-            {rows, prepared} = blockers(config, db, run)
+-            raise in_use_message(db, error, "autovacuum workers #{inspect(left, charlists: :as_lists)} did not leave within #{bound_ms} ms", rows, prepared)
++          {:still_there, _left} ->
++            run.(config, drop_sql(db), :infinity)
++            :ok
+ 
+           {:poll_failed, left, reason} ->
+             {rows, prepared} = blockers(config, db, run)

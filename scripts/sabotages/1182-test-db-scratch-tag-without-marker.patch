@@ -6,15 +6,15 @@
 # TEST_FILES: test/test_db_test.exs
 # MUST_FAIL: a word and digits after test is not a scratch tag
 diff --git a/samen_core/lib/samen/test_db.ex b/samen_core/lib/samen/test_db.ex
-index 404e7b38..9022a359 100644
+index e2e9f7d..4aab823 100644
 --- a/samen_core/lib/samen/test_db.ex
 +++ b/samen_core/lib/samen/test_db.ex
-@@ -59,7 +59,7 @@ defmodule Samen.TestDb do
+@@ -64,7 +64,7 @@ defmodule Samen.TestDb do
    """
  
    @maintenance_default "postgres"
 -  @test_name ~r/\A(?:[A-Za-z0-9]+_)*test\d*(?:_lane\d+)*(?:_scratch_[A-Za-z][A-Za-z0-9]*_\d+(?:_\d+)*)*\z|\A[A-Za-z0-9_]+_downcheck_[0-9a-f]{8}\z/
 +  @test_name ~r/\A(?:[A-Za-z0-9]+_)*test\d*(?:_lane\d+)*(?:_(?:scratch_)?[A-Za-z][A-Za-z0-9]*_\d+(?:_\d+)*)*\z|\A[A-Za-z0-9_]+_downcheck_[0-9a-f]{8}\z/
    @in_use "55006"
- 
-   @doc "Drop (if present) and create the database of `config`. Raises with the real error on any failure."
+   @autovacuum_wait_ms 30_000
+   @poll_ms 100

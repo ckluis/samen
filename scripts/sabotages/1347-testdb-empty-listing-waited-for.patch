@@ -1,0 +1,19 @@
+# SABOTAGE: TestDb treats an empty listing as waitable (a wait on no pids) instead of one immediate re-issue
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/test_db_test.exs
+# MUST_FAIL: an EMPTY listing and prepared 0
+diff --git a/samen_core/lib/samen/test_db.ex b/samen_core/lib/samen/test_db.ex
+index 87a2bca..a1e4b86 100644
+--- a/samen_core/lib/samen/test_db.ex
++++ b/samen_core/lib/samen/test_db.ex
+@@ -210,7 +210,7 @@ defmodule Samen.TestDb do
+   @spec classify([map()] | {:error, term()}, non_neg_integer() | :unknown | {:unknown, String.t()}) :: {:wait, [integer()]} | :retry_now | :raise
+   # An empty listing with a KNOWN prepared count of 0 means the blocker left before the listing ran: `:retry_now`
+   # (one immediate DROP, no wait). Empty with prepared > 0 or unknown raises. ANY non-autovacuum backend raises.
+-  def classify([], 0), do: :retry_now
++  def classify([], 0), do: {:wait, []}
+ 
+   def classify([_ | _] = rows, 0) do
+     if Enum.all?(rows, &(Map.get(&1, :backend_type) == "autovacuum worker")), do: {:wait, Enum.map(rows, & &1.pid)}, else: :raise

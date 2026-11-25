@@ -1,0 +1,21 @@
+# SABOTAGE: TestDb.classify ignores prepared transactions when deciding an autovacuum-only blocker set is 
+#   waitable
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/test_db_test.exs
+# MUST_FAIL: a prepared transaction in the database raises
+# MUST_FAIL: a prepared transaction raises at once
+diff --git a/samen_core/lib/samen/test_db.ex b/samen_core/lib/samen/test_db.ex
+index 87a2bca2..6b35d124 100644
+--- a/samen_core/lib/samen/test_db.ex
++++ b/samen_core/lib/samen/test_db.ex
+@@ -212,7 +212,7 @@ defmodule Samen.TestDb do
+   # (one immediate DROP, no wait). Empty with prepared > 0 or unknown raises. ANY non-autovacuum backend raises.
+   def classify([], 0), do: :retry_now
+ 
+-  def classify([_ | _] = rows, 0) do
++  def classify([_ | _] = rows, _prepared) do
+     if Enum.all?(rows, &(Map.get(&1, :backend_type) == "autovacuum worker")), do: {:wait, Enum.map(rows, & &1.pid)}, else: :raise
+   end
+ 

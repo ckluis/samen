@@ -6,15 +6,15 @@
 # TEST_FILES: test/test_db_test.exs
 # MUST_FAIL: reset! with another live session RAISES, lists the holder, and kills and drops nothing
 diff --git a/samen_core/lib/samen/test_db.ex b/samen_core/lib/samen/test_db.ex
-index 71bb9bb9..736a52dc 100644
+index e2e9f7d2..25d86d8a 100644
 --- a/samen_core/lib/samen/test_db.ex
 +++ b/samen_core/lib/samen/test_db.ex
-@@ -89,7 +89,8 @@ defmodule Samen.TestDb do
+@@ -97,7 +97,8 @@ defmodule Samen.TestDb do
          :ok
  
        {:error, %Postgrex.Error{postgres: %{pg_code: @in_use}} = error} ->
--        raise in_use_message(config, db, error)
-+        _ = in_use_message(config, db, error)
+-        retry_or_raise!(config, db, error)
++        _ = {config, error}
 +        :ok
  
        {:error, error} ->

@@ -1,0 +1,18 @@
+# SABOTAGE: TestDb re-issues the DROP a third time after the second one failed
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/test_db_test.exs
+# MUST_FAIL: the second DROP failing raises
+diff --git a/samen_core/lib/samen/test_db.ex b/samen_core/lib/samen/test_db.ex
+index 87a2bca..f61f316 100644
+--- a/samen_core/lib/samen/test_db.ex
++++ b/samen_core/lib/samen/test_db.ex
+@@ -147,6 +147,7 @@ defmodule Samen.TestDb do
+                 note("DROP of #{inspect(db)} hit 55006; waited #{waited} ms for autovacuum pids #{inspect(pids, charlists: :as_lists)} to leave, then re-issued the DROP: ok")
+ 
+               {:error, %Postgrex.Error{postgres: %{pg_code: @in_use}} = second} ->
++                _ = run.(config, drop_sql(db), :infinity)
+                 {rows, prepared} = blockers(config, db, run)
+                 raise in_use_message(db, second, "the second DROP, after the autovacuum workers left, also failed", rows, prepared)
+ 

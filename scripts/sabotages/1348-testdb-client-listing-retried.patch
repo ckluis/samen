@@ -1,0 +1,19 @@
+# SABOTAGE: TestDb retries the DROP when the listing holds a non-autovacuum backend
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/test_db_test.exs
+# MUST_FAIL: a client backend among the blockers raises at once
+diff --git a/samen_core/lib/samen/test_db.ex b/samen_core/lib/samen/test_db.ex
+index 5b60b524..07d032d3 100644
+--- a/samen_core/lib/samen/test_db.ex
++++ b/samen_core/lib/samen/test_db.ex
+@@ -192,7 +192,7 @@ defmodule Samen.TestDb do
+   def classify([], 0), do: :retry_now
+ 
+   def classify([_ | _] = rows, 0) do
+-    if Enum.all?(rows, &(Map.get(&1, :backend_type) == "autovacuum worker")), do: {:wait, Enum.map(rows, & &1.pid)}, else: :raise
++    if Enum.all?(rows, &(Map.get(&1, :backend_type) == "autovacuum worker")), do: {:wait, Enum.map(rows, & &1.pid)}, else: :retry_now
+   end
+ 
+   def classify(_rows, _prepared), do: :raise
