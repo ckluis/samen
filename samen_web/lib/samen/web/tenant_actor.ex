@@ -71,6 +71,28 @@ defmodule Samen.Web.TenantActor do
   end
 
   @doc """
+  The role `ref` acts with in `org_id`, for a surface that builds its own actor map (the generated `--live`
+  screens): `{:ok, role}` or `{:refused, :denied | :unavailable}`.
+
+  ARMED: the resolved membership role (`scope/3`). DISARMED dev posture: `disarmed_role`, named by the
+  caller (the generated screens keep their `:admin` dev convenience). There is no default role: a refusal
+  carries none.
+  """
+  @spec access(Mount.t(), String.t() | nil, Reads.principal_ref() | nil, atom()) ::
+          {:ok, atom()} | {:refused, :denied | :unavailable}
+  def access(%Mount{} = mount, org_id, ref, disarmed_role) do
+    if CurrentOrg.tenant_gate_armed?(mount) do
+      case scope(mount, org_id, ref) do
+        {:ok, %Samen.Scope{actor: %{role: role}}} -> {:ok, role}
+        :denied -> {:refused, :denied}
+        {:error, :unavailable} -> {:refused, :unavailable}
+      end
+    else
+      {:ok, disarmed_role}
+    end
+  end
+
+  @doc """
   The principal reference for a request: pinned by `Samen.Web.TenantAuthz` as `:samen_principal_ref`
   on every tenant socket; a controller derives it from its session.
   """
