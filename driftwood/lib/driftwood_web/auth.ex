@@ -61,8 +61,18 @@ defmodule DriftwoodWeb.Auth do
     cond do
       not auth_required?() -> conn
       WebAuth.authenticated_user_id(get_session(conn)) -> conn
+      spine_session?(get_session(conn)) -> conn
       true -> conn |> redirect(to: "/login") |> halt()
     end
+  end
+
+  # The framework login (`POST /login`, `Samen.Web.Auth.SessionController`) writes ONLY `samen_session_token`, never the
+  # legacy `samen_current_user`: a LIVE spine session is an authenticated principal too. (Without this clause an armed host
+  # redirected every real login to /login.) A failed session read is not authenticated: fail closed.
+  defp spine_session?(session) do
+    match?({:ok, %{credential_id: _}}, WebAuth.resolve_principal(session, %{session: Driftwood.Operator.Session}))
+  rescue
+    _ -> false
   end
 
   @doc """
