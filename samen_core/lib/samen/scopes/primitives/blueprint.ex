@@ -496,10 +496,16 @@ defmodule Samen.Scopes.Primitives.Blueprint do
           end
 
           # Not atomic: the `:promote` forbid policy below cannot be rendered into an atomic filter.
+          #
+          # What a person may change: the name and the metadata. `content_type`, `size_bytes` and `uploaded_by_id`
+          # are facts the UPLOAD recorded (`Samen.Files.upload/3` enforces the type allowlist and size cap, then stamps
+          # them): the byte route serves inline with the STORED content type, so a writable one would let a member
+          # turn a scanned text/plain file into text/html or javascript (same-origin script) and skip `enforce/4`.
+          # `storage_key` stays an input only because `ChokepointGuard` refuses any change to it outside the upload path.
           update :update do
             primary?(true)
             require_atomic?(false)
-            accept([:filename, :content_type, :size_bytes, :storage_key, :uploaded_by_id, :metadata, :org_id])
+            accept([:filename, :storage_key, :metadata, :org_id])
           end
 
           # The promotion path's own write (`Samen.Files.promote/3` after a clean scan). No input; it is
