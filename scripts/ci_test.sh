@@ -80,6 +80,10 @@
 #          counts that do not sum to the total refuse the plan; a rate for a non-target fails the lint; verify checks the
 #          published plan.
 #
+#   MUTOVH   a sharded step's fixed per-invocation cost (shard_overhead_s) is charged once per chunk: the plan sizes chunks as
+#          overhead + n x each and the rate it learns is (duration - overhead) / n, so a small selection is not ratcheted
+#          into single-item chunks that each pay the overhead again.
+#
 #   GENDEPS  (P6) the gen probes' compiled-hex-dependency cache (scripts/gen_deps_cache.py): the key changes with the lock,
 #          a dependency's Application env, the toolchain, MIX_ENV and the build environment (and not with the app's name);
 #          only the lock's hex packages are ever stored or seeded (samen_*, samen_core, samen_web and the app compile fresh);
@@ -1994,6 +1998,39 @@ case_MUTRATE() {
   has "$ROOT/scripts/mutate.sh" 'seconds per mutant: ' "MUTRATE: mutate.sh prints the per-target timing line"
 }
 
+case_MUTOVH() {
+  # A chunk pays the command's FIXED cost once: a fake mutate that sleeps `overhead + n x each` for its chunk of n mutants.
+  # 4 mutants, overhead 2 s, each 0.5 s, chunk target 3 s: one class would take 4 s (> 3), so the plan makes TWO classes of
+  # 2 (2.8 s each, 5.6 s in all - not 4 x (2 + 0.4) = 9.6 s as single-mutant chunks); and the rate it LEARNS from them is the
+  # per-mutant 0.5 bucket, not the ~1.5 s (overhead + each) that would ratchet the bucket to 2 s and split the next plan into four.
+  mkrepo mutovh
+  { echo "$APPS"
+    cat <<'CONF'
+[step mut]
+cmd = a=${CI_SHARD_ARGS#--shard }; r=${a%/*}; m=${a#*/}; k=0; x=0
+      while [ $x -lt 4 ]; do [ $((x % m)) -eq $((r-1)) ] && k=$((k+1)); x=$((x+1)); done
+      sleep "$(awk "BEGIN { print 2 + 0.4 * $k }")"; echo "  mutants run : $k"
+shard_list = printf "SELECTED 4\n"
+shard_kind = modulo
+shard_total = ^SELECTED ([0-9]+)$
+shard_each_s = 0.5
+shard_target_s = 3
+shard_overhead_s = 2
+shard_check = ^  mutants run +: ([0-9]+)
+modes = pr
+inputs = core/
+est_s = 3
+CONF
+  } > "$SAMEN_CI_MANIFEST"
+  drive "$T/ov0" pr --plan --no-cache
+  eq "$(grep -c '^PLAN mut\[' "$T/ov0")" 2 "MUTOVH: 4 mutants, 2 s overhead + 0.5 s each, target 3 s: planned as 2 classes (not 1 over the target, not 4 singles)"
+  drive "$T/ov1" pr --budget 0 -j 1 --no-cache
+  eq "$RC" 0 "MUTOVH: the two classes run and pass"
+  eq "$(jsonget "$SAMEN_CI_HOME/timings.json" 'd["mut#per_item"]')" 0.5 "MUTOVH: the learned per-mutant rate is the 0.5 s bucket (0.4 s each; the 2 s fixed cost is not charged to each mutant)"
+  drive "$T/ov2" pr --plan --no-cache
+  eq "$(grep -c '^PLAN mut\[' "$T/ov2")" 2 "MUTOVH: ... so the next plan of the same selection is still 2 classes (it does not ratchet into single-mutant runs)"
+}
+
 case_GENDEPS() {
   # (P6) the compiled-dependency cache of the gen probes (scripts/gen_deps_cache.py) on a REAL tiny mix project with a
   # hand-written mix.lock and a hand-built _build: key sensitivity, path deps never cached, corruption fails closed.
@@ -2576,7 +2613,7 @@ STEP
   done
 }
 
-ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS LOCALPATHS GENPROBE GENHEX GENHEXRO NARROW RECHUNK COSTW TIMEOUT SELTMO MUTRATE GENDEPS ESCAPE MUTLINT MUTLOCK LAUNCHREC LAUNCHSEAM RERUNREC GROUPKILL)
+ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS LOCALPATHS GENPROBE GENHEX GENHEXRO NARROW RECHUNK COSTW TIMEOUT SELTMO MUTRATE MUTOVH GENDEPS ESCAPE MUTLINT MUTLOCK LAUNCHREC LAUNCHSEAM RERUNREC GROUPKILL)
 CASES=("$@")
 [[ ${#CASES[@]} -gt 0 ]] || CASES=("${ALL[@]}")
 for c in "${CASES[@]}"; do

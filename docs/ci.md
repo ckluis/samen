@@ -103,6 +103,11 @@ Cost model (`ranges` steps with `shard_cost`): chunk wall-clock ≈ margin × (o
 fitted to the last twelve passed chunks — only with ≥ 4 observations spread over half the largest, else the
 prior (10 s, share 1) — never planning a chunk past 1.5× the largest lane-seconds seen to complete; the margin is
 the worst observed wall-clock over its prediction. Measured here: ≈ 60 s lane start-up + 0.32 × lane-seconds.
+A step may declare the FIXED cost of one invocation of its command (`shard_overhead_s`; `mutation_changed`: 50 s, the lint,
+compile and baseline run of one `mutate.sh`). It is paid once per chunk: a chunk of n items is planned as overhead + n x
+per-item, and the per-item rate is learned as (duration - overhead) / n. Without it a one-mutant chunk taught a rate of
+overhead + each, the rate ratcheted up (it only comes down by a factor of 4) and a 28-mutant selection was planned as 26
+single-mutant runs that took hours (`MUTOVH` proves the plan and the learned rate).
 Unbudgeted (`--budget 0`, `./ci.sh`) the loops run as one command.
 
 ## 4. Cache semantics

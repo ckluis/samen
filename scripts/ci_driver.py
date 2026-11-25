@@ -180,7 +180,7 @@ STEP_KEYS = {"cmd", "cwd", "modes", "inputs", "reads", "always", "serial", "lock
              "marker", "marker_if", "skip_marker", "echo_log", "exunit_dir", "superseded_by",
              "shard_list", "shard_kind", "shard_item", "shard_total", "shard_each_s", "shard_target_s",
              "shard_check", "shard_cost", "unsharded_cmd", "desc", "actions_job", "actions_skip", "actions_dirs", "actions_slices",
-             "shard_rates", "shard_rate_item", "actions_slice_max_s"}
+             "shard_rates", "shard_rate_item", "actions_slice_max_s", "shard_overhead_s"}
 
 
 class Step(object):
@@ -219,6 +219,11 @@ class Step(object):
         self.shard_each = float(d.get("shard_each_s", "30"))
         self.shard_target = float(d.get("shard_target_s", "300"))
         self.shard_check = d.get("shard_check", "").strip() or None
+        # the FIXED cost of one invocation of the step's command (a mutate.sh run: lint, compile, baseline ~50 s), paid once
+        # per chunk, not per item: a chunk of n items costs overhead + n x per-item. Without it a one-item chunk "teaches"
+        # a per-item rate of overhead + each, the rate ratchets up (it never comes down within a factor of 4) and a small
+        # selection is planned as single-item chunks that each pay the overhead again.
+        self.shard_overhead = float(d.get("shard_overhead_s", "0"))
         # (rates) a SELECTION is sized per item kind, not at one flat rate: `shard_rates` is a committed TSV
         # (item path, seconds per item, measurement source) and `shard_rate_item` a regex over the lister's output with two
         # groups (item path, count). `actions plan --selection` then sizes the job as the sum of count x rate (the flat
@@ -702,6 +707,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
     seen = read_json(os.path.join(HOME, "timings.json")) or {}
     learned = float(seen.get(step.id + "#per_item", 0))
     each = max(step.shard_each, learned)
+    room = max(step.shard_target - step.shard_overhead, each)  # per-chunk time left for items once the fixed cost is paid
     # (P5) cost-weighted ranges: what each item LAST cost (lane-seconds, read from the sub-step logs through
     # `shard_cost`) and what a chunk of that many lane-seconds really took (cost_model).
     costs = seen.get(step.id + "#item_cost") or {} if step.shard_cost else {}
@@ -802,15 +808,15 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
                 probe.shard_items = ["%d mutants of %d" % (size_of(m_, r_), count)]
                 probe.key = ctx.key(probe, apps)
                 est = size_of(m_, r_) * each
-                if done(probe) or est <= step.shard_target:
+                if done(probe) or est <= room:
                     classes.append((m_, r_))
                 else:
                     # never more sub-classes than the class has members: its members are x = r-1 + t*m, t < size, and
                     # sub-class j takes t % k == j, so k <= size leaves every sub-class non-empty
-                    k = min(int(math.ceil(est / step.shard_target)), size_of(m_, r_))
+                    k = min(int(math.ceil(est / room)), size_of(m_, r_))
                     classes.extend((m_ * k, r_ + j * m_) for j in range(k))
         else:
-            n = min(count, max(1, int(math.ceil(count * each / step.shard_target)))) if count else 0  # never a class past the last mutant
+            n = min(count, max(1, int(math.ceil(count * each / room)))) if count else 0  # never a class past the last mutant
             classes = [(n, i) for i in range(1, n + 1)]
         specs = [("--shard %d/%d" % (r_, m_), ["%d mutants of %d" % (size_of(m_, r_), count)], size_of(m_, r_))
                  for m_, r_ in classes]
@@ -1198,7 +1204,8 @@ class Run(object):
             seen = read_json(tp) or {}
             seen[step.id] = round(dur, 1)
             if rc == 0 and step.parent and step.expected:
-                seen[step.parent + "#per_item"] = per_item_bucket(seen.get(step.parent + "#per_item", 0), dur / step.expected)
+                seen[step.parent + "#per_item"] = per_item_bucket(seen.get(step.parent + "#per_item", 0),
+                                                                  max(dur - step.shard_overhead, 0.0) / step.expected)
             if rc == 0 and step.parent and step.shard_cost:
                 learn_costs(seen, step, text, dur)
             atomic_write_json(tp, seen)
