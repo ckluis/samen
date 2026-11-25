@@ -144,10 +144,10 @@ defmodule Samen.Web.CRM.PipelineLive do
     )
   end
 
-  # Load the NEXT keyset page for one stage column and append it (per-column bounded).
   @impl true
   TenantActor.refuse_events()
 
+  # Load the NEXT keyset page for one stage column and append it (per-column bounded).
   def handle_event("board_load_more", %{"key" => key}, socket) do
     %{samen_mount: mount, acting_scope: scope} = socket.assigns
 

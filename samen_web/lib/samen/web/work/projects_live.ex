@@ -8,7 +8,7 @@ defmodule Samen.Web.Work.ProjectsLive do
   use Phoenix.LiveView
 
   import Samen.UI
-  import Samen.Web.Work.Live, only: [assign_mount: 2, work_sidebar: 1, writable?: 1]
+  import Samen.Web.Work.Live, only: [assign_mount: 2, work_sidebar: 1]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
@@ -16,6 +16,7 @@ defmodule Samen.Web.Work.ProjectsLive do
   alias Samen.Web.Mount
   alias Samen.Web.TenantActor
   require TenantActor
+  import Samen.Web.TenantActor, only: [writable?: 2]
   import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   alias Samen.Web.Work.Reads
@@ -142,7 +143,7 @@ defmodule Samen.Web.Work.ProjectsLive do
 
         <.topbar title="Projects" crumbs={[CurrentOrg.name(@samen_mount, @org_id), "Work", "Projects"]}>
           <:actions>
-            <.button :if={writable?(@samen_mount) and not @no_org} variant="primary" phx-click="new_project" id="new-project">
+            <.button :if={writable?(@samen_mount, @acting_scope) and not @no_org} variant="primary" phx-click="new_project" id="new-project">
               New project
             </.button>
           </:actions>
@@ -170,13 +171,13 @@ defmodule Samen.Web.Work.ProjectsLive do
                 <li :for={p <- @projects} class="project-row" style="padding:10px 0;border-top:1px solid var(--line,#eee);display:flex;justify-content:space-between;align-items:center">
                   <span style="font-weight:500">{p.name}</span>
                   <.pill variant="info">{p.status}</.pill>
-                  <.delete_confirm :if={writable?(@samen_mount)} phx-click="delete" phx-value-id={p.id} />
+                  <.delete_confirm :if={writable?(@samen_mount, @acting_scope)} phx-click="delete" phx-value-id={p.id} />
                 </li>
               </ul>
             </div>
           </div>
 
-          <.modal :if={@show_new and @new_form != nil and writable?(@samen_mount)} id="new-project-modal" title="New project" on_cancel="cancel_new">
+          <.modal :if={@show_new and @new_form != nil and writable?(@samen_mount, @acting_scope)} id="new-project-modal" title="New project" on_cancel="cancel_new">
             <.simple_form :let={f} for={@new_form} id="new-project-form" phx-change="validate_new" phx-submit="save_new">
               <.form_field field={f[:name]} label="Name" />
               <:actions>

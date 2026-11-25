@@ -379,6 +379,87 @@ defmodule Samen.Web.TenantRoleCrmWorkTest do
     end
   end
 
+  describe "CompanyLive: a refused request does nothing, an unknown company does not crash" do
+    test "a VIEWER's refused billing-link request registers no custom field (authorize first, then register); a member's does", ctx do
+      company = company!(ctx.org_id, "Link Co")
+      table = Samen.Catalog.table_name(Samen.WebTest.Crm.Company)
+      registered? = fn -> Enum.any?(Samen.CustomFields.list_fields(ctx.org_id, table, Samen.WebTest.Repo)) end
+      refute registered?.()
+
+      viewer = company_socket(ctx.viewer, ctx.org_id, company.id)
+      viewer = event(CompanyLive, "link_billing_customer", %{"billing_customer_id" => Ash.UUID.generate()}, viewer)
+      assert viewer.assigns.link_error == "Could not update the billing link."
+      refute registered?.(), "a refused viewer request still wrote the field registration"
+
+      member = company_socket(ctx.member, ctx.org_id, company.id)
+      event(CompanyLive, "link_billing_customer", %{"billing_customer_id" => Ash.UUID.generate()}, member)
+      assert registered?.()
+    end
+
+    test "edit_company / save_edit / delete_company for a company that is not found is a no-op, not a crash", ctx do
+      missing = Ash.UUID.generate()
+
+      for account <- [ctx.member, ctx.owner] do
+        socket = company_socket(account, ctx.org_id, missing)
+        assert socket.assigns.company == nil
+
+        socket = event(CompanyLive, "edit_company", %{}, socket)
+        assert socket.assigns.show_edit == false
+        socket = event(CompanyLive, "save_edit", %{"form" => %{"name" => "Nothing"}}, socket)
+        assert socket.assigns.company == nil
+        refute company_named(ctx.org_id, "Nothing")
+        event(CompanyLive, "delete_company", %{"id" => missing}, socket)
+      end
+
+      # control: the same event on a company that exists opens the form
+      company = company!(ctx.org_id, "Found Co")
+      found = event(CompanyLive, "edit_company", %{}, company_socket(ctx.member, ctx.org_id, company.id))
+      assert found.assigns.show_edit == true
+    end
+  end
+
+  describe "write controls follow the acting role" do
+    # What a page SHOWS follows what the person may DO: a viewer's render has no create / edit / delete / enroll control,
+    # a member's has them. (The kernel policy is what refuses; the controls only stop offering a button that will refuse.)
+    test "a viewer's render carries no write control on the Work and CRM pages; a member's does", ctx do
+      company = company!(ctx.org_id, "Controls Co")
+      task = task!(ctx.org_id, "Controls Task")
+      project!(ctx.org_id, "Controls Project")
+      sequence!(ctx.org_id, "Controls Drip")
+      logins = %{viewer: log_in(ctx.viewer), member: log_in(ctx.member)}
+
+      pages = [
+        {CompanyLive, "/crm/companies/:id", %{"id" => company.id}, ["edit-company", "delete-company"]},
+        {TasksLive, "/work", %{}, ["new-task", ~s(phx-click="delete")]},
+        {ProjectsLive, "/work/projects", %{}, ["new-project", ~s(phx-click="delete")]},
+        {SequencesLive, "/crm/sequences", %{}, ["sequences-enroll"]},
+        {TaskLive, "/work/tasks/:id", %{"id" => task.id}, ["status-form"]},
+        {Samen.Web.CRM.CompaniesLive, "/crm/companies", %{}, ["new-company"]},
+        {Samen.Web.CRM.ContactsLive, "/crm/contacts", %{}, ["new-contact"]}
+      ]
+
+      for {view, path, extra, controls} <- pages do
+        member_html = html(view, live_socket(logins.member, view, path, ctx.org_id, extra))
+        viewer_html = html(view, live_socket(logins.viewer, view, path, ctx.org_id, extra))
+
+        for control <- controls do
+          assert member_html =~ control, "#{inspect(view)}: the member's page has no #{control} (the control is vacuous)"
+          refute viewer_html =~ control, "#{inspect(view)}: the viewer's page offers #{control}"
+        end
+      end
+    end
+
+    test "writable?/2: plane AND role", ctx do
+      member = Samen.Web.TenantActor.system_scope(build_mount(:crm), ctx.org_id)
+      viewer = put_in(member.actor.role, :viewer)
+
+      assert Samen.Web.TenantActor.writable?(build_mount(:crm), member)
+      refute Samen.Web.TenantActor.writable?(build_mount(:crm), viewer)
+      refute Samen.Web.TenantActor.writable?(build_mount(:crm), nil)
+      refute Samen.Web.TenantActor.writable?(build_mount(:crm, plane: :operator, target_org_id: ctx.org_id), member)
+    end
+  end
+
   describe "Work writes" do
     test "a VIEWER cannot create or archive a task through the list; a member and an owner can", ctx do
       target = task!(ctx.org_id, "Existing Task")

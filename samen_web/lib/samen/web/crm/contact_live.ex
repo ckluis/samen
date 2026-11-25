@@ -39,7 +39,6 @@ defmodule Samen.Web.CRM.ContactLive do
     only: [
       assign_mount: 2,
       crm_sidebar: 1,
-      writable?: 1,
       full_name_field: 1,
       mail_timeline_entries: 1,
       merge_timeline: 2
@@ -56,6 +55,7 @@ defmodule Samen.Web.CRM.ContactLive do
   alias Samen.Web.Reads.Guard
   alias Samen.Web.TenantActor
   require TenantActor
+  import Samen.Web.TenantActor, only: [writable?: 2]
   import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @impl true
@@ -153,6 +153,11 @@ defmodule Samen.Web.CRM.ContactLive do
   end
 
   # -- A3 edit/delete (the write side of the PII detail surface) ---------------
+
+  # A contact that was not found has nothing to edit (the page rendered "not found"): a crafted event for it is a no-op,
+  # never a form built over `nil`.
+  def handle_event(event, _params, %{assigns: %{contact: nil}} = socket) when event in ["edit_contact", "validate_edit", "save_edit"],
+    do: {:noreply, socket}
 
   def handle_event("edit_contact", _params, socket) do
     %{contact: contact, acting_scope: scope} = socket.assigns
@@ -395,7 +400,7 @@ defmodule Samen.Web.CRM.ContactLive do
               Edit contact
             </.button>
             <.delete_confirm
-              :if={writable?(@samen_mount) and @contact != nil}
+              :if={writable?(@samen_mount, @acting_scope) and @contact != nil}
               id="delete-contact"
               message="Delete this contact? This cannot be undone."
               phx-click="delete_contact"

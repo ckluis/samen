@@ -18,7 +18,7 @@ defmodule Samen.Web.Work.TasksLive do
   use Phoenix.LiveView
 
   import Samen.UI
-  import Samen.Web.Work.Live, only: [assign_mount: 2, work_sidebar: 1, work_path: 1, writable?: 1]
+  import Samen.Web.Work.Live, only: [assign_mount: 2, work_sidebar: 1, work_path: 1]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
@@ -26,6 +26,7 @@ defmodule Samen.Web.Work.TasksLive do
   alias Samen.Web.Mount
   alias Samen.Web.TenantActor
   require TenantActor
+  import Samen.Web.TenantActor, only: [writable?: 2]
   import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   alias Samen.Web.Work.Reads
@@ -167,7 +168,7 @@ defmodule Samen.Web.Work.TasksLive do
 
         <.topbar title="Work" crumbs={crumbs(@samen_mount, @org_id, "Tasks")}>
           <:actions>
-            <.button :if={writable?(@samen_mount) and not @no_org} variant="primary" phx-click="new_task" id="new-task">
+            <.button :if={writable?(@samen_mount, @acting_scope) and not @no_org} variant="primary" phx-click="new_task" id="new-task">
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M12 3v18M3 12h18" />
@@ -210,7 +211,7 @@ defmodule Samen.Web.Work.TasksLive do
                 empty_icon="✓"
                 empty_body="Tasks land here with status, priority, and due date."
               >
-                <:empty_actions :if={writable?(@samen_mount)}>
+                <:empty_actions :if={writable?(@samen_mount, @acting_scope)}>
                   <.button variant="primary" phx-click="new_task" id="empty-new-task">New task</.button>
                 </:empty_actions>
                 <:head>
@@ -218,7 +219,7 @@ defmodule Samen.Web.Work.TasksLive do
                   <.sort_header field={:status} label="Status" sort={@list_state.sort} width="16%" />
                   <.sort_header field={:priority} label="Priority" sort={@list_state.sort} width="16%" />
                   <.sort_header field={:due_at} label="Due" sort={@list_state.sort} width="20%" />
-                  <th :if={writable?(@samen_mount)} scope="col" style="width:10%"><span class="sr-only">Actions</span></th>
+                  <th :if={writable?(@samen_mount, @acting_scope)} scope="col" style="width:10%"><span class="sr-only">Actions</span></th>
                 </:head>
                 <:row :let={task}>
                   <td class="wk-title">
@@ -235,7 +236,7 @@ defmodule Samen.Web.Work.TasksLive do
                   <td class="wk-due" style="font-size:12px;color:var(--muted)">
                     {due_cell(task)}
                   </td>
-                  <td :if={writable?(@samen_mount)} class="wk-actions">
+                  <td :if={writable?(@samen_mount, @acting_scope)} class="wk-actions">
                     <.delete_confirm phx-click="delete" phx-value-id={task.id} />
                   </td>
                 </:row>
@@ -243,7 +244,7 @@ defmodule Samen.Web.Work.TasksLive do
             </div>
           </div>
 
-          <.modal :if={@show_new and @new_form != nil and writable?(@samen_mount)} id="new-task-modal" title="New task" on_cancel="cancel_new">
+          <.modal :if={@show_new and @new_form != nil and writable?(@samen_mount, @acting_scope)} id="new-task-modal" title="New task" on_cancel="cancel_new">
             <.simple_form :let={f} for={@new_form} id="new-task-form" phx-change="validate_new" phx-submit="save_new">
               <.form_field field={f[:title]} label="Title" />
               <.form_field

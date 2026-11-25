@@ -99,6 +99,17 @@ defmodule Samen.Web.TenantActor do
   end
 
   @doc """
+  Whether a page offers its WRITE controls (the create / edit / delete / enroll buttons): the plane may write
+  (`Samen.Web.Live`'s `writable?/1`, an operator never authors into a tenant) AND the person acting holds at least the
+  `:member` role every tenant write of these surfaces needs. A viewer's page renders no write control, a refused page
+  (`nil` scope) none either. This is what the page SHOWS; what it ALLOWS is the kernel policy, which is unchanged.
+  """
+  @spec writable?(Mount.t() | nil, Samen.Scope.t() | nil) :: boolean()
+  def writable?(%Mount{plane: %{kind: :operator}}, _scope), do: false
+  def writable?(%Mount{}, %Samen.Scope{actor: %{role: role}}), do: Samen.Scope.Role.at_least?(role, :member)
+  def writable?(_mount, _scope), do: false
+
+  @doc """
   The principal reference for a request: pinned by `Samen.Web.TenantAuthz` as `:samen_principal_ref`
   on every tenant socket; a controller derives it from its session.
   """

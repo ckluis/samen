@@ -30,6 +30,7 @@ defmodule Samen.Web.Csv.ImportLive do
   alias Samen.Web.Mount
   alias Samen.Web.TenantActor
   require TenantActor
+  import Samen.Web.TenantActor, only: [writable?: 2]
   import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @upload_ref :csv_upload
@@ -165,7 +166,7 @@ defmodule Samen.Web.Csv.ImportLive do
                 <span class="lane">every row through the governed create — bad mappings are rejected whole-file</span>
               </div>
 
-              <%= if writable?(@samen_mount) do %>
+              <%= if writable?(@samen_mount, @acting_scope) do %>
                 <form id="csv-import-form" phx-submit="import" phx-change="validate">
                   <.live_file_input upload={@uploads.csv_upload} id="csv-import-input" />
 

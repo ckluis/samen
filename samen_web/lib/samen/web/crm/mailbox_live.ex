@@ -199,12 +199,6 @@ defmodule Samen.Web.CRM.MailboxLive do
     """
   end
 
-  # The connect affordance exists ONLY when a real provider is wired, so this handler
-  # is unreachable in the unconfigured state. It still ANSWERS honestly rather than
-  # silently doing nothing (T74 fix round, LOW-3): the OAuth/IMAP handshake needs
-  # host-held credentials and a host-owned redirect, which this framework surface does
-  # not and must not hold. It says exactly that instead of faking a spinner — the same
-  # honesty the unconfigured empty state uses.
   @impl true
   TenantActor.refuse_events()
 
@@ -212,6 +206,12 @@ defmodule Samen.Web.CRM.MailboxLive do
     {:noreply, load(socket, socket.assigns.org_id)}
   end
 
+  # The connect affordance exists ONLY when a real provider is wired, so this handler
+  # is unreachable in the unconfigured state. It still ANSWERS honestly rather than
+  # silently doing nothing (T74 fix round, LOW-3): the OAuth/IMAP handshake needs
+  # host-held credentials and a host-owned redirect, which this framework surface does
+  # not and must not hold. It says exactly that instead of faking a spinner — the same
+  # honesty the unconfigured empty state uses.
   def handle_event("connect", _params, socket) do
     {:noreply, assign(socket, connect_notice: connect_notice())}
   end

@@ -22,7 +22,7 @@ defmodule Samen.Web.CRM.CompaniesLive do
   use Phoenix.LiveView
 
   import Samen.UI
-  import Samen.Web.CRM.Live, only: [assign_mount: 2, crm_sidebar: 1, writable?: 1]
+  import Samen.Web.CRM.Live, only: [assign_mount: 2, crm_sidebar: 1]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
@@ -30,6 +30,7 @@ defmodule Samen.Web.CRM.CompaniesLive do
   alias Samen.Web.Mount
   alias Samen.Web.TenantActor
   require TenantActor
+  import Samen.Web.TenantActor, only: [writable?: 2]
   import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   alias Samen.Web.CRM.Reads
@@ -187,7 +188,7 @@ defmodule Samen.Web.CRM.CompaniesLive do
 
         <.topbar title="Companies" crumbs={crumbs(@samen_mount, @org_id, "Companies")}>
           <:actions>
-            <.button :if={writable?(@samen_mount) and not @no_org} variant="primary" phx-click="new_company" id="new-company">
+            <.button :if={writable?(@samen_mount, @acting_scope) and not @no_org} variant="primary" phx-click="new_company" id="new-company">
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M12 3v18M3 12h18" />
@@ -269,7 +270,7 @@ defmodule Samen.Web.CRM.CompaniesLive do
                 empty_icon="▣"
                 empty_body="Companies group your contacts, deals, and activity in one place."
               >
-                <:empty_actions :if={writable?(@samen_mount)}>
+                <:empty_actions :if={writable?(@samen_mount, @acting_scope)}>
                   <.button variant="primary" phx-click="new_company" id="empty-new-company">New company</.button>
                 </:empty_actions>
                 <:head>
@@ -278,7 +279,7 @@ defmodule Samen.Web.CRM.CompaniesLive do
                   <.sort_header field={:industry} label="Industry" sort={@list_state.sort} width="16%" />
                   <.sort_header field={:size} label="Size" sort={@list_state.sort} width="14%" />
                   <th scope="col" style="width:16%">Website</th>
-                  <th :if={writable?(@samen_mount)} scope="col" style="width:8%"><span class="sr-only">Actions</span></th>
+                  <th :if={writable?(@samen_mount, @acting_scope)} scope="col" style="width:8%"><span class="sr-only">Actions</span></th>
                 </:head>
                 <:row :let={c}>
                   <td class="c-name">
@@ -295,7 +296,7 @@ defmodule Samen.Web.CRM.CompaniesLive do
                   <td class="c-industry" style="color:var(--muted)">{c.industry || "—"}</td>
                   <td class="c-size" style="color:var(--muted)">{c.size || "—"}</td>
                   <td class="c-website" style="color:var(--muted);font-size:12px">{Map.get(c, :website) || "—"}</td>
-                  <td :if={writable?(@samen_mount)} class="c-actions">
+                  <td :if={writable?(@samen_mount, @acting_scope)} class="c-actions">
                     <.delete_confirm phx-click="delete" phx-value-id={c.id} />
                   </td>
                 </:row>
@@ -303,7 +304,7 @@ defmodule Samen.Web.CRM.CompaniesLive do
             </div>
           </div>
 
-          <.modal :if={@show_new and @new_form != nil and writable?(@samen_mount)} id="new-company-modal" title="New company" on_cancel="cancel_new">
+          <.modal :if={@show_new and @new_form != nil and writable?(@samen_mount, @acting_scope)} id="new-company-modal" title="New company" on_cancel="cancel_new">
             <.simple_form :let={f} for={@new_form} id="new-company-form" phx-change="validate_new" phx-submit="save_new">
               <.form_field field={f[:name]} label="Name" />
               <.form_field field={f[:industry]} label="Industry" />

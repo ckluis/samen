@@ -22,7 +22,7 @@ defmodule Samen.Web.CRM.CompanyLive do
 
   import Samen.UI
   import Samen.Web.CRM.Live,
-    only: [assign_mount: 2, crm_sidebar: 1, writable?: 1, mail_timeline_entries: 1, merge_timeline: 2]
+    only: [assign_mount: 2, crm_sidebar: 1, mail_timeline_entries: 1, merge_timeline: 2]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
@@ -34,6 +34,7 @@ defmodule Samen.Web.CRM.CompanyLive do
   alias Samen.Web.Reads.Guard
   alias Samen.Web.TenantActor
   require TenantActor
+  import Samen.Web.TenantActor, only: [writable?: 2]
   import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @impl true
@@ -128,6 +129,11 @@ defmodule Samen.Web.CRM.CompanyLive do
   end
 
   # -- A3 edit/delete (non-PII surface) -----------------------------------------
+
+  # A company that was not found has nothing to edit (the page rendered "not found"): a crafted event for it is a no-op,
+  # never a form built over `nil`.
+  def handle_event(event, _params, %{assigns: %{company: nil}} = socket) when event in ["edit_company", "validate_edit", "save_edit"],
+    do: {:noreply, socket}
 
   def handle_event("edit_company", _params, socket) do
     %{company: company, acting_scope: scope} = socket.assigns
@@ -376,11 +382,11 @@ defmodule Samen.Web.CRM.CompanyLive do
               </span>
               Back to companies
             </a>
-            <.button :if={writable?(@samen_mount) and @company != nil} phx-click="edit_company" id="edit-company">
+            <.button :if={writable?(@samen_mount, @acting_scope) and @company != nil} phx-click="edit_company" id="edit-company">
               Edit company
             </.button>
             <.delete_confirm
-              :if={writable?(@samen_mount) and @company != nil}
+              :if={writable?(@samen_mount, @acting_scope) and @company != nil}
               id="delete-company"
               message="Delete this company? This cannot be undone."
               phx-click="delete_company"
@@ -471,7 +477,7 @@ defmodule Samen.Web.CRM.CompanyLive do
                 {@link_error}
               </div>
               <form
-                :if={writable?(@samen_mount)}
+                :if={writable?(@samen_mount, @acting_scope)}
                 id="link-billing-customer-form"
                 phx-submit="link_billing_customer"
                 style="margin-top:6px;display:flex;gap:6px;align-items:center"
@@ -644,7 +650,7 @@ defmodule Samen.Web.CRM.CompanyLive do
                 </div>
             <% end %>
 
-            <.modal :if={@show_edit and @edit_form != nil and writable?(@samen_mount)} id="edit-company-modal" title="Edit company" on_cancel="cancel_edit">
+            <.modal :if={@show_edit and @edit_form != nil and writable?(@samen_mount, @acting_scope)} id="edit-company-modal" title="Edit company" on_cancel="cancel_edit">
               <.simple_form :let={f} for={@edit_form} id="edit-company-form" phx-change="validate_edit" phx-submit="save_edit">
                 <.form_field field={f[:name]} label="Name" />
                 <.form_field field={f[:industry]} label="Industry" />

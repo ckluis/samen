@@ -15,13 +15,14 @@ defmodule Samen.Web.Work.TaskLive do
   use Phoenix.LiveView
 
   import Samen.UI
-  import Samen.Web.Work.Live, only: [assign_mount: 2, work_sidebar: 1, work_path: 1, writable?: 1]
+  import Samen.Web.Work.Live, only: [assign_mount: 2, work_sidebar: 1, work_path: 1]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Work.Reads
   alias Samen.Web.TenantActor
   require TenantActor
+  import Samen.Web.TenantActor, only: [writable?: 2]
   import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @impl true
@@ -169,7 +170,7 @@ defmodule Samen.Web.Work.TaskLive do
                   </div>
                   <div>
                     <span style="font-size:11px;color:var(--muted);display:block">Status</span>
-                    <%= if writable?(@samen_mount) do %>
+                    <%= if writable?(@samen_mount, @acting_scope) do %>
                       <form phx-change="update_status" id="status-form">
                         <select name="status">
                           <option :for={s <- Reads.task_statuses()} value={s} selected={s == @task.status}>

@@ -43,7 +43,7 @@ defmodule Samen.Web.CRM.SequencesLive do
   use Phoenix.LiveView
 
   import Samen.UI
-  import Samen.Web.CRM.Live, only: [assign_mount: 2, crm_sidebar: 1, writable?: 1]
+  import Samen.Web.CRM.Live, only: [assign_mount: 2, crm_sidebar: 1]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CRM.SequencesReads, as: Reads
@@ -51,6 +51,7 @@ defmodule Samen.Web.CRM.SequencesLive do
   alias Samen.Web.Reads.Guard
   alias Samen.Web.TenantActor
   require TenantActor
+  import Samen.Web.TenantActor, only: [writable?: 2]
   import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @impl true
@@ -263,7 +264,7 @@ defmodule Samen.Web.CRM.SequencesLive do
               </div>
 
               <%!-- Enroll flow — tenant plane only (writable?). Uses the EXISTING :enroll action. --%>
-              <div :if={writable?(@samen_mount)} id="sequences-enroll">
+              <div :if={writable?(@samen_mount, @acting_scope)} id="sequences-enroll">
                 <%= cond do %>
                 <% :sequences in @read_errors -> %>
                   <%!-- the sequences list below shows the error; no "create one first" advice here --%>
