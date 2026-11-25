@@ -1273,7 +1273,9 @@ defmodule Driftwood.Seeds do
 
   defp do_seed_notifications(org_id, spec) do
     person = first_person(org_id)
-    recipient_id = Ash.UUID.generate()
+    # System events are addressed to the ORGANISATION (as the engine's own sources do): every member of
+    # the org sees them in the inbox; a user-addressed row is the recipient's alone.
+    recipient_id = org_id
     base = 4400 + rem(name_offset(org_id), 500)
 
     engine_opts = [
