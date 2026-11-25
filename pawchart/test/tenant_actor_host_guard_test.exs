@@ -7,8 +7,9 @@ defmodule PawChart.TenantActorHostGuardTest do
     * `pawchart_web/clinic_live.ex` calls `Mount.scope/2` twice (the clinic landing page: load and event).
     * `pawchart_web/clinic_reads.ex` builds the clinic actor by hand (`id: "clinic:<org>"`, a literal `role: :member`).
 
-  The clinic landing page is not converted yet; the other callers in this app (seeds, the clinic domain) are system
-  contexts and are not spelled in a form the detectors match.
+  The clinic landing page is not converted yet. The other hand-spelled roles are SYSTEM contexts (seeds: org-level
+  actors and membership rows), listed by file and count so a new one is a visible edit. An id-less
+  `%{org_id: o, role: :admin}` counts.
   """
   use ExUnit.Case, async: true
 
@@ -17,7 +18,11 @@ defmodule PawChart.TenantActorHostGuardTest do
   @root Path.expand("../lib", __DIR__)
 
   @implicit %{"pawchart_web/clinic_live.ex" => 2}
-  @literal_actors %{"pawchart_web/clinic_reads.ex" => 1}
+  @literal_actors %{
+    "pawchart_web/clinic_reads.ex" => 1,
+    "pawchart/seeds.ex" => 8,
+    "pawchart/operator_seeds.ex" => 11
+  }
 
   test "the implicit fixed-role scope calls are exactly the listed request-path sites, and there is no escape hatch" do
     assert Guard.scan(@root) == @implicit,

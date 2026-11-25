@@ -12,15 +12,19 @@ defmodule Samen.Web.TenantActor.Guard do
     * `implicit_calls/1` - the fixed-role scope calls: `Mount.scope(` / `Plane.scope(` under any alias
       (`alias Samen.Web.Mount, as: M`), the `&Mount.scope/2` capture, `apply(Mount, :scope, ...)` and an
       `import` of either module that does not exclude `scope`.
-    * `literal_actors/1` - a literal tenant actor map (`id:`, `org_id:` and a literal `role: :atom` in one map):
-      the same fixed role, spelled by hand.
+    * `literal_actors/1` - a literal role, spelled by hand: a map with `org_id:` and a literal `role: :atom` (an
+      id-less `%{org_id: o, role: :admin}` is all `OrgScope` and `RoleAtLeast` need, so `id:` is not required; a
+      nested map is found on its own), a map update `%{actor | role: :admin}`, `Map.put(actor, :role, :admin)` and
+      `Map.merge(actor, %{role: :admin})`.
     * `escape_hatches/1` - the named ways to ask for a role without resolving one: `system_scope(`,
-      `TenantRole.admin_scope(` and `Reads.user_scope(` called WITHOUT a role (fewer than four arguments).
+      `TenantRole.admin_scope(` and `Reads.user_scope(` called WITHOUT a role (fewer than four arguments, or a
+      literal `nil` role, which falls back to `:member`).
   """
 
   @call ~r/\b(?:Mount|Plane)\.scope\(/
   @capture ~r/&\s*(?:[A-Z][A-Za-z0-9_]*\.)*(?:Mount|Plane)\.scope\/\d/
   @apply ~r/\bapply\(\s*(?:[A-Z][A-Za-z0-9_]*\.)*(?:Mount|Plane)\s*,\s*:scope\b/
+  # `\s` spans newlines: the pattern is run over the whole source, so `alias ...Mount,\n  as: M` is seen too.
   @alias_as ~r/\balias\s+(?:[A-Z][A-Za-z0-9_]*\.)*(?:Mount|Plane)\s*,\s*as:\s*([A-Z][A-Za-z0-9_]*)/
   @import ~r/^\s*import\s+(?:[A-Z][A-Za-z0-9_]*\.)*(?:Mount|Plane)\b(.*)$/
 
@@ -28,7 +32,7 @@ defmodule Samen.Web.TenantActor.Guard do
   @spec implicit_calls(String.t()) :: non_neg_integer()
   def implicit_calls(source) when is_binary(source) do
     lines = code_lines(source)
-    aliases = for line <- lines, [_, name] <- Regex.scan(@alias_as, line), do: name
+    aliases = for [_, name] <- Regex.scan(@alias_as, Enum.join(lines, "\n")), do: name
     alias_res = for name <- Enum.uniq(aliases), do: Regex.compile!("\\b#{name}\\.scope\\(|&\\s*#{name}\\.scope\\/\\d")
 
     lines
@@ -48,28 +52,61 @@ defmodule Samen.Web.TenantActor.Guard do
     end
   end
 
+  # `scope:` as a keyword KEY (`scope_kind: 1` is another function and says nothing about `scope`).
+  @scope_key ~r/\bscope:/
+
   defp import_excludes_scope?(rest) do
+    named? = Regex.match?(@scope_key, rest)
+
     cond do
-      String.contains?(rest, "only:") -> not String.contains?(rest, "scope")
-      String.contains?(rest, "except:") -> String.contains?(rest, "scope")
+      String.contains?(rest, "only:") -> not named?
+      String.contains?(rest, "except:") -> named?
       true -> false
     end
   end
 
-  @actor_map ~r/%\{[^%{}]*\}/s
-
-  @doc "How many literal tenant actor maps (`id:`, `org_id:` and a literal `role: :atom` in one map) `source` builds."
+  @doc """
+  How many hand-spelled roles `source` has: a map literal with `org_id:` and a literal `role: :atom` (its own top
+  level, so a nested map counts on its own and an outer map is not hidden by an inner one), a map update
+  `%{x | role: :atom}`, `Map.put(x, :role, :atom)` and `Map.merge(x, %{role: :atom})`.
+  """
   @spec literal_actors(String.t()) :: non_neg_integer()
   def literal_actors(source) when is_binary(source) do
-    source
-    |> code_lines()
-    |> Enum.join("\n")
-    |> String.replace(~r/#\{[^{}]*\}/, "X")
-    |> then(&Regex.scan(@actor_map, &1))
-    |> Enum.count(fn [map] ->
-      Regex.match?(~r/\bid:/, map) and Regex.match?(~r/\borg_id:/, map) and Regex.match?(~r/\brole:\s*:[a-z_]+/, map)
-    end)
+    # Comments and heredoc text (a `@moduledoc` that SHOWS `Map.put(actor, :role, :admin)`) are not code.
+    code =
+      source
+      |> String.replace(~r/"""[\s\S]*?"""/, "")
+      |> code_lines_of()
+      |> Enum.join("\n")
+      |> String.replace(~r/#\{[^{}]*\}/, "X")
+
+    maps = Enum.count(map_bodies(code), &literal_role_map?/1)
+    puts = count(~r/\bMap\.put\(\s*[^,()]+,\s*:role\s*,\s*:[a-z_]+/, code)
+    merges = count(~r/\bMap\.merge\([^()]*%\{[^{}]*\brole:\s*:[a-z_]+/, code)
+    maps + puts + merges
   end
+
+  @role_literal ~r/\brole:\s*:[a-z_]+/
+
+  # `%{org_id: o, role: :atom}` (an actor) or `%{actor | role: :atom}` (an update of one).
+  defp literal_role_map?(body) do
+    Regex.match?(@role_literal, body) and (Regex.match?(~r/\borg_id:/, body) or String.contains?(body, "|"))
+  end
+
+  # The top-level text of every `%{...}` literal in `code`: nested brackets are removed, and each nested map is its
+  # own entry (found from its own `%{`), so neither shape hides the other.
+  defp map_bodies(code) do
+    for [{start, len}] <- Regex.scan(~r/%\{/, code, return: :index) do
+      code |> binary_part(start + len, byte_size(code) - start - len) |> top_level(0, [])
+    end
+  end
+
+  defp top_level(<<>>, _depth, acc), do: acc |> Enum.reverse() |> IO.iodata_to_binary()
+  defp top_level(<<"}", _::binary>>, 0, acc), do: acc |> Enum.reverse() |> IO.iodata_to_binary()
+  defp top_level(<<c, rest::binary>>, depth, acc) when c in [?{, ?(, ?[], do: top_level(rest, depth + 1, acc)
+  defp top_level(<<c, rest::binary>>, depth, acc) when c in [?}, ?), ?]], do: top_level(rest, depth - 1, acc)
+  defp top_level(<<c, rest::binary>>, 0, acc), do: top_level(rest, 0, [<<c>> | acc])
+  defp top_level(<<_, rest::binary>>, depth, acc), do: top_level(rest, depth, acc)
 
   @doc """
   How many escape-hatch calls `source` makes: `system_scope(`, `admin_scope(` and `user_scope(` with fewer than four
@@ -81,30 +118,32 @@ defmodule Samen.Web.TenantActor.Guard do
 
     system = count(~r/\bsystem_scope\(/, code)
     admin = count(~r/\badmin_scope\(/, code)
-    user = code |> calls("user_scope") |> Enum.count(&(&1 < 4))
+    user = code |> calls("user_scope") |> Enum.count(&role_less?/1)
     system + admin + user
   end
 
-  # The argument count of every `name(...)` call in `code` (top-level commas of the balanced parentheses).
+  # A `user_scope` call names no role when it has fewer than four arguments, or its fourth is a literal `nil`.
+  defp role_less?(args), do: length(args) < 4 or args |> Enum.at(3) |> String.trim() == "nil"
+
+  # The arguments (source text, split at the top-level commas of the balanced parentheses) of every `name(...)` call.
   defp calls(code, name) do
     for [{start, len}] <- Regex.scan(Regex.compile!("\\b" <> name <> "\\("), code, return: :index),
-        do: code |> binary_part(start + len, byte_size(code) - start - len) |> arg_count()
+        do: code |> binary_part(start + len, byte_size(code) - start - len) |> split_args(0, "", [])
   end
 
-  defp arg_count(rest), do: scan_args(rest, 0, 0, false)
+  defp split_args(<<>>, _depth, cur, acc), do: finish_args(cur, acc)
+  defp split_args(<<")", _::binary>>, 0, cur, acc), do: finish_args(cur, acc)
+  defp split_args(<<c, rest::binary>>, depth, cur, acc) when c in [?(, ?[, ?{], do: split_args(rest, depth + 1, cur <> <<c>>, acc)
+  defp split_args(<<c, rest::binary>>, depth, cur, acc) when c in [?), ?], ?}], do: split_args(rest, depth - 1, cur <> <<c>>, acc)
+  defp split_args(<<",", rest::binary>>, 0, cur, acc), do: split_args(rest, 0, "", [cur | acc])
+  defp split_args(<<c, rest::binary>>, depth, cur, acc), do: split_args(rest, depth, cur <> <<c>>, acc)
 
-  defp scan_args(<<>>, _depth, commas, any?), do: total(commas, any?)
-  defp scan_args(<<")", _::binary>>, 0, commas, any?), do: total(commas, any?)
-  defp scan_args(<<c, rest::binary>>, depth, commas, _any?) when c in [?(, ?[, ?{], do: scan_args(rest, depth + 1, commas, true)
-  defp scan_args(<<c, rest::binary>>, depth, commas, any?) when c in [?), ?], ?}], do: scan_args(rest, depth - 1, commas, any?)
-  defp scan_args(<<",", rest::binary>>, 0, commas, _any?), do: scan_args(rest, 0, commas + 1, true)
-  defp scan_args(<<c, rest::binary>>, depth, commas, any?), do: scan_args(rest, depth, commas, any? or c not in [?\s, ?\n, ?\t])
-
-  defp total(commas, any?), do: if(any?, do: commas + 1, else: 0)
+  defp finish_args(cur, acc), do: if(String.trim(cur) == "" and acc == [], do: [], else: Enum.reverse([cur | acc]))
 
   defp count(re, text), do: length(Regex.scan(re, text))
 
-  defp code_lines(source), do: source |> String.split("\n") |> Enum.reject(&String.match?(&1, ~r/^\s*#/))
+  defp code_lines(source), do: code_lines_of(source)
+  defp code_lines_of(source), do: source |> String.split("\n") |> Enum.reject(&String.match?(&1, ~r/^\s*#/))
 
   @doc "`%{relative_path => count}` for every `.ex` under `root` where `fun` (a `source -> count` detector) finds at least one."
   @spec scan(String.t(), (String.t() -> non_neg_integer())) :: %{String.t() => pos_integer()}

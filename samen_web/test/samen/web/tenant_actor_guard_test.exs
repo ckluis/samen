@@ -86,10 +86,13 @@ defmodule Samen.Web.TenantActorGuardTest do
 
   @exempt ~w(samen/web/mount.ex samen/web/tenant_actor.ex samen/web/tenant_actor/guard.ex)
 
-  # Literal tenant actor maps (`id:`, `org_id:`, a literal `role:`) in samen_web/lib. `plane.ex` is the definition.
+  # Hand-spelled roles (a map with `org_id:` and a literal `role:`, an id-less one included; a `%{actor | role: :x}`
+  # update; `Map.put(actor, :role, :x)`) in samen_web/lib. `plane.ex` is the definition.
+  #   chat.ex           NOT an actor: the creator's thread-participant ROW (`role: :owner` is the participant's data)
   #   chat/identity.ex  the disclosure actor: reads the org's own PII in the clear for the tenant-as-owner rule
   #   saved_views.ex    `owner_scope/2`: the saved-view owner's scope (OwnerOnly + OrgScope), role :member by design
   @literal_actor_allowlist %{
+    "samen/web/chat.ex" => 1,
     "samen/web/chat/identity.ex" => 1,
     "samen/web/saved_views.ex" => 1
   }
@@ -138,7 +141,7 @@ defmodule Samen.Web.TenantActorGuardTest do
 
   test "no file gains a literal tenant actor map, and the allowlist is exact" do
     assert found_literal_actors() == @literal_actor_allowlist,
-           "a literal `%{id:, org_id:, role: :atom}` in samen_web/lib acts with a role nobody resolved: derive it with " <>
+           "a literal role (`%{org_id:, role: :atom}`, `%{actor | role: :atom}`, `Map.put(actor, :role, :atom)`) in samen_web/lib acts with a role nobody resolved: derive it with " <>
              "`Samen.Web.TenantActor.scope/3`, or add the file here WITH its reason"
   end
 
@@ -199,8 +202,50 @@ defmodule Samen.Web.TenantActorGuardTest do
       assert Guard.literal_actors("a = %{\n  id: u,\n  org_id: o,\n  role: :admin\n}") == 1
       assert Guard.literal_actors("Samen.Scope.new(%{id: user_id, org_id: org_id, role: :member})") == 1
       assert Guard.literal_actors("a = %{id: u, org_id: o, role: role}") == 0
-      assert Guard.literal_actors("a = %{thread_id: t, org_id: o, role: :owner, principal_id: p}") == 0
+      # a participant ROW has the same shape as an actor: counted, and allowlisted by file where it is data
+      assert Guard.literal_actors("a = %{thread_id: t, org_id: o, role: :owner, principal_id: p}") == 1
       assert Guard.literal_actors("# a = %{id: u, org_id: o, role: :member}") == 0
+    end
+
+    test "an id-less actor, a nested one, a role update and Map.put/merge of a literal role are counted" do
+      # id-less: all OrgScope and RoleAtLeast need
+      assert Guard.literal_actors("a = %{org_id: o, role: :admin}") == 1
+      assert Guard.literal_actors("s = %Samen.Scope{actor: %{org_id: org_id, role: :admin}}") == 1
+      # a nested map: the outer map and the inner one are each judged on their own top level
+      assert Guard.literal_actors("a = %{org_id: o, meta: %{x: 1}, role: :admin}") == 1
+      assert Guard.literal_actors("a = %{meta: %{org_id: o, role: :admin}, x: 1}") == 1
+      assert Guard.literal_actors("a = %{org_id: o, role: :admin, extra: [%{a: 1}, %{b: {1, 2}}]}") == 1
+      # an update of an actor's role, and the Map functions
+      assert Guard.literal_actors("a = %{actor | role: :admin}") == 1
+      assert Guard.literal_actors("a = %{actor | org_id: o, role: :owner}") == 1
+      assert Guard.literal_actors("a = Map.put(actor, :role, :admin)") == 1
+      assert Guard.literal_actors("a = Map.merge(actor, %{role: :admin})") == 1
+      # look-alikes: a resolved role, an update of something else, doc text and a map with no org
+      assert Guard.literal_actors("a = %{actor | role: role}") == 0
+      assert Guard.literal_actors("a = %{actor | name: :x}") == 0
+      assert Guard.literal_actors("a = Map.put(actor, :role, role)") == 0
+      assert Guard.literal_actors("a = %{role: :admin}") == 0
+      assert Guard.literal_actors("@moduledoc \"\"\"\n  Map.put(actor, :role, :admin)\n  \"\"\"\n") == 0
+    end
+
+    test "user_scope with a literal nil role is an escape hatch; a real role and a variable are not" do
+      assert Guard.escape_hatches("Reads.user_scope(mount, org_id, user_id, nil)") == 1
+      assert Guard.escape_hatches("Reads.user_scope(mount, org_id, user_id, nil )") == 1
+      assert Guard.escape_hatches("Reads.user_scope(mount, org_id, user_id, role)") == 0
+      assert Guard.escape_hatches("Reads.user_scope(mount, org_id, user_id, :member)") == 0
+      assert Guard.escape_hatches("Reads.user_scope(\n  mount,\n  org_id,\n  user_id,\n  nil\n)") == 1
+      assert Guard.escape_hatches("Reads.user_scope(mount, org_id, user_id, fetch(a, nil))") == 0
+    end
+
+    test "an import that excludes another function named like scope still imports scope; a multi-line alias is seen" do
+      # `scope_kind: 1` is not `scope: 2`
+      assert Guard.implicit_calls("import Samen.Web.Mount, except: [scope_kind: 1]") == 1
+      assert Guard.implicit_calls("import Samen.Web.Mount, except: [scope: 2, scope_kind: 1]") == 0
+      assert Guard.implicit_calls("import Samen.Web.Mount, only: [scope_kind: 1]") == 0
+      assert Guard.implicit_calls("import Samen.Web.Mount, only: [scope: 2, scope_kind: 1]") == 1
+      # `alias ..., as:` split over lines
+      assert Guard.implicit_calls("alias Samen.Web.Mount,\n  as: M\nx = M.scope(m, o)\n") == 1
+      assert Guard.implicit_calls("alias Samen.Web.Plane,\n    as: P\nP.scope(p, o)\nf = &P.scope/2\n") == 2
     end
 
     test "an escape hatch is counted: system_scope, admin_scope and user_scope WITHOUT a role" do
