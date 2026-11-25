@@ -43,7 +43,7 @@ defmodule Samen.Web.TenantActor do
   def system_scope(%Mount{plane: plane}, org_id), do: Plane.scope(plane, org_id)
 
   @doc "The acting scope for `ref` (a `Settings.Reads.principal_ref/3`) in `org_id`. See the moduledoc."
-  @spec scope(Mount.t(), String.t() | nil, Reads.principal_ref() | nil) :: result()
+  @spec scope(Mount.t() | nil, String.t() | nil, Reads.principal_ref() | nil) :: result()
   def scope(%Mount{plane: %{kind: :operator}} = mount, org_id, _ref), do: {:ok, system_scope(mount, org_id)}
   def scope(nil, _org_id, _ref), do: :denied
   def scope(_mount, nil, _ref), do: :denied
