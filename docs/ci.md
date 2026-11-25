@@ -93,7 +93,10 @@ patches. **A resume never discards finished work:** the partition of a (step, se
 `_ci/partition/`; a finished chunk (a PASS in this run's state, or a cached PASS) stays exactly as planned — found
 by its key, so a changed slot number (`[3/13]` → `[3/15]`) does not void it — and only the unfinished stretches
 between finished chunks are re-planned at the current rate. Modulo shards (`mutation_*`) keep finished classes and
-split only a class that outgrew `shard_target_s` (x % M == r-1 is the union of x % kM == r-1+jM). Each sub-step
+split only a class that outgrew `shard_target_s` (x % M == r-1 is the union of x % kM == r-1+jM) into at most as many
+sub-classes as it has mutants, and a fresh plan never has more classes than mutants: a class holding no mutant is never a step
+(`mutate.sh --shard r/m` rightly fails "selection is empty"; one in a stored partition is dropped, and an Actions `--slice`
+past the last mutant is an "empty slice" PASS). Each sub-step
 still reports exactly its chunk, no re-planned chunk outgrows the target (G10), and the chunks still sum to the
 lister's count. `--no-cache` ignores cached PASSes (so nothing counts as finished unless this run did it).
 Cost model (`ranges` steps with `shard_cost`): chunk wall-clock ≈ margin × (overhead + share × lane-seconds),

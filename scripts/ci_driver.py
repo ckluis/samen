@@ -782,6 +782,11 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
             # classes keep their key, the classes still partition the selection exactly
             classes = []
             for m_, r_ in stored["classes"]:
+                if size_of(m_, r_) == 0:
+                    # a class that holds no mutant (a partition stored by a driver that split a small class into more
+                    # sub-classes than it has members) is no step: `mutate.sh --shard r/m` refuses an empty selection,
+                    # and the remaining classes still partition the selection exactly (the sum check below)
+                    continue
                 probe = clone_step(step, step.id + "#probe")
                 probe.shard_args = "--shard %d/%d" % (r_, m_)
                 probe.shard_items = ["%d mutants of %d" % (size_of(m_, r_), count)]
@@ -790,20 +795,24 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
                 if done(probe) or est <= step.shard_target:
                     classes.append((m_, r_))
                 else:
-                    k = int(math.ceil(est / step.shard_target))
+                    # never more sub-classes than the class has members: its members are x = r-1 + t*m, t < size, and
+                    # sub-class j takes t % k == j, so k <= size leaves every sub-class non-empty
+                    k = min(int(math.ceil(est / step.shard_target)), size_of(m_, r_))
                     classes.extend((m_ * k, r_ + j * m_) for j in range(k))
         else:
-            n = max(1, int(math.ceil(count * each / step.shard_target))) if count else 0
+            n = min(count, max(1, int(math.ceil(count * each / step.shard_target)))) if count else 0  # never a class past the last mutant
             classes = [(n, i) for i in range(1, n + 1)]
         specs = [("--shard %d/%d" % (r_, m_), ["%d mutants of %d" % (size_of(m_, r_), count)], size_of(m_, r_))
                  for m_, r_ in classes]
+        if not slice_ and any(sp[2] == 0 for sp in specs):
+            raise UsageError("shard accounting: %s planned a shard that holds no mutant" % step.id)
         if sum(sp[2] for sp in specs) != count:
             raise UsageError("shard accounting: %s shards hold %d of %d mutants" % (step.id, sum(sp[2] for sp in specs), count))
         if persist:
             save_partition(step.id, sel, {"kind": "modulo", "count": count, "classes": [list(c) for c in classes]})
     if slice_:
         i, n = slice_
-        if i <= len(specs):
+        if i <= len(specs) and (len(specs[i - 1]) < 3 or specs[i - 1][2] > 0):
             specs = [specs[i - 1]]
         else:  # fewer chunks than slices (a tiny selection): this slice is genuinely empty
             s = clone_step(step, "%s[%d/%d]" % (step.id, i, n))

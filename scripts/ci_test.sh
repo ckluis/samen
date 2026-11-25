@@ -1697,6 +1697,66 @@ d = json.load(open(sys.argv[1])); d["sel"] = "0" * 64; json.dump(d, open(sys.arg
 PY
   drive "$T/rcm4" pr --plan --no-cache
   eq "$(grep -c '^PLAN mut\[' "$T/rcm4")" 2 "RECHUNK: modulo — a partition stored for a DIFFERENT selection is ignored (fresh plan: 2 classes)"
+
+  # a class split into more sub-classes than it has members used to emit EMPTY sub-classes that ran as real steps (a
+  # 28-mutant selection became mutation_changed[7/48] = `--shard 51/96`: "selection is empty", 0 mutants, FAIL)
+  mkrepo rcz
+  { echo "$APPS"
+    cat <<'CONF'
+[step mut]
+cmd = a=${CI_SHARD_ARGS#--shard }; r=${a%/*}; m=${a#*/}; k=0; x=0
+      while [ $x -lt ${CI_TEST_N:-5} ]; do [ $((x % m)) -eq $((r-1)) ] && { k=$((k+1)); echo "$x" >> "$CI_TEST_COVER"; }; x=$((x+1)); done
+      echo "$CI_SHARD_ARGS" >> "$CI_TEST_RUNS"
+      [ "$k" -eq 0 ] && { echo "MUTATION GATE: FAILED - selection is empty (0 mutants) for filter [shard=$r/$m]"; exit 1; }
+      echo "  mutants run : $k"
+shard_list = printf "SELECTED 5\n"
+shard_kind = modulo
+shard_total = ^SELECTED ([0-9]+)$
+shard_each_s = 4
+shard_target_s = 8
+shard_check = ^  mutants run +: ([0-9]+)
+modes = pr
+inputs = core/
+est_s = 3
+CONF
+  } > "$SAMEN_CI_MANIFEST"
+  export CI_TEST_COVER="$T/rcz.cover"; : > "$CI_TEST_COVER"; : > "$CI_TEST_RUNS"
+  drive "$T/rcz1" pr --budget 1 -j 1 --no-cache
+  has "$T/rcz1" '^PASS mut\[1/3\] ' "RECHUNK: empty class — 5 mutants at 4 s, target 8 s = 3 classes (sizes 2, 2, 1)"
+  python3 - "$SAMEN_CI_HOME/timings.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["mut#per_item"] = 40.0; json.dump(d, open(sys.argv[1], "w"))
+PY
+  drive "$T/rcz2" resume --budget 0 -j 1
+  eq "$RC" 0 "RECHUNK: empty class — resume completes after the rate rose to 40 s/mutant (a 2-mutant class asks for 10 sub-classes)"
+  hasnt "$T/rcz2" 'selection is empty' "RECHUNK: empty class — no sub-class with 0 mutants was run"
+  eq "$(sort -n "$CI_TEST_COVER" | tr '\n' ' ')" "0 1 2 3 4 " "RECHUNK: empty class — every mutant ran exactly once"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'min(s["expected"] for s in d["steps"])')" 1 "RECHUNK: empty class — every planned step holds at least one mutant"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'sum(s["processed"] for s in d["steps"])')" 5 "RECHUNK: empty class — PROCESSED sums to the selection (5)"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'len(d["steps"])')" 4 "RECHUNK: empty class — 1 kept class + 2 members split apart + the single-mutant class"
+  # a partition stored by the old driver already holds an empty class: it is dropped, never planned (and the sum still holds)
+  python3 - "$SAMEN_CI_HOME/partition/mut.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["classes"].append([30, 27]); json.dump(d, open(sys.argv[1], "w"))
+PY
+  drive "$T/rcz3" pr --plan --no-cache
+  eq "$(grep -c '^PLAN mut\[' "$T/rcz3")" 4 "RECHUNK: empty class — an empty class in a stored partition is dropped (positive control: 4 real classes remain)"
+  # a first plan never asks for more classes than mutants (2 mutants at 100 s, target 8 s: ceil(200/8) = 25 classes)
+  export CI_TEST_N=2; sed -i.bak -e 's/SELECTED 5/SELECTED 2/' -e 's/shard_each_s = 4/shard_each_s = 100/' "$SAMEN_CI_MANIFEST"
+  drive "$T/rcz4" pr --plan --no-cache
+  eq "$(grep -c '^PLAN mut\[' "$T/rcz4")" 2 "RECHUNK: empty class — a fresh plan never has more classes than mutants (2, not 25)"
+  # an Actions slice past the last mutant is an empty slice (PASS), not a run of `--shard 5/6` that finds nothing
+  export CI_TEST_N=3; sed -i.bak -e 's/SELECTED 2/SELECTED 3/' "$SAMEN_CI_MANIFEST"
+  drive "$T/rcz5" pr --slice 5/6 --no-cache -j 1
+  eq "$RC" 0 "RECHUNK: empty class — slice 5/6 of a 3-mutant selection passes"
+  has "$T/rcz5" 'empty slice 5/6' "RECHUNK: empty class — ... as an empty slice"
+  drive "$T/rcz6" pr --slice 2/6 --no-cache -j 1
+  has "$T/rcz6" '^PASS mut\[2/6\] ' "RECHUNK: empty class — positive control: slice 2/6 holds a mutant and runs"
+  # nothing selected at all keeps passing as "nothing selected"
+  export CI_TEST_N=0; sed -i.bak -e 's/SELECTED 3/SELECTED 0/' "$SAMEN_CI_MANIFEST"
+  drive "$T/rcz7" pr --no-cache -j 1
+  has "$T/rcz7" 'nothing selected' "RECHUNK: empty class — a selection of 0 mutants still passes as nothing selected"
+  unset CI_TEST_N
 }
 
 # COSTW (ADR-053 P5): chunks of a `shard_cost` step are weighted by what each item last cost, so one 40 s item no
