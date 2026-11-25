@@ -153,4 +153,199 @@ defmodule Samen.OrgIdPinnedGuardCoreTest do
     assert %{valid?: false} = Ash.Changeset.for_update(record, :update, %{org_id: other}, actor: actor)
     assert %{valid?: true} = Ash.Changeset.for_update(record, :update, %{org_id: other}, actor: actor, authorize?: false)
   end
+
+  # --- the watch is derived, not optional ------------------------------------------------------------------
+
+  defmodule PgBuildsQuery do
+    use Ash.Resource, domain: Samen.OrgIdPinnedGuardCoreTest.PgDom, data_layer: AshPostgres.DataLayer
+
+    postgres do
+      table "zzz_org_pin_walk_never_created"
+      repo SamenCore.TestRepo
+    end
+
+    attributes do
+      uuid_primary_key(:id)
+      attribute(:org_id, :uuid, public?: true, writable?: true)
+    end
+
+    changes do
+      change({Samen.Policy.OrgIdPinned, []}, on: [:create, :update])
+
+      change(
+        fn changeset, _ctx ->
+          case SamenCore.TestRepo.query("SELECT 1") do
+            {:ok, _} -> changeset
+            {:error, _} -> Ash.Changeset.add_error(changeset, field: :id, message: "not found")
+          end
+        end,
+        on: [:create]
+      )
+    end
+
+    actions do
+      defaults([:read, create: :*, update: :*])
+    end
+  end
+
+  defmodule PgDom do
+    use Ash.Domain, validate_config_inclusion?: false
+
+    resources do
+      resource(Samen.OrgIdPinnedGuardCoreTest.PgBuildsQuery)
+    end
+  end
+
+  test "the watched repos are derived from the resources: a Postgres build that queries is caught WITHOUT repos:" do
+    report = Samen.OrgIdPinnedGuard.walk([PgDom])
+
+    assert SamenCore.TestRepo in report.watched_repos
+    assert [{PgBuildsQuery, :create, why}] = report.unexercisable
+    assert why =~ "queried the database"
+  end
+
+  defmodule NoRepoPg do
+    use Ash.Resource, domain: Samen.OrgIdPinnedGuardCoreTest.NoRepoDom, data_layer: AshPostgres.DataLayer
+
+    postgres do
+      table "zzz_org_pin_walk_no_repo"
+      repo(fn _resource, _type -> nil end)
+    end
+
+    attributes do
+      uuid_primary_key(:id)
+      attribute(:org_id, :uuid, public?: true, writable?: true)
+    end
+
+    actions do
+      defaults([:read, create: :*])
+    end
+  end
+
+  defmodule NoRepoDom do
+    use Ash.Domain, validate_config_inclusion?: false
+
+    resources do
+      resource(Samen.OrgIdPinnedGuardCoreTest.NoRepoPg)
+    end
+  end
+
+  test "a Postgres-backed resource whose repo cannot be resolved fails the walk by name" do
+    assert_raise ArgumentError, ~r/NoRepoPg is Postgres-backed but no repo could be resolved/, fn ->
+      Samen.OrgIdPinnedGuard.walk([NoRepoDom])
+    end
+  end
+
+  # --- a query issued by a Task the build started ------------------------------------------------------------
+
+  defmodule BuildsTaskQuery do
+    use Ash.Resource, domain: Samen.OrgIdPinnedGuardCoreTest.TaskDom, data_layer: Ash.DataLayer.Ets
+
+    attributes do
+      uuid_primary_key(:id)
+      attribute(:org_id, :uuid, public?: true, writable?: true)
+    end
+
+    changes do
+      change({Samen.Policy.OrgIdPinned, []}, on: [:create, :update])
+
+      change(
+        fn changeset, _ctx ->
+          Task.async(fn -> SamenCore.TestRepo.query("SELECT 1") end) |> Task.await()
+          changeset
+        end,
+        on: [:create]
+      )
+    end
+
+    actions do
+      defaults([:read, create: :*, update: :*])
+    end
+  end
+
+  defmodule TaskDom do
+    use Ash.Domain, validate_config_inclusion?: false
+
+    resources do
+      resource(Samen.OrgIdPinnedGuardCoreTest.BuildsTaskQuery)
+    end
+  end
+
+  test "a query issued from a Task the build started is seen (its $callers include the walker)" do
+    report = Samen.OrgIdPinnedGuard.walk([TaskDom], %{}, repos: [SamenCore.TestRepo])
+    assert [{BuildsTaskQuery, :create, why}] = report.unexercisable
+    assert why =~ "queried the database"
+  end
+
+  # --- an action that sets org_id inside a hook -------------------------------------------------------------
+
+  defmodule HookSets do
+    use Ash.Resource, domain: Samen.OrgIdPinnedGuardCoreTest.HookDom, data_layer: Ash.DataLayer.Ets
+
+    attributes do
+      uuid_primary_key(:id)
+      attribute(:org_id, :uuid, public?: true, writable?: false)
+    end
+
+    changes do
+      change({Samen.Policy.OrgIdPinned, []}, on: [:create, :update])
+    end
+
+    actions do
+      defaults([:read])
+
+      create :create do
+        argument(:org_id, :uuid, allow_nil?: false)
+
+        change(fn changeset, _ctx ->
+          Ash.Changeset.before_action(changeset, fn cs ->
+            Ash.Changeset.force_change_attribute(cs, :org_id, Ash.Changeset.get_argument(cs, :org_id))
+          end)
+        end)
+      end
+    end
+  end
+
+  defmodule HookDom do
+    use Ash.Domain, validate_config_inclusion?: false
+
+    resources do
+      resource(Samen.OrgIdPinnedGuardCoreTest.HookSets)
+    end
+  end
+
+  @this_file Path.relative_to_cwd(__ENV__.file)
+
+  test "an action that sets org_id in a hook is NOT counted as exercised; unlisted it fails the walk by name" do
+    report = Samen.OrgIdPinnedGuard.walk([HookDom])
+
+    assert report.hook_set == [{HookSets, :create}]
+    assert report.hook_set_unlisted == [{HookSets, :create}]
+    assert report.actions == 0
+    assert report.violations == []
+  end
+
+  test "a listed hook-set action needs a reason and a named test that exists" do
+    ok = %{reason: "org taken from an argument", test_file: @this_file, test_name: "a listed hook-set action needs a reason"}
+    report = Samen.OrgIdPinnedGuard.walk([HookDom], %{}, hook_set: %{{HookSets, :create} => ok})
+    assert report.hook_set_unlisted == []
+    assert report.hook_set_unproven == []
+
+    for {label, bad} <- [
+          {"test not in the file", %{ok | test_name: "a test that does not exist anywhere #{System.unique_integer()}"}},
+          {"no file", %{ok | test_file: "test/nope_#{System.unique_integer([:positive])}.exs"}},
+          {"no reason", %{ok | reason: ""}}
+        ] do
+      report = Samen.OrgIdPinnedGuard.walk([HookDom], %{}, hook_set: %{{HookSets, :create} => bad})
+      assert [{HookSets, :create, _why}] = report.hook_set_unproven, label
+    end
+
+    stale = Samen.OrgIdPinnedGuard.walk([HookDom], %{}, hook_set: %{{HookSets, :create} => ok, {HookSets, :gone} => ok})
+    assert [{HookSets, :gone, "the action does not exist"}] = stale.hook_set_unproven
+  end
+
+  test "the Marketing Send mount is detected as hook-set (the real shape)" do
+    report = Samen.OrgIdPinnedGuard.walk([SamenCore.Support.SuppressionFixture])
+    assert {SamenCore.Support.SuppressionFixture.Send, :create_checked} in report.hook_set
+  end
 end

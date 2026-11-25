@@ -23,8 +23,28 @@ defmodule Samen.OrgIdPinnedGuard do
   it — the CI flake), and Ash turns a failed query into a changeset error that looks like validation.
   So the walk treats ANY of these as `:unexercisable`, by resource and action, never as exercised:
   a build that exits or raises, a changeset error that is an unexpected exception (Ash's
-  `Unknown` class — a swallowed crash) and a query on a `repos:` repo issued by the walking process.
-  A check that needs the database belongs in a `before_action` hook.
+  `Unknown` class — a swallowed crash) and a query on a watched repo issued by the walking process
+  or by a process it started (`$callers`, e.g. a `Task`).
+
+  The watched repos are DERIVED from the walked resources' data layer (the read and the mutate repo of
+  every Postgres-backed resource), united with any `repos:` the host passes. There is no way to turn the
+  watch off by leaving `repos:` out; a Postgres-backed resource whose repo cannot be resolved raises, by
+  resource name.
+
+  ## The blind spot of moving a check into `before_action`
+
+  A check that needs the database must run in a `before_action` hook, not at build time. The price: an
+  action that SETS `org_id` inside such a hook (it takes the org as an ARGUMENT named `org_id` and copies it
+  into the row, as `Marketing`'s `Send.:create_checked` does) has no `org_id` on the changeset the walk
+  builds, so the walk cannot see the pin at all — it only works because of the hook ORDER (the action's
+  hook runs before the global `Samen.Policy.OrgIdPinned` recheck). Such an action is NOT counted as
+  exercised. The walk detects it (an `org_id` argument the changeset did not carry as an attribute) and
+  reports it under `:hook_set`; the host must list it in `hook_set:` with a reason and the NAMED behavioural
+  test that proves a foreign org is refused (`%{{Resource, :action} => %{reason:, test_file:, test_name:}}`).
+  The walk then fails (`:hook_set_unlisted`) for a detected action that is not listed, and
+  (`:hook_set_unproven`) for a listed one whose test file does not contain that test name or whose action
+  does not exist. A hook-set pin that does not take an `org_id` argument (any other shape) cannot be
+  detected statically: do not write one — take the org as an `org_id` argument so the walk sees it.
   """
 
   @org_a "00000000-0000-4000-8000-00000000000a"
@@ -36,18 +56,56 @@ defmodule Samen.OrgIdPinnedGuard do
           actions: non_neg_integer(),
           violations: [{module(), atom(), atom(), String.t()}],
           unexercisable: [{module(), atom(), term()}],
-          exceptions: %{module() => String.t()}
+          exceptions: %{module() => String.t()},
+          hook_set: [{module(), atom()}],
+          hook_set_unlisted: [{module(), atom()}],
+          hook_set_unproven: [{module(), atom(), String.t()}],
+          watched_repos: [module()]
         }
 
+  @doc """
+  Walk `domains`. Options: `repos:` (extra repos to watch, united with the derived ones) and `hook_set:`
+  (see the moduledoc).
+  """
   @spec walk([module()], %{module() => String.t()}, keyword()) :: report()
   def walk(domains, exceptions \\ %{}, opts \\ []) do
-    handler = attach_query_watch(Keyword.get(opts, :repos, []))
+    resources = resources_of(domains)
+    repos = Enum.uniq(derive_repos(resources) ++ Keyword.get(opts, :repos, []))
+    handler = attach_query_watch(repos)
 
     try do
-      do_walk(domains, exceptions)
+      do_walk(resources, exceptions, Keyword.get(opts, :hook_set, %{}))
+      |> Map.put(:watched_repos, repos)
     after
       detach_query_watch(handler)
     end
+  end
+
+  defp resources_of(domains) do
+    domains
+    |> Enum.flat_map(&Ash.Domain.Info.resources/1)
+    |> Enum.uniq()
+  end
+
+  # The read and mutate repo of every Postgres-backed resource. A Postgres resource with no resolvable repo
+  # would be walked with its queries unwatched: fail by name instead.
+  defp derive_repos(resources) do
+    resources
+    |> Enum.filter(&(Ash.Resource.Info.data_layer(&1) == AshPostgres.DataLayer))
+    |> Enum.flat_map(fn resource ->
+      found =
+        for type <- [:read, :mutate], repo = AshPostgres.DataLayer.Info.repo(resource, type), is_atom(repo), repo != nil,
+            do: repo
+
+      if found == [] do
+        raise ArgumentError,
+              "Samen.OrgIdPinnedGuard: #{inspect(resource)} is Postgres-backed but no repo could be resolved " <>
+                "for it, so the walk would not watch its queries"
+      end
+
+      found
+    end)
+    |> Enum.uniq()
   end
 
   # Query events are emitted in the process that issues the query, so a handler that forwards only
@@ -57,10 +115,12 @@ defmodule Samen.OrgIdPinnedGuard do
     id = {__MODULE__, make_ref()}
 
     events =
-      for repo <- repos do
-        prefix = Keyword.get(repo.config(), :telemetry_prefix, [])
-        prefix ++ [:query]
-      end
+      Enum.uniq(
+        for repo <- repos do
+          prefix = Keyword.get(repo.config(), :telemetry_prefix, [])
+          prefix ++ [:query]
+        end
+      )
 
     if events != [] do
       :ok =
@@ -68,7 +128,8 @@ defmodule Samen.OrgIdPinnedGuard do
           id,
           events,
           fn _event, _measurements, meta, _config ->
-            if self() == walker, do: send(walker, {:org_pin_walk_query, meta[:query]})
+            if self() == walker or walker in List.wrap(Process.get(:"$callers")),
+              do: send(walker, {:org_pin_walk_query, meta[:query]})
           end,
           nil
         )
@@ -79,12 +140,7 @@ defmodule Samen.OrgIdPinnedGuard do
 
   defp detach_query_watch(id), do: :telemetry.detach(id)
 
-  defp do_walk(domains, exceptions) do
-    resources =
-      domains
-      |> Enum.flat_map(&Ash.Domain.Info.resources/1)
-      |> Enum.uniq()
-
+  defp do_walk(resources, exceptions, hook_set) do
     {with_org, without_org} =
       Enum.split_with(resources, &Ash.Resource.Info.attribute(&1, :org_id))
 
@@ -95,15 +151,51 @@ defmodule Samen.OrgIdPinnedGuard do
 
     unexercisable = for {:unexercisable, r, a, why} <- results, do: {r, a, why}
 
+    detected = for {:hook_set, r, a} <- results, do: {r, a}
+    {hook_set_unlisted, hook_set_unproven} = check_hook_set(resources, detected, hook_set)
+
     %{
       walked: length(with_org),
       no_org_id: without_org,
       actions: Enum.count(results, &match?({:ok, _, _, _}, &1)) + length(violations),
       violations: violations,
       unexercisable: unexercisable,
-      exceptions: exceptions
+      exceptions: exceptions,
+      hook_set: detected,
+      hook_set_unlisted: hook_set_unlisted,
+      hook_set_unproven: hook_set_unproven
     }
   end
+
+  # Detected-but-unlisted, and listed-but-unproven (no such action, or the named test is not in the named file).
+  defp check_hook_set(resources, detected, listed) do
+    unlisted = Enum.reject(detected, &Map.has_key?(listed, &1))
+
+    unproven =
+      for {{resource, action} = key, entry} <- listed,
+          why = unproven_reason(resources, key, entry),
+          do: {resource, action, why}
+
+    {unlisted, unproven}
+  end
+
+  defp unproven_reason(resources, {resource, action}, entry) do
+    with true <- resource in resources or "the resource is not in the walked domains",
+         true <- Ash.Resource.Info.action(resource, action) != nil or "the action does not exist",
+         true <- is_binary(entry[:reason]) and entry[:reason] != "" or "no reason given",
+         file when is_binary(file) <- entry[:test_file] || "no test_file given",
+         {:ok, body} <- File.read(file) |> file_result(file),
+         name when is_binary(name) <- entry[:test_name] || "no test_name given",
+         true <- String.contains?(body, name) or "test #{inspect(name)} is not in #{file}" do
+      nil
+    else
+      why when is_binary(why) -> why
+      _ -> "unproven"
+    end
+  end
+
+  defp file_result({:ok, body}, _file), do: {:ok, body}
+  defp file_result(_, file), do: "test file #{file} is unreadable"
 
   defp exercise(resource) do
     actor = %{id: Ash.UUID.generate(), org_id: @org_a, role: :owner, verified?: true, kind: :tenant, plane: :tenant}
@@ -123,6 +215,9 @@ defmodule Samen.OrgIdPinnedGuard do
 
           carries_foreign_org?(changeset) and not org_error?(changeset) ->
             {:violation, resource, action.name, action.type, "the changeset carries org_id #{@org_b}"}
+
+          hook_set?(action, changeset) ->
+            {:hook_set, resource, action.name}
 
           true ->
             {:ok, resource, action.name, action.type}
@@ -194,6 +289,13 @@ defmodule Samen.OrgIdPinnedGuard do
   defp carries_foreign_org?(changeset) do
     Map.get(changeset.attributes, :org_id) == @org_b or
       Keyword.has_key?(List.wrap(changeset.atomics), :org_id)
+  end
+
+  # The org is taken as an ARGUMENT named `org_id` and the changeset carries no `org_id` attribute: the row's
+  # org is set later, by a hook, so the build proves nothing about the pin.
+  defp hook_set?(action, changeset) do
+    Enum.any?(action.arguments, &(&1.name == :org_id)) and
+      not Map.has_key?(changeset.attributes, :org_id)
   end
 
   defp org_error?(changeset) do
