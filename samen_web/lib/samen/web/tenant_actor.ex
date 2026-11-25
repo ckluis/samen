@@ -133,16 +133,151 @@ defmodule Samen.Web.TenantActor do
     * `{:refused, socket}` - `acting_scope` is `nil` (a scope from before the refusal does not survive it), `actor_state`
       is `:denied` or `:unavailable`. The caller then renders `Samen.Web.TenantActor.Components.actor_refused/1`, reads
       nothing, and takes any list context away (`Samen.Web.ListLive.refuse/1`).
+
+  ## An open page does not keep the role it resolved
+
+  The first call on a mounted socket also attaches the event guard (`recheck_event/3`, a `:handle_event` lifecycle hook,
+  attached once however many times `assign_actor/2` runs): before EVERY event the actor is resolved again for the
+  org the page is pinned to, so a member suspended or demoted while the page is open is judged by the membership as it
+  is now, not as it was at the last navigation. See `recheck_event/3`.
   """
   @spec assign_actor(Phoenix.LiveView.Socket.t(), String.t() | nil) ::
           {:ok, Phoenix.LiveView.Socket.t()} | {:refused, Phoenix.LiveView.Socket.t()}
   def assign_actor(socket, org_id) do
+    socket
+    |> Phoenix.Component.assign(:acting_org_id, org_id)
+    |> attach_guard()
+    |> resolve_into(org_id)
+  end
+
+  defp resolve_into(socket, org_id) do
     case socket_scope(socket, org_id) do
       {:ok, scope} -> {:ok, Phoenix.Component.assign(socket, acting_scope: scope, actor_state: :ok)}
       :denied -> {:refused, Phoenix.Component.assign(socket, acting_scope: nil, actor_state: :denied)}
       {:error, :unavailable} -> {:refused, Phoenix.Component.assign(socket, acting_scope: nil, actor_state: :unavailable)}
     end
   end
+
+  # -- the event guard: re-resolve who acts before EVERY event ------------------------------------------------------
+
+  @guard_id :samen_tenant_actor_guard
+  @uri_id :samen_tenant_actor_uri
+
+  # A routed view also records the URI it was patched to (`:acting_uri`), which is where `retry_actor` re-runs it.
+  defp attach_guard(socket) do
+    socket = attach_once(socket, @guard_id, :handle_event, &__MODULE__.recheck_event/3)
+
+    if is_nil(socket.router),
+      do: socket,
+      else: attach_once(socket, @uri_id, :handle_params, &__MODULE__.remember_uri/3)
+  end
+
+  @doc """
+  Attach a lifecycle hook ONCE: a no-op when `id` is already attached at `stage` (a `handle_params` re-entry runs the
+  caller again on every navigation), and a no-op on a bare `%Socket{}` with no lifecycle (the unit harness; a real mounted
+  socket always has one). The surfaces that do not resolve through `assign_actor/2` (the notification pages resolve the
+  recipient their own way) attach their own guard with it.
+  """
+  @spec attach_once(Phoenix.LiveView.Socket.t(), atom(), atom(), function()) :: Phoenix.LiveView.Socket.t()
+  def attach_once(%Phoenix.LiveView.Socket{private: %{lifecycle: lifecycle}} = socket, id, stage, fun) do
+    if Enum.any?(Map.fetch!(lifecycle, stage), &(&1.id == id)),
+      do: socket,
+      else: Phoenix.LiveView.attach_hook(socket, id, stage, fun)
+  end
+
+  def attach_once(socket, _id, _stage, _fun), do: socket
+
+  @doc false
+  def remember_uri(_params, uri, socket), do: {:cont, Phoenix.Component.assign(socket, :acting_uri, uri)}
+
+  @doc """
+  The `:handle_event` lifecycle hook `assign_actor/2` attaches: it runs BEFORE the `ListLive` hook and before the view's
+  own `handle_event/3` (hooks run in attach order and `assign_actor/2` is the first thing a page's `load` does), and it
+  re-resolves the actor for the org the page is pinned to (`:acting_org_id`) on every event:
+
+    * the page is not acting (no org, or already the denied / unavailable state): `{:cont, socket}`; `refuse_events/1` is
+      the second line of defence for those.
+    * `{:ok, scope}`: `acting_scope` becomes the fresh scope (a demotion takes effect on the very next event), the
+      `ListLive` context follows (it keeps its own scope), and a view that built anything with the old scope (a form)
+      rebuilds it in its `actor_changed/1` when the person's role or id changed.
+    * `:denied` / `{:error, :unavailable}`: the page switches to the refused state (`acting_scope` nil, the list context
+      taken away, the data it held cleared) and the event is HALTED - no later hook and no `handle_event/3` sees it.
+
+  `"retry_actor"` (the button of `Samen.Web.TenantActor.Components.actor_refused/1`) re-resolves the same way and, when the
+  person acts again, patches to the page's own URL so it loads fresh.
+  """
+  def recheck_event("retry_actor", _params, socket), do: {:halt, retry(socket)}
+
+  def recheck_event(_event, _params, socket) do
+    case socket.assigns do
+      %{acting_scope: %Samen.Scope{} = held, acting_org_id: org_id} when is_binary(org_id) ->
+        case resolve_into(socket, org_id) do
+          {:ok, socket} -> {:cont, follow(socket, held)}
+          {:refused, socket} -> {:halt, scrub(socket)}
+        end
+
+      _not_acting ->
+        {:cont, socket}
+    end
+  end
+
+  defp retry(%{assigns: %{acting_org_id: org_id}} = socket) when is_binary(org_id) do
+    case resolve_into(socket, org_id) do
+      {:ok, _acting} -> patch_to_self(socket)
+      {:refused, refused} -> scrub(refused)
+    end
+  end
+
+  defp retry(socket), do: socket
+
+  # Acting again: the page loads fresh through its own `handle_params` (nothing is rebuilt here by hand); until it does
+  # it stays the refused state it was.
+  defp patch_to_self(socket) do
+    case socket.assigns[:acting_uri] || socket.assigns[:return_to] do
+      uri when is_binary(uri) ->
+        %URI{path: path, query: query} = URI.parse(uri)
+        Phoenix.LiveView.push_patch(socket, to: if(query, do: "#{path}?#{query}", else: path))
+
+      _unknown ->
+        socket
+    end
+  end
+
+  # The refused state: nothing the page loaded for the person it acted for is kept.
+  defp scrub(socket) do
+    socket = Samen.Web.ListLive.refuse(socket)
+
+    case socket.assigns do
+      %{page: %Samen.Web.Page{}} -> Phoenix.Component.assign(socket, :page, %Samen.Web.Page{})
+      _ -> socket
+    end
+  end
+
+  # The person is still acting; their scope is the fresh one. Whatever else the page kept from the old scope follows.
+  defp follow(socket, %Samen.Scope{actor: held}) do
+    %Samen.Scope{actor: fresh} = socket.assigns.acting_scope
+    socket = follow_list_ctx(socket, fresh)
+
+    if {held[:id], held[:role]} == {fresh[:id], fresh[:role]},
+      do: socket,
+      else: actor_changed(socket)
+  end
+
+  # `ListLive` keeps its own scope (its read AND its `restore` write context): same scope, the person's fresh id + role.
+  defp follow_list_ctx(%{assigns: %{samen_list_ctx: %{scope: %Samen.Scope{actor: actor} = scope} = ctx}} = socket, fresh) do
+    ctx = %{ctx | scope: %{scope | actor: Map.merge(actor, %{id: fresh[:id], role: fresh[:role]})}}
+    Phoenix.Component.assign(socket, :samen_list_ctx, ctx)
+  end
+
+  defp follow_list_ctx(socket, _fresh), do: socket
+
+  defp actor_changed(%{view: view} = socket) when is_atom(view) and not is_nil(view) do
+    if Code.ensure_loaded?(view) and function_exported?(view, :actor_changed, 1),
+      do: view.actor_changed(socket),
+      else: socket
+  end
+
+  defp actor_changed(socket), do: socket
 
   @doc """
   The shared `handle_event/3` guard of a converted LiveView: define it BEFORE the view's own clauses (after

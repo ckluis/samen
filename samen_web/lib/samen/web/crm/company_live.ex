@@ -332,6 +332,13 @@ defmodule Samen.Web.CRM.CompanyLive do
   defp section({:error, :unavailable}, default, section), do: {default, [section]}
   defp section({:error, _denied}, default, _section), do: {default, []}
 
+  # The person's role or id changed while the page was open (`Samen.Web.TenantActor.recheck_event/3`): a form built at
+  # load holds the scope it was built with, so it is built again with the fresh one.
+  @doc false
+  def actor_changed(%{assigns: %{samen_mount: mount, acting_scope: scope} = assigns} = socket) do
+    assign(socket, edit_form: assigns[:company] && edit_form(assigns.company, scope), activity_form: activity_form(mount, scope))
+  end
+
   defp edit_form(company, scope) do
     company
     |> AshPhoenix.Form.for_update(:update, scope: scope)

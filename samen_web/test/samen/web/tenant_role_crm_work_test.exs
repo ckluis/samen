@@ -277,7 +277,7 @@ defmodule Samen.Web.TenantRoleCrmWorkTest do
     end
   end
 
-  test "a suspended member's open page is the denied state: nothing is read, and no event reads or writes", ctx do
+  test "NAVIGATION: a suspended member's page, re-entered through handle_params, is the denied state: nothing is read, and no event reads or writes", ctx do
     pages = pages(ctx.org_id)
     login = log_in(ctx.member)
     sockets = for page <- pages, do: {page, live_socket(login, page.view, page.path, ctx.org_id, page.extra)}

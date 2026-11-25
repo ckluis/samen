@@ -62,4 +62,11 @@ defmodule Samen.WebTest.SpineAccounts do
     [m] = Op.Membership |> Ash.Query.filter(user_id == ^user_id and org_id == ^org_id) |> Ash.read!(authorize?: false)
     m |> Ash.Changeset.for_update(:update, %{status: "suspended"}, authorize?: false) |> Ash.update!()
   end
+
+  @doc "Change `account`'s membership role in `org_id` (a demotion, or a promotion)."
+  def set_role!(account, org_id, role) do
+    user_id = user_id(account, org_id)
+    [m] = Op.Membership |> Ash.Query.filter(user_id == ^user_id and org_id == ^org_id) |> Ash.read!(authorize?: false)
+    m |> Ash.Changeset.for_update(:update, %{role: role}, authorize?: false) |> Ash.update!()
+  end
 end

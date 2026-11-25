@@ -119,6 +119,12 @@ defmodule Samen.Web.Work.ProjectsLive do
     end
   end
 
+  # The person's role or id changed while the page was open (`Samen.Web.TenantActor.recheck_event/3`): a form built at
+  # load holds the scope it was built with, so it is built again with the fresh one.
+  @doc false
+  def actor_changed(%{assigns: %{samen_mount: mount, acting_scope: scope}} = socket),
+    do: assign(socket, new_form: new_project_form(mount, scope))
+
   defp new_project_form(mount, scope) do
     Mount.resource(mount, Project) |> AshPhoenix.Form.for_create(:create, scope: scope) |> to_form()
   end

@@ -330,6 +330,13 @@ defmodule Samen.Web.CRM.ContactLive do
   # value, on the operator plane it is `%Masked{}` — which the form fields render as the
   # read-only •••• placeholder. This module never unwraps a %Masked{} and never calls
   # the vault.
+  # The person's role or id changed while the page was open (`Samen.Web.TenantActor.recheck_event/3`): a form built at
+  # load holds the scope it was built with, so it is built again with the fresh one.
+  @doc false
+  def actor_changed(%{assigns: %{samen_mount: mount, acting_scope: scope} = assigns} = socket) do
+    assign(socket, edit_form: assigns[:contact] && edit_form(assigns.contact, scope), activity_form: activity_form(mount, scope))
+  end
+
   defp edit_form(contact, scope) do
     contact
     |> AshPhoenix.Form.for_update(:update, scope: scope)
