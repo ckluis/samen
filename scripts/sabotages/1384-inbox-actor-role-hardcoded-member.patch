@@ -1,0 +1,19 @@
+# SABOTAGE: the inbox actor ignores the membership role OrgActor resolved and acts as a member
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/notifications_spine_session_test.exs
+# MUST_FAIL: the org-addressed row reaches a member, not a viewer
+diff --git a/samen_web/lib/samen/web/settings/reads.ex b/samen_web/lib/samen/web/settings/reads.ex
+index 5e95f0a0..81f83b9b 100644
+--- a/samen_web/lib/samen/web/settings/reads.ex
++++ b/samen_web/lib/samen/web/settings/reads.ex
+@@ -139,7 +139,7 @@ defmodule Samen.Web.Settings.Reads do
+     case ref do
+       {:credential, credential_id} ->
+         case Samen.Auth.OrgActor.resolve_result(mods, credential_id, org_id) do
+-          {:ok, %{user_id: user_id, role: role}} -> {:ok, %{id: user_id, role: role}}
++          {:ok, %{user_id: user_id, role: _role}} -> {:ok, %{id: user_id, role: :member}}
+           :error -> :denied
+           {:error, :unavailable} -> {:error, :unavailable}
+         end
