@@ -132,7 +132,7 @@ defmodule Samen.Web.WsEFlagshipProbeTest do
 
     {:ok, active} =
       file
-      |> Ash.Changeset.for_update(:update, %{status: :active})
+      |> Ash.Changeset.for_update(:promote, %{})
       |> Ash.update(authorize?: false)
 
     active
