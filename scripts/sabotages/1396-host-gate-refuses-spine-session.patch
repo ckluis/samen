@@ -1,0 +1,19 @@
+# SABOTAGE: the armed host gate admits only the legacy session key, so a real framework login is redirected 
+#   to /login
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/notifications_spine_session_test.exs
+# MUST_FAIL: a spine-authenticated user sees their user-addressed notification
+diff --git a/driftwood/lib/driftwood_web/auth.ex b/driftwood/lib/driftwood_web/auth.ex
+index c2f3db40..f0f52d91 100644
+--- a/driftwood/lib/driftwood_web/auth.ex
++++ b/driftwood/lib/driftwood_web/auth.ex
+@@ -61,7 +61,6 @@ defmodule DriftwoodWeb.Auth do
+     cond do
+       not auth_required?() -> conn
+       WebAuth.authenticated_user_id(get_session(conn)) -> conn
+-      spine_session?(get_session(conn)) -> conn
+       true -> conn |> redirect(to: "/login") |> halt()
+     end
+   end
