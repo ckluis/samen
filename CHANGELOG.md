@@ -122,10 +122,43 @@ All notable changes to Samen are recorded here. The format follows
   and the Work tasks list, task detail (status), projects (create, archive), timeline and task tree. A viewer could create and
   archive tasks and projects and edit and archive companies through them; they now get a refusal. **Policy gate added:**
   Outreach `Enrollment` `:enroll`, `:pause`, `:resume` and `:stop` had no role rule (org scope only) and are now
-  member-or-above, like the other CRM and Work writes (`Sequence` writes and `Enrollment` destroy stay admin; reads and the
-  system advance are unchanged). **Upgrade note:** a host that enrolls or pauses enrollments with a `:viewer` actor (or with
+  member-or-above, like the other CRM and Work writes (`Sequence` writes and `Enrollment` destroy stay admin; reads are
+  unchanged; the system actions are closed to actors in the next entry). **Upgrade note:** a host that enrolls or pauses enrollments with a `:viewer` actor (or with
   an actor carrying no role) now gets a forbidden error; run those as a member or above, or with `authorize?: false` in a job.
   No migration. Sabotages 1470 to 1478.
+
+- **Fixed: an open page kept the role it had at its last navigation.** A member suspended or demoted while a converted page was
+  open could keep sending write events (create, delete, enroll, status change, restore, CSV import) and they ran with the old
+  role: every handler reused the scope resolved at the last `handle_params`, and so did the list context and any form built at
+  load. `Samen.Web.TenantActor.assign_actor/2` now attaches a `:handle_event` lifecycle hook (once, ahead of the `ListLive` hook
+  and the view's own `handle_event/3`) that resolves the person again for the page's org before EVERY event. Still acting:
+  `acting_scope`, the list context and the forms built at load follow the current role, so a demotion takes effect on the very
+  next event. Denied or unavailable: the page switches to the refused state (its list and page are cleared) and the event is
+  halted. This covers the tasks, task, projects, company, contact, contacts, companies, sequences and CSV import pages and the
+  other converted pages through the same call; the notification inbox (events and realtime messages) and preferences resolve the
+  recipient their own way and carry the same guard. Cost: two identity queries per event (the user, then the membership),
+  re-read every time, never cached across events. The refused card gains a "Check again" button (`retry_actor`) that resolves
+  the person again and reloads the page when they act. A view that builds something from the scope exports `actor_changed/1`.
+  No migration. Sabotages 1479 to 1483.
+- **Fixed: viewers were offered write controls, a refused request still wrote, and a missing company crashed its page.**
+  The create, edit, delete, enroll and status controls of the company, contact, companies, contacts, tasks, task, projects,
+  sequences and import pages are shown only to a person who may write (`Samen.Web.TenantActor.writable?/2`: the plane AND at
+  least the member role, assigned as `can_write` so a replay shows the controls its person saw); what the pages allow is
+  still the kernel policy. A viewer's billing-link request no longer registers
+  the org's custom field before the update policy refuses it (`link_billing_customer` asks the policy first). `edit_company`,
+  `validate_edit` and `save_edit` (and the contact twins) for a record that was not found are no-ops instead of a crash.
+  Sabotages 1493 to 1495 and the viewer tests for the forms built at load (1484, 1485; 1473 is the event-time mutation alone).
+- **Fixed: Outreach system actions were open to every actor, and Mailbox rows to every tenant actor.** `Enrollment`
+  `:advance_due`, `:due_scan` (an unfiltered cross-org read) and `:system_advance`, and `StepSend` `:queue`, `:mark` and
+  `:requeue`, were `authorize_if(always())`. The three internal ones are forbidden to every actor and keep working as the
+  `authorize?: false` calls `Samen.Sequences` and the send worker make; `:due_scan` and `:advance_due` are authorized only for
+  AshOban's own interaction (the `:sequence_step_due` trigger). Mailbox `Connection` and `MailMessage` writes were org scope
+  only; the sole writer is `Samen.Mailbox.Sync` (`authorize?: false`), so create, update and destroy are now forbidden to every
+  actor. `reveal_connection` and `reveal_mail_message` checked the reveal grant for a caller-supplied `actor_id`, so any actor
+  could name an operator who holds a grant and ride it: the argument is gone and the grant is checked for the actor that runs
+  the action. **Upgrade note:** a host that wrote Outreach system actions or mailbox rows with a tenant actor, or passed
+  `actor_id` to a Mailbox reveal action, gets a forbidden or an unknown-argument error; run those as the system
+  (`authorize?: false`) or as the actor that holds the grant. No migration. Sabotages 1486 to 1492.
 
 - **Fixed: `Samen.Webhook.deliver/4` raised `FunctionClauseError` on any non-empty endpoint list, discarded the `:multi` it
   was given, and answered `{:ok, 0}` when no `:endpoints` were passed.** It now enqueues one job per active, subscribed
