@@ -1,0 +1,19 @@
+# SABOTAGE: the subject lookup no longer excludes archived rows: a tag anchors to a soft-deleted object
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/tags_scope_test.exs
+# MUST_FAIL: an ARCHIVED subject is refused
+diff --git a/samen_core/lib/samen/policy/subject_in_org.ex b/samen_core/lib/samen/policy/subject_in_org.ex
+index c3e72a32..ed3063bd 100644
+--- a/samen_core/lib/samen/policy/subject_in_org.ex
++++ b/samen_core/lib/samen/policy/subject_in_org.ex
+@@ -137,7 +137,7 @@ defmodule Samen.Policy.SubjectInOrg do
+   defp unarchived_clause(subject) do
+     case Ash.Resource.Info.attribute(subject, :archived_at) do
+       nil -> ""
+-      attr -> " AND #{quote_ident(source(attr))} IS NULL"
++      _attr -> ""
+     end
+   end
+ 
