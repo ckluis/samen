@@ -7,15 +7,15 @@
 # MUST_FAIL: a viewer's render carries no write control
 # MUST_FAIL: writable?/2: plane AND role
 diff --git a/samen_web/lib/samen/web/tenant_actor.ex b/samen_web/lib/samen/web/tenant_actor.ex
-index 4a445a14..be5567b0 100644
+index f09228a5..722e558b 100644
 --- a/samen_web/lib/samen/web/tenant_actor.ex
 +++ b/samen_web/lib/samen/web/tenant_actor.ex
-@@ -106,7 +106,7 @@ defmodule Samen.Web.TenantActor do
+@@ -107,7 +107,7 @@ defmodule Samen.Web.TenantActor do
    """
    @spec writable?(Mount.t() | nil, Samen.Scope.t() | nil) :: boolean()
    def writable?(%Mount{plane: %{kind: :operator}}, _scope), do: false
 -  def writable?(%Mount{}, %Samen.Scope{actor: %{role: role}}), do: Samen.Scope.Role.at_least?(role, :member)
 +  def writable?(%Mount{}, %Samen.Scope{actor: %{role: role}}), do: is_atom(role)
-   def writable?(_mount, _scope), do: false
+   def writable?(%Mount{}, _no_scope), do: false
  
    @doc """

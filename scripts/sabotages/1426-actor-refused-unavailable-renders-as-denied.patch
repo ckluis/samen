@@ -6,10 +6,10 @@
 # TEST_FILES: test/samen/web/tenant_actor_shared_test.exs
 # MUST_FAIL: unavailable: the error card, never the empty state
 diff --git a/samen_web/lib/samen/web/tenant_actor/components.ex b/samen_web/lib/samen/web/tenant_actor/components.ex
-index cf50094d..d5641bbc 100644
+index 1293589..3081305 100644
 --- a/samen_web/lib/samen/web/tenant_actor/components.ex
 +++ b/samen_web/lib/samen/web/tenant_actor/components.ex
-@@ -28,7 +28,7 @@ defmodule Samen.Web.TenantActor.Components do
+@@ -35,7 +35,7 @@ defmodule Samen.Web.TenantActor.Components do
    def actor_refused(%{state: :unavailable} = assigns) do
      ~H"""
      <div class="wrap">
@@ -17,4 +17,4 @@ index cf50094d..d5641bbc 100644
 +      <div id="actor-denied" class="gtitle">
          <h3>{@title} unavailable</h3>
          <span class="lane">We couldn't check who you are in this workspace. Nothing is shown rather than a wrong list.</span>
-       </div>
+         <.button type="button" phx-click="retry_actor" id="actor-retry">Try again</.button>

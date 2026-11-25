@@ -5,11 +5,11 @@
 # TEST_FILES: test/samen/web/tenant_role_surfaces_test.exs
 # MUST_FAIL: a VIEWER cannot edit or delete a contact on its detail page
 diff --git a/samen_web/lib/samen/web/crm/contact_live.ex b/samen_web/lib/samen/web/crm/contact_live.ex
-index f49440f1..e6909823 100644
+index 2102621..da7825f 100644
 --- a/samen_web/lib/samen/web/crm/contact_live.ex
 +++ b/samen_web/lib/samen/web/crm/contact_live.ex
-@@ -155,7 +155,8 @@ defmodule Samen.Web.CRM.ContactLive do
-   # -- A3 edit/delete (the write side of the PII detail surface) ---------------
+@@ -159,7 +159,8 @@ defmodule Samen.Web.CRM.ContactLive do
+     do: {:noreply, socket}
  
    def handle_event("edit_contact", _params, socket) do
 -    %{contact: contact, acting_scope: scope} = socket.assigns
