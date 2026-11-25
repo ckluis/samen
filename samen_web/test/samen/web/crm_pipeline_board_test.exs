@@ -156,7 +156,7 @@ defmodule Samen.Web.CRMPipelineBoardTest do
 
     socket =
       %Phoenix.LiveView.Socket{}
-      |> Phoenix.Component.assign(samen_mount: mount, org_id: org_id, board: board)
+      |> Phoenix.Component.assign(samen_mount: mount, org_id: org_id, board: board, acting_scope: scope, actor_state: :ok)
 
     {:noreply, socket} =
       PipelineLive.handle_event("board_load_more", %{"key" => to_string(open.id)}, socket)
