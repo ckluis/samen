@@ -11,6 +11,39 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Fixed: flakes and guards round 5 (review of the flakes round, 2026-11-25)
+
+- **Upgrade: rename `config :samen_core, :ash_domains, [...]` to `config :samen_core, :host_domains, [...]`.** samen reused
+  Ash's own key for the `:samen_core` application as its host-domain registry, so `Ash.Resource.verify` read the host's
+  not-yet-compiled domains while samen_core compiled as a dependency and printed `Demo.Crm is not a Spark DSL module` (nine
+  warning blocks per host build, and the inclusion check skipped there). Every reader (catalog, MCP, data map,
+  no_plaintext_pii, pii_reads, `samen.verify.*`, erasure) now goes through `Samen.HostDomains.registry/0`. Your own
+  `config :my_app, ash_domains: [...]` is unchanged, and so is Ash's check on samen_core's own build. For this release the
+  old key is still read when `:host_domains` is not configured, with a deprecation warning, so an un-renamed host never
+  sees an empty registry (the verifiers that fail on zero resources still do). `mix samen.gen.app` / `samen.gen.scope`
+  emit and edit the new key; the five config goldens moved with it. Measured: demo `MIX_ENV=test mix deps.compile samen_core
+  --force` went from 9 such warnings to 0.
+- **`Samen.OrgIdPinnedGuard.walk/3` (host-visible).** `repos:` is no longer what turns the query watch on: the watched repos
+  are derived from the walked resources (read and mutate repo), united with any you pass, and a Postgres-backed resource
+  whose repo cannot be resolved fails the walk by name. A query issued by a process the build started (`$callers`, a `Task`)
+  counts. An action that takes `org_id` as an argument and sets it in a `before_action` hook (`Marketing`'s `Send`) is no
+  longer counted as exercised: the report has `hook_set`, `hook_set_unlisted` and `hook_set_unproven`, and a host lists each
+  such action in `hook_set:` with a reason and the named behavioural test that proves a foreign org is refused (the walk
+  checks the test is in the file). The three host guards assert both lists are empty. Hosts that pass `repos:` keep working.
+- **`Samen.VaultTokenAssert` takes only text (host-visible).** `refute_vault_token/3`, `assert_vault_token/2` and `leaks/2`
+  accept a binary or iodata and flunk, naming the input, on `nil` or anything else (they used to `to_string/1` it, so
+  `refute_vault_token(nil)` passed). No call site in the five suites passed one. The `phx-` blanking is anchored to an
+  `id="phx-..."` attribute.
+- **Marketing `Send :create_checked`:** an authorized org-A actor passing `org_id: B` for a subscriber in B is a tested
+  refusal that names the pin that refused it (it depended on `before_action` hook order only); a subscriber lookup that
+  FAILS is reported (`Samen.Observability.Failure`, `marketing_send_subscriber_lookup`) and refused with its own message
+  instead of "subscriber not found". **Freight `ApiKey :create`:** the minter is checked against the org the row is created
+  in, not the one the changeset was built with.
+- **Vault-token bare guard** now sees assertions that span lines, pipes, captures, `Regex.match?` / `String.match?`, every
+  regex delimiter, `String.contains?` with a list and module-attribute patterns; an exemption is a trailing
+  `# bare-vt_-ok: <why>` and the exact set is pinned per file. The generated `record_api_test` checks the body with
+  `refute_vault_token(boundary: true)`.
+
 ### Fixed: authorization and honesty round 5 (evaluation 2026-11-24)
 
 - **Fixed: a signed-in `:viewer` acted as a `:member` on the tenant list surfaces, CSV export, file bytes and the profile

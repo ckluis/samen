@@ -89,7 +89,7 @@ defmodule Mix.Tasks.Samen.Verify.VaultTokenBinding do
 
     domains =
       Application.get_env(otp_app, :ash_domains, []) ++
-        Application.get_env(:samen_core, :ash_domains, []) ++
+        Samen.HostDomains.registry() ++
         Application.get_env(:ash, :domains, [])
 
     Samen.Catalog.resource_modules(Enum.uniq(domains))

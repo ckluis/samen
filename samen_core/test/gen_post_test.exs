@@ -46,9 +46,9 @@ defmodule Samen.Gen.PostTest do
 
     core_list =
       if web? do
-        "config :samen_core, :ash_domains, [\n  Widgetco.Billing,\n  Widgetco.Vertical,\n  Widgetco.Aggregate,\n  Widgetco.Primitives,\n  Widgetco.Operator\n]"
+        "config :samen_core, :host_domains, [\n  Widgetco.Billing,\n  Widgetco.Vertical,\n  Widgetco.Aggregate,\n  Widgetco.Primitives,\n  Widgetco.Operator\n]"
       else
-        "config :samen_core, :ash_domains, [\n  Widgetco.Billing,\n  Widgetco.Vertical,\n  Widgetco.Aggregate\n]"
+        "config :samen_core, :host_domains, [\n  Widgetco.Billing,\n  Widgetco.Vertical,\n  Widgetco.Aggregate\n]"
       end
 
     File.write!(Path.join(dir, "config/config.exs"), """
@@ -131,7 +131,7 @@ defmodule Samen.Gen.PostTest do
         cfg = File.read!(Path.join(dir, "config/config.exs"))
         # The new domain is the last element of BOTH lists.
         assert cfg =~ ~r/ash_domains:\s*\[[^\]]*Widgetco\.Crm[^\]]*\]/s
-        assert cfg =~ ~r/:ash_domains,\s*\[[^\]]*Widgetco\.Crm[^\]]*\]/s
+        assert cfg =~ ~r/:host_domains,\s*\[[^\]]*Widgetco\.Crm[^\]]*\]/s
         # The empty scope domain file exists.
         assert File.exists?(Path.join(dir, "lib/widgetco/crm.ex"))
         assert File.read!(Path.join(dir, "lib/widgetco/crm.ex")) =~ "use Ash.Domain"

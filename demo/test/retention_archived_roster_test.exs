@@ -45,7 +45,7 @@ defmodule Demo.RetentionArchivedRosterTest do
 
   describe "archivable_specs/2 walks demo's catalog — the T37a-f roster is fully covered (§5.6)" do
     test "every archivable resource across demo's mounted scopes gets a spec, all timestamp_field: :archived_at" do
-      domains = Application.fetch_env!(:samen_core, :ash_domains)
+      domains = Application.fetch_env!(:samen_core, :host_domains)
       specs = Retention.archivable_specs(domains)
 
       archivable_resources =

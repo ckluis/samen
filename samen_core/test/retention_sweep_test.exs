@@ -157,11 +157,11 @@ defmodule Samen.RetentionSweepTest do
       spec = %Spec{resource: Company, ttl_seconds: 365 * 24 * 60 * 60, action: :shred, subject_field: :name}
 
       # A host whose `:ash_domains` derive nothing: erasure cannot know which blind indexes to clear.
-      prev = Application.get_env(:samen_core, :ash_domains)
-      Application.put_env(:samen_core, :ash_domains, [])
+      prev = Application.get_env(:samen_core, :host_domains)
+      Application.put_env(:samen_core, :host_domains, [])
 
       on_exit(fn ->
-        if prev, do: Application.put_env(:samen_core, :ash_domains, prev), else: Application.delete_env(:samen_core, :ash_domains)
+        if prev, do: Application.put_env(:samen_core, :host_domains, prev), else: Application.delete_env(:samen_core, :host_domains)
       end)
 
       log =
@@ -177,7 +177,7 @@ defmodule Samen.RetentionSweepTest do
       refute Samen.Erasure.erased?(doomed, repo: @repo)
 
       # CONTROL: the same row erases once the lookup is healthy, so the refusal above was the precondition's
-      Application.put_env(:samen_core, :ash_domains, prev)
+      Application.put_env(:samen_core, :host_domains, prev)
       assert %{swept: 1} = Retention.sweep([spec], now: @now, repo: @repo)
       assert Samen.Erasure.erased?(doomed, repo: @repo)
     end

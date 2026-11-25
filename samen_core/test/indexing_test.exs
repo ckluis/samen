@@ -450,7 +450,7 @@ defmodule Samen.IndexingTest do
     end
 
     test "samen_core's own configured domains (kernel resources) are all served" do
-      assert Indexes.violations(domains: Application.fetch_env!(:samen_core, :ash_domains)) == []
+      assert Indexes.violations(domains: Application.fetch_env!(:samen_core, :host_domains)) == []
     end
 
     test "the shipped exemption list is empty: no resource is excused from the contract" do
