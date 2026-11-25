@@ -373,6 +373,33 @@ defmodule Samen.TagsScopeTest do
       end
     end
 
+    test "RED: an ARCHIVED subject is refused (as the web helper's Ash read always hid it); CONTROL: restored, it is accepted",
+         %{org: org, scope: scope} do
+      tag = new_tag(scope, org)
+      subject = new_tag(scope, org, %{name: "to-archive"})
+
+      assert {:ok, _} = create_tagging(scope, org, tag.id, @subject_key, subject.id)
+
+      {:ok, archived} = Archival.archive(subject, scope: scope)
+      other_tag = new_tag(scope, org, %{name: "other"})
+      assert {:error, _} = create_tagging(scope, org, other_tag.id, @subject_key, archived.id)
+
+      {:ok, _} = Archival.restore(archived, scope: scope)
+      assert {:ok, _} = create_tagging(scope, org, other_tag.id, @subject_key, subject.id)
+    end
+
+    test "RED: a client-supplied key never creates an atom, and is refused", %{org: org, scope: scope} do
+      tag = new_tag(scope, org)
+      subject = new_subject(scope, org)
+      scope_part = "zz#{System.unique_integer([:positive])}"
+      resource_part = "rr#{System.unique_integer([:positive])}"
+      camelized = "Elixir.SamenCore.Support.#{Macro.camelize(scope_part)}.#{Macro.camelize(resource_part)}"
+
+      assert_raise ArgumentError, fn -> String.to_existing_atom(camelized) end
+      assert {:error, _} = create_tagging(scope, org, tag.id, "#{scope_part}.#{resource_part}", subject)
+      assert_raise ArgumentError, fn -> String.to_existing_atom(camelized) end
+    end
+
     test "RED: the authorize?: false (system) path is held to the same rule", %{org: org, scope: scope} do
       tag = new_tag(scope, org)
 
