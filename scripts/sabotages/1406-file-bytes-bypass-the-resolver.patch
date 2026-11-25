@@ -1,0 +1,19 @@
+# SABOTAGE: the file byte-serve builds its scope with Mount.scope again, so a viewer reads bytes as a member
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_surfaces_test.exs
+# MUST_FAIL: file bytes act as the RESOLVED role
+diff --git a/samen_web/lib/samen/web/files/bytes_controller.ex b/samen_web/lib/samen/web/files/bytes_controller.ex
+index ae864f4a..34c5f0af 100644
+--- a/samen_web/lib/samen/web/files/bytes_controller.ex
++++ b/samen_web/lib/samen/web/files/bytes_controller.ex
+@@ -58,7 +58,7 @@ defmodule Samen.Web.Files.BytesController do
+ 
+     # WHO reads: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), not
+     # `Mount.scope/2`'s fixed `:member`. Denied -> 403, a failed lookup -> 503; never a default role.
+-    actor = TenantActor.scope(mount, org_id, TenantActor.conn_ref(mount, params, session))
++    actor = if mount && org_id, do: {:ok, Mount.scope(mount, org_id)}, else: TenantActor.scope(mount, org_id, TenantActor.conn_ref(mount, params, session))
+ 
+     serve_bytes(conn, mount, org_id, file_id, actor)
+   end

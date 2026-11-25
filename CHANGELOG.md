@@ -13,6 +13,25 @@ All notable changes to Samen are recorded here. The format follows
 
 ### Fixed: authorization and honesty round 5 (evaluation 2026-11-24)
 
+- **Fixed: a signed-in `:viewer` acted as a `:member` on the tenant list surfaces, CSV export, file bytes and the profile
+  page.** `Samen.Web.Plane.scope/2` (through `Mount.scope/2`) gave every tenant actor a fixed `role: :member`; since a real
+  spine login can pass an armed host, a viewer could create and delete companies (and, where a policy reserves it, anything
+  else a member may) through the generic CRM list screens, and CSV export and file bytes ran as a member. A new shared
+  resolver, `Samen.Web.TenantActor.scope/3` (over the same `Settings.Reads.actor_in_org/3` + `Samen.Auth.OrgActor` the
+  notification pages use), builds the scope from the person's ACTIVE membership: the role and the per-org user id. On an
+  armed host a person with no active membership is refused (the denied card, or 403 on CSV and bytes) and a failed lookup is an
+  error state (the unavailable card, or 503); neither reads nor writes, and neither ever falls back to a default role.
+  The disarmed dev posture and the operator plane are unchanged (`TenantActor.system_scope/2` names the fixed `:member`
+  scope where it is really meant). Converted: `CRM.ContactsLive`, `CRM.CompaniesLive`, `Csv.ExportController`,
+  `Files.BytesController` and `Settings.ProfileLive` (CSV and bytes expose the role they acted with as the
+  `:samen_acting_role` conn assign). **Generated `--live` screens** (index, show, form) read the role from the same
+  resolver instead of `TenantRole.membership_role/3` (whose fallback for "no membership" was `:member`) and show the same
+  two states. **Upgrade note:** an ARMED host whose signed-in users have no active `Identity.Membership` row in the org
+  they act in (a legacy `samen_current_user` host that never created one) now gets the denied state on those screens
+  instead of acting as a member; create the membership rows. `Samen.Web.TenantActorGuardTest` holds a per-file ratchet over
+  the `Mount.scope/2` / `Plane.scope/2` calls in samen_web that are not converted yet: a file may not gain one and a new file
+  may not introduce one. Sabotages 1402 to 1407.
+
 - **Fixed: `Samen.Webhook.deliver/4` raised `FunctionClauseError` on any non-empty endpoint list, discarded the `:multi` it
   was given, and answered `{:ok, 0}` when no `:endpoints` were passed.** It now enqueues one job per active, subscribed
   endpoint. With `:multi` it returns `{:ok, count, multi}`: **upgrade note:** run the RETURNED multi (`Ecto.Multi` is
