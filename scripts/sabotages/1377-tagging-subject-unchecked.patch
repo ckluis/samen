@@ -1,0 +1,19 @@
+# SABOTAGE: Tagging drops SubjectInOrg, so any subject key and id (another organisation's included) is 
+#   anchored
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/tags_scope_test.exs
+# MUST_FAIL: a subject id from ANOTHER organisation is refused
+diff --git a/samen_core/lib/samen/scopes/tags/blueprint.ex b/samen_core/lib/samen/scopes/tags/blueprint.ex
+index 1054896f..ea08418a 100644
+--- a/samen_core/lib/samen/scopes/tags/blueprint.ex
++++ b/samen_core/lib/samen/scopes/tags/blueprint.ex
+@@ -173,7 +173,6 @@ defmodule Samen.Scopes.Tags.Blueprint do
+         changes do
+           change({Samen.Policy.SameOrgFk, relationships: [:tag]})
+           # The anchor must be a resource the host knows and a row of THIS organisation, on every path.
+-          change(Samen.Policy.SubjectInOrg)
+         end
+ 
+         actions do

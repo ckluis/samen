@@ -45,6 +45,15 @@ All notable changes to Samen are recorded here. The format follows
   member their own plus the org-addressed ones; a host wiring the preferences panel by `?recipient=` must wire the
   `:recipient_id` label or a session user. Sabotages 1373 to 1376.
 
+- **Fixed: a Tagging accepted any subject, including an id from another organisation.** `subject_key` and `subject_id` were
+  plain scalars checked only by `Samen.Web.Tags.attach/5`, so a direct `Ash.create`, the automation `add_tag` action or a
+  host's own code could anchor a tag to a nonexistent object or to another tenant's row. New change
+  `Samen.Policy.SubjectInOrg` on `Tags.Tagging`: `subject_key` must resolve (the `Samen.ObjectKey` rule, under the Tagging's own
+  host namespace) to a compiled resource with an `org_id`, and the row must exist in the write's organisation, read on the
+  write repo; a lookup that cannot run refuses the write. It holds on `authorize?: false` writes too. **Upgrade note:** code
+  or seeds that tagged a made-up subject (a key no resource answers to, or an id with no row) now get an error; tag a real row
+  of the same organisation. Sabotages 1377 and 1378.
+
 ### Security: identity authorization, round 3
 
 - **Fixed: an admin could demote, suspend or re-role an owner or a peer admin.** `Samen.Policy.ManageRole` judged only the
