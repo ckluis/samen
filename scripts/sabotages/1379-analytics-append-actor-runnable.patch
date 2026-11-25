@@ -1,0 +1,20 @@
+# SABOTAGE: ProductEvent :append is authorized for actors again, so an admin skips every gate track/1 
+#   applies
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/analytics_append_system_only_test.exs
+# MUST_FAIL: an admin cannot append directly
+diff --git a/samen_core/lib/samen/scopes/analytics/blueprint.ex b/samen_core/lib/samen/scopes/analytics/blueprint.ex
+index 728ab54f..90af072e 100644
+--- a/samen_core/lib/samen/scopes/analytics/blueprint.ex
++++ b/samen_core/lib/samen/scopes/analytics/blueprint.ex
+@@ -149,7 +149,7 @@ defmodule Samen.Scopes.Analytics.Blueprint do
+           # (a system-emitted row, like the notifications engine + `mov`). A direct actor write would skip
+           # every one of those gates, so no actor, an admin included, may run it.
+           policy action(:append) do
+-            forbid_if(always())
++            authorize_if(always())
+           end
+         end
+       end

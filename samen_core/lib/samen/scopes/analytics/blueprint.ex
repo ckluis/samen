@@ -60,8 +60,8 @@ defmodule Samen.Scopes.Analytics.Blueprint do
         vault-excluded CDC projection (`project(ProductEvent)` returns all columns)
         and inherit post-shred erasure for free (the pseudonym's key is destroyed).
 
-        Org-scoped: `OrgScope` read + admin-gated create (the `track/1` framework
-        emit writes with `authorize?: false`, like the notifications engine + `mov`).
+        Org-scoped: `OrgScope` read; `:append` is the system door only (the `track/1` framework
+        emit writes with `authorize?: false`, like the notifications engine + `mov`; no actor may run it).
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
@@ -144,13 +144,12 @@ defmodule Samen.Scopes.Analytics.Blueprint do
             authorize_if(Samen.Policy.OrgScope)
           end
 
-          # Append is admin-gated on the tenant plane; the framework track/1 emit
-          # writes with authorize?: false (a system-emitted row, like the
-          # notifications engine + mov), so this gate governs any DIRECT caller.
-          policy action_type(:create) do
-            forbid_unless(Samen.Policy.OrgScope)
-            forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})
-            authorize_if(always())
+          # `:append` is the SYSTEM door. `Samen.Analytics.track/1` applies the gates (a registered event name,
+          # catalogued prop keys, no PII-shaped `entity_ref` or value) and then writes with `authorize?: false`
+          # (a system-emitted row, like the notifications engine + `mov`). A direct actor write would skip
+          # every one of those gates, so no actor, an admin included, may run it.
+          policy action(:append) do
+            forbid_if(always())
           end
         end
       end
