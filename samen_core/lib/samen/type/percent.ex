@@ -39,6 +39,18 @@ defmodule Samen.Type.Percent do
   @doc "Self-classification for `Samen.Pii.Classification`: a percent is non-PII (ADR-036 D2)."
   def samen_pii_class, do: :non_pii
 
+  @doc "Units for the catalog (ADR-043 §8a): percent points (`42.5` is 42.5%), within the type's min and max."
+  def samen_catalog_units(constraints) do
+    "percent points (#{bound(constraints, :min, @default_min)}-#{bound(constraints, :max, @default_max)})"
+  end
+
+  defp bound(constraints, key, default) do
+    case Keyword.get(constraints, key, default) do
+      %Decimal{} = d -> Decimal.to_string(d, :normal)
+      other -> to_string(other)
+    end
+  end
+
   @impl true
   def storage_type(_constraints), do: :decimal
 

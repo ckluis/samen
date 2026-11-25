@@ -92,6 +92,7 @@ defmodule Samen.Transformers.ArchivableAttribute do
       allow_nil?: true,
       public?: true,
       writable?: true,
+      description: "When the record was archived (hidden from normal reads); empty while it is active.",
       # Must be selected by default: the archival read filter, idempotence guards, and
       # restore all key off `archived_at` — an unselected (NotLoaded) value would defeat
       # them. (A raw-struct injection leaves this nil, unlike the DSL default of true.)

@@ -11,6 +11,22 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Added: meaning in the catalog (ADR-043 §8a)
+
+- **Added: resources and fields carry meaning that the catalog dump and the AI catalogue expose.** Ash `description`
+  on resources, attributes and relationships, a `meaning do … end` section (`label`, `synonyms`, `units`), and
+  `description:` on `pii_attribute`. `Samen.Catalog.Meaning` reads it and derives `allowed_values`, `max_length` and
+  the units Money, Percent and Duration fix. `schema.dict.json` gains `description` and `label` on tables, fields
+  and (description) relationships, and optional `synonyms`, `units`, `allowed_values`, `max_length`; `grounding/2`
+  and the MCP browse carry the same. The framework describes `id`, `org_id`, timestamps, `archived_at` and `custom`.
+- **Added: a literal `vt_` in any string the catalogue entry takes from meaning, a `meaning` field naming a
+  non-attribute or naming one twice, and authored units on a unit-fixing type fail compile.** The AI chokepoint
+  refuses any metadata string containing `vt_`, so the check scans the reader's whole output with the chokepoint's
+  own predicate (`Samen.AI.VtSentinel`): descriptions, labels, synonyms, units, `allowed_values`, and logical names.
+  Physical table and column names are not meaning text and are covered by a catalogue walk test in each host.
+- **Changed: the CRM scope blueprint, `Samen.Fragments.CorePerson` and demo's CRM resources are described**; the three
+  committed `schema.dict.json` files are regenerated. No database column, migration or `custom_objects` change.
+
 ### Fixed: hardening batch 3 (database TLS, API-key digest uniqueness, expired API keys)
 
 - **Fixed: a generated `--deploy` app verifies the database server certificate (ARCH-12).** `config/runtime.exs` used

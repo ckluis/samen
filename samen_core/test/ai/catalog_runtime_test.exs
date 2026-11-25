@@ -26,6 +26,7 @@ defmodule Samen.AI.CatalogRuntimeTest do
   alias Samen.AI
   alias Samen.AI.{Catalog, MaskedPayload, Provider}
   alias Samen.CustomObjects
+  alias SamenCore.Support.MeaningFixture
   alias SamenCore.TestRepo
 
   @fixture_resources [
@@ -38,6 +39,44 @@ defmodule Samen.AI.CatalogRuntimeTest do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
     Provider.Fake.reset()
     :ok
+  end
+
+  describe "meaning in the catalogue (ADR-043 §8a)" do
+    setup do
+      mod = MeaningFixture.described!()
+      on_exit(&MeaningFixture.unload_described/0)
+      {:ok, mod: mod}
+    end
+
+    test "the runtime catalog carries declared descriptions, synonyms, units and allowed values", %{mod: mod} do
+      [table] = Catalog.schema(resources: [mod])["tables"]
+      fields = Map.new(table["fields"], &{&1["logical_name"], &1})
+
+      assert table["description"] == "A fixture deal used to prove catalog meaning."
+      assert table["label"] == "Bad vault"
+      assert table["synonyms"] == ["contract"]
+
+      assert fields["value"]["description"] == "Expected value of the fixture deal."
+      assert fields["value"]["label"] == "Deal value"
+      assert fields["value"]["synonyms"] == ["amount"]
+      assert fields["value"]["units"] == "money: amount with per-value ISO 4217 currency"
+      assert fields["count"]["units"] == "pieces"
+      assert fields["status"]["allowed_values"] == ["open", "won"]
+      assert fields["company_id"]["description"] == "The company the fixture deal is with."
+      assert [%{"name" => "company", "description" => "The company the fixture deal is with."}] = table["relationships"]
+
+      # null description + omitted optional keys: the shape rules
+      assert Map.has_key?(fields["status"], "description") and fields["status"]["description"] == nil
+      refute Map.has_key?(fields["status"], "units")
+      refute Map.has_key?(fields["status"], "synonyms")
+      refute Map.has_key?(fields["id"], "allowed_values")
+    end
+
+    test "grounding/2 carries the same meaning, and dump parity still holds", %{mod: mod} do
+      grounding = Catalog.grounding(:scope, resources: [mod])
+      assert [%{"description" => "A fixture deal used to prove catalog meaning."}] = grounding.schema["tables"]
+      assert Catalog.dict([mod]) == Mix.Tasks.Samen.Catalog.Dump.build_dict([mod])
+    end
   end
 
   # --------------------------------------------------------------------------------------
@@ -93,7 +132,20 @@ defmodule Samen.AI.CatalogRuntimeTest do
       all_fields = Enum.flat_map(dict["tables"], & &1["fields"])
       assert all_fields != []
 
-      allowed_keys = MapSet.new(["column_name", "logical_name", "type", "pii"])
+      # Extended KEY BY KEY (ADR-043 §8a): each is schema text or a code constant, never a row value.
+      allowed_keys =
+        MapSet.new([
+          "column_name",
+          "logical_name",
+          "type",
+          "pii",
+          "description",
+          "label",
+          "synonyms",
+          "units",
+          "allowed_values",
+          "max_length"
+        ])
 
       for field <- all_fields do
         keys = field |> Map.keys() |> MapSet.new()

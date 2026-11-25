@@ -50,16 +50,19 @@ same source of truth.**
       "table_name": "per_person",
       "resource": "Demo.CrmScope.Person",
       "fields": [
-        { "column_name": "per_full_name", "logical_name": "full_name", "type": "Samen.Type.VaultField", "pii": true },
-        { "column_name": "per_id",        "logical_name": "id",        "type": "UUID", "pii": false },
-        { "column_name": "per_org_id",    "logical_name": "org_id",    "type": "UUID", "pii": false }
+        { "column_name": "per_full_name", "logical_name": "full_name", "type": "Samen.Type.VaultField", "pii": true,
+          "description": "…", "label": "Full name" },
+        { "column_name": "per_id",        "logical_name": "id",        "type": "UUID", "pii": false,
+          "description": "…", "label": "Id" },
+        { "column_name": "per_org_id",    "logical_name": "org_id",    "type": "UUID", "pii": false,
+          "description": "…", "label": "Org id" }
       ]
     }
   ]
 }
 ```
 
-Each field carries four keys the agent needs:
+Each field carries these four keys the agent needs, plus `description` and `label` (always present, see below):
 
 | key | what it is | why the agent needs it |
 |---|---|---|
@@ -67,6 +70,19 @@ Each field carries four keys the agent needs:
 | `logical_name` | the **catalog / API field name** the agent writes Ash against (`:full_name`) — resource-scoped, NOT globally unique | what the agent puts in `Ash.Query`/`attribute`/policy code |
 | `type` | the declared type (`UUID`, `Atom`, `Samen.Type.VaultField`, …) | so the agent never "guesses `status` is a string" |
 | `pii` | **boolean** — is this field vault-routed PII? | so the agent routes the field through the vault + `:reveal`, never lands it in the clear (T6.3) |
+
+Fields (and tables) also carry meaning, authored once and read by `Samen.Catalog.Meaning` (ADR-043 §8a):
+
+| key | present | what it is |
+|---|---|---|
+| `description` | always (`null` when undescribed) | what the field or table means, in plain words |
+| `label` | always | human label; the humanized name unless authored |
+| `synonyms` | only when authored | other words a person may use |
+| `units` | only when known | fixed by the type (Money, Percent, Duration) or authored |
+| `allowed_values` | only when constrained | the `one_of` values, in declared order |
+| `max_length` | only when constrained | the `max_length` constraint |
+
+Relationships carry `description` too. It is schema text written by the framework's authors, never a row value.
 
 ### The two names, and which identity is unambiguous
 

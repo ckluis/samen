@@ -61,4 +61,49 @@ defmodule Demo.AiGroundingCatalogTest do
     # Derived, not hand-written: matches a fresh direct catalog call byte-for-byte.
     assert grounding.schema == Catalog.schema()
   end
+
+  test "the CRM blueprint's meaning reaches demo's catalog with zero host code (ADR-043 §8a)" do
+    [opp] = Enum.filter(Catalog.schema()["tables"], &(&1["table_name"] == "opp_opportunity"))
+    by_name = Map.new(opp["fields"], &{&1["logical_name"], &1})
+
+    assert opp["description"] =~ "sales deal"
+    assert opp["synonyms"] == ["deal"]
+
+    assert by_name["value"]["description"] =~ "Expected value"
+    assert "amount" in by_name["value"]["synonyms"]
+    assert by_name["value"]["units"] =~ "ISO 4217"
+    assert by_name["status"]["allowed_values"] == ["open", "won", "lost", "on_hold"]
+    # the belongs_to source attribute is described by its relationship
+    assert by_name["company_id"]["description"] == "The company this deal is with, if any."
+    # framework-injected
+    assert is_binary(by_name["org_id"]["description"])
+  end
+
+  test "every description in demo's catalog is plain schema text: 3+ words, at most 300 chars" do
+    texts =
+      for table <- Catalog.schema()["tables"],
+          text <-
+            [table["description"]] ++
+              Enum.map(table["fields"], & &1["description"]) ++ Enum.map(table["relationships"], & &1["description"]),
+          is_binary(text),
+          do: text
+
+    assert length(texts) > 100
+
+    for text <- texts do
+      assert length(String.split(text)) >= 3, "too short: #{inspect(text)}"
+      assert String.length(text) <= 300, "too long: #{inspect(text)}"
+    end
+  end
+
+  test "no string anywhere in demo's catalogue carries the vault-token sentinel the chokepoint refuses" do
+    leaves = Samen.AI.VtSentinel.leaves(Catalog.schema())
+
+    # anti-tautology: the walk really reaches names, descriptions, labels, synonyms, units and allowed values
+    assert length(leaves) > 5_000
+    assert Enum.any?(leaves, fn {path, _} -> "allowed_values" in path end)
+
+    offenders = for {path, text} <- leaves, Samen.AI.VtSentinel.in_string?(text), do: {path, text}
+    assert offenders == [], "strings the AI chokepoint would refuse: #{inspect(Enum.take(offenders, 5))}"
+  end
 end

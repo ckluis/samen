@@ -1,0 +1,20 @@
+# SABOTAGE: a belongs_to source attribute loses its relationship's description, so every FK field is 
+#   undescribed
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_reader_test.exs
+# MUST_FAIL: a belongs_to source attribute is described by its relationship
+diff --git a/samen_core/lib/samen/catalog/meaning.ex b/samen_core/lib/samen/catalog/meaning.ex
+index 797a18c1..01a50e9b 100644
+--- a/samen_core/lib/samen/catalog/meaning.ex
++++ b/samen_core/lib/samen/catalog/meaning.ex
+@@ -56,7 +56,7 @@ defmodule Samen.Catalog.Meaning do
+ 
+       {to_string(attr.name),
+        %{
+-         description: blank_to_nil(attr.description) || Map.get(fk_descriptions, attr.name),
++         description: blank_to_nil(attr.description) || (fk_descriptions && nil),
+          label: (entry && blank_to_nil(entry.label)) || humanize(attr.name),
+          synonyms: (entry && entry.synonyms) || [],
+          units: fixed_units(attr.type, attr.constraints) || (entry && blank_to_nil(entry.units)),

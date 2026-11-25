@@ -1,0 +1,20 @@
+# SABOTAGE: the meaning transformer stops declaring its order against the attribute-adding transformers, so 
+#   acceptance of FK, org_id and archived_at fields falls to hash order
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_reader_test.exs
+# MUST_FAIL: the transformer is declared to run after every transformer that adds or describes attributes
+diff --git a/samen_core/lib/samen/catalog/transformers/meaning_declarations.ex b/samen_core/lib/samen/catalog/transformers/meaning_declarations.ex
+index 10972246..5fc45cd9 100644
+--- a/samen_core/lib/samen/catalog/transformers/meaning_declarations.ex
++++ b/samen_core/lib/samen/catalog/transformers/meaning_declarations.ex
+@@ -45,7 +45,7 @@ defmodule Samen.Catalog.Transformers.MeaningDeclarations do
+   def after_transformers, do: @after_transformers
+ 
+   @impl true
+-  def after?(transformer), do: transformer in @after_transformers
++  def after?(_transformer), do: false
+ 
+   @impl true
+   def before?(_), do: false

@@ -58,9 +58,29 @@ defmodule Samen.Transformers.MaterializeCustomFields do
 
     if has_bag? do
       {:ok, change} = Ash.Resource.Builder.build_change(Samen.CustomFields.Change)
-      {:ok, Transformer.add_entity(dsl_state, [:changes], change)}
+
+      {:ok,
+       dsl_state
+       |> describe_bag()
+       |> Transformer.add_entity([:changes], change)}
     else
       {:ok, dsl_state}
+    end
+  end
+
+  # The framework describes the bag once (ADR-043 §8a); a blueprint or host that wrote its own description keeps it.
+  @bag_description "Organization-defined extra fields for this record, validated against the organization's custom field definitions on every create or update that sets it."
+
+  defp describe_bag(dsl_state) do
+    dsl_state
+    |> Transformer.get_entities([:attributes])
+    |> Enum.find(&(&1.name == @bag_attr))
+    |> case do
+      %{description: description} = attr when description in [nil, ""] ->
+        Transformer.replace_entity(dsl_state, [:attributes], %{attr | description: @bag_description}, &(&1.name == @bag_attr))
+
+      _ ->
+        dsl_state
     end
   end
 end

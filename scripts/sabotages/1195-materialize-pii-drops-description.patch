@@ -1,0 +1,19 @@
+# SABOTAGE: a pii_attribute description is dropped when the vault field is materialized, so vault fields 
+#   are never described
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_reader_test.exs
+# MUST_FAIL: pii_attribute description reaches the materialized attribute
+diff --git a/samen_core/lib/samen/transformers/materialize_pii.ex b/samen_core/lib/samen/transformers/materialize_pii.ex
+index d3945e4a..c47093e2 100644
+--- a/samen_core/lib/samen/transformers/materialize_pii.ex
++++ b/samen_core/lib/samen/transformers/materialize_pii.ex
+@@ -146,7 +146,6 @@ defmodule Samen.Transformers.MaterializePii do
+       public?: true,
+       writable?: true,
+       sensitive?: true,
+-      description: pii_attr.description,
+       constraints: []
+     }
+ 

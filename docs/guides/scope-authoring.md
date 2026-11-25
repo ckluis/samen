@@ -204,6 +204,51 @@ end
 
 ---
 
+## 5a · Meaning: describe what each resource and field is
+
+The catalog dump and the AI catalogue (grounding, MCP browse) carry meaning beside structure. Write it once in the
+blueprint; every host that mounts the scope gets it with no host code.
+
+```elixir
+resource do
+  description "A sales deal pursued with a company and moved through pipeline stages until it is won or lost."
+end
+
+meaning do
+  synonyms ["deal"]
+  field :value, label: "Deal value", synonyms: ["amount", "deal size"]
+  field :size_bytes, units: "bytes"
+end
+
+attributes do
+  attribute :status, :atom, public?: true, constraints: [one_of: [:open, :won]],
+    description: "Overall state of the deal, independent of its pipeline stage."
+end
+
+relationships do
+  belongs_to :company, Company do
+    description "The company this deal is with, if any."   # also describes the company_id field
+  end
+end
+```
+
+- Descriptions use Ash's `description`; `pii_attribute … description:` describes a vault field (its meaning, never a value).
+- `meaning do` holds only `label`, `synonyms` and `units` (free text, at most 40 characters).
+- Do not describe `id`, `org_id`, timestamps, `archived_at` or the `custom` bag when the framework injects them: it does.
+  A resource that declares its own `org_id` (or any of these) must describe it itself; otherwise it stays `null`.
+- A synonym must not be a word another table in any host uses as its name, label or synonym (blueprint text reaches
+  every host): "file" and "contact" were dropped for naming the Files primitive and demo's `cnt_contact`.
+- Allowed values and max length come from `one_of` / `max_length`; Money, Percent and Duration fix their own units
+  (authoring units there fails compile).
+- Write only what the code makes true: read the type, constraints, default and use first, and say so plainly when
+  the code defines no meaning ("free text as entered; no format is enforced"). Never invent units, ranges or rules.
+- One or two plain sentences, at least 3 words, at most 300 characters, not a restatement of the field name. No
+  personal data and no example values that look like real people.
+- A literal `vt_` anywhere in these texts fails compile (the AI chokepoint would refuse every grounded completion).
+- After changing any text, regenerate the host dicts with `mix samen.catalog.dump --output schema.dict.json`.
+
+---
+
 ## 6 · Audit rides `aud_event` — never a new table
 
 The scope table lists `audit` under Identity and Primitives. **A scope never defines its own audit

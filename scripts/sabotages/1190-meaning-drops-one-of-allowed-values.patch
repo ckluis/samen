@@ -1,0 +1,19 @@
+# SABOTAGE: one_of constraints stop producing allowed_values, so the model is not told the closed set
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/catalog_meaning_reader_test.exs
+# MUST_FAIL: allowed_values are derived from one_of constraints
+diff --git a/samen_core/lib/samen/catalog/meaning.ex b/samen_core/lib/samen/catalog/meaning.ex
+index 797a18c1..420fe446 100644
+--- a/samen_core/lib/samen/catalog/meaning.ex
++++ b/samen_core/lib/samen/catalog/meaning.ex
+@@ -137,7 +137,7 @@ defmodule Samen.Catalog.Meaning do
+ 
+   defp allowed_values(type, constraints) do
+     case Keyword.get(constraints, :one_of) do
+-      values when is_list(values) and values != [] -> Enum.map(values, &to_string/1)
++      values when is_list(values) and values == :never -> Enum.map(values, &to_string/1)
+       _ -> enum_values(type)
+     end
+   end

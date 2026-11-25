@@ -588,6 +588,40 @@ context (§3.2 step 2b) and the MCP catalog tool serves it (§9).
 
 **Decision (binds T66):** as stated; the parity test is the contract.
 
+### 8a · Amendment — meaning in the catalog
+
+**Why.** The catalog told the model that a field exists, its type and whether it is protected, but not what it
+means. A model guessing that `probability` is a fraction, or that `value` is dollars, is exactly the gap the
+catalog exists to close.
+
+**What changed (additive).** Every resource and field can carry author-written *meaning*, and the catalog dump and
+the runtime catalogue expose it, so §8's parity still holds by construction (one function, `Samen.AI.Catalog.dict/1`).
+
+- Authors use Ash's native `description` (resource, attribute, relationship) plus one `meaning do … end` section on
+  `Samen.Catalog` for `label`, `synonyms` and `units`. `pii_attribute` takes `description:`. A `belongs_to` source
+  attribute is described by its relationship's description. `id`, `org_id`, `inserted_at`, `updated_at`,
+  `archived_at` and the `custom` bag are described once by the framework.
+- Derived, never authored: `allowed_values` (from `one_of`), `max_length`, and the units of types that fix them
+  (Money, Percent, Duration via `samen_catalog_units/1`; authoring units on those is a compile error).
+- `Samen.Catalog.Meaning` is the single reader. `description` and `label` are always present (a missing description
+  is `null`; an empty string counts as missing); `synonyms`, `units`, `allowed_values`, `max_length` appear only when
+  they have a value; relationships carry `description`.
+- A literal `vt_` in any string the reader puts into a catalogue entry fails compile: the chokepoint refuses any
+  metadata string containing it, so one such string would refuse every auto-grounded completion and the MCP browse.
+  The check (`Samen.Catalog.Transformers.MeaningDeclarations`) scans the reader's own output
+  (`Samen.Catalog.Meaning.string_leaves/1`): the table description, label and synonyms; each field's description,
+  label, synonyms, units and `allowed_values` (`one_of` atoms, `Ash.Type.Enum` values); each relationship
+  description; and the logical attribute and relationship names. It uses the chokepoint's own predicate
+  (`Samen.AI.VtSentinel`). It does NOT cover the physical table and column names (`table_name`, `column_name`), which
+  are not meaning text; each host's `catalog_vt_sentinel` test walks the whole catalogue, names included.
+  A `meaning field` naming an attribute twice also fails compile. The check runs after every transformer that adds
+  or describes an attribute (declared with `after?/1`), so `meaning field :company_id`, `:org_id`, `:archived_at`
+  and `:custom` are accepted.
+
+**Unchanged.** Still metadata only: author-written text and code constants, never a row value. No database column,
+no `tam_table`/`fld_field` change, and the tenant `custom_objects` payload is untouched (tenant-written text is a
+separate decision).
+
 ## 9 · The MCP server (D4 — binds T69)
 
 Per ruling c4 and ADR-037 §5.6(a): an **HTTP + SSE (streamable) MCP server mounted in

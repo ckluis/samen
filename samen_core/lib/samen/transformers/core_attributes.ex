@@ -92,6 +92,7 @@ defmodule Samen.Transformers.CoreAttributes do
       writable?: false,
       public?: true,
       default: &Ash.UUID.generate/0,
+      description: "Unique identifier of the record, generated when it is created.",
       generated?: false,
       constraints: []
     }
@@ -105,6 +106,7 @@ defmodule Samen.Transformers.CoreAttributes do
       allow_nil?: false,
       public?: true,
       writable?: true,
+      description: "Identifier of the organization (tenant) that owns the record.",
       # Explicit booleans (each == the Ash default, so no behaviour change): a raw-struct
       # injection leaves these `nil`, which the E7 version-resource generator rejects when
       # it mirrors org_id onto the `<Resource>.Version` via ash_paper_trail's
@@ -131,6 +133,7 @@ defmodule Samen.Transformers.CoreAttributes do
       allow_nil?: false,
       writable?: false,
       public?: true,
+      description: "When the record was created.",
       default: &__MODULE__.now/0,
       match_other_defaults?: true,
       constraints: []
@@ -145,6 +148,7 @@ defmodule Samen.Transformers.CoreAttributes do
       allow_nil?: false,
       writable?: false,
       public?: true,
+      description: "When the record was last changed.",
       default: &__MODULE__.now/0,
       update_default: &__MODULE__.now/0,
       match_other_defaults?: true,

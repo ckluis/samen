@@ -1,0 +1,19 @@
+# SABOTAGE: the catalogue leaf walk sees nothing, so a vt_ string in pawchart's catalogue would pass
+#
+# Flips the named test(s).
+# APP: pawchart
+# TEST_FILES: test/catalog_vt_sentinel_test.exs
+# MUST_FAIL: no string anywhere in pawchart's catalogue carries the vault-token sentinel
+diff --git a/samen_core/lib/samen/ai/vt_sentinel.ex b/samen_core/lib/samen/ai/vt_sentinel.ex
+index 05152164..52b0ee57 100644
+--- a/samen_core/lib/samen/ai/vt_sentinel.ex
++++ b/samen_core/lib/samen/ai/vt_sentinel.ex
+@@ -25,7 +25,7 @@ defmodule Samen.AI.VtSentinel do
+   arrived by (description, label, synonym, unit, allowed value, name).
+   """
+   @spec leaves(term()) :: [{[term()], String.t()}]
+-  def leaves(term), do: leaves([], term)
++  def leaves(_term), do: []
+ 
+   defp leaves(path, string) when is_binary(string), do: [{Enum.reverse(path), string}]
+ 

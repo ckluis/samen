@@ -283,6 +283,7 @@ defmodule SamenCore.CatalogTest do
       assert by_resource["SamenCore.Support.Crm.Contact"]["relationships"] == [
                %{
                  "name" => "company",
+                 "description" => nil,
                  "type" => "belongs_to",
                  "destination" => "SamenCore.Support.Crm.Company",
                  "destination_table" => "cpy_company",

@@ -52,7 +52,10 @@ defmodule Samen.Fragments.CorePerson do
 
   attributes do
     # Non-PII fields the CRM person carries from the core shape.
-    attribute(:job_title, :string, public?: true)
+    attribute(:job_title, :string,
+      public?: true,
+      description: "Job title of the person as free text; no fixed list is enforced."
+    )
 
     # Tier-1 jsonb bag — per-org custom fields at the bottom rung of the ladder.
     attribute(:custom, :map, public?: true)
@@ -65,8 +68,17 @@ defmodule Samen.Fragments.CorePerson do
     vault(:pii_email)
     vault(:pii_phone)
 
-    pii_attribute(:full_name, Samen.Type.FullName, vault: :pii_name)
-    pii_attribute(:emails, Samen.Type.Emails, vault: :pii_email)
-    pii_attribute(:phones, Samen.Type.Phones, vault: :pii_phone)
+    pii_attribute(:full_name, Samen.Type.FullName,
+      vault: :pii_name,
+      description: "The person's full name; vault-routed and masked unless revealed."
+    )
+    pii_attribute(:emails, Samen.Type.Emails,
+      vault: :pii_email,
+      description: "The person's email addresses; vault-routed and masked unless revealed."
+    )
+    pii_attribute(:phones, Samen.Type.Phones,
+      vault: :pii_phone,
+      description: "The person's phone numbers; vault-routed and masked unless revealed."
+    )
   end
 end

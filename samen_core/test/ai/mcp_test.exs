@@ -120,6 +120,23 @@ defmodule Samen.AI.McpTest do
     end
   end
 
+  describe "browse — meaning in the catalogue (ADR-043 §8a)" do
+    test "the browse catalogue payload carries the described fixture and is still sealed" do
+      mod = SamenCore.Support.MeaningFixture.described!()
+      on_exit(&SamenCore.Support.MeaningFixture.unload_described/0)
+
+      assert {:ok, %{"kind" => "catalog", "schema" => %{"tables" => [table]}}} =
+               Mcp.browse(scope(Ash.UUID.generate()), %{}, resources: [mod], repo: TestRepo)
+
+      assert table["description"] == "A fixture deal used to prove catalog meaning."
+      assert Enum.any?(table["fields"], &(&1["synonyms"] == ["amount"]))
+
+      # control: a `vt_` token in a description would NOT seal (the chokepoint refuses it), which is why the DSL
+      # refuses it at compile time
+      assert {:error, _} = Chokepoint.seal(:mcp, [], meta: %{payload: %{"description" => "holds a vt_ token"}})
+    end
+  end
+
   describe "browse — a catalogue or resource list that FAILED is an error, not an empty one" do
     test "RED: an unreadable custom-object table answers {:error, :unavailable}, not a catalogue with no custom objects" do
       org = Ash.UUID.generate()
