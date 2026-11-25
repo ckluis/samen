@@ -141,6 +141,11 @@ defmodule Samen.Web.Csv do
     * `:max_rows`  — the row limit (default `max_export_rows/0`).
   """
   def export(resource, scope, opts \\ []) do
+    with {:ok, csv, _rows} <- export_counted(resource, scope, opts), do: {:ok, csv}
+  end
+
+  @doc "Like `export/3`, and also returns the number of data rows: `{:ok, csv, row_count}` (what an audit line records)."
+  def export_counted(resource, scope, opts \\ []) do
     with {:ok, cols} <- validate_columns(resource, Keyword.get(opts, :columns)) do
       page_size = Keyword.get(opts, :page_size, Reads.default_page_size())
       base = Keyword.get(opts, :query, resource)
@@ -155,7 +160,7 @@ defmodule Samen.Web.Csv do
         # machinery (`samen.csv.export.row_count`). The count is a measurement; the only
         # tag is the bounded `:result`. Best-effort — never fails an export.
         emit_export_telemetry(length(rows))
-        {:ok, serialize([Enum.map(cols, &to_string/1) | rows])}
+        {:ok, serialize([Enum.map(cols, &to_string/1) | rows]), length(rows)}
       end
     end
   end

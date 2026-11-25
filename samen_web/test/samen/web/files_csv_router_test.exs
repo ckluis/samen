@@ -99,6 +99,20 @@ defmodule Samen.Web.FilesCsvRouterTest do
     |> Ash.create!()
   end
 
+  # The `aud_event` rows of `type` written by (or about) `who` (an actor id): this test host has no `aud_chain` table, so
+  # the org-partitioned chain entry (what a migrated host also gets) is not readable here; the row itself is.
+  defp access_events(who, type) do
+    import Ecto.Query
+
+    Samen.WebTest.Repo.all(
+      from(e in Samen.AuditEvent,
+        where: e.event_type == ^type and (e.actor_id == ^who or e.subject_id == ^who),
+        order_by: [asc: e.occurred_at],
+        select: %{actor_id: e.actor_id, subject_id: e.subject_id, detail: e.detail}
+      )
+    )
+  end
+
   defp bytes(conn, file, org_id), do: get(conn, "/files/#{file.id}/bytes?org=#{org_id}")
   defp export(conn, resource, org_id), do: get(conn, "/csv/export/#{resource}?org=#{org_id}")
 
@@ -114,6 +128,29 @@ defmodule Samen.Web.FilesCsvRouterTest do
       assert get_resp_header(conn, "content-type") |> Enum.join() =~ "text/plain"
       assert conn.assigns[:samen_acting_role] == :member
       assert conn.assigns[:samen_mount].scope_kind == :files
+    end
+
+    test "a download is audited (actor, org, file id, byte size, outcome), a refused one too, and it needs the audit to work", ctx do
+      file = active_file!(ctx.org_id, ctx.root)
+      uid = Accounts.user_id(ctx.member, ctx.org_id)
+      member = log_in(ctx.member)
+      assert bytes(member, file, ctx.org_id).status == 200
+
+      assert [%{actor_id: ^uid, subject_id: subject, detail: detail}] = access_events(to_string(file.id), "file_download")
+      assert subject == to_string(file.id)
+      assert detail == "event=file_download bytes=12 outcome=ok"
+
+      # a quarantined file is refused (403) and the refusal is recorded
+      quarantined = upload!(ctx.org_id, ctx.root, [])
+      assert bytes(member, quarantined, ctx.org_id).status == 403
+      assert Enum.any?(access_events(to_string(quarantined.id), "file_download"), &(&1.subject_id == to_string(quarantined.id) and &1.detail == "event=file_download outcome=quarantined"))
+
+      # an audit that cannot be written refuses the download and serves nothing
+      Application.put_env(:samen_web, Samen.Web.AccessAudit, repo: Samen.WebTest.NoSuchRepo)
+      on_exit(fn -> Application.delete_env(:samen_web, Samen.Web.AccessAudit) end)
+      conn = bytes(member, file, ctx.org_id)
+      assert conn.status == 503
+      refute conn.resp_body =~ "ROUTER-BYTES"
     end
 
     test "a viewer gets what the policies give a viewer: reads are OrgScope only, so the file, as a viewer", ctx do
@@ -329,6 +366,42 @@ defmodule Samen.Web.FilesCsvRouterTest do
       {ok, queries} = queries_during(fn -> export(member, "Person", ctx.org_id) end)
       assert ok.status == 200
       assert row_reads(queries) != []
+    end
+
+    test "an export is audited: who, which org, which resource, how many rows, and the outcome (403, 413 included)", ctx do
+      person!(ctx.org_id, "Audit Row 1")
+      person!(ctx.org_id, "Audit Row 2")
+      uid = Accounts.user_id(ctx.member, ctx.org_id)
+      assert export(log_in(ctx.member), "Person", ctx.org_id).status == 200
+
+      assert [%{actor_id: ^uid, detail: detail, subject_id: nil}] = access_events(uid, "csv_export")
+      assert detail == "event=csv_export resource=Person rows=2 outcome=ok"
+      refute detail =~ "Audit Row"
+
+      # a refusal is recorded too (413), with the limit and no rows
+      previous = Application.get_env(:samen_web, Samen.Web.Csv, [])
+      Application.put_env(:samen_web, Samen.Web.Csv, max_export_rows: 1)
+      on_exit(fn -> Application.put_env(:samen_web, Samen.Web.Csv, previous) end)
+      assert export(log_in(ctx.member), "Person", ctx.org_id).status == 413
+      assert Enum.any?(access_events(uid, "csv_export"), &(&1.detail == "event=csv_export resource=Person outcome=too_large limit=1"))
+
+      # and so is a denial (403): a suspended member
+      Accounts.suspend!(ctx.member, ctx.org_id)
+      assert export(legacy_conn(uid, ctx.org_id), "Person", ctx.org_id).status == 403
+      assert Enum.any?(access_events(uid, "csv_export"), &(&1.detail == "event=csv_export resource=Person outcome=denied"))
+      assert Enum.all?(access_events(uid, "csv_export"), &(&1.actor_id == uid))
+    end
+
+    test "an export whose audit write fails is refused (503) and delivers nothing; the same request succeeds when it works", ctx do
+      person!(ctx.org_id, "Unaudited Row")
+      member = log_in(ctx.member)
+      assert export(member, "Person", ctx.org_id).status == 200
+
+      Application.put_env(:samen_web, Samen.Web.AccessAudit, repo: Samen.WebTest.NoSuchRepo)
+      on_exit(fn -> Application.delete_env(:samen_web, Samen.Web.AccessAudit) end)
+      conn = export(member, "Person", ctx.org_id)
+      assert conn.status == 503
+      refute conn.resp_body =~ "Unaudited Row"
     end
 
     test "the row limit counts what the read would return: archived rows are not counted", ctx do

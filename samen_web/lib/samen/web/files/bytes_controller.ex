@@ -19,7 +19,10 @@ defmodule Samen.Web.Files.BytesController do
        §2 decision 4 / RP-FI-4). The masking invariant is enforced here independently
        of the PreviewLive UI posture.
 
-    4. **`Samen.Files.fetch_bytes/3`** — reads through the configured storage adapter
+    4. **Audit** — a download is recorded (actor, org, file id, byte size) BEFORE the bytes are sent, and one whose
+       line cannot be written is a 503 that sends nothing; refusals (403) are recorded too (`Samen.Web.AccessAudit`).
+
+    5. **`Samen.Files.fetch_bytes/3`** — reads through the configured storage adapter
        (fail-honest: an unconfigured adapter returns `{:error, :not_configured}`,
        never `{:ok, _}`). A storage error → 500.
 
@@ -43,6 +46,7 @@ defmodule Samen.Web.Files.BytesController do
   require Logger
 
   alias Samen.Files
+  alias Samen.Web.AccessAudit
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Files.Reads
   alias Samen.Web.Mount
@@ -60,31 +64,46 @@ defmodule Samen.Web.Files.BytesController do
 
     # WHO reads: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), not
     # `Mount.scope/2`'s fixed `:member`. Denied -> 403, a failed lookup -> 503; never a default role.
-    actor = TenantActor.scope(mount, org_id, TenantActor.conn_ref(mount, params, session))
+    ref = TenantActor.conn_ref(mount, params, session)
+    actor = TenantActor.scope(mount, org_id, ref)
 
-    serve_bytes(conn, mount, org_id, file_id, actor)
+    serve_bytes(conn, mount, org_id, file_id, actor, ref)
   end
 
   # -- private -----------------------------------------------------------------
 
-  defp serve_bytes(conn, nil, _org_id, _file_id, _actor) do
+  # Only a well-formed id is recorded as the subject (it is client input until a read has found the file).
+  defp audit_refusal(mount, org_id, file_id, actor_id, outcome) do
+    subject = if match?({:ok, _}, Ecto.UUID.cast(file_id)), do: file_id
+
+    AccessAudit.record_refusal(mount, :file_download, org_id, %{actor_id: actor_id, subject_id: subject, outcome: outcome})
+  end
+
+  defp ref_id({kind, id}) when kind in [:credential, :user, :dev] and is_binary(id), do: id
+  defp ref_id(_), do: nil
+
+  defp serve_bytes(conn, nil, _org_id, _file_id, _actor, _ref) do
     conn |> put_status(503) |> text("no mount")
   end
 
-  defp serve_bytes(conn, _mount, nil, _file_id, _actor) do
+  defp serve_bytes(conn, _mount, nil, _file_id, _actor, _ref) do
     conn |> put_status(404) |> text("no org")
   end
 
-  defp serve_bytes(conn, _mount, _org_id, _file_id, :denied), do: conn |> put_status(403) |> text("no access")
+  defp serve_bytes(conn, mount, org_id, file_id, :denied, ref) do
+    audit_refusal(mount, org_id, file_id, ref_id(ref), :denied)
+    conn |> put_status(403) |> text("no access")
+  end
 
-  defp serve_bytes(conn, _mount, _org_id, _file_id, {:error, :unavailable}),
+  defp serve_bytes(conn, _mount, _org_id, _file_id, {:error, :unavailable}, _ref),
     do: conn |> put_status(503) |> text("unavailable")
 
-  defp serve_bytes(conn, mount, _org_id, file_id, {:ok, scope}) do
+  defp serve_bytes(conn, mount, org_id, file_id, {:ok, scope}, _ref) do
     conn = assign(conn, :samen_acting_role, scope.actor.role)
 
     # Plane gate: bytes have no %Masked{} partial-reveal; operator is refused outright.
     if operator_plane?(mount) do
+      audit_refusal(mount, org_id, file_id, scope.actor.id, :operator_refused)
       conn |> put_status(403) |> text("operator-refused")
     else
       case Reads.get_file_result(mount, scope, file_id) do
@@ -98,15 +117,16 @@ defmodule Samen.Web.Files.BytesController do
         {:ok, file} ->
           # Quarantine gate: refused unless :active (RP-FI-3).
           if not Files.previewable?(file) do
+            audit_refusal(mount, org_id, file_id, scope.actor.id, :quarantined)
             conn |> put_status(403) |> text("quarantined")
           else
-            serve_active_file(conn, mount, scope, file)
+            serve_active_file(conn, mount, org_id, scope, file)
           end
       end
     end
   end
 
-  defp serve_active_file(conn, _mount, _scope, file) do
+  defp serve_active_file(conn, mount, org_id, scope, file) do
     # Resolve storage opts from host config (same seam as Samen.Files.upload/3).
     storage = files_config(:storage) || Samen.Files.Storage.Local
     storage_config = files_config(:storage_config) || %{}
@@ -118,11 +138,23 @@ defmodule Samen.Web.Files.BytesController do
       {:ok, binary} ->
         content_type = content_type(file)
 
-        conn
-        |> put_resp_content_type(content_type)
-        |> put_resp_header("x-content-type-options", "nosniff")
-        |> put_disposition(content_type, file)
-        |> send_resp(200, binary)
+        # The delivery is gated on its audit line: bytes whose download could not be recorded are not sent.
+        case AccessAudit.record(mount, :file_download, org_id, %{
+               actor_id: scope.actor.id,
+               subject_id: file.id,
+               bytes: byte_size(binary),
+               outcome: :ok
+             }) do
+          :ok ->
+            conn
+            |> put_resp_content_type(content_type)
+            |> put_resp_header("x-content-type-options", "nosniff")
+            |> put_disposition(content_type, file)
+            |> send_resp(200, binary)
+
+          {:error, :audit_unavailable} ->
+            conn |> put_status(503) |> text("unavailable")
+        end
 
       {:error, :not_previewable} ->
         # Defensive: quarantine gate above should catch this first.
