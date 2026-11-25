@@ -45,6 +45,8 @@ defmodule Samen.Web.CRM.ContactsLive do
   import Samen.Web.ObjectRef.FieldValue, only: [opaque: 1]
 
   alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
   alias Samen.Web.CRM.Reads
   alias Samen.Web.Reads.Guard
   alias Samen.Web.CurrentOrg
@@ -90,18 +92,17 @@ defmodule Samen.Web.CRM.ContactsLive do
   # role (`Samen.Web.TenantActor`), never `Mount.scope/2`'s fixed `:member`. A denial or a failed
   # lookup is a STATE of the page: nothing is read, nothing can be written.
   def load(socket, org_id) do
-    case TenantActor.socket_scope(socket, org_id) do
-      {:ok, scope} -> load_for(assign(socket, acting_scope: scope, actor_state: :ok), org_id, scope)
-      :denied -> load_refused(socket, org_id, :denied)
-      {:error, :unavailable} -> load_refused(socket, org_id, :unavailable)
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id)
     end
   end
 
-  defp load_refused(socket, org_id, state) do
+  defp load_refused(socket, org_id) do
     socket
     |> Samen.Web.ListLive.refuse()
     |> default_return_to()
-    |> assign(no_org: false, org_id: org_id, company_names: %{}, acting_scope: nil, actor_state: state)
+    |> assign(no_org: false, org_id: org_id, company_names: %{})
     |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{}, list_error: nil)
     |> assign(show_new: false, new_form: nil, first_run: false)
     |> assign_new(:delete_error, fn -> nil end)
@@ -131,7 +132,7 @@ defmodule Samen.Web.CRM.ContactsLive do
   # -- A3 CRUD events (list events belong to the ListLive hook) -----------------
 
   @impl true
-  def handle_event(_event, _params, %{assigns: %{acting_scope: nil}} = socket), do: {:noreply, socket}
+  TenantActor.refuse_events()
 
   def handle_event("new_contact", _params, socket) do
     %{samen_mount: mount, acting_scope: scope} = socket.assigns
@@ -263,20 +264,8 @@ defmodule Samen.Web.CRM.ContactsLive do
         <%= cond do %>
         <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% @actor_state == :denied -> %>
-          <div class="wrap">
-            <div id="actor-denied" class="gtitle">
-              <h3>No access</h3>
-              <span class="lane">Your account holds no active membership in this workspace, so there are no contacts to show.</span>
-            </div>
-          </div>
-        <% @actor_state == :unavailable -> %>
-          <div class="wrap">
-            <div id="actor-unavailable" class="gtitle">
-              <h3>Contacts unavailable</h3>
-              <span class="lane">We couldn't check who you are in this workspace. Nothing is shown rather than a wrong list.</span>
-            </div>
-          </div>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Contacts" nothing="there are no contacts to show" />
         <% true -> %>
           <span id="org-banner" style="display:none">CRM org: {@org_id}</span>
 

@@ -125,6 +125,57 @@ defmodule Samen.Web.TenantActor do
     end
   end
 
+  @doc """
+  Resolve who acts on `socket` for `org_id` (`socket_scope/2`) and ASSIGN the outcome, the one way every converted
+  LiveView does it: `:acting_scope` (the scope, or `nil`) and `:actor_state` (`:ok`, `:denied`, `:unavailable`).
+
+    * `{:ok, socket}` - `acting_scope` is the resolved scope, `actor_state` is `:ok`.
+    * `{:refused, socket}` - `acting_scope` is `nil` (a scope from before the refusal does not survive it), `actor_state`
+      is `:denied` or `:unavailable`. The caller then renders `Samen.Web.TenantActor.Components.actor_refused/1`, reads
+      nothing, and takes any list context away (`Samen.Web.ListLive.refuse/1`).
+  """
+  @spec assign_actor(Phoenix.LiveView.Socket.t(), String.t() | nil) ::
+          {:ok, Phoenix.LiveView.Socket.t()} | {:refused, Phoenix.LiveView.Socket.t()}
+  def assign_actor(socket, org_id) do
+    case socket_scope(socket, org_id) do
+      {:ok, scope} -> {:ok, Phoenix.Component.assign(socket, acting_scope: scope, actor_state: :ok)}
+      :denied -> {:refused, Phoenix.Component.assign(socket, acting_scope: nil, actor_state: :denied)}
+      {:error, :unavailable} -> {:refused, Phoenix.Component.assign(socket, acting_scope: nil, actor_state: :unavailable)}
+    end
+  end
+
+  @doc """
+  The shared `handle_event/3` guard of a converted LiveView: define it BEFORE the view's own clauses (after
+  `@impl true`), and an event that arrives while nobody is acting is a no-op.
+
+      require Samen.Web.TenantActor
+
+      @impl true
+      Samen.Web.TenantActor.refuse_events()          # every event: acting_scope is nil, or actor_state is not :ok
+      Samen.Web.TenantActor.refuse_events(["save"])  # only these events, while actor_state is not :ok
+
+  The named form is for a view whose other events (a retry) must still work from the refused state. A socket with
+  neither assign is not refused here: `assign_actor/2` always sets them in `load`.
+  """
+  defmacro refuse_events(events \\ :all) do
+    case events do
+      :all ->
+        quote do
+          def handle_event(_event, _params, %{assigns: %{acting_scope: nil}} = socket), do: {:noreply, socket}
+
+          def handle_event(_event, _params, %{assigns: %{actor_state: state}} = socket) when state != :ok,
+            do: {:noreply, socket}
+        end
+
+      names when is_list(names) ->
+        quote do
+          def handle_event(event, _params, %{assigns: %{actor_state: state}} = socket)
+              when event in unquote(names) and state != :ok,
+              do: {:noreply, socket}
+        end
+    end
+  end
+
   defp assigns(%{assigns: a}) when is_map(a), do: a
   defp assigns(a) when is_map(a), do: a
 end

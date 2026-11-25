@@ -498,6 +498,36 @@ defmodule Samen.Web.TenantRoleSurfacesTest do
       assert socket.assigns.acting_role == :viewer
     end
 
+    test "assign_actor/2 sets acting_scope and actor_state for every outcome, and nothing else decides them", ctx do
+      mount = Mount.new(:crm, Samen.WebTest.Crm, Samen.WebTest.Repo, labels: @labels)
+
+      socket = fn ref ->
+        %Phoenix.LiveView.Socket{} |> Phoenix.Component.assign(samen_mount: mount, samen_principal_ref: ref)
+      end
+
+      # ok: the resolved scope, state :ok
+      assert {:ok, ok} = TenantActor.assign_actor(socket.({:credential, ctx.viewer.credential.id}), ctx.org_id)
+      assert ok.assigns.actor_state == :ok
+      assert ok.assigns.acting_scope.actor.role == :viewer
+
+      # denied: no scope, state :denied
+      assert {:refused, denied} = TenantActor.assign_actor(socket.({:credential, Ash.UUID.generate()}), ctx.org_id)
+      assert denied.assigns.actor_state == :denied
+      assert denied.assigns.acting_scope == nil
+
+      # a previous scope does not survive a refusal
+      stale = Phoenix.Component.assign(ok, samen_principal_ref: :none)
+      assert {:refused, refused} = TenantActor.assign_actor(stale, ctx.org_id)
+      assert refused.assigns.acting_scope == nil
+
+      # unavailable: no scope, state :unavailable
+      broken = Mount.new(:crm, Samen.WebTest.Crm, Samen.WebTest.Repo, labels: Map.put(@labels, :identity_namespace, Samen.WebTest.NoSuchIdentity))
+      sock = %Phoenix.LiveView.Socket{} |> Phoenix.Component.assign(samen_mount: broken, samen_principal_ref: {:credential, ctx.viewer.credential.id})
+      assert {:refused, unavailable} = ExUnit.CaptureLog.with_log(fn -> TenantActor.assign_actor(sock, ctx.org_id) end) |> elem(0)
+      assert unavailable.assigns.actor_state == :unavailable
+      assert unavailable.assigns.acting_scope == nil
+    end
+
     test "operator plane is unchanged", ctx do
       mount = Mount.new(:crm, Samen.WebTest.Crm, Samen.WebTest.Repo, labels: @labels, plane: Samen.Web.Plane.operator("op-1", ctx.org_id, "sess-1"))
       assert {:ok, scope} = TenantActor.scope(mount, ctx.org_id, :none)

@@ -33,6 +33,8 @@ defmodule Samen.Web.Settings.ProfileLive do
   alias Samen.Web.Settings.Profile
   alias Samen.Web.Settings.Reads
   alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @impl true
   def mount(params, session, socket) do
@@ -66,6 +68,7 @@ defmodule Samen.Web.Settings.ProfileLive do
       form: blank_form(),
       load_error: nil,
       acting_role: nil,
+      acting_scope: nil,
       actor_state: :ok
     }
 
@@ -79,8 +82,9 @@ defmodule Samen.Web.Settings.ProfileLive do
         # ADR-045 §4.4 — the person's RESOLVED membership role (`Samen.Web.TenantActor`), never the
         # synthetic scope's fixed `:member`. No active membership is a denied state, a failed lookup
         # an error state; neither reads anything.
-        case TenantActor.socket_scope(socket, org_id) do
-          {:ok, scope} ->
+        case TenantActor.assign_actor(socket, org_id) do
+          {:ok, socket} ->
+            scope = socket.assigns.acting_scope
             # On an armed host the person is the RESOLVED actor (one principal for the org and the role); the
             # `user_id` the mount derived from the session keys is only the disarmed dev posture's answer.
             user_id = if Map.get(scope.actor, :resolved), do: scope.actor.id, else: user_id
@@ -93,11 +97,11 @@ defmodule Samen.Web.Settings.ProfileLive do
               {:error, :unavailable} -> assign(socket, load_error: Samen.Web.Reads.Guard.message())
             end
 
-          :denied ->
-            assign(socket, actor_state: :denied)
+          {:refused, %{assigns: %{actor_state: :denied}} = socket} ->
+            socket
 
-          {:error, :unavailable} ->
-            assign(socket, actor_state: :unavailable, load_error: Samen.Web.Reads.Guard.message())
+          {:refused, socket} ->
+            assign(socket, load_error: Samen.Web.Reads.Guard.message())
         end
     end
   end
@@ -106,8 +110,8 @@ defmodule Samen.Web.Settings.ProfileLive do
   def handle_event("retry_load", _params, socket),
     do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.user_id)}
 
-  def handle_event("save", _params, %{assigns: %{actor_state: state}} = socket) when state != :ok,
-    do: {:noreply, socket}
+  # "save" is refused while nobody is acting; "retry_load" must still work from the unavailable state.
+  TenantActor.refuse_events(["save"])
 
   def handle_event("save", %{"profile" => params}, socket) do
     %{samen_mount: mount, org_id: org_id, user_id: user_id} = socket.assigns
@@ -160,12 +164,7 @@ defmodule Samen.Web.Settings.ProfileLive do
             <.no_org_card mount={@samen_mount} />
 
           <% @actor_state == :denied -> %>
-            <div class="wrap">
-              <div id="actor-denied" class="gtitle">
-                <h3>No access</h3>
-                <span class="lane">Your account holds no active membership in this workspace, so there is no profile to show.</span>
-              </div>
-            </div>
+            <.actor_refused state={:denied} title="Profile" nothing="there is no profile to show" />
 
           <% @load_error != nil -> %>
             <div class="wrap">

@@ -1,0 +1,19 @@
+# SABOTAGE: the shared handle_event guard lets an event through when acting_scope is nil
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_shared_test.exs
+# MUST_FAIL: a socket with no acting scope, or a refused actor_state, no-ops every event
+diff --git a/samen_web/lib/samen/web/tenant_actor.ex b/samen_web/lib/samen/web/tenant_actor.ex
+index 31a325b0..925d7cdd 100644
+--- a/samen_web/lib/samen/web/tenant_actor.ex
++++ b/samen_web/lib/samen/web/tenant_actor.ex
+@@ -161,8 +161,6 @@ defmodule Samen.Web.TenantActor do
+     case events do
+       :all ->
+         quote do
+-          def handle_event(_event, _params, %{assigns: %{acting_scope: nil}} = socket), do: {:noreply, socket}
+-
+           def handle_event(_event, _params, %{assigns: %{actor_state: state}} = socket) when state != :ok,
+             do: {:noreply, socket}
+         end
