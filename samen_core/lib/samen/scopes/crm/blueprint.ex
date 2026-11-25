@@ -243,8 +243,17 @@ defmodule Samen.Scopes.Crm.Blueprint do
         end
 
         policies do
-          policy action_type([:read, :create, :update, :destroy]) do
+          policy action_type(:read) do
             authorize_if(Samen.Policy.OrgScope)
+          end
+
+          # Writes (create, update, destroy: archive and restore included) are member-or-above, the same gate
+          # `Company` carries: a viewer reads contacts, it does not create, edit or delete them. `reveal_person`
+          # is a generic action with its own policy below and is not an `action_type` this clause names.
+          policy action_type([:create, :update, :destroy]) do
+            forbid_unless(Samen.Policy.OrgScope)
+            forbid_unless({Samen.Policy.RoleAtLeast, role: :member})
+            authorize_if(always())
           end
 
           policy action(:reveal_person) do

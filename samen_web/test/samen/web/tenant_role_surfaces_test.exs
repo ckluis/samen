@@ -144,8 +144,7 @@ defmodule Samen.Web.TenantRoleSurfacesTest do
     |> Enum.count(&(&1.org_id == org_id))
   end
 
-  # `Company` writes are `RoleAtLeast :member` (the CRM blueprint); `Person` writes are OrgScope only,
-  # so for contacts viewer and member differ in NOTHING the policy can observe.
+  # `Company` and `Person` writes are `RoleAtLeast :member` (the CRM blueprint).
   defp create_company(login, org_id) do
     socket = live_socket(login, CompaniesLive, "/crm/companies", org_id)
     {:noreply, socket} = CompaniesLive.handle_event("new_company", %{}, socket)
@@ -166,6 +165,73 @@ defmodule Samen.Web.TenantRoleSurfacesTest do
     assert company_count(ctx.org_id) == before + 1
     create_company(log_in(ctx.owner), ctx.org_id)
     assert company_count(ctx.org_id) == before + 2
+  end
+
+  # `Person` writes are `RoleAtLeast :member` since authz-5 (they were OrgScope only: a viewer could create and delete contacts).
+  defp create_contact(login, org_id, name) do
+    socket = live_socket(login, ContactsLive, "/crm/contacts", org_id)
+    {:noreply, socket} = ContactsLive.handle_event("new_contact", %{}, socket)
+    {:noreply, socket} = ContactsLive.handle_event("save_new", %{"form" => %{"display_name" => name}}, socket)
+    socket
+  end
+
+  test "a VIEWER cannot create or delete a contact through the list surface; a member and an owner can", ctx do
+    before = person_count(ctx.org_id)
+
+    create_contact(log_in(ctx.viewer), ctx.org_id, "Viewer Made")
+    assert person_count(ctx.org_id) == before
+
+    # positive controls: the same surface, the same calls, a member and an owner
+    create_contact(log_in(ctx.member), ctx.org_id, "Member Made")
+    create_contact(log_in(ctx.owner), ctx.org_id, "Owner Made")
+    assert person_count(ctx.org_id) == before + 2
+
+    target = person!(ctx.org_id, "Member Made")
+    viewer_socket = live_socket(log_in(ctx.viewer), ContactsLive, "/crm/contacts", ctx.org_id)
+    {:noreply, viewer_socket} = ContactsLive.handle_event("delete", %{"id" => target.id}, viewer_socket)
+    refute person_archived?(ctx.org_id, "Member Made")
+    assert viewer_socket.assigns.delete_error == "Could not delete this contact."
+
+    member_socket = live_socket(log_in(ctx.member), ContactsLive, "/crm/contacts", ctx.org_id)
+    {:noreply, _} = ContactsLive.handle_event("delete", %{"id" => target.id}, member_socket)
+    assert person_archived?(ctx.org_id, "Member Made")
+  end
+
+  test "a VIEWER cannot restore an archived contact; a member can", ctx do
+    seed_archived_person!(log_in(ctx.member), ctx.org_id, "Archived One")
+    seed_archived_person!(log_in(ctx.member), ctx.org_id, "Archived Two")
+
+    viewer = live_socket(log_in(ctx.viewer), ContactsLive, "/crm/contacts", ctx.org_id)
+    viewer = list_event(viewer, "toggle_archived", %{})
+    assert "Archived One" in archived_names(viewer)
+    list_event(viewer, "restore", %{"id" => person!(ctx.org_id, "Archived One").id})
+    assert person_archived?(ctx.org_id, "Archived One")
+
+    member = live_socket(log_in(ctx.member), ContactsLive, "/crm/contacts", ctx.org_id)
+    member = list_event(member, "toggle_archived", %{})
+    list_event(member, "restore", %{"id" => person!(ctx.org_id, "Archived Two").id})
+    refute person_archived?(ctx.org_id, "Archived Two")
+  end
+
+  # `SampleData.load/2` seeds through the system scope (a fixed `:member`): the person's own role is the gate, in ContactsLive.
+  test "the sample-data offer is member+ only: a viewer's load_sample_data seeds nothing, a member's does", ctx do
+    prev = Application.get_env(:samen_web, Samen.Web.SampleData)
+    Application.put_env(:samen_web, Samen.Web.SampleData, env: :test)
+    on_exit(fn -> if prev, do: Application.put_env(:samen_web, Samen.Web.SampleData, prev), else: Application.delete_env(:samen_web, Samen.Web.SampleData) end)
+    assert Samen.Web.SampleData.enabled?()
+
+    before = person_count(ctx.org_id)
+    viewer = live_socket(log_in(ctx.viewer), ContactsLive, "/crm/contacts", ctx.org_id)
+    {:noreply, viewer} = ContactsLive.handle_event("load_sample_data", %{}, viewer)
+    assert viewer.assigns.sample_error == "Sample data is not available here."
+    assert person_count(ctx.org_id) == before
+    assert company_count(ctx.org_id) == 0
+
+    member = live_socket(log_in(ctx.member), ContactsLive, "/crm/contacts", ctx.org_id)
+    {:noreply, member} = ContactsLive.handle_event("load_sample_data", %{}, member)
+    assert member.assigns.sample_error == nil
+    assert person_count(ctx.org_id) == before + 3
+    assert company_count(ctx.org_id) == 2
   end
 
   test "the list surface acts with the RESOLVED role, not :member", ctx do
