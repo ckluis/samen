@@ -1,0 +1,19 @@
+# SABOTAGE: a failed session lookup is treated as no user, so an outage shows a quietly wrong inbox
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/notifications_spine_session_test.exs
+# MUST_FAIL: a failed identity lookup is an ERROR state
+diff --git a/samen_web/lib/samen/web/settings/reads.ex b/samen_web/lib/samen/web/settings/reads.ex
+index 5e95f0a0..0177bd1b 100644
+--- a/samen_web/lib/samen/web/settings/reads.ex
++++ b/samen_web/lib/samen/web/settings/reads.ex
+@@ -107,7 +107,7 @@ defmodule Samen.Web.Settings.Reads do
+   rescue
+     e ->
+       Guard.report(:settings_principal_ref, nil, e)
+-      {:error, :unavailable}
++      :none
+   end
+ 
+   def principal_ref(_mount, _params, _session), do: :none
