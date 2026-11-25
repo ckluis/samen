@@ -1,0 +1,27 @@
+# SABOTAGE: a chat mention is addressed to the Participant row's own id, which no inbox or preference can 
+#   match
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/notifications_spine_session_test.exs test/samen/web/notifications_sources_test.exs
+# MUST_FAIL: a chat @-mention is visible in the mentioned member's inbox through a real login
+# MUST_FAIL: notifies the mentioned participant
+diff --git a/samen_web/lib/samen/web/chat.ex b/samen_web/lib/samen/web/chat.ex
+index 26dad76f..eb5d5b85 100644
+--- a/samen_web/lib/samen/web/chat.ex
++++ b/samen_web/lib/samen/web/chat.ex
+@@ -330,13 +330,7 @@ defmodule Samen.Web.Chat do
+       :ok
+   end
+ 
+-  defp mention_recipient(%{principal_kind: :user, principal_id: id}) when is_binary(id) do
+-    case Ecto.UUID.cast(id) do
+-      {:ok, uuid} -> uuid
+-      :error -> nil
+-    end
+-  end
+-
++  defp mention_recipient(%{id: id}), do: id
+   defp mention_recipient(_participant), do: nil
+ 
+   # Broadcast the id-only envelope unless the caller opted out (`broadcast: false`, e.g. a
