@@ -6,10 +6,10 @@
 # TEST_FILES: test/meta/ci_driver_guard_test.exs
 # MUST_FAIL: RECHUNK a resume never discards a finished chunk when the learned per-item rate rises
 diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
-index 945aca7..a0d4817 100755
+index d00162f..1b3c15a 100755
 --- a/scripts/ci_driver.py
 +++ b/scripts/ci_driver.py
-@@ -715,7 +715,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
+@@ -792,7 +792,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
                  probe.shard_items = ["%d mutants of %d" % (size_of(m_, r_), count)]
                  probe.key = ctx.key(probe, apps)
                  est = size_of(m_, r_) * each
@@ -17,4 +17,4 @@ index 945aca7..a0d4817 100755
 +                if True:
                      classes.append((m_, r_))
                  else:
-                     k = int(math.ceil(est / step.shard_target))
+                     # never more sub-classes than the class has members: its members are x = r-1 + t*m, t < size, and
