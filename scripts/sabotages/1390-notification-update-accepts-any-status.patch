@@ -1,0 +1,21 @@
+# SABOTAGE: a member may set any status on a notification, including on the shared org-addressed row
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/primitives_notification_recipient_scope_test.exs
+# MUST_FAIL: the update takes only the transition the inbox performs
+diff --git a/samen_core/lib/samen/scopes/primitives/blueprint.ex b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+index a8a0335f..f8de494a 100644
+--- a/samen_core/lib/samen/scopes/primitives/blueprint.ex
++++ b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+@@ -162,10 +162,6 @@ defmodule Samen.Scopes.Primitives.Blueprint do
+             # its delivery workers move a row through :pending/:sent/:delivered/:failed with `authorize?: false`;
+             # an actor, who can reach an ORG-addressed row that every member shares, may only set :read, so
+             # one member cannot flip a shared SLA or invoice alert back to :failed or :pending for everyone.
+-            validate(attribute_equals(:status, :read),
+-              where: [changing(:status)],
+-              message: "an actor can only mark a notification read"
+-            )
+           end
+ 
+           action :reveal_notification, :map do
