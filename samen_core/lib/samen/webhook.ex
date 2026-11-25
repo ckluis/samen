@@ -14,7 +14,7 @@ defmodule Samen.Webhook do
        `Samen.Jobs.enqueue_in_tx/3` so the enqueue is atomic with the triggering
        action (no delivery without the domain change, no orphan job on rollback).
 
-  Returns `{:ok, job_count}` on success or `{:error, reason}`.
+  Returns `{:ok, job_count}` on success (`{:ok, job_count, multi}` with `:multi`) or `{:error, reason}`.
 
   ## Delivery guarantees (doc §external-surface bullets)
 
@@ -72,6 +72,7 @@ defmodule Samen.Webhook do
 
   alias Samen.Webhook.{Payload, DeliveryWorker}
   alias Samen.Jobs
+  require Ecto.Query
 
   @doc """
   Enqueue durable webhook delivery for `event_type`, `resource`, `record`.
@@ -88,24 +89,34 @@ defmodule Samen.Webhook do
     * `:endpoints` — explicit list of endpoint maps/structs (bypasses DB lookup;
       for tests).
 
-  Returns `{:ok, job_count}` or `{:error, reason}`.
+  Without `:endpoints`, active endpoints of the record's org are read from the host-configured
+  `:webhook_endpoint_module` on `:webhook_repo` (or `:repo`); with neither configured the result is
+  `{:error, :not_configured}`, never a silent `{:ok, 0}`.
+
+  Returns `{:ok, job_count}`, or `{:ok, job_count, multi}` when `:multi` was given (the caller
+  must run the RETURNED multi; `Ecto.Multi` is immutable), or `{:error, reason}`.
   """
   @spec deliver(String.t(), module(), struct(), keyword()) ::
-          {:ok, non_neg_integer()} | {:error, term()}
+          {:ok, non_neg_integer()} | {:ok, non_neg_integer(), Ecto.Multi.t()} | {:error, term()}
   def deliver(event_type, resource, record, opts \\ []) do
     with {:ok, body} <- build_body(event_type, resource, record),
          {:ok, endpoints} <- resolve_endpoints(event_type, record, opts) do
-      count =
-        endpoints
-        |> Enum.with_index()
-        |> Enum.reduce(0, fn {{endpoint, idx}, _}, acc ->
-          case enqueue_job(endpoint, event_type, body, record, idx, opts) do
-            {:ok, _} -> acc + 1
-            _ -> acc
-          end
-        end)
+      initial = {0, Keyword.get(opts, :multi)}
 
-      {:ok, count}
+      endpoints
+      |> Enum.with_index()
+      |> Enum.reduce_while({:ok, initial}, fn {endpoint, idx}, {:ok, {acc, multi}} ->
+        case enqueue_job(endpoint, event_type, body, record, idx, Keyword.put(opts, :multi, multi)) do
+          {:ok, %Ecto.Multi{} = next} -> {:cont, {:ok, {acc + 1, next}}}
+          {:ok, _job} -> {:cont, {:ok, {acc + 1, multi}}}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
+      end)
+      |> case do
+        {:ok, {count, %Ecto.Multi{} = multi}} -> {:ok, count, multi}
+        {:ok, {count, nil}} -> {:ok, count}
+        {:error, reason} -> {:error, reason}
+      end
     end
   end
 
@@ -117,7 +128,7 @@ defmodule Samen.Webhook do
     Payload.encode(payload)
   end
 
-  defp resolve_endpoints(event_type, _record, opts) do
+  defp resolve_endpoints(event_type, record, opts) do
     case Keyword.get(opts, :endpoints) do
       endpoints when is_list(endpoints) ->
         active =
@@ -128,13 +139,51 @@ defmodule Samen.Webhook do
         {:ok, active}
 
       nil ->
-        # No explicit endpoints — look up from the configured endpoint module.
-        # In the library (sans a real host domain), this is a seam: return [].
-        {:ok, []}
+        lookup_endpoints(event_type, record, opts)
     end
   end
 
-  defp ep_status(ep) when is_map(ep), do: Map.get(ep, :status, :active)
+  # No explicit endpoints: read the org's endpoint rows from the host-configured endpoint module
+  # (`:webhook_endpoint_module`, the same table the DeliveryWorker loads from) on the configured
+  # repo. Unconfigured is `{:error, :not_configured}`, never `{:ok, 0}`: a delivery that has nowhere to
+  # look must not read as "delivered to nobody" (fail-honest contract, ADR-014).
+  defp lookup_endpoints(event_type, record, opts) do
+    module = Application.get_env(:samen_core, :webhook_endpoint_module)
+
+    repo =
+      Keyword.get(opts, :repo) || Application.get_env(:samen_core, :webhook_repo) ||
+        Application.get_env(:samen_core, :verify_repo)
+
+    org_id = Map.get(record, :org_id)
+
+    cond do
+      is_nil(module) or is_nil(repo) or is_nil(org_id) ->
+        {:error, :not_configured}
+
+      true ->
+        try do
+          rows = repo.all(Ecto.Query.from(e in module, where: e.org_id == ^org_id))
+
+          {:ok,
+           Enum.filter(rows, fn ep ->
+             ep_status(ep) == :active and event_subscribed?(ep, event_type)
+           end)}
+        rescue
+          e ->
+            Samen.Observability.Failure.report(:webhook_deliver_lookup, nil, e)
+            {:error, :endpoint_lookup_failed}
+        end
+    end
+  end
+
+  defp ep_status(ep) when is_map(ep) do
+    case Map.get(ep, :status, :active) do
+      s when is_atom(s) -> s
+      s when is_binary(s) -> if s == "active", do: :active, else: :inactive
+      _ -> :inactive
+    end
+  end
+
   defp ep_status(_), do: :active
 
   defp event_subscribed?(ep, event_type) when is_map(ep) do
@@ -159,8 +208,7 @@ defmodule Samen.Webhook do
 
     case Keyword.get(opts, :multi) do
       %Ecto.Multi{} = multi ->
-        Jobs.enqueue_in_tx(multi, :"webhook_delivery_#{idx}", job)
-        {:ok, :enqueued_in_tx}
+        {:ok, Jobs.enqueue_in_tx(multi, :"webhook_delivery_#{idx}", job)}
 
       nil ->
         case Oban.insert(job) do

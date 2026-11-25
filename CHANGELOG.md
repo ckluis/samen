@@ -11,6 +11,16 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Fixed: authorization and honesty round 5 (evaluation 2026-11-24)
+
+- **Fixed: `Samen.Webhook.deliver/4` raised `FunctionClauseError` on any non-empty endpoint list, discarded the `:multi` it
+  was given, and answered `{:ok, 0}` when no `:endpoints` were passed.** It now enqueues one job per active, subscribed
+  endpoint. With `:multi` it returns `{:ok, count, multi}`: **upgrade note:** run the RETURNED multi (`Ecto.Multi` is
+  immutable, so the multi you passed in never held the jobs). Without `:endpoints` it reads the record's org rows from the
+  `:webhook_endpoint_module` on `:webhook_repo` (or `:repo`); with neither configured it returns `{:error, :not_configured}`
+  and a failing lookup returns `{:error, :endpoint_lookup_failed}`, where it used to claim `{:ok, 0}`. A failed enqueue is
+  `{:error, reason}`. Nothing in the framework or the three hosts calls `deliver/4` today.
+
 ### Security: identity authorization, round 3
 
 - **Fixed: an admin could demote, suspend or re-role an owner or a peer admin.** `Samen.Policy.ManageRole` judged only the
