@@ -1,0 +1,19 @@
+# SABOTAGE: the subject key resolves with Module.concat, so every client-supplied key creates an atom
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/tags_scope_test.exs
+# MUST_FAIL: a client-supplied key never creates an atom
+diff --git a/samen_core/lib/samen/policy/subject_in_org.ex b/samen_core/lib/samen/policy/subject_in_org.ex
+index c3e72a32..e76bc825 100644
+--- a/samen_core/lib/samen/policy/subject_in_org.ex
++++ b/samen_core/lib/samen/policy/subject_in_org.ex
+@@ -88,7 +88,7 @@ defmodule Samen.Policy.SubjectInOrg do
+   # `Module.concat/1` would CREATE an atom for every key a client sends; `safe_concat/1` only names a module that
+   # already exists, and raises for one that does not: that is an unknown subject key, a refusal.
+   defp safe_module(parts) do
+-    {:ok, Module.safe_concat(parts)}
++    {:ok, Module.concat(parts)}
+   rescue
+     ArgumentError -> :error
+   end
