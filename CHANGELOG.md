@@ -48,11 +48,14 @@ All notable changes to Samen are recorded here. The format follows
   panel act as the signed-in user, derived from the SESSION: the framework login (`POST /login`, which writes
   `samen_session_token`) or the legacy BYO session user resolves, through `Samen.Auth.OrgActor` (`Samen.Web.Settings.Reads.actor_in_org/3`),
   to the per-org `Identity.User` id AND the member's real role (so a viewer is a viewer there, not a member). A principal with no
-  ACTIVE membership in the org gets no access, and a failed lookup is an error state on the page, never an empty inbox. The
+  ACTIVE membership in the org gets no access, and a failed lookup is an error state on the page, never an empty inbox: a realtime
+  notification on such an inbox reads nothing and sets no unread count. The
   `:recipient_id` mount label no longer names a recipient, the `:current_user_id` label and the `?recipient=` and `?user=`
   parameters are dev legs honoured only in the disarmed posture, and a session that resolves no user (a disarmed dev host) sees
   the org-addressed rows only and says so. The other settings screens (profile, security, API keys, invitations, reveal
-  approvals, billing settings, onboarding, replay) now find the framework-login user too, through `Settings.Reads.current_user_id/3`.
+  approvals, billing settings, onboarding, replay) now find the framework-login user too, through `Settings.Reads.current_user_id/3`,
+  and when `?org=` switches them to another org they re-derive the user for THAT org (`Settings.Reads.reresolve_user/3`; no active
+  membership there is the no-user state), never keeping the id of the org they mounted on.
   Chat @-mentions are addressed to the mentioned participant's per-org user (`principal_id` of a `:user` participant, which
   `Chat.start_conversation/3` takes from the session), not to the participant row: a participant with no per-org user (an
   operator-staff participant, or one added without a `principal_id`) is not notified, and the mention preference is keyed on the
@@ -61,11 +64,11 @@ All notable changes to Samen are recorded here. The format follows
   member their own plus the org-addressed ones; a host that wired the `:recipient_id` or `:current_user_id` mount label must sign its users in through the
   framework login or the legacy session user (the labels are dev-only now); code that added a chat participant meant to be
   mentioned must pass `principal_id` (the per-org user id); code that destroyed an org-addressed notification as a member needs
-  an admin, and code that wrote a `status` other than `:read` through `Notification :update` must use the engine. Sabotages 1373 to 1376, 1384 to 1386 and 1389 to 1391.
+  an admin, and code that wrote a `status` other than `:read` through `Notification :update` must use the engine. Sabotages 1373 to 1376, 1384 to 1386, 1389 to 1391 and 1398 to 1401.
 
 - **Fixed: an armed host redirected every framework login to `/login`.** The host `:browser` gates `DriftwoodWeb.Auth` and
   `PawChartWeb.Auth` admitted only the legacy `samen_current_user` session key, but the framework login (`POST /login`) writes
-  only `samen_session_token`. A live spine session is now an authenticated principal there too; an unknown or revoked token is
+  only `samen_session_token`. A live spine session is now an authenticated principal there too; an unknown, revoked or expired token is
   not. **Upgrade note:** a host that copied these gates must add the same clause. Sabotages 1396 and 1397.
 
 - **Fixed: a Tagging accepted any subject, including an id from another organisation.** `subject_key` and `subject_id` were
