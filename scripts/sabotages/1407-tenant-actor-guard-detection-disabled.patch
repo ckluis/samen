@@ -5,11 +5,11 @@
 # TEST_FILES: test/samen/web/tenant_actor_guard_test.exs
 # MUST_FAIL: a modeled new file with an implicit call would be reported
 diff --git a/samen_web/lib/samen/web/tenant_actor/guard.ex b/samen_web/lib/samen/web/tenant_actor/guard.ex
-index 586d52cb..d9961da6 100644
+index be056aa3..1e8aecf2 100644
 --- a/samen_web/lib/samen/web/tenant_actor/guard.ex
 +++ b/samen_web/lib/samen/web/tenant_actor/guard.ex
-@@ -16,6 +16,11 @@ defmodule Samen.Web.TenantActor.Guard do
-   @doc "How many implicit fixed-role scope calls `source` makes (comment lines are ignored)."
+@@ -27,6 +27,11 @@ defmodule Samen.Web.TenantActor.Guard do
+   @doc "How many fixed-role scope calls `source` makes (comment lines are ignored)."
    @spec implicit_calls(String.t()) :: non_neg_integer()
    def implicit_calls(source) when is_binary(source) do
 +    _ = source
@@ -17,6 +17,6 @@ index 586d52cb..d9961da6 100644
 +  end
 +
 +  def implicit_calls_disabled(source) do
-     source
-     |> String.split("\n")
-     |> Enum.reject(&String.match?(&1, ~r/^\s*#/))
+     lines = code_lines(source)
+     aliases = for line <- lines, [_, name] <- Regex.scan(@alias_as, line), do: name
+     alias_res = for name <- Enum.uniq(aliases), do: Regex.compile!("\\b#{name}\\.scope\\(|&\\s*#{name}\\.scope\\/\\d")
