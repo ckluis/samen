@@ -1,0 +1,19 @@
+# SABOTAGE: the literal-actor detector requires id: again, so an id-less %{org_id: o, role: :admin} passes
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_guard_test.exs
+# MUST_FAIL: an id-less actor, a nested one, a role update
+diff --git a/samen_web/lib/samen/web/tenant_actor/guard.ex b/samen_web/lib/samen/web/tenant_actor/guard.ex
+index 985cf6f6..7d60cc55 100644
+--- a/samen_web/lib/samen/web/tenant_actor/guard.ex
++++ b/samen_web/lib/samen/web/tenant_actor/guard.ex
+@@ -90,7 +90,7 @@ defmodule Samen.Web.TenantActor.Guard do
+ 
+   # `%{org_id: o, role: :atom}` (an actor) or `%{actor | role: :atom}` (an update of one).
+   defp literal_role_map?(body) do
+-    Regex.match?(@role_literal, body) and (Regex.match?(~r/\borg_id:/, body) or String.contains?(body, "|"))
++    Regex.match?(@role_literal, body) and ((Regex.match?(~r/\bid:/, body) and Regex.match?(~r/\borg_id:/, body)) or String.contains?(body, "|"))
+   end
+ 
+   # The top-level text of every `%{...}` literal in `code`: nested brackets are removed, and each nested map is its

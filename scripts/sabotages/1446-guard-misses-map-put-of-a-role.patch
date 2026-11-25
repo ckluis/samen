@@ -1,0 +1,20 @@
+# SABOTAGE: the literal-actor detector ignores Map.put/Map.merge of a literal role
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_guard_test.exs
+# MUST_FAIL: an id-less actor, a nested one, a role update
+diff --git a/samen_web/lib/samen/web/tenant_actor/guard.ex b/samen_web/lib/samen/web/tenant_actor/guard.ex
+index 985cf6f6..d2ab1cf3 100644
+--- a/samen_web/lib/samen/web/tenant_actor/guard.ex
++++ b/samen_web/lib/samen/web/tenant_actor/guard.ex
+@@ -83,7 +83,8 @@ defmodule Samen.Web.TenantActor.Guard do
+     maps = Enum.count(map_bodies(code), &literal_role_map?/1)
+     puts = count(~r/\bMap\.put\(\s*[^,()]+,\s*:role\s*,\s*:[a-z_]+/, code)
+     merges = count(~r/\bMap\.merge\([^()]*%\{[^{}]*\brole:\s*:[a-z_]+/, code)
+-    maps + puts + merges
++    _ = {puts, merges}
++    maps
+   end
+ 
+   @role_literal ~r/\brole:\s*:[a-z_]+/

@@ -111,6 +111,22 @@ defmodule Samen.Web.TenantAuthzLiveTest do
 
   # A conn carrying a REAL authenticated principal in the SIGNED session (the only thing
   # `Samen.Web.Auth.authenticated_user_id/1` accepts — never a param).
+  # The legacy BYO principal's ACTIVE `Identity.Membership` in `org_id` (with the `Identity.User` row it
+  # references): the tenant role is read from it (`Samen.Web.TenantActor`), and a principal without one is
+  # refused. Returns the user id the legacy session carries.
+  defp legacy_member!(org_id, role \\ :member) do
+    user =
+      Op.User
+      |> Ash.Changeset.for_create(:create, %{org_id: org_id}, authorize?: false)
+      |> Ash.create!()
+
+    Op.Membership
+    |> Ash.Changeset.for_create(:create, %{org_id: org_id, user_id: user.id, role: role, status: "active"}, authorize?: false)
+    |> Ash.create!()
+
+    user.id
+  end
+
   defp signed_in_conn(user_id) do
     build_conn()
     |> Plug.Test.init_test_session(%{})
@@ -159,10 +175,11 @@ defmodule Samen.Web.TenantAuthzLiveTest do
     # checks WHICH org. Before the fix, `handle_params/3` handed the caller the victim's org.
     test "an authenticated member of org A asking for org B gets A's data, never B's", ctx do
       SecurityHost.arm!()
-      SecurityHost.grant!("attacker-user", [ctx.attacker_org])
+      attacker = legacy_member!(ctx.attacker_org)
+      SecurityHost.grant!(attacker, [ctx.attacker_org])
 
       html =
-        signed_in_conn("attacker-user")
+        signed_in_conn(attacker)
         |> get("/crm/contacts?org=#{ctx.victim_org}")
         |> html_response(200)
 
@@ -177,10 +194,11 @@ defmodule Samen.Web.TenantAuthzLiveTest do
 
     test "POSITIVE CONTROL — the legitimate same-org path still works end-to-end", ctx do
       SecurityHost.arm!()
-      SecurityHost.grant!("victim-user", [ctx.victim_org])
+      victim = legacy_member!(ctx.victim_org)
+      SecurityHost.grant!(victim, [ctx.victim_org])
 
       html =
-        signed_in_conn("victim-user")
+        signed_in_conn(victim)
         |> get("/crm/contacts?org=#{ctx.victim_org}")
         |> html_response(200)
 
@@ -197,10 +215,13 @@ defmodule Samen.Web.TenantAuthzLiveTest do
     test "a `?org=` INSIDE the principal's authorized set is still honoured (multi-org switch)",
          ctx do
       SecurityHost.arm!()
-      SecurityHost.grant!("multi-user", [ctx.attacker_org, ctx.victim_org])
+      # one legacy principal, authorized for two orgs by the host's seam; the membership lookup is per
+      # TARGET org (a user row belongs to one org), so it holds one in the org it asks for
+      multi = legacy_member!(ctx.victim_org)
+      SecurityHost.grant!(multi, [ctx.attacker_org, ctx.victim_org])
 
       html =
-        signed_in_conn("multi-user")
+        signed_in_conn(multi)
         |> get("/crm/contacts?org=#{ctx.victim_org}")
         |> html_response(200)
 

@@ -13,6 +13,75 @@ All notable changes to Samen are recorded here. The format follows
 
 ### Fixed: authorization and honesty round 5 (evaluation 2026-11-24)
 
+- **Fixed: a signed-in `:viewer` acted as a `:member` on the tenant list surfaces, CSV export, file bytes and the profile
+  page.** `Samen.Web.Plane.scope/2` (through `Mount.scope/2`) gave every tenant actor a fixed `role: :member`; since a real
+  spine login can pass an armed host, a viewer could create and delete companies and contacts (and, where a policy reserves
+  it, anything else a member may) through the generic CRM list screens, and CSV export and file bytes ran as a member. A
+  new shared resolver, `Samen.Web.TenantActor.scope/3` (over the same `Settings.Reads.actor_in_org/3` +
+  `Samen.Auth.OrgActor` the notification pages use), builds the scope from the person's ACTIVE membership: the role and the
+  per-org user id. On an armed host a person with no active membership is refused (the denied card, or 403 on CSV and
+  bytes) and a failed lookup is an error state (the unavailable card, or 503). A refused list page takes its list context
+  away (`Samen.Web.ListLive.refuse/1`): a later `toggle_archived`, `restore` or any other list event reads nothing and
+  writes nothing, including after a suspension or after `?org=` moves to an org the person holds no membership in. Nothing
+  ever falls back to a default role: on an armed mount a socket that never ran the tenant gate (no pinned principal) and a
+  `{:dev, _}` principal are refused too. The disarmed dev posture and the operator plane are unchanged
+  (`TenantActor.system_scope/2` names the fixed `:member` scope where it is really meant). Converted:
+  `CRM.ContactsLive`, `CRM.CompaniesLive`, `CRM.ContactLive` (the detail page: edit and delete), `Csv.ImportLive`,
+  `Marketing.LeadsLive` (the list scope its restore runs under), `Csv.ExportController`, `Files.BytesController` and
+  `Settings.ProfileLive` (CSV and bytes expose the role they acted with as the `:samen_acting_role` conn assign;
+  `ProfileLive` refuses a save when nobody is acting instead of rebuilding a scope from a nil role). A session carrying
+  both the legacy `samen_current_user` key and the spine token acts as ONE person everywhere: `CurrentOrg.principal_key/2`
+  is the single order (the legacy key when the host's `:authorized_orgs` seam grants it an org, the spine credential
+  otherwise) and `principal_id/2`, `Settings.Reads.principal_ref/3` and `authorized_orgs/2` all follow it, so CRM, files,
+  CSV and profile, Billing elevation, AI agent consent and audit attribution name the same person. **A new framework
+  sign-in drops the legacy `samen_current_user` key** (it used to survive `finish_login`, so signing in over another
+  person's legacy session kept acting as them); logout clears both keys.
+  **Generated `--live` screens** (index, show, form) read the role from the same resolver instead of
+  `TenantRole.membership_role/3` (whose fallback for "no membership" was `:member`) and show the same two states. The shared
+  pieces the remaining conversions use are `TenantActor.assign_actor/2`, `TenantActor.Components.actor_refused/1` and
+  `TenantActor.refuse_events/0,1`. `Samen.Web.TenantActorGuardTest` holds per-file ratchets over the `Mount.scope/2` /
+  `Plane.scope/2` calls in samen_web that are not converted yet (every spelling: the `&Mount.scope/2` capture, an `as:`
+  alias, an `import`, `apply/3`), over literal tenant actor maps, and over callers of `system_scope`, `admin_scope` and a
+  role-less `user_scope` (a literal `nil` role included); its baseline total is pinned, and driftwood and pawchart ratchet
+  their own request-path sites. The literal-role detector counts an id-less `%{org_id: o, role: :admin}`, a nested map, a
+  `%{actor | role: :admin}` update and `Map.put`/`Map.merge` of a literal role; `except: [scope_kind: 1]` no longer reads as
+  excluding `scope`, and an `alias ...,` split over two lines is seen. The hosts' seeds, workers and game days that spell a
+  role are listed by file and count.
+  **Upgrade notes:** (1) an ARMED host whose signed-in users have no active `Identity.Membership` row in the org they act in
+  (a legacy `samen_current_user` host that never created one) now gets the denied state on those screens, and 403 on CSV
+  export and file bytes, instead of acting as a member; create the membership rows. (2) A CRM, CSV or files mount now
+  needs the `:identity_namespace` label (the host's Identity namespace, as driftwood and pawchart set it): without it the
+  membership lookup cannot resolve `<namespace>.User`, so every armed user sees the unavailable state (or 503) and the
+  failure is logged on each request. (3) `socket_scope/2` on an armed mount refuses a socket the tenant gate never ran on:
+  mount `ContactsLive`, `CompaniesLive` and `ProfileLive` only in a `live_session` carrying
+  `{Samen.Web.TenantAuthz, :require_tenant}` (the router macros do). Sabotages 1402 to 1430 and 1436 to 1446.
+
+- **Fixed: the file-bytes and CSV-export routes answered 503 "no mount" on every host.** `samen_files_routes/3` and
+  `samen_csv_routes/3` emitted `GET <path>/:id/bytes` and `GET <path>/export/:resource` without
+  `assigns: %{samen_mount: mount}` (the ICS route has it) and no host pipeline sets it, so through any real router every
+  request was a 503, including the `/files/<id>/bytes` links the files UI renders; the tests that said "via the mounted
+  route" set the assign by hand. Both routes now carry the mount and work: a member downloads an active file's bytes and
+  exports a CSV, a viewer gets what the policies give a viewer, a person with no active membership gets 403, and a
+  quarantined file is not served (tests drive the real router with a real login, in samen_web, driftwood and pawchart). Now that
+  they are reachable they are hardened: uploaded bytes are sent with `X-Content-Type-Options: nosniff` and, unless the
+  type is a safe inline one (png, jpeg, gif, webp, pdf, plain text), as an attachment under `Content-Security-Policy:
+  default-src 'none'; sandbox; frame-ancestors 'none'`, so an uploaded HTML file can neither run as a page on the app's origin
+  nor be framed; a CSV export is refused with 413 above `Samen.Web.Csv.max_export_rows/0` rows (`config :samen_web,
+  Samen.Web.Csv, max_export_rows: n`, default 100,000) by a scoped count BEFORE any row is read or vault-resolved (an
+  org above the limit costs one aggregate, not a full scan; a count that fails refuses too), and an export that fails
+  answers with fixed copy rather than the reason term. **Both are audited** (`Samen.Web.AccessAudit`, through
+  `Samen.AuditChain.Writer`, the sink the sample-data load and the DSAR export use): a `csv_export` line (actor, org,
+  resource, row count, outcome) and a `file_download` line (actor, org, file id, byte size, outcome), refusals
+  (403, 413, 422, quarantined) included. Like the DSAR export, a delivery is gated on its line: if the line cannot be
+  written the response is 503 and nothing is sent. Sabotages 1414 to 1417 and 1431 to 1435.
+
+- **Fixed: a `:viewer` could create, edit and delete CRM contacts.** `CRM.Person` create, update and destroy (archive and
+  restore included) were `OrgScope` only; they now carry the member-or-above gate `Company` has. Reads and `reveal_person`
+  are unchanged. The in-app sample-data offer is pinned to the same bar by a test. Every screen that writes a Person now
+  acts as the signed-in person, so the gate holds end to end: the contacts list, the contact detail page (edit, delete),
+  the CSV import (Person and any other member-gated resource of the mounted domain) and the leads lens. Tests log in
+  as a real viewer and a real member and assert the database. Sabotages 1418, 1419 and 1427 to 1430.
+
 - **Fixed: `Samen.Webhook.deliver/4` raised `FunctionClauseError` on any non-empty endpoint list, discarded the `:multi` it
   was given, and answered `{:ok, 0}` when no `:endpoints` were passed.** It now enqueues one job per active, subscribed
   endpoint. With `:multi` it returns `{:ok, count, multi}`: **upgrade note:** run the RETURNED multi (`Ecto.Multi` is
