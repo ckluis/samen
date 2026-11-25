@@ -9,9 +9,12 @@ defmodule Samen.Web.Notifications.PubSub do
     * `"samen:notifications:<org_id>:<recipient_id>"` — the per-recipient topic the
       kernel's ADR-016 contract names (`Samen.Notifications.Broadcaster` docs). A
       session viewing one recipient's inbox subscribes here.
-    * `"samen:notifications:<org_id>"` — the org-wide topic. The framework inbox is
-      the ORG's inbox (every recipient in the org), so it subscribes here; the
-      broadcaster publishes the SAME id-only envelope on both.
+    * `"samen:notifications:<org_id>"` — the org-wide topic. The framework inbox
+      subscribes here as a WAKE-UP only: it is each signed-in user's OWN inbox (their
+      user-addressed rows plus, for a member, the org-addressed ones), not the org's.
+      The broadcaster publishes the SAME id-only envelope on both topics, so the
+      envelope reaches every session of the org; a session whose scope cannot read
+      the row re-reads zero rows and ignores it.
 
   Publishing an id-only envelope on the org topic adds no leak surface: the envelope
   carries bounded ids/enums only, and every subscriber RE-READS the record through its
