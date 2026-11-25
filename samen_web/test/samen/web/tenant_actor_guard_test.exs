@@ -127,7 +127,8 @@ defmodule Samen.Web.TenantActorGuardTest do
   end
 
   test "the baseline is not stale: a converted file lowers its entry" do
-    stale = for {file, n} <- @baseline, Map.get(found(), file, 0) < n, do: {file, n, Map.get(found(), file, 0)}
+    now = found()
+    stale = for {file, n} <- @baseline, Map.get(now, file, 0) < n, do: {file, n, Map.get(now, file, 0)}
     assert stale == [], "lower these @baseline entries (file, baseline, now): #{inspect(stale)}"
   end
 
@@ -135,8 +136,9 @@ defmodule Samen.Web.TenantActorGuardTest do
     assert Enum.sum(Map.values(@baseline)) == @baseline_total
     assert map_size(@baseline) == @baseline_files
     # and the tree agrees with the pin exactly (not merely "at most")
-    assert Enum.sum(Map.values(found())) == @baseline_total
-    assert map_size(found()) == @baseline_files
+    now = found()
+    assert Enum.sum(Map.values(now)) == @baseline_total
+    assert map_size(now) == @baseline_files
   end
 
   test "no file gains a literal tenant actor map, and the allowlist is exact" do
@@ -151,13 +153,14 @@ defmodule Samen.Web.TenantActorGuardTest do
   end
 
   test "non-vacuity: the sweep sees the whole tree and the converted surfaces are really clean" do
-    assert map_size(found()) > 40
-    assert Enum.sum(Map.values(found())) > 90
-    refute Map.has_key?(found(), "samen/web/crm/contacts_live.ex")
-    refute Map.has_key?(found(), "samen/web/crm/companies_live.ex")
-    refute Map.has_key?(found(), "samen/web/csv/export_controller.ex")
-    refute Map.has_key?(found(), "samen/web/files/bytes_controller.ex")
-    refute Map.has_key?(found(), "samen/web/settings/profile_live.ex")
+    now = found()
+    assert map_size(now) > 40
+    assert Enum.sum(Map.values(now)) > 90
+    refute Map.has_key?(now, "samen/web/crm/contacts_live.ex")
+    refute Map.has_key?(now, "samen/web/crm/companies_live.ex")
+    refute Map.has_key?(now, "samen/web/csv/export_controller.ex")
+    refute Map.has_key?(now, "samen/web/files/bytes_controller.ex")
+    refute Map.has_key?(now, "samen/web/settings/profile_live.ex")
   end
 
   describe "the detector discriminates (anti-tautology)" do
