@@ -73,7 +73,7 @@ defmodule PawChart.Auth do
   The tenant org ids the authenticated `user_id` may act on — the `:authorized_orgs` membership
   seam `Samen.Web.CurrentOrg` calls on an armed host. Resolves REAL `Identity.Membership` rows on
   `PawChart.Operator` (the identity spine `samen_auth_routes`/`samen_settings_routes` mount): every
-  org the user holds a membership in. Read unscoped (`authorize?: false`) BY DESIGN — this function
+  org the user holds an ACTIVE membership in (a suspended one gives no access). Read unscoped (`authorize?: false`) BY DESIGN — this function
   IS the authorization boundary that decides which orgs the principal may act on, exactly as
   `Samen.Auth.OrgActor.authorized_org_ids/2` reads the spine directly. Unknown user → `[]` (deny — fail closed). A read that FAILS raises: the framework
   (`Samen.Web.CurrentOrg.authorized_orgs/2`) catches it, denies (no authorized orgs) and reports it by name
@@ -82,7 +82,7 @@ defmodule PawChart.Auth do
   @spec authorized_org_ids(String.t() | nil) :: [String.t()]
   def authorized_org_ids(user_id) when is_binary(user_id) do
     PawChart.Operator.Membership
-    |> Ash.Query.filter(user_id == ^user_id)
+    |> Ash.Query.filter(user_id == ^user_id and status == "active")
     |> Ash.Query.ensure_selected([:org_id])
     # authz-scope: authorization-boundary read — derives the org set user_id may act on from
     # real Membership rows (unique user key; deny-on-empty, fail closed); this IS the seam CurrentOrg consults

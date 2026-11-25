@@ -1,0 +1,23 @@
+# SABOTAGE: authorized_org_ids lists an org of a suspended membership
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: a suspended member's EXISTING session resolves no actor
+diff --git a/samen_core/lib/samen/auth/org_actor.ex b/samen_core/lib/samen/auth/org_actor.ex
+index e0c38993..d9906cfa 100644
+--- a/samen_core/lib/samen/auth/org_actor.ex
++++ b/samen_core/lib/samen/auth/org_actor.ex
+@@ -201,10 +201,10 @@ defmodule Samen.Auth.OrgActor do
+   defp active_org_ids(mods, users) do
+     case active_memberships(mods.membership, Enum.map(users, & &1.id), Enum.map(users, & &1.org_id)) do
+       {:ok, rows} ->
+-        active = MapSet.new(rows, &{&1.user_id, &1.org_id})
++        _active = MapSet.new(rows, &{&1.user_id, &1.org_id})
+ 
+         ids =
+-          for user <- users, MapSet.member?(active, {user.id, user.org_id}), do: user.org_id
++          for user <- users, do: user.org_id
+ 
+         {:ok, Enum.uniq(ids)}
+ 

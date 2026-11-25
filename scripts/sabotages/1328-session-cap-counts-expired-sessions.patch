@@ -1,0 +1,19 @@
+# SABOTAGE: the session cap counts expired sessions and evicts a live one for them
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: an abandoned EXPIRED session does not occupy a slot
+diff --git a/samen_core/lib/samen/auth/session_create.ex b/samen_core/lib/samen/auth/session_create.ex
+index 4067880c..86e7b7b4 100644
+--- a/samen_core/lib/samen/auth/session_create.ex
++++ b/samen_core/lib/samen/auth/session_create.ex
+@@ -151,7 +151,7 @@ defmodule Samen.Auth.SessionCreate do
+     # a session that can (it would push the oldest live one out instead).
+     live =
+       session_mod
+-      |> Ash.Query.filter(credential_id == ^credential_id and is_nil(revoked_at) and expires_at > ^now)
++      |> Ash.Query.filter(credential_id == ^credential_id and is_nil(revoked_at))
+       |> Ash.Query.select([:id, :inserted_at])
+       |> Ash.Query.sort(inserted_at: :asc, id: :asc)
+       # authz-scope: login-time session-cap eviction keyed on the unique credential id — bounded

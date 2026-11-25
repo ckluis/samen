@@ -145,9 +145,13 @@ defmodule Samen.Auth.SessionCreate do
   defp evict_to_cap(session_mod, credential_id, cap) do
     keep = max(cap - 1, 0)
 
+    now = DateTime.utc_now()
+
+    # LIVE sessions only: an expired one cannot resolve, so it holds no slot and must not be kept in preference to
+    # a session that can (it would push the oldest live one out instead).
     live =
       session_mod
-      |> Ash.Query.filter(credential_id == ^credential_id and is_nil(revoked_at))
+      |> Ash.Query.filter(credential_id == ^credential_id and is_nil(revoked_at) and expires_at > ^now)
       |> Ash.Query.select([:id, :inserted_at])
       |> Ash.Query.sort(inserted_at: :asc, id: :asc)
       # authz-scope: login-time session-cap eviction keyed on the unique credential id — bounded
@@ -157,8 +161,6 @@ defmodule Samen.Auth.SessionCreate do
     excess = length(live) - keep
 
     if excess > 0 do
-      now = DateTime.utc_now()
-
       live
       |> Enum.take(excess)
       |> Enum.each(fn session ->

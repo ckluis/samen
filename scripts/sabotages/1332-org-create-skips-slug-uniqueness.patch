@@ -1,0 +1,18 @@
+# SABOTAGE: Org create does not check the slug against other orgs
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/identity_authz_test.exs
+# MUST_FAIL: the generic create refuses a taken slug
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index 12d042ec..745e98ad 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -153,7 +153,6 @@ defmodule Samen.Scopes.Identity.Blueprint do
+           create :create do
+             primary?(true)
+             accept([:name, :slug])
+-            change(Samen.Identity.SlugFree)
+           end
+ 
+           # The OPERATOR's account create (`Samen.Web.Operator.AccountsLive` "New account"): an account

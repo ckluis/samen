@@ -70,6 +70,22 @@ defmodule Samen.Web.IdentityAuthzTest do
     mod |> Ash.Query.filter(id == ^id) |> Ash.read!(authorize?: false) |> List.first()
   end
 
+  # A pre-existing duplicate membership for (org, user), as an older database may hold one. It is written by moving
+  # a freshly created row's `user_id` with raw SQL, because `Membership :create` now refuses a second row.
+  defp dup_membership!(org_id, user_id, role) do
+    donor =
+      User
+      |> Ash.Changeset.for_create(:create, %{org_id: org_id, handle: "dup-#{System.unique_integer([:positive])}"}, authorize?: false)
+      |> Ash.create!()
+
+    row = Membership |> Ash.Changeset.for_create(:create, %{org_id: org_id, user_id: donor.id, role: role}, authorize?: false) |> Ash.create!()
+    table = AshPostgres.DataLayer.Info.table(Membership)
+    col = fn name -> Ash.Resource.Info.attribute(Membership, name).source |> to_string() end
+
+    Repo.query!("UPDATE #{table} SET #{col.(:user_id)} = $1 WHERE #{col.(:id)} = $2", [Ecto.UUID.dump!(user_id), Ecto.UUID.dump!(row.id)])
+    reread(Membership, row.id)
+  end
+
   # ===========================================================================
   # A. Invitation default :update
   # ===========================================================================
@@ -799,9 +815,9 @@ defmodule Samen.Web.IdentityAuthzTest do
         r = register!()
         user = User |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, handle: "dup-#{System.unique_integer([:positive])}"}, authorize?: false) |> Ash.create!()
 
-        for role <- order do
-          Membership |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, user_id: user.id, role: role}, authorize?: false) |> Ash.create!()
-        end
+        [first, second] = order
+        Membership |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, user_id: user.id, role: first}, authorize?: false) |> Ash.create!()
+        dup_membership!(r.org.id, user.id, second)
 
         for _ <- 1..3 do
           assert {:ok, %{role: :viewer}} = Samen.Scope.ApiKey.membership_for_user(Membership, r.org.id, user.id)
@@ -939,6 +955,514 @@ defmodule Samen.Web.IdentityAuthzTest do
                |> Ash.create(scope: as_user(r, viewer, :viewer))
 
       assert :ok = Ash.destroy(mbr, scope: scope(r, :admin))
+    end
+  end
+
+  describe "H. A membership write must out-rank BOTH the stored role and the role being set" do
+    defp h_member(r, role) do
+      user =
+        User
+        |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, handle: "h-#{System.unique_integer([:positive])}"}, authorize?: false)
+        |> Ash.create!()
+
+      Membership |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, user_id: user.id, role: role}, authorize?: false) |> Ash.create!()
+    end
+
+    defp h_mbr_of(r, user_id), do: Membership |> Ash.Query.filter(user_id == ^user_id and org_id == ^r.org.id) |> Ash.read!(authorize?: false) |> hd()
+
+    defp h_upd(mbr, attrs, s), do: mbr |> Ash.Changeset.for_update(:update, attrs, scope: s) |> Ash.update(scope: s)
+
+    test "RED: an admin cannot demote or suspend an owner or a peer admin (role, status, or both in one write); CONTROL: it can demote a member" do
+      r = register!()
+      owner = h_mbr_of(r, r.user.id)
+      peer_admin = h_member(r, :admin)
+      admin = scope(r, :admin)
+
+      for {target, label} <- [{owner, "owner"}, {peer_admin, "peer admin"}],
+          attrs <- [%{role: :member}, %{role: :viewer, status: "suspended"}, %{status: "suspended"}, %{role: :admin}] do
+        result = h_upd(target, attrs, admin)
+        assert match?({:error, _}, result), "an admin must not write #{inspect(attrs)} onto the #{label}"
+      end
+
+      assert reread(Membership, owner.id) |> Map.take([:role, :status]) == %{role: :owner, status: "active"}
+      assert reread(Membership, peer_admin.id) |> Map.take([:role, :status]) == %{role: :admin, status: "active"}
+
+      member = h_member(r, :member)
+      assert {:ok, %{role: :viewer}} = h_upd(member, %{role: :viewer}, admin)
+      assert {:ok, %{status: "suspended"}} = h_upd(member, %{status: "suspended"}, admin)
+    end
+
+    test "RED: the stored role is read from the database, not the record in hand (a stale or partially loaded struct cannot hide a promotion)" do
+      r = register!()
+      member = h_member(r, :member)
+      stale = reread(Membership, member.id)
+      # the row is promoted to admin behind the struct's back
+      {:ok, _} = h_upd(member, %{role: :admin}, scope(r, :owner))
+      admin = scope(r, :admin)
+
+      assert %{role: :member} = stale
+      assert {:error, _} = h_upd(stale, %{role: :viewer}, admin)
+      assert reread(Membership, member.id).role == :admin
+
+      unloaded = %{stale | role: %Ash.NotLoaded{field: :role, type: :attribute}}
+      assert {:error, _} = h_upd(unloaded, %{status: "suspended"}, admin)
+      assert reread(Membership, member.id).status == "active"
+
+      # CONTROL: an owner may still manage that admin, through the same stale struct
+      assert {:ok, %{role: :member}} = h_upd(stale, %{role: :member}, scope(r, :owner))
+    end
+
+    test "RED: an owner cannot demote, suspend or remove another owner (Role.may_manage?/2 is strict: no lateral management); CONTROL: it manages an admin" do
+      r = register!()
+      co_owner = h_member(r, :owner)
+      owner = scope(r, :owner)
+
+      assert {:error, _} = h_upd(co_owner, %{role: :admin}, owner)
+      assert {:error, _} = h_upd(co_owner, %{status: "suspended"}, owner)
+      assert {:error, _} = Ash.destroy(co_owner, scope: owner)
+      assert reread(Membership, co_owner.id).role == :owner
+
+      admin = h_member(r, :admin)
+      assert {:ok, %{role: :member}} = h_upd(admin, %{role: :member}, owner)
+    end
+
+    test "RED: an admin cannot remove an owner or peer admin membership; CONTROL: a member" do
+      r = register!()
+      owner = h_mbr_of(r, r.user.id)
+      peer = h_member(r, :admin)
+      member = h_member(r, :member)
+      admin = scope(r, :admin)
+
+      assert {:error, _} = Ash.destroy(owner, scope: admin)
+      assert {:error, _} = Ash.destroy(peer, scope: admin)
+      assert :ok = Ash.destroy(member, scope: admin)
+    end
+  end
+
+  describe "I. A membership that is not active confers no role and no org access" do
+    alias Samen.Auth.SessionCreate
+    alias Samen.Web.Auth, as: WebAuth
+    alias Samen.Web.CurrentOrg
+    alias Samen.Web.Mount
+    alias Samen.Web.Plane
+    alias Samen.WebTest.Operator.Session
+
+    defp i_mount, do: Mount.new(:settings, Samen.WebTest.Operator, Repo, plane: Plane.tenant(), labels: %{authn: :required})
+
+    # a credential that registered its own org (Y) and joins `host` (X) as a member through a real invitation
+    defp i_join!(host, role) do
+      guest = register!()
+      {:ok, _inv, raw} = Invite.create(invite_mods(), scope(host, :owner), %{email: guest.email, role: role})
+      {:ok, joined} = Invite.accept(invite_mods(), raw)
+      {guest, joined.membership}
+    end
+
+    defp i_session!(guest) do
+      {:ok, _row, raw} = SessionCreate.create(%{session: Session, org: Org, membership: Membership, user: User}, guest.credential.id)
+      %{WebAuth.session_token_key() => raw}
+    end
+
+    test "RED: a suspended member's EXISTING session resolves no actor and no access to the org; CONTROL: active, and active again after reactivation" do
+      host = register!()
+      {guest, membership} = i_join!(host, :member)
+      session = i_session!(guest)
+      mount = i_mount()
+      x = host.org.id
+      y = guest.org.id
+      admin = scope(host, :admin)
+
+      # CONTROL: while active the same session holds the role and the org
+      assert %{role: :member, org_id: ^x} = CurrentOrg.resolve_actor(mount, guest.credential.id, x)
+      assert x in CurrentOrg.authorized_orgs(mount, session)
+      assert CurrentOrg.resolve(mount, %{"org" => x}, session) == x
+
+      assert {:ok, %{status: "suspended"}} = h_upd(membership, %{status: "suspended"}, admin)
+
+      # the same session: no role, no org (its OWN org is untouched)
+      assert CurrentOrg.resolve_actor(mount, guest.credential.id, x) == nil
+      refute x in CurrentOrg.authorized_orgs(mount, session)
+      assert y in CurrentOrg.authorized_orgs(mount, session)
+      assert CurrentOrg.resolve(mount, %{"org" => x}, session) == y
+      assert CurrentOrg.resolve_actor(mount, guest.credential.id, y).role == :owner
+
+      assert {:ok, %{status: "active"}} = h_upd(reread(Membership, membership.id), %{status: "active"}, admin)
+      assert %{role: :member} = CurrentOrg.resolve_actor(mount, guest.credential.id, x)
+      assert x in CurrentOrg.authorized_orgs(mount, session)
+    end
+
+    test "RED: a suspended ADMIN keeps no authority (the role it held is not resolved); a PRE-EXISTING duplicate resolves the lowest ACTIVE row" do
+      host = register!()
+      {guest, membership} = i_join!(host, :admin)
+      mount = i_mount()
+      assert %{role: :admin} = CurrentOrg.resolve_actor(mount, guest.credential.id, host.org.id)
+
+      {:ok, _} = h_upd(membership, %{status: "suspended"}, scope(host, :owner))
+      assert CurrentOrg.resolve_actor(mount, guest.credential.id, host.org.id) == nil
+
+      # a pre-existing second, ACTIVE, lower row for the same user (the create path now refuses to add one): that one
+      # answers, never the suspended admin row
+      dup_membership!(host.org.id, membership.user_id, :viewer)
+
+      assert %{role: :viewer} = CurrentOrg.resolve_actor(mount, guest.credential.id, host.org.id)
+    end
+
+    test "CONTROL: ManageUser still ranks a SUSPENDED target (an admin cannot suspend an admin to get around the rank rule)" do
+      host = register!()
+      {_guest, membership} = i_join!(host, :admin)
+      {:ok, _} = h_upd(membership, %{status: "suspended"}, scope(host, :owner))
+      user = reread(User, membership.user_id)
+
+      assert {:error, _} = upd(user, %{handle: "renamed-by-peer"}, scope(host, :admin))
+      assert {:ok, _} = upd(user, %{handle: "renamed-by-owner"}, scope(host, :owner))
+    end
+  end
+
+  describe "J. The session cap counts only LIVE sessions" do
+    alias Samen.Auth.SessionCreate
+    alias Samen.WebTest.Operator.Session
+
+    defp j_mods, do: %{session: Session, org: Org, membership: Membership, user: User}
+
+    defp j_capped_credential!(cap) do
+      r = register!()
+
+      Org
+      |> Ash.get!(r.org.id, authorize?: false)
+      |> Ash.Changeset.for_update(:update, %{max_concurrent_sessions: cap}, authorize?: false)
+      |> Ash.update!()
+
+      r
+    end
+
+    defp j_revoked?(id), do: reread(Session, id).revoked_at != nil
+
+    test "RED: an abandoned EXPIRED session does not occupy a slot, so the live session is not evicted; CONTROL: two live sessions still evict the oldest" do
+      r = j_capped_credential!(2)
+      cred = r.credential.id
+
+      {:ok, a, _} = SessionCreate.create(j_mods(), cred)
+      {:ok, b_expired, _} = SessionCreate.create(j_mods(), cred, ttl_seconds: -60)
+      {:ok, c, _} = SessionCreate.create(j_mods(), cred)
+
+      refute j_revoked?(a.id), "the oldest LIVE session was revoked to make room for an expired one"
+      refute j_revoked?(c.id)
+      # the expired one is neither counted nor revoked on its behalf
+      assert reread(Session, b_expired.id).expires_at < DateTime.utc_now()
+
+      # CONTROL: now a and c are both live and the cap is 2: the next sign-in evicts the oldest live one (a)
+      {:ok, d, _} = SessionCreate.create(j_mods(), cred)
+      assert j_revoked?(a.id)
+      refute j_revoked?(c.id)
+      refute j_revoked?(d.id)
+    end
+  end
+
+  describe "K. Every Invitation create yields a PENDING invitation with its expiry; status is not an input" do
+    defp k_create(r, role, attrs) do
+      s = scope(r, role)
+
+      Invitation
+      |> Ash.Changeset.for_create(
+        :create,
+        Map.merge(%{org_id: r.org.id, role: :member, email: ["k-#{System.unique_integer([:positive])}@example.test"]}, attrs),
+        scope: s
+      )
+      |> Ash.create(scope: s)
+    end
+
+    defp k_row(id), do: Invitation |> Ash.Query.filter(id == ^id) |> Ash.Query.select([:id, :status, :expires_at, :role]) |> Ash.read_one!(authorize?: false)
+
+    test "RED: status is not an input of the generic create (accepted, revoked, junk); CONTROL: without one the row is pending with a 14-day expiry" do
+      r = register!()
+
+      for status <- ["accepted", "revoked", "expired", "junk"] do
+        assert_not_accepted(k_create(r, :admin, %{status: status}), :status)
+      end
+
+      assert {:ok, inv} = k_create(r, :admin, %{})
+      row = k_row(inv.id)
+      assert row.status == "pending"
+      assert %DateTime{} = row.expires_at
+      assert DateTime.diff(row.expires_at, DateTime.utc_now(), :day) in 13..14
+    end
+
+    test "RED: a direct create (not through Invite.create) always carries the 14-day expiry" do
+      r = register!()
+      assert {:ok, inv} = k_create(r, :admin, %{})
+      assert %DateTime{} = k_row(inv.id).expires_at
+    end
+
+    test "RED: expires_at is not an input of the generic create either" do
+      r = register!()
+      assert_not_accepted(k_create(r, :admin, %{expires_at: DateTime.add(DateTime.utc_now(), 10 * 365, :day)}), :expires_at)
+    end
+
+    test "CONTROL: Invite.create still yields a pending invitation with the 14-day expiry that can be accepted" do
+      inviter = register!()
+      invitee = register!()
+      {:ok, inv, raw} = Invite.create(invite_mods(), scope(inviter, :admin), %{email: invitee.email, role: :member})
+      row = k_row(inv.id)
+      assert row.status == "pending"
+      assert DateTime.diff(row.expires_at, DateTime.utc_now(), :day) in 13..14
+      assert {:ok, %{status: :joined}} = Invite.accept(invite_mods(), raw)
+    end
+  end
+  describe "L. An org's slug is unique on update and on the generic create" do
+    defp l_org!(slug),
+      do: Org |> Ash.Changeset.for_create(:create, %{name: "L #{slug}", slug: slug}, authorize?: false) |> Ash.create!()
+
+    test "RED: an org admin cannot take another org's slug or id; CONTROL: a normal rename, and re-sending its own slug, work" do
+      a = l_org!("l-a-#{System.unique_integer([:positive])}")
+      b = l_org!("l-b-#{System.unique_integer([:positive])}")
+
+      assert {:error, _} = org_update(a, %{slug: b.slug}, :admin)
+      assert {:error, _} = org_update(a, %{slug: b.id}, :admin)
+      assert Ash.get!(Org, a.id, authorize?: false).slug == a.slug
+
+      fresh = "l-fresh-#{System.unique_integer([:positive])}"
+      assert {:ok, %{slug: ^fresh}} = org_update(a, %{slug: fresh}, :admin)
+      assert {:ok, %{slug: ^fresh}} = org_update(Ash.get!(Org, a.id, authorize?: false), %{slug: fresh}, :admin)
+    end
+
+    test "RED: the generic create refuses a taken slug; CONTROL: a free one works" do
+      taken = l_org!("l-taken-#{System.unique_integer([:positive])}")
+
+      assert {:error, _} = Org |> Ash.Changeset.for_create(:create, %{name: "Dup", slug: taken.slug}, authorize?: false) |> Ash.create()
+      assert {:error, _} = Org |> Ash.Changeset.for_create(:create, %{name: "Dup", slug: taken.id}, authorize?: false) |> Ash.create()
+      assert {:ok, _} = Org |> Ash.Changeset.for_create(:create, %{name: "Ok", slug: "l-free-#{System.unique_integer([:positive])}"}, authorize?: false) |> Ash.create()
+    end
+  end
+  describe "L2. Slug uniqueness ignores case and surrounding whitespace, and never counts the org's own row" do
+    test "RED: `Acme`, ` acme ` and `ACME` collide with `acme`, on update and on create; CONTROL: a different slug is free" do
+      base = "l2-#{System.unique_integer([:positive])}"
+      taken = l_org!(base)
+      other = l_org!("l2-other-#{System.unique_integer([:positive])}")
+
+      for variant <- [String.upcase(base), " #{base}", "#{base} ", " #{String.capitalize(base)} "] do
+        assert {:error, _} = org_update(other, %{slug: variant}, :admin), "update accepted #{inspect(variant)}"
+
+        assert {:error, _} =
+                 Org |> Ash.Changeset.for_create(:create, %{name: "Dup", slug: variant}, authorize?: false) |> Ash.create(),
+               "create accepted #{inspect(variant)}"
+      end
+
+      assert Ash.get!(Org, other.id, authorize?: false).slug == other.slug
+      assert {:ok, _} = org_update(other, %{slug: "#{base}-two"}, :admin)
+      assert taken.slug == base
+    end
+
+    test "RED: re-sending the org's own slug, or its own id, is never a self-collision even when `slug` is not loaded; another org's id is still refused" do
+      a = l_org!("l2-a-#{System.unique_integer([:positive])}")
+      b = l_org!("l2-b-#{System.unique_integer([:positive])}")
+      # the record in hand was read without `slug`
+      thin = Org |> Ash.Query.filter(id == ^a.id) |> Ash.Query.select([:id, :name]) |> Ash.read!(authorize?: false) |> hd()
+      assert %Ash.NotLoaded{} = thin.slug
+
+      assert {:ok, %{slug: slug}} = org_update(thin, %{slug: a.slug}, :admin)
+      assert slug == a.slug
+      assert {:ok, %{slug: id_slug}} = org_update(thin, %{slug: a.id}, :admin)
+      assert id_slug == a.id
+      assert {:error, _} = org_update(thin, %{slug: b.id}, :admin)
+      assert {:error, _} = org_update(thin, %{slug: b.slug}, :admin)
+    end
+  end
+
+  describe "M. ApiKey :mark_used is a system action" do
+    test "RED: an authorized admin (or owner) cannot forge last_used_at; CONTROL: the auth path (no actor) still stamps it" do
+      r = register!()
+      key = mint!(r, :admin)
+      forged = ~U[2020-01-01 00:00:00Z]
+
+      for role <- [:admin, :owner] do
+        s = scope(r, role)
+        assert {:error, _} = key_update(key, :mark_used, %{last_used_at: forged}, s)
+      end
+
+      assert reread(ApiKey, key.id).last_used_at == nil
+
+      stamped = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      assert {:ok, _} =
+               key |> Ash.Changeset.for_update(:mark_used, %{last_used_at: stamped}) |> Ash.update(authorize?: false)
+
+      assert reread(ApiKey, key.id).last_used_at == stamped
+    end
+  end
+
+  describe "N. A user holds ONE membership per org (a second, lower row would demote the owner)" do
+    test "RED: an admin cannot add a second :viewer row for the owner or a peer admin; CONTROL: the owner still resolves as owner, and a fresh user can be added" do
+      r = register!()
+      peer = h_member(r, :admin)
+      admin = scope(r, :admin)
+      mods = %{user: User, membership: Membership}
+
+      for {user_id, role} <- [{r.user.id, :owner}, {peer.user_id, :admin}] do
+        assert {:error, _} =
+                 Membership
+                 |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, user_id: user_id, role: :viewer}, scope: admin)
+                 |> Ash.create(scope: admin)
+
+        rows = Membership |> Ash.Query.filter(user_id == ^user_id and org_id == ^r.org.id) |> Ash.read!(authorize?: false)
+        assert [%{role: ^role}] = rows
+        assert {:ok, %{role: ^role}} = Samen.Auth.OrgActor.active_membership(Membership, user_id, r.org.id)
+      end
+
+      assert %{role: :owner} = elem(Samen.Auth.OrgActor.resolve(%{user: User, membership: Membership}, r.credential.id, r.org.id), 1)
+      _ = mods
+
+      # CONTROL: a membership for a user that has none is still created
+      fresh = User |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, handle: "n-#{System.unique_integer([:positive])}"}, authorize?: false) |> Ash.create!()
+
+      assert {:ok, %{role: :viewer}} =
+               Membership
+               |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, user_id: fresh.id, role: :viewer}, scope: admin)
+               |> Ash.create(scope: admin)
+    end
+
+    test "RED: the refusal also holds for authorize?: false creates, whatever the existing row's status" do
+      r = register!()
+      member = h_member(r, :member)
+      {:ok, _} = h_upd(member, %{status: "suspended"}, scope(r, :owner))
+
+      assert {:error, _} =
+               Membership
+               |> Ash.Changeset.for_create(:create, %{org_id: r.org.id, user_id: member.user_id, role: :viewer}, authorize?: false)
+               |> Ash.create()
+
+      assert Membership |> Ash.Query.filter(user_id == ^member.user_id) |> Ash.read!(authorize?: false) |> length() == 1
+    end
+
+    test "RED: a probe that cannot run is an ERROR, never `{:ok, false}` (fail closed); CONTROL: a readable probe answers true and false" do
+      r = register!()
+      probe = &Samen.Identity.OneMembership.exists?/3
+
+      assert {:ok, true} = probe.(Membership, r.org.id, r.user.id)
+      assert {:ok, false} = probe.(Membership, r.org.id, Ash.UUID.generate())
+
+      # a value that cannot be dumped and a missing id: none of them reads as "free"
+      assert {:error, _} = probe.(Membership, r.org.id, "not-a-uuid")
+      assert {:error, _} = probe.(Membership, nil, r.user.id)
+      assert {:error, _} = probe.(Membership, r.org.id, nil)
+    end
+  end
+
+  describe "P. A role set through an atomic update is judged like any other role" do
+    require Ash.Expr
+
+    test "RED: an admin cannot make a member an owner through atomic_update(:role); CONTROL: a plain role write and an atomic non-role write still work" do
+      r = register!()
+      member = h_member(r, :member)
+      admin = scope(r, :admin)
+
+      result =
+        member
+        |> Ash.Changeset.for_update(:update, %{}, scope: admin)
+        |> Ash.Changeset.atomic_update(:role, Ash.Expr.expr(if status == "active", do: ^:owner, else: role))
+        |> Ash.update(scope: admin)
+
+      assert {:error, _} = result
+      assert reread(Membership, member.id).role == :member
+
+      # the check itself ERRORS (fail closed, by name) rather than reading the stored role through `get_attribute`
+      changeset =
+        member
+        |> Ash.Changeset.for_update(:update, %{}, scope: admin)
+        |> Ash.Changeset.atomic_update(:role, Ash.Expr.expr(if status == "active", do: ^:owner, else: role))
+
+      assert {:error, :atomic_role} = Samen.Policy.ManageRole.match?(admin.actor, %{changeset: changeset}, [])
+
+      assert {:ok, %{role: :viewer}} = h_upd(member, %{role: :viewer}, admin)
+
+      assert {:ok, %{status: "suspended"}} =
+               reread(Membership, member.id)
+               |> Ash.Changeset.for_update(:update, %{}, scope: admin)
+               |> Ash.Changeset.atomic_update(:status, Ash.Expr.expr(^"suspended"))
+               |> Ash.update(scope: admin)
+    end
+  end
+
+  describe "Q. authorized_org_ids reads memberships once, not once per org" do
+    alias Samen.Auth.OrgActor
+
+    defp q_queries(fun) do
+      parent = self()
+      id = {:q_count, System.unique_integer([:positive])}
+
+      :telemetry.attach(
+        id,
+        [:samen, :web_test, :repo, :query],
+        fn _event, _measure, meta, _ -> send(parent, {id, meta.source}) end,
+        nil
+      )
+
+      result = fun.()
+      :telemetry.detach(id)
+      {result, drain(id, [])}
+    end
+
+    defp drain(id, acc) do
+      receive do
+        {^id, source} -> drain(id, [source | acc])
+      after
+        0 -> acc
+      end
+    end
+
+    test "RED: a credential in several orgs (one suspended) resolves the same orgs with ONE membership read; CONTROL: the result and the single-org case" do
+      h1 = register!()
+      h2 = register!()
+      guest = register!()
+
+      joined =
+        for host <- [h1, h2] do
+          {:ok, _inv, raw} = Invite.create(invite_mods(), scope(host, :owner), %{email: guest.email, role: :member})
+          {:ok, j} = Invite.accept(invite_mods(), raw)
+          j.membership
+        end
+
+      {:ok, _} = h_upd(List.last(joined), %{status: "suspended"}, scope(h2, :owner))
+      mods = %{user: User, membership: Membership}
+      membership_table = AshPostgres.DataLayer.Info.table(Membership)
+
+      {result, sources} = q_queries(fn -> OrgActor.authorized_org_ids_result(mods, guest.credential.id) end)
+
+      assert {:ok, ids} = result
+      assert Enum.sort(ids) == Enum.sort([guest.org.id, h1.org.id])
+      assert Enum.count(sources, &(&1 == membership_table)) == 1, "one membership read for all the credential's users, got #{inspect(sources)}"
+      assert length(sources) == 2
+
+      assert Enum.sort(OrgActor.authorized_org_ids(mods, guest.credential.id)) == Enum.sort(ids)
+
+      # CONTROL: a credential in one org, and one in none
+      assert {:ok, [only]} = OrgActor.authorized_org_ids_result(mods, h1.credential.id)
+      assert only == h1.org.id
+      assert {:ok, []} = OrgActor.authorized_org_ids_result(mods, Ash.UUID.generate())
+
+      # the single statement of the rule still answers a suspended row as "none", an active one as the member
+      assert :none = OrgActor.active_membership(Membership, List.last(joined).user_id, h2.org.id)
+      assert {:ok, %{role: :member}} = OrgActor.active_membership(Membership, List.first(joined).user_id, h1.org.id)
+    end
+  end
+
+  describe "O. A forged struct (own org_id, another org's primary key) cannot write another org's membership" do
+    test "RED: update (role, status) and destroy are refused and the foreign row is unchanged; CONTROL: the admin's own org's row is writable" do
+      a = register!()
+      b = register!()
+      foreign = h_member(b, :member)
+      admin_a = scope(a, :admin)
+
+      forged = %{foreign | org_id: a.org.id}
+
+      assert {:error, _} = h_upd(forged, %{role: :viewer}, admin_a)
+      assert {:error, _} = h_upd(forged, %{status: "suspended"}, admin_a)
+      assert {:error, _} = Ash.destroy(forged, scope: admin_a)
+
+      assert reread(Membership, foreign.id) |> Map.take([:role, :status]) == %{role: :member, status: "active"}
+      in_b = Membership |> Ash.Query.filter(id == ^foreign.id and org_id == ^b.org.id) |> Ash.read!(authorize?: false)
+      assert [_] = in_b
+
+      own = h_member(a, :member)
+      assert {:ok, %{role: :viewer}} = h_upd(own, %{role: :viewer}, admin_a)
     end
   end
 end

@@ -45,6 +45,10 @@ defmodule Samen.Identity.Invite do
 
   @invite_ttl_seconds 14 * 24 * 60 * 60
 
+  @doc "How long an invitation stays acceptable, in seconds (14 days): the expiry every `Invitation` create sets."
+  @spec ttl_seconds() :: pos_integer()
+  def ttl_seconds, do: @invite_ttl_seconds
+
   @type mods :: %{
           required(:invitation) => module(),
           required(:credential) => module(),
@@ -74,9 +78,6 @@ defmodule Samen.Identity.Invite do
     with {:ok, bidx} <- Samen.Auth.BlindIndex.compute(email) do
       raw_token = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
 
-      expires_at =
-        DateTime.utc_now() |> DateTime.add(@invite_ttl_seconds, :second) |> DateTime.truncate(:second)
-
       create_attrs = %{
         org_id: scope_org_id(scope),
         role: Map.get(attrs, :role, :member),
@@ -85,10 +86,8 @@ defmodule Samen.Identity.Invite do
 
       mods.invitation
       |> Ash.Changeset.for_create(:create, create_attrs, scope: scope)
-      |> Ash.Changeset.force_change_attribute(:status, "pending")
       |> Ash.Changeset.force_change_attribute(:token_digest, TokenMint.digest(raw_token))
       |> Ash.Changeset.force_change_attribute(:email_bidx, bidx)
-      |> Ash.Changeset.force_change_attribute(:expires_at, expires_at)
       |> Ash.create(scope: scope)
       |> case do
         {:ok, invitation} ->

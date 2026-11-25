@@ -1,0 +1,19 @@
+# SABOTAGE: PawChart.Auth.authorized_org_ids lists an org of a suspended membership
+#
+# Flips the named test(s).
+# APP: pawchart
+# TEST_FILES: test/reads_honest_failure_p4_test.exs
+# MUST_FAIL: a SUSPENDED membership gives no org through the seam
+diff --git a/pawchart/lib/pawchart/auth.ex b/pawchart/lib/pawchart/auth.ex
+index 7ce29c4a..94b980ea 100644
+--- a/pawchart/lib/pawchart/auth.ex
++++ b/pawchart/lib/pawchart/auth.ex
+@@ -82,7 +82,7 @@ defmodule PawChart.Auth do
+   @spec authorized_org_ids(String.t() | nil) :: [String.t()]
+   def authorized_org_ids(user_id) when is_binary(user_id) do
+     PawChart.Operator.Membership
+-    |> Ash.Query.filter(user_id == ^user_id and status == "active")
++    |> Ash.Query.filter(user_id == ^user_id)
+     |> Ash.Query.ensure_selected([:org_id])
+     # authz-scope: authorization-boundary read — derives the org set user_id may act on from
+     # real Membership rows (unique user key; deny-on-empty, fail closed); this IS the seam CurrentOrg consults

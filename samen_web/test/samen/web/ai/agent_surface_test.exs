@@ -625,6 +625,25 @@ defmodule Samen.Web.AI.AgentSurfaceTest do
       assert {:ok, _} = Approver.resolve(elsewhere.id, other_org)
     end
 
+    test "RED: a SUSPENDED member is not an approver (no authority); CONTROL: reactivated, they resolve again",
+         %{org_id: org_id} do
+      {admin, membership} = seed_member!(org_id, :admin)
+      assert {:ok, %{actor: %{role: :admin}}} = Approver.resolve(admin.id, org_id)
+
+      set_status = fn status ->
+        Membership
+        |> Ash.get!(membership.id, authorize?: false)
+        |> Ash.Changeset.for_update(:update, %{status: status}, authorize?: false)
+        |> Ash.update!()
+      end
+
+      set_status.("suspended")
+      assert {:error, :not_authorized} = Approver.resolve(admin.id, org_id)
+
+      set_status.("active")
+      assert {:ok, %{actor: %{role: :admin}}} = Approver.resolve(admin.id, org_id)
+    end
+
     test "an UNWIRED host is fail-closed — never a synthesized member", %{org_id: org_id} do
       {member, _} = seed_member!(org_id, :member)
       prior = Application.get_env(:samen_core, Samen.AI.Agent, [])
