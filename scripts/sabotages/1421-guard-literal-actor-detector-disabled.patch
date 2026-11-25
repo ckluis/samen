@@ -1,0 +1,23 @@
+# SABOTAGE: the guard detector finds no literal tenant actor map, so a hand-built fixed-role actor goes 
+#   unreported
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_guard_test.exs
+# MUST_FAIL: a literal tenant actor map is counted
+diff --git a/samen_web/lib/samen/web/tenant_actor/guard.ex b/samen_web/lib/samen/web/tenant_actor/guard.ex
+index be056aa3..7affd9d5 100644
+--- a/samen_web/lib/samen/web/tenant_actor/guard.ex
++++ b/samen_web/lib/samen/web/tenant_actor/guard.ex
+@@ -61,6 +61,11 @@ defmodule Samen.Web.TenantActor.Guard do
+   @doc "How many literal tenant actor maps (`id:`, `org_id:` and a literal `role: :atom` in one map) `source` builds."
+   @spec literal_actors(String.t()) :: non_neg_integer()
+   def literal_actors(source) when is_binary(source) do
++    _ = source
++    0
++  end
++
++  def literal_actors_disabled(source) do
+     source
+     |> code_lines()
+     |> Enum.join("\n")

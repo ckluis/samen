@@ -9,7 +9,14 @@ defmodule Samen.Web.TenantActorGuardTest do
 
   This is a RATCHET over the sites not yet converted (`@baseline`, the owner's work list): a file may
   not gain a call, a file not listed may not contain one, and when a file is converted its entry
-  must be LOWERED here (a stale, higher number would let a regression hide behind it).
+  must be LOWERED here (a stale, higher number would let a regression hide behind it). The baseline's
+  TOTAL is pinned too (`@baseline_total`, `@baseline_files`), so raising an entry is a second, visible edit.
+
+  Three detectors, each with its own ratchet (see `Samen.Web.TenantActor.Guard`): the fixed-role scope calls
+  in every spelling (`Mount.scope(`, `&Mount.scope/2`, an `as:` alias, an `import`, `apply/3`), the literal tenant
+  actor maps (`@literal_actor_allowlist`), and the escape hatches that name a role without resolving one
+  (`system_scope(`, `admin_scope(`, `user_scope(` with no role: `@escape_hatch_baseline`). The hosts' own request-path
+  sites are ratcheted in their own tests (`Driftwood.TenantActorHostGuardTest`, `PawChart.TenantActorHostGuardTest`).
   """
   use ExUnit.Case, async: true
 
@@ -76,11 +83,39 @@ defmodule Samen.Web.TenantActorGuardTest do
     "samen/web/work/timeline_live.ex" => 1,
   }
 
+  # The exact size of the work list: a silent bump of an entry (or a new entry) fails here, not only in the ratchet.
+  @baseline_total 97
+  @baseline_files 55
+
   @exempt ~w(samen/web/mount.ex samen/web/tenant_actor.ex samen/web/tenant_actor/guard.ex)
+
+  # Literal tenant actor maps (`id:`, `org_id:`, a literal `role:`) in samen_web/lib. `plane.ex` is the definition.
+  #   chat/identity.ex  the disclosure actor: reads the org's own PII in the clear for the tenant-as-owner rule
+  #   saved_views.ex    `owner_scope/2`: the saved-view owner's scope (OwnerOnly + OrgScope), role :member by design
+  @literal_actor_allowlist %{
+    "samen/web/chat/identity.ex" => 1,
+    "samen/web/saved_views.ex" => 1
+  }
+  @literal_actor_exempt ~w(samen/web/plane.ex samen/web/tenant_actor.ex samen/web/tenant_actor/guard.ex)
+
+  # Callers of `system_scope(` / `admin_scope(` / `user_scope(` without a role. `TenantRole.admin_scope/3` takes the
+  # principal pinned by the tenant gate, so its callers are the unconverted admin-gated reads; `api_keys_live.ex`
+  # calls its own private `admin_scope/3` (user, org and the membership's role). Not exempt: nothing new may appear.
+  @escape_hatch_baseline %{
+    "samen/web/billing/reads.ex" => 2,
+    "samen/web/chat.ex" => 1,
+    "samen/web/flags/reads.ex" => 1,
+    "samen/web/marketing/reads.ex" => 1,
+    "samen/web/settings/api_keys_live.ex" => 2,
+    "samen/web/support/kb_reads.ex" => 1
+  }
+  @escape_hatch_exempt ~w(samen/web/tenant_actor.ex samen/web/tenant_actor/guard.ex)
 
   @root Path.expand("../../../lib", __DIR__)
 
   defp found, do: @root |> Guard.scan() |> Map.drop(@exempt)
+  defp found_literal_actors, do: @root |> Guard.scan(&Guard.literal_actors/1) |> Map.drop(@literal_actor_exempt)
+  defp found_escape_hatches, do: @root |> Guard.scan(&Guard.escape_hatches/1) |> Map.drop(@escape_hatch_exempt)
 
   test "no file gains an implicit fixed-role scope call and no new file introduces one" do
     over = for {file, n} <- found(), n > Map.get(@baseline, file, 0), do: {file, Map.get(@baseline, file, 0), n}
@@ -94,6 +129,25 @@ defmodule Samen.Web.TenantActorGuardTest do
   test "the baseline is not stale: a converted file lowers its entry" do
     stale = for {file, n} <- @baseline, Map.get(found(), file, 0) < n, do: {file, n, Map.get(found(), file, 0)}
     assert stale == [], "lower these @baseline entries (file, baseline, now): #{inspect(stale)}"
+  end
+
+  test "the baseline is pinned: its exact size is stated here, so raising an entry is a second visible edit" do
+    assert Enum.sum(Map.values(@baseline)) == @baseline_total
+    assert map_size(@baseline) == @baseline_files
+    # and the tree agrees with the pin exactly (not merely "at most")
+    assert Enum.sum(Map.values(found())) == @baseline_total
+    assert map_size(found()) == @baseline_files
+  end
+
+  test "no file gains a literal tenant actor map, and the allowlist is exact" do
+    assert found_literal_actors() == @literal_actor_allowlist,
+           "a literal `%{id:, org_id:, role: :atom}` in samen_web/lib acts with a role nobody resolved: derive it with " <>
+             "`Samen.Web.TenantActor.scope/3`, or add the file here WITH its reason"
+  end
+
+  test "no file gains an escape-hatch call (system_scope / admin_scope / user_scope without a role), and the baseline is exact" do
+    assert found_escape_hatches() == @escape_hatch_baseline,
+           "an escape hatch names a role without resolving one: lower the entry when a file is converted, never raise it"
   end
 
   test "non-vacuity: the sweep sees the whole tree and the converted surfaces are really clean" do
@@ -114,6 +168,70 @@ defmodule Samen.Web.TenantActorGuardTest do
       assert Guard.implicit_calls("TenantActor.scope(mount, org_id, ref)") == 0
       assert Guard.implicit_calls("# scope = Mount.scope(mount, org_id)") == 0
       assert Guard.implicit_calls("see Mount.scope/2 for the shape") == 0
+    end
+
+    test "the capture, alias, import and apply spellings are counted; their look-alikes are not" do
+      # captures
+      assert Guard.implicit_calls("f = &Mount.scope/2") == 1
+      assert Guard.implicit_calls("Enum.map(os, &Plane.scope(p, &1))") == 1
+      assert Guard.implicit_calls("f = &Samen.Web.Mount.scope/2") == 1
+      assert Guard.implicit_calls("f = &TenantActor.scope/3") == 0
+
+      # an `as:` alias
+      aliased = "alias Samen.Web.Mount, as: M\nx = M.scope(m, o)\nf = &M.scope/2\n"
+      assert Guard.implicit_calls(aliased) == 2
+      assert Guard.implicit_calls("x = M.scope(m, o)") == 0, "without the alias line `M` is some other module"
+      assert Guard.implicit_calls("alias Samen.Web.Plane, as: P\nP.scope(p, o)") == 1
+
+      # an import
+      assert Guard.implicit_calls("import Samen.Web.Mount") == 1
+      assert Guard.implicit_calls("import Samen.Web.Mount, only: [scope: 2]") == 1
+      assert Guard.implicit_calls("import Samen.Web.Mount, only: [new: 3]") == 0
+      assert Guard.implicit_calls("import Samen.Web.Mount, except: [scope: 2]") == 0
+      assert Guard.implicit_calls("import Samen.Web.Plane") == 1
+
+      # apply
+      assert Guard.implicit_calls("apply(Mount, :scope, [m, o])") == 1
+      assert Guard.implicit_calls("apply(Samen.Web.Plane, :scope, [p, o])") == 1
+      assert Guard.implicit_calls("apply(Mount, :new, [m, o])") == 0
+    end
+
+    test "a literal tenant actor map is counted; a participant row, a resolved role and a comment are not" do
+      assert Guard.literal_actors("a = %{id: u, org_id: o, role: :member, kind: :tenant, plane: :tenant}") == 1
+      assert Guard.literal_actors(~s|a = %{id: "broker:\#{org_id}", org_id: org_id, role: :member}|) == 1
+      assert Guard.literal_actors("a = %{\n  id: u,\n  org_id: o,\n  role: :admin\n}") == 1
+      assert Guard.literal_actors("Samen.Scope.new(%{id: user_id, org_id: org_id, role: :member})") == 1
+      assert Guard.literal_actors("a = %{id: u, org_id: o, role: role}") == 0
+      assert Guard.literal_actors("a = %{thread_id: t, org_id: o, role: :owner, principal_id: p}") == 0
+      assert Guard.literal_actors("# a = %{id: u, org_id: o, role: :member}") == 0
+    end
+
+    test "an escape hatch is counted: system_scope, admin_scope and user_scope WITHOUT a role" do
+      assert Guard.escape_hatches("TenantActor.system_scope(mount, org_id)") == 1
+      assert Guard.escape_hatches("TenantRole.admin_scope(mount, org_id)") == 1
+      assert Guard.escape_hatches("TenantRole.admin_scope(mount, org_id, principal)") == 1
+      assert Guard.escape_hatches("Reads.user_scope(mount, org_id, user_id)") == 1
+      assert Guard.escape_hatches("Reads.user_scope(mount, org_id, user_id, role)") == 0
+      assert Guard.escape_hatches("Reads.user_scope(\n  socket.assigns.mount,\n  org_id,\n  fetch(a, b),\n  role\n)") == 0
+      assert Guard.escape_hatches("Reads.user_scope(fetch(a, b), org_id, u)") == 1
+      assert Guard.escape_hatches("def system_scope(mount, org_id), do: x") == 0
+      assert Guard.escape_hatches("defp admin_scope(user_id, org_id, role) do") == 0
+      assert Guard.escape_hatches("# TenantActor.system_scope(mount, org_id)") == 0
+      assert Guard.escape_hatches("restore_admin_scope(scope, socket)") == 0
+    end
+
+    test "a modeled new file is reported by every detector" do
+      dir = Path.join(System.tmp_dir!(), "tenant_actor_guard_all_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf!(dir) end)
+
+      File.write!(Path.join(dir, "a_live.ex"), "defmodule A do\n  def x(m, o), do: Enum.map([o], &Mount.scope(m, &1))\nend\n")
+      File.write!(Path.join(dir, "b_live.ex"), "defmodule B do\n  def x(o), do: %{id: o, org_id: o, role: :member}\nend\n")
+      File.write!(Path.join(dir, "c_live.ex"), "defmodule C do\n  def x(m, o), do: TenantActor.system_scope(m, o)\nend\n")
+
+      assert Guard.scan(dir) == %{"a_live.ex" => 1}
+      assert Guard.scan(dir, &Guard.literal_actors/1) == %{"b_live.ex" => 1}
+      assert Guard.scan(dir, &Guard.escape_hatches/1) == %{"c_live.ex" => 1}
     end
 
     test "a modeled new file with an implicit call would be reported" do
