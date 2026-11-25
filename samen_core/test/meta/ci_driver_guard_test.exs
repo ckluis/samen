@@ -20,7 +20,8 @@ defmodule Samen.Meta.CiDriverGuard do
   @script Path.join(@repo_root, "scripts/ci_test.sh")
 
   # The nested driver must not inherit an outer run's state dir / manifest / repo override.
-  @scrub ~w(SAMEN_CI_HOME SAMEN_CI_MANIFEST SAMEN_CI_REPO SAMEN_CI_DRIVER SAMEN_CI_TOOLCHAIN SAMEN_SABOTAGE_ROOT)
+  @scrub ~w(SAMEN_CI_HOME SAMEN_CI_MANIFEST SAMEN_CI_REPO SAMEN_CI_DRIVER SAMEN_CI_TOOLCHAIN SAMEN_SABOTAGE_ROOT
+         SAMEN_CI_TEST_HOLD_LAUNCH SAMEN_CI_TEST_HOLD_KIND SAMEN_CI_TEST_HOLD_LIMIT_S)
          |> Enum.map(&{&1, nil})
 
   def run_case!(name) do
@@ -300,5 +301,37 @@ defmodule Samen.Meta.CiDriverGuardTest.MutationRunLock do
 
   test "MUTLOCK mutate.sh refuses a second run in the same checkout and takes nothing from another checkout or a read-only list" do
     Samen.Meta.CiDriverGuard.run_case!("MUTLOCK")
+  end
+end
+
+defmodule Samen.Meta.CiDriverGuardTest.LaunchRecord do
+  use ExUnit.Case, async: true
+
+  test "LAUNCHREC a step is released only once the driver has recorded it, so a killed driver leaves no unrecorded orphan" do
+    Samen.Meta.CiDriverGuard.run_case!("LAUNCHREC")
+  end
+end
+
+defmodule Samen.Meta.CiDriverGuardTest.LaunchSeam do
+  use ExUnit.Case, async: true
+
+  test "LAUNCHSEAM the launch-hold test seam is bounded, interruptible and never reaches a step" do
+    Samen.Meta.CiDriverGuard.run_case!("LAUNCHSEAM")
+  end
+end
+
+defmodule Samen.Meta.CiDriverGuardTest.RerunRecord do
+  use ExUnit.Case, async: true
+
+  test "RERUNREC the flaky rerun is released only once the driver has recorded it, so a killed driver leaves no unrecorded rerun" do
+    Samen.Meta.CiDriverGuard.run_case!("RERUNREC")
+  end
+end
+
+defmodule Samen.Meta.CiDriverGuardTest.GroupKill do
+  use ExUnit.Case, async: true
+
+  test "GROUPKILL an interrupted driver stops the whole process group, not just its leader" do
+    Samen.Meta.CiDriverGuard.run_case!("GROUPKILL")
   end
 end

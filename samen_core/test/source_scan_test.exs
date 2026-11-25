@@ -110,8 +110,13 @@ defmodule Samen.SourceScanTest do
       test/delivery/chokepoint_anti_bypass_probe_test.exs
       test/ai/chokepoint_anti_bypass_probe_test.exs
       test/aud_role_derivation_test.exs
+      test/meta/test_db_guard_test.exs
+      ../samen_web/lib/samen/web/authz/read_scope_lint.ex
+      ../samen_web/lib/samen/web/reads/lint.ex
     )
-    @file_server_scan ~r/(\b(Path\.wildcard|File\.(read!?|regular\?|dir\?|ls!?|stat!?|lstat!?|exists\?|stream!))|:filelib\.\w+)\(/
+    # A call is `Mod.fun(` (also piped: `|> Path.wildcard()`) or a capture `&Mod.fun/N` (`Enum.flat_map(&Path.wildcard/1)` is
+    # the idiom read_scope_lint used before it moved to SourceScan). NOT chased: an aliased module (`alias Path, as: P`).
+    @file_server_scan ~r/(\b(Path\.wildcard|File\.(read!?|regular\?|dir\?|ls!?|stat!?|lstat!?|exists\?|stream!))|:filelib\.\w+)(\(|\/\d)/
 
     defp file_server_scan_calls(source) do
       for {line, n} <- source |> String.split("\n") |> Enum.with_index(1),
@@ -130,11 +135,14 @@ defmodule Samen.SourceScanTest do
     end
 
     test "positive control: the matcher flags each stdlib call it guards against and spares the tmp-file helpers" do
-      for call <- ["Path.wildcard(x)", "File.read!(p)", "File.regular?(p)", "File.dir?(d)", "File.ls!(d)", ":filelib.wildcard(x)", ":filelib.is_dir(d)", "File.stream!(p)"] do
+      for call <- ["Path.wildcard(x)", "File.read!(p)", "File.regular?(p)", "File.dir?(d)", "File.ls!(d)", ":filelib.wildcard(x)", ":filelib.is_dir(d)", "File.stream!(p)",
+                   "x |> Path.wildcard()", "Enum.flat_map(&Path.wildcard/1)", "Enum.map(&Path.wildcard/2)", "Enum.map(&File.read!/1)", "&:filelib.wildcard/2"] do
         assert [_] = file_server_scan_calls("  y = " <> call), call
       end
 
       assert [] = file_server_scan_calls("  # File.read!(p) in a comment")
+      assert [] = file_server_scan_calls("  # Enum.flat_map(&Path.wildcard/1) in a comment")
+      assert [] = file_server_scan_calls(~s(  doc = "Path.wildcard is the old way"))
       assert [] = file_server_scan_calls("  File.write!(p, body)\n  File.mkdir_p!(d)\n  File.rm_rf!(d)")
     end
 

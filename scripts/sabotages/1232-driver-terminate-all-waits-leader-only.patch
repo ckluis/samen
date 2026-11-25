@@ -1,0 +1,28 @@
+# SABOTAGE: terminate_all waits only for each group leader and never kills a member that outlives it
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: GROUPKILL an interrupted driver stops the whole process group, not just its leader
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index e5e0718d..58348b30 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1321,7 +1321,7 @@ class Run(object):
+                 rc = self.running[sid]["proc"].poll()
+                 if rc is not None:
+                     self.finish(sid, rc)
+-            if not self.running and not any(group_alive(pg) for pg in pgs.values()):
++            if not self.running:
+                 break
+             time.sleep(0.2)
+         for sid in list(self.running):
+@@ -1332,7 +1332,7 @@ class Run(object):
+             self.running[sid]["proc"].wait()
+             self.finish(sid, -9)
+         for pg in pgs.values():
+-            if group_alive(pg):
++            if False:
+                 try:
+                     os.killpg(pg, signal.SIGKILL)
+                 except OSError:

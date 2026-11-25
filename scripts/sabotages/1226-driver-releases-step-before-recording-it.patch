@@ -1,0 +1,19 @@
+# SABOTAGE: the wrapper is kept but the step is released before save_state, so a driver killed in between 
+#   leaves an unrecorded live step
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: LAUNCHREC a step is released only once the driver has recorded it
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index f0a6c898..b88d2152 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1076,6 +1076,7 @@ class Run(object):
+             finally:
+                 os.close(gate_r)
+             register(proc)
++            os.write(gate_w, b"\n")
+             self.save_state()
+             if hold_launch_for_test(proc.pid, kind, lambda: self.interrupted):
+                 try:

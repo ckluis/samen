@@ -32,14 +32,10 @@ defmodule Samen.Web.Authz.ReadScopeLint do
     samen_web_root = __ENV__.file |> Path.dirname() |> Path.join("../../../..") |> Path.expand()
     repo_root = Path.expand(Path.join(samen_web_root, ".."))
 
-    [
-      Path.join(repo_root, "samen_core/lib/**/*.ex"),
-      Path.join(repo_root, "samen_web/lib/**/*.ex"),
-      Path.join(repo_root, "demo/lib/**/*.ex"),
-      Path.join(repo_root, "driftwood/lib/**/*.ex"),
-      Path.join(repo_root, "pawchart/lib/**/*.ex")
-    ]
-    |> Enum.flat_map(&Path.wildcard/1)
+    # Samen.SourceScan, not Path.wildcard: five `**` walks through the node's single :file_server_2 queue behind every other
+    # test's file I/O and outran ExUnit's 60 s on a loaded machine (the file reads here already bypass it).
+    ~w(samen_core/lib samen_web/lib demo/lib driftwood/lib pawchart/lib)
+    |> Enum.flat_map(&Samen.SourceScan.files(Path.join(repo_root, &1), [".ex"]))
     |> Enum.reject(fn f -> Path.basename(f) in @skip_basenames end)
     |> Enum.sort()
   end

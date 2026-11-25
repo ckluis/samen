@@ -122,6 +122,43 @@ def atomic_write_json(path, data):
     os.replace(tmp, path)
 
 
+# Self-test seams (scripts/ci_test.sh LAUNCHREC) — test-only, documented in docs/ci.md, and stripped from every step's
+# environment (step_base_env) so a step can never make a nested driver hold.
+TEST_SEAMS = ("SAMEN_CI_TEST_HOLD_LAUNCH", "SAMEN_CI_TEST_HOLD_KIND", "SAMEN_CI_TEST_HOLD_LIMIT_S")
+
+
+def group_alive(pg):
+    """True while any process of group `pg` exists (signal 0: ProcessLookupError means none is left)."""
+    try:
+        os.killpg(pg, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def hold_launch_for_test(pgid, kind, interrupted):
+    """Self-test seam: with SAMEN_CI_TEST_HOLD_LAUNCH=<file> the driver records the launched process group in <file> and
+    then BLOCKS, at the exact point between launching (a step, or the flaky rerun: SAMEN_CI_TEST_HOLD_KIND=step|rerun,
+    default step) and persisting that it runs — so a test can SIGKILL the driver there instead of racing it. The hold is
+    bounded (SAMEN_CI_TEST_HOLD_LIMIT_S, default 60): on expiry the driver FAILS LOUDLY naming this seam. It honours the
+    driver's interrupt flag (SIGINT/SIGTERM/SIGHUP): returns False, and the caller must not release the held process.
+    Returns True when there is nothing to hold or the hold ended without an interrupt (never: expiry raises)."""
+    path = os.environ.get("SAMEN_CI_TEST_HOLD_LAUNCH")
+    if not path or os.environ.get("SAMEN_CI_TEST_HOLD_KIND", "step") != kind:
+        return True
+    atomic_write_json(path, {"pgid": pgid, "kind": kind})
+    limit = float(os.environ.get("SAMEN_CI_TEST_HOLD_LIMIT_S", "60"))
+    deadline = time.time() + limit
+    while not interrupted():
+        if time.time() >= deadline:
+            raise RuntimeError("SAMEN_CI_TEST_HOLD_LAUNCH: the test seam held the %s launch for %gs and nothing killed "
+                               "the driver — it is test-only (scripts/ci_test.sh LAUNCHREC); unset it" % (kind, limit))
+        time.sleep(0.05)
+    return False
+
+
 def read_json(path):
     try:
         with open(path) as f:
@@ -418,7 +455,8 @@ PROBE_SEAMS = ("GEN_PROBE_SHARED_REGISTRY", "SAMEN_ABBREV_REGISTRY", "SAMEN_ABBR
 
 
 def step_base_env():
-    return {k: v for k, v in os.environ.items() if k not in WRAPPER_FLAGS and k not in PROBE_SEAMS}
+    return {k: v for k, v in os.environ.items()
+            if k not in WRAPPER_FLAGS and k not in PROBE_SEAMS and k not in TEST_SEAMS}
 
 
 def env_fingerprint():
@@ -929,6 +967,7 @@ class Run(object):
         self.results = {}    # id -> dict
         self.groups_done = set()
         self.interrupted = False
+        self.reruns = {}  # flaky-rerun processes by "<step>#rerun": recorded in state.json like a running step
         self.running = {}    # id -> dict(proc, step, start, log)
 
     # ── printing ──
@@ -975,7 +1014,8 @@ class Run(object):
     # ── state ──
     def save_state(self):
         self.state["steps"] = self.state.get("steps", {})
-        self.state["running"] = {sid: r["proc"].pid for sid, r in self.running.items()}
+        self.state["running"] = dict({sid: r["proc"].pid for sid, r in self.running.items()},
+                                     **{rid: p.pid for rid, p in self.reruns.items()})
         atomic_write_json(os.path.join(HOME, "state.json"), self.state)
 
     def record(self, step, status, duration, log=None, digest=None, note=None, key=None):
@@ -1024,13 +1064,38 @@ class Run(object):
             self.mode, step.id, step.cwd, time.strftime("%Y-%m-%dT%H:%M:%S"),
             "\n".join("#   " + l for l in step.cmd.splitlines()), LOG_SEP))
         f.flush()
-        proc = subprocess.Popen(["bash", "-c", "set -euo pipefail\n" + step.cmd],
-                                cwd=os.path.join(REPO, step.cwd), env=self.ctx.env(self.mode, step),
-                                stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                                start_new_session=True)
-        self.running[step.id] = {"proc": proc, "step": step, "start": time.time(), "log": logrel, "fh": f}
-        self.status[step.id] = "RUNNING"
-        self.save_state()
+        def register(proc):
+            self.running[step.id] = {"proc": proc, "step": step, "start": time.time(), "log": logrel, "fh": f}
+            self.status[step.id] = "RUNNING"
+        self.spawn_gated(step.cmd, os.path.join(REPO, step.cwd), self.ctx.env(self.mode, step), f, "step", register)
+
+    def spawn_gated(self, cmd, cwd, env, fh, kind, register):
+        """Start `cmd` in its own session, HELD until the driver has persisted that it runs. A step lives in its own
+        session, so a SIGKILLed driver cannot stop it — and the next invocation can only refuse to overlap with it (or
+        resume) from what state.json says is running. That record needs the pid, which exists only after Popen: so the
+        process is HELD on a pipe until the record is on disk. A driver killed before releasing it closes the pipe; the
+        process reads EOF and exits without running a line of its command (once a step could print `start` before
+        state.json existed, and a fresh run then overlapped the orphan). The same gate serves a step's launch and the
+        flaky rerun (`kind`): `register(proc)` files the process where save_state reads it from."""
+        gate_r, gate_w = os.pipe()
+        try:
+            try:
+                proc = subprocess.Popen(
+                    ["bash", "-c", "IFS= read -r _go <&%d || exit 1; exec %d<&-\nset -euo pipefail\n%s" % (gate_r, gate_r, cmd)],
+                    cwd=cwd, env=env, stdout=fh, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                    start_new_session=True, pass_fds=(gate_r,))
+            finally:
+                os.close(gate_r)
+            register(proc)
+            self.save_state()
+            if hold_launch_for_test(proc.pid, kind, lambda: self.interrupted):
+                try:
+                    os.write(gate_w, b"\n")  # the record is durable: let it run
+                except BrokenPipeError:
+                    pass  # it died before it was released: poll() collects its real exit code (a FAIL of this step only)
+        finally:
+            os.close(gate_w)  # un-released (interrupt, expired hold, crash): the process reads EOF and never runs
+        return proc
 
     def flaky_rerun(self, step, text, logabs):
         fails = parse_exunit(ANSI.sub("", text))
@@ -1041,13 +1106,49 @@ class Run(object):
         if not step.exunit_dir or not locs or len(locs) > 25 or len(locs) < len(fails):
             return None
         cmd = "mix test " + " ".join(shlex.quote(l) for l in locs)
+        rid = step.id + "#rerun"
         with open(logabs + ".rerun", "w") as f:
             f.write("# FLAKE CHECK — the failing tests, once, in isolation: (cd %s && %s)\n" % (step.exunit_dir, cmd))
             f.flush()
-            p = subprocess.run(["bash", "-c", cmd], cwd=os.path.join(REPO, step.exunit_dir),
-                               env=self.ctx.env(self.mode, step), stdout=f, stderr=subprocess.STDOUT,
-                               stdin=subprocess.DEVNULL)
+            # Recorded like a step (state.json "running"): a driver killed during the rerun must not leave a live,
+            # unrecorded `mix test` for the next invocation to overlap on the same test database.
+            def register(proc):
+                self.reruns[rid] = proc
+            p = None
+            try:
+                # inside the try: an exception after `register` (save_state in spawn_gated) must not leave the record behind
+                p = self.spawn_gated(cmd, os.path.join(REPO, step.exunit_dir), self.ctx.env(self.mode, step), f, "rerun", register)
+                while p.poll() is None:
+                    if self.interrupted:
+                        self.stop_group(p)
+                        return None
+                    time.sleep(0.2)
+            finally:
+                self.reruns.pop(rid, None)
+                self.save_state()
         return p.returncode == 0
+
+    def stop_group(self, proc):
+        """SIGTERM then (after 20 s) SIGKILL a process group this driver started, and reap it. The deadline covers the
+        WHOLE group: a member that handles SIGTERM can outlive the leader, and the record is dropped once this returns."""
+        pg = proc.pid
+        try:
+            os.killpg(pg, signal.SIGTERM)
+        except OSError:
+            pass
+        deadline = time.time() + 20
+        try:
+            proc.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            pass
+        while group_alive(pg) and time.time() < deadline:
+            time.sleep(0.1)
+        if proc.poll() is None or group_alive(pg):
+            try:
+                os.killpg(pg, signal.SIGKILL)
+            except OSError:
+                pass
+            proc.wait()
 
     def finish(self, sid, rc):
         r = self.running.pop(sid)
@@ -1205,18 +1306,23 @@ class Run(object):
         return t0, pending, stop_reason
 
     def terminate_all(self):
-        for r in self.running.values():
+        pgs = {}
+        for sid, r in self.running.items():
             r["signalled"] = True
+            pgs[sid] = r["proc"].pid
             try:
                 os.killpg(r["proc"].pid, signal.SIGTERM)  # SIGTERM first: gen-probe/sabotage traps restore
             except OSError:
                 pass
         deadline = time.time() + 20
-        while self.running and time.time() < deadline:
+        # the deadline covers every member of every group, not just each leader: a member that handles SIGTERM outlives it
+        while time.time() < deadline:
             for sid in list(self.running):
                 rc = self.running[sid]["proc"].poll()
                 if rc is not None:
                     self.finish(sid, rc)
+            if not self.running and not any(group_alive(pg) for pg in pgs.values()):
+                break
             time.sleep(0.2)
         for sid in list(self.running):
             try:
@@ -1225,6 +1331,12 @@ class Run(object):
                 pass
             self.running[sid]["proc"].wait()
             self.finish(sid, -9)
+        for pg in pgs.values():
+            if group_alive(pg):
+                try:
+                    os.killpg(pg, signal.SIGKILL)
+                except OSError:
+                    pass
 
 
 def final_line(mode, opts, plan, status, elapsed, first_fail):

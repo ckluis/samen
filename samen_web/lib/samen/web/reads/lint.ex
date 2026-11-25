@@ -73,9 +73,10 @@ defmodule Samen.Web.Reads.Lint do
   defp framework_reads_files do
     __ENV__.file
     |> Path.dirname()
-    |> Path.join("../**/reads.ex")
+    |> Path.join("..")
     |> Path.expand()
-    |> Path.wildcard()
+    |> Samen.SourceScan.files([".ex"])
+    |> Enum.filter(&(Path.basename(&1) == "reads.ex"))
   end
 
   @doc """
@@ -90,8 +91,8 @@ defmodule Samen.Web.Reads.Lint do
     Enum.flat_map(@vertical_read_trees, fn tree ->
       root
       |> Path.join(tree)
-      |> Path.join("**/*reads.ex")
-      |> Path.wildcard()
+      |> Samen.SourceScan.files([".ex"])
+      |> Enum.filter(&String.ends_with?(&1, "reads.ex"))
     end)
   end
 
@@ -138,7 +139,7 @@ defmodule Samen.Web.Reads.Lint do
   def assert_all_bounded!(files \\ reads_files()) do
     {violations, read_clauses} =
       Enum.reduce(files, {[], 0}, fn file, {acc_v, acc_n} ->
-        {v, n} = file |> File.read!() |> scan_source(file)
+        {v, n} = file |> Samen.SourceScan.read!() |> scan_source(file)
         {acc_v ++ v, acc_n + n}
       end)
 

@@ -39,6 +39,8 @@ verdict is `PR-READY (vs X)`). Step lines: `PASS <id> 12.3s`, `CACHED <id>`, `SK
 machine-readable form (`verdict`, `final_line`, per-step `status`/`log`/`head`/`tree`). `_ci/state.json`
 is the resume state. `_ci/` is gitignored; never commit it.
 
+`SAMEN_CI_TEST_HOLD_LAUNCH` (with `SAMEN_CI_TEST_HOLD_KIND`, `SAMEN_CI_TEST_HOLD_LIMIT_S`) is a test-only seam of `scripts/ci_test.sh`: it makes the driver hold a launched process before releasing it. Never export it; it is bounded (60 s by default, then the driver fails naming it), stops on Ctrl-C/SIGTERM, and is stripped from every step's environment.
+
 ## 2. The round recipe
 
 ```
