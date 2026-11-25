@@ -1,0 +1,21 @@
+# SABOTAGE: the Outreach worker actions (:due_scan, :advance_due) are authorized for any actor again, so a 
+#   tenant viewer reads every org's enrollments
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/crm/sequence_send_test.exs
+# MUST_FAIL: a tenant actor of ANY role cannot run the cross-org :due_scan
+# MUST_FAIL: a tenant actor of ANY role cannot run :system_advance or :advance_due
+diff --git a/samen_core/lib/samen/scopes/outreach/blueprint.ex b/samen_core/lib/samen/scopes/outreach/blueprint.ex
+index 58fd6baa..37515f3d 100644
+--- a/samen_core/lib/samen/scopes/outreach/blueprint.ex
++++ b/samen_core/lib/samen/scopes/outreach/blueprint.ex
+@@ -365,7 +365,7 @@ defmodule Samen.Scopes.Outreach.Blueprint do
+           # with no org filter) and advances what is due (`:advance_due`). It runs with no actor and says so
+           # (`AshOban.Checks.AshObanInteraction`); an actor of any role, an owner included, is refused below.
+           bypass action([:advance_due, :due_scan]) do
+-            authorize_if(AshOban.Checks.AshObanInteraction)
++            authorize_if(always())
+           end
+ 
+           # Nothing an actor may run: the cross-org worker actions (above, when they are not the worker's) and the

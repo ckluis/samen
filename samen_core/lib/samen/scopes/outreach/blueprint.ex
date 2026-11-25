@@ -361,8 +361,18 @@ defmodule Samen.Scopes.Outreach.Blueprint do
         end
 
         policies do
-          bypass action([:advance_due, :due_scan, :system_advance]) do
-            authorize_if(always())
+          # The worker's own two actions: the AshOban `:sequence_step_due` trigger scans every org (`:due_scan`, a read
+          # with no org filter) and advances what is due (`:advance_due`). It runs with no actor and says so
+          # (`AshOban.Checks.AshObanInteraction`); an actor of any role, an owner included, is refused below.
+          bypass action([:advance_due, :due_scan]) do
+            authorize_if(AshOban.Checks.AshObanInteraction)
+          end
+
+          # Nothing an actor may run: the cross-org worker actions (above, when they are not the worker's) and the
+          # internal state setter `Samen.Sequences.transition/2` runs as an `authorize?: false` call (the
+          # `ApiKey.mark_used` / `File.promote` precedent).
+          policy action([:advance_due, :due_scan, :system_advance]) do
+            forbid_if(always())
           end
 
           policy action_type(:read) do
@@ -481,8 +491,10 @@ defmodule Samen.Scopes.Outreach.Blueprint do
         end
 
         policies do
-          bypass action([:queue, :mark, :requeue]) do
-            authorize_if(always())
+          # Internal-only: `Samen.Sequences` and `Samen.Sequences.SendWorker` run these as `authorize?: false` calls.
+          # No actor may queue, resolve or requeue a send (the `ApiKey.mark_used` / `File.promote` precedent).
+          policy action([:queue, :mark, :requeue]) do
+            forbid_if(always())
           end
 
           policy action_type(:read) do
