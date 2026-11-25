@@ -6,13 +6,13 @@
 # TEST_FILES: test/vault_token_assert_test.exs
 # MUST_FAIL: a real token inside a CSRF value, a phx session or a phx id still fails
 diff --git a/samen_core/lib/samen/vault_token_assert.ex b/samen_core/lib/samen/vault_token_assert.ex
-index 66707f69..ef96a5d4 100644
+index 9d63d8b3..9ee508bb 100644
 --- a/samen_core/lib/samen/vault_token_assert.ex
 +++ b/samen_core/lib/samen/vault_token_assert.ex
 @@ -42,7 +42,7 @@ defmodule Samen.VaultTokenAssert do
-   def leaks(text, opts \\ [])
- 
-   def leaks(text, opts) when is_binary(text) do
+   @spec leaks(iodata(), keyword()) :: [String.t()]
+   def leaks(text, opts \\ []) do
+     text = text!(text, "leaks/2")
 -    grammar = Samen.Vault.tokens_in(text)
 +    grammar = Samen.Vault.tokens_in(Regex.replace(~r/="[^"]*"/, text, ""))
      prefix = text |> blank_framework_tokens() |> prefix_hits(Keyword.get(opts, :boundary, false))
