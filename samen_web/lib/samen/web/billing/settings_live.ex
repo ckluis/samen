@@ -71,6 +71,7 @@ defmodule Samen.Web.Billing.SettingsLive do
   @impl true
   def mount(params, session, socket) do
     socket = assign_mount(socket, session)
+    socket = SettingsReads.assign_principal(socket, params, session)
     mount = socket.assigns[:samen_mount]
     org_id = CurrentOrg.resolve(mount, params, session)
     # PP-5: the acting user (the SAME current-user seam the api-key settings surface uses)
@@ -82,7 +83,7 @@ defmodule Samen.Web.Billing.SettingsLive do
   @impl true
   def handle_params(params, uri, socket) do
     org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
-    user_id = Samen.Web.Settings.Reads.reresolve_user(socket, params)
+    user_id = Samen.Web.Settings.Reads.reresolve_user(socket, params, org_id)
 
     {:noreply,
      load(

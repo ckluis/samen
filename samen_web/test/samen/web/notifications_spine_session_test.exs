@@ -362,6 +362,52 @@ defmodule Samen.Web.NotificationsSpineSessionTest do
     assert inbox.assigns.unread_count == 0
   end
 
+  # -- a settings screen re-derives its user when ?org= switches to ANOTHER authorized org ------------------
+
+  test "settings screens: a patch to another authorized org acts as THAT org's user, never the mount org's id", ctx do
+    own_org = ctx.member.org.id
+    refute own_org == ctx.org_id
+
+    host_user = user_id(ctx.member, ctx.org_id)
+    own_user = user_id(ctx.member, own_org)
+    refute host_user == own_user
+
+    login = log_in(ctx.member)
+
+    for {view, path} <- [
+          {Samen.Web.Settings.ProfileLive, "/settings/profile"},
+          {Samen.Web.Settings.ApiKeysLive, "/settings/api-keys"},
+          {Samen.Web.Settings.InvitationsLive, "/settings/invitations"}
+        ] do
+      socket = live_socket(login, view, path, ctx.org_id)
+
+      # positive control: mounted on the host org, the screen acts as the host org's user
+      assert socket.assigns.org_id == ctx.org_id
+      assert socket.assigns.user_id == host_user, "#{inspect(view)} mount"
+
+      socket = reenter(view, socket, own_org)
+
+      assert socket.assigns.org_id == own_org
+      assert socket.assigns.user_id == own_user, "#{inspect(view)} kept the mount org's user id on a patch to another org"
+      refute socket.assigns.user_id == host_user
+    end
+  end
+
+  test "settings screens: a patch to an org where the principal's membership is not active shows the honest no-user state", ctx do
+    host_user = user_id(ctx.member, ctx.org_id)
+    own_org = ctx.member.org.id
+    login = log_in(ctx.member)
+    socket = live_socket(login, Samen.Web.Settings.ProfileLive, "/settings/profile", own_org)
+    assert socket.assigns.user_id == user_id(ctx.member, own_org)
+
+    suspend!(host_user, ctx.org_id)
+    # the pinned set still names the host org, but the member holds no ACTIVE membership there any more
+    socket = reenter(Samen.Web.Settings.ProfileLive, socket, ctx.org_id)
+
+    assert socket.assigns.org_id == ctx.org_id
+    assert socket.assigns.user_id == nil
+  end
+
   # -- the preferences panel, through the real login -------------------------------------
 
   test "the preferences panel edits the signed-in user's OWN row (and not another user's)", ctx do

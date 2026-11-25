@@ -175,7 +175,7 @@ defmodule Samen.Web.Settings.Reads do
   The ACTING scope for `user_id`: `Mount.scope/2`, with the tenant plane's synthetic org-level actor
   (`broker:<org>`, which names no user) carrying the user the SESSION resolved. This is the one place a
   user identity enters a settings scope, and `user_id` must be the value `current_user_id/3` /
-  `reresolve_user/2` produced, never a request argument of its own. `Samen.Web.Settings.Profile.update/4`
+  `reresolve_user/3` produced, never a request argument of its own. `Samen.Web.Settings.Profile.update/4`
   refuses any scope whose actor is not the user being edited. An operator-plane (impersonation) scope is
   returned as it is: its actor is the operator, never the user.
   """
@@ -193,6 +193,16 @@ defmodule Samen.Web.Settings.Reads do
   end
 
   @doc """
+  Stash the session's PRINCIPAL (`principal_ref/3`) on the socket at `mount/3`, so `handle_params/3` (which has
+  no session) can re-derive the acting user when `?org=` switches to another authorized org. A principal is
+  org-less; the user it acts as is PER ORG.
+  """
+  @spec assign_principal(Phoenix.LiveView.Socket.t(), map(), map()) :: Phoenix.LiveView.Socket.t()
+  def assign_principal(socket, params, session) do
+    Phoenix.Component.assign(socket, :principal_ref, principal_ref(socket_assigns(socket)[:samen_mount], params, session))
+  end
+
+  @doc """
   Re-resolve the current user id inside `handle_params/3` — the shared helper the settings /
   billing-settings / onboarding surfaces call in place of the old
   `Map.get(params, "user") || socket.assigns.user_id` idiom (B-SEC / S2, the identity twin of
@@ -201,14 +211,31 @@ defmodule Samen.Web.Settings.Reads do
   `handle_params/3` runs on the initial DEAD RENDER, so that idiom let a client `?user=`
   overwrite the session-derived identity `mount/3` had just computed. Here the param is
   honoured ONLY in the explicitly DISARMED dev posture; otherwise the identity `mount/3`
-  resolved from the session stands.
-  """
-  @spec reresolve_user(Phoenix.LiveView.Socket.t() | map(), map()) :: String.t() | nil
-  def reresolve_user(socket, params) do
-    assigns = socket_assigns(socket)
-    current = Map.get(assigns, :user_id)
+  resolved from the session stands - for the SAME org.
 
-    present(dev_param_user(Map.get(assigns, :samen_mount), params)) || current
+  A user id is PER ORG: when `?org=` switched to another (authorized) `org_id`, the id `mount/3` resolved
+  belongs to the OLD org and is never carried over. The user is re-derived for `org_id` from the principal
+  `assign_principal/3` stashed (`actor_in_org/3`); a principal with no active membership there, a failed
+  lookup, or no stashed principal gives `nil` - the honest "no user" state, never another org's id.
+  """
+  @spec reresolve_user(Phoenix.LiveView.Socket.t() | map(), map(), String.t() | nil) :: String.t() | nil
+  def reresolve_user(socket, params, org_id) do
+    assigns = socket_assigns(socket)
+    mount = Map.get(assigns, :samen_mount)
+
+    cond do
+      dev = present(dev_param_user(mount, params)) ->
+        dev
+
+      org_id == Map.get(assigns, :org_id) ->
+        Map.get(assigns, :user_id)
+
+      true ->
+        case actor_in_org(mount, org_id, Map.get(assigns, :principal_ref, :none)) do
+          {:ok, %{id: id}} -> id
+          _ -> nil
+        end
+    end
   end
 
   defp socket_assigns(%{assigns: assigns}) when is_map(assigns), do: assigns
