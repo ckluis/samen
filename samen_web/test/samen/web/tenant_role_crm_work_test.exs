@@ -17,8 +17,6 @@ defmodule Samen.Web.TenantRoleCrmWorkTest do
 
   import Phoenix.ConnTest
 
-  require Ash.Query
-
   alias Samen.Mailbox
   alias Samen.Mailbox.{Config, FakeProvider}
   alias Samen.Web.CRM.{CalendarLive, CompanyLive, ContactsGalleryLive, DashboardLive, MailboxLive, PipelineLive, SequencesLive}
