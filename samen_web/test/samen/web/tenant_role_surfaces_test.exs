@@ -544,6 +544,55 @@ defmodule Samen.Web.TenantRoleSurfacesTest do
     end
   end
 
+  # -- one principal order (authz-5 round 3, item 5) ---------------------------------------------------
+
+  describe "a session carrying BOTH the spine token and the legacy key" do
+    setup ctx do
+      uid = user_id(ctx.member, ctx.org_id)
+      SecurityHost.grant!(uid, [ctx.org_id])
+      on_exit(&SecurityHost.revoke_all!/0)
+      mount = Mount.new(:crm, Samen.WebTest.Crm, Samen.WebTest.Repo, labels: @labels)
+      # the VIEWER signs in (spine token); the legacy key names the MEMBER, whom the host seam grants the org
+      session = Map.put(log_in(ctx.viewer).session, "samen_current_user", uid)
+      %{mount: mount, session: session, legacy_uid: uid}
+    end
+
+    test "every surface acts as the SAME person: principal_id and principal_ref agree (legacy first)", ctx do
+      assert Samen.Web.CurrentOrg.principal_id(ctx.mount, ctx.session) == ctx.legacy_uid
+      assert Reads.principal_ref(ctx.mount, %{}, ctx.session) == {:user, ctx.legacy_uid}
+      assert Samen.Web.CurrentOrg.authorized_orgs(ctx.mount, ctx.session) == [ctx.org_id]
+    end
+
+    test "the spine credential acts only when the legacy seam grants nothing (positive control)", ctx do
+      SecurityHost.revoke_all!()
+      credential = Samen.Web.CurrentOrg.principal_id(ctx.mount, ctx.session)
+      assert credential != ctx.legacy_uid
+      assert {:credential, ^credential} = Reads.principal_ref(ctx.mount, %{}, ctx.session)
+    end
+  end
+
+  describe "signing in and out" do
+    defp login_over(session, account) do
+      build_conn()
+      |> Plug.Test.init_test_session(session)
+      |> post("/login", %{"login" => %{"email" => account.email, "password" => @password}})
+    end
+
+    test "a new sign-in drops the legacy key: it cannot inherit a previous person's identity", ctx do
+      conn = login_over(%{"samen_current_user" => "previous-person"}, ctx.viewer)
+      assert redirected_to(conn)
+      assert Plug.Conn.get_session(conn, "samen_session_token")
+      assert Plug.Conn.get_session(conn, "samen_current_user") == nil
+    end
+
+    test "logout clears both keys", ctx do
+      login = log_in(ctx.viewer)
+      conn = login.conn |> Plug.Test.init_test_session(Map.put(login.session, "samen_current_user", "previous-person")) |> post("/logout", %{})
+      assert Plug.Conn.get_session(conn, "samen_session_token") == nil
+      assert Plug.Conn.get_session(conn, "samen_current_user") == nil
+    end
+  end
+
   # -- the shared resolver, in every posture ---------------------------------------------------
 
   describe "TenantActor.scope/3" do

@@ -158,18 +158,41 @@ defmodule Samen.Web.CurrentOrg do
   end
 
   @doc """
-  The authenticated principal's id for `mount` + `session`, or `nil`. The SPINE credential id
-  (`samen_session_token`) first — the id `Samen.Auth.OrgActor` keys a membership lookup on
-  (ADR-045 §4.4, the tenant-role residual) — then the legacy BYO `samen_current_user` id. Never
-  a param, never raises. `Samen.Web.TenantAuthz` pins this into the socket so the tenant
-  `write_scope` helpers + the generated `--live` screens can derive the REAL membership role on an
-  armed host instead of a hardcoded `:admin`.
+  WHICH key of the session names the acting person: the ONE order every surface uses (`principal_id/2`,
+  `Samen.Web.Settings.Reads.principal_ref/3` and `authorized_orgs/2` all follow it, so a session carrying BOTH keys
+  never acts as two different people).
+
+    1. `{:legacy, user_id}` - the BYO `samen_current_user` key, when the host's `:authorized_orgs` seam grants it at
+       least one org (it is then also the key `authorized_orgs/2` takes the org set from);
+    2. `{:spine, credential_id}` - the framework's `samen_session_token`, resolved to a live session;
+    3. `{:legacy, user_id}` - a legacy key the seam grants nothing (no spine session either);
+    4. `:none`.
+  """
+  @spec principal_key(Mount.t() | nil, map()) :: {:legacy, String.t()} | {:spine, String.t()} | :none
+  def principal_key(mount, session) do
+    legacy = Samen.Web.Auth.authenticated_user_id(session)
+
+    if is_binary(legacy) and legacy_authorizes?(mount, session) do
+      {:legacy, legacy}
+    else
+      case spine_credential_id(mount, session) do
+        {:ok, credential_id} when is_binary(credential_id) -> {:spine, credential_id}
+        _ -> if is_binary(legacy), do: {:legacy, legacy}, else: :none
+      end
+    end
+  end
+
+  @doc """
+  The authenticated principal's id for `mount` + `session` (`principal_key/2`'s id), or `nil`: the legacy user id or the
+  SPINE credential id `Samen.Auth.OrgActor` keys a membership lookup on (ADR-045 §4.4, the tenant-role residual). Never
+  a param, never raises. `Samen.Web.TenantAuthz` pins this into the socket so the tenant `write_scope` helpers + the
+  generated `--live` screens can derive the REAL membership role on an armed host instead of a hardcoded `:admin`.
   """
   @spec principal_id(Mount.t() | nil, map()) :: String.t() | nil
   def principal_id(mount, session) do
-    case spine_credential_id(mount, session) do
-      {:ok, credential_id} when is_binary(credential_id) -> credential_id
-      _ -> Samen.Web.Auth.authenticated_user_id(session)
+    case principal_key(mount, session) do
+      {_kind, id} -> id
+      :none -> nil
     end
   end
 
