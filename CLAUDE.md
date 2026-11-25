@@ -34,7 +34,7 @@ Use the driver; never hand-segment `ci.sh`, never background a run and poll it (
   new` — `git add` your fix FIRST, make ONLY the sabotage edit unstaged, then run it. `MUST_FAIL` is a literal test
   name, never interpolated. A patch that stopped applying: `scripts/sabotage reanchor <n>`; never delete it.
   Replay: `scripts/sabotage.sh` (filters) / `scripts/sabotage-lanes.sh` (N lanes). Unfiltered runs need `scripts/ci full`.
-- Counts are generated (`scripts/counts --write`, never by hand): <!--count:sabotages-->1370<!--/count--> sabotages
+- Counts are generated (`scripts/counts --write`, never by hand): <!--count:sabotages-->1371<!--/count--> sabotages
   (driver red paths `scripts/ci_test.sh` <!--count:driver_sabotages-->496–1232<!--/count-->), watch-list <!--count:watchlist_modules-->23<!--/count-->
   modules / <!--count:watchlist_mutants-->471<!--/count--> mutants, corpus <!--count:corpus_targets-->393<!--/count--> targets /
   <!--count:corpus_mutants-->7,178<!--/count--> mutants.
