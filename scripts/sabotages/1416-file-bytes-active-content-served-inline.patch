@@ -6,15 +6,15 @@
 # TEST_FILES: test/samen/web/files_csv_router_test.exs
 # MUST_FAIL: a stored file cannot run as a page on the app's origin
 diff --git a/samen_web/lib/samen/web/files/bytes_controller.ex b/samen_web/lib/samen/web/files/bytes_controller.ex
-index 85ee8828..1649e916 100644
+index c3ec7e3b..75f359e7 100644
 --- a/samen_web/lib/samen/web/files/bytes_controller.ex
 +++ b/samen_web/lib/samen/web/files/bytes_controller.ex
-@@ -151,8 +151,7 @@ defmodule Samen.Web.Files.BytesController do
+@@ -186,8 +186,7 @@ defmodule Samen.Web.Files.BytesController do
        put_resp_header(conn, "content-disposition", ~s(inline; filename="#{name}"))
      else
        conn
 -      |> put_resp_header("content-disposition", ~s(attachment; filename="#{name}"))
--      |> put_resp_header("content-security-policy", "default-src 'none'; sandbox")
+-      |> put_resp_header("content-security-policy", @sandbox_csp)
 +      |> put_resp_header("content-disposition", ~s(inline; filename="#{name}"))
      end
    end
