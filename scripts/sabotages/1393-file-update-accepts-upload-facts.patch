@@ -1,0 +1,20 @@
+# SABOTAGE: File :update accepts content_type, size_bytes and uploaded_by_id again: a member can turn a 
+#   scanned text file into text/html
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/primitives_file_update_inputs_test.exs
+# MUST_FAIL: a member cannot rewrite the stored content type, size or uploader of a file
+diff --git a/samen_core/lib/samen/scopes/primitives/blueprint.ex b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+index a8a0335f..5e6b59de 100644
+--- a/samen_core/lib/samen/scopes/primitives/blueprint.ex
++++ b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+@@ -505,7 +505,7 @@ defmodule Samen.Scopes.Primitives.Blueprint do
+           update :update do
+             primary?(true)
+             require_atomic?(false)
+-            accept([:filename, :storage_key, :metadata, :org_id])
++            accept([:filename, :content_type, :size_bytes, :storage_key, :uploaded_by_id, :metadata, :org_id])
+           end
+ 
+           # The promotion path's own write (`Samen.Files.promote/3` after a clean scan). No input; it is

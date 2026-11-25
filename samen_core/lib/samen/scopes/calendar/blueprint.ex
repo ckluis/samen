@@ -107,6 +107,8 @@ defmodule Samen.Scopes.Calendar.Blueprint do
           # moduledoc) — a malformed rule is refused here, never silently
           # persisted to surface as a raised error at the first ICS export.
           validate(Samen.Scopes.Calendar.RecurrenceGuard, on: [:create, :update])
+          # An event never ends before it starts (an update is compared against the stored other instant).
+          validate(Samen.Scopes.Calendar.EndsAfterStarts, on: [:create, :update])
         end
 
         actions do

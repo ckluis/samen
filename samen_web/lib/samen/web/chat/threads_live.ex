@@ -28,7 +28,9 @@ defmodule Samen.Web.Chat.ThreadsLive do
       |> maybe_assign_operator_identity(session, params)
 
     org_id = CurrentOrg.resolve(socket.assigns[:samen_mount], params, session)
-    {:ok, load(assign(socket, org_id: org_id, flash_note: nil), org_id)}
+    # The session's principal, org-less: a new conversation's initiator is derived from it per org.
+    ref = Samen.Web.Settings.Reads.principal_ref(socket.assigns[:samen_mount], params, session)
+    {:ok, load(assign(socket, org_id: org_id, flash_note: nil, principal_ref: ref), org_id)}
   end
 
   # T153 — on the OPERATOR desk-chat plane, resolve the acting operator identity the
@@ -187,6 +189,7 @@ defmodule Samen.Web.Chat.ThreadsLive do
              subject: subject,
              handle: default_handle(params),
              full_name: default_full_name(params),
+             principal_id: initiator_user_id(socket),
              share_identity: share?
            }) do
         {:ok, _thread} ->
@@ -222,6 +225,19 @@ defmodule Samen.Web.Chat.ThreadsLive do
       end
     else
       {:noreply, load(socket, org_id)}
+    end
+  end
+
+  # The initiator's per-org `Identity.User` id (what an @-mention is addressed to), derived from the
+  # session principal `mount/3` resolved through `Samen.Auth.OrgActor`; nil when no user resolves.
+  defp initiator_user_id(socket) do
+    case Samen.Web.Settings.Reads.actor_in_org(
+           socket.assigns[:samen_mount],
+           socket.assigns[:org_id],
+           socket.assigns[:principal_ref] || :none
+         ) do
+      {:ok, %{id: id}} -> id
+      _ -> nil
     end
   end
 

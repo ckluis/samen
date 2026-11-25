@@ -47,11 +47,19 @@ defmodule Samen.WebTest.Seeds do
   @second_tenant_last "Secondparty"
   @second_tenant_handle "blueridge-dispatch"
   @operator_participant_handle "saas-agent-01"
+  @tenant_user_id "7e570000-0000-4000-8000-0000000000a1"
+  @second_tenant_user_id "7e570000-0000-4000-8000-0000000000a2"
   @chat_message_body "Rate confirmation attached — CHAT-BODY-SENTINEL for load #4471."
 
   @doc "Sentinel accessors so tests reference the exact seeded PII strings."
   def tenant_participant_full_name, do: "#{@tenant_participant_first} #{@tenant_participant_last}"
   def tenant_participant_handle, do: @tenant_participant_handle
+
+  @doc "The per-org `Identity.User` id the seeded tenant participant maps to (what a mention is addressed to)."
+  def tenant_user_id, do: @tenant_user_id
+
+  @doc "The per-org `Identity.User` id the seeded SECOND tenant participant maps to."
+  def second_tenant_user_id, do: @second_tenant_user_id
   def second_tenant_full_name, do: "#{@second_tenant_first} #{@second_tenant_last}"
   def second_tenant_handle, do: @second_tenant_handle
   def operator_participant_handle, do: @operator_participant_handle
@@ -132,6 +140,7 @@ defmodule Samen.WebTest.Seeds do
           thread_id: thread.id,
           party: :tenant,
           principal_kind: :user,
+          principal_id: @tenant_user_id,
           handle: @tenant_participant_handle,
           identity_shared: initiator_shared,
           role: :owner,
@@ -153,6 +162,7 @@ defmodule Samen.WebTest.Seeds do
           thread_id: thread.id,
           party: :tenant,
           principal_kind: :user,
+          principal_id: @second_tenant_user_id,
           handle: @second_tenant_handle,
           identity_shared: false,
           role: :member,

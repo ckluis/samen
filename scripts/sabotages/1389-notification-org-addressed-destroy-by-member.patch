@@ -1,0 +1,20 @@
+# SABOTAGE: a member may destroy the one shared org-addressed notification, clearing the alert for every 
+#   member
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/primitives_notification_recipient_scope_test.exs
+# MUST_FAIL: a member cannot destroy an org-addressed notification
+diff --git a/samen_core/lib/samen/scopes/primitives/blueprint.ex b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+index a8a0335f..354de5d9 100644
+--- a/samen_core/lib/samen/scopes/primitives/blueprint.ex
++++ b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+@@ -221,7 +221,7 @@ defmodule Samen.Scopes.Primitives.Blueprint do
+           policy action(:destroy) do
+             forbid_unless(Samen.Policy.OrgScope)
+             authorize_if({Samen.Policy.RoleAtLeast, role: :admin})
+-            authorize_if(Samen.Policy.RecipientOnly)
++            authorize_if({Samen.Policy.RecipientOnly, org_addressed: true})
+           end
+ 
+           policy action(:reveal_notification) do

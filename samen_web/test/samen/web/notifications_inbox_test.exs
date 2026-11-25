@@ -17,11 +17,13 @@ defmodule Samen.Web.NotificationsInboxTest do
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.Notifications.Engine
-  alias Samen.Web.Mount
   alias Samen.Web.Notifications.InboxLive
   alias Samen.Web.Notifications.Reads
 
   @body "INBOX-BODY-SENTINEL your invoice #INV-7 is ready."
+  # The signed-in user: the inbox is the RECIPIENT'S own (policy: `recipient_id == actor.id`).
+  @user "5e1f0000-0000-4000-8000-000000000001"
+  @other_user "5e1f0000-0000-4000-8000-000000000002"
 
   # -- harness -------------------------------------------------------------------
 
@@ -38,7 +40,7 @@ defmodule Samen.Web.NotificationsInboxTest do
       Map.merge(
         %{
           org_id: org_id,
-          recipient_id: Ash.UUID.generate(),
+          recipient_id: @user,
           event_type: "invoice.created",
           channel: :in_app,
           rendered_body: @body
@@ -55,6 +57,7 @@ defmodule Samen.Web.NotificationsInboxTest do
     |> Phoenix.Component.assign(:samen_mount, build_mount(:notifications, plane_opts))
     |> Phoenix.Component.assign(:samen_acting_as, false)
     |> Phoenix.Component.assign(:return_to, nil)
+    |> Phoenix.Component.assign(:user_id, @user)
     |> InboxLive.load(org_id)
   end
 
@@ -105,7 +108,7 @@ defmodule Samen.Web.NotificationsInboxTest do
     for _ <- 1..5, do: notify!(org_id)
 
     mount = build_mount(:notifications)
-    scope = Mount.scope(mount, org_id)
+    scope = Samen.Web.Settings.Reads.user_scope(mount, org_id, @user)
 
     # 5 rows > probe page size 2 — the lint would RAISE on an unbounded read.
     assert :ok = Samen.Web.Reads.bounded!(&Reads.notifications_page/3, mount, scope, page_size: 2)
@@ -160,6 +163,121 @@ defmodule Samen.Web.NotificationsInboxTest do
     raw = Ash.get!(Samen.WebTest.Primitives.Notification, foreign.id, authorize?: false)
     assert raw.read_at == nil
     assert socket.assigns.unread_count == 0
+  end
+
+  test "RED: the inbox shows, counts and marks only the signed-in user's own notifications" do
+    org_id = Ash.UUID.generate()
+    mine = notify!(org_id, %{rendered_body: "MINE-SENTINEL"})
+    theirs = notify!(org_id, %{recipient_id: @other_user, rendered_body: "THEIRS-SENTINEL"})
+
+    socket = mount_socket(org_id)
+    rendered = html(socket)
+
+    assert rendered =~ "MINE-SENTINEL"
+    refute rendered =~ "THEIRS-SENTINEL"
+    assert socket.assigns.unread_count == 1
+
+    # marking the other user's notification, one by one or all at once, leaves it unread
+    socket = event(socket, "mark_read", %{"id" => theirs.id})
+    socket = event(socket, "mark_all_read", %{})
+
+    assert Ash.get!(Samen.WebTest.Primitives.Notification, theirs.id, authorize?: false).read_at == nil
+    # positive control: the same calls DID mark the user's own
+    assert %DateTime{} = Ash.get!(Samen.WebTest.Primitives.Notification, mine.id, authorize?: false).read_at
+    assert socket.assigns.unread_count == 0
+  end
+
+  test "a session that genuinely has NO user (the disarmed dev posture) sees only the org-addressed rows, and says so" do
+    org_id = Ash.UUID.generate()
+    notify!(org_id, %{recipient_id: @other_user, rendered_body: "USER-ADDRESSED-SENTINEL"})
+    notify!(org_id, %{recipient_id: org_id, rendered_body: "ORG-ADDRESSED-SENTINEL"})
+
+    socket =
+      %Phoenix.LiveView.Socket{}
+      |> Phoenix.Component.assign(:samen_mount, build_mount(:notifications, []))
+      |> Phoenix.Component.assign(:samen_acting_as, false)
+      |> Phoenix.Component.assign(:return_to, nil)
+      |> Phoenix.Component.assign(:user_id, nil)
+      |> InboxLive.load(org_id)
+
+    refute html(socket) =~ "USER-ADDRESSED-SENTINEL"
+    assert html(socket) =~ "ORG-ADDRESSED-SENTINEL"
+    # it is not passed off as somebody's inbox: the page states that no user is signed in
+    assert html(socket) =~ ~s(id="notifications-no-user")
+    # ...and the signed-in user's page does not carry that note (positive control)
+    refute html(mount_socket(org_id)) =~ ~s(id="notifications-no-user")
+  end
+
+  test "RED: a principal with no ACTIVE membership gets no access: nothing is read, nothing is marked" do
+    org_id = Ash.UUID.generate()
+    row = notify!(org_id, %{rendered_body: "DENIED-SENTINEL"})
+
+    socket = mount_socket(org_id) |> Phoenix.Component.assign(:recipient_state, :denied) |> InboxLive.load(org_id)
+    rendered = html(socket)
+
+    refute rendered =~ "DENIED-SENTINEL"
+    refute rendered =~ "No notifications yet."
+    assert rendered =~ ~s(id="notifications-denied")
+
+    socket = event(socket, "mark_read", %{"id" => row.id})
+    event(socket, "mark_all_read", %{})
+    assert Ash.get!(Samen.WebTest.Primitives.Notification, row.id, authorize?: false).read_at == nil
+
+    # positive control: the same row, with the actor resolved, is shown
+    assert html(mount_socket(org_id)) =~ "DENIED-SENTINEL"
+  end
+
+  test "RED: a realtime envelope for an org-addressed row, on a :denied or :unavailable socket, reads nothing and sets no count" do
+    org_id = Ash.UUID.generate()
+    row = notify!(org_id, %{recipient_id: org_id, rendered_body: "REALTIME-DENIED-SENTINEL"})
+
+    for state <- [:denied, :unavailable] do
+      socket =
+        mount_socket(org_id)
+        |> Phoenix.Component.assign(user_id: nil, user_role: nil, recipient_state: state)
+        |> InboxLive.load(org_id)
+
+      {:noreply, socket} = InboxLive.handle_info({:notification_created, %{id: row.id}}, socket)
+
+      assert socket.assigns.unread_count == 0, "#{state}: the broker re-read leaked a count"
+      assert socket.assigns.page.items == [], "#{state}: rows were read"
+      rendered = html(socket)
+      refute rendered =~ "REALTIME-DENIED-SENTINEL"
+      refute rendered =~ ~s(id="mark-all-read")
+    end
+
+    # positive control: with the actor resolved to no user (:ok, the dev posture) the SAME envelope is counted
+    ok_socket =
+      mount_socket(org_id)
+      |> Phoenix.Component.assign(user_id: nil, user_role: nil, recipient_state: :ok)
+      |> InboxLive.load(org_id)
+
+    {:noreply, ok_socket} = InboxLive.handle_info({:notification_created, %{id: row.id}}, ok_socket)
+    assert ok_socket.assigns.unread_count == 1
+  end
+
+  test "RED: a FAILED actor lookup is an error state with a retry, never an empty inbox" do
+    org_id = Ash.UUID.generate()
+    notify!(org_id, %{rendered_body: "UNAVAILABLE-SENTINEL"})
+
+    socket = mount_socket(org_id) |> Phoenix.Component.assign(:recipient_state, :unavailable) |> InboxLive.load(org_id)
+    rendered = html(socket)
+
+    assert rendered =~ ~s(id="notifications-unavailable")
+    assert rendered =~ ~s(id="notifications-retry")
+    refute rendered =~ "No notifications yet."
+    refute rendered =~ "UNAVAILABLE-SENTINEL"
+  end
+
+  test "the scope acts with the RESOLVED role: a viewer does not see the org-addressed rows a member does" do
+    org_id = Ash.UUID.generate()
+    notify!(org_id, %{recipient_id: org_id, rendered_body: "ORG-WIDE-SENTINEL"})
+
+    member = mount_socket(org_id) |> Phoenix.Component.assign(:user_role, :member) |> InboxLive.load(org_id)
+    viewer = mount_socket(org_id) |> Phoenix.Component.assign(:user_role, :viewer) |> InboxLive.load(org_id)
+
+    assert html(member) =~ "ORG-WIDE-SENTINEL"
+    refute html(viewer) =~ "ORG-WIDE-SENTINEL"
   end
 
   # ---------------------------------------------------------------------------

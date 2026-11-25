@@ -1,0 +1,29 @@
+# SABOTAGE: SearchIndexPiiChange reads a resource it cannot resolve as declaring no PII, so any field of an 
+#   unknown resource is registered
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/search_index_no_vault_field_test.exs
+# MUST_FAIL: a resource the guard cannot read is refused
+diff --git a/samen_core/lib/samen/scopes/primitives/search_index_pii_change.ex b/samen_core/lib/samen/scopes/primitives/search_index_pii_change.ex
+index 0ab4730c..8b9b1ff0 100644
+--- a/samen_core/lib/samen/scopes/primitives/search_index_pii_change.ex
++++ b/samen_core/lib/samen/scopes/primitives/search_index_pii_change.ex
+@@ -67,13 +67,15 @@ defmodule Samen.Scopes.Primitives.SearchIndexPiiChange do
+          Ash.Resource.Info.resource?(module) do
+       {:ok, module}
+     else
+-      {:error, "#{resource_name} is not a known resource, so its PII columns cannot be checked"}
++      {:ok, :unknown}
+     end
+   rescue
+-    ArgumentError -> {:error, "#{resource_name} is not a known resource, so its PII columns cannot be checked"}
++    ArgumentError -> {:ok, :unknown}
+   end
+ 
+   # The logical names of the resource's pii attributes AND their storage column names, as strings.
++  defp pii_names(:unknown), do: {:ok, []}
++
+   defp pii_names(module) do
+     names = SearchIndexGuard.get_pii_fields(module)
+ 

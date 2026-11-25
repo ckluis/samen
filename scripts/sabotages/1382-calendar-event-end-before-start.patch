@@ -1,0 +1,19 @@
+# SABOTAGE: Calendar Event drops EndsAfterStarts, so an event ends before it starts
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/calendar_event_order_test.exs
+# MUST_FAIL: RED on update, whichever one instant moves
+# MUST_FAIL: RED on create
+diff --git a/samen_core/lib/samen/scopes/calendar/blueprint.ex b/samen_core/lib/samen/scopes/calendar/blueprint.ex
+index f1c8cb9b..59c64030 100644
+--- a/samen_core/lib/samen/scopes/calendar/blueprint.ex
++++ b/samen_core/lib/samen/scopes/calendar/blueprint.ex
+@@ -108,7 +108,6 @@ defmodule Samen.Scopes.Calendar.Blueprint do
+           # persisted to surface as a raised error at the first ICS export.
+           validate(Samen.Scopes.Calendar.RecurrenceGuard, on: [:create, :update])
+           # An event never ends before it starts (an update is compared against the stored other instant).
+-          validate(Samen.Scopes.Calendar.EndsAfterStarts, on: [:create, :update])
+         end
+ 
+         actions do

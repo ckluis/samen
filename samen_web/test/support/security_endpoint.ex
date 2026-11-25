@@ -112,6 +112,16 @@ defmodule Samen.WebTest.SecurityRouter do
     # never B (org bound from the authenticated scope, forge refused). Driven in
     # `tenant_analytics_route_e2e_test.exs`.
     samen_tenant_analytics_routes(Samen.WebTest.Crm, repo: Samen.WebTest.Repo, labels: @labels)
+
+    # The framework session spine's `POST /login` (what writes `samen_session_token`) and the tenant
+    # notifications inbox + preferences, so a REAL login can be followed by a REAL inbox render
+    # (`notifications_spine_session_test.exs`).
+    samen_auth_routes(namespace: Samen.WebTest.Operator, repo: Samen.WebTest.Repo)
+
+    samen_notifications_routes(:notifications, Samen.WebTest.Primitives,
+      repo: Samen.WebTest.Repo,
+      labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)
+    )
   end
 end
 

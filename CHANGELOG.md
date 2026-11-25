@@ -11,6 +11,99 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Fixed: authorization and honesty round 5 (evaluation 2026-11-24)
+
+- **Fixed: `Samen.Webhook.deliver/4` raised `FunctionClauseError` on any non-empty endpoint list, discarded the `:multi` it
+  was given, and answered `{:ok, 0}` when no `:endpoints` were passed.** It now enqueues one job per active, subscribed
+  endpoint. With `:multi` it returns `{:ok, count, multi}`: **upgrade note:** run the RETURNED multi (`Ecto.Multi` is
+  immutable, so the multi you passed in never held the jobs). Without `:endpoints` it reads the record's org rows from the
+  `:webhook_endpoint_module` on `:webhook_repo` (or `:repo`); with neither configured it returns `{:error, :not_configured}`
+  and a failing lookup returns `{:error, :endpoint_lookup_failed}`, where it used to claim `{:ok, 0}`. The lookup reads only the
+  org's UNARCHIVED rows (a raw query does not get Ash's archive filter, and archiving leaves `status` alone, so an archived
+  endpoint still `:active` would otherwise have received payloads). A failed enqueue is
+  `{:error, reason}`. Nothing in the framework or the three hosts calls `deliver/4` today. Sabotages 1387 and 1388.
+
+- **Fixed: a member could un-quarantine a File.** `status` was an input of the generic `File` `:create` and `:update`, so
+  `%{status: :active}` from any member skipped the scan that `Samen.Files.promote/3`, `previewable?/1` and `fetch_bytes`
+  rely on. `status` is no input of any actor write now (a new row is `:quarantined`); the scan-gated `Samen.Files.promote/3`
+  sets `:active` through a new system action `File :promote` that no actor, an admin included, may run. `archived_at` is no
+  input of `File :create`/`:update` either (use `:archive` and `:restore`). `File :update` takes `filename` and `metadata` only (plus
+  `storage_key` and `org_id`, which `ChokepointGuard` and the org pin still refuse to change): `content_type`, `size_bytes` and
+  `uploaded_by_id` are facts the upload records, and the byte route serves with the stored content type, so a writable one let a
+  member turn a scanned text file into `text/html` or javascript and skip the type and size checks. **Upgrade notes:** code that
+  rewrote `content_type`, `size_bytes` or `uploaded_by_id` through `File :update` must go through `Samen.Files.upload/3`; a host or test that wrote
+  `status:` through `File :create`/`:update` must use `Samen.Files.promote/3`; to archive or restore a file use the
+  archive and restore actions, not `archived_at`. Sabotages 1371, 1372, 1392 and 1393.
+
+- **Fixed: notifications were readable and writable across recipients.** `Notification` and `NotificationPreference` were
+  `OrgScope` only, so a viewer could create, update or destroy any recipient's notification, any member could read every
+  notification of the organisation, and any member could write another user's `NotificationPreference` and switch their alerts
+  off. New check `Samen.Policy.RecipientOnly`. Now: a user reads and marks read only their own notifications (and, for a
+  member or above, the rows the engine addresses to the organisation, `recipient_id == org_id`); the operator plane still reads
+  the org's rows, masked; no actor creates a notification (`Samen.Notifications.Engine` creates them with `authorize?: false`);
+  only the recipient or an org admin destroys one (a row addressed to the ORGANISATION is one shared row: destroying it needs an
+  admin; marking it read stays a member's, as before, and is shared state); nobody edits another recipient's notification, and
+  an update takes only `read_at` and `status`, with `status` only ever set to `:read` (the one transition the inbox performs). A user creates, updates and destroys only their own `NotificationPreference` (an admin included
+  gets no exception: no screen needs one), and its `recipient_id` is not editable. In `samen_web` the inbox and the settings
+  panel act as the signed-in user, derived from the SESSION: the framework login (`POST /login`, which writes
+  `samen_session_token`) or the legacy BYO session user resolves, through `Samen.Auth.OrgActor` (`Samen.Web.Settings.Reads.actor_in_org/3`),
+  to the per-org `Identity.User` id AND the member's real role (so a viewer is a viewer there, not a member). A principal with no
+  ACTIVE membership in the org gets no access, and a failed lookup is an error state on the page, never an empty inbox: a realtime
+  notification on such an inbox reads nothing and sets no unread count. The
+  `:recipient_id` mount label no longer names a recipient, the `:current_user_id` label and the `?recipient=` and `?user=`
+  parameters are dev legs honoured only in the disarmed posture, and a session that resolves no user (a disarmed dev host) sees
+  the org-addressed rows only and says so. The other settings screens (profile, security, API keys, invitations, reveal
+  approvals, billing settings, onboarding, replay) now find the framework-login user too, through `Settings.Reads.current_user_id/3`,
+  and when `?org=` switches them to another org they re-derive the user for THAT org (`Settings.Reads.reresolve_user/3`; no active
+  membership there is the no-user state), never keeping the id of the org they mounted on.
+  Chat @-mentions are addressed to the mentioned participant's per-org user (`principal_id` of a `:user` participant, which
+  `Chat.start_conversation/3` takes from the session), not to the participant row: a participant with no per-org user (an
+  operator-staff participant, or one added without a `principal_id`) is not notified, and the mention preference is keyed on the
+  user id, so its owner can manage it. **Upgrade notes:** a host that created notifications or preferences with an actor must
+  use the engine or `authorize?: false`; a host that showed the whole org's notifications to every member now shows each
+  member their own plus the org-addressed ones; a host that wired the `:recipient_id` or `:current_user_id` mount label must sign its users in through the
+  framework login or the legacy session user (the labels are dev-only now); code that added a chat participant meant to be
+  mentioned must pass `principal_id` (the per-org user id); code that destroyed an org-addressed notification as a member needs
+  an admin, and code that wrote a `status` other than `:read` through `Notification :update` must use the engine. Sabotages 1373 to 1376, 1384 to 1386, 1389 to 1391 and 1398 to 1401.
+
+- **Fixed: an armed host redirected every framework login to `/login`.** The host `:browser` gates `DriftwoodWeb.Auth` and
+  `PawChartWeb.Auth` admitted only the legacy `samen_current_user` session key, but the framework login (`POST /login`) writes
+  only `samen_session_token`. A live spine session is now an authenticated principal there too; an unknown, revoked or expired token is
+  not. **Upgrade note:** a host that copied these gates must add the same clause. Sabotages 1396 and 1397.
+
+- **Fixed: a Tagging accepted any subject, including an id from another organisation.** `subject_key` and `subject_id` were
+  plain scalars checked only by `Samen.Web.Tags.attach/5`, so a direct `Ash.create`, the automation `add_tag` action or a
+  host's own code could anchor a tag to a nonexistent object or to another tenant's row. New change
+  `Samen.Policy.SubjectInOrg` on `Tags.Tagging`: `subject_key` must resolve (the `Samen.ObjectKey` rule, under the Tagging's own
+  host namespace) to a compiled resource with an `org_id`, and the row must exist in the write's organisation, read on the
+  write repo; a lookup that cannot run refuses the write. It holds on `authorize?: false` writes too. **Upgrade note:** code
+  or seeds that tagged a made-up subject (a key no resource answers to, or an id with no row) now get an error; tag a real row
+  of the same organisation. An ARCHIVED subject row is refused too, as `Samen.Web.Tags.attach/5` always did (its resolve reads
+  through Ash, which hides archived rows), and a client-supplied key never creates an atom (`Module.safe_concat`). The check is
+  existence in the organisation, not the subject's own read policies: the web helper still resolves the subject under the
+  viewer's scope first, but a direct write or the automation `add_tag` action is not held to the subject's read policies.
+  Sabotages 1377, 1378, 1394 and 1395.
+
+- **Fixed: an admin's direct `Analytics.ProductEvent :append` bypassed every gate `Samen.Analytics.track/1` applies** (registered
+  event name, catalogued prop keys, no PII-shaped `entity_ref` or value). `:append` is now the system door only: no actor, an
+  admin included, may run it, and `track/1` (which writes with `authorize?: false`) is the one way a `pae` row is written.
+  **Upgrade note:** code that appended product events with an actor must call `Samen.Analytics.track/1`. Sabotage 1379.
+- **Fixed: `Primitives.SearchIndex` could register a vault-routed field.** The create never ran `SearchIndexGuard` (only the
+  query path did). Create and update now refuse a `resource_name`/`field_name` that names a `pii_attribute` of the resource
+  (or its storage column), and refuse a `resource_name` that is not a loaded Ash resource, on every path including
+  `authorize?: false`: a resource whose PII declarations cannot be read is never registered. **Upgrade note:** a search index
+  row naming a resource module that does not exist is now an error. Sabotages 1380 and 1381.
+- **Fixed: a calendar event could end before it starts.** `Calendar.Event` create and update refuse `ends_at` earlier than
+  `starts_at` (equal instants are allowed; no end is allowed). On an update that changes only one of the two, it is compared
+  against the stored other; a stored value that cannot be read refuses the write. **Upgrade note:** an existing event whose
+  stored end precedes its start can still be edited in other fields, but an edit that touches either instant must leave
+  them ordered. Sabotage 1382.
+- **Fixed: a saved view could store typed filter-box text for a vault-routed field, and its documentation overstated what is
+  refused.** `Samen.Web.SavedViews.Params.serialize/4` now refuses (`{:error, {:vaulted_field, field}}`) a non-empty
+  filter-box text when any of the surface's `filter_fields` is vault-routed, and `restore/2` drops such a stored text. The
+  moduledocs now say exactly what is stored: the filter-box text of a surface whose filter fields are all non-vaulted, and
+  structured predicate values on non-vaulted fields, are stored as typed; no PII detection is attempted on them. Sabotage 1383.
+
 ### Security: identity authorization, round 3
 
 - **Fixed: an admin could demote, suspend or re-role an owner or a peer admin.** `Samen.Policy.ManageRole` judged only the

@@ -1,0 +1,20 @@
+# SABOTAGE: NotificationPreference writes lose the recipient axis, so any member switches off another 
+#   user's alerts
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/primitives_notification_recipient_scope_test.exs
+# MUST_FAIL: a member cannot create a preference for another user
+# MUST_FAIL: nobody updates or destroys another user's preference
+diff --git a/samen_core/lib/samen/scopes/primitives/blueprint.ex b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+index ee5712d6..b8e9b684 100644
+--- a/samen_core/lib/samen/scopes/primitives/blueprint.ex
++++ b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+@@ -360,7 +360,6 @@ defmodule Samen.Scopes.Primitives.Blueprint do
+           # the rows with `authorize?: false`.
+           policy action_type([:create, :update, :destroy]) do
+             forbid_unless(Samen.Policy.OrgScope)
+-            forbid_unless(Samen.Policy.RecipientOnly)
+             forbid_unless({Samen.Policy.RoleAtLeast, role: :member})
+             authorize_if(always())
+           end

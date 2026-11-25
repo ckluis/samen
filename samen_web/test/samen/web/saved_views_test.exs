@@ -237,6 +237,47 @@ defmodule Samen.Web.SavedViewsTest do
     assert [] = SavedViews.list(SavedView, org, user, @surface)
   end
 
+  test "RED: filter-box text is refused when the surface's filter fields include a vaulted (🔒) field" do
+    org = uid()
+    user = uid()
+
+    result =
+      SavedViews.save(
+        SavedView,
+        org,
+        user,
+        %{name: "typed", surface: @surface, list_state: %ListState{filter: "alice@example.com"}},
+        pii_whitelist()
+      )
+
+    assert {:error, {:vaulted_field, :emails}} = result
+    assert [] = SavedViews.list(SavedView, org, user, @surface)
+  end
+
+  test "CONTROL: the same filter-box text is stored verbatim when every filter field is non-vaulted" do
+    org = uid()
+    user = uid()
+
+    assert {:ok, sv} =
+             SavedViews.save(
+               SavedView,
+               org,
+               user,
+               %{name: "typed", surface: @surface, list_state: %ListState{filter: "acme"}},
+               whitelist()
+             )
+
+    assert sv.params["filter"] == "acme"
+  end
+
+  test "RED: restore drops a stored filter-box text when a filter field is vaulted (untrusted blob)" do
+    {_type, state, _view_params} = Params.restore(%{"filter" => "alice@example.com"}, pii_whitelist())
+    assert state.filter == ""
+
+    {_type, state, _view_params} = Params.restore(%{"filter" => "acme"}, whitelist())
+    assert state.filter == "acme"
+  end
+
   test "a SORT on a vaulted (🔒) field is refused" do
     org = uid()
     user = uid()

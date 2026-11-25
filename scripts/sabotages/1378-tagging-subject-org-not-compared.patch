@@ -1,0 +1,20 @@
+# SABOTAGE: SubjectInOrg checks the subject exists but no longer compares its org_id, so another 
+#   organisation's row is accepted
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/tags_scope_test.exs
+# MUST_FAIL: a subject id from ANOTHER organisation is refused
+diff --git a/samen_core/lib/samen/policy/subject_in_org.ex b/samen_core/lib/samen/policy/subject_in_org.ex
+index c3e72a32..3b23585e 100644
+--- a/samen_core/lib/samen/policy/subject_in_org.ex
++++ b/samen_core/lib/samen/policy/subject_in_org.ex
+@@ -114,7 +114,7 @@ defmodule Samen.Policy.SubjectInOrg do
+          {:ok, org_native} <- Ash.Type.dump_to_native(org_attr.type, org_id, org_attr.constraints) do
+       sql =
+         "SELECT 1 FROM #{quote_ident(table)} WHERE #{quote_ident(source(pk_attr))} = $1 AND " <>
+-          "#{quote_ident(source(org_attr))} = $2#{unarchived_clause(subject)} LIMIT 1"
++          "$2::uuid IS NOT NULL#{unarchived_clause(subject)} LIMIT 1"
+ 
+       case repo.query(sql, [id_native, org_native]) do
+         {:ok, %{rows: [_ | _]}} -> :ok

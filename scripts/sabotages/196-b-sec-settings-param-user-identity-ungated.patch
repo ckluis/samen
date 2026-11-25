@@ -9,18 +9,17 @@
 # TEST_FILES: test/samen/web/tenant_authz_live_test.exs
 # MUST_FAIL: armed + authenticated: a `?user=` cannot re-derive identity
 diff --git a/samen_web/lib/samen/web/settings/reads.ex b/samen_web/lib/samen/web/settings/reads.ex
+index 5e95f0a0..bbb6b66a 100644
 --- a/samen_web/lib/samen/web/settings/reads.ex
 +++ b/samen_web/lib/samen/web/settings/reads.ex
-@@ -55,9 +55,9 @@
+@@ -62,8 +62,8 @@ defmodule Samen.Web.Settings.Reads do
    """
    @spec current_user_id(Mount.t() | nil, map(), map()) :: String.t() | nil
    def current_user_id(mount, params, session) do
--    present(session_user(session)) ||
--      present(label_user(mount)) ||
--      present(dev_param_user(mount, params))
-+    present(param_user(params)) ||
-+      present(session_user(session)) ||
-+      present(label_user(mount))
+-    present(session_user(session)) || spine_user_id(mount, params, session) ||
+-      present(dev_label_user(mount)) || present(dev_param_user(mount, params))
++    present(param_user(params)) || present(session_user(session)) || spine_user_id(mount, params, session) ||
++      present(dev_label_user(mount))
    end
  
-   @doc """
+   defp spine_user_id(%Mount{} = mount, params, session) do

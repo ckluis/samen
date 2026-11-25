@@ -286,9 +286,11 @@ defmodule Samen.Web.NotificationsSourcesTest do
     assert {:ok, message} = post_mention!(org_id, chat, body)
 
     assert [notification] = notifications(org_id, "chat_mention")
-    # The MENTIONED participant is the recipient (matched by non-PII handle).
-    assert notification.recipient_id == chat.second_tenant_participant.id
-    refute notification.recipient_id == chat.tenant_participant.id
+    # The MENTIONED participant's PERSON (the per-org user id) is the recipient (matched by non-PII
+    # handle): the one id an inbox and the notification preferences can match on.
+    assert notification.recipient_id == Seeds.second_tenant_user_id()
+    refute notification.recipient_id == Seeds.tenant_user_id()
+    refute notification.recipient_id == chat.second_tenant_participant.id
     # Bounded routing metadata only.
     assert notification.metadata["thread_id"] == chat.thread.id
     assert notification.metadata["message_id"] == message.id
@@ -303,6 +305,34 @@ defmodule Samen.Web.NotificationsSourcesTest do
 
     assert rows == []
     refute to_string(notification.event_type) =~ "SENTINEL"
+  end
+
+  test "RED chat_mention: a participant with NO per-org user (operator staff, or no principal_id) is not notified" do
+    seeded = Seeds.seed_all()
+    chat = Seeds.seed_chat(seeded.org_id)
+    org_id = seeded.org_id
+
+    # the operator-staff participant has no user in this org
+    assert {:ok, _} = post_mention!(org_id, chat, "@#{Seeds.operator_participant_handle()} are you there")
+    assert notifications(org_id, "chat_mention") == []
+
+    # a tenant user participant added WITHOUT a principal_id has no address either
+    {:ok, _} =
+      Chat.add_participant(chat_mount(), Mount.scope(chat_mount(), org_id), %{
+        org_id: org_id,
+        thread_id: chat.thread.id,
+        party: :tenant,
+        principal_kind: :user,
+        handle: "no-principal",
+        role: :member
+      })
+
+    assert {:ok, _} = post_mention!(org_id, chat, "@no-principal hello")
+    assert notifications(org_id, "chat_mention") == []
+
+    # positive control: the mentioned participant WITH a principal_id is notified
+    assert {:ok, _} = post_mention!(org_id, chat, "@#{Seeds.second_tenant_handle()} hello")
+    assert [_one] = notifications(org_id, "chat_mention")
   end
 
   test "chat_mention does not fire for a body with no mention, nor for a self-mention" do
@@ -322,7 +352,7 @@ defmodule Samen.Web.NotificationsSourcesTest do
     chat = Seeds.seed_chat(seeded.org_id)
     org_id = seeded.org_id
 
-    suppress!(org_id, chat.second_tenant_participant.id, "chat_mention")
+    suppress!(org_id, Seeds.second_tenant_user_id(), "chat_mention")
 
     assert {:ok, message} =
              post_mention!(org_id, chat, "@#{Seeds.second_tenant_handle()} ping again")

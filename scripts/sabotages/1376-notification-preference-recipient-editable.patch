@@ -1,0 +1,19 @@
+# SABOTAGE: NotificationPreference :update accepts recipient_id again, so a user repoints their own row at 
+#   another user
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/primitives_notification_recipient_scope_test.exs
+# MUST_FAIL: an update cannot repoint the user's own row at another recipient
+diff --git a/samen_core/lib/samen/scopes/primitives/blueprint.ex b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+index ee5712d6..25d0d476 100644
+--- a/samen_core/lib/samen/scopes/primitives/blueprint.ex
++++ b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+@@ -335,6 +335,7 @@ defmodule Samen.Scopes.Primitives.Blueprint do
+ 
+             accept([
+               :org_id,
++              :recipient_id,
+               :event_type,
+               :in_app_enabled,
+               :email_enabled,

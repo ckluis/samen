@@ -88,7 +88,7 @@ defmodule Samen.Web.FilesSurfaceTest do
   # to prove the byte-serve gate's :active path, not the scanner gate).
   defp promote_file(file) do
     file
-    |> Ash.Changeset.for_update(:update, %{status: :active})
+    |> Ash.Changeset.for_update(:promote, %{})
     |> Ash.update(authorize?: false)
     |> case do
       {:ok, f} -> f

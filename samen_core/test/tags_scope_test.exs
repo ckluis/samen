@@ -52,11 +52,16 @@ defmodule Samen.TagsScopeTest do
     |> Ash.create!()
   end
 
+  # A real subject of this org: the fixture's own `Tag` is a resource of the host, so its ref key is
+  # `tags_fixture.tag` and `Samen.Policy.SubjectInOrg` resolves it.
+  @subject_key "tags_fixture.tag"
+  defp new_subject(scope, org), do: new_tag(scope, org, %{name: "subject-#{System.unique_integer([:positive])}"}).id
+
   defp new_tagging(scope, org, tag_id, attrs \\ %{}) do
     Tagging
     |> Ash.Changeset.for_create(
       :create,
-      Map.merge(%{org_id: org, tag_id: tag_id, subject_key: "crm.person", subject_id: Ash.UUID.generate()}, attrs),
+      Map.merge(%{org_id: org, tag_id: tag_id, subject_key: @subject_key, subject_id: new_subject(scope, org)}, attrs),
       scope: scope
     )
     |> Ash.create!()
@@ -109,7 +114,8 @@ defmodule Samen.TagsScopeTest do
       seen_tags = Tag |> Ash.read!(scope: scope_a) |> Enum.map(& &1.id)
       seen_taggings = Tagging |> Ash.read!(scope: scope_a) |> Enum.map(& &1.id)
 
-      assert tag_a.id in seen_tags and length(seen_tags) == 1
+      # org A holds its own tag plus the tag `new_tagging` made as the tagging's subject; none of org B's
+      assert tag_a.id in seen_tags and length(seen_tags) == 2
       assert tagging_a.id in seen_taggings and length(seen_taggings) == 1
     end
 
@@ -203,34 +209,34 @@ defmodule Samen.TagsScopeTest do
     test "the SAME Tag attaches to TWO different subject_key kinds", %{org: org, scope: scope} do
       tag = new_tag(scope, org, %{name: "vip"})
 
-      ticket_id = Ash.UUID.generate()
-      person_id = Ash.UUID.generate()
+      ticket_id = new_subject(scope, org)
+      person_id = new_tagging(scope, org, tag.id).id
 
-      on_ticket = new_tagging(scope, org, tag.id, %{subject_key: "support.ticket", subject_id: ticket_id})
-      on_person = new_tagging(scope, org, tag.id, %{subject_key: "crm.person", subject_id: person_id})
+      on_ticket = new_tagging(scope, org, tag.id, %{subject_key: "tags_fixture.tag", subject_id: ticket_id})
+      on_person = new_tagging(scope, org, tag.id, %{subject_key: "tags_fixture.tagging", subject_id: person_id})
 
-      assert on_ticket.subject_key == "support.ticket"
+      assert on_ticket.subject_key == "tags_fixture.tag"
       assert on_ticket.subject_id == ticket_id
-      assert on_person.subject_key == "crm.person"
+      assert on_person.subject_key == "tags_fixture.tagging"
       assert on_person.subject_id == person_id
 
       all = Tagging |> Ash.Query.filter(tag_id == ^tag.id) |> Ash.read!(scope: scope)
-      assert length(all) == 2
-      assert Enum.map(all, & &1.subject_key) |> Enum.sort() == ["crm.person", "support.ticket"]
+      assert length(all) == 3
+      assert all |> Enum.map(& &1.subject_key) |> Enum.uniq() |> Enum.sort() == ["tags_fixture.tag", "tags_fixture.tagging"]
     end
 
     test "a Tag attaches to the SAME object at most once (unique per tag+subject)",
          %{org: org, scope: scope} do
       tag = new_tag(scope, org)
-      subject_id = Ash.UUID.generate()
+      subject_id = new_subject(scope, org)
 
-      _first = new_tagging(scope, org, tag.id, %{subject_key: "support.ticket", subject_id: subject_id})
+      _first = new_tagging(scope, org, tag.id, %{subject_id: subject_id})
 
       result =
         Tagging
         |> Ash.Changeset.for_create(
           :create,
-          %{org_id: org, tag_id: tag.id, subject_key: "support.ticket", subject_id: subject_id},
+          %{org_id: org, tag_id: tag.id, subject_key: @subject_key, subject_id: subject_id},
           scope: scope
         )
         |> Ash.create()
@@ -302,7 +308,7 @@ defmodule Samen.TagsScopeTest do
         Tagging
         |> Ash.Changeset.for_create(
           :create,
-          %{org_id: org_a, tag_id: tag_b.id, subject_key: "crm.person", subject_id: Ash.UUID.generate()},
+          %{org_id: org_a, tag_id: tag_b.id, subject_key: @subject_key, subject_id: new_subject(tenant_scope(org_a), org_a)},
           scope: tenant_scope(org_a)
         )
         |> Ash.create()
@@ -329,6 +335,83 @@ defmodule Samen.TagsScopeTest do
       assert violations == [],
              "expected no catalog_parity violations for the Tags fixture tables, got: " <>
                inspect(violations)
+    end
+  end
+
+  # ── the subject is checked in the resource (Samen.Policy.SubjectInOrg) ────
+
+  describe "the subject anchor is checked on every path" do
+    defp create_tagging(scope, org, tag_id, key, id) do
+      Tagging
+      |> Ash.Changeset.for_create(:create, %{org_id: org, tag_id: tag_id, subject_key: key, subject_id: id}, scope: scope)
+      |> Ash.create()
+    end
+
+    test "RED: a subject id from ANOTHER organisation is refused; CONTROL: the same key and an own-org id is accepted",
+         %{org: org, scope: scope} do
+      other = Ash.UUID.generate()
+      foreign_subject = new_subject(tenant_scope(other), other)
+      tag = new_tag(scope, org)
+
+      assert {:error, _} = create_tagging(scope, org, tag.id, @subject_key, foreign_subject)
+      assert Tagging |> Ash.read!(scope: scope) == []
+
+      assert {:ok, _} = create_tagging(scope, org, tag.id, @subject_key, new_subject(scope, org))
+    end
+
+    test "RED: a subject id that exists nowhere is refused", %{org: org, scope: scope} do
+      tag = new_tag(scope, org)
+      assert {:error, _} = create_tagging(scope, org, tag.id, @subject_key, Ash.UUID.generate())
+    end
+
+    test "RED: a key that names no resource of the host is refused", %{org: org, scope: scope} do
+      tag = new_tag(scope, org)
+      subject = new_subject(scope, org)
+
+      for key <- ["crm.person", "no.such", "bogus", "", "a.b.c", "tags_fixture.nope"] do
+        assert {:error, _} = create_tagging(scope, org, tag.id, key, subject), "key #{inspect(key)} was accepted"
+      end
+    end
+
+    test "RED: an ARCHIVED subject is refused (as the web helper's Ash read always hid it); CONTROL: restored, it is accepted",
+         %{org: org, scope: scope} do
+      tag = new_tag(scope, org)
+      subject = new_tag(scope, org, %{name: "to-archive"})
+
+      assert {:ok, _} = create_tagging(scope, org, tag.id, @subject_key, subject.id)
+
+      {:ok, archived} = Archival.archive(subject, scope: scope)
+      other_tag = new_tag(scope, org, %{name: "other"})
+      assert {:error, _} = create_tagging(scope, org, other_tag.id, @subject_key, archived.id)
+
+      {:ok, _} = Archival.restore(archived, scope: scope)
+      assert {:ok, _} = create_tagging(scope, org, other_tag.id, @subject_key, subject.id)
+    end
+
+    test "RED: a client-supplied key never creates an atom, and is refused", %{org: org, scope: scope} do
+      tag = new_tag(scope, org)
+      subject = new_subject(scope, org)
+      scope_part = "zz#{System.unique_integer([:positive])}"
+      resource_part = "rr#{System.unique_integer([:positive])}"
+      camelized = "Elixir.SamenCore.Support.#{Macro.camelize(scope_part)}.#{Macro.camelize(resource_part)}"
+
+      assert_raise ArgumentError, fn -> String.to_existing_atom(camelized) end
+      assert {:error, _} = create_tagging(scope, org, tag.id, "#{scope_part}.#{resource_part}", subject)
+      assert_raise ArgumentError, fn -> String.to_existing_atom(camelized) end
+    end
+
+    test "RED: the authorize?: false (system) path is held to the same rule", %{org: org, scope: scope} do
+      tag = new_tag(scope, org)
+
+      assert {:error, _} =
+               Tagging
+               |> Ash.Changeset.for_create(:create, %{
+                 org_id: org,
+                 tag_id: tag.id,
+                 subject_key: @subject_key,
+                 subject_id: Ash.UUID.generate()
+               })
+               |> Ash.create(authorize?: false)
     end
   end
 end

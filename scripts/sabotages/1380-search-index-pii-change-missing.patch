@@ -1,0 +1,20 @@
+# SABOTAGE: SearchIndex create and update drop SearchIndexPiiChange, so a vault-routed field is registered
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/search_index_no_vault_field_test.exs
+# MUST_FAIL: an admin registering a vault-routed field is refused
+diff --git a/samen_core/lib/samen/scopes/primitives/blueprint.ex b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+index 5abe0d1a..09560531 100644
+--- a/samen_core/lib/samen/scopes/primitives/blueprint.ex
++++ b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+@@ -619,9 +619,6 @@ defmodule Samen.Scopes.Primitives.Blueprint do
+         end
+ 
+         # A vault-routed field is never registered (the query path's guard, applied at write time too).
+-        changes do
+-          change(Samen.Scopes.Primitives.SearchIndexPiiChange, on: [:create, :update])
+-        end
+ 
+         policies do
+           policy action_type(:read) do

@@ -757,7 +757,7 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
         Engine.notify(
           %{
             org_id: org_id,
-            recipient_id: Ash.UUID.generate(),
+            recipient_id: org_id,
             event_type: "crm.person.flagged",
             channel: :in_app,
             rendered_body: @body

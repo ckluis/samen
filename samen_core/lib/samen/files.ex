@@ -567,7 +567,7 @@ defmodule Samen.Files do
   defp do_promote(file, ctx) do
     result =
       file
-      |> Ash.Changeset.for_update(:update, %{status: :active})
+      |> Ash.Changeset.for_update(:promote, %{})
       |> Ash.update(authorize?: false)
 
     case result do

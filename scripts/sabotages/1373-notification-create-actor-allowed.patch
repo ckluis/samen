@@ -1,0 +1,20 @@
+# SABOTAGE: Notification :create is authorized by OrgScope alone again, so any actor addresses a 
+#   notification to any recipient
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/primitives_notification_recipient_scope_test.exs
+# MUST_FAIL: no actor creates a notification
+diff --git a/samen_core/lib/samen/scopes/primitives/blueprint.ex b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+index ee5712d6..e797f54f 100644
+--- a/samen_core/lib/samen/scopes/primitives/blueprint.ex
++++ b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+@@ -195,7 +195,7 @@ defmodule Samen.Scopes.Primitives.Blueprint do
+           # Creating a notification is the notification engine's own write (`Samen.Notifications.Engine`
+           # runs it with `authorize?: false`); no actor creates one, so none can address another user.
+           policy action(:create) do
+-            forbid_if(always())
++            authorize_if(Samen.Policy.OrgScope)
+           end
+ 
+           # A recipient marks their own notification read (the org's own, for a row addressed to the org); nobody

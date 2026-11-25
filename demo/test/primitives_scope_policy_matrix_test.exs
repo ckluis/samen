@@ -47,11 +47,11 @@ defmodule Demo.PrimitivesScopePolicyMatrixTest do
     Samen.Scope.new(%{id: user.id, org_id: org_id, role: role})
   end
 
-  defp mk_notification(org_id) do
+  defp mk_notification(org_id, recipient_id \\ Ash.UUID.generate()) do
     {:ok, n} =
       Notification
       |> Ash.Changeset.for_create(:create, %{
-        recipient_id: Ash.UUID.generate(),
+        recipient_id: recipient_id,
         channel: :email,
         event_type: "invoice.created",
         status: :sent,
@@ -270,7 +270,7 @@ defmodule Demo.PrimitivesScopePolicyMatrixTest do
     # Can update own org's file.
     {:ok, _updated} =
       file
-      |> Ash.Changeset.for_update(:update, %{status: :archived})
+      |> Ash.Changeset.for_update(:update, %{filename: "renamed.pdf"})
       |> Ash.update(actor: scope.actor, authorize?: true)
   end
 
@@ -378,8 +378,8 @@ defmodule Demo.PrimitivesScopePolicyMatrixTest do
 
   test "notification rendered_body is masked (%Masked{}) on default read" do
     org = mk_org("pii-mask-ntf")
-    _notification = mk_notification(org.id)
     scope = mk_actor(org.id, :member)
+    _notification = mk_notification(org.id, scope.actor.id)
 
     query = Notification |> Ash.Query.select([:id, :rendered_body])
     {:ok, [loaded]} = Ash.read(query, actor: scope.actor, authorize?: true)

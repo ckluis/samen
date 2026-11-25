@@ -119,7 +119,7 @@ defmodule Samen.Web.NotificationsRealtimeTest do
     assert_receive {:notification_created, ^envelope}, 2_000
 
     # The TENANT re-read (own scope) → CLEAR body.
-    tenant_scope = Mount.scope(tenant_mount, org_id)
+    tenant_scope = Samen.Web.Settings.Reads.user_scope(tenant_mount, org_id, recipient_id)
     {:ok, tenant_view} = Reads.get_notification(tenant_mount, tenant_scope, envelope.id)
     assert tenant_view.rendered_body == @body
 
@@ -168,7 +168,7 @@ defmodule Samen.Web.NotificationsRealtimeTest do
 
   test "InboxLive.handle_info re-reads the broadcast id under its OWN scope and refreshes list + badge",
        %{org_id: org_id, recipient_id: recipient_id} do
-    tenant_socket = inbox_socket(notifications_mount(), org_id)
+    tenant_socket = inbox_socket(notifications_mount(), org_id, recipient_id)
     assert tenant_socket.assigns.unread_count == 0
 
     {:ok, notification} =
@@ -231,9 +231,10 @@ defmodule Samen.Web.NotificationsRealtimeTest do
 
   # -- harness -------------------------------------------------------------------
 
-  defp inbox_socket(mount, org_id) do
+  defp inbox_socket(mount, org_id, user_id \\ nil) do
     %Phoenix.LiveView.Socket{}
     |> Phoenix.Component.assign(:samen_mount, mount)
+    |> Phoenix.Component.assign(:user_id, user_id)
     |> Phoenix.Component.assign(:samen_acting_as, false)
     |> Phoenix.Component.assign(:return_to, nil)
     |> InboxLive.load(org_id)

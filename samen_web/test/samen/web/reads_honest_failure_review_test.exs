@@ -41,7 +41,7 @@ defmodule Samen.Web.ReadsHonestFailureReviewTest do
 
       {:ok, notification} =
         Samen.Notifications.Engine.notify(
-          %{org_id: org_id, recipient_id: Ash.UUID.generate(), event_type: "crm.person.flagged", channel: :in_app, rendered_body: "n1"},
+          %{org_id: org_id, recipient_id: org_id, event_type: "crm.person.flagged", channel: :in_app, rendered_body: "n1"},
           notification_module: Samen.WebTest.Primitives.Notification,
           preference_module: Samen.WebTest.Primitives.NotificationPreference,
           repo: Samen.WebTest.Repo

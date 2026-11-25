@@ -75,13 +75,36 @@ defmodule Samen.Web.Notifications.InboxLive do
       NotificationsPubSub.subscribe_org(socket.assigns.samen_mount, org_id)
     end
 
-    {:ok, load(assign(socket, org_id: org_id), org_id)}
+    # WHO is acting: ONE resolver (`Settings.Reads.actor_in_org/3` -> `Samen.Auth.OrgActor`) turns the
+    # session's principal (the spine credential, or the legacy BYO user) into the per-org `Identity.User`
+    # id AND the member's real role. No label, no param (outside the disarmed dev legs) names a user.
+    ref = Samen.Web.Settings.Reads.principal_ref(socket.assigns[:samen_mount], params, session)
+
+    {:ok, load(socket |> assign(principal_ref: ref) |> assign_actor(org_id), org_id)}
   end
 
   @impl true
   def handle_params(params, uri, socket) do
     org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
-    {:noreply, load(assign(socket, org_id: org_id, return_to: return_path(uri)), org_id)}
+
+    # A user id is PER ORG: a switch of the (authorized) org re-derives the actor from the principal
+    # `mount/3` resolved, never from a param.
+    socket = assign(socket, return_to: return_path(uri))
+    {:noreply, load(assign_actor(socket, org_id), org_id)}
+  end
+
+  # Re-derive the acting user + role in `org_id` from the principal reference, and the state of that
+  # derivation (`:ok` | `:none` | `:denied` | `:unavailable`) - a denial or an outage is a STATE of the page.
+  defp assign_actor(socket, org_id) do
+    mount = socket.assigns[:samen_mount]
+    ref = socket.assigns[:principal_ref] || :none
+
+    case Samen.Web.Settings.Reads.actor_in_org(mount, org_id, ref) do
+      {:ok, %{id: id, role: role}} -> assign(socket, user_id: id, user_role: role, recipient_state: :ok)
+      :none -> assign(socket, user_id: nil, user_role: nil, recipient_state: :ok)
+      :denied -> assign(socket, user_id: nil, user_role: nil, recipient_state: :denied)
+      {:error, :unavailable} -> assign(socket, user_id: nil, user_role: nil, recipient_state: :unavailable)
+    end
   end
 
   @doc false
@@ -92,9 +115,24 @@ defmodule Samen.Web.Notifications.InboxLive do
     |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
   end
 
+  # No access: the principal holds no ACTIVE membership here, or the lookup failed. Nothing is read.
   def load(socket, org_id) do
+    if recipient_state(socket) in [:denied, :unavailable] do
+      socket
+      |> default_return_to()
+      |> assign(no_org: false, org_id: org_id, unread_count: 0, unread_failed: false)
+      |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
+    else
+      load_inbox(socket, org_id)
+    end
+  end
+
+  defp recipient_state(%{assigns: assigns}), do: recipient_state(assigns)
+  defp recipient_state(assigns) when is_map(assigns), do: Map.get(assigns, :recipient_state) || :ok
+
+  defp load_inbox(socket, org_id) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
+    scope = recipient_scope(socket, org_id)
 
     socket
     |> default_return_to()
@@ -106,10 +144,18 @@ defmodule Samen.Web.Notifications.InboxLive do
   # -- events (list events belong to the ListLive hook) -------------------------
 
   @impl true
+  def handle_event("retry_load", _params, socket) do
+    {:noreply, load(assign_actor(socket, socket.assigns.org_id), socket.assigns.org_id)}
+  end
+
+  # A denied or unavailable actor writes nothing (and the page offers no affordance either).
+  def handle_event(event, _params, socket) when event in ["mark_read", "mark_all_read"] and is_map_key(socket.assigns, :recipient_state) and socket.assigns.recipient_state != :ok,
+    do: {:noreply, socket}
+
   def handle_event("mark_read", %{"id" => id}, socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
 
-    case Reads.mark_read(mount, Mount.scope(mount, org_id), id) do
+    case Reads.mark_read(mount, recipient_scope(socket, org_id), id) do
       :ok -> {:noreply, refresh(socket)}
       # A missing / cross-org id is a no-op (OrgScope; no existence oracle) — not a failure.
       {:error, :not_found} -> {:noreply, refresh(socket)}
@@ -120,7 +166,7 @@ defmodule Samen.Web.Notifications.InboxLive do
   def handle_event("mark_all_read", _params, socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
 
-    case Reads.mark_all_read(mount, Mount.scope(mount, org_id)) do
+    case Reads.mark_all_read(mount, recipient_scope(socket, org_id)) do
       :ok -> {:noreply, refresh(socket)}
       {:error, _} -> {:noreply, socket |> write_failed("Couldn't mark all notifications read.") |> refresh()}
     end
@@ -136,10 +182,16 @@ defmodule Samen.Web.Notifications.InboxLive do
   # session's OWN scope — the per-plane masking re-read (design §2.4). A cross-org /
   # unreadable id resolves to :error and is ignored (OrgScope; no existence oracle).
   @impl true
+  # A denied / unavailable actor reads NOTHING: the broker-scope fallback of `recipient_scope/2` is for the
+  # honest no-user posture (`:ok` with no user_id) only, never for a failed or refused actor lookup.
+  def handle_info({:notification_created, _envelope}, %{assigns: %{recipient_state: state}} = socket)
+      when state != :ok,
+      do: {:noreply, socket}
+
   def handle_info({:notification_created, %{id: id}}, socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
 
-    case org_id && Reads.get_notification_result(mount, Mount.scope(mount, org_id), id) do
+    case org_id && Reads.get_notification_result(mount, recipient_scope(socket, org_id), id) do
       {:ok, _notification} -> {:noreply, refresh(socket)}
       # The broadcast arrived but its re-read FAILED: re-run the list read, which then shows its
       # own error state if the outage persists (never silently stays stale).
@@ -152,15 +204,30 @@ defmodule Samen.Web.Notifications.InboxLive do
 
   # Re-run the CURRENT bounded read (preserving sort/filter/cursor — unlike a full
   # load/2, which would reset the list state) and re-count the badge.
+  defp refresh(%{assigns: %{recipient_state: state}} = socket) when state != :ok, do: socket
+
   defp refresh(socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    scope = recipient_scope(socket, org_id)
     state = socket.assigns.list_state
     page = Reads.notifications_page(mount, scope, state)
 
     socket
     |> assign(page: %{page | prev_cursor: List.first(state.cursor_stack)})
     |> assign_unread(Reads.unread_count_result(mount, scope))
+  end
+
+  # The inbox is the signed-in user's OWN: the tenant plane's synthetic org broker names no user, so the
+  # scope carries the user (and REAL role) the session resolved (`Notification` reads and writes are
+  # recipient-scoped by policy). A session that genuinely resolves no user (the disarmed dev posture) stays
+  # the broker and sees only the org-addressed rows, never any user's.
+  defp recipient_scope(socket, org_id) do
+    Samen.Web.Settings.Reads.user_scope(
+      socket.assigns.samen_mount,
+      org_id,
+      socket.assigns[:user_id],
+      socket.assigns[:user_role]
+    )
   end
 
   # A failed count is NOT "0 unread": the badge goes unlit and the header says it is unavailable.
@@ -206,15 +273,32 @@ defmodule Samen.Web.Notifications.InboxLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% recipient_state(assigns) == :denied -> %>
+          <div class="wrap">
+            <div id="notifications-denied" class="gtitle">
+              <h3>No access</h3>
+              <span class="lane">Your account holds no active membership in this workspace, so there is no inbox to show.</span>
+            </div>
+          </div>
+        <% recipient_state(assigns) == :unavailable -> %>
+          <div class="wrap">
+            <div id="notifications-unavailable" class="gtitle">
+              <h3>Notifications unavailable</h3>
+              <span class="lane">We couldn't check who you are in this workspace. Nothing is shown rather than a wrong inbox.</span>
+              <.button phx-click="retry_load" id="notifications-retry">Retry</.button>
+            </div>
+          </div>
+        <% true -> %>
           <span id="org-banner" style="display:none">Notifications org: {@org_id}</span>
 
           <div class="wrap">
             <div id="notifications-panel">
               <div class="gtitle">
                 <h3>Inbox</h3>
+                <span :if={is_nil(assigns[:user_id])} class="lane" id="notifications-no-user">no signed-in user: only org-wide notices are shown</span>
                 <span :if={not @unread_failed} class="n" id="notifications-unread">{@unread_count}</span>
                 <span :if={@unread_failed} class="n" id="notifications-unread-unavailable">—</span>
                 <span class="lane">{if @unread_failed, do: "unread count unavailable", else: "unread"} · body via PiiResolution · {plane_note(@samen_mount)}</span>

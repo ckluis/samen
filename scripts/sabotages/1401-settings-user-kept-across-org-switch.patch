@@ -1,0 +1,20 @@
+# SABOTAGE: reresolve_user keeps the mount org's user id when ?org= switches to another org, pairing org 
+#   A's user with org B
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/notifications_spine_session_test.exs
+# MUST_FAIL: settings screens: a patch to another authorized org acts as THAT org's user
+diff --git a/samen_web/lib/samen/web/settings/reads.ex b/samen_web/lib/samen/web/settings/reads.ex
+index eb162c02..11c01188 100644
+--- a/samen_web/lib/samen/web/settings/reads.ex
++++ b/samen_web/lib/samen/web/settings/reads.ex
+@@ -227,7 +227,7 @@ defmodule Samen.Web.Settings.Reads do
+       dev = present(dev_param_user(mount, params)) ->
+         dev
+ 
+-      org_id == Map.get(assigns, :org_id) ->
++      org_id != nil ->
+         Map.get(assigns, :user_id)
+ 
+       true ->

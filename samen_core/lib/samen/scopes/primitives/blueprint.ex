@@ -144,7 +144,29 @@ defmodule Samen.Scopes.Primitives.Blueprint do
         end
 
         actions do
-          defaults([:read, :destroy, create: :*, update: :*])
+          defaults([:read, :destroy])
+
+          create :create do
+            primary?(true)
+            accept(:*)
+          end
+
+          # A recipient's own marker, nothing else: the recipient, channel, event and body of a
+          # delivered notification are not editable by an actor.
+          update :update do
+            primary?(true)
+            require_atomic?(false)
+            accept([:read_at, :status])
+
+            # The one transition the inbox performs is "mark read" (`read_at` + `status: :read`). The engine and
+            # its delivery workers move a row through :pending/:sent/:delivered/:failed with `authorize?: false`;
+            # an actor, who can reach an ORG-addressed row that every member shares, may only set :read, so
+            # one member cannot flip a shared SLA or invoice alert back to :failed or :pending for everyone.
+            validate(attribute_equals(:status, :read),
+              where: [changing(:status)],
+              message: "an actor can only mark a notification read"
+            )
+          end
 
           action :reveal_notification, :map do
             argument(:actor_id, :string, allow_nil?: false)
@@ -169,8 +191,37 @@ defmodule Samen.Scopes.Primitives.Blueprint do
         end
 
         policies do
-          policy action_type([:read, :create, :update, :destroy]) do
+          # Two stacked axes (org, then recipient) on every read; the operator plane reads the org's
+          # rows masked.
+          policy action_type(:read) do
             authorize_if(Samen.Policy.OrgScope)
+          end
+
+          policy action_type(:read) do
+            authorize_if({Samen.Policy.RecipientOnly, operator_reads: true, org_addressed: true})
+          end
+
+          # Creating a notification is the notification engine's own write (`Samen.Notifications.Engine`
+          # runs it with `authorize?: false`); no actor creates one, so none can address another user.
+          policy action(:create) do
+            forbid_if(always())
+          end
+
+          # A recipient marks their own notification read (the org's own, for a row addressed to the org); nobody
+          # edits another recipient's.
+          policy action(:update) do
+            forbid_unless(Samen.Policy.OrgScope)
+            forbid_unless({Samen.Policy.RecipientOnly, org_addressed: true})
+            authorize_if(always())
+          end
+
+          # A recipient removes their own (a row addressed to them); an org admin may remove any of the org's. A row
+          # addressed to the ORGANISATION is one shared row, so removing it clears the alert for every member and
+          # admin: it needs an admin (marking it read stays a member's, as before).
+          policy action(:destroy) do
+            forbid_unless(Samen.Policy.OrgScope)
+            authorize_if({Samen.Policy.RoleAtLeast, role: :admin})
+            authorize_if(Samen.Policy.RecipientOnly)
           end
 
           policy action(:reveal_notification) do
@@ -285,7 +336,25 @@ defmodule Samen.Scopes.Primitives.Blueprint do
         end
 
         actions do
-          defaults([:read, :destroy, create: :*, update: :*])
+          defaults([:read, :destroy, create: :*])
+
+          # `recipient_id` is not editable: an update that repointed a row at another user would write
+          # that user's alert settings (the create/update policies check the PRE-image's recipient).
+          update :update do
+            primary?(true)
+            require_atomic?(false)
+
+            accept([
+              :org_id,
+              :event_type,
+              :in_app_enabled,
+              :email_enabled,
+              :quiet_hours,
+              :digest_cadence,
+              :digest_timezone,
+              :digest_last_sent_at
+            ])
+          end
         end
 
         policies do
@@ -293,9 +362,16 @@ defmodule Samen.Scopes.Primitives.Blueprint do
             authorize_if(Samen.Policy.OrgScope)
           end
 
-          # A recipient manages their own preferences (member+); org-scoped.
+          policy action_type(:read) do
+            authorize_if({Samen.Policy.RecipientOnly, operator_reads: true})
+          end
+
+          # A recipient manages ONLY their own preferences (member+); org-scoped. Nobody, an admin
+          # included, writes another user's: the notification engine and the digest read and advance
+          # the rows with `authorize?: false`.
           policy action_type([:create, :update, :destroy]) do
             forbid_unless(Samen.Policy.OrgScope)
+            forbid_unless(Samen.Policy.RecipientOnly)
             forbid_unless({Samen.Policy.RoleAtLeast, role: :member})
             authorize_if(always())
           end
@@ -407,7 +483,38 @@ defmodule Samen.Scopes.Primitives.Blueprint do
         end
 
         actions do
-          defaults([:read, :destroy, create: :*, update: :*])
+          defaults([:read, :destroy])
+
+          # `status` is NOT an actor input on any write. A member who could write it could set
+          # `:active` on a quarantined file and skip the scan that `Samen.Files.promote/3`,
+          # `previewable?/1` and `fetch_bytes` rely on. A new row takes the resource default
+          # (`:quarantined`); only the system action `:promote` (below) sets `:active`. `archived_at` is no input either:
+          # archiving and restoring go through the audited `:archive`/`:restore` actions.
+          create :create do
+            primary?(true)
+            accept([:filename, :content_type, :size_bytes, :storage_key, :uploaded_by_id, :metadata, :org_id])
+          end
+
+          # Not atomic: the `:promote` forbid policy below cannot be rendered into an atomic filter.
+          #
+          # What a person may change: the name and the metadata. `content_type`, `size_bytes` and `uploaded_by_id`
+          # are facts the UPLOAD recorded (`Samen.Files.upload/3` enforces the type allowlist and size cap, then stamps
+          # them): the byte route serves inline with the STORED content type, so a writable one would let a member
+          # turn a scanned text/plain file into text/html or javascript (same-origin script) and skip `enforce/4`.
+          # `storage_key` stays an input only because `ChokepointGuard` refuses any change to it outside the upload path.
+          update :update do
+            primary?(true)
+            require_atomic?(false)
+            accept([:filename, :storage_key, :metadata, :org_id])
+          end
+
+          # The promotion path's own write (`Samen.Files.promote/3` after a clean scan). No input; it is
+          # run only as that function's internal `authorize?: false` call, and no actor may run it.
+          update :promote do
+            require_atomic?(false)
+            accept([])
+            change(set_attribute(:status, :active))
+          end
         end
 
         # ADR-026 §2 decision 2 / RP-FI-1 / AC-G14-2 — governed-by-construction. The
@@ -436,6 +543,11 @@ defmodule Samen.Scopes.Primitives.Blueprint do
         policies do
           policy action_type(:read) do
             authorize_if(Samen.Policy.OrgScope)
+          end
+
+          # `:promote` marks a file clean: the scan verdict, never a request. No actor, an admin included.
+          policy action(:promote) do
+            forbid_if(always())
           end
 
           policy action_type([:create, :update, :destroy]) do
@@ -521,6 +633,11 @@ defmodule Samen.Scopes.Primitives.Blueprint do
 
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
+        end
+
+        # A vault-routed field is never registered (the query path's guard, applied at write time too).
+        changes do
+          change(Samen.Scopes.Primitives.SearchIndexPiiChange, on: [:create, :update])
         end
 
         policies do

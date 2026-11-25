@@ -125,8 +125,8 @@ defmodule Samen.Scopes.Tags.Blueprint do
   # ---------------------------------------------------------------------------
   # Tagging — the polymorphic JOIN: one Tag attached to one object. `tag_id` is a
   # real same-scope belongs_to (SameOrgFk-guarded); subject_key/subject_id are the
-  # generic object-ref anchor (plain scalars, org-scope enforced at the samen_web
-  # write boundary, mirroring Work.Task/Docs.{Doc,Note}). NOT archivable (a pure
+  # generic object-ref anchor (plain scalars; the subject is checked in the resource by
+  # `Samen.Policy.SubjectInOrg`, and again at the samen_web write boundary). NOT archivable (a pure
   # join row — untag is a real destroy).
   # ---------------------------------------------------------------------------
   defmacro define_tagging(module, otp_app, domain, repo, abbrev, tag_mod) do
@@ -155,8 +155,8 @@ defmodule Samen.Scopes.Tags.Blueprint do
         attributes do
           # The generic object-ref anchor (mirrors Samen.Scopes.Work.Task /
           # Samen.Scopes.Docs.{Doc,Note}) — CRM/host-agnostic, never a belongs_to.
-          # Org-scope enforced at the samen_web ObjectRef.resolve write boundary,
-          # not here (Samen.Web.Tags.attach/5).
+          # Checked in the resource by `Samen.Policy.SubjectInOrg` (a known resource, a row of
+          # this organisation), and again at the samen_web write boundary (Samen.Web.Tags.attach/5).
           attribute(:subject_key, :string, public?: true, allow_nil?: false)
           attribute(:subject_id, :uuid, public?: true, allow_nil?: false)
         end
@@ -172,6 +172,8 @@ defmodule Samen.Scopes.Tags.Blueprint do
         # F3.5-style same-org FK: a Tagging may only reference a same-org Tag.
         changes do
           change({Samen.Policy.SameOrgFk, relationships: [:tag]})
+          # The anchor must be a resource the host knows and a row of THIS organisation, on every path.
+          change(Samen.Policy.SubjectInOrg)
         end
 
         actions do

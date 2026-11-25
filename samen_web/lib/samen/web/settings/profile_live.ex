@@ -36,6 +36,7 @@ defmodule Samen.Web.Settings.ProfileLive do
   @impl true
   def mount(params, session, socket) do
     socket = Samen.Web.Live.assign_mount(socket, session)
+    socket = Reads.assign_principal(socket, params, session)
     mount = socket.assigns[:samen_mount]
     org_id = CurrentOrg.resolve(mount, params, session)
     user_id = Reads.current_user_id(mount, params, session)
@@ -46,7 +47,7 @@ defmodule Samen.Web.Settings.ProfileLive do
   @impl true
   def handle_params(params, uri, socket) do
     org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
-    user_id = Samen.Web.Settings.Reads.reresolve_user(socket, params)
+    user_id = Samen.Web.Settings.Reads.reresolve_user(socket, params, org_id)
 
     {:noreply,
      socket
@@ -84,7 +85,7 @@ defmodule Samen.Web.Settings.ProfileLive do
   def handle_event("save", %{"profile" => params}, socket) do
     %{samen_mount: mount, org_id: org_id, user_id: user_id} = socket.assigns
     # The acting scope carries the SESSION-resolved user (`user_id` was resolved by `Reads.current_user_id/3` /
-    # `reresolve_user/2`); `Profile.update/4` refuses a scope whose actor is not that user.
+    # `reresolve_user/3`); `Profile.update/4` refuses a scope whose actor is not that user.
     scope = Reads.user_scope(mount, org_id, user_id)
 
     case Profile.update(mount, scope, user_id, attrs_from_params(params)) do

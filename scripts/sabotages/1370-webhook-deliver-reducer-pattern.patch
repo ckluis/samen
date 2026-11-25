@@ -1,0 +1,20 @@
+# SABOTAGE: Webhook.deliver reducer matches {{endpoint, idx}, _} against {endpoint, idx} and raises on any 
+#   non-empty endpoint list
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/webhook_deliver_endpoints_test.exs
+# MUST_FAIL: a non-empty endpoint list does not crash
+diff --git a/samen_core/lib/samen/webhook.ex b/samen_core/lib/samen/webhook.ex
+index c91bb7ef..74f051fb 100644
+--- a/samen_core/lib/samen/webhook.ex
++++ b/samen_core/lib/samen/webhook.ex
+@@ -105,7 +105,7 @@ defmodule Samen.Webhook do
+ 
+       endpoints
+       |> Enum.with_index()
+-      |> Enum.reduce_while({:ok, initial}, fn {endpoint, idx}, {:ok, {acc, multi}} ->
++      |> Enum.reduce_while({:ok, initial}, fn {{endpoint, idx}, _}, {:ok, {acc, multi}} ->
+         case enqueue_job(endpoint, event_type, body, record, idx, Keyword.put(opts, :multi, multi)) do
+           {:ok, %Ecto.Multi{} = next} -> {:cont, {:ok, {acc + 1, next}}}
+           {:ok, _job} -> {:cont, {:ok, {acc + 1, multi}}}

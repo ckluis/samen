@@ -1,0 +1,20 @@
+# SABOTAGE: the default endpoint lookup no longer filters by the record's org: another org's endpoints 
+#   receive the payload
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/webhook_deliver_endpoints_test.exs
+# MUST_FAIL: another org's active endpoint is never read
+diff --git a/samen_core/lib/samen/webhook.ex b/samen_core/lib/samen/webhook.ex
+index 02237328..746ea414 100644
+--- a/samen_core/lib/samen/webhook.ex
++++ b/samen_core/lib/samen/webhook.ex
+@@ -180,7 +180,7 @@ defmodule Samen.Webhook do
+   # `archived_at` without touching `status`: an archived endpoint left `:active` would still receive
+   # payloads. So an archivable endpoint module (one that declares `archived_at`) is read UNARCHIVED only.
+   defp endpoint_query(module, org_id) do
+-    query = Ecto.Query.from(e in module, where: e.org_id == ^org_id)
++    query = Ecto.Query.from(e in module)
+ 
+     if archivable?(module),
+       do: Ecto.Query.where(query, [e], is_nil(e.archived_at)),

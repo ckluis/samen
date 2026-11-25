@@ -359,6 +359,10 @@ defmodule Samen.Web.CurrentOrg do
   # `@samen_authn_mount`, already carries the Identity namespace — backward compatible). This lets
   # a wired module surface be genuinely SPINE-capable (authenticate the principal, read its
   # authorized orgs + Membership role) instead of only legacy-BYO-capable.
+  @doc "The sibling mount carrying the Identity spine (`Session`/`User`/`Membership`) for `mount` (see the `:identity_namespace` label)."
+  @spec identity_mount(Mount.t()) :: Mount.t()
+  def identity_mount(%Mount{} = mount), do: identity_ns_mount(mount)
+
   defp identity_ns_mount(%Mount{} = mount) do
     case Mount.label(mount, :identity_namespace, nil) do
       ns when is_atom(ns) and not is_nil(ns) -> %{mount | namespace: ns}

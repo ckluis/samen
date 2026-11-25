@@ -234,7 +234,6 @@ defmodule Samen.Web.Mount do
     chat_path pubsub presence object_cards
     default_org_id org_directory tenant_landing impersonate_path seed_command
     host_nav_extra identity_namespace
-    recipient_id
     flags_namespace flags_path revenue_plan_loader
     automation_path
     current_user_id current_membership_id
