@@ -529,11 +529,36 @@ defmodule Samen.Scopes.Marketing.Blueprint do
                   :error -> nil
                 end
 
-              _ ->
+              # A genuine miss: no such subscriber row.
+              {:ok, %{rows: []}} ->
                 nil
+
+              # The lookup itself failed (outage, permission, missing table): NOT a miss.
+              # Report it (name + org + exception module, never the message) and refuse
+              # with a distinct error, so an outage is not read as "subscriber not found".
+              other ->
+                reason =
+                  case other do
+                    {:error, e} -> e
+                    _ -> :unexpected_lookup_result
+                  end
+
+                Samen.Observability.Failure.report(
+                  :marketing_send_subscriber_lookup,
+                  %{org_id: org_id},
+                  reason
+                )
+
+                :lookup_failed
             end
 
           cond do
+            subscriber_org_id == :lookup_failed ->
+              Ash.Changeset.add_error(changeset,
+                field: :subscriber_id,
+                message: "subscriber lookup failed — send refused (could not confirm the subscriber's org)"
+              )
+
             is_nil(subscriber_org_id) ->
               Ash.Changeset.add_error(changeset,
                 field: :subscriber_id,
@@ -649,16 +674,18 @@ defmodule Samen.Scopes.Marketing.Blueprint do
         end
 
         defp apply_suppression_result(changeset, org_id, subscriber_id, suppressed?) do
+          # force_change_attribute: this runs in a before_action, after the changeset was validated
+          # (change_attribute/3 there logs a warning per send).
           if suppressed? do
             Ash.Changeset.add_error(changeset, field: :subscriber_id, message: "suppressed")
           else
             changeset
-            |> Ash.Changeset.change_attribute(:subscriber_id, subscriber_id)
-            |> Ash.Changeset.change_attribute(:org_id, org_id)
-            |> Ash.Changeset.change_attribute(:campaign_id, Ash.Changeset.get_argument(changeset, :campaign_id))
-            |> Ash.Changeset.change_attribute(:template_id, Ash.Changeset.get_argument(changeset, :template_id))
-            |> Ash.Changeset.change_attribute(:status, :queued)
-            |> Ash.Changeset.change_attribute(:queued_at, DateTime.utc_now())
+            |> Ash.Changeset.force_change_attribute(:subscriber_id, subscriber_id)
+            |> Ash.Changeset.force_change_attribute(:org_id, org_id)
+            |> Ash.Changeset.force_change_attribute(:campaign_id, Ash.Changeset.get_argument(changeset, :campaign_id))
+            |> Ash.Changeset.force_change_attribute(:template_id, Ash.Changeset.get_argument(changeset, :template_id))
+            |> Ash.Changeset.force_change_attribute(:status, :queued)
+            |> Ash.Changeset.force_change_attribute(:queued_at, DateTime.utc_now())
           end
         end
 
