@@ -1,0 +1,19 @@
+# SABOTAGE: assert_vault_token accepts any vt_ substring instead of the real token grammar
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault_token_assert_test.exs
+# MUST_FAIL: a bare vt_ or a short/uppercase look-alike does not satisfy it
+diff --git a/samen_core/lib/samen/vault_token_assert.ex b/samen_core/lib/samen/vault_token_assert.ex
+index 66707f69..1ebc9d4d 100644
+--- a/samen_core/lib/samen/vault_token_assert.ex
++++ b/samen_core/lib/samen/vault_token_assert.ex
+@@ -79,7 +79,7 @@ defmodule Samen.VaultTokenAssert do
+   def assert_vault_token(text, message \\ nil) do
+     text = if is_binary(text), do: text, else: to_string(text)
+ 
+-    case Samen.Vault.tokens_in(text) do
++    case Regex.scan(~r/vt_/, text) |> List.flatten() do
+       [] ->
+         flunk(
+           (message || "expected a vault token (vt_ + 32 hex)") <>

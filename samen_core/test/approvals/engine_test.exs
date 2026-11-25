@@ -15,6 +15,7 @@ defmodule Samen.Approvals.EngineTest do
     * exactly-once double-approve (machine guard); no-persisted-inputs / INV-1;
     * expiry AshOban trigger + job-args sink (`actor_persister :none`, ID-only args).
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   import Ecto.Query, only: [from: 2]
@@ -497,7 +498,7 @@ defmodule Samen.Approvals.EngineTest do
     row_text = cols |> Enum.zip(row) |> Enum.map(fn {_c, v} -> inspect(v) end) |> Enum.join(" ")
 
     refute row_text =~ secret, "plaintext secret leaked into the approval row"
-    refute row_text =~ "vt_", "a vault token leaked into the approval row"
+    refute_vault_token(row_text, "a vault token leaked into the approval row")
 
     # The row carries only the bounded object-ref, never the inputs.
     {:ok, approval} = Approvals.get(approval_id)

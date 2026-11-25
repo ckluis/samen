@@ -21,6 +21,7 @@ defmodule Samen.Delivery.LifecycleTest do
     * Token-only — bounded event enum + opaque ids only; an unbounded/absent event
       is discarded, never delivered.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   alias Samen.Delivery.{LocalSink, Message, Provider, Rendering}
@@ -288,7 +289,7 @@ defmodule Samen.Delivery.LifecycleTest do
                  "#{event}: the (rendering pending) placeholder must be GONE"
 
           # PII-safe: no vault token / masked marker reaches the wire.
-          refute field =~ "vt_", "#{event}: no vault token may reach the wire"
+          refute_vault_token(field, "#{event}: no vault token may reach the wire")
           refute field =~ "••••", "#{event}: no masked marker may reach the wire"
           refute field =~ "%Samen.Masked", "#{event}: no unresolved Masked value may reach the wire"
         end

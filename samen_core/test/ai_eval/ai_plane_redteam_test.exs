@@ -59,6 +59,7 @@ defmodule Samen.AI.Eval.MaskLeakRedTeamTest do
   not merely a unit test. The positive controls (mask present / leak detectable) make the
   refutation non-vacuous.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   @moduletag :ai_eval
@@ -199,7 +200,7 @@ defmodule Samen.AI.Eval.MaskLeakRedTeamTest do
         # Non-vacuous positive control: the vault field WAS resolved into the egress, MASKED.
         assert recorded =~ @mask, "verb #{verb}: the 🔒 field must resolve-then-mask, not be omitted"
         refute recorded =~ canary, "verb #{verb}: the 🔒 canary PLAINTEXT reached the provider"
-        refute recorded =~ "vt_", "verb #{verb}: a vault token reached the provider"
+        refute_vault_token(recorded, "verb #{verb}: a vault token reached the provider")
       end
     end
   end
@@ -231,12 +232,12 @@ defmodule Samen.AI.Eval.MaskLeakRedTeamTest do
       recorded = recorded_text()
       assert recorded =~ @mask, "the support item's 🔒 field must resolve-then-mask (non-vacuous)"
       refute recorded =~ canary, "the 🔒 canary reached the AI provider payload"
-      refute recorded =~ "vt_", "a vault token reached the AI provider payload"
+      refute_vault_token(recorded, "a vault token reached the AI provider payload")
 
       # The persisted draft body (what a human reviews / what will send) carries neither.
       draft = Ash.get!(SupportReplyDraft, result.draft.id, authorize?: false)
       refute draft.body =~ canary
-      refute draft.body =~ "vt_"
+      refute_vault_token(draft.body)
     end
   end
 
@@ -270,7 +271,7 @@ defmodule Samen.AI.Eval.MaskLeakRedTeamTest do
       assert {:ok, %Completion{}} = Crm.summarize_timeline(scope(org), Person, person.id)
       assert recorded_text() =~ @mask
       refute recorded_text() =~ canary
-      refute recorded_text() =~ "vt_"
+      refute_vault_token(recorded_text())
 
       Provider.Fake.reset()
       assert {:ok, %Completion{}} = Crm.recommend_next_step(scope(org), Person, person.id)
@@ -282,7 +283,7 @@ defmodule Samen.AI.Eval.MaskLeakRedTeamTest do
                Crm.draft_sequence(scope(org), Person, person.id, "draft a friendly check-in")
 
       refute body =~ canary, "the drafted sequence body must never carry the canary"
-      refute body =~ "vt_"
+      refute_vault_token(body)
       refute recorded_text() =~ canary
     end
   end
@@ -302,7 +303,7 @@ defmodule Samen.AI.Eval.MaskLeakRedTeamTest do
       assert rec["title"] == "Refund question", "a non-PII field is CLEAR (projection is not blanket-masking)"
       assert rec["secret"] == @mask, "the 🔒 field is masked at the MCP boundary"
       refute inspect(data) =~ canary, "the canary reached the MCP browse response"
-      refute inspect(data) =~ "vt_"
+      refute_vault_token(inspect(data))
 
       {:ok, ddata} =
         Mcp.drafts(
@@ -314,7 +315,7 @@ defmodule Samen.AI.Eval.MaskLeakRedTeamTest do
       assert ddata["kind"] == "draft"
       refute inspect(ddata) =~ canary, "the canary reached the MCP draft response"
       refute recorded_text() =~ canary, "the canary reached the provider via the MCP draft"
-      refute recorded_text() =~ "vt_"
+      refute_vault_token(recorded_text())
     end
   end
 
@@ -337,7 +338,7 @@ defmodule Samen.AI.Eval.MaskLeakRedTeamTest do
 
       dump = store_dump()
       refute dump =~ canary, "the 🔒 canary reached the invertible vector store (permanent leak)"
-      refute dump =~ "vt_", "a vault token reached the vector store"
+      refute_vault_token(dump, "a vault token reached the vector store")
     end
   end
 
@@ -382,7 +383,7 @@ defmodule Samen.AI.Eval.MaskLeakRedTeamTest do
         end)
 
       refute log =~ canary
-      refute log =~ "vt_"
+      refute_vault_token(log)
 
       handler = "t72-eg6-#{System.unique_integer([:positive])}"
 
@@ -398,7 +399,7 @@ defmodule Samen.AI.Eval.MaskLeakRedTeamTest do
 
       assert_receive {:telemetry_meta, meta_str}
       refute meta_str =~ canary
-      refute meta_str =~ "vt_"
+      refute_vault_token(meta_str)
     end
   end
 
@@ -489,7 +490,7 @@ defmodule Samen.AI.Eval.MaskLeakRedTeamTest do
         refute recorded =~ canary, "a seeded canary reached a provider recording: #{canary}"
       end
 
-      refute recorded =~ "vt_", "a vault token reached a provider recording"
+      refute_vault_token(recorded, "a vault token reached a provider recording")
       # Non-vacuous: the fan-out DID egress masked vault fields (the surfaces really ran).
       assert recorded =~ @mask
     end
@@ -548,7 +549,7 @@ defmodule Samen.AI.Eval.MaskLeakRedTeamTest do
       sent = sent_texts() |> Enum.join("\n")
 
       refute sent =~ @agent_email_canary, "the 🔒 canary reached the provider on the agent path"
-      refute sent =~ "vt_", "a vault token reached the provider on the agent path"
+      refute_vault_token(sent, "a vault token reached the provider on the agent path")
 
       # NON-VACUOUS: the masked field DID egress (`••••`) — masking is load-bearing, not
       # mask-by-omission; the ONLY thing keeping the canary out is the egress-mode resolution.
@@ -576,7 +577,7 @@ defmodule Samen.AI.Eval.MaskLeakRedTeamTest do
       # Non-vacuous: the fetch_record def WAS offered (the arm really ran).
       assert Enum.any?(defs, &(Map.get(&1, :name) == "fetch_record"))
       refute dump =~ @agent_email_canary
-      refute dump =~ "vt_"
+      refute_vault_token(dump)
     end
 
     test "every agent payload segment is a plain rendered binary — no grant span, no vt_ (§4.4)" do
@@ -605,7 +606,7 @@ defmodule Samen.AI.Eval.MaskLeakRedTeamTest do
       # The vt_-bearing arg never became a real fetch: the turn recorded a bounded tool
       # error (invalid args), the token never reached the provider.
       assert Enum.any?(turn_rows(run), &(&1.error_kind != nil))
-      refute Enum.join(sent_texts(), "\n") =~ "vt_"
+      refute_vault_token(Enum.join(sent_texts(), "\n"))
     end
 
     test "ALLOWLIST ESCAPE: an agent that declared NO tools cannot call one (refused, executes nothing)" do
@@ -694,9 +695,11 @@ defmodule Samen.AI.Eval.MaskLeakRedTeamTest do
              "the 🔒 canary REAPPEARED in the model-written summary — compaction laundered " <>
                "vault plaintext back into the governed transcript (ADR-048 §5, INV-7)"
 
-      refute summary =~ "vt_",
-             "a vault token reappeared in the model-written summary (INV-7 forbids the " <>
-               "token exactly as it forbids the plaintext)"
+      refute_vault_token(
+        summary,
+        "a vault token reappeared in the model-written summary (INV-7 forbids the " <>
+          "token exactly as it forbids the plaintext)"
+      )
 
       refute Enum.any?(views.llm_view, &String.contains?(&1, @agent_email_canary)),
              "the 🔒 canary reached the persisted llm_view through the fold"

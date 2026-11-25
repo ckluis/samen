@@ -51,6 +51,7 @@ defmodule Samen.AI.VerbsTest do
   check-(c) structural verifier (see `prompt_resource_test.exs`), not this runtime suite —
   this suite's own canary/positive-control pairing is what makes ITS assertions refutable.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   alias Samen.AI.{Completion, Prompt, Provider, Verbs}
@@ -194,7 +195,7 @@ defmodule Samen.AI.VerbsTest do
 
         recorded = recorded_text()
         refute recorded =~ @canary, "#{inspect(mod)} leaked the canary PLAINTEXT to the provider"
-        refute recorded =~ "vt_", "#{inspect(mod)} leaked a vt_ token to the provider"
+        refute_vault_token(recorded, "#{inspect(mod)} leaked a vt_ token to the provider")
         assert recorded =~ Samen.Masked.mask(), "#{inspect(mod)} must carry the masked field present-but-masked"
       end
     end
@@ -234,7 +235,7 @@ defmodule Samen.AI.VerbsTest do
       refute recorded =~ @canary,
              "a truthy-non-true grant verdict must NOT egress plaintext (resolve_egress requires a literal true)"
 
-      refute recorded =~ "vt_"
+      refute_vault_token(recorded)
 
       assert recorded =~ Samen.Masked.mask(),
              "the vault field must remain present-but-masked when the grant verdict is not a literal true"

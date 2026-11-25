@@ -11,6 +11,7 @@ defmodule Samen.Gen.PostTest do
   red-path files green + a red-path-mechanism sabotage flips one" claim is covered by
   `priv/gen_post_probe.exs` (the non-vacuity probe), run by the gen_app tier.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: true
 
   alias Samen.CatalogMeaning
@@ -726,7 +727,7 @@ defmodule Samen.Gen.PostTest do
                  "#{field_type}: field #{name}: #{inspect(description)}"
         end
 
-        refute inspect(fields) =~ "vt_", "a vault field's description describes the schema, never a value"
+        refute_vault_token(inspect(fields), "a vault field's description describes the schema, never a value")
 
         # Only what is enforced: `status` is a one_of with a default; create accepts any of the three values and nothing
         # enforces a lifecycle, so the text claims neither "new entries start active" nor a "lifecycle".

@@ -20,6 +20,7 @@ defmodule Driftwood.ApiExternalSurfaceTest do
   "masked" assertions are non-vacuous. A live anti-tautology sabotage is recorded in the
   Gate-5 F1 report section.
   """
+  import Samen.VaultTokenAssert
   use Driftwood.ApiCase, async: false
 
   setup do
@@ -53,7 +54,7 @@ defmodule Driftwood.ApiExternalSurfaceTest do
       assert Map.has_key?(attrs, "full_name")
       assert attrs["full_name"] =~ "Owned"
       # The vault token itself NEVER appears.
-      refute conn.resp_body =~ "vt_"
+      refute_vault_token(conn.resp_body)
     end
 
     test "a cross-org tenant key sees ZERO of another org's drivers" do
@@ -106,7 +107,7 @@ defmodule Driftwood.ApiExternalSurfaceTest do
 
       # The plaintext CDL + the vault token never appear ANYWHERE in the body.
       refute conn.resp_body =~ cdl
-      refute conn.resp_body =~ "vt_"
+      refute_vault_token(conn.resp_body)
       # The physical storage name never leaks either.
       refute conn.resp_body =~ "pii_drv_cdl_number"
       refute conn.resp_body =~ "drv_cdl"
@@ -184,7 +185,7 @@ defmodule Driftwood.ApiExternalSurfaceTest do
 
       json = Jason.encode!(data)
       refute json =~ "CDL-", "no plaintext CDL in the webhook body"
-      refute json =~ "vt_", "no vault token in the webhook body"
+      refute_vault_token(json, "no vault token in the webhook body")
 
       # A6 red path (1): the previously-dropped non-PII catalog names now SURVIVE under
       # their catalog names (they are legitimately allowlisted; the guard no longer

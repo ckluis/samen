@@ -10,6 +10,7 @@ defmodule Driftwood.GateE3CsvE2ETest do
   login (`Driftwood.FilesCsvRouterTest` does, and it is what proves the route carries the mount).
   A gate artifact, not part of the shipped suites.
   """
+  import Samen.VaultTokenAssert
   use Driftwood.DataCase, async: false
 
   import Plug.Test
@@ -65,7 +66,7 @@ defmodule Driftwood.GateE3CsvE2ETest do
     assert t_conn.status == 200
     assert get_resp_header(t_conn, "content-type") |> Enum.join() =~ "text/csv"
     assert t_conn.resp_body =~ @secret_first
-    refute t_conn.resp_body =~ "vt_"
+    refute_vault_token(t_conn.resp_body)
 
     # 3. OPERATOR export — the SAME controller, cells masked •••• , zero plaintext,
     #    zero vault tokens (AC-G15-2 on a real host).
@@ -77,7 +78,7 @@ defmodule Driftwood.GateE3CsvE2ETest do
     assert o_conn.resp_body =~ "••••"
     refute o_conn.resp_body =~ @secret_first
     refute o_conn.resp_body =~ @secret_last
-    refute o_conn.resp_body =~ "vt_"
+    refute_vault_token(o_conn.resp_body)
 
     # 4. DENY-BY-DEFAULT: a non-CRM resource name is 404 on this mount.
     bad = export_conn(org_a, []) |> ExportController.export(%{"resource" => "File"})

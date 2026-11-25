@@ -10,6 +10,7 @@ defmodule Samen.Web.FilesCsvRouterTest do
 
   Every refusal is paired with the positive control that proves the same request is served.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   import Phoenix.ConnTest
@@ -320,7 +321,7 @@ defmodule Samen.Web.FilesCsvRouterTest do
     test "a vault-routed field never reaches the file as a token, and the body carries no vt_ reference", ctx do
       person!(ctx.org_id, "Router Row")
       body = export(log_in(ctx.member), "Person", ctx.org_id).resp_body
-      refute body =~ "vt_"
+      refute_vault_token(body)
     end
 
     test "an export larger than the row limit is refused (413), not built in memory and not silently truncated", ctx do

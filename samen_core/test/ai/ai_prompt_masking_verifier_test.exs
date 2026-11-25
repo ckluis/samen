@@ -28,7 +28,7 @@ defmodule Mix.Tasks.Samen.Verify.AiPromptMaskingTest do
   describe "(c) Prompt-body vt_ scan" do
     test "a template body embedding a vt_ token is a violation (sabotage-refutable)" do
       assert [msg] = V.prompt_body_vt_violations([LeakyPromptFixture])
-      assert msg =~ "vt_"
+      assert msg =~ "vt_" # bare-vt_-ok: the message names the vt_ marker; it is not a token in a page
       assert msg =~ "LeakyPromptFixture"
     end
 

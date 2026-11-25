@@ -20,6 +20,7 @@ defmodule Samen.Web.DeliverabilityMaskingTest do
        plane leaks the plaintext, proving the RED scan above is refutable (a
        real leak WOULD be caught), not vacuously true.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -128,7 +129,7 @@ defmodule Samen.Web.DeliverabilityMaskingTest do
     assert html =~ "#{@recipient_first} #{@recipient_last}"
     # The row itself is present (non-vacuous — the SAME record, not a different one).
     assert html =~ "bounce"
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   # ==========================================================================
@@ -151,7 +152,7 @@ defmodule Samen.Web.DeliverabilityMaskingTest do
     refute html =~ @recipient_first
     refute html =~ @recipient_last
     # No vault token leaks either (the ADR-009/010 red-path scan).
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   test "operator WITHOUT a grant: BOTH the suppression list row and the timeline row for the SAME subscriber mask",
@@ -217,6 +218,6 @@ defmodule Samen.Web.DeliverabilityMaskingTest do
     # No PII field was ever resolved (the recipient is unknown) — the mask branch
     # never engages, and no vault token leaks either.
     refute html =~ "••••"
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 end

@@ -17,6 +17,7 @@ defmodule Samen.Web.BillingPlansCrudTest do
       write-path suspenders for the billing PII surface live in
       `billing_overview_crud_test.exs` — plans carry no PII.)
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   require Ash.Query
@@ -234,7 +235,7 @@ defmodule Samen.Web.BillingPlansCrudTest do
     refute rendered =~ ~s(phx-click="toggle_plan")
     refute rendered =~ ~s(phx-click="delete")
     refute rendered =~ "data-confirm"
-    refute rendered =~ "vt_"
+    refute_vault_token(rendered)
   end
 
   # ---------------------------------------------------------------------------

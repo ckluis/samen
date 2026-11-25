@@ -18,6 +18,7 @@ defmodule Samen.Scopes.ChatSearchMaskingTest do
     * **Index-content probe** — the vaulted body can NEVER be registered into a tsvector
       search index as plaintext (`SearchIndexGuard`).
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -104,7 +105,7 @@ defmodule Samen.Scopes.ChatSearchMaskingTest do
 
       assert [%Hit{} = hit | _] = search(tenant_scope(org_id), @sentinel)
       assert hit.snippet =~ @sentinel
-      refute hit.snippet =~ "vt_"
+      refute_vault_token(hit.snippet)
     end
 
     test "RED: an operator-WITHOUT-grant matches ZERO vaulted bodies (no hit, no leak)" do
@@ -117,7 +118,7 @@ defmodule Samen.Scopes.ChatSearchMaskingTest do
 
       html = render_results(search(operator_scope(org_id), @sentinel))
       refute html =~ @sentinel
-      refute html =~ "vt_"
+      refute_vault_token(html)
       assert html =~ "No matching messages."
     end
 

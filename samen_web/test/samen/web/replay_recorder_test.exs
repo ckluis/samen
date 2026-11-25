@@ -19,6 +19,7 @@ defmodule Samen.Web.ReplayRecorderTest do
       (the recorder is not even attached there);
     * overhead — the per-render cost with capture ON, measured.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Phoenix.LiveView.Lifecycle
@@ -193,7 +194,7 @@ defmodule Samen.Web.ReplayRecorderTest do
     ]
 
     for s <- sentinels, do: refute(all =~ s, "plaintext #{inspect(s)} reached the replay tables")
-    refute all =~ "vt_"
+    refute_vault_token(all)
 
     # A render records ONLY the assigns it changed: the last render (after "validate_new")
     # changed nothing but the form.

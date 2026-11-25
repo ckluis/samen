@@ -1,0 +1,20 @@
+# SABOTAGE: the vault-token helper's grammar arm skips attribute values, so a real token in a CSRF or data- 
+#   attribute passes
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault_token_assert_test.exs
+# MUST_FAIL: a real token inside a CSRF value, a phx session or a phx id still fails
+diff --git a/samen_core/lib/samen/vault_token_assert.ex b/samen_core/lib/samen/vault_token_assert.ex
+index 66707f69..ef96a5d4 100644
+--- a/samen_core/lib/samen/vault_token_assert.ex
++++ b/samen_core/lib/samen/vault_token_assert.ex
+@@ -42,7 +42,7 @@ defmodule Samen.VaultTokenAssert do
+   def leaks(text, opts \\ [])
+ 
+   def leaks(text, opts) when is_binary(text) do
+-    grammar = Samen.Vault.tokens_in(text)
++    grammar = Samen.Vault.tokens_in(Regex.replace(~r/="[^"]*"/, text, ""))
+     prefix = text |> blank_framework_tokens() |> prefix_hits(Keyword.get(opts, :boundary, false))
+     Enum.uniq(grammar ++ prefix)
+   end

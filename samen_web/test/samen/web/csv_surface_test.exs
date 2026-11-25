@@ -14,6 +14,7 @@ defmodule Samen.Web.CsvSurfaceTest do
     * ImportLive: tenant plane offers the form; operator plane does not (posture);
       a `%Report{}` renders created count + per-row errors honestly.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -97,7 +98,7 @@ defmodule Samen.Web.CsvSurfaceTest do
       assert get_resp_header(conn, "content-type") |> Enum.join() =~ "text/csv"
       assert get_resp_header(conn, "content-disposition") |> Enum.join() =~ ~s(attachment; filename="person.csv")
       assert conn.resp_body =~ @secret_first
-      refute conn.resp_body =~ "vt_"
+      refute_vault_token(conn.resp_body)
     end
 
     test "OPERATOR plane: the SAME route serves the MASKED CSV — •••• cells, zero plaintext (AC-G15-2)" do

@@ -1439,7 +1439,7 @@ defmodule Samen.Gen.PostTemplates do
         assert byte_size(out) > 0
         assert out =~ "Smoke row"
         assert out =~ to_string(record.id)
-        refute out =~ "vt_"
+        Samen.VaultTokenAssert.refute_vault_token(out)
       end
 
       test "SHOW mounts + resolves the 🔒 field through PiiResolution on the tenant plane (masking by construction)", %{record: record} do
@@ -1451,7 +1451,7 @@ defmodule Samen.Gen.PostTemplates do
         # NEVER the raw stored value.
         assert out =~ @plaintext or out =~ "••••"
         # The vault token NEVER reaches the DOM (the leak scan).
-        refute out =~ "vt_"
+        Samen.VaultTokenAssert.refute_vault_token(out)
       end
 
       test "FORM (new) mounts + renders the kit create form" do

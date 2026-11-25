@@ -13,6 +13,7 @@ defmodule PawChart.ReadsHonestFailureP4Test do
 
   The operator plane stays masked: an error state carries no name, no email and no `vt_` token.
   """
+  import Samen.VaultTokenAssert
   use PawChart.DataCase, async: false
 
   import ExUnit.CaptureLog
@@ -70,7 +71,7 @@ defmodule PawChart.ReadsHonestFailureP4Test do
     assert rendered =~ "error-state"
     assert rendered =~ ~s(role="alert")
     assert rendered =~ "Nothing was lost"
-    refute rendered =~ "vt_"
+    refute_vault_token(rendered)
   end
 
   defp create_owner!(org \\ @org, first \\ "Alice", opts \\ []) do
@@ -375,7 +376,7 @@ defmodule PawChart.ReadsHonestFailureP4Test do
       refute rendered =~ "<table"
       refute rendered =~ "Olivia"
       refute rendered =~ "olivia@example.com"
-      refute rendered =~ "vt_"
+      refute_vault_token(rendered)
     end
 
     test "POSITIVE CONTROL: the same console over a healthy table renders the masked roster and no error" do
@@ -387,7 +388,7 @@ defmodule PawChart.ReadsHonestFailureP4Test do
       assert rendered =~ "patient-row"
       assert rendered =~ "••••"
       refute rendered =~ "Olivia"
-      refute rendered =~ "vt_"
+      refute_vault_token(rendered)
     end
 
     test "a failing directory read shows the org id it was given and is reported, never a name it could not look up" do

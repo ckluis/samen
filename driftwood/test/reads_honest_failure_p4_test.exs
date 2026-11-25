@@ -14,6 +14,7 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
 
   The operator plane stays masked: an error state carries no name, no CDL and no `vt_` token.
   """
+  import Samen.VaultTokenAssert
   use Driftwood.DataCase, async: false
 
   require Ash.Query
@@ -77,7 +78,7 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
     assert rendered =~ "error-state"
     assert rendered =~ ~s(role="alert")
     assert rendered =~ "Nothing was lost"
-    refute rendered =~ "vt_"
+    refute_vault_token(rendered)
   end
 
   defp seeded_load(name \\ "BRL-P4 dry van") do
@@ -529,7 +530,7 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
       assert socket.assigns.loads_error == nil
       assert_error_state(rendered)
       refute rendered =~ "driver-row"
-      refute rendered =~ "vt_"
+      refute_vault_token(rendered)
       # the load board is another read and still renders
       assert rendered =~ "Load board"
       assert rendered =~ "load-row"

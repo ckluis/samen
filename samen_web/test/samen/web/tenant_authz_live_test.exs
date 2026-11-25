@@ -26,6 +26,7 @@ defmodule Samen.Web.TenantAuthzLiveTest do
   `full_name` in the CLEAR (`Samen.MaskingCase`'s tenant-plane green). A test that refuses
   everything proves nothing.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -152,7 +153,7 @@ defmodule Samen.Web.TenantAuthzLiveTest do
       refute body =~ @victim_name
       refute body =~ "VICTIM CONTACT"
       # Never a vault token either (the leak scan the masking discipline mandates).
-      refute body =~ "vt_"
+      refute_vault_token(body)
     end
 
     test "the LIVE mount is REFUSED", ctx do
@@ -185,7 +186,7 @@ defmodule Samen.Web.TenantAuthzLiveTest do
 
       refute html =~ @victim_name, "cross-tenant vaulted PII rendered in the clear"
       refute html =~ "VICTIM CONTACT"
-      refute html =~ "vt_"
+      refute_vault_token(html)
 
       # POSITIVE CONTROL (anti-tautology): the caller's OWN org still renders, in the clear.
       # (The list renders the vault-routed `full_name` — the 🔒 sentinel that matters here.)
@@ -209,7 +210,7 @@ defmodule Samen.Web.TenantAuthzLiveTest do
              "the tenant plane must still resolve its OWN vaulted full_name in the clear"
 
       refute html =~ "#{mask()}#{mask()}", "the owner's own row must not be mask-substituted"
-      refute html =~ "vt_"
+      refute_vault_token(html)
     end
 
     test "a `?org=` INSIDE the principal's authorized set is still honoured (multi-org switch)",

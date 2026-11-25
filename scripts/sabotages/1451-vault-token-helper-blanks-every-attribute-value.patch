@@ -1,0 +1,19 @@
+# SABOTAGE: the vault-token helper blanks every attribute value before the prefix scan, so a planted canary 
+#   in an attribute passes
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault_token_assert_test.exs
+# MUST_FAIL: a planted canary (vt_realtoken) fails in text, an attribute and JSON
+diff --git a/samen_core/lib/samen/vault_token_assert.ex b/samen_core/lib/samen/vault_token_assert.ex
+index 66707f69..4d8095b8 100644
+--- a/samen_core/lib/samen/vault_token_assert.ex
++++ b/samen_core/lib/samen/vault_token_assert.ex
+@@ -101,6 +101,7 @@ defmodule Samen.VaultTokenAssert do
+     )
+     |> then(&Regex.replace(@phx_attr, &1, ~s(\\1="~")))
+     |> then(&Regex.replace(@phx_id, &1, "phx-~"))
++    |> then(&Regex.replace(~r/="[^"]*"/, &1, "=\"~\""))
+   end
+ 
+   # Each `vt_` with 20 characters of context either side, so a failure shows WHERE.

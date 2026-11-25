@@ -229,7 +229,7 @@ defmodule SamenCore.CatalogMeaningReaderTest do
         end
 
       msg = Exception.message(err)
-      assert msg =~ "vt_"
+      assert msg =~ "vt_" # bare-vt_-ok: the message names the vt_ marker; it is not a token in a page
       assert msg =~ "UnclassifiedNonPii"
       assert msg =~ "allowed_values"
       assert msg =~ "risk"

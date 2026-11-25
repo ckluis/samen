@@ -18,6 +18,7 @@ defmodule Driftwood.RevealApproverLiveTest do
     * DENY — a denial issues no grant (the reveal still denies) and drops the request off the
       pending queue.
   """
+  import Samen.VaultTokenAssert
   use Driftwood.DataCase, async: false
 
   alias Driftwood.DogfoodScenario
@@ -113,7 +114,7 @@ defmodule Driftwood.RevealApproverLiveTest do
     assert pending_html =~ driver_id
     assert pending_html =~ "ticket 4242"
     assert pending_html =~ "approve-btn-#{req.id}"
-    refute pending_html =~ "vt_"
+    refute_vault_token(pending_html)
     refute pending_html =~ "CDL-OK", "the requested plaintext CDL value must NEVER render on the approver surface"
 
     # RED leg: before approval the reveal denies — the mask holds.
