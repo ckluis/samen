@@ -294,3 +294,11 @@ defmodule Samen.Meta.CiDriverGuardTest.MutationLintScan do
     Samen.Meta.CiDriverGuard.run_case!("MUTLINT")
   end
 end
+
+defmodule Samen.Meta.CiDriverGuardTest.MutationRunLock do
+  use ExUnit.Case, async: true
+
+  test "MUTLOCK mutate.sh refuses a second run in the same checkout and takes nothing from another checkout or a read-only list" do
+    Samen.Meta.CiDriverGuard.run_case!("MUTLOCK")
+  end
+end

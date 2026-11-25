@@ -6,15 +6,15 @@
 # TEST_FILES: test/api_key_digest_unique_gen_test.exs
 # MUST_FAIL: writes one migration of literal SQL for the keys
 diff --git a/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex b/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
-index 2919573e..492034f1 100644
+index e9175bba..512f8fc6 100644
 --- a/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
 +++ b/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
-@@ -80,7 +80,7 @@ defmodule Mix.Tasks.Samen.Gen.ApiKeyDigestUnique do
-   @doc "The migration source for `keys` on `repo` at `timestamp` (pure)."
-   @spec render(module(), [{String.t(), String.t()}], String.t()) :: String.t()
-   def render(repo, keys, timestamp) do
--    ups = Enum.map_join(keys, "\n", fn {t, c} -> "    concurrent_unique_index(:#{t}, :#{c}, name: \"#{index_name(t)}\")" end)
-+    ups = Enum.map_join(keys, "\n", fn {t, c} -> "    concurrent_index(:#{t}, [:#{c}], name: \"#{index_name(t)}\")" end)
-     downs = Enum.map_join(keys, "\n", fn {t, _} -> "    execute(\"DROP INDEX CONCURRENTLY IF EXISTS #{index_name(t)}\")" end)
+@@ -117,7 +117,7 @@ defmodule Mix.Tasks.Samen.Gen.ApiKeyDigestUnique do
+   @spec render(module(), [{String.t(), String.t()}], String.t(), kind()) :: String.t()
+   def render(repo, keys, timestamp, kind \\ :api_key) do
+     k = Map.fetch!(@kinds, kind)
+-    ups = Enum.map_join(keys, "\n", fn {t, c} -> "    concurrent_unique_index(:#{t}, :#{c}, name: \"#{index_name(t)}\")" <> drop_plain_up(k, t) end)
++    ups = Enum.map_join(keys, "\n", fn {t, c} -> "    concurrent_index(:#{t}, [:#{c}], name: \"#{index_name(t)}\")" <> drop_plain_up(k, t) end)
+     downs = Enum.map_join(keys, "\n", fn {t, c} -> restore_plain_down(k, t, c) <> "    execute(\"DROP INDEX CONCURRENTLY IF EXISTS #{index_name(t)}\")" end)
      cols = Enum.map_join(keys, ", ", fn {t, c} -> "`#{t}.#{c}`" end)
  

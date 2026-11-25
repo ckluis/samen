@@ -1,0 +1,19 @@
+# SABOTAGE: the CSAT retrofit generator no longer drops the plain index the unique one replaces
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/csat_token_digest_unique_gen_test.exs
+# MUST_FAIL: writes one migration of literal SQL that builds each unique index
+diff --git a/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex b/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
+index e9175bba..65bee022 100644
+--- a/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
++++ b/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
+@@ -155,7 +155,7 @@ defmodule Mix.Tasks.Samen.Gen.ApiKeyDigestUnique do
+   defp drop_plain_up(%{plain_index: nil}, _table), do: ""
+ 
+   defp drop_plain_up(%{plain_index: suffix}, table),
+-    do: "\n    execute(\"DROP INDEX CONCURRENTLY IF EXISTS #{table}_#{suffix}\")"
++    do: ""
+ 
+   defp restore_plain_down(%{plain_index: nil}, _table, _column), do: ""
+ 

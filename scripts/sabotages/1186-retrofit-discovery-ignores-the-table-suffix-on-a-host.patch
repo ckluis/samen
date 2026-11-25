@@ -1,0 +1,20 @@
+# SABOTAGE: discovery takes every resource with a *_token_digest column, not only the kind's tables, so a 
+#   host's invitation and auth-token tables are generated for
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/digest_unique_retrofit_discovery_test.exs
+# MUST_FAIL: tables finds exactly what the shipped migration names (table and stored column)
+diff --git a/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex b/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
+index 10aa5aac..9e2bf80a 100644
+--- a/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
++++ b/samen_core/lib/mix/tasks/samen.gen.api_key_digest_unique.ex
+@@ -195,7 +195,7 @@ defmodule Mix.Tasks.Samen.Gen.ApiKeyDigestUnique do
+     for domain <- domains,
+         resource <- Ash.Domain.Info.resources(domain),
+         table = AshPostgres.DataLayer.Info.table(resource),
+-        is_binary(table) and String.ends_with?(table, suffix),
++        is_binary(table) and (String.ends_with?(table, suffix) or is_binary(suffix)),
+         %{column_name: column} <- Samen.Catalog.fields(resource),
+         String.ends_with?(column, "_token_digest"),
+         uniq: true,

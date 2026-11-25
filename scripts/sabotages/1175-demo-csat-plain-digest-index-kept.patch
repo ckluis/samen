@@ -1,0 +1,19 @@
+# SABOTAGE: demo's survey-token retrofit leaves the redundant plain digest index in place
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/csat_token_digest_unique_test.exs
+# MUST_FAIL: dsc_csat_survey_token: the unique index replaced the plain lookup index
+diff --git a/demo/priv/repo/migrations/20261120100000_csat_token_digest_unique.exs b/demo/priv/repo/migrations/20261120100000_csat_token_digest_unique.exs
+index 1ebc21e6..fee9bf33 100644
+--- a/demo/priv/repo/migrations/20261120100000_csat_token_digest_unique.exs
++++ b/demo/priv/repo/migrations/20261120100000_csat_token_digest_unique.exs
+@@ -15,7 +15,7 @@ defmodule Demo.Repo.Migrations.CsatTokenDigestUnique do
+ 
+   def up do
+     concurrent_unique_index(:dsc_csat_survey_token, :dsc_token_digest, name: "dsc_csat_survey_token_token_digest_uidx")
+-    execute("DROP INDEX CONCURRENTLY IF EXISTS dsc_csat_survey_token_digest_idx")
++    nil
+   end
+ 
+   def down do

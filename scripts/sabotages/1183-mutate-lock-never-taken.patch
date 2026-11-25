@@ -1,0 +1,20 @@
+# SABOTAGE: mutate.sh never takes its per-checkout lock, so two runs share the mutated files and the test 
+#   database
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: MUTLOCK mutate.sh refuses a second run in the same checkout
+diff --git a/scripts/mutate.sh b/scripts/mutate.sh
+index 9cc70f7e..c565930d 100755
+--- a/scripts/mutate.sh
++++ b/scripts/mutate.sh
+@@ -128,7 +128,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ # lives exactly as long as this process (and any test process it left behind), with no stale-lock bookkeeping. Read-only
+ # invocations (--list, --dry-run, --list-targets, --help) take no lock. Lanes (scripts/sabotage-lanes.sh) are separate
+ # worktrees with their own `_ci/`, so they never meet. NEVER bypass: the guard is the only change allowed to the gate.
+-mutate_wants_lock=1
++mutate_wants_lock=0
+ for arg in "$@"; do
+   case "$arg" in --list|--dry-run|--list-targets|-h|--help) mutate_wants_lock=0 ;; esac
+ done

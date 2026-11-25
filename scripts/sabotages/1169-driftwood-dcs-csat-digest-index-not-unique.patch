@@ -1,0 +1,19 @@
+# SABOTAGE: driftwood's dcs survey-token retrofit builds a plain index, so a duplicate digest still inserts
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/csat_token_digest_unique_test.exs
+# MUST_FAIL: dcs_csat_survey_token: a duplicate digest is refused by the database
+diff --git a/driftwood/priv/repo/migrations/20261120100000_csat_token_digest_unique.exs b/driftwood/priv/repo/migrations/20261120100000_csat_token_digest_unique.exs
+index 1b008887..8f7ef997 100644
+--- a/driftwood/priv/repo/migrations/20261120100000_csat_token_digest_unique.exs
++++ b/driftwood/priv/repo/migrations/20261120100000_csat_token_digest_unique.exs
+@@ -16,7 +16,7 @@ defmodule Driftwood.Repo.Migrations.CsatTokenDigestUnique do
+   def up do
+     concurrent_unique_index(:dco_csat_survey_token, :dco_token_digest, name: "dco_csat_survey_token_token_digest_uidx")
+     execute("DROP INDEX CONCURRENTLY IF EXISTS dco_csat_survey_token_digest_idx")
+-    concurrent_unique_index(:dcs_csat_survey_token, :dcs_token_digest, name: "dcs_csat_survey_token_token_digest_uidx")
++    concurrent_index(:dcs_csat_survey_token, :dcs_token_digest, name: "dcs_csat_survey_token_token_digest_uidx")
+     execute("DROP INDEX CONCURRENTLY IF EXISTS dcs_csat_survey_token_digest_idx")
+   end
+ 

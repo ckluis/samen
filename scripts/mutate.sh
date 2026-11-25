@@ -117,6 +117,49 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# ── ONE RUN PER CHECKOUT ─────────────────────────────────────────────────────
+# Every run applies mutants to this checkout's files and runs the owning suites against this checkout's test
+# databases (samen_core_test, …), and nothing here sets SAMEN_TEST_DB_SUFFIX: two runs in one checkout (two
+# `--shard`s started by hand) would mutate the same files and reset the same database under each other. scripts/ci
+# runs the mutation shards one at a time and holds its own lock, so only a human can do this; a second run is REFUSED
+# here, loudly, and nothing is touched. The lock is an flock(2) on `<ci home>/mutate.lock` (the driver's own style:
+# scripts/ci_driver.py `fcntl.flock(LOCK_EX | LOCK_NB)`), taken by re-executing under a tiny python holder so the lock
+# lives exactly as long as this process (and any test process it left behind), with no stale-lock bookkeeping. Read-only
+# invocations (--list, --dry-run, --list-targets, --help) take no lock. Lanes (scripts/sabotage-lanes.sh) are separate
+# worktrees with their own `_ci/`, so they never meet. NEVER bypass: the guard is the only change allowed to the gate.
+mutate_wants_lock=1
+for arg in "$@"; do
+  case "$arg" in --list|--dry-run|--list-targets|-h|--help) mutate_wants_lock=0 ;; esac
+done
+if [[ $mutate_wants_lock -eq 1 && "${SAMEN_MUTATE_LOCK_PID:-}" != "$$" ]]; then
+  MUTATE_LOCK_FILE="${SAMEN_CI_HOME:-$REPO_ROOT/_ci}/mutate.lock"
+  mkdir -p "$(dirname "$MUTATE_LOCK_FILE")" || { echo "mutate.sh: cannot create $(dirname "$MUTATE_LOCK_FILE")" >&2; exit 3; }
+  # the holder becomes this script again (exec keeps the pid), with the locked descriptor inherited
+  exec python3 -I -c '
+import fcntl, os, sys
+path, cmd = sys.argv[1], sys.argv[2:]
+f = open(path, "a+")
+try:
+    fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except OSError:
+    f.seek(0)
+    holder = f.read().strip() or "an unknown process"
+    sys.stderr.write("mutate.sh: REFUSED - another mutate.sh is already running in this checkout (%s).\n"
+                     "  Two runs here would mutate the same files and share one test database.\n"
+                     "  Wait for it to finish (lock: %s), or run this one in its own worktree\n"
+                     "  (scripts/sabotage-lanes.sh does that, with SAMEN_TEST_DB_SUFFIX). Nothing was touched.\n" % (holder, path))
+    sys.exit(3)
+f.seek(0)
+f.truncate()
+f.write("pid %d: mutate.sh %s\n" % (os.getpid(), " ".join(cmd[2:])))
+f.flush()
+os.set_inheritable(f.fileno(), True)
+os.environ["SAMEN_MUTATE_LOCK_PID"] = str(os.getpid())
+os.execvp(cmd[0], cmd)
+' "$MUTATE_LOCK_FILE" "$BASH" "${BASH_SOURCE[0]}" "$@"
+fi
+
 ENGINE="$REPO_ROOT/scripts/mutation/mutate.exs"
 TARGETS_FILE="$REPO_ROOT/scripts/mutation/targets.tsv"
 LEDGER_FILE="$REPO_ROOT/scripts/mutation/ledger.tsv"

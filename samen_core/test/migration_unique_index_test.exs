@@ -21,7 +21,7 @@ defmodule Samen.MigrationUniqueIndexTest do
 
   setup do
     base = Repo.config()
-    db = "#{Keyword.fetch!(base, :database)}_uqidx_#{:rand.uniform(1_000_000)}"
+    db = "#{Keyword.fetch!(base, :database)}_scratch_uqidx_#{:rand.uniform(1_000_000)}"
     config = base |> Keyword.delete(:pool) |> Keyword.put(:pool_size, 5) |> Keyword.put(:database, db)
 
     dir = Path.join(System.tmp_dir!(), "samen_uq_migrations_#{System.unique_integer([:positive])}")

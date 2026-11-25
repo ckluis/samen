@@ -67,7 +67,11 @@ mkdir -p "$WORK_DIR" "$KEY_DIR" "$EMPTY_KEY_DIR"
 psql_admin() { psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres -v ON_ERROR_STOP=1 -c "$1"; }
 psql_db()    { psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$1" -v ON_ERROR_STOP=1 -c "$2"; }
 
-drop_db()   { psql_admin "DROP DATABASE IF EXISTS $1" >/dev/null 2>&1 || true; }
+# A failed drop is fatal where it precedes work that assumes a fresh database (IF EXISTS already
+# succeeds on a missing one, so a failure is real: a held connection, a permission). In EXIT-path
+# cleanup it is a warning on stderr instead, so cleanup never recurses into fail().
+drop_db()   { psql_admin "DROP DATABASE IF EXISTS $1" >/dev/null || fail "could not drop database $1"; }
+cleanup_drop_db() { psql_admin "DROP DATABASE IF EXISTS $1" >/dev/null 2>&1 || echo "WARNING: could not drop $1 (cleanup)" >&2; }
 create_db() { psql_admin "CREATE DATABASE $1" >/dev/null; }
 
 now_ms() { python3 -c 'import time; print(int(time.time()*1000))'; }
@@ -92,8 +96,8 @@ run_phase_started() {
 }
 
 cleanup() {
-  drop_db "$BASE_DB"
-  drop_db "$RESTORE_DB"
+  cleanup_drop_db "$BASE_DB"
+  cleanup_drop_db "$RESTORE_DB"
   rm -rf "$WORK_DIR"
 }
 

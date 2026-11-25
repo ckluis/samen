@@ -768,19 +768,31 @@ defmodule Samen.IndexingTest do
 
     defp slow_index_state, do: index_state("ix_slow_idx")
 
+    # The build is in flight when PostgreSQL has reported it in pg_stat_progress_create_index AND the
+    # first transaction has committed its pg_index row (INVALID). Progress reporting starts BEFORE that
+    # commit (DefineIndex), so progress alone leaves a window with no row to read.
+    defp build_in_flight? do
+      [[progress, invalid_rows]] =
+        @repo.query!(
+          "SELECT (SELECT count(*) FROM pg_stat_progress_create_index WHERE relid = 'ix_slow'::regclass), " <>
+            "(SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid " <>
+            "WHERE c.relname = 'ix_slow_idx' AND NOT i.indisvalid)"
+        ).rows
+
+      progress == 1 and invalid_rows == 1
+    end
+
     defp wait_for_build(deadline \\ 100) do
-      case @repo.query!(
-             "SELECT count(*) FROM pg_stat_progress_create_index WHERE relid = 'ix_slow'::regclass"
-           ).rows do
-        [[1]] ->
+      cond do
+        build_in_flight?() ->
           :ok
 
-        _ when deadline > 0 ->
+        deadline > 0 ->
           Process.sleep(50)
           wait_for_build(deadline - 1)
 
-        _ ->
-          flunk("the second session's CREATE INDEX CONCURRENTLY never showed up in progress")
+        true ->
+          flunk("the second session's CREATE INDEX CONCURRENTLY never showed up as an INVALID index in progress")
       end
     end
 
@@ -806,6 +818,59 @@ defmodule Samen.IndexingTest do
       # the build was not killed, and its index (same relation) is the finished, VALID one
       assert %Postgrex.Result{} = Task.await(builder, 60_000)
       assert [[true, ^oid, _]] = slow_index_state()
+    end
+
+    # Deterministic stall of the build's first transaction: another session holds an UNCOMMITTED relation
+    # named ix_slow_idx, so the build's pg_class insert waits on it after progress reporting has started
+    # and before its own pg_index row is committed. Progress is visible; the row is not.
+    test "wait_for_build does not return while the build is reported but its index row is not yet committed" do
+      cfg = Keyword.take(@repo.config(), [:hostname, :port, :username, :password, :database, :socket_dir, :socket])
+      {:ok, holder} = Postgrex.start_link(cfg)
+      {:ok, other} = Postgrex.start_link(cfg)
+      Postgrex.query!(holder, "BEGIN", [])
+      Postgrex.query!(holder, "CREATE TABLE ix_slow_idx (x int)", [])
+
+      builder =
+        Task.async(fn ->
+          Postgrex.query!(other, "CREATE INDEX CONCURRENTLY ix_slow_idx ON ix_slow (ix_slow_fn(id))", [], timeout: 60_000)
+        end)
+
+      try do
+        progress = fn ->
+          @repo.query!("SELECT count(*) FROM pg_stat_progress_create_index WHERE relid = 'ix_slow'::regclass").rows
+        end
+
+        until = fn until, n ->
+          cond do
+            progress.() == [[1]] -> :ok
+            n == 0 -> flunk("the stalled build never showed up in progress")
+            true ->
+              Process.sleep(20)
+              until.(until, n - 1)
+          end
+        end
+
+        :ok = until.(until, 250)
+        # The window, observed as STATE (no timer): the build is reported in progress, there is no index row for
+        # slow_index_state/0 to read, and the predicate wait_for_build/1 loops on says "not yet".
+        assert progress.() == [[1]]
+        assert slow_index_state() == []
+        refute build_in_flight?()
+
+        Postgrex.query!(holder, "ROLLBACK", [])
+        assert :ok = wait_for_build()
+        assert [[false, _, _]] = slow_index_state()
+        assert build_in_flight?()
+        assert %Postgrex.Result{} = Task.await(builder, 60_000)
+        assert [[true, _, _]] = slow_index_state()
+        refute build_in_flight?()
+      after
+        # explicit on every path: free the held relation name, let (or make) the build end, close both sessions
+        Postgrex.query(holder, "ROLLBACK", [])
+        if Process.alive?(builder.pid), do: Task.yield(builder, 30_000) || Task.shutdown(builder, :brutal_kill)
+        GenServer.stop(holder)
+        GenServer.stop(other)
+      end
     end
 
     # CREATE INDEX CONCURRENTLY releases its session lock BEFORE the transaction that flips indisvalid

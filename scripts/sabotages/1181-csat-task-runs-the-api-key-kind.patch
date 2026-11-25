@@ -1,0 +1,17 @@
+# SABOTAGE: the csat mix task runs the API-key kind: wrong file and module, no drop of the plain index
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/csat_token_digest_unique_gen_test.exs
+# MUST_FAIL: the mix task runs the csat kind
+diff --git a/samen_core/lib/mix/tasks/samen.gen.csat_token_digest_unique.ex b/samen_core/lib/mix/tasks/samen.gen.csat_token_digest_unique.ex
+index 0f6de90a..50474820 100644
+--- a/samen_core/lib/mix/tasks/samen.gen.csat_token_digest_unique.ex
++++ b/samen_core/lib/mix/tasks/samen.gen.csat_token_digest_unique.ex
+@@ -26,5 +26,5 @@ defmodule Mix.Tasks.Samen.Gen.CsatTokenDigestUnique do
+   use Mix.Task
+ 
+   @impl Mix.Task
+-  def run(argv), do: Mix.Tasks.Samen.Gen.ApiKeyDigestUnique.run_kind(argv, :csat)
++  def run(argv), do: Mix.Tasks.Samen.Gen.ApiKeyDigestUnique.run_kind(argv, :api_key)
+ end

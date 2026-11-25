@@ -496,6 +496,66 @@ fi
 rm -f "${PROBE_TESTS[@]}"
 
 echo ""
+echo "== 17b: one mutate.sh per checkout (a second run is refused, nothing is touched) =="
+# Two runs in one checkout share the mutated files and the test database. The lock is an flock on <ci home>/mutate.lock;
+# a scratch ci home keeps this case independent of whatever the real _ci/ holds.
+LOCK_HOME="$SCRATCH/cihome"
+LOCK_RAN="$SCRATCH/lock-runner-ran"
+R_MARK="touch '$LOCK_RAN'; exit 0"
+lock_gate() { SAMEN_CI_HOME="$LOCK_HOME" SAMEN_MUTATION_RUNNER="$R_MARK" bash "$MUTATE" --targets "$TARGETS" --ledger "$EMPTY_LEDGER" "$@" 2>&1; }
+
+# positive control: with the lock free the run goes ahead and reaches the runner
+rm -f "$LOCK_RAN"
+out="$(lock_gate)"; st=$?
+if [[ -e "$LOCK_RAN" ]] && ! grep -q "REFUSED" <<<"$out"; then
+  ok "POSITIVE CONTROL: with no other mutate.sh running, the run is not refused and reaches the test runner"
+else
+  echo "$out"
+  bad "a run with a free lock never reached the runner (exit $st)"
+fi
+
+# another mutate.sh is running: hold the same lock from a separate process
+mkdir -p "$LOCK_HOME"
+python3 -I -c '
+import fcntl, sys, time
+f = open(sys.argv[1], "a+"); fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+f.seek(0); f.truncate(); f.write("pid 4242: mutate.sh --shard 1/2\n"); f.flush()
+open(sys.argv[2], "w").close()
+time.sleep(120)
+' "$LOCK_HOME/mutate.lock" "$SCRATCH/lock-held" &
+HOLDER=$!
+for _ in $(seq 1 100); do [[ -e "$SCRATCH/lock-held" ]] && break; sleep 0.1; done
+rm -f "$LOCK_RAN"
+if [[ ! -e "$SCRATCH/lock-held" ]]; then
+  bad "the lock holder never started"
+else
+  out="$(lock_gate)"; st=$?
+  if [[ $st -eq 3 ]] && grep -q "REFUSED - another mutate.sh is already running in this checkout (pid 4242: mutate.sh --shard 1/2)" <<<"$out" \
+     && [[ ! -e "$LOCK_RAN" ]] && [[ "$(shasum -a 256 "$PROBE" | cut -d' ' -f1)" == "$PROBE_SHA_BEFORE" ]]; then
+    ok "NEGATIVE CONTROL: a second mutate.sh is REFUSED (exit 3, naming the holder); no test runner ran and no file was touched"
+  else
+    echo "$out"
+    bad "a second mutate.sh was not refused while the lock was held (exit $st)"
+  fi
+  out="$(SAMEN_CI_HOME="$LOCK_HOME" bash "$MUTATE" --list --targets "$TARGETS" --ledger "$EMPTY_LEDGER" 2>&1)"; st=$?
+  if [[ $st -eq 0 ]] && grep -q "dry-run" <<<"$out"; then
+    ok "a read-only --list is not blocked by a running mutate.sh"
+  else
+    echo "$out"
+    bad "--list was refused or failed while another run held the lock (exit $st)"
+  fi
+fi
+kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null
+rm -f "$LOCK_RAN"
+out="$(lock_gate)"; st=$?
+if [[ -e "$LOCK_RAN" ]] && ! grep -q "REFUSED" <<<"$out"; then
+  ok "once the other run has gone, the lock is free again (no stale lock to clear by hand)"
+else
+  echo "$out"
+  bad "the lock stayed held after its owner died (exit $st)"
+fi
+
+echo ""
 echo "== 18: residue =="
 if [[ "$(shasum -a 256 "$PROBE" | cut -d' ' -f1)" == "$PROBE_SHA_BEFORE" ]]; then
   ok "the probe target is byte-identical after every run (no mutant residue)"

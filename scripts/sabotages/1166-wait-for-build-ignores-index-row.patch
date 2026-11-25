@@ -1,0 +1,19 @@
+# SABOTAGE: the in-flight build wait checks progress only, not the committed INVALID index row
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/indexing_test.exs
+# MUST_FAIL: wait_for_build does not return while the build is reported but its index row is not yet committed
+diff --git a/samen_core/test/indexing_test.exs b/samen_core/test/indexing_test.exs
+index 920ff2bd..26ccab47 100644
+--- a/samen_core/test/indexing_test.exs
++++ b/samen_core/test/indexing_test.exs
+@@ -779,7 +779,7 @@ defmodule Samen.IndexingTest do
+             "WHERE c.relname = 'ix_slow_idx' AND NOT i.indisvalid)"
+         ).rows
+ 
+-      progress == 1 and invalid_rows == 1
++      progress == 1 and invalid_rows >= 0
+     end
+ 
+     defp wait_for_build(deadline \\ 100) do

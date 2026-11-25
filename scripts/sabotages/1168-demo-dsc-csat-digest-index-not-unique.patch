@@ -1,0 +1,19 @@
+# SABOTAGE: demo's dsc survey-token retrofit builds a plain index, so a duplicate digest still inserts
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/csat_token_digest_unique_test.exs
+# MUST_FAIL: dsc_csat_survey_token: a duplicate digest is refused by the database
+diff --git a/demo/priv/repo/migrations/20261120100000_csat_token_digest_unique.exs b/demo/priv/repo/migrations/20261120100000_csat_token_digest_unique.exs
+index 1ebc21e6..3a0208b7 100644
+--- a/demo/priv/repo/migrations/20261120100000_csat_token_digest_unique.exs
++++ b/demo/priv/repo/migrations/20261120100000_csat_token_digest_unique.exs
+@@ -14,7 +14,7 @@ defmodule Demo.Repo.Migrations.CsatTokenDigestUnique do
+   @disable_migration_lock true
+ 
+   def up do
+-    concurrent_unique_index(:dsc_csat_survey_token, :dsc_token_digest, name: "dsc_csat_survey_token_token_digest_uidx")
++    concurrent_index(:dsc_csat_survey_token, :dsc_token_digest, name: "dsc_csat_survey_token_token_digest_uidx")
+     execute("DROP INDEX CONCURRENTLY IF EXISTS dsc_csat_survey_token_digest_idx")
+   end
+ 

@@ -1,0 +1,19 @@
+# SABOTAGE: samen_web's wco survey-token retrofit builds a plain index, so a duplicate digest still inserts
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/csat_token_digest_unique_test.exs
+# MUST_FAIL: wco_csat_survey_token: a duplicate digest is refused by the database
+diff --git a/samen_web/priv/repo/migrations/20261120100000_csat_token_digest_unique.exs b/samen_web/priv/repo/migrations/20261120100000_csat_token_digest_unique.exs
+index 5df4d802..696f3ab7 100644
+--- a/samen_web/priv/repo/migrations/20261120100000_csat_token_digest_unique.exs
++++ b/samen_web/priv/repo/migrations/20261120100000_csat_token_digest_unique.exs
+@@ -16,7 +16,7 @@ defmodule Samen.WebTest.Repo.Migrations.CsatTokenDigestUnique do
+   def up do
+     concurrent_unique_index(:scw_csat_survey_token, :scw_token_digest, name: "scw_csat_survey_token_token_digest_uidx")
+     execute("DROP INDEX CONCURRENTLY IF EXISTS scw_csat_survey_token_digest_idx")
+-    concurrent_unique_index(:wco_csat_survey_token, :wco_token_digest, name: "wco_csat_survey_token_token_digest_uidx")
++    concurrent_index(:wco_csat_survey_token, :wco_token_digest, name: "wco_csat_survey_token_token_digest_uidx")
+     execute("DROP INDEX CONCURRENTLY IF EXISTS wco_csat_survey_token_digest_idx")
+   end
+ 

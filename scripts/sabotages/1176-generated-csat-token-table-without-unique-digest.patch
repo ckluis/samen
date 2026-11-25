@@ -1,0 +1,19 @@
+# SABOTAGE: the generated first migration creates a plain digest index on the CSAT survey-token table
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/csat_token_digest_unique_template_test.exs
+# MUST_FAIL: the generated mount migration builds a UNIQUE index on the survey token's digest
+diff --git a/samen_core/priv/templates/m_mount_operator_scopes.eex b/samen_core/priv/templates/m_mount_operator_scopes.eex
+index 86b2d88c..b3a02bc0 100644
+--- a/samen_core/priv/templates/m_mount_operator_scopes.eex
++++ b/samen_core/priv/templates/m_mount_operator_scopes.eex
+@@ -840,7 +840,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
+ 
+     # One row per digest: `preview` reads by digest with `limit(1)` and `respond` consumes by digest, so a duplicate
+     # would make them disagree about which row they mean.
+-    create(unique_index(:<%= o_csat_token %>_csat_survey_token, [:<%= o_csat_token %>_token_digest], name: "<%= o_csat_token %>_csat_survey_token_digest_idx"))
++    create(index(:<%= o_csat_token %>_csat_survey_token, [:<%= o_csat_token %>_token_digest], name: "<%= o_csat_token %>_csat_survey_token_digest_idx"))
+ 
+     # ARCH-4: the tenant keyset index (org_id, <keyset sort>, id) on every org-scoped table above.
+     create_org_keyset_indexes(@resources)

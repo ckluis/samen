@@ -1,0 +1,20 @@
+# SABOTAGE: mutate.sh's lock is one file for the machine, so a run in one checkout blocks every other 
+#   checkout and worktree lane
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: MUTLOCK mutate.sh refuses a second run in the same checkout
+diff --git a/scripts/mutate.sh b/scripts/mutate.sh
+index 9cc70f7e..0ebf1999 100755
+--- a/scripts/mutate.sh
++++ b/scripts/mutate.sh
+@@ -133,7 +133,7 @@ for arg in "$@"; do
+   case "$arg" in --list|--dry-run|--list-targets|-h|--help) mutate_wants_lock=0 ;; esac
+ done
+ if [[ $mutate_wants_lock -eq 1 && "${SAMEN_MUTATE_LOCK_PID:-}" != "$$" ]]; then
+-  MUTATE_LOCK_FILE="${SAMEN_CI_HOME:-$REPO_ROOT/_ci}/mutate.lock"
++  MUTATE_LOCK_FILE="/tmp/samen_mutate.lock"
+   mkdir -p "$(dirname "$MUTATE_LOCK_FILE")" || { echo "mutate.sh: cannot create $(dirname "$MUTATE_LOCK_FILE")" >&2; exit 3; }
+   # the holder becomes this script again (exec keeps the pid), with the locked descriptor inherited
+   exec python3 -I -c '

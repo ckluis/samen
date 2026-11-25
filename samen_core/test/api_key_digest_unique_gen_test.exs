@@ -34,7 +34,8 @@ defmodule Samen.ApiKeyDigestUniqueGenTest do
 
     attributes do
       uuid_primary_key :id
-      attribute :zzk_token_digest, :string
+      # the shape of a real Samen resource: logical `:token_digest`, only the STORED column carries the prefix
+      attribute :token_digest, :string, source: :zzk_token_digest
     end
   end
 
@@ -96,7 +97,7 @@ defmodule Samen.ApiKeyDigestUniqueGenTest do
   describe "the generated migration, run for real" do
     setup %{dir: dir} do
       base = Repo.config()
-      db = "#{Keyword.fetch!(base, :database)}_akdgen_#{:rand.uniform(1_000_000)}"
+      db = "#{Keyword.fetch!(base, :database)}_scratch_akdgen_#{:rand.uniform(1_000_000)}"
       config = base |> Keyword.delete(:pool) |> Keyword.put(:pool_size, 5) |> Keyword.put(:database, db)
 
       :ok = Samen.TestDb.reset!(config)
