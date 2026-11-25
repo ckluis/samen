@@ -618,6 +618,11 @@ defmodule Samen.Scopes.Primitives.Blueprint do
           defaults([:read, :destroy, create: :*, update: :*])
         end
 
+        # A vault-routed field is never registered (the query path's guard, applied at write time too).
+        changes do
+          change(Samen.Scopes.Primitives.SearchIndexPiiChange, on: [:create, :update])
+        end
+
         policies do
           policy action_type(:read) do
             authorize_if(Samen.Policy.OrgScope)
