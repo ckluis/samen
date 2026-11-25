@@ -155,7 +155,7 @@ mkfix() {
     local real_f="$F"; F="$TPL"; build_fixture; F="$real_f"
   fi
   rm -rf "$F"
-  if [[ "$(uname)" == Darwin ]]; then cp -Rpc "$TPL" "$F" 2>/dev/null || cp -Rp "$TPL" "$F"
+  if [[ "$(uname)" == Darwin ]]; then cp -Rpc "$TPL" "$F" 2>/dev/null || { rm -rf "$F"; cp -Rp "$TPL" "$F"; }
   else cp -a --reflink=auto "$TPL" "$F"; fi
 }
 sab() { # sab <outfile> <args…> — run the fixture's scripts/sabotage; RC
