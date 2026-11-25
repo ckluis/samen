@@ -60,6 +60,7 @@ defmodule Samen.VaultTokenAssert do
 
   defp text!(other, who), do: bad_input!(other, who)
 
+  @spec bad_input!(term(), String.t()) :: no_return()
   defp bad_input!(other, who) do
     flunk(
       "Samen.VaultTokenAssert.#{who} expects a binary or iodata, got #{inspect(other, limit: 5, printable_limit: 80)}" <>
