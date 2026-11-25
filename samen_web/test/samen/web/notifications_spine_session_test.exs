@@ -271,6 +271,112 @@ defmodule Samen.Web.NotificationsSpineSessionTest do
     refute Enum.any?(rows, &(&1.recipient_id == owner_user))
   end
 
+  # -- B1: chat @-mentions reach the mentioned PERSON ---------------------------------------
+
+  defp chat_mount,
+    do: Mount.new(:chat, Samen.WebTest.Chat, Samen.WebTest.Repo, labels: %{identity_namespace: Samen.WebTest.Operator})
+
+  defp thread_with_participants!(ctx) do
+    mount = chat_mount()
+    scope = Mount.scope(mount, ctx.org_id)
+
+    {:ok, thread} = Samen.Web.Chat.create_thread(mount, scope, %{org_id: ctx.org_id, subject: "Mentions", kind: :cross_plane, status: :open})
+
+    add = fn account, handle ->
+      {:ok, p} =
+        Samen.Web.Chat.add_participant(mount, scope, %{
+          org_id: ctx.org_id,
+          thread_id: thread.id,
+          party: :tenant,
+          principal_kind: :user,
+          principal_id: user_id(account, ctx.org_id),
+          handle: handle,
+          role: :member
+        })
+
+      p
+    end
+
+    %{thread: thread, owner_p: add.(ctx.owner, "the-owner"), member_p: add.(ctx.member, "the-member"), viewer_p: add.(ctx.viewer, "the-viewer")}
+  end
+
+  defp mention!(ctx, chat, body) do
+    mount = chat_mount()
+
+    Samen.Web.Chat.post_message(
+      mount,
+      Mount.scope(mount, ctx.org_id),
+      %{org_id: ctx.org_id, thread_id: chat.thread.id, participant_id: chat.owner_p.id, sender_party: :tenant, body: body},
+      broadcast: false,
+      notify: engine_opts()
+    )
+  end
+
+  test "B1: a chat @-mention is visible in the mentioned member's inbox through a real login, and in no one else's", ctx do
+    chat = thread_with_participants!(ctx)
+    assert {:ok, _} = mention!(ctx, chat, "ping @the-member please")
+
+    # the stored row is addressed to the member's PER-ORG USER, not the participant row
+    member_user = user_id(ctx.member, ctx.org_id)
+    assert [%{recipient_id: ^member_user}] = Notification |> Ash.Query.filter(event_type == "chat_mention") |> Ash.read!(authorize?: false)
+
+    # positive control: the mentioned member sees it
+    assert inbox_html(log_in(ctx.member).conn, ctx.org_id) =~ "mentioned you in a conversation"
+    # nobody else does: not the sender, not another member, not the viewer
+    refute inbox_html(log_in(ctx.owner).conn, ctx.org_id) =~ "mentioned you in a conversation"
+    refute inbox_html(log_in(ctx.viewer).conn, ctx.org_id) =~ "mentioned you in a conversation"
+  end
+
+  test "B1: the mention preference is set by its owner (real session) and gates delivery", ctx do
+    chat = thread_with_participants!(ctx)
+    member_user = user_id(ctx.member, ctx.org_id)
+
+    socket = live_socket(log_in(ctx.member), PreferencesLive, "/notifications/settings", ctx.org_id)
+
+    {:noreply, _socket} =
+      PreferencesLive.handle_event(
+        "save",
+        %{"_target" => ["prefs", "chat_mention__in_app"], "prefs" => %{"chat_mention__in_app" => "off"}},
+        socket
+      )
+
+    assert [%{recipient_id: ^member_user, event_type: "chat_mention", in_app_enabled: false}] =
+             NotificationPreference |> Ash.Query.filter(event_type == "chat_mention") |> Ash.read!(authorize?: false)
+
+    assert {:ok, _} = mention!(ctx, chat, "ping @the-member again")
+    assert Notification |> Ash.Query.filter(event_type == "chat_mention") |> Ash.read!(authorize?: false) == []
+
+    # positive control: another member's mention is still delivered
+    assert {:ok, _} = mention!(ctx, chat, "ping @the-viewer too")
+    assert [_one] = Notification |> Ash.Query.filter(event_type == "chat_mention") |> Ash.read!(authorize?: false)
+  end
+
+  test "B1: a conversation started from the real session maps its initiator to the per-org user", ctx do
+    login = log_in(ctx.member)
+
+    mount =
+      Mount.new(:chat, Samen.WebTest.Chat, Samen.WebTest.Repo,
+        labels: %{
+          otp_app: SecurityHost.otp_app(),
+          authn: {:app_env, SecurityHost.otp_app(), :auth_required?},
+          authorized_orgs: {SecurityHost, :authorized_org_ids, []},
+          identity_namespace: Samen.WebTest.Operator
+        }
+      )
+
+    session = Map.merge(login.session, %{"samen_mount" => Mount.to_session(mount)})
+    socket = Phoenix.Component.assign(%Phoenix.LiveView.Socket{}, :__changed__, %{})
+    {:cont, socket} = Samen.Web.TenantAuthz.on_mount(:require_tenant, %{"org" => ctx.org_id}, session, socket)
+    {:ok, socket} = Samen.Web.Chat.ThreadsLive.mount(%{"org" => ctx.org_id}, session, socket)
+
+    {:noreply, _socket} =
+      Samen.Web.Chat.ThreadsLive.handle_event("new_conversation", %{"subject" => "Hello", "handle" => "initiator"}, socket)
+
+    participants = Samen.WebTest.Chat.ChatParticipant |> Ash.read!(authorize?: false)
+    member_user = user_id(ctx.member, ctx.org_id)
+    assert Enum.any?(participants, &(&1.principal_id == member_user and &1.principal_kind == :user))
+  end
+
   # -- helpers needing the endpoint -----------------------------------------------------
 
   defp suspend!(user_id, org_id) do

@@ -51,7 +51,8 @@ defmodule Samen.Web.Chat do
   @doc """
   Add a participant to a thread. `attrs` carries `thread_id`, `party` (`:tenant | :operator`),
   `handle`, optional `full_name`/`principal_kind`/`principal_id`/`identity_shared`/`role`, and
-  `org_id`. The write goes through Ash (`OrgScope` + `SameOrgFk`). `{:ok, p}` or `{:error, _}`.
+  `org_id`. For a `principal_kind: :user` participant `principal_id` is the per-org `Identity.User` id:
+  it is the address an @-mention notification goes to. The write goes through Ash (`OrgScope` + `SameOrgFk`). `{:ok, p}` or `{:error, _}`.
   """
   @spec add_participant(Mount.t(), Samen.Scope.t(), map()) :: {:ok, map()} | {:error, term()}
   def add_participant(%Mount{} = mount, scope, attrs) do
@@ -68,7 +69,9 @@ defmodule Samen.Web.Chat do
   `identity_shared` carries the per-conversation opt-in (§5 state 2).
 
   `attrs` carries `org_id`, `subject`, `handle` (the initiator's non-PII label), optional
-  `full_name`, and `share_identity` (the opt-in boolean, default `false`). Returns
+  `full_name`, optional `principal_id` (the initiator's per-org `Identity.User` id - what an @-mention
+  notification is addressed to; without it the participant cannot be notified), and `share_identity`
+  (the opt-in boolean, default `false`). Returns
   `{:ok, thread}` or `{:error, reason}` (the thread create/participant create failing rolls up).
 
   This is the ONE place the 3-state model's WRITE side lives at framework level: the setting
@@ -100,6 +103,7 @@ defmodule Samen.Web.Chat do
              thread_id: thread.id,
              party: :tenant,
              principal_kind: :user,
+             principal_id: Map.get(attrs, :principal_id),
              role: :owner,
              handle: Map.get(attrs, :handle),
              full_name: Map.get(attrs, :full_name),
@@ -287,21 +291,32 @@ defmodule Samen.Web.Chat do
         participants
         |> Enum.filter(fn p -> p.handle in mentions and p.id != message.participant_id end)
         |> Enum.each(fn p ->
-          Samen.Notifications.Engine.emit(
-            %{
-              org_id: org_id || org_id_of(scope),
-              recipient_id: p.id,
-              event_type: "chat_mention",
-              channel: :in_app,
-              # Non-PII copy: handles only — NEVER the vaulted message body.
-              rendered_body: "@#{sender_handle} mentioned you in a conversation.",
-              metadata: %{
-                "thread_id" => to_string(message.thread_id),
-                "message_id" => to_string(message.id)
-              }
-            },
-            notify_opts
-          )
+          # Addressed to the participant's PERSON (the per-org `Identity.User` id), the one id a
+          # recipient's inbox and notification preferences match on. The participant row's own id
+          # names nobody a session can act as. A participant with no per-org user (an operator-staff
+          # or agent participant, or one added without a `principal_id`) has no inbox in this org:
+          # it is not notified rather than addressed to the whole org.
+          case mention_recipient(p) do
+            nil ->
+              :ok
+
+            recipient_id ->
+              Samen.Notifications.Engine.emit(
+                %{
+                  org_id: org_id || org_id_of(scope),
+                  recipient_id: recipient_id,
+                  event_type: "chat_mention",
+                  channel: :in_app,
+                  # Non-PII copy: handles only — NEVER the vaulted message body.
+                  rendered_body: "@#{sender_handle} mentioned you in a conversation.",
+                  metadata: %{
+                    "thread_id" => to_string(message.thread_id),
+                    "message_id" => to_string(message.id)
+                  }
+                },
+                notify_opts
+              )
+          end
         end)
 
         :ok
@@ -314,6 +329,15 @@ defmodule Samen.Web.Chat do
       Samen.Web.Reads.Guard.report(:chat_notify_mentions, scope, e)
       :ok
   end
+
+  defp mention_recipient(%{principal_kind: :user, principal_id: id}) when is_binary(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> uuid
+      :error -> nil
+    end
+  end
+
+  defp mention_recipient(_participant), do: nil
 
   # Broadcast the id-only envelope unless the caller opted out (`broadcast: false`, e.g. a
   # seed that inserts without a running PubSub).
