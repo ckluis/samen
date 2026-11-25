@@ -337,6 +337,35 @@ defmodule Samen.Web.FilesCsvRouterTest do
       conn = export(member, "Person", ctx.org_id)
       assert conn.status == 413
       refute conn.resp_body =~ "Row 1"
+
+      # The case the in-loop limit exists for: the org passes the up-front COUNT (3 <= 3) and then grows before the
+      # paged read. A telemetry handler runs in the querying process right after the scoped COUNT and inserts one more
+      # row (once), so the read sees 4 > 3: the in-loop check alone must refuse, with no body.
+      Application.put_env(:samen_web, Samen.Web.Csv, max_export_rows: 3)
+      assert export(member, "Person", ctx.org_id).status == 200
+
+      grown = :atomics.new(1, [])
+      org_id = ctx.org_id
+      id = {:csv_growth, System.unique_integer([:positive])}
+      event = Samen.WebTest.Repo.config()[:telemetry_prefix] ++ [:query]
+
+      :telemetry.attach(
+        id,
+        event,
+        fn _e, _m, meta, _c ->
+          if meta.query =~ "swp_person" and meta.query =~ "count(" and :atomics.compare_exchange(grown, 1, 0, 1) == :ok do
+            person!(org_id, "Grow 4")
+          end
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(id) end)
+
+      conn = export(member, "Person", ctx.org_id)
+      assert :atomics.get(grown, 1) == 1, "the growth never happened: the handler did not see the COUNT"
+      assert conn.status == 413
+      refute conn.resp_body =~ "Grow"
     end
 
     # Every SQL statement the repo runs while `fun` does: a COUNT is not a row read, and a vault read is a resolution.

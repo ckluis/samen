@@ -5,18 +5,9 @@
 # TEST_FILES: test/samen/web/files_csv_router_test.exs
 # MUST_FAIL: an export larger than the row limit is refused
 diff --git a/samen_web/lib/samen/web/csv.ex b/samen_web/lib/samen/web/csv.ex
-index bd4193e6..a954f4e7 100644
+index bd4193e6..3918cd29 100644
 --- a/samen_web/lib/samen/web/csv.ex
 +++ b/samen_web/lib/samen/web/csv.ex
-@@ -167,7 +167,7 @@ defmodule Samen.Web.Csv do
- 
-   defp within_limit(base, scope, max_rows) do
-     case Ash.count(Ash.Query.new(base), scope: scope) do
--      {:ok, n} when n > max_rows -> {:error, {:too_many_rows, max_rows}}
-+      {:ok, n} when false and n > max_rows -> {:error, {:too_many_rows, max_rows}}
-       {:ok, _} -> :ok
-       # Unknown size: fail closed, never read on without having bounded the work.
-       {:error, _} -> {:error, :count_failed}
 @@ -244,7 +244,7 @@ defmodule Samen.Web.Csv do
      page = page(base, scope, state, cols)
      count = count + length(page.items)
