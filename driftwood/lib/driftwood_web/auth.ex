@@ -72,7 +72,10 @@ defmodule DriftwoodWeb.Auth do
   defp spine_session?(session) do
     match?({:ok, %{credential_id: _}}, WebAuth.resolve_principal(session, %{session: Driftwood.Operator.Session}))
   rescue
-    _ -> false
+    e ->
+      # Fail closed, but not silent: a session lookup that failed is on record by name and exception module.
+      Samen.Web.Reads.Guard.report(:host_gate_spine_session, nil, e)
+      false
   end
 
   @doc """
