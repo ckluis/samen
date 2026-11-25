@@ -1,0 +1,20 @@
+# SABOTAGE: the plan loads scripts/mutation/rates.tsv but sizes every mutant at the flat shard_each_s, so a 
+#   slow target (vault.ex) gets the limit that cancelled PR #177
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: MUTRATE a mutation job is sized from per-target measured rates
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 9af747f2..d904773e 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1757,7 +1757,7 @@ def selection_counts(man, mode, base):
+                 raise UsageError("actions plan --selection: %s: the per-path counts matched by shard_rate_item /%s/ add up to %d, "
+                                  "but the lister selected %d — refusing to size the job from a partial listing\n%s"
+                                  % (s.id, s.shard_rate_item, sum(c for _p, c in per), n, text[-1500:]))
+-            est = sum(c * rates.get(p, s.shard_each) for p, c in per)
++            est = sum(c * s.shard_each for p, c in per)
+         counts[s.id] = (n, est)
+     return counts
+ 
