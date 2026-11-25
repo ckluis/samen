@@ -162,7 +162,7 @@ defmodule Samen.Webhook do
 
       true ->
         try do
-          rows = repo.all(Ecto.Query.from(e in module, where: e.org_id == ^org_id))
+          rows = repo.all(endpoint_query(module, org_id))
 
           {:ok,
            Enum.filter(rows, fn ep ->
@@ -173,6 +173,27 @@ defmodule Samen.Webhook do
             Samen.Observability.Failure.report(:webhook_deliver_lookup, nil, e)
             {:error, :endpoint_lookup_failed}
         end
+    end
+  end
+
+  # The org's endpoint rows. A raw Ecto query does NOT get Ash's archive filter, and archiving sets
+  # `archived_at` without touching `status`: an archived endpoint left `:active` would still receive
+  # payloads. So an archivable endpoint module (one that declares `archived_at`) is read UNARCHIVED only.
+  defp endpoint_query(module, org_id) do
+    query = Ecto.Query.from(e in module, where: e.org_id == ^org_id)
+
+    if archivable?(module),
+      do: Ecto.Query.where(query, [e], is_nil(e.archived_at)),
+      else: query
+  end
+
+  defp archivable?(module) do
+    cond do
+      Code.ensure_loaded?(module) and function_exported?(module, :__schema__, 1) ->
+        :archived_at in module.__schema__(:fields)
+
+      Ash.Resource.Info.resource?(module) -> not is_nil(Ash.Resource.Info.attribute(module, :archived_at))
+      true -> false
     end
   end
 

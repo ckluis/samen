@@ -1,6 +1,18 @@
-defmodule Samen.Webhook.DeliverStubRepo do
-  @moduledoc false
-  def all(_query), do: Process.get(:deliver_rows, [])
+defmodule Samen.Webhook.DeliverEndpointsTest.Row do
+  @moduledoc """
+  A REAL Ecto schema over a TEMP table, so the lookup's query is executed by Postgres (a stub repo that
+  returned canned rows ignored the query: removing the org filter or the archive filter went unnoticed).
+  Shaped like a generated `Webhook` endpoint: `org_id`, `status`, `event_types`, `archived_at`.
+  """
+  use Ecto.Schema
+
+  @primary_key {:id, :binary_id, autogenerate: true}
+  schema "deliver_ep_rows" do
+    field(:org_id, :binary_id)
+    field(:status, :string)
+    field(:event_types, {:array, :string}, default: [])
+    field(:archived_at, :utc_datetime)
+  end
 end
 
 defmodule Samen.Webhook.DeliverEndpointsTest.Res do
@@ -63,17 +75,24 @@ defmodule Samen.Webhook.DeliverEndpointsTest do
   end
 
   describe "default endpoint source" do
+    # EVERY env key these tests touch is captured and restored (an earlier version deleted
+    # `:verify_repo` and never put it back, so later modules that fall back to it saw `nil`).
+    @env_keys [:webhook_endpoint_module, :webhook_repo, :verify_repo]
+
     setup do
-      prev = {Application.get_env(:samen_core, :webhook_endpoint_module), Application.get_env(:samen_core, :webhook_repo)}
+      prev = Map.new(@env_keys, &{&1, Application.fetch_env(:samen_core, &1)})
 
       on_exit(fn ->
-        restore(:webhook_endpoint_module, elem(prev, 0))
-        restore(:webhook_repo, elem(prev, 1))
+        for {key, saved} <- prev do
+          case saved do
+            {:ok, value} -> Application.put_env(:samen_core, key, value)
+            :error -> Application.delete_env(:samen_core, key)
+          end
+        end
       end)
-    end
 
-    defp restore(k, nil), do: Application.delete_env(:samen_core, k)
-    defp restore(k, v), do: Application.put_env(:samen_core, k, v)
+      :ok
+    end
 
     test "unconfigured is an error, never a silent {:ok, 0}" do
       Application.delete_env(:samen_core, :webhook_endpoint_module)
@@ -84,26 +103,76 @@ defmodule Samen.Webhook.DeliverEndpointsTest do
                Webhook.deliver("invoice.created", FakeResource, @record, multi: Ecto.Multi.new())
     end
 
-    test "configured: the org's active, subscribed endpoints are read from the endpoint module" do
-      Application.put_env(:samen_core, :webhook_endpoint_module, FakeResource)
-      Application.put_env(:samen_core, :webhook_repo, Samen.Webhook.DeliverStubRepo)
-
-      Process.put(:deliver_rows, [
-        ep("e1", %{status: "active"}),
-        ep("e2", %{status: "paused"}),
-        ep("e3", %{event_types: ["x"]})
-      ])
-
-      assert {:ok, 1, %Ecto.Multi{}} =
-               Webhook.deliver("invoice.created", FakeResource, @record, multi: Ecto.Multi.new())
-    end
-
     test "a failing lookup is an error, not {:ok, 0}" do
       Application.put_env(:samen_core, :webhook_endpoint_module, FakeResource)
       Application.put_env(:samen_core, :webhook_repo, Samen.Webhook.NoSuchRepo)
 
       assert {:error, :endpoint_lookup_failed} =
                Webhook.deliver("invoice.created", FakeResource, @record, multi: Ecto.Multi.new())
+    end
+  end
+
+  describe "default endpoint source, read from the real repo" do
+    alias Samen.Webhook.DeliverEndpointsTest.Row
+
+    @repo SamenCore.TestRepo
+    @other_org "00000000-0000-0000-0000-0000000000bb"
+
+    setup do
+      :ok = Ecto.Adapters.SQL.Sandbox.checkout(@repo)
+
+      @repo.query!("""
+      CREATE TEMP TABLE deliver_ep_rows (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        org_id uuid, status text, event_types text[] DEFAULT '{}', archived_at timestamptz
+      ) ON COMMIT DROP
+      """)
+
+      prev = Map.new([:webhook_endpoint_module, :webhook_repo, :verify_repo], &{&1, Application.fetch_env(:samen_core, &1)})
+
+      on_exit(fn ->
+        for {key, saved} <- prev do
+          case saved do
+            {:ok, value} -> Application.put_env(:samen_core, key, value)
+            :error -> Application.delete_env(:samen_core, key)
+          end
+        end
+      end)
+
+      Application.put_env(:samen_core, :webhook_endpoint_module, Row)
+      Application.put_env(:samen_core, :webhook_repo, @repo)
+      :ok
+    end
+
+    defp insert!(attrs), do: @repo.insert!(struct!(Row, Map.merge(%{org_id: @org, status: "active", event_types: []}, attrs)))
+
+    defp deliver, do: Webhook.deliver("invoice.created", FakeResource, @record, multi: Ecto.Multi.new())
+
+    test "the org's active, subscribed, unarchived endpoint receives; paused and unsubscribed ones do not" do
+      insert!(%{})
+      insert!(%{status: "paused"})
+      insert!(%{event_types: ["x"]})
+
+      assert {:ok, 1, %Ecto.Multi{}} = deliver()
+    end
+
+    test "RED: another org's active endpoint is never read (the org filter)" do
+      insert!(%{org_id: @other_org})
+
+      # positive control: the same row in THIS org is delivered to
+      assert {:ok, 0, %Ecto.Multi{}} = deliver()
+      insert!(%{})
+      assert {:ok, 1, %Ecto.Multi{}} = deliver()
+    end
+
+    test "RED: an ARCHIVED endpoint is never delivered to, even though its status is still active (the archive filter)" do
+      insert!(%{archived_at: ~U[2026-01-01 00:00:00Z]})
+
+      assert {:ok, 0, %Ecto.Multi{}} = deliver()
+
+      # positive control: the same row, restored, is delivered to
+      @repo.query!("UPDATE deliver_ep_rows SET archived_at = NULL")
+      assert {:ok, 1, %Ecto.Multi{}} = deliver()
     end
   end
 end
