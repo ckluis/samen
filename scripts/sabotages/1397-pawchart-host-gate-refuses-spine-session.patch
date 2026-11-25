@@ -1,0 +1,19 @@
+# SABOTAGE: the armed pawchart gate admits only the legacy session key, so a real framework login is 
+#   redirected to /login
+#
+# Flips the named test(s).
+# APP: pawchart
+# TEST_FILES: test/auth_spine_session_gate_test.exs
+# MUST_FAIL: an armed host admits a LIVE spine session
+diff --git a/pawchart/lib/pawchart_web/auth.ex b/pawchart/lib/pawchart_web/auth.ex
+index 9b35ae04..93ddc1d3 100644
+--- a/pawchart/lib/pawchart_web/auth.ex
++++ b/pawchart/lib/pawchart_web/auth.ex
+@@ -65,7 +65,6 @@ defmodule PawChartWeb.Auth do
+     cond do
+       not auth_required?() -> conn
+       WebAuth.authenticated_user_id(get_session(conn)) -> conn
+-      spine_session?(get_session(conn)) -> conn
+       true -> conn |> redirect(to: "/login") |> halt()
+     end
+   end
