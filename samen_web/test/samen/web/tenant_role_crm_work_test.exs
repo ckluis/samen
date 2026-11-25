@@ -408,6 +408,59 @@ defmodule Samen.Web.TenantRoleCrmWorkTest do
       assert archived?(Samen.WebTest.Work.Task, ctx.org_id, :title, "Existing Task")
     end
 
+    # `new_task` rebuilds the create form on the acting scope, so the tests above never exercise the form `load_for` builds
+    # when the page loads. A client can send `save_new` without ever sending `new_task`: that form is judged here.
+    test "a VIEWER cannot create a task by sending save_new on the form built at load, and the list context is the viewer's", ctx do
+      before = length(tasks(ctx.org_id))
+      save = fn account, title ->
+        socket = live_socket(log_in(account), TasksLive, "/work", ctx.org_id)
+        {socket, event(TasksLive, "save_new", %{"form" => %{"title" => title, "kind" => "task"}}, socket)}
+      end
+
+      {loaded, _} = save.(ctx.viewer, "Direct Viewer Task")
+      assert length(tasks(ctx.org_id)) == before
+      assert loaded.assigns.new_form.source.opts[:actor].role == :viewer
+      assert loaded.assigns.samen_list_ctx.scope.actor.role == :viewer
+
+      # positive control: the same direct save_new as a member, then an owner
+      save.(ctx.member, "Direct Member Task")
+      save.(ctx.owner, "Direct Owner Task")
+      assert length(tasks(ctx.org_id)) == before + 2
+    end
+
+    test "a VIEWER cannot create a project by sending save_new on the form built at load", ctx do
+      before = length(projects(ctx.org_id))
+
+      save = fn account, name ->
+        socket = live_socket(log_in(account), ProjectsLive, "/work/projects", ctx.org_id)
+        {socket, event(ProjectsLive, "save_new", %{"form" => %{"name" => name}}, socket)}
+      end
+
+      {loaded, _} = save.(ctx.viewer, "Direct Viewer Project")
+      assert length(projects(ctx.org_id)) == before
+      assert loaded.assigns.new_form.source.opts[:actor].role == :viewer
+
+      save.(ctx.member, "Direct Member Project")
+      save.(ctx.owner, "Direct Owner Project")
+      assert length(projects(ctx.org_id)) == before + 2
+    end
+
+    # The Work lists never surface an archived row (`Reads.tasks_page/3` ignores `show_archived`), so `restore` finds
+    # nothing on the page to act on: for a viewer AND a member it is a no-op, never a write. The ListLive context holds the
+    # scope the event would restore with, and that is the person's own.
+    test "a ListLive restore on the tasks list restores nothing for a viewer or a member", ctx do
+      archived = task!(ctx.org_id, "Archived Task")
+      {:ok, _} = Samen.Archival.archive(archived, scope: Samen.Web.Plane.scope(Samen.Web.Plane.tenant(), ctx.org_id))
+
+      for {account, role} <- [viewer: ctx.viewer, member: ctx.member] |> Enum.map(fn {k, v} -> {v, k} end) do
+        socket = live_socket(log_in(account), TasksLive, "/work", ctx.org_id)
+        assert socket.assigns.samen_list_ctx.scope.actor.role == role
+        {:halt, socket} = Samen.Web.ListLive.on_event("toggle_archived", %{}, socket)
+        {:halt, _socket} = Samen.Web.ListLive.on_event("restore", %{"id" => archived.id}, socket)
+        assert archived?(Samen.WebTest.Work.Task, ctx.org_id, :title, "Archived Task")
+      end
+    end
+
     test "a VIEWER cannot change a task's status; a member can", ctx do
       task = task!(ctx.org_id, "Status Task")
       path = "/work/tasks/:id"

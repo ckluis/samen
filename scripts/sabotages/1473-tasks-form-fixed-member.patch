@@ -6,18 +6,9 @@
 # TEST_FILES: test/samen/web/tenant_role_crm_work_test.exs
 # MUST_FAIL: a VIEWER cannot create or archive a task through the list
 diff --git a/samen_web/lib/samen/web/work/tasks_live.ex b/samen_web/lib/samen/web/work/tasks_live.ex
-index dfb40e6b..62c756ed 100644
+index 05f68611..0748f34e 100644
 --- a/samen_web/lib/samen/web/work/tasks_live.ex
 +++ b/samen_web/lib/samen/web/work/tasks_live.ex
-@@ -67,7 +67,7 @@ defmodule Samen.Web.Work.TasksLive do
-   # can be written, and the page is re-resolved on every `handle_params`.
-   def load(socket, org_id) do
-     case TenantActor.assign_actor(socket, org_id) do
--      {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
-+      {:ok, socket} -> load_for(socket, org_id, Mount.scope(socket.assigns.samen_mount, org_id))
-       {:refused, socket} -> load_refused(socket, org_id)
-     end
-   end
 @@ -100,7 +100,8 @@ defmodule Samen.Web.Work.TasksLive do
    TenantActor.refuse_events()
  

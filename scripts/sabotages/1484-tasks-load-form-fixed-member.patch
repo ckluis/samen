@@ -1,0 +1,21 @@
+# SABOTAGE: TasksLive builds its create form and its list context on the fixed member scope at load, so a 
+#   viewer's direct save_new runs as member
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_crm_work_test.exs
+# MUST_FAIL: a VIEWER cannot create a task by sending save_new on the form built at load
+# MUST_FAIL: a ListLive restore on the tasks list restores nothing
+diff --git a/samen_web/lib/samen/web/work/tasks_live.ex b/samen_web/lib/samen/web/work/tasks_live.ex
+index 05f68611..d6ae15a6 100644
+--- a/samen_web/lib/samen/web/work/tasks_live.ex
++++ b/samen_web/lib/samen/web/work/tasks_live.ex
+@@ -67,7 +67,7 @@ defmodule Samen.Web.Work.TasksLive do
+   # can be written, and the page is re-resolved on every `handle_params`.
+   def load(socket, org_id) do
+     case TenantActor.assign_actor(socket, org_id) do
+-      {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
++      {:ok, socket} -> load_for(socket, org_id, Mount.scope(socket.assigns.samen_mount, org_id))
+       {:refused, socket} -> load_refused(socket, org_id)
+     end
+   end
