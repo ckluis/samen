@@ -249,6 +249,119 @@ defmodule Samen.Web.NotificationsSpineSessionTest do
     refute html =~ "OUTAGE-SENTINEL"
   end
 
+  # -- :denied and :unavailable, reached end to end through actor_in_org ---------------------------
+
+  # Rename a table out from under a resource so every read of it is a REAL database error (the
+  # repo's honest-failure idiom, see notifications_sources_test.exs); always renamed back.
+  defp with_unreadable(resource, fun) do
+    table = AshPostgres.DataLayer.Info.table(resource)
+    Samen.WebTest.Repo.query!("ALTER TABLE #{table} RENAME TO #{table}_unreadable")
+
+    try do
+      ExUnit.CaptureLog.capture_log(fn -> send(self(), {:result, fun.()}) end)
+      assert_received {:result, result}
+      result
+    after
+      Samen.WebTest.Repo.query!("ALTER TABLE #{table}_unreadable RENAME TO #{table}")
+    end
+  end
+
+  defp reenter(view, socket, org_id) do
+    {:noreply, socket} = view.handle_params(%{"org" => org_id}, "http://localhost/notifications?org=#{org_id}", socket)
+    socket
+  end
+
+  test "a pinned org whose membership is suspended AFTER the mount is :denied on re-entry (?org=): no org-addressed rows, nothing marked", ctx do
+    member_user = user_id(ctx.member, ctx.org_id)
+    org_row = notify!(ctx.org_id, ctx.org_id, "ORG-ROW-DENIED-SENTINEL")
+    own_row = notify!(ctx.org_id, member_user, "OWN-ROW-DENIED-SENTINEL")
+
+    socket = live_socket(log_in(ctx.member), InboxLive, "/notifications", ctx.org_id)
+
+    # positive control: while active, the member reads both rows
+    assert socket.assigns.recipient_state == :ok
+    assert socket.assigns.org_id == ctx.org_id
+    assert render_html(InboxLive, socket.assigns) =~ "ORG-ROW-DENIED-SENTINEL"
+
+    suspend!(member_user, ctx.org_id)
+    socket = reenter(InboxLive, socket, ctx.org_id)
+
+    # the pinned authorized set still names the org, so it is `actor_in_org` that refuses
+    assert socket.assigns.org_id == ctx.org_id
+    assert socket.assigns.recipient_state == :denied
+    html = render_html(InboxLive, socket.assigns)
+    assert html =~ ~s(id="notifications-denied")
+    refute html =~ "ORG-ROW-DENIED-SENTINEL"
+    refute html =~ "OWN-ROW-DENIED-SENTINEL"
+
+    # nothing is written and a realtime envelope reads nothing
+    {:noreply, socket} = InboxLive.handle_event("mark_all_read", %{}, socket)
+    {:noreply, socket} = InboxLive.handle_info({:notification_created, %{id: org_row.id}}, socket)
+    assert socket.assigns.unread_count == 0
+    assert raw(org_row.id).read_at == nil
+    assert raw(own_row.id).read_at == nil
+  end
+
+  test "a pinned org whose membership is suspended AFTER the mount is :denied in the preferences panel too", ctx do
+    member_user = user_id(ctx.member, ctx.org_id)
+    socket = live_socket(log_in(ctx.member), PreferencesLive, "/notifications/settings", ctx.org_id)
+
+    # positive control
+    assert socket.assigns.access == :ok
+    assert socket.assigns.recipient_id == member_user
+
+    suspend!(member_user, ctx.org_id)
+    socket = reenter(PreferencesLive, socket, ctx.org_id)
+
+    assert socket.assigns.org_id == ctx.org_id
+    assert socket.assigns.access == :denied
+    assert socket.assigns.recipient_id == nil
+    html = render_html(PreferencesLive, socket.assigns)
+    assert html =~ ~s(id="preferences-denied")
+    refute html =~ ~s(id="preferences-grid")
+
+    {:noreply, _} =
+      PreferencesLive.handle_event(
+        "save",
+        %{"_target" => ["prefs", "chat_mention__in_app"], "prefs" => %{"chat_mention__in_app" => "off"}},
+        socket
+      )
+
+    assert Ash.read!(NotificationPreference, authorize?: false) == []
+  end
+
+  test "a FAILED OrgActor lookup (the User read errors) is {:error, :unavailable}: the inbox and the preferences panel show the error state, never an inbox", ctx do
+    member_user = user_id(ctx.member, ctx.org_id)
+    notify!(ctx.org_id, ctx.org_id, "ORG-ROW-OUTAGE-SENTINEL")
+    notify!(ctx.org_id, member_user, "OWN-ROW-OUTAGE-SENTINEL")
+
+    login = log_in(ctx.member)
+    inbox = live_socket(login, InboxLive, "/notifications", ctx.org_id)
+    prefs = live_socket(login, PreferencesLive, "/notifications/settings", ctx.org_id)
+    assert inbox.assigns.recipient_state == :ok
+    assert prefs.assigns.access == :ok
+
+    {inbox, prefs} =
+      with_unreadable(Op.User, fn ->
+        {reenter(InboxLive, inbox, ctx.org_id), reenter(PreferencesLive, prefs, ctx.org_id)}
+      end)
+
+    assert inbox.assigns.recipient_state == :unavailable
+    inbox_html = render_html(InboxLive, inbox.assigns)
+    assert inbox_html =~ ~s(id="notifications-unavailable")
+    refute inbox_html =~ "ORG-ROW-OUTAGE-SENTINEL"
+    refute inbox_html =~ "OWN-ROW-OUTAGE-SENTINEL"
+
+    assert prefs.assigns.access == :unavailable
+    prefs_html = render_html(PreferencesLive, prefs.assigns)
+    assert prefs_html =~ "preferences-error"
+    refute prefs_html =~ ~s(id="preferences-grid")
+
+    # a realtime envelope on the unavailable inbox reads nothing
+    {:noreply, inbox} = InboxLive.handle_info({:notification_created, %{id: Ash.UUID.generate()}}, inbox)
+    assert inbox.assigns.unread_count == 0
+  end
+
   # -- the preferences panel, through the real login -------------------------------------
 
   test "the preferences panel edits the signed-in user's OWN row (and not another user's)", ctx do

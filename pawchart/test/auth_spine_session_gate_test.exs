@@ -39,7 +39,7 @@ defmodule PawChart.AuthSpineSessionGateTest do
     |> PawChartWeb.Auth.call([])
   end
 
-  test "an armed host admits a LIVE spine session and refuses an unknown token" do
+  defp tenant! do
     {:ok, tenant} =
       Register.register(
         %{
@@ -49,16 +49,52 @@ defmodule PawChart.AuthSpineSessionGateTest do
           email: "gate-#{System.unique_integer([:positive])}@example.test",
           password: "correct horse battery staple"
         },
-        %{org: Org, credential: Credential, user: User, membership: Membership, auth_token: AuthToken, repo: PawChart.Repo}
+        %{
+          org: Org,
+          credential: Credential,
+          user: User,
+          membership: Membership,
+          auth_token: AuthToken,
+          repo: PawChart.Repo
+        }
       )
 
-    {:ok, _session, raw} =
-      SessionCreate.create(%{session: Session, org: Org, membership: Membership, user: User}, tenant.credential.id)
+    tenant
+  end
+
+  defp mods, do: %{session: Session, org: Org, membership: Membership, user: User}
+
+  test "an armed host admits a LIVE spine session and refuses an unknown token" do
+    tenant = tenant!()
+    {:ok, _session, raw} = SessionCreate.create(mods(), tenant.credential.id)
 
     refute gate(raw).halted
 
     refused = gate("not-a-live-token")
     assert refused.halted
     assert get_resp_header(refused, "location") == ["/login"]
+  end
+
+  test "an armed host refuses a REVOKED session and an EXPIRED one, while the live one beside them passes" do
+    tenant = tenant!()
+    credential_id = tenant.credential.id
+
+    {:ok, live, live_raw} = SessionCreate.create(mods(), credential_id)
+    {:ok, revoked, revoked_raw} = SessionCreate.create(mods(), credential_id)
+    # a session whose sliding window has already lapsed
+    {:ok, _expired, expired_raw} = SessionCreate.create(mods(), credential_id, ttl_seconds: -60)
+
+    # positive control: before the revoke, the same token is admitted
+    refute gate(revoked_raw).halted
+    assert {:ok, _} = Samen.Auth.SessionRevoke.revoke_one(Session, revoked.id, credential_id)
+
+    for {name, raw} <- [revoked: revoked_raw, expired: expired_raw] do
+      refused = gate(raw)
+      assert refused.halted, "#{name} session was admitted"
+      assert get_resp_header(refused, "location") == ["/login"]
+    end
+
+    refute gate(live_raw).halted
+    assert live.id != revoked.id
   end
 end

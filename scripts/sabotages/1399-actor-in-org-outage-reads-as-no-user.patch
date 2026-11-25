@@ -1,0 +1,20 @@
+# SABOTAGE: actor_in_org maps a failed OrgActor lookup to no user, so an outage reads the org-addressed 
+#   rows as the broker
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/notifications_spine_session_test.exs
+# MUST_FAIL: a FAILED OrgActor lookup (the User read errors)
+diff --git a/samen_web/lib/samen/web/settings/reads.ex b/samen_web/lib/samen/web/settings/reads.ex
+index 5e95f0a0..63d78b80 100644
+--- a/samen_web/lib/samen/web/settings/reads.ex
++++ b/samen_web/lib/samen/web/settings/reads.ex
+@@ -141,7 +141,7 @@ defmodule Samen.Web.Settings.Reads do
+         case Samen.Auth.OrgActor.resolve_result(mods, credential_id, org_id) do
+           {:ok, %{user_id: user_id, role: role}} -> {:ok, %{id: user_id, role: role}}
+           :error -> :denied
+-          {:error, :unavailable} -> {:error, :unavailable}
++          {:error, :unavailable} -> :none
+         end
+ 
+       {:user, user_id} ->
