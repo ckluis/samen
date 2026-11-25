@@ -1,0 +1,19 @@
+# SABOTAGE: File :create accepts status again: a new file can be created already :active, skipping the scan
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/primitives_file_status_not_input_test.exs
+# MUST_FAIL: status is no input on create
+diff --git a/samen_core/lib/samen/scopes/primitives/blueprint.ex b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+index a8a0335f..53dd38ee 100644
+--- a/samen_core/lib/samen/scopes/primitives/blueprint.ex
++++ b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+@@ -492,7 +492,7 @@ defmodule Samen.Scopes.Primitives.Blueprint do
+           # archiving and restoring go through the audited `:archive`/`:restore` actions.
+           create :create do
+             primary?(true)
+-            accept([:filename, :content_type, :size_bytes, :storage_key, :uploaded_by_id, :metadata, :org_id])
++            accept([:filename, :content_type, :size_bytes, :storage_key, :uploaded_by_id, :metadata, :org_id, :status])
+           end
+ 
+           # Not atomic: the `:promote` forbid policy below cannot be rendered into an atomic filter.
