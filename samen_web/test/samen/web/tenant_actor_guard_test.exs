@@ -41,13 +41,11 @@ defmodule Samen.Web.TenantActorGuardTest do
     "samen/web/chat/threads_live.ex" => 3,
     "samen/web/crm/calendar_live.ex" => 1,
     "samen/web/crm/company_live.ex" => 5,
-    "samen/web/crm/contact_live.ex" => 4,
     "samen/web/crm/contacts_gallery_live.ex" => 1,
     "samen/web/crm/dashboard_live.ex" => 1,
     "samen/web/crm/mailbox_live.ex" => 1,
     "samen/web/crm/pipeline_live.ex" => 2,
     "samen/web/crm/sequences_live.ex" => 2,
-    "samen/web/csv/import_live.ex" => 1,
     "samen/web/files/preview_live.ex" => 3,
     "samen/web/files/upload_live.ex" => 2,
     "samen/web/first_run.ex" => 1,
@@ -55,7 +53,6 @@ defmodule Samen.Web.TenantActorGuardTest do
     "samen/web/ics/export_controller.ex" => 1,
     "samen/web/marketing/campaign_live.ex" => 2,
     "samen/web/marketing/campaigns_live.ex" => 1,
-    "samen/web/marketing/leads_live.ex" => 1,
     "samen/web/marketing/segments_live.ex" => 1,
     "samen/web/notifications/inbox_live.ex" => 1,
     "samen/web/onboarding/wizard_controller.ex" => 1,
@@ -84,8 +81,8 @@ defmodule Samen.Web.TenantActorGuardTest do
   }
 
   # The exact size of the work list: a silent bump of an entry (or a new entry) fails here, not only in the ratchet.
-  @baseline_total 97
-  @baseline_files 55
+  @baseline_total 91
+  @baseline_files 52
 
   @exempt ~w(samen/web/mount.ex samen/web/tenant_actor.ex samen/web/tenant_actor/guard.ex)
 

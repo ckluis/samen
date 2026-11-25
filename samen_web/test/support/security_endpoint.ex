@@ -83,6 +83,12 @@ defmodule Samen.WebTest.SecurityRouter do
       labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)
     )
 
+    # The leads lens reads the CRM Person through the derived CRM mount (`:crm_namespace`).
+    samen_module_routes(:marketing, Samen.WebTest.Marketing,
+      repo: Samen.WebTest.Repo,
+      labels: @labels |> Map.put(:identity_namespace, Samen.WebTest.Operator) |> Map.put(:crm_namespace, Samen.WebTest.Crm)
+    )
+
     samen_settings_routes(:settings, Samen.WebTest.Operator,
       repo: Samen.WebTest.Repo,
       labels: @labels,

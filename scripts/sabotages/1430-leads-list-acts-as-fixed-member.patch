@@ -1,0 +1,19 @@
+# SABOTAGE: LeadsLive builds the list scope as the fixed member again, so a viewer's restore runs as member
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_surfaces_test.exs
+# MUST_FAIL: the leads lens writes as the person's own role
+diff --git a/samen_web/lib/samen/web/marketing/leads_live.ex b/samen_web/lib/samen/web/marketing/leads_live.ex
+index c2b5a4d7..df15569f 100644
+--- a/samen_web/lib/samen/web/marketing/leads_live.ex
++++ b/samen_web/lib/samen/web/marketing/leads_live.ex
+@@ -99,7 +99,7 @@ defmodule Samen.Web.Marketing.LeadsLive do
+     # stays inert (an empty page), exactly as before.
+     case crm_mount(mount) do
+       nil -> assign(socket, page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
+-      crm -> init_list(socket, crm, scope)
++      crm -> init_list(socket, crm, Mount.scope(crm, org_id))
+     end
+   end
+ 

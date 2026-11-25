@@ -69,6 +69,8 @@ defmodule Samen.Web.CsvSurfaceTest do
       |> Phoenix.Component.assign(:return_to, nil)
       |> Phoenix.Component.assign(:org_id, org_id)
       |> Phoenix.Component.assign(:resource_name, "Person")
+      |> Phoenix.Component.assign(:actor_state, :ok)
+      |> Phoenix.Component.assign(:acting_scope, nil)
       |> Phoenix.Component.assign(:report, Keyword.get(extra, :report))
       |> Phoenix.Component.assign(:import_error, Keyword.get(extra, :import_error))
 

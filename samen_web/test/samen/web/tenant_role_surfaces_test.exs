@@ -102,7 +102,9 @@ defmodule Samen.Web.TenantRoleSurfacesTest do
     %{conn: recycle(conn), session: Plug.Conn.get_session(conn)}
   end
 
-  defp live_socket(%{session: login_session}, view, path, org_id) do
+  defp live_socket(login, view, path, org_id, extra_params \\ %{})
+
+  defp live_socket(%{session: login_session}, view, path, org_id, extra_params) do
     {_path, mount_session} =
       Samen.WebTest.SecurityRouter
       |> Phoenix.Router.routes()
@@ -114,7 +116,7 @@ defmodule Samen.Web.TenantRoleSurfacesTest do
       |> Enum.find(fn {p, _} -> p == path end)
 
     session = Map.merge(login_session, mount_session)
-    params = %{"org" => org_id}
+    params = Map.merge(%{"org" => org_id}, extra_params)
     socket = %Phoenix.LiveView.Socket{} |> Phoenix.Component.assign(:__changed__, %{})
     socket = %{socket | assigns: Map.put(socket.assigns, :flash, %{})}
     {:cont, socket} = Samen.Web.TenantAuthz.on_mount(:require_tenant, params, session, socket)
@@ -385,6 +387,160 @@ defmodule Samen.Web.TenantRoleSurfacesTest do
       assert socket.assigns.page.items == []
       list_event(socket, "restore", %{"id" => person!(ctx.org_id, "Org A Person").id})
       assert person_archived?(ctx.org_id, "Org A Person")
+    end
+  end
+
+  # -- every other surface that writes a Person (authz-5 round 3, item 1) -------------------------
+
+  describe "Person writes through ContactLive, ImportLive and LeadsLive" do
+    test "a VIEWER cannot edit or delete a contact on its detail page; a member can", ctx do
+      create_contact(log_in(ctx.member), ctx.org_id, "Detail Target")
+      id = person!(ctx.org_id, "Detail Target").id
+      path = "/crm/contacts/:id"
+
+      viewer = live_socket(log_in(ctx.viewer), Samen.Web.CRM.ContactLive, path, ctx.org_id, %{"id" => id})
+      assert viewer.assigns.acting_scope.actor.role == :viewer
+      {:noreply, viewer} = Samen.Web.CRM.ContactLive.handle_event("edit_contact", %{}, viewer)
+      {:noreply, _} = Samen.Web.CRM.ContactLive.handle_event("save_edit", %{"form" => %{"display_name" => "Viewer Renamed"}}, viewer)
+      assert person!(ctx.org_id, "Detail Target")
+      refute person!(ctx.org_id, "Viewer Renamed")
+
+      {:noreply, viewer} = Samen.Web.CRM.ContactLive.handle_event("delete_contact", %{"id" => id}, viewer)
+      refute person_archived?(ctx.org_id, "Detail Target")
+      assert viewer.assigns.delete_error == "Could not delete this contact."
+
+      # positive controls: the same calls as a member
+      member = live_socket(log_in(ctx.member), Samen.Web.CRM.ContactLive, path, ctx.org_id, %{"id" => id})
+      {:noreply, member} = Samen.Web.CRM.ContactLive.handle_event("edit_contact", %{}, member)
+      {:noreply, _} = Samen.Web.CRM.ContactLive.handle_event("save_edit", %{"form" => %{"display_name" => "Member Renamed"}}, member)
+      assert person!(ctx.org_id, "Member Renamed")
+      member = live_socket(log_in(ctx.member), Samen.Web.CRM.ContactLive, path, ctx.org_id, %{"id" => id})
+      {:noreply, _} = Samen.Web.CRM.ContactLive.handle_event("delete_contact", %{"id" => id}, member)
+      assert person_archived?(ctx.org_id, "Member Renamed")
+    end
+
+    test "a suspended member's open contact page reads nothing and writes nothing", ctx do
+      create_contact(log_in(ctx.member), ctx.org_id, "Open Detail")
+      id = person!(ctx.org_id, "Open Detail").id
+      path = "/crm/contacts/:id"
+      socket = live_socket(log_in(ctx.member), Samen.Web.CRM.ContactLive, path, ctx.org_id, %{"id" => id})
+      assert socket.assigns.contact.id == id
+
+      suspend!(ctx.member, ctx.org_id)
+
+      {:noreply, socket} =
+        Samen.Web.CRM.ContactLive.handle_params(%{"org" => ctx.org_id, "id" => id}, "http://localhost/crm/contacts/#{id}", socket)
+
+      assert socket.assigns.actor_state == :denied
+      assert socket.assigns.contact == nil
+      html = Samen.WebTest.DataCase.render_html(Samen.Web.CRM.ContactLive, socket.assigns)
+      assert html =~ ~s(id="actor-denied")
+      {:noreply, socket} = Samen.Web.CRM.ContactLive.handle_event("delete_contact", %{"id" => id}, socket)
+      refute person_archived?(ctx.org_id, "Open Detail")
+      assert socket.assigns.acting_scope == nil
+    end
+
+    # `ImportLive.import_rows/2` is what the `import` event runs on the consumed upload (a harness socket has no upload).
+    defp import_csv(account, resource, csv, org_id) do
+      socket = live_socket(log_in(account), Samen.Web.Csv.ImportLive, "/csv/import/:resource", org_id, %{"resource" => resource})
+      {:noreply, socket} = Samen.Web.Csv.ImportLive.handle_params(%{"org" => org_id, "resource" => resource}, "http://localhost/csv/import/#{resource}", socket)
+      Samen.Web.Csv.ImportLive.import_rows(socket, csv)
+    end
+
+    test "a VIEWER cannot import Person rows or Company rows; a member can", ctx do
+      org_id = ctx.org_id
+      before_p = person_count(org_id)
+      before_c = company_count(org_id)
+
+      viewer_p = import_csv(ctx.viewer, "Person", "display_name\nCsv Viewer Person\n", org_id)
+      assert person_count(org_id) == before_p
+      assert viewer_p.assigns.report == nil or viewer_p.assigns.report.created == 0
+      viewer_c = import_csv(ctx.viewer, "Company", "name\nCsv Viewer Co\n", org_id)
+      assert company_count(org_id) == before_c
+      assert viewer_c.assigns.report == nil or viewer_c.assigns.report.created == 0
+
+      # positive controls: a member through the same two imports
+      member_p = import_csv(ctx.member, "Person", "display_name\nCsv Member Person\n", org_id)
+      assert member_p.assigns.report.created == 1
+      assert person_count(org_id) == before_p + 1
+      member_c = import_csv(ctx.member, "Company", "name\nCsv Member Co\n", org_id)
+      assert member_c.assigns.report.created == 1
+      assert company_count(org_id) == before_c + 1
+    end
+
+    test "the import page of a suspended member is the denied state and imports nothing", ctx do
+      org_id = ctx.org_id
+      login = log_in(ctx.member)
+      socket = live_socket(login, Samen.Web.Csv.ImportLive, "/csv/import/:resource", org_id, %{"resource" => "Person"})
+      assert socket.assigns.actor_state == :ok
+      suspend!(ctx.member, org_id)
+      path = "http://localhost/csv/import/Person"
+      {:noreply, socket} = Samen.Web.Csv.ImportLive.handle_params(%{"org" => org_id, "resource" => "Person"}, path, socket)
+      assert socket.assigns.actor_state == :denied
+      html = Samen.WebTest.DataCase.render_html(Samen.Web.Csv.ImportLive, socket.assigns)
+      assert html =~ ~s(id="actor-denied")
+      refute html =~ ~s(id="csv-import-form")
+
+      before = person_count(org_id)
+      socket = Samen.Web.Csv.ImportLive.import_rows(socket, "display_name\nGhost\n")
+      assert person_count(org_id) == before
+      assert socket.assigns.report == nil
+    end
+
+    # The leads lens surfaces only LIVE Person rows, so its `restore` event can reach no archived row and a DB-state
+    # check cannot tell a viewer from a member (restoring a live row is a no-op write). What decides who the event
+    # acts as is the scope in the list context: the one every `restore`/`bulk` runs under. It must be the person's own.
+    defp seed_lead!(org_id, name) do
+      # the Tier-1 custom field must be registered before a value writes (re-defining it is fine)
+      Samen.CustomFields.define_field(
+        %{org_id: org_id, table_name: "swp_person", field_name: "lifecycle_stage", type: :string},
+        Samen.WebTest.Repo
+      )
+
+      {:ok, person} =
+        Samen.WebTest.Crm.Person
+        |> Ash.Changeset.for_create(:create, %{org_id: org_id, display_name: name, custom: %{"lifecycle_stage" => "lead"}}, authorize?: false)
+        |> Ash.create()
+
+      {:ok, _} = Samen.Archival.archive(person, authorize?: false)
+      person!(org_id, name)
+    end
+
+    defp leads_socket(account, org_id),
+      do: live_socket(log_in(account), Samen.Web.Marketing.LeadsLive, "/marketing/leads", org_id)
+
+    test "the leads lens writes as the person's own role: a viewer's list scope cannot restore, a member's can", ctx do
+      archived = seed_lead!(ctx.org_id, "Lead One")
+      assert archived.archived_at
+
+      viewer = leads_socket(ctx.viewer, ctx.org_id)
+      assert viewer.assigns.acting_scope.actor.role == :viewer
+      assert viewer.assigns.samen_list_ctx.scope.actor.role == :viewer
+      assert {:error, _} = Samen.Archival.restore(archived, scope: viewer.assigns.samen_list_ctx.scope)
+      assert person_archived?(ctx.org_id, "Lead One")
+
+      # positive control: the member's list scope restores the same row
+      member = leads_socket(ctx.member, ctx.org_id)
+      assert member.assigns.samen_list_ctx.scope.actor.role == :member
+      assert {:ok, _} = Samen.Archival.restore(archived, scope: member.assigns.samen_list_ctx.scope)
+      refute person_archived?(ctx.org_id, "Lead One")
+    end
+
+    test "a suspended member's open leads page reads nothing and keeps no list scope", ctx do
+      seed_lead!(ctx.org_id, "Lead Open")
+      socket = leads_socket(ctx.member, ctx.org_id)
+      assert socket.assigns.samen_list_ctx.scope.actor.role == :member
+      suspend!(ctx.member, ctx.org_id)
+
+      {:noreply, socket} =
+        Samen.Web.Marketing.LeadsLive.handle_params(%{"org" => ctx.org_id}, "http://localhost/marketing/leads", socket)
+
+      assert socket.assigns.actor_state == :denied
+      assert socket.assigns.acting_scope == nil
+      assert socket.assigns.samen_list_ctx == nil
+      assert socket.assigns.page.items == []
+      html = Samen.WebTest.DataCase.render_html(Samen.Web.Marketing.LeadsLive, socket.assigns)
+      assert html =~ ~s(id="actor-denied")
     end
   end
 

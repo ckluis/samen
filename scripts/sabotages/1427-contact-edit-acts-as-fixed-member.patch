@@ -1,0 +1,20 @@
+# SABOTAGE: ContactLive edit builds the fixed-member scope again, so a viewer's save_edit writes
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_surfaces_test.exs
+# MUST_FAIL: a VIEWER cannot edit or delete a contact on its detail page
+diff --git a/samen_web/lib/samen/web/crm/contact_live.ex b/samen_web/lib/samen/web/crm/contact_live.ex
+index f49440f1..e6909823 100644
+--- a/samen_web/lib/samen/web/crm/contact_live.ex
++++ b/samen_web/lib/samen/web/crm/contact_live.ex
+@@ -155,7 +155,8 @@ defmodule Samen.Web.CRM.ContactLive do
+   # -- A3 edit/delete (the write side of the PII detail surface) ---------------
+ 
+   def handle_event("edit_contact", _params, socket) do
+-    %{contact: contact, acting_scope: scope} = socket.assigns
++    %{samen_mount: mount, org_id: org_id, contact: contact} = socket.assigns
++    scope = Mount.scope(mount, org_id)
+     {:noreply, assign(socket, show_edit: true, edit_form: edit_form(contact, scope))}
+   end
+ 
