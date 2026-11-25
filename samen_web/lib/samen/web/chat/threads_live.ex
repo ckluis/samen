@@ -208,19 +208,6 @@ defmodule Samen.Web.Chat.ThreadsLive do
 
   def handle_event("new_conversation", _params, socket), do: {:noreply, socket}
 
-  # The initiator's per-org `Identity.User` id (what an @-mention is addressed to), derived from the
-  # session principal `mount/3` resolved through `Samen.Auth.OrgActor`; nil when no user resolves.
-  defp initiator_user_id(socket) do
-    case Samen.Web.Settings.Reads.actor_in_org(
-           socket.assigns[:samen_mount],
-           socket.assigns[:org_id],
-           socket.assigns[:principal_ref] || :none
-         ) do
-      {:ok, %{id: id}} -> id
-      _ -> nil
-    end
-  end
-
   # T153 — the open-session-with-reason affordance the OPERATOR denied state renders. Opens a
   # REAL `Samen.Impersonation` session (reason required, same-tx audit + auto-expire, tenant-
   # visible ledger) for the acting operator over this tenant org, then re-renders the inbox.
@@ -238,6 +225,19 @@ defmodule Samen.Web.Chat.ThreadsLive do
       end
     else
       {:noreply, load(socket, org_id)}
+    end
+  end
+
+  # The initiator's per-org `Identity.User` id (what an @-mention is addressed to), derived from the
+  # session principal `mount/3` resolved through `Samen.Auth.OrgActor`; nil when no user resolves.
+  defp initiator_user_id(socket) do
+    case Samen.Web.Settings.Reads.actor_in_org(
+           socket.assigns[:samen_mount],
+           socket.assigns[:org_id],
+           socket.assigns[:principal_ref] || :none
+         ) do
+      {:ok, %{id: id}} -> id
+      _ -> nil
     end
   end
 
