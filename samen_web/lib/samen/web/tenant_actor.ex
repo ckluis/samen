@@ -111,6 +111,14 @@ defmodule Samen.Web.TenantActor do
   def writable?(%Mount{}, _no_scope), do: false
 
   @doc """
+  Whether the person acting on `socket` holds at least the `:member` role (the plane is not asked): the page-level gate for
+  a write whose resource only checks the org in the kernel (a reply, a customer, an article). `false` when nobody acts.
+  """
+  @spec member?(map()) :: boolean()
+  def member?(%{assigns: %{acting_scope: %Samen.Scope{actor: %{role: role}}}}), do: Samen.Scope.Role.at_least?(role, :member)
+  def member?(_socket), do: false
+
+  @doc """
   Whether a page offers its ADMIN-ranked write controls (the billing, plan, invoice, campaign and segment writes the kernel
   reserves for `RoleAtLeast :admin`): the plane may write, and the person acting holds at least `:admin`. On a DISARMED mount
   (the dev posture, where `write_scope/3` is the dev admin) the controls are offered, exactly as before. `assign_actor/2`

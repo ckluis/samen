@@ -134,7 +134,7 @@ defmodule Samen.Web.Support.TicketLive do
   # `Samen.Pii.WriteGuard` REJECTS the plaintext at the Ash write path (MC-1) and
   # the error renders inline — this LiveView adds no policy of its own.
   def handle_event("save_reply", %{"form" => params}, socket) do
-    if Samen.Scope.Role.at_least?(socket.assigns.acting_scope.actor.role, :member),
+    if TenantActor.member?(socket),
       do: save_reply(params, socket),
       else: {:noreply, put_flash(socket, :error, Guard.write_copy(:forbidden, "send that reply"))}
   end
