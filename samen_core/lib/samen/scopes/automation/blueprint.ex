@@ -625,14 +625,14 @@ defmodule Samen.Scopes.Automation.Blueprint do
 
           # The engine's own writes (open/refresh/resolve/cancel) run
           # authorize?: false from Samen.Automation.Escalate — a trusted kernel
-          # API, the Approvals/Grants precedent. Tenant-surface reads stay
-          # org-scoped.
+          # API, the Approvals/Grants precedent — so no actor may run one.
+          # Tenant-surface reads stay org-scoped.
           policy action_type(:read) do
             authorize_if(Samen.Policy.OrgScope)
           end
 
           policy action_type([:create, :update, :destroy]) do
-            authorize_if(always())
+            forbid_if(always())
           end
         end
       end

@@ -194,7 +194,8 @@ All notable changes to Samen are recorded here. The format follows
   breaker) already run `authorize?: false`. The automation Run log's `:create` and `:update` bypass is forbidden to actors
   (the kernel pipeline writes it as `authorize?: false`). The agent Run's `:expire_due` (the `:agent_proposal_expiry`
   trigger) is the scheduler's like its siblings, and every other agent Run write (`:advance`, `:park`, `:cancel`, …) is
-  forbidden to actors: `Samen.AI.Agent` runs them all as `authorize?: false`. **Upgrade note:** a host that ran these actions, or wrote Run rows,
+  forbidden to actors: `Samen.AI.Agent` runs them all as `authorize?: false`. Escalation's `:open`, `:refresh`, `:resolve` and `:cancel` were open to every actor with
+  no org check; they are forbidden too (`Samen.Automation.Escalate` runs them as `authorize?: false`). **Upgrade note:** a host that ran these actions, or wrote Run rows,
   with a tenant actor gets a forbidden error; run them as the system (`authorize?: false`) or let the trigger run them.
   No migration. Sabotages 1512 to 1516.
 

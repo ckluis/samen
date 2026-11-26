@@ -173,4 +173,39 @@ defmodule Samen.Automation.SystemActionsAuthzTest do
       end
     end
   end
+
+  describe "the escalation writes are the engine's, not an actor's" do
+    test "a tenant actor of ANY role, in this org or another, cannot open, refresh, resolve or cancel an escalation; the engine (authorize?: false) can" do
+      org = Ash.UUID.generate()
+      other_org = Ash.UUID.generate()
+      esc = escalation!(org)
+
+      for org_id <- [org, other_org], role <- @roles do
+        as = scope(org_id, role)
+
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 Escalation
+                 |> Ash.Changeset.for_create(
+                   :open,
+                   %{org_id: org_id, kind: "forged", dedupe_key: "forged-#{role}", subject_ref: "samen:x:y", deadline_at: past(), chain: []},
+                   scope: as
+                 )
+                 |> Ash.create(),
+               "#{role}@#{org_id} opened an escalation"
+
+        for {action, args} <- [refresh: %{deadline_at: past()}, resolve: %{}, cancel: %{}] do
+          assert {:error, %Ash.Error.Forbidden{}} =
+                   esc |> Ash.Changeset.for_update(action, args, scope: as) |> Ash.update(),
+                 "#{role}@#{org_id} ran #{action}"
+        end
+      end
+
+      assert reload(Escalation, esc.id).state == :open
+      assert [] = Ash.read!(Escalation, authorize?: false) |> Enum.filter(&(&1.kind == "forged"))
+
+      # positive control: the engine's own write (Samen.Automation.Escalate runs them `authorize?: false`)
+      assert {:ok, resolved} = esc |> Ash.Changeset.for_update(:resolve, %{}, authorize?: false) |> Ash.update()
+      assert resolved.state == :resolved
+    end
+  end
 end
