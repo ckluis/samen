@@ -6,7 +6,7 @@ defmodule Samen.Web.TenantActor.Guard do
   `Samen.Web.Plane.scope/2` (through `Samen.Web.Mount.scope/2`) builds the synthetic org-level actor with a FIXED
   `role: :member`. A surface acting for a signed-in person must derive its role from that person's membership
   (`Samen.Web.TenantActor.scope/3`); one that needs the fixed role (system, job, seed, the disarmed dev posture)
-  must say so by name (`TenantActor.system_scope/2`). Four detectors, each a per-file count the guard test
+  must say so by name (`TenantActor.system_scope/2`). Detectors, each a per-file count the guard test
   RATCHETS (a file may not gain one, a new file may not appear with one, a converted file must lower its entry):
 
     * `implicit_calls/1` - the fixed-role scope calls: `Mount.scope(` / `Plane.scope(` under any alias
@@ -19,6 +19,11 @@ defmodule Samen.Web.TenantActor.Guard do
     * `escape_hatches/1` - the named ways to ask for a role without resolving one: `system_scope(`,
       `TenantRole.admin_scope(` and `Reads.user_scope(` called WITHOUT a role (fewer than four arguments, or a
       literal `nil` role, which falls back to `:member`).
+    * `foreign_write_scopes/1` - a `TenantActor.write_scope(` call that could pass a scope other than the page's own acting
+      scope: its third argument must be the socket's acting scope (`acting`, a variable bound from `acting_scope:` of
+      `socket.assigns`, `acting_scope`, `socket.assigns.acting_scope`); a literal `nil`, any other expression, a
+      `&TenantActor.write_scope/3` capture, an `apply` and an `import` of the module are all counted. (On an armed mount the
+      function itself refuses a non-scope; this keeps a caller from handing it someone else's scope, or none, unseen.)
   """
 
   @call ~r/\b(?:Mount|Plane)\.scope\(/
@@ -139,6 +144,57 @@ defmodule Samen.Web.TenantActor.Guard do
   defp split_args(<<c, rest::binary>>, depth, cur, acc), do: split_args(rest, depth, cur <> <<c>>, acc)
 
   defp finish_args(cur, acc), do: if(String.trim(cur) == "" and acc == [], do: [], else: Enum.reverse([cur | acc]))
+
+  @write_scope_acting ~w(acting acting_scope socket.assigns.acting_scope assigns.acting_scope)
+
+  @doc """
+  How many `TenantActor.write_scope(` uses `source` has that are not demonstrably the page's own acting scope: a third
+  argument other than `acting` / `acting_scope` / `socket.assigns.acting_scope` / `assigns.acting_scope` (so a literal `nil`
+  counts), a `&TenantActor.write_scope/3` capture, `apply(TenantActor, :write_scope, ...)` and an `import` of the module
+  that does not exclude `write_scope`. Comments and heredoc text are not code; a definition is not a call.
+  """
+  @spec foreign_write_scopes(String.t()) :: non_neg_integer()
+  def foreign_write_scopes(source) when is_binary(source) do
+    code =
+      source
+      |> String.replace(~r/"""[\s\S]*?"""/, "")
+      |> code_lines_of()
+      |> Enum.join("\n")
+
+    args = for a <- calls_qualified(code, "TenantActor.write_scope"), do: Enum.map(a, &String.trim/1)
+    bad_args = Enum.count(args, fn a -> length(a) != 3 or Enum.at(a, 2) not in @write_scope_acting end)
+
+    captures = count(~r/&\s*(?:[A-Z][A-Za-z0-9_]*\.)*TenantActor\.write_scope\/\d/, code)
+    applies = count(~r/\bapply\(\s*(?:[A-Z][A-Za-z0-9_]*\.)*TenantActor\s*,\s*:write_scope\b/, code)
+
+    imports =
+      code
+      |> String.split("\n")
+      |> Enum.count(fn line ->
+        case Regex.run(~r/^\s*import\s+(?:[A-Z][A-Za-z0-9_]*\.)*TenantActor\b(.*)$/, line) do
+          nil -> false
+          [_, rest] -> not import_excludes?(rest, "write_scope")
+        end
+      end)
+
+    bad_args + captures + applies + imports
+  end
+
+  defp import_excludes?(rest, name) do
+    named? = Regex.match?(Regex.compile!("\\b#{name}:"), rest)
+
+    cond do
+      String.contains?(rest, "only:") -> not named?
+      String.contains?(rest, "except:") -> named?
+      true -> false
+    end
+  end
+
+  # The argument lists of every `prefix(...)` call (the prefix is a literal, dots included).
+  defp calls_qualified(code, prefix) do
+    for [{start, len}] <- Regex.scan(Regex.compile!("\\b" <> Regex.escape(prefix) <> "\\("), code, return: :index),
+        do: code |> binary_part(start + len, byte_size(code) - start - len) |> split_args(0, "", [])
+  end
 
   defp count(re, text), do: length(Regex.scan(re, text))
 

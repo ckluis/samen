@@ -90,6 +90,11 @@ defmodule Samen.Web.TenantActorGuardTest do
 
   defp found, do: @root |> Guard.scan() |> Map.drop(@exempt)
   defp found_literal_actors, do: @root |> Guard.scan(&Guard.literal_actors/1) |> Map.drop(@literal_actor_exempt)
+  # `write_scope(` called with anything but the page's own acting scope: nothing may appear (an empty baseline, never raised).
+  # `tenant_actor.ex` defines it and `guard.ex` is the detector.
+  @write_scope_exempt ~w(samen/web/tenant_actor.ex samen/web/tenant_actor/guard.ex)
+  defp found_foreign_write_scopes, do: @root |> Guard.scan(&Guard.foreign_write_scopes/1) |> Map.drop(@write_scope_exempt)
+
   defp found_escape_hatches, do: @root |> Guard.scan(&Guard.escape_hatches/1) |> Map.drop(@escape_hatch_exempt)
 
   test "no file gains an implicit fixed-role scope call and no new file introduces one" do
@@ -127,6 +132,31 @@ defmodule Samen.Web.TenantActorGuardTest do
            "an escape hatch names a role without resolving one: lower the entry when a file is converted, never raise it"
   end
 
+  test "no file hands write_scope/3 a scope that is not the page's own acting scope, and the baseline is empty" do
+    assert found_foreign_write_scopes() == %{},
+           "`TenantActor.write_scope(mount, org_id, scope)` must be given the socket's acting scope (`acting`, `acting_scope`, " <>
+             "`socket.assigns.acting_scope`): a literal nil or another scope would elevate or act as someone nobody resolved"
+  end
+
+  test "non-vacuity of the write_scope ratchet: the tree has write_scope calls, and the detector counts a modeled bad one in a real file" do
+    callers =
+      for file <- Path.wildcard(Path.join(@root, "**/*.ex")),
+          src = File.read!(file),
+          String.contains?(src, "TenantActor.write_scope("),
+          do: Path.relative_to(file, @root)
+
+    assert length(callers) >= 8
+    assert "samen/web/billing/plans_live.ex" in callers
+
+    for file <- callers -- @write_scope_exempt do
+      src = File.read!(Path.join(@root, file))
+      assert Guard.foreign_write_scopes(src) == 0, file
+      bad = String.replace(src, ~r/TenantActor\.write_scope\(([^,()]+),\s*([^,()]+),\s*[^()]+?\)/, "TenantActor.write_scope(\\1, \\2, nil)", global: false)
+      assert bad != src, file
+      assert Guard.foreign_write_scopes(bad) >= 1, "#{file}: a write_scope(…, nil) would not be seen"
+    end
+  end
+
   test "non-vacuity: the sweep sees the whole tree and the converted surfaces are really clean" do
     now = found()
     assert map_size(now) > 25
@@ -142,6 +172,16 @@ defmodule Samen.Web.TenantActorGuardTest do
     refute Map.has_key?(now, "samen/web/csv/export_controller.ex")
     refute Map.has_key?(now, "samen/web/files/bytes_controller.ex")
     refute Map.has_key?(now, "samen/web/settings/profile_live.ex")
+
+    # the Billing, Marketing and Support pages converted in authz-7 (and leads)
+    for page <- ~w(dunning_live invoices_live overview_live plans_live settings_live usage_live),
+        do: refute(Map.has_key?(now, "samen/web/billing/#{page}.ex"), page)
+
+    for page <- ~w(campaign_live campaigns_live leads_live segments_live),
+        do: refute(Map.has_key?(now, "samen/web/marketing/#{page}.ex"), page)
+
+    for page <- ~w(kb_live ticket_live tickets_live),
+        do: refute(Map.has_key?(now, "samen/web/support/#{page}.ex"), page)
   end
 
   describe "the detector discriminates (anti-tautology)" do
@@ -244,6 +284,30 @@ defmodule Samen.Web.TenantActorGuardTest do
       assert Guard.escape_hatches("defp admin_scope(user_id, org_id, role) do") == 0
       assert Guard.escape_hatches("# TenantActor.system_scope(mount, org_id)") == 0
       assert Guard.escape_hatches("restore_admin_scope(scope, socket)") == 0
+    end
+
+    test "a write_scope call is counted unless its scope is the page's own acting scope" do
+      assert Guard.foreign_write_scopes("TenantActor.write_scope(mount, org_id, acting)") == 0
+      assert Guard.foreign_write_scopes("TenantActor.write_scope(mount, org_id, acting_scope)") == 0
+      assert Guard.foreign_write_scopes("Samen.Web.TenantActor.write_scope(m, o, socket.assigns.acting_scope)") == 0
+      assert Guard.foreign_write_scopes("TenantActor.write_scope(\n  mount,\n  org_id,\n  acting\n)") == 0
+      # a literal nil, another scope, an expression, the wrong arity
+      assert Guard.foreign_write_scopes("TenantActor.write_scope(mount, org_id, nil)") == 1
+      assert Guard.foreign_write_scopes("TenantActor.write_scope(mount, org_id, scope)") == 1
+      assert Guard.foreign_write_scopes("TenantActor.write_scope(mount, org_id, other.acting_scope)") == 1
+      assert Guard.foreign_write_scopes("TenantActor.write_scope(mount, org_id, fetch(a, acting))") == 1
+      assert Guard.foreign_write_scopes("TenantActor.write_scope(mount, org_id)") == 1
+      # captures, apply, import
+      assert Guard.foreign_write_scopes("f = &TenantActor.write_scope/3") == 1
+      assert Guard.foreign_write_scopes("apply(TenantActor, :write_scope, [m, o, nil])") == 1
+      assert Guard.foreign_write_scopes("import Samen.Web.TenantActor") == 1
+      assert Guard.foreign_write_scopes("import Samen.Web.TenantActor, only: [admin?: 1]") == 0
+      assert Guard.foreign_write_scopes("import Samen.Web.TenantActor, except: [write_scope: 3]") == 0
+      # not code: a comment, doc text, another module's write_scope, a definition
+      assert Guard.foreign_write_scopes("# TenantActor.write_scope(mount, org_id, nil)") == 0
+      assert Guard.foreign_write_scopes("@doc \"\"\"\n  TenantActor.write_scope(mount, org_id, nil)\n  \"\"\"\n") == 0
+      assert Guard.foreign_write_scopes("Reads.write_scope(mount, org_id, nil)") == 0
+      assert Guard.foreign_write_scopes("def write_scope(mount, org_id, acting), do: x") == 0
     end
 
     test "a modeled new file is reported by every detector" do

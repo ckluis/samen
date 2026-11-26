@@ -34,6 +34,10 @@ All notable changes to Samen are recorded here. The format follows
   operator never authors into a tenant; the three now agree. The disarmed dev posture keeps `admin?/1` open. `member?/1` is
   left a rank check on purpose: the operator's synthetic scope carries `:member`, and an operator's reply is refused by the
   kernel's plaintext-PII `WriteGuard`, which the operator red paths drive the write through to.
+- **The guard ratchet sees `write_scope`.** `Samen.Web.TenantActor.Guard.foreign_write_scopes/1` counts a
+  `TenantActor.write_scope(` call whose third argument is not the page's own acting scope (a literal `nil`, another scope,
+  a capture, `apply`, an `import`); the baseline is empty and `Billing.Reads.restore_admin_scope/2` passes the socket's
+  acting scope instead of the list's. The by-name non-vacuity check names the Billing, Marketing and Support pages too.
 
 ### Tooling: the driver waits for a killed process group to be gone
 
