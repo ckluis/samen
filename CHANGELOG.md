@@ -133,13 +133,19 @@ All notable changes to Samen are recorded here. The format follows
   load. `Samen.Web.TenantActor.assign_actor/2` now attaches a `:handle_event` lifecycle hook (once, ahead of the `ListLive` hook
   and the view's own `handle_event/3`) that resolves the person again for the page's org before EVERY event. Still acting:
   `acting_scope`, the list context and the forms built at load follow the current role, so a demotion takes effect on the very
-  next event. Denied or unavailable: the page switches to the refused state (its list and page are cleared) and the event is
-  halted. This covers the tasks, task, projects, company, contact, contacts, companies, sequences and CSV import pages and the
+  next event. Denied or unavailable: the page switches to the refused state and the event is halted. The refused state carries
+  no data: the list context and page are cleared and the view runs the same load a refused navigation does (an optional
+  `actor_lost/1`), so a record's name in a topbar (the company, the contact's full name, the task title), the forms, the tiles
+  and the profile are dropped, and the profile shows the refused card for the unavailable state too. This covers the tasks, task, projects, company, contact, contacts, companies, sequences and CSV import pages and the
   other converted pages through the same call; the notification inbox (events and realtime messages) and preferences resolve the
   recipient their own way and carry the same guard. Cost: two identity queries per event (the user, then the membership),
   re-read every time, never cached across events. The refused card gains a "Check again" button (`retry_actor`) that resolves
-  the person again and reloads the page when they act. A view that builds something from the scope exports `actor_changed/1`.
-  No migration. Sabotages 1479 to 1483.
+  the person again and reloads the page when they act; a page with no URL to go back to (an embedded view, or one whose org
+  resolved late) reloads in place (`actor_regained/1`) instead of doing nothing. A view that builds something from the scope
+  exports `actor_changed/1`. The Edit contact button follows the write role like the other pages' controls. The generated
+  `--live` index and form screens had the same bug (they submitted a form built at load with the role of that moment) and now
+  attach the same guard; **upgrade note:** re-generate (`mix samen.gen.resource --live`) to get it, an already generated
+  screen keeps the old behavior. No migration. Sabotages 1479 to 1483 and 1502 to 1507.
 - **Fixed: viewers were offered write controls, a refused request still wrote, and a missing company crashed its page.**
   The create, edit, delete, enroll and status controls of the company, contact, companies, contacts, tasks, task, projects,
   sequences and import pages are shown only to a person who may write (`Samen.Web.TenantActor.writable?/2`: the plane AND at
@@ -150,7 +156,7 @@ All notable changes to Samen are recorded here. The format follows
   Sabotages 1493 to 1495 and the viewer tests for the forms built at load (1484, 1485; 1473 is the event-time mutation alone).
 - **Fixed: Outreach system actions were open to every actor, and Mailbox rows to every tenant actor.** `Enrollment`
   `:advance_due`, `:due_scan` (an unfiltered cross-org read) and `:system_advance`, and `StepSend` `:queue`, `:mark` and
-  `:requeue`, were `authorize_if(always())`. The three internal ones are forbidden to every actor and keep working as the
+  `:requeue`, were `authorize_if(always())`. The four internal ones (`:system_advance`, `:queue`, `:mark`, `:requeue`) are forbidden to every actor and keep working as the
   `authorize?: false` calls `Samen.Sequences` and the send worker make; `:due_scan` and `:advance_due` are authorized only for
   AshOban's own interaction (the `:sequence_step_due` trigger). Mailbox `Connection` and `MailMessage` writes were org scope
   only; the sole writer is `Samen.Mailbox.Sync` (`authorize?: false`), so create, update and destroy are now forbidden to every
