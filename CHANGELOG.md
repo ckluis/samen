@@ -173,12 +173,16 @@ All notable changes to Samen are recorded here. The format follows
   `authorize_if(always())`, so any code path, with any actor or none, could ask about anyone's grants. They are now one
   implementation, `Samen.Reveal.GrantProbe` (the Mailbox pair uses it too): the grant is checked for the actor that RUNS the
   action, a missing actor is denied, there is no identity argument, and the policy is `authorize_if(actor_present())`. A
-  reveal action that takes an identity argument (`actor_id`, `user_id`, `requestor_id`, …) or is `authorize_if(always())`
-  now fails the build: `Samen.Transformers.RevealActions` enforces it at compile time on every resource, so hosts and
+  declared reveal action (`reveal :name` in `pii do`) now fails the build unless it has exactly this shape:
+  `run({Samen.Reveal.GrantProbe, _})`, arguments exactly `[:subject_id]`, and a `policy action(:name)` whose only check
+  is `authorize_if(actor_present())`; any other `authorize_if` or `authorize_unless` that can apply to it (`always()`,
+  `expr(true)`, a custom check, in a `policy`, a `policy_group` or a `bypass`) and any `bypass` other than AshOban's own
+  interaction are refused. `Samen.Transformers.RevealActions` enforces it at compile time on every resource that
+  declares a reveal action, so hosts and
   generated apps get it with no CI step (`Samen.Pii.Info.reveal_probes_examined/1` records what it examined). **Upgrade
   note:** drop `actor_id:` from any call to a reveal probe action (it is now an unknown-argument error) and run it with the
-  actor that is asking; a reveal action of your own that names an identity argument or answers `always()` stops compiling,
-  so give it `run({Samen.Reveal.GrantProbe, label: :field})` and `authorize_if(actor_present())`; **re-generate** (or
+  actor that is asking; a reveal action of your own that is not of that shape stops compiling,
+  so give it `run({Samen.Reveal.GrantProbe, label: :field})`, the one argument `subject_id`, and `authorize_if(actor_present())`; **re-generate** (or
   copy) the `vertical.ex` / `--api` / `--live` resource templates. No migration. Sabotages 1508 to 1511.
 
 - **Fixed: the Automation and AI-agent system actions were open to every actor.** Workflow `:scan_due` and `:dispatch_due`,

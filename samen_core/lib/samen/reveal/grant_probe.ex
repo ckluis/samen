@@ -19,8 +19,8 @@ defmodule Samen.Reveal.GrantProbe do
         authorize_if(actor_present())
       end
 
-  `Samen.Transformers.RevealActions` refuses, at compile time, a declared reveal action that takes an identity
-  argument or is `authorize_if(always())`.
+  `Samen.Transformers.RevealActions` refuses, at compile time, a declared reveal action that is not of this shape (see
+  `Samen.Reveal.ProbeGuard`).
   """
   use Ash.Resource.Actions.Implementation
 

@@ -81,8 +81,8 @@ defmodule Samen.Transformers.RevealActions do
     end
   end
 
-  # A declared reveal action must not take an identity argument nor be `authorize_if(always())`
-  # (`Samen.Reveal.ProbeGuard`): fail the build on either, and persist what was examined so a host's test can prove
+  # A declared reveal action must be of the positive shape `Samen.Reveal.ProbeGuard` states
+  # (the shared probe, `[:subject_id]`, an `actor_present()` gate and nothing else authorizing): fail the build otherwise, and persist what was examined so a host's test can prove
   # the rule saw its reveal action (never vacuous).
   defp probe_check(dsl_state, reveal_names) do
     actions = Transformer.get_entities(dsl_state, [:actions])

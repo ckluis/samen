@@ -135,7 +135,17 @@ defmodule Samen.RevealProbeAuthzTest do
   end
 
   describe "ProbeGuard (the compile-time rule)" do
-    defp fake_policy(condition, type, check), do: %{condition: condition, policies: [%{type: type, check: check}]}
+    @probe {Samen.Reveal.GrantProbe, [label: :x]}
+    @present Ash.Policy.Check.ActorPresent
+    defp fake_policy(condition, type, check, extra \\ []),
+      do: struct(Ash.Policy.Policy, [condition: condition, policies: [%{type: type, check: check}]] ++ extra)
+
+    defp gate(name \\ :reveal_x),
+      do: fake_policy([{Ash.Policy.Check.Action, [action: [name]]}], :authorize_if, @present)
+
+    defp clean_action(extra \\ []),
+      do: Map.merge(%{name: :reveal_x, type: :action, run: @probe, arguments: [%{name: :subject_id}]}, Map.new(extra))
+
     @always {Ash.Policy.Check.Static, [result: true]}
 
     test "an identity argument is flagged; subject_id is not" do
@@ -147,22 +157,56 @@ defmodule Samen.RevealProbeAuthzTest do
     end
 
     test "violations: identity argument, always() by name, always() by action_type; clean passes (positive control)" do
-      clean = %{name: :reveal_x, arguments: [%{name: :subject_id}]}
-      ok_policy = fake_policy([{Ash.Policy.Check.Action, [action: [:reveal_x]]}], :authorize_if, {Ash.Policy.Check.Builtins, []})
-      assert [] = ProbeGuard.violations([:reveal_x], [clean], [ok_policy])
+      clean = clean_action()
+      assert [] = ProbeGuard.violations([:reveal_x], [clean], [gate()])
 
       assert [{:reveal_x, "takes the identity argument :actor_id" <> _}] =
-               ProbeGuard.violations([:reveal_x], [%{name: :reveal_x, arguments: [%{name: :actor_id}]}], [ok_policy])
+               ProbeGuard.violations([:reveal_x], [clean_action(arguments: [%{name: :actor_id}])], [gate()])
 
       open = fake_policy([{Ash.Policy.Check.Action, [action: [:reveal_x]]}], :authorize_if, @always)
-      assert [{:reveal_x, "is `authorize_if(always())`" <> _}] = ProbeGuard.violations([:reveal_x], [clean], [open])
+      assert [{:reveal_x, "authorize_if(" <> _} | _] = ProbeGuard.violations([:reveal_x], [clean], [gate(), open])
 
       open_type = fake_policy([{Ash.Policy.Check.ActionType, [type: [:action]]}], :authorize_if, @always)
-      assert [{:reveal_x, _}] = ProbeGuard.violations([:reveal_x], [clean], [open_type])
+      assert [{:reveal_x, _} | _] = ProbeGuard.violations([:reveal_x], [clean], [gate(), open_type])
 
-      # a policy for ANOTHER action, or a forbid, is not a violation
+      # a policy for ANOTHER action is not a violation; neither is a forbid
       other = fake_policy([{Ash.Policy.Check.Action, [action: [:other]]}], :authorize_if, @always)
-      assert [] = ProbeGuard.violations([:reveal_x], [clean], [other])
+      forbid = fake_policy([{Ash.Policy.Check.Action, [action: [:reveal_x]]}], :forbid_if, @always)
+      assert [] = ProbeGuard.violations([:reveal_x], [clean], [gate(), other, forbid])
+    end
+
+    test "the shape is positive: a reveal action with no actor_present gate, another run, or other arguments fails" do
+      assert [{:reveal_x, "has no `policy action(:reveal_x)`" <> _}] = ProbeGuard.violations([:reveal_x], [clean_action()], [])
+
+      assert [{:reveal_x, "does not `run(" <> _}] =
+               ProbeGuard.violations([:reveal_x], [clean_action(run: {Some.Other, []})], [gate()])
+
+      assert [{:reveal_x, "takes the arguments [:subject_id, :as]" <> _}] =
+               ProbeGuard.violations([:reveal_x], [clean_action(arguments: [%{name: :subject_id}, %{name: :as}])], [gate()])
+    end
+
+    test "a bypass or policy_group that can reach the action is refused; the AshOban bypass is allow-listed" do
+      clean = clean_action()
+      oban = Ash.Policy.Check.Static && {AshOban.Checks.AshObanInteraction, []}
+
+      assert [] = ProbeGuard.violations([:reveal_x], [clean], [gate(), fake_policy([oban], :authorize_if, oban, bypass?: true)])
+
+      assert [{:reveal_x, "can be authorized by a `bypass`" <> _}] =
+               ProbeGuard.violations([:reveal_x], [clean], [gate(), fake_policy([@always], :authorize_if, @always, bypass?: true)])
+
+      # a bypass for another action cannot reach it
+      assert [] =
+               ProbeGuard.violations([:reveal_x], [clean], [
+                 gate(),
+                 fake_policy([{Ash.Policy.Check.Action, [action: [:other]]}], :authorize_if, @always, bypass?: true)
+               ])
+
+      group = %Ash.Policy.PolicyGroup{
+        condition: [{Ash.Policy.Check.Action, [action: [:reveal_x]]}],
+        policies: [fake_policy([], :authorize_if, @always)]
+      }
+
+      assert [{:reveal_x, "authorize_if(" <> _}] = ProbeGuard.violations([:reveal_x], [clean], [gate(), group])
     end
   end
 
@@ -175,19 +219,34 @@ defmodule Samen.RevealProbeAuthzTest do
 
     defp dsl, do: @resource.spark_dsl_config()
 
-    defp with_argument(dsl, name) do
+    defp edit_action(dsl, fun) do
       action = dsl |> Transformer.get_entities([:actions]) |> Enum.find(&(&1.name == :reveal_email))
-      arg = %Ash.Resource.Actions.Argument{name: name, type: Ash.Type.String, allow_nil?: false}
-      Transformer.replace_entity(dsl, [:actions], %{action | arguments: [arg | action.arguments]}, &(&1.name == :reveal_email))
+      Transformer.replace_entity(dsl, [:actions], fun.(action), &(&1.name == :reveal_email))
     end
 
-    defp with_policy(dsl, type, check) do
-      policy = %Ash.Policy.Policy{
-        condition: [{Ash.Policy.Check.Action, [action: [:reveal_email]]}],
-        policies: [%Ash.Policy.Check{type: type, check: check}]
-      }
+    defp with_argument(dsl, name) do
+      arg = %Ash.Resource.Actions.Argument{name: name, type: Ash.Type.String, allow_nil?: false}
+      edit_action(dsl, &%{&1 | arguments: [arg | &1.arguments]})
+    end
+
+    defp with_run(dsl, run), do: edit_action(dsl, &%{&1 | run: run})
+
+    defp with_policy(dsl, type, check, extra \\ []) do
+      policy =
+        struct(
+          Ash.Policy.Policy,
+          [
+            condition: [{Ash.Policy.Check.Action, [action: [:reveal_email]]}],
+            policies: [%Ash.Policy.Check{type: type, check: check}]
+          ] ++ extra
+        )
 
       Transformer.add_entity(dsl, [:policies], policy)
+    end
+
+    defp refused(dsl) do
+      assert {:error, %Spark.Error.DslError{message: msg}} = Samen.Transformers.RevealActions.transform(dsl)
+      msg
     end
 
     test "positive control: the clean declaration passes and records that it examined it" do
@@ -197,25 +256,82 @@ defmodule Samen.RevealProbeAuthzTest do
 
     test "an identity argument fails the build" do
       for name <- [:actor_id, :user_id] do
-        assert {:error, %Spark.Error.DslError{message: msg}} =
-                 dsl() |> with_argument(name) |> Samen.Transformers.RevealActions.transform()
-
-        assert msg =~ "identity argument #{inspect(name)}"
+        assert dsl() |> with_argument(name) |> refused() =~ "identity argument #{inspect(name)}"
       end
     end
 
-    test "authorize_if(always()) fails the build; a policy that is not always() passes" do
-      always = {Ash.Policy.Check.Static, [result: true]}
-
-      assert {:error, %Spark.Error.DslError{message: msg}} =
-               dsl() |> with_policy(:authorize_if, always) |> Samen.Transformers.RevealActions.transform()
-
-      assert msg =~ "authorize_if(always())"
+    test "authorize_if(always()) fails the build; a second actor_present policy for the action passes" do
+      assert dsl() |> with_policy(:authorize_if, {Ash.Policy.Check.Static, [result: true]}) |> refused() =~
+               "authorize_if(always())"
 
       assert {:ok, _} =
                dsl()
-               |> with_policy(:authorize_if, {Ash.Policy.Check.Builtins, []})
+               |> with_policy(:authorize_if, Ash.Policy.Check.ActorPresent)
                |> Samen.Transformers.RevealActions.transform()
+    end
+
+    test "evasion: an own `run` reading a non-listed argument (`:as`) fails the build" do
+      msg = dsl() |> with_run({SomeOwn.Probe, []}) |> with_argument(:as) |> refused()
+      assert msg =~ "does not `run("
+      assert msg =~ "[:as, :subject_id]"
+    end
+
+    test "evasion: an own `run` that uses subject_id as the actor fails the build" do
+      assert dsl() |> with_run({SomeOwn.Probe, []}) |> refused() =~ "does not `run("
+    end
+
+    test "evasion: `bypass always()` fails the build" do
+      always = {Ash.Policy.Check.Static, [result: true]}
+
+      msg =
+        dsl()
+        |> Transformer.add_entity(
+          [:policies],
+          struct(Ash.Policy.Policy, bypass?: true, condition: [always], policies: [%Ash.Policy.Check{type: :authorize_if, check: always}])
+        )
+        |> refused()
+
+      assert msg =~ "`bypass`"
+
+      # positive control: AshOban's own bypass is the one allow-listed shape
+      oban = {AshOban.Checks.AshObanInteraction, []}
+
+      assert {:ok, _} =
+               dsl()
+               |> Transformer.add_entity(
+                 [:policies],
+                 struct(Ash.Policy.Policy, bypass?: true, condition: [oban], policies: [%Ash.Policy.Check{type: :authorize_if, check: oban}])
+               )
+               |> Samen.Transformers.RevealActions.transform()
+    end
+
+    test "evasion: a policy_group that authorizes always() fails the build" do
+      always = {Ash.Policy.Check.Static, [result: true]}
+
+      group = %Ash.Policy.PolicyGroup{
+        condition: [{Ash.Policy.Check.Action, [action: [:reveal_email]]}],
+        policies: [struct(Ash.Policy.Policy, condition: [], policies: [%Ash.Policy.Check{type: :authorize_if, check: always}])]
+      }
+
+      assert dsl() |> Transformer.add_entity([:policies], group) |> refused() =~ "authorize_if("
+    end
+
+    test "evasion: expr(true) fails the build" do
+      assert dsl() |> with_policy(:authorize_if, {Ash.Policy.Check.Expression, [expr: true]}) |> refused() =~ "authorize_if("
+    end
+
+    test "evasion: a policy that is not about the action (a broad always() on its action type) fails the build" do
+      broad = {Ash.Policy.Check.Static, [result: true]}
+
+      assert dsl()
+             |> Transformer.add_entity(
+               [:policies],
+               struct(Ash.Policy.Policy,
+                 condition: [{Ash.Policy.Check.ActionType, [type: [:action]]}],
+                 policies: [%Ash.Policy.Check{type: :authorize_if, check: broad}]
+               )
+             )
+             |> refused() =~ "authorize_if("
     end
   end
 end
