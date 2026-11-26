@@ -413,7 +413,7 @@ defmodule Samen.Web.TenantActorOpenPageTest do
     login = log_in(ctx.member)
 
     opened =
-      for {name, view, path, extra, marks} <- refusal_pages(org), name in ["company", "contact", "task"] do
+      for {name, view, path, extra, marks} <- refusal_pages(org), name in ["company", "contact", "task", "profile"] do
         {view, socket} = v = prepare(name, open(login, view, path, org, extra))
         mount = socket.assigns.samen_mount
         broken = %{mount | labels: Map.put(mount.labels, :identity_namespace, Samen.WebTest.NoSuchIdentity)}

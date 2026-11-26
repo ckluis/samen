@@ -97,11 +97,9 @@ defmodule Samen.Web.Settings.ProfileLive do
               {:error, :unavailable} -> assign(socket, load_error: Samen.Web.Reads.Guard.message())
             end
 
-          {:refused, %{assigns: %{actor_state: :denied}} = socket} ->
-            socket
-
+          # Denied or unavailable: the refused card (`actor_lost/1`), no profile.
           {:refused, socket} ->
-            assign(socket, load_error: Samen.Web.Reads.Guard.message())
+            socket
         end
     end
   end
@@ -173,8 +171,8 @@ defmodule Samen.Web.Settings.ProfileLive do
           <% is_nil(@org_id) -> %>
             <.no_org_card mount={@samen_mount} />
 
-          <% @actor_state == :denied -> %>
-            <.actor_refused state={:denied} title="Profile" nothing="there is no profile to show" />
+          <% @actor_state in [:denied, :unavailable] -> %>
+            <.actor_refused state={@actor_state} title="Profile" nothing="there is no profile to show" />
 
           <% @load_error != nil -> %>
             <div class="wrap">
