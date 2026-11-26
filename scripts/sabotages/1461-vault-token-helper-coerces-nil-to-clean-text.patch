@@ -1,0 +1,19 @@
+# SABOTAGE: refute_vault_token coerces nil and other non-text input with to_string and passes
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault_token_assert_test.exs
+# MUST_FAIL: nil, atoms, numbers, maps and non-iodata lists flunk
+diff --git a/samen_core/lib/samen/vault_token_assert.ex b/samen_core/lib/samen/vault_token_assert.ex
+index 9d63d8b..18fb6d9 100644
+--- a/samen_core/lib/samen/vault_token_assert.ex
++++ b/samen_core/lib/samen/vault_token_assert.ex
+@@ -58,7 +58,7 @@ defmodule Samen.VaultTokenAssert do
+     ArgumentError -> bad_input!(text, who)
+   end
+ 
+-  defp text!(other, who), do: bad_input!(other, who)
++  defp text!(other, _who), do: to_string(other)
+ 
+   @spec bad_input!(term(), String.t()) :: no_return()
+   defp bad_input!(other, who) do

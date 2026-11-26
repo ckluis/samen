@@ -36,6 +36,7 @@ defmodule Driftwood.GateA6AgentSliceTest do
   record carries the proposed owner, the audit chain names that human, and the run reaches
   `:succeeded`.
   """
+  import Samen.VaultTokenAssert
   use Driftwood.DataCase, async: false
   use Samen.AgentCase
 
@@ -544,7 +545,7 @@ defmodule Driftwood.GateA6AgentSliceTest do
 
       # §7.3 on driftwood's own rows: the operator projection carries NO transcript.
       refute Map.has_key?(projected, :transcript)
-      refute inspect(summary ++ [projected], limit: :infinity) =~ "vt_"
+      refute_vault_token(inspect(summary ++ [projected], limit: :infinity))
     end
   end
 

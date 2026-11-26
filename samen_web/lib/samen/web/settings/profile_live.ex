@@ -32,6 +32,9 @@ defmodule Samen.Web.Settings.ProfileLive do
   alias Samen.Web.Mount
   alias Samen.Web.Settings.Profile
   alias Samen.Web.Settings.Reads
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @impl true
   def mount(params, session, socket) do
@@ -58,7 +61,16 @@ defmodule Samen.Web.Settings.ProfileLive do
   @doc false
   def load(socket, org_id, user_id) do
     mount = socket.assigns.samen_mount
-    assigns = %{org_id: org_id, user_id: user_id, user: nil, form: blank_form(), load_error: nil}
+    assigns = %{
+      org_id: org_id,
+      user_id: user_id,
+      user: nil,
+      form: blank_form(),
+      load_error: nil,
+      acting_role: nil,
+      acting_scope: nil,
+      actor_state: :ok
+    }
 
     socket = assign(socket, assigns)
 
@@ -67,13 +79,29 @@ defmodule Samen.Web.Settings.ProfileLive do
         socket
 
       true ->
-        scope = Mount.scope(mount, org_id)
+        # ADR-045 §4.4 — the person's RESOLVED membership role (`Samen.Web.TenantActor`), never the
+        # synthetic scope's fixed `:member`. No active membership is a denied state, a failed lookup
+        # an error state; neither reads anything.
+        case TenantActor.assign_actor(socket, org_id) do
+          {:ok, socket} ->
+            scope = socket.assigns.acting_scope
+            # On an armed host the person is the RESOLVED actor (one principal for the org and the role); the
+            # `user_id` the mount derived from the session keys is only the disarmed dev posture's answer.
+            user_id = if Map.get(scope.actor, :resolved), do: scope.actor.id, else: user_id
+            socket = assign(socket, acting_role: scope.actor.role, user_id: user_id)
 
-        # A FAILED read is the error state (retry), never "No user in context".
-        case Reads.get_user_result(mount, scope, user_id) do
-          {:ok, user} -> assign(socket, user: user, form: profile_form(user))
-          {:error, :not_found} -> socket
-          {:error, :unavailable} -> assign(socket, load_error: Samen.Web.Reads.Guard.message())
+            # A FAILED read is the error state (retry), never "No user in context".
+            case Reads.get_user_result(mount, scope, user_id) do
+              {:ok, user} -> assign(socket, user: user, form: profile_form(user))
+              {:error, :not_found} -> socket
+              {:error, :unavailable} -> assign(socket, load_error: Samen.Web.Reads.Guard.message())
+            end
+
+          {:refused, %{assigns: %{actor_state: :denied}} = socket} ->
+            socket
+
+          {:refused, socket} ->
+            assign(socket, load_error: Samen.Web.Reads.Guard.message())
         end
     end
   end
@@ -82,11 +110,19 @@ defmodule Samen.Web.Settings.ProfileLive do
   def handle_event("retry_load", _params, socket),
     do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.user_id)}
 
+  # "save" is refused while nobody is acting; "retry_load" must still work from the unavailable state.
+  TenantActor.refuse_events(["save"])
+
+  # No acting scope (nobody was resolved: no org, no user) is a refusal, never a scope rebuilt with a nil role that
+  # would fall back to `:member`.
+  def handle_event("save", _params, %{assigns: %{acting_scope: nil}} = socket),
+    do: {:noreply, assign(socket, flash_ok: nil, save_error: "This change was refused: nobody is signed in to this workspace.")}
+
   def handle_event("save", %{"profile" => params}, socket) do
-    %{samen_mount: mount, org_id: org_id, user_id: user_id} = socket.assigns
+    %{samen_mount: mount, org_id: org_id, user_id: user_id, acting_scope: acting} = socket.assigns
     # The acting scope carries the SESSION-resolved user (`user_id` was resolved by `Reads.current_user_id/3` /
     # `reresolve_user/3`); `Profile.update/4` refuses a scope whose actor is not that user.
-    scope = Reads.user_scope(mount, org_id, user_id)
+    scope = Reads.user_scope(mount, org_id, user_id, acting.actor.role)
 
     case Profile.update(mount, scope, user_id, attrs_from_params(params)) do
       {:ok, _user} ->
@@ -131,6 +167,9 @@ defmodule Samen.Web.Settings.ProfileLive do
         <%= cond do %>
           <% is_nil(@org_id) -> %>
             <.no_org_card mount={@samen_mount} />
+
+          <% @actor_state == :denied -> %>
+            <.actor_refused state={:denied} title="Profile" nothing="there is no profile to show" />
 
           <% @load_error != nil -> %>
             <div class="wrap">

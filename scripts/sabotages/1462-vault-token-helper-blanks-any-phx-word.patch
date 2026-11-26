@@ -1,0 +1,28 @@
+# SABOTAGE: the vault-token helper blanks any phx- word, not only an id="phx-..." attribute
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/vault_token_assert_test.exs
+# MUST_FAIL: a canary after a phx- word that is not an id
+diff --git a/samen_core/lib/samen/vault_token_assert.ex b/samen_core/lib/samen/vault_token_assert.ex
+index 59336067..1cf85506 100644
+--- a/samen_core/lib/samen/vault_token_assert.ex
++++ b/samen_core/lib/samen/vault_token_assert.ex
+@@ -33,7 +33,7 @@ defmodule Samen.VaultTokenAssert do
+   @csrf_attr ~r/\b(value|content)="[^"]*"/
+   @phx_attr ~r/\b(data-phx-(?:session|static|main|parent-id)|data-csrf)="[^"]*"/
+   # Only an `id="phx-…"` ATTRIBUTE: a `phx-vt_…` word anywhere else (text, `data-id`, a class, JSON) is not a LiveView id.
+-  @phx_id ~r/(?<![\w-])id="phx-[A-Za-z0-9_-]{8,}"/
++  @phx_id ~r/\bphx-[A-Za-z0-9_-]{8,}/
+ 
+   @doc """
+   The vault-token evidence in `text`: every grammar match (arm 1), then each prefix hit (arm 2) as a short
+@@ -118,7 +118,7 @@ defmodule Samen.VaultTokenAssert do
+       &Regex.replace(@csrf_tag, &1, fn tag -> Regex.replace(@csrf_attr, tag, ~s(\\1="~")) end)
+     )
+     |> then(&Regex.replace(@phx_attr, &1, ~s(\\1="~")))
+-    |> then(&Regex.replace(@phx_id, &1, ~s(id="phx-~")))
++    |> then(&Regex.replace(@phx_id, &1, "phx-~"))
+   end
+ 
+   # Each `vt_` with 20 characters of context either side, so a failure shows WHERE.

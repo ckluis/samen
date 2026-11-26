@@ -26,6 +26,7 @@ defmodule Samen.Web.AI.AgentMaskingTest do
 
   Sabotage 261 flips the named reds here.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -88,7 +89,7 @@ defmodule Samen.Web.AI.AgentMaskingTest do
 
     assert html =~ @canary
     assert html =~ @line_canary
-    refute html =~ "vt_", "the raw vault token reached the tenant DOM — the resolver was bypassed"
+    refute_vault_token(html, "the raw vault token reached the tenant DOM — the resolver was bypassed")
   end
 
   # ==========================================================================
@@ -161,13 +162,13 @@ defmodule Samen.Web.AI.AgentMaskingTest do
     encoded = inspect(runs, limit: :infinity, printable_limit: :infinity)
     refute encoded =~ @canary
     refute encoded =~ @line_canary
-    refute encoded =~ "vt_"
+    refute_vault_token(encoded)
 
     # ...and the same for the turn log the operator drills into.
     {:ok, turns} = Samen.AI.Agent.Health.turns(operator, org_id, run.id)
     assert length(turns) == 1
     turn_encoded = inspect(turns, limit: :infinity, printable_limit: :infinity)
     refute turn_encoded =~ @canary
-    refute turn_encoded =~ "vt_"
+    refute_vault_token(turn_encoded)
   end
 end

@@ -22,6 +22,7 @@ defmodule Samen.Web.CRMCompanyDetailCrudTest do
       renders the SAME rows `••••` with plaintext AND vault token absent — and offers
       NO write affordance (edit/delete/composer are tenant-plane posture).
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   require Ash.Query
@@ -260,7 +261,7 @@ defmodule Samen.Web.CRMCompanyDetailCrudTest do
     refute rendered =~ Seeds.contact_full_name()
     refute rendered =~ Seeds.contact_email()
     refute rendered =~ Seeds.contact_phone()
-    refute rendered =~ "vt_"
+    refute_vault_token(rendered)
     # And no write affordance: no edit/delete/composer (tenant-plane posture; the
     # kernel's OrgScope + WriteGuard enforce regardless).
     refute rendered =~ ~s(id="edit-company")

@@ -1,0 +1,19 @@
+# SABOTAGE: CRM Person writes admit a viewer (the member-or-above gate is lowered to viewer)
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/crm_scope_policy_matrix_test.exs
+# MUST_FAIL: a VIEWER cannot create, update or destroy a person
+diff --git a/samen_core/lib/samen/scopes/crm/blueprint.ex b/samen_core/lib/samen/scopes/crm/blueprint.ex
+index 18128158..eef8fb9e 100644
+--- a/samen_core/lib/samen/scopes/crm/blueprint.ex
++++ b/samen_core/lib/samen/scopes/crm/blueprint.ex
+@@ -252,7 +252,7 @@ defmodule Samen.Scopes.Crm.Blueprint do
+           # is a generic action with its own policy below and is not an `action_type` this clause names.
+           policy action_type([:create, :update, :destroy]) do
+             forbid_unless(Samen.Policy.OrgScope)
+-            forbid_unless({Samen.Policy.RoleAtLeast, role: :member})
++            forbid_unless({Samen.Policy.RoleAtLeast, role: :viewer})
+             authorize_if(always())
+           end
+ 

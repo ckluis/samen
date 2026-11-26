@@ -12,6 +12,7 @@ defmodule Samen.Web.ChatLiveRenderTest do
   On the OPERATOR plane the SAME room renders bodies + identities `••••` — the two-plane thesis,
   extended to chat, with masking BY CONSTRUCTION (no LiveView masking branch).
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.Web.Chat.{ThreadLive, ThreadsLive}
@@ -105,7 +106,7 @@ defmodule Samen.Web.ChatLiveRenderTest do
     refute html =~ Seeds.contact_full_name()
     refute html =~ Seeds.contact_email()
     # No vault token / pii_ column string leaks.
-    refute html =~ "vt_"
+    refute_vault_token(html)
     refute html =~ "pii_"
     # The safe handle still renders (non-PII).
     assert html =~ Seeds.tenant_participant_handle()

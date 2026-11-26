@@ -24,6 +24,7 @@ defmodule Samen.Web.CsvNestedMaskingTest do
   The serialization boundary is exercised through `Csv.render_cell/1` — the same
   private `cell/1`/`compact/1` path `export_rows/8` runs every export cell through.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: true
   use Samen.MaskingCase
 
@@ -40,7 +41,7 @@ defmodule Samen.Web.CsvNestedMaskingTest do
       # sibling key rides along untouched (masking is per-value, not per-cell).
       assert_masked_dom!(cell, [@token])
       assert cell =~ "keep"
-      refute cell =~ "vt_"
+      refute_vault_token(cell)
     end
 
     test "nested inside a LIST" do
@@ -48,14 +49,14 @@ defmodule Samen.Web.CsvNestedMaskingTest do
 
       assert_masked_dom!(cell, [@token])
       assert cell =~ "keep"
-      refute cell =~ "vt_"
+      refute_vault_token(cell)
     end
 
     test "nested DEEPLY (map inside a list inside a map)" do
       cell = Csv.render_cell(%{"outer" => [%{"inner" => Masked.new(@token, :phone)}]})
 
       assert_masked_dom!(cell, [@token])
-      refute cell =~ "vt_"
+      refute_vault_token(cell)
     end
   end
 

@@ -11,6 +11,7 @@ defmodule Samen.DsarExportTest do
     * operator plane WITH a grant → plaintext (the positive control that proves the
       mask is refutable, not a value that never resolved).
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   alias SamenCore.TestRepo, as: Repo
@@ -78,7 +79,7 @@ defmodule Samen.DsarExportTest do
       refute blob =~ "alice@example.com"
       refute blob =~ "Alice Anders"
       refute blob =~ "pii_vault"
-      refute blob =~ "vt_"
+      refute_vault_token(blob)
     end
 
     test "a caller-asserted grant?: true is IGNORED — no real grant → still MASKED (hole closed)" do

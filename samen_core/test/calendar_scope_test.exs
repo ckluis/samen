@@ -25,6 +25,7 @@ defmodule Samen.CalendarScopeTest do
       (soft-delete does not disturb INV-1 — mirrors `Samen.SoftDeleteTest`);
     * c7 catalog registration — `mix samen.verify.catalog_parity` is green.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   require Ash.Query
@@ -323,7 +324,7 @@ defmodule Samen.CalendarScopeTest do
       masked = resolve_on_plane(e, Event, :operator, repo: @repo, grant: DenyAll).attendees
       assert_plane_masked!(masked, nil)
       refute to_string(masked) =~ @secret_addr
-      refute to_string(masked) =~ "vt_"
+      refute_vault_token(to_string(masked))
     end
 
     test "ANTI-TAUTOLOGY: plane flip — the SAME row resolves clear on tenant, masked on operator",

@@ -10,6 +10,7 @@ defmodule Samen.PiiResolutionTokenBindingTest do
   wherever the plane allows. The DEK leg (the foreign subject is never unwrapped) is in
   `vault_dek_reuse_test.exs`.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
   use Samen.MaskingCase
 
@@ -219,7 +220,7 @@ defmodule Samen.PiiResolutionTokenBindingTest do
 
       assert_receive {:failure, %{read: :vault_token_unbound, cause: "foreign_subject"} = meta}
       assert_receive {:failure, %{read: :vault_token_unbound, cause: "foreign_subject"}}
-      refute inspect(meta) =~ "vt_"
+      refute_vault_token(inspect(meta))
       refute inspect(meta) =~ h1.id
       refute_receive {:failure, %{read: :vault_token_unbound}}, 50
 
@@ -230,7 +231,7 @@ defmodule Samen.PiiResolutionTokenBindingTest do
 
       refute log =~ v.id, "the victim is not named"
       refute log =~ victim_token
-      refute log =~ "vt_"
+      refute_vault_token(log)
     end
 
     test "S2: the cap is per reason, and what it cuts is reported (a flood of one reason never hides another)" do
@@ -262,7 +263,7 @@ defmodule Samen.PiiResolutionTokenBindingTest do
       assert log =~ "read=vault_token_unbound_truncated resource=#{inspect(Person)} cause=foreign_subject suppressed=2 cap=20"
       refute_receive {:failure, _, %{read: :vault_token_unbound_truncated}}, 50
       refute log =~ "cause=field_mismatch suppressed"
-      refute log =~ "vt_"
+      refute_vault_token(log)
       refute log =~ elem(v.vals.full_name, 0)
     end
 

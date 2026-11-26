@@ -21,6 +21,7 @@ defmodule Samen.Web.WebhookSecurityTest do
   Vendor-free: the pipeline runs against a CORE-based `TestProvider` (verification via the
   vendor-generic `Samen.Webhook.Signer` primitive) — `samen_web` never deps a vendor pkg.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   import Plug.Test
@@ -407,7 +408,7 @@ defmodule Samen.Web.WebhookSecurityTest do
       # (`\bvt_` word-boundary so a legit `evt_`-prefixed event id is not a false hit.)
       refute html =~ @pii_email
       refute html =~ @pii_name
-      refute html =~ ~r/\bvt_/
+      refute_vault_token(html, nil, boundary: true)
     end
 
     test "sabotage twin — the token-blind probe is refutable: an un-redacted payload WOULD be caught", %{event: event} do

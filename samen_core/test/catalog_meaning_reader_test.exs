@@ -183,7 +183,7 @@ defmodule SamenCore.CatalogMeaningReaderTest do
     end
 
     test "RED: vt_ in an attribute description fails compile" do
-      assert_raise Spark.Error.DslError, ~r/vt_/, fn ->
+      assert_raise Spark.Error.DslError, ~r/vt_/, fn -> # bare-vt_-ok: the DSL error message names the vt_ marker; it is not a token in a page
         compile!("VtAttr", body(", description: \"Holds a vt_ token for the person.\""), "mfe")
       end
     end
@@ -193,15 +193,15 @@ defmodule SamenCore.CatalogMeaningReaderTest do
     end
 
     test "RED: vt_ in a synonym, a resource description, a relationship description and a pii description fail" do
-      assert_raise Spark.Error.DslError, ~r/vt_/, fn ->
+      assert_raise Spark.Error.DslError, ~r/vt_/, fn -> # bare-vt_-ok: the DSL error message names the vt_ marker; it is not a token in a page
         compile!("VtSyn", body("", "meaning do\n field :name, synonyms: [\"a vt_b\"]\n end"), "mff")
       end
 
-      assert_raise Spark.Error.DslError, ~r/vt_/, fn ->
+      assert_raise Spark.Error.DslError, ~r/vt_/, fn -> # bare-vt_-ok: the DSL error message names the vt_ marker; it is not a token in a page
         compile!("VtRes", body("", "resource do\n description \"About vt_ things.\"\n end"), "mff")
       end
 
-      assert_raise Spark.Error.DslError, ~r/vt_/, fn ->
+      assert_raise Spark.Error.DslError, ~r/vt_/, fn -> # bare-vt_-ok: the DSL error message names the vt_ marker; it is not a token in a page
         compile!(
           "VtRel",
           "attributes do\n attribute :a, :string, public?: true\nend\nrelationships do\n belongs_to :company, SamenCore.Support.Crm.Company do\n description \"has vt_x\"\n end\nend",
@@ -209,7 +209,7 @@ defmodule SamenCore.CatalogMeaningReaderTest do
         )
       end
 
-      assert_raise Spark.Error.DslError, ~r/vt_/, fn ->
+      assert_raise Spark.Error.DslError, ~r/vt_/, fn -> # bare-vt_-ok: the DSL error message names the vt_ marker; it is not a token in a page
         compile!(
           "VtPii",
           "pii do\n vault :pii_name\n pii_attribute :full_name, Samen.Type.FullName, vault: :pii_name, description: \"a vt_ token\"\n end",
@@ -229,7 +229,7 @@ defmodule SamenCore.CatalogMeaningReaderTest do
         end
 
       msg = Exception.message(err)
-      assert msg =~ "vt_"
+      assert msg =~ "vt_" # bare-vt_-ok: the message names the vt_ marker; it is not a token in a page
       assert msg =~ "UnclassifiedNonPii"
       assert msg =~ "allowed_values"
       assert msg =~ "risk"
@@ -396,7 +396,7 @@ defmodule SamenCore.CatalogMeaningReaderTest do
     end
 
     test "RED: vt_ in a belongs_to description is refused when the FK attribute is generated" do
-      assert_raise Spark.Error.DslError, ~r/vt_/, fn ->
+      assert_raise Spark.Error.DslError, ~r/vt_/, fn -> # bare-vt_-ok: the DSL error message names the vt_ marker; it is not a token in a page
         compile!(
           "OrderVt",
           """

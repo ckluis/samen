@@ -1,0 +1,20 @@
+# SABOTAGE: a session carrying both keys takes the org from the legacy key and the role from the spine 
+#   credential
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_surfaces_test.exs
+# MUST_FAIL: a session with BOTH keys: the org and the role come from the SAME key
+diff --git a/samen_web/lib/samen/web/settings/reads.ex b/samen_web/lib/samen/web/settings/reads.ex
+index 59f36057..f55694c3 100644
+--- a/samen_web/lib/samen/web/settings/reads.ex
++++ b/samen_web/lib/samen/web/settings/reads.ex
+@@ -117,7 +117,7 @@ defmodule Samen.Web.Settings.Reads do
+   # `authorized_orgs/2`, so the person acting here is the one acting everywhere else.
+   defp credential_or_legacy(mount, session, credential_id) do
+     case Samen.Web.CurrentOrg.principal_key(mount, session) do
+-      {:legacy, user_id} -> {:user, user_id}
++      {:legacy, _user_id} -> {:credential, credential_id}
+       _ -> {:credential, credential_id}
+     end
+   end

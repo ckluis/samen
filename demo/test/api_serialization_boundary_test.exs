@@ -45,7 +45,7 @@ defmodule Demo.ApiSerializationBoundaryTest do
   end
 
   test "no allowlisted field name is a physical storage name" do
-    storage_patterns = [~r/^cnt_/, ~r/^com_/, ~r/^ido_/, ~r/^usr_/, ~r/^pii_/, ~r/^vt_/]
+    storage_patterns = [~r/^cnt_/, ~r/^com_/, ~r/^ido_/, ~r/^usr_/, ~r/^pii_/, ~r/^vt_/] # bare-vt_-ok: an ^-anchored check on allowlisted field NAMES (atoms), not a body or page
 
     for {_resource, allowlisted} <- @exposed_resources, field <- allowlisted do
       s = Atom.to_string(field)

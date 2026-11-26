@@ -22,6 +22,7 @@ defmodule Demo.WebhookPayloadAllowlistTest do
        "absent" assertions are not vacuous).
     4. Masked PII on the allowlist serializes as "••••" / omitted per the plane rules.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: true
 
   alias Samen.Webhook.Payload
@@ -244,7 +245,7 @@ defmodule Demo.WebhookPayloadAllowlistTest do
              "a masked value on a surviving catalog field still serializes as •••• (never plaintext)"
 
       json = Jason.encode!(data)
-      refute json =~ "vt_", "no vault token in the payload body"
+      refute_vault_token(json, "no vault token in the payload body")
     end
   end
 

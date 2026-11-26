@@ -29,6 +29,7 @@ defmodule Samen.DocsScopeTest do
       PII-shaped value can never land in the unvaulted `body` column, forcing
       the caller to the vaulted `secure_body` path instead.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   require Ash.Query
@@ -250,7 +251,7 @@ defmodule Samen.DocsScopeTest do
       masked = resolve_on_plane(d, Doc, :operator, repo: @repo, grant: DenyAll).secure_body
       assert_plane_masked!(masked, nil)
       refute to_string(masked) =~ @secret_body
-      refute to_string(masked) =~ "vt_"
+      refute_vault_token(to_string(masked))
     end
 
     test "GREEN/RED: Note.secure_body masks identically to Doc.secure_body", %{org: org, scope: scope} do

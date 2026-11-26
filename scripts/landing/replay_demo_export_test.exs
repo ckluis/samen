@@ -23,6 +23,7 @@
 # `replay.viewed` aud_event rows; and the CONTRAST — the same session's changed assigns and
 # event params BEFORE sanitization (what a replay that stores values would have kept).
 defmodule Samen.Web.LandingReplayDemoExportTest do
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Phoenix.LiveView.Lifecycle
@@ -99,7 +100,7 @@ defmodule Samen.Web.LandingReplayDemoExportTest do
     naive_text = Jason.encode!(naive)
     for s <- sentinels, do: refute(all_stored =~ s, "#{s} reached replay rows")
     assert naive_text =~ "ada.whitfield@blueridge.example"
-    refute all_stored =~ "vt_"
+    refute_vault_token(all_stored)
 
     # -- four viewers ----------------------------------------------------------------------
     operator = "0e000000-0000-4000-8000-00000000c0de"

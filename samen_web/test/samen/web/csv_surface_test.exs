@@ -3,15 +3,18 @@ defmodule Samen.Web.CsvSurfaceTest do
   WS-E E3.4 — the CSV ROUTE surface: `ExportController` (the download path) and
   `ImportLive` (render posture + report rendering). The export/import ENGINE
   semantics live in `csv_test.exs`; the per-plane export masking red-path in
-  `csv_masking_test.exs`. Here we prove the mounted surface:
+  `csv_masking_test.exs`. Here we prove the surface BEHIND the route (the controller is called directly,
+  with the `:samen_mount` assign set by hand and a bare session; `files_csv_router_test.exs` drives the real
+  router with a real login, and is what proves the route carries the mount):
 
     * export download: tenant plane → 200 `text/csv` attachment with the org's
-      rows; OPERATOR plane → the SAME route serves the masked CSV (`••••`, no
+      rows; OPERATOR plane → the SAME controller serves the masked CSV (`••••`, no
       plaintext, no `vt_*`) — masking, not refusal, is the export guarantee.
     * deny-by-default resource resolution: an unknown/unmounted resource is 404.
     * ImportLive: tenant plane offers the form; operator plane does not (posture);
       a `%Report{}` renders created count + per-row errors honestly.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -67,6 +70,8 @@ defmodule Samen.Web.CsvSurfaceTest do
       |> Phoenix.Component.assign(:return_to, nil)
       |> Phoenix.Component.assign(:org_id, org_id)
       |> Phoenix.Component.assign(:resource_name, "Person")
+      |> Phoenix.Component.assign(:actor_state, :ok)
+      |> Phoenix.Component.assign(:acting_scope, nil)
       |> Phoenix.Component.assign(:report, Keyword.get(extra, :report))
       |> Phoenix.Component.assign(:import_error, Keyword.get(extra, :import_error))
 
@@ -93,7 +98,7 @@ defmodule Samen.Web.CsvSurfaceTest do
       assert get_resp_header(conn, "content-type") |> Enum.join() =~ "text/csv"
       assert get_resp_header(conn, "content-disposition") |> Enum.join() =~ ~s(attachment; filename="person.csv")
       assert conn.resp_body =~ @secret_first
-      refute conn.resp_body =~ "vt_"
+      refute_vault_token(conn.resp_body)
     end
 
     test "OPERATOR plane: the SAME route serves the MASKED CSV — •••• cells, zero plaintext (AC-G15-2)" do

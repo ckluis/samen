@@ -588,7 +588,7 @@ defmodule Samen.Gen.PostTemplates do
       "\n" <>
       "      # FAIL-HONEST restore: navigate/refresh only when the restore actually happened.\n" <>
       "      def handle_event(\"restore\", %{\"id\" => id}, socket) do\n" <>
-      "        scope = scope(socket.assigns.org_id, socket.assigns[:samen_principal])\n" <>
+      "        scope = scope(socket.assigns.org_id, socket.assigns[:samen_principal_ref])\n" <>
       "\n" <>
       "        case Enum.find(socket.assigns.records, &(to_string(&1.id) == id)) do\n" <>
       "          nil ->\n" <>
@@ -693,7 +693,8 @@ defmodule Samen.Gen.PostTemplates do
         socket =
           assign(socket,
             samen_mount: @samen_authn_mount,
-            samen_principal: Samen.Web.CurrentOrg.principal_id(@samen_authn_mount, session)
+            samen_principal: Samen.Web.CurrentOrg.principal_id(@samen_authn_mount, session),
+            samen_principal_ref: Samen.Web.Settings.Reads.principal_ref(@samen_authn_mount, params, session)
           )
 
         org_id = Samen.Web.CurrentOrg.resolve(@samen_authn_mount, params, session)
@@ -714,6 +715,7 @@ defmodule Samen.Gen.PostTemplates do
       def load(socket, nil) do
         assign(socket,
           no_org: true,
+          access: :ok,
           org_id: nil,
           records: [],
           show_new: false,
@@ -724,12 +726,25 @@ defmodule Samen.Gen.PostTemplates do
       end
 
       def load(socket, org_id) do
-        scope = scope(org_id, socket.assigns[:samen_principal])
+        case access(org_id, socket.assigns[:samen_principal_ref]) do
+          {:ok, _role} ->
+            load_allowed(socket, org_id)
+
+          {:refused, state} ->
+            socket
+            |> assign(no_org: false, org_id: org_id, access: state, records: [], show_new: false, new_form: nil, delete_error: nil)
+            |> assign_new(:show_archived, fn -> false end)
+        end
+      end
+
+      defp load_allowed(socket, org_id) do
+        scope = scope(org_id, socket.assigns[:samen_principal_ref])
         show_archived = Map.get(socket.assigns, :show_archived, false)
 
         socket
         |> assign(
           no_org: false,
+          access: :ok,
           org_id: org_id,
           show_archived: show_archived,
           records: read_records(scope, show_archived)
@@ -740,8 +755,11 @@ defmodule Samen.Gen.PostTemplates do
       end
 
       @impl true
+      def handle_event(_event, _params, %{assigns: %{access: access}} = socket) when access != :ok,
+        do: {:noreply, socket}
+
       def handle_event("new", _params, socket) do
-        {:noreply, assign(socket, show_new: true, new_form: create_form(scope(socket.assigns.org_id, socket.assigns[:samen_principal])))}
+        {:noreply, assign(socket, show_new: true, new_form: create_form(scope(socket.assigns.org_id, socket.assigns[:samen_principal_ref])))}
       end
 
       def handle_event("cancel_new", _params, socket) do
@@ -767,7 +785,7 @@ defmodule Samen.Gen.PostTemplates do
 
       # FAIL-HONEST delete: navigate/refresh only when the destroy actually happened.
       def handle_event("delete", %{"id" => id}, socket) do
-        scope = scope(socket.assigns.org_id, socket.assigns[:samen_principal])
+        scope = scope(socket.assigns.org_id, socket.assigns[:samen_principal_ref])
 
         case Enum.find(socket.assigns.records, &(to_string(&1.id) == id)) do
           nil ->
@@ -789,24 +807,25 @@ defmodule Samen.Gen.PostTemplates do
       # B-SEC / S12 · ADR-045 §4.4 — the acting scope. `org_id` is the SESSION-RESOLVED org
       # (see `mount/3` and `handle_params/3`, which both go through `Samen.Web.CurrentOrg`),
       # never a raw `?org=`, so `Samen.Policy.OrgScope` confines every read/write to an org the
-      # CALLER is authorized for. `principal` is the authenticated principal id pinned in `mount/3`.
-      defp scope(org_id, principal) do
-        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: role(org_id, principal), plane: :tenant}}
-      end
+      # CALLER is authorized for. `ref` is the principal reference pinned in `mount/3`.
+      #
+      # WHO acts: ONE resolver (`Samen.Web.TenantActor.access/4`, over `Samen.Auth.OrgActor`) turns the
+      # principal into the person's ACTIVE `Identity.Membership` role. DISARMED
+      # (`config :<%= otp_app %>, auth_required?: false`): the dev convenience (`:admin`), unchanged.
+      # ARMED: the real role — a viewer is a viewer. No active membership, or a failed lookup, is a
+      # refusal (`access/2` -> `{:refused, :denied | :unavailable}`): `load/2` shows the honest state and
+      # reads nothing, and this scope then carries NO role, so every kernel write is refused. There is
+      # never a default role.
+      defp access(org_id, ref), do: Samen.Web.TenantActor.access(@samen_authn_mount, org_id, ref, :admin)
 
-      # The acting role. DISARMED (`config :<%= otp_app %>, auth_required?: false`): the dev
-      # convenience (`:admin`), unchanged. ARMED: the principal's REAL `Identity.Membership` role
-      # via the framework (`Samen.Web.TenantRole.membership_role/3` — the SAME source of truth the
-      # settings surfaces use), fail-CLOSED to `:member` so admin-rank writes require ACTUAL admin
-      # membership rather than a hardcoded elevation, and a non-admin member's write is refused by
-      # the kernel `RoleAtLeast :admin` gate. Reads are unaffected — `OrgScope` confines by org_id
-      # regardless of role. This is the tenant-plane twin of the operator `dev_operator_role/2`
-      # convenience: `?org=` names the org, the SESSION names the principal, the Membership names
-      # the rank.
-      defp role(org_id, principal) do
-        if Samen.Web.CurrentOrg.tenant_gate_armed?(@samen_authn_mount),
-          do: Samen.Web.TenantRole.membership_role(@samen_authn_mount, org_id, principal),
-          else: :admin
+      defp scope(org_id, ref) do
+        role =
+          case access(org_id, ref) do
+            {:ok, role} -> role
+            {:refused, _state} -> nil
+          end
+
+        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: role, plane: :tenant}}
       end
 
       <%= archivable_read_records_fn %>
@@ -835,14 +854,20 @@ defmodule Samen.Gen.PostTemplates do
             <.topbar title="<%= resource %>" crumbs={["<%= module %>", "<%= scope %>", "<%= resource %>"]}>
               <:actions>
                 <%= archivable_live_toggle_button %>
-                <.button :if={not @no_org} variant="primary" phx-click="new" id="new-<%= resource_path %>">New <%= resource %></.button>
+                <.button :if={not @no_org and @access == :ok} variant="primary" phx-click="new" id="new-<%= resource_path %>">New <%= resource %></.button>
               </:actions>
             </.topbar>
 
-            <%= if @no_org do %>
+            <%= if @no_org or @access != :ok do %>
               <div class="wrap">
-                <div class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
+                <div :if={@no_org} class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
                   No org selected. Append <code>?org=&lt;uuid&gt;</code> to the URL.
+                </div>
+                <div :if={not @no_org and @access == :denied} class="card" id="actor-denied" style="padding:22px 20px;color:var(--muted)">
+                  No access. Your account holds no active membership in this workspace.
+                </div>
+                <div :if={not @no_org and @access == :unavailable} class="card" id="actor-unavailable" style="padding:22px 20px;color:var(--muted)">
+                  Unavailable. We couldn't check who you are in this workspace, so nothing is shown.
                 </div>
               </div>
             <% else %>
@@ -947,7 +972,8 @@ defmodule Samen.Gen.PostTemplates do
         socket =
           assign(socket,
             samen_mount: @samen_authn_mount,
-            samen_principal: Samen.Web.CurrentOrg.principal_id(@samen_authn_mount, session)
+            samen_principal: Samen.Web.CurrentOrg.principal_id(@samen_authn_mount, session),
+            samen_principal_ref: Samen.Web.Settings.Reads.principal_ref(@samen_authn_mount, params, session)
           )
 
         org_id = Samen.Web.CurrentOrg.resolve(@samen_authn_mount, params, session)
@@ -967,20 +993,33 @@ defmodule Samen.Gen.PostTemplates do
       end
 
       @doc false
-      def load(socket, nil, _id), do: assign(socket, no_org: true, record: nil, delete_error: nil)
-      def load(socket, _org_id, nil), do: assign(socket, no_org: false, record: nil, delete_error: nil)
+      def load(socket, nil, _id), do: assign(socket, no_org: true, access: :ok, record: nil, delete_error: nil)
+      def load(socket, _org_id, nil), do: assign(socket, no_org: false, access: :ok, record: nil, delete_error: nil)
 
       def load(socket, org_id, id) do
-        socket
-        |> assign(no_org: false, record: fetch(org_id, id))
-        |> assign_new(:delete_error, fn -> nil end)
+        ref = socket.assigns[:samen_principal_ref]
+
+        case access(org_id, ref) do
+          {:ok, _role} ->
+            socket
+            |> assign(no_org: false, access: :ok, record: fetch(org_id, id, ref))
+            |> assign_new(:delete_error, fn -> nil end)
+
+          {:refused, state} ->
+            socket
+            |> assign(no_org: false, access: state, record: nil)
+            |> assign_new(:delete_error, fn -> nil end)
+        end
       end
 
       @impl true
-      def handle_event("delete", %{"id" => id}, socket) do
-        scope = scope(socket.assigns.org_id, socket.assigns[:samen_principal])
+      def handle_event(_event, _params, %{assigns: %{access: access}} = socket) when access != :ok,
+        do: {:noreply, socket}
 
-        case fetch(socket.assigns.org_id, id) do
+      def handle_event("delete", %{"id" => id}, socket) do
+        scope = scope(socket.assigns.org_id, socket.assigns[:samen_principal_ref])
+
+        case fetch(socket.assigns.org_id, id, socket.assigns[:samen_principal_ref]) do
           nil ->
             {:noreply, assign(socket, delete_error: "This <%= resource_path %> no longer exists.")}
 
@@ -997,11 +1036,11 @@ defmodule Samen.Gen.PostTemplates do
       # not selected by default). The read's `Samen.Api.PiiResolution` preparation resolves
       # `secret` per plane — clear on the tenant plane, `%Samen.Masked{}` otherwise — so the
       # template renders the already-resolved value (never hand-masked, never a `vt_*` token).
-      defp fetch(org_id, id) do
+      defp fetch(org_id, id, ref) do
         Resource
         |> Ash.Query.filter(id == ^id)
         |> Ash.Query.ensure_selected([:secret])
-        |> Ash.read_one(scope: scope(org_id, nil))
+        |> Ash.read_one(scope: scope(org_id, ref))
         |> case do
           {:ok, record} -> record
           {:error, _} -> nil
@@ -1011,24 +1050,25 @@ defmodule Samen.Gen.PostTemplates do
       # B-SEC / S12 · ADR-045 §4.4 — the acting scope. `org_id` is the SESSION-RESOLVED org
       # (see `mount/3` and `handle_params/3`, which both go through `Samen.Web.CurrentOrg`),
       # never a raw `?org=`, so `Samen.Policy.OrgScope` confines every read/write to an org the
-      # CALLER is authorized for. `principal` is the authenticated principal id pinned in `mount/3`.
-      defp scope(org_id, principal) do
-        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: role(org_id, principal), plane: :tenant}}
-      end
+      # CALLER is authorized for. `ref` is the principal reference pinned in `mount/3`.
+      #
+      # WHO acts: ONE resolver (`Samen.Web.TenantActor.access/4`, over `Samen.Auth.OrgActor`) turns the
+      # principal into the person's ACTIVE `Identity.Membership` role. DISARMED
+      # (`config :<%= otp_app %>, auth_required?: false`): the dev convenience (`:admin`), unchanged.
+      # ARMED: the real role — a viewer is a viewer. No active membership, or a failed lookup, is a
+      # refusal (`access/2` -> `{:refused, :denied | :unavailable}`): `load/2` shows the honest state and
+      # reads nothing, and this scope then carries NO role, so every kernel write is refused. There is
+      # never a default role.
+      defp access(org_id, ref), do: Samen.Web.TenantActor.access(@samen_authn_mount, org_id, ref, :admin)
 
-      # The acting role. DISARMED (`config :<%= otp_app %>, auth_required?: false`): the dev
-      # convenience (`:admin`), unchanged. ARMED: the principal's REAL `Identity.Membership` role
-      # via the framework (`Samen.Web.TenantRole.membership_role/3` — the SAME source of truth the
-      # settings surfaces use), fail-CLOSED to `:member` so admin-rank writes require ACTUAL admin
-      # membership rather than a hardcoded elevation, and a non-admin member's write is refused by
-      # the kernel `RoleAtLeast :admin` gate. Reads are unaffected — `OrgScope` confines by org_id
-      # regardless of role. This is the tenant-plane twin of the operator `dev_operator_role/2`
-      # convenience: `?org=` names the org, the SESSION names the principal, the Membership names
-      # the rank.
-      defp role(org_id, principal) do
-        if Samen.Web.CurrentOrg.tenant_gate_armed?(@samen_authn_mount),
-          do: Samen.Web.TenantRole.membership_role(@samen_authn_mount, org_id, principal),
-          else: :admin
+      defp scope(org_id, ref) do
+        role =
+          case access(org_id, ref) do
+            {:ok, role} -> role
+            {:refused, _state} -> nil
+          end
+
+        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: role, plane: :tenant}}
       end
 
       defp index_path(org_id), do: "/<%= scope_path %>/<%= resource_path %>?org=#{org_id}"
@@ -1054,10 +1094,16 @@ defmodule Samen.Gen.PostTemplates do
               </:actions>
             </.topbar>
 
-            <%= if @no_org do %>
+            <%= if @no_org or @access != :ok do %>
               <div class="wrap">
-                <div class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
+                <div :if={@no_org} class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
                   No org selected. Append <code>?org=&lt;uuid&gt;</code> to the URL.
+                </div>
+                <div :if={not @no_org and @access == :denied} class="card" id="actor-denied" style="padding:22px 20px;color:var(--muted)">
+                  No access. Your account holds no active membership in this workspace.
+                </div>
+                <div :if={not @no_org and @access == :unavailable} class="card" id="actor-unavailable" style="padding:22px 20px;color:var(--muted)">
+                  Unavailable. We couldn't check who you are in this workspace, so nothing is shown.
                 </div>
               </div>
             <% else %>
@@ -1161,7 +1207,8 @@ defmodule Samen.Gen.PostTemplates do
         socket =
           assign(socket,
             samen_mount: @samen_authn_mount,
-            samen_principal: Samen.Web.CurrentOrg.principal_id(@samen_authn_mount, session)
+            samen_principal: Samen.Web.CurrentOrg.principal_id(@samen_authn_mount, session),
+            samen_principal_ref: Samen.Web.Settings.Reads.principal_ref(@samen_authn_mount, params, session)
           )
 
         org_id = Samen.Web.CurrentOrg.resolve(@samen_authn_mount, params, session)
@@ -1171,30 +1218,39 @@ defmodule Samen.Gen.PostTemplates do
       end
 
       @doc false
-      def load(socket, nil, _id, action), do: assign(socket, no_org: true, action: action, record: nil, form: nil)
+      def load(socket, nil, _id, action), do: assign(socket, no_org: true, access: :ok, action: action, record: nil, form: nil)
 
-      def load(socket, org_id, nil, _action) do
-        assign(socket, no_org: false, action: :new, record: nil, form: create_form(scope(org_id, socket.assigns[:samen_principal])))
+      def load(socket, org_id, id, action) do
+        ref = socket.assigns[:samen_principal_ref]
+
+        case access(org_id, ref) do
+          {:ok, _role} -> load_allowed(socket, org_id, id, ref)
+          {:refused, state} -> assign(socket, no_org: false, access: state, action: action, record: nil, form: nil)
+        end
       end
 
-      def load(socket, org_id, id, _action) do
-        case fetch(org_id, id) do
+      defp load_allowed(socket, org_id, nil, ref) do
+        assign(socket, no_org: false, access: :ok, action: :new, record: nil, form: create_form(scope(org_id, ref)))
+      end
+
+      defp load_allowed(socket, org_id, id, ref) do
+        case fetch(org_id, id, ref) do
           nil ->
-            assign(socket, no_org: false, action: :edit, record: nil, form: nil)
+            assign(socket, no_org: false, access: :ok, action: :edit, record: nil, form: nil)
 
           record ->
-            assign(socket, no_org: false, action: :edit, record: record, form: update_form(record, scope(org_id, socket.assigns[:samen_principal])))
+            assign(socket, no_org: false, access: :ok, action: :edit, record: record, form: update_form(record, scope(org_id, ref)))
         end
       end
 
       # Read ONE record on the tenant plane, SELECTING the 🔒 vault field so the edit form
       # pre-fills the plane-resolved value (the kit's masked branch keeps it read-only
       # `••••` on the operator plane; on the tenant plane it is a normal editable field).
-      defp fetch(org_id, id) do
+      defp fetch(org_id, id, ref) do
         Resource
         |> Ash.Query.filter(id == ^id)
         |> Ash.Query.ensure_selected([:secret])
-        |> Ash.read_one(scope: scope(org_id, nil))
+        |> Ash.read_one(scope: scope(org_id, ref))
         |> case do
           {:ok, record} -> record
           {:error, _} -> nil
@@ -1202,6 +1258,9 @@ defmodule Samen.Gen.PostTemplates do
       end
 
       @impl true
+      def handle_event(_event, _params, %{assigns: %{access: access}} = socket) when access != :ok,
+        do: {:noreply, socket}
+
       def handle_event("validate", %{"form" => params}, socket) do
         {:noreply, assign(socket, form: AshPhoenix.Form.validate(socket.assigns.form, submit_params(params, socket)))}
       end
@@ -1219,24 +1278,25 @@ defmodule Samen.Gen.PostTemplates do
       # B-SEC / S12 · ADR-045 §4.4 — the acting scope. `org_id` is the SESSION-RESOLVED org
       # (see `mount/3` and `handle_params/3`, which both go through `Samen.Web.CurrentOrg`),
       # never a raw `?org=`, so `Samen.Policy.OrgScope` confines every read/write to an org the
-      # CALLER is authorized for. `principal` is the authenticated principal id pinned in `mount/3`.
-      defp scope(org_id, principal) do
-        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: role(org_id, principal), plane: :tenant}}
-      end
+      # CALLER is authorized for. `ref` is the principal reference pinned in `mount/3`.
+      #
+      # WHO acts: ONE resolver (`Samen.Web.TenantActor.access/4`, over `Samen.Auth.OrgActor`) turns the
+      # principal into the person's ACTIVE `Identity.Membership` role. DISARMED
+      # (`config :<%= otp_app %>, auth_required?: false`): the dev convenience (`:admin`), unchanged.
+      # ARMED: the real role — a viewer is a viewer. No active membership, or a failed lookup, is a
+      # refusal (`access/2` -> `{:refused, :denied | :unavailable}`): `load/2` shows the honest state and
+      # reads nothing, and this scope then carries NO role, so every kernel write is refused. There is
+      # never a default role.
+      defp access(org_id, ref), do: Samen.Web.TenantActor.access(@samen_authn_mount, org_id, ref, :admin)
 
-      # The acting role. DISARMED (`config :<%= otp_app %>, auth_required?: false`): the dev
-      # convenience (`:admin`), unchanged. ARMED: the principal's REAL `Identity.Membership` role
-      # via the framework (`Samen.Web.TenantRole.membership_role/3` — the SAME source of truth the
-      # settings surfaces use), fail-CLOSED to `:member` so admin-rank writes require ACTUAL admin
-      # membership rather than a hardcoded elevation, and a non-admin member's write is refused by
-      # the kernel `RoleAtLeast :admin` gate. Reads are unaffected — `OrgScope` confines by org_id
-      # regardless of role. This is the tenant-plane twin of the operator `dev_operator_role/2`
-      # convenience: `?org=` names the org, the SESSION names the principal, the Membership names
-      # the rank.
-      defp role(org_id, principal) do
-        if Samen.Web.CurrentOrg.tenant_gate_armed?(@samen_authn_mount),
-          do: Samen.Web.TenantRole.membership_role(@samen_authn_mount, org_id, principal),
-          else: :admin
+      defp scope(org_id, ref) do
+        role =
+          case access(org_id, ref) do
+            {:ok, role} -> role
+            {:refused, _state} -> nil
+          end
+
+        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: role, plane: :tenant}}
       end
 
       defp create_form(scope) do
@@ -1276,10 +1336,16 @@ defmodule Samen.Gen.PostTemplates do
               </:actions>
             </.topbar>
 
-            <%= if @no_org do %>
+            <%= if @no_org or @access != :ok do %>
               <div class="wrap">
-                <div class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
+                <div :if={@no_org} class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
                   No org selected. Append <code>?org=&lt;uuid&gt;</code> to the URL.
+                </div>
+                <div :if={not @no_org and @access == :denied} class="card" id="actor-denied" style="padding:22px 20px;color:var(--muted)">
+                  No access. Your account holds no active membership in this workspace.
+                </div>
+                <div :if={not @no_org and @access == :unavailable} class="card" id="actor-unavailable" style="padding:22px 20px;color:var(--muted)">
+                  Unavailable. We couldn't check who you are in this workspace, so nothing is shown.
                 </div>
               </div>
             <% else %>
@@ -1373,7 +1439,7 @@ defmodule Samen.Gen.PostTemplates do
         assert byte_size(out) > 0
         assert out =~ "Smoke row"
         assert out =~ to_string(record.id)
-        refute out =~ "vt_"
+        Samen.VaultTokenAssert.refute_vault_token(out)
       end
 
       test "SHOW mounts + resolves the 🔒 field through PiiResolution on the tenant plane (masking by construction)", %{record: record} do
@@ -1385,7 +1451,7 @@ defmodule Samen.Gen.PostTemplates do
         # NEVER the raw stored value.
         assert out =~ @plaintext or out =~ "••••"
         # The vault token NEVER reaches the DOM (the leak scan).
-        refute out =~ "vt_"
+        Samen.VaultTokenAssert.refute_vault_token(out)
       end
 
       test "FORM (new) mounts + renders the kit create form" do

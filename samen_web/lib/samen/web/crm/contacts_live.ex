@@ -44,6 +44,9 @@ defmodule Samen.Web.CRM.ContactsLive do
   import Samen.Web.FirstRun, only: [first_run_card: 1]
   import Samen.Web.ObjectRef.FieldValue, only: [opaque: 1]
 
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
   alias Samen.Web.CRM.Reads
   alias Samen.Web.Reads.Guard
   alias Samen.Web.CurrentOrg
@@ -75,17 +78,39 @@ defmodule Samen.Web.CRM.ContactsLive do
   @doc false
   def load(socket, nil) do
     socket
+    |> Samen.Web.ListLive.refuse()
     |> default_return_to()
     |> assign(no_org: no_org?(socket, nil), org_id: nil, company_names: %{})
+    |> assign(acting_scope: nil, actor_state: :ok)
     |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{}, list_error: nil)
     |> assign(show_new: false, new_form: nil, first_run: false)
     |> assign_new(:delete_error, fn -> nil end)
     |> assign_new(:sample_error, fn -> nil end)
   end
 
+  # ADR-045 §4.4 — WHO acts: the scope is derived from the signed-in person's resolved membership
+  # role (`Samen.Web.TenantActor`), never `Mount.scope/2`'s fixed `:member`. A denial or a failed
+  # lookup is a STATE of the page: nothing is read, nothing can be written.
   def load(socket, org_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id)
+    end
+  end
+
+  defp load_refused(socket, org_id) do
+    socket
+    |> Samen.Web.ListLive.refuse()
+    |> default_return_to()
+    |> assign(no_org: false, org_id: org_id, company_names: %{})
+    |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{}, list_error: nil)
+    |> assign(show_new: false, new_form: nil, first_run: false)
+    |> assign_new(:delete_error, fn -> nil end)
+    |> assign_new(:sample_error, fn -> nil end)
+  end
+
+  defp load_for(socket, org_id, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
 
     socket
     |> default_return_to()
@@ -107,9 +132,10 @@ defmodule Samen.Web.CRM.ContactsLive do
   # -- A3 CRUD events (list events belong to the ListLive hook) -----------------
 
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("new_contact", _params, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{samen_mount: mount, acting_scope: scope} = socket.assigns
     {:noreply, assign(socket, show_new: true, new_form: new_contact_form(mount, scope))}
   end
 
@@ -156,13 +182,15 @@ defmodule Samen.Web.CRM.ContactsLive do
   # vault write path) — this handler only relays and re-reads. A refusal is
   # SURFACED (fail-honest), never swallowed.
   def handle_event("load_sample_data", _params, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    %{samen_mount: mount, org_id: org_id, acting_scope: scope} = socket.assigns
 
-    case SampleData.load(mount, org_id) do
-      {:ok, _} ->
-        {:noreply, load(assign(socket, sample_error: nil), org_id)}
-
-      {:error, _reason} ->
+    # `SampleData.load/2` seeds through the system scope (a fixed `:member`): the person's own role
+    # must clear the same bar the "New contact" write has, or a viewer would seed through it.
+    with true <- Samen.Scope.Role.at_least?(scope.actor.role, :member),
+         {:ok, _} <- SampleData.load(mount, org_id) do
+      {:noreply, load(assign(socket, sample_error: nil), org_id)}
+    else
+      _refused ->
         {:noreply, assign(socket, sample_error: "Sample data is not available here.")}
     end
   end
@@ -175,8 +203,7 @@ defmodule Samen.Web.CRM.ContactsLive do
   # is never refused on their account; any `{:error, _}` here is a genuine
   # failure (e.g. an authorization denial), not the old FK-refusal case.
   def handle_event("delete", %{"id" => id}, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{samen_mount: mount, org_id: org_id, acting_scope: scope} = socket.assigns
 
     case Reads.delete_contact(mount, scope, id) do
       :ok ->
@@ -234,9 +261,12 @@ defmodule Samen.Web.CRM.ContactsLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Contacts" nothing="there are no contacts to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">CRM org: {@org_id}</span>
 
           <div :if={@delete_error} class="wrap" style="margin-bottom:0">
