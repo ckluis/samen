@@ -1668,30 +1668,62 @@ defmodule Samen.AI.AgentDurabilityTest do
       assert run.cached_input_tokens_used == 940
     end
   end
-  # authz-6 review 2: `:due_scan` (a read with no org filter) and `:resume_due` were `bypass … authorize_if(always())`
-  # for ANY actor. They are the AshOban triggers' own: a tenant actor, an owner included, is refused.
-  describe "the watchdog's system actions are the scheduler's, not an actor's" do
-    test "a tenant actor of ANY role cannot run the cross-org :due_scan or :resume_due; the scheduler still resumes" do
+
+  # authz-6 review 2/3: `:due_scan` (a read with no org filter), `:resume_due`, `:expire_due` and every other Run write
+  # were `authorize_if(always())` for ANY actor. The loop is the only author (`Samen.AI.Agent`, `authorize?: false`) and
+  # the AshOban triggers are the scheduler: a tenant actor, an owner included, in this org or another, is refused.
+  describe "the Run's writes and system actions are the kernel's and the scheduler's, not an actor's" do
+    @roles [:viewer, :member, :admin, :owner]
+    @update_actions [:begin, :advance, :request_cancel, :park, :resume, :reject, :expire_due, :succeed, :fail, :exhaust, :context_exhaust, :cancel, :resume_due]
+
+    defp actor_scope(org_id, role),
+      do: %Samen.Scope{actor: %{id: "u:#{role}:#{org_id}", org_id: org_id, role: role, kind: :tenant, plane: :tenant}}
+
+    test "a tenant actor of ANY role, in this org or another, cannot run :due_scan, :expire_due, :resume_due or any Run write" do
       scripted_worker_config()
       script(continue: "one", final: "two")
       s = new_scope()
-      assert {:ok, run} = Agent.start(Durable, s, "goal")
       other = new_scope()
+      assert other.actor.org_id != s.actor.org_id
+      assert {:ok, run} = Agent.start(Durable, s, "goal")
+      before = reload(run)
 
-      for role <- [:viewer, :member, :admin, :owner] do
-        actor_scope = %Samen.Scope{actor: %{id: "u:#{role}", org_id: s.actor.org_id, role: role, kind: :tenant, plane: :tenant}}
-        assert {:error, %Ash.Error.Forbidden{}} = Ash.read(Run, action: :due_scan, scope: actor_scope), "#{role} read the due scan"
+      for org_id <- [s.actor.org_id, other.actor.org_id], role <- @roles do
+        as = actor_scope(org_id, role)
+        assert {:error, %Ash.Error.Forbidden{}} = Ash.read(Run, action: :due_scan, scope: as), "#{role}@#{org_id} read the due scan"
 
-        assert {:error, %Ash.Error.Forbidden{}} =
-                 reload(run) |> Ash.Changeset.for_update(:resume_due, %{}, scope: actor_scope) |> Ash.update(),
-               "#{role} ran :resume_due"
+        # every write action is refused by policy ...
+        for action <- @update_actions do
+          refute Ash.can?({before, action}, as.actor, maybe_is: false), "#{role}@#{org_id} may run #{action}"
+        end
+
+        # ... and the ones valid from `:queued` really are Forbidden when run (the rest fail the state machine first)
+        for action <- [:begin, :advance, :request_cancel, :resume_due] do
+          assert {:error, %Ash.Error.Forbidden{}} =
+                   before |> Ash.Changeset.for_update(action, %{}, scope: as) |> Ash.update(),
+                 "#{role}@#{org_id} ran #{action}"
+        end
+
+        refute Ash.can?({Run, :start}, as.actor, maybe_is: false), "#{role}@#{org_id} may create a run"
       end
 
-      assert other.actor.org_id != s.actor.org_id
+      # nothing changed, and no forged row exists
+      assert reload(run).state == before.state
+      assert reload(run).next_turn_at == before.next_turn_at
 
-      # positive control: the scheduler (no actor, AshOban) still re-selects the lost run and drives it to terminal
-      TestRepo.delete_all(Oban.Job)
+      # positive controls: the loop's own write (authorize?: false) lands, and the scheduler's authorization (AshOban's
+      # interaction, no actor) is not refused for the two trigger writes
       run |> Ash.Changeset.for_update(:advance, %{next_turn_at: DateTime.add(DateTime.utc_now(), -5)}) |> Ash.update!(authorize?: false)
+
+      for action <- [:resume_due, :expire_due] do
+        assert Ash.can?({before, action}, nil, context: %{private: %{ash_oban?: true}}, maybe_is: false),
+               "the scheduler was refused #{action}"
+      end
+
+      assert Ash.can?({Run, :due_scan}, nil, context: %{private: %{ash_oban?: true}}, maybe_is: false)
+
+      # and the real scheduler still re-selects the lost run and drives it to terminal
+      TestRepo.delete_all(Oban.Job)
       AshOban.Test.schedule_and_run_triggers(Run)
       drain_agent_queues()
       assert_terminal!(run, :succeeded)

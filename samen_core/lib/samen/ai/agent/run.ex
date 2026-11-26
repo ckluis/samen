@@ -516,12 +516,13 @@ defmodule Samen.AI.Agent.Run do
 
   policies do
     # The AshOban `:agent_turn_due` watchdog and `:agent_proposal_expiry` triggers (no actor): `:due_scan` is a read with
-    # no org filter, `:resume_due` re-arms the watchdog and re-enqueues the turn. An actor of any role is refused.
-    bypass action([:resume_due, :due_scan]) do
+    # no org filter, `:resume_due` re-arms the watchdog and re-enqueues the turn, `:expire_due` withdraws a parked
+    # approval and terminates the run. An actor of any role is refused.
+    bypass action([:resume_due, :expire_due, :due_scan]) do
       authorize_if(AshOban.Checks.AshObanInteraction)
     end
 
-    policy action([:resume_due, :due_scan]) do
+    policy action([:resume_due, :expire_due, :due_scan]) do
       forbid_if(always())
     end
 
@@ -536,9 +537,10 @@ defmodule Samen.AI.Agent.Run do
     end
 
     # Writes are kernel-driven (`Samen.AI.Agent`, the Approvals-engine trusted-API
-    # precedent) — the loop is the only author; there is no tenant-facing write surface.
+    # precedent) — the loop is the only author, and it runs them `authorize?: false`; there is no
+    # tenant-facing write surface, so no actor may run one.
     policy action_type([:create, :update, :destroy]) do
-      authorize_if(always())
+      forbid_if(always())
     end
   end
 end
