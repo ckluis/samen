@@ -144,6 +144,19 @@ defmodule Samen.WebTest.SecurityRouter do
       labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)
     )
 
+    # The Support, Billing and (above) Marketing surfaces with the `:identity_namespace` seam, so a real login resolves
+    # the signed-in person's membership role on them (`tenant_role_support_billing_marketing_test.exs`); Support carries
+    # the CMS namespace as its knowledge base.
+    samen_module_routes(:support, Samen.WebTest.Support,
+      repo: Samen.WebTest.Repo,
+      labels: @labels |> Map.put(:identity_namespace, Samen.WebTest.Operator) |> Map.put(:kb_namespace, Samen.WebTest.Cms)
+    )
+
+    samen_module_routes(:billing, Samen.WebTest.Billing,
+      repo: Samen.WebTest.Repo,
+      labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)
+    )
+
     samen_csv_routes(:csv, Samen.WebTest.Crm,
       repo: Samen.WebTest.Repo,
       labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)

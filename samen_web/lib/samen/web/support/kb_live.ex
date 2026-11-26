@@ -18,22 +18,23 @@ defmodule Samen.Web.Support.KbLive do
   ## Reads/writes
 
   `articles/2` (agent view: internal + public, any status) is org-scoped —
-  ANY member may author/edit a draft (the CMS blueprint's own `:update`
-  posture); `:publish` is admin-gated by the kernel (the write affordance is
-  offered regardless — POSTURE only, enforcement is the kernel Ash policy, the
-  same split every framework LiveView documents). No PII on this scope (CMS
+  a member (or above) may author/edit a draft (the page checks the acting role: the article
+  resource itself only checks the org); `:publish` is admin-gated by the kernel and its
+  button is offered to an admin only (`:can_admin`). No PII on this scope (CMS
   has no 🔒 mark) — nothing here touches `Samen.Api.PiiResolution`.
   """
   use Phoenix.LiveView
 
   import Samen.UI
-  import Samen.Web.Support.Live, only: [assign_mount: 2, support_sidebar: 1, writable?: 1]
+  import Samen.Web.Support.Live, only: [assign_mount: 2, support_sidebar: 1]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Reads.Guard
-  alias Samen.Web.Mount
   alias Samen.Web.Support.KbReads
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @impl true
   def mount(params, session, socket) do
@@ -53,13 +54,48 @@ defmodule Samen.Web.Support.KbLive do
     socket
     |> ensure_return_to()
     |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, kb_mount: nil, articles: [], articles_error: false)
+    |> assign(acting_scope: nil, actor_state: :ok, can_write: false, can_admin: false)
     |> assign(show_new: false, new_form: nil, edit_id: nil, edit_form: nil, save_error: nil)
   end
 
+  # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read, nothing
+  # can be written, and the page is re-resolved on every `handle_params`.
   def load(socket, org_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id)
+    end
+  end
+
+  # Acting again with no URL to patch to (`Samen.Web.TenantActor`, the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _}} = socket), do: load(socket, socket.assigns.org_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): the
+  # same load a refused navigation does, so nothing the page loaded for the person it acted for is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket, socket.assigns.org_id)
+
+  # The person's role or id changed while the page was open: the forms built at load hold the scope they were built with,
+  # so they are built again with the fresh one.
+  @doc false
+  def actor_changed(%{assigns: %{kb_mount: kb_mount, acting_scope: scope}} = socket) do
+    socket
+    |> assign(new_form: kb_mount && KbReads.new_article_form(kb_mount, scope))
+    |> refresh_edit()
+  end
+
+  defp load_refused(socket, org_id) do
+    socket
+    |> ensure_return_to()
+    |> assign(no_org: false, org_id: org_id, kb_mount: nil, articles: [], articles_error: false)
+    |> assign(show_new: false, new_form: nil, edit_id: nil, edit_form: nil, save_error: nil)
+  end
+
+  defp load_for(socket, org_id, scope) do
     mount = socket.assigns.samen_mount
     kb_mount = KbReads.kb_mount(mount)
-    scope = Mount.scope(mount, org_id)
 
     socket
     |> ensure_return_to()
@@ -82,9 +118,7 @@ defmodule Samen.Web.Support.KbLive do
 
   defp refresh_edit(%{assigns: %{edit_id: nil}} = socket), do: assign(socket, edit_form: nil)
 
-  defp refresh_edit(%{assigns: %{edit_id: id, kb_mount: kb_mount, org_id: org_id, samen_mount: mount}} = socket) do
-    scope = Mount.scope(mount, org_id)
-
+  defp refresh_edit(%{assigns: %{edit_id: id, kb_mount: kb_mount, acting_scope: scope}} = socket) do
     case kb_mount && KbReads.get_article_result(kb_mount, scope, id) do
       {:ok, article} ->
         assign(socket, edit_form: KbReads.edit_article_form(kb_mount, scope, article))
@@ -101,10 +135,19 @@ defmodule Samen.Web.Support.KbLive do
   # -- events -------------------------------------------------------------------
 
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
 
+  # Authoring (new, edit, save) is member-or-above: the article resource itself only checks the org, so the page does.
+  # `publish` keeps its own, stricter, kernel gate.
+  def handle_event(event, _params, %{assigns: %{can_write: false}} = socket)
+      when event in ~w(new_article validate_new save_new edit_article validate_edit save_edit) do
+    {:noreply, put_flash(socket, :error, Guard.write_copy(:forbidden, "change articles"))}
+  end
+
   def handle_event("new_article", _params, socket) do
-    scope = Mount.scope(socket.assigns.samen_mount, socket.assigns.org_id)
+    scope = socket.assigns.acting_scope
     form = socket.assigns.kb_mount && KbReads.new_article_form(socket.assigns.kb_mount, scope)
     {:noreply, assign(socket, show_new: true, new_form: form)}
   end
@@ -147,12 +190,13 @@ defmodule Samen.Web.Support.KbLive do
     end
   end
 
-  # T78 done-criterion 1 write side: publish (admin-gated by the kernel — the
-  # button is offered to any writable? actor, POSTURE only; a non-admin's
-  # attempt is refused by the kernel and rendered inline, same split every
-  # framework write event documents).
+  # T78 done-criterion 1 write side: publish (admin-gated by the kernel, run with the
+  # acting person's own scope: a non-admin's attempt is refused by the kernel and
+  # rendered inline).
   def handle_event("publish", %{"id" => id}, socket) do
-    case KbReads.publish_article(socket.assigns.kb_mount, socket.assigns.org_id, id) do
+    scope = TenantActor.write_scope(socket.assigns.samen_mount, socket.assigns.org_id, socket.assigns.acting_scope)
+
+    case KbReads.publish_article(socket.assigns.kb_mount, scope, id) do
       {:ok, _} -> {:noreply, load(assign(socket, save_error: nil), socket.assigns.org_id)}
       {:error, :unavailable} ->
         {:noreply, assign(socket, save_error: "Couldn't publish this article right now. Nothing was published — try again.")}
@@ -179,7 +223,7 @@ defmodule Samen.Web.Support.KbLive do
 
         <.topbar title="Knowledge base" crumbs={crumbs(@samen_mount, @org_id)}>
           <:actions>
-            <.button :if={writable?(@samen_mount) and @kb_mount} variant="primary" phx-click="new_article" id="new-article">
+            <.button :if={@can_write and @kb_mount} variant="primary" phx-click="new_article" id="new-article">
               New article
             </.button>
           </:actions>
@@ -187,9 +231,12 @@ defmodule Samen.Web.Support.KbLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Knowledge base" nothing="there are no articles to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">Support org: {@org_id}</span>
 
           <%= if @kb_mount == nil do %>
@@ -225,7 +272,7 @@ defmodule Samen.Web.Support.KbLive do
                     title="No articles yet."
                     body="Author your first knowledge-base article — internal notes for agents, or public self-serve help."
                   >
-                    <:actions :if={writable?(@samen_mount)}>
+                    <:actions :if={@can_write}>
                       <.button variant="primary" phx-click="new_article" id="empty-new-article">New article</.button>
                     </:actions>
                   </.empty_state>
@@ -235,7 +282,7 @@ defmodule Samen.Web.Support.KbLive do
                       <th>Title</th>
                       <th>Status</th>
                       <th>Visibility</th>
-                      <th :if={writable?(@samen_mount)}><span class="sr-only">Actions</span></th>
+                      <th :if={@can_admin}><span class="sr-only">Actions</span></th>
                     </:head>
                     <tr :for={a <- @articles} class="kb-article-row" id={"kb-article-#{a.id}"}>
                       <td class="kb-title">
@@ -245,8 +292,8 @@ defmodule Samen.Web.Support.KbLive do
                       </td>
                       <td class="kb-status"><.pill variant={status_variant(a.status)}>{a.status}</.pill></td>
                       <td class="kb-visibility"><.pill variant={visibility_variant(a.visibility)}>{a.visibility}</.pill></td>
-                      <td :if={writable?(@samen_mount)} class="kb-actions">
-                        <.button :if={a.status != :published} phx-click="publish" phx-value-id={a.id} class="kb-publish-btn">Publish</.button>
+                      <td :if={@can_admin} class="kb-actions">
+                        <.button :if={a.status != :published and @can_admin} phx-click="publish" phx-value-id={a.id} class="kb-publish-btn">Publish</.button>
                       </td>
                     </tr>
                   </.data_table>
@@ -255,11 +302,11 @@ defmodule Samen.Web.Support.KbLive do
               </div>
             </div>
 
-            <.modal :if={@show_new and @new_form != nil and writable?(@samen_mount)} id="new-article-modal" title="New article" on_cancel="cancel_new">
+            <.modal :if={@show_new and @new_form != nil and @can_write} id="new-article-modal" title="New article" on_cancel="cancel_new">
               <.article_form form={@new_form} on_change="validate_new" on_submit="save_new" on_cancel="cancel_new" submit_label="Save article" />
             </.modal>
 
-            <.modal :if={@edit_id != nil and @edit_form != nil and writable?(@samen_mount)} id="edit-article-modal" title="Edit article" on_cancel="cancel_edit">
+            <.modal :if={@edit_id != nil and @edit_form != nil and @can_write} id="edit-article-modal" title="Edit article" on_cancel="cancel_edit">
               <.article_form form={@edit_form} on_change="validate_edit" on_submit="save_edit" on_cancel="cancel_edit" submit_label="Save changes" />
             </.modal>
           <% end %>

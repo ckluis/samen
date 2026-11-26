@@ -60,17 +60,13 @@ defmodule Samen.Web.TenantActorGuardTest do
     "samen/web/settings/reads.ex" => 1,
     "samen/web/settings/reveal_approvals_live.ex" => 1,
     "samen/web/settings/security_live.ex" => 1,
-    "samen/web/support/kb_live.ex" => 3,
-    "samen/web/support/kb_reads.ex" => 1,
-    "samen/web/support/ticket_live.ex" => 3,
-    "samen/web/support/tickets_live.ex" => 3,
     "samen/web/tenant/analytics_live.ex" => 1,
     "samen/web/tenant_role.ex" => 1,
   }
 
   # The exact size of the work list: a silent bump of an entry (or a new entry) fails here, not only in the ratchet.
-  @baseline_total 68
-  @baseline_files 40
+  @baseline_total 58
+  @baseline_files 36
 
   @exempt ~w(samen/web/mount.ex samen/web/tenant_actor.ex samen/web/tenant_actor/guard.ex)
 
@@ -90,7 +86,7 @@ defmodule Samen.Web.TenantActorGuardTest do
   # principal pinned by the tenant gate, so its callers are the unconverted admin-gated reads; `api_keys_live.ex`
   # calls its own private `admin_scope/3` (user, org and the membership's role). Not exempt: nothing new may appear.
   @escape_hatch_baseline %{
-    "samen/web/billing/reads.ex" => 2,
+    "samen/web/billing/reads.ex" => 1,
     "samen/web/chat.ex" => 1,
     "samen/web/flags/reads.ex" => 1,
     "samen/web/marketing/reads.ex" => 1,
@@ -142,8 +138,8 @@ defmodule Samen.Web.TenantActorGuardTest do
 
   test "non-vacuity: the sweep sees the whole tree and the converted surfaces are really clean" do
     now = found()
-    assert map_size(now) > 35
-    assert Enum.sum(Map.values(now)) > 60
+    assert map_size(now) > 30
+    assert Enum.sum(Map.values(now)) > 50
     refute Map.has_key?(now, "samen/web/crm/contacts_live.ex")
     refute Map.has_key?(now, "samen/web/crm/companies_live.ex")
     for page <- ~w(calendar_live company_live contacts_gallery_live dashboard_live mailbox_live pipeline_live sequences_live),

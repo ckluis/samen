@@ -111,6 +111,35 @@ defmodule Samen.Web.TenantActor do
   def writable?(%Mount{}, _no_scope), do: false
 
   @doc """
+  Whether a page offers its ADMIN-ranked write controls (the billing, plan, invoice, campaign and segment writes the kernel
+  reserves for `RoleAtLeast :admin`): the plane may write, and the person acting holds at least `:admin`. On a DISARMED mount
+  (the dev posture, where `write_scope/3` is the dev admin) the controls are offered, exactly as before. `assign_actor/2`
+  assigns the answer as `:can_admin`. What the page SHOWS; what it ALLOWS is the kernel policy, which is unchanged.
+  """
+  @spec administrable?(Mount.t() | nil, Samen.Scope.t() | nil) :: boolean()
+  def administrable?(%Mount{plane: %{kind: :operator}}, _scope), do: false
+
+  def administrable?(%Mount{} = mount, %Samen.Scope{actor: %{role: role}}) do
+    if CurrentOrg.tenant_gate_armed?(mount), do: Samen.Scope.Role.at_least?(role, :admin), else: true
+  end
+
+  def administrable?(_mount, _no_scope), do: false
+
+  @doc """
+  The scope an ADMIN-gated write runs with. ARMED tenant plane: the acting scope itself (the person's real, current role and
+  user id; the kernel policy refuses a viewer or a member). DISARMED dev posture and the OPERATOR plane: the posture's own
+  admin elevation (`Samen.Web.TenantRole.admin_scope/3`), byte for byte what those postures always did.
+  """
+  @spec write_scope(Mount.t(), String.t(), Samen.Scope.t() | nil) :: Samen.Scope.t()
+  def write_scope(%Mount{plane: %{kind: :tenant}} = mount, org_id, %Samen.Scope{} = acting) do
+    if CurrentOrg.tenant_gate_armed?(mount),
+      do: acting,
+      else: Samen.Web.TenantRole.admin_scope(mount, org_id)
+  end
+
+  def write_scope(%Mount{} = mount, org_id, _acting), do: Samen.Web.TenantRole.admin_scope(mount, org_id)
+
+  @doc """
   The principal reference for a request: pinned by `Samen.Web.TenantAuthz` as `:samen_principal_ref`
   on every tenant socket; a controller derives it from its session.
   """
@@ -168,13 +197,19 @@ defmodule Samen.Web.TenantActor do
     case socket_scope(socket, org_id) do
       {:ok, scope} ->
         mount = assigns(socket)[:samen_mount]
-        {:ok, Phoenix.Component.assign(socket, acting_scope: scope, actor_state: :ok, can_write: writable?(mount, scope))}
+        {:ok,
+         Phoenix.Component.assign(socket,
+           acting_scope: scope,
+           actor_state: :ok,
+           can_write: writable?(mount, scope),
+           can_admin: administrable?(mount, scope)
+         )}
 
       :denied ->
-        {:refused, Phoenix.Component.assign(socket, acting_scope: nil, actor_state: :denied, can_write: false)}
+        {:refused, Phoenix.Component.assign(socket, acting_scope: nil, actor_state: :denied, can_write: false, can_admin: false)}
 
       {:error, :unavailable} ->
-        {:refused, Phoenix.Component.assign(socket, acting_scope: nil, actor_state: :unavailable, can_write: false)}
+        {:refused, Phoenix.Component.assign(socket, acting_scope: nil, actor_state: :unavailable, can_write: false, can_admin: false)}
     end
   end
 

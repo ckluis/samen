@@ -29,7 +29,7 @@ defmodule Samen.Web.Support.TicketLive do
       (client input never mints an atom; garbage is refused).
 
   Write affordances are offered on the tenant plane only
-  (`Samen.Web.Support.Live.writable?/1`); enforcement stays in the kernel.
+  (`Samen.Web.TenantActor.writable?/2`, the `:can_write` assign); enforcement stays in the kernel.
 
   ## Composer suggestion (T78, spec §I5; D5/T68 AI-plane path)
 
@@ -78,7 +78,7 @@ defmodule Samen.Web.Support.TicketLive do
   use Phoenix.LiveView
 
   import Samen.UI
-  import Samen.Web.Support.Live, only: [assign_mount: 2, support_sidebar: 1, writable?: 1]
+  import Samen.Web.Support.Live, only: [assign_mount: 2, support_sidebar: 1]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
   import Samen.Web.ObjectRef.FieldValue, only: [opaque: 1]
 
@@ -88,6 +88,9 @@ defmodule Samen.Web.Support.TicketLive do
   alias Samen.Web.Reads.Guard
   alias Samen.Web.Support.Reads
   alias Samen.Web.Support.KbReads
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @impl true
   def mount(params, session, socket) do
@@ -108,6 +111,8 @@ defmodule Samen.Web.Support.TicketLive do
   end
 
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("retry_load", _params, socket) do
     {:noreply, load(socket, socket.assigns.org_id, socket.assigns.ticket_id)}
   end
@@ -129,16 +134,9 @@ defmodule Samen.Web.Support.TicketLive do
   # `Samen.Pii.WriteGuard` REJECTS the plaintext at the Ash write path (MC-1) and
   # the error renders inline — this LiveView adds no policy of its own.
   def handle_event("save_reply", %{"form" => params}, socket) do
-    case Guard.submit_form(:support_save_reply, socket.assigns[:org_id], socket.assigns.reply_form, reply_params(params, socket)) do
-      {:ok, _message} ->
-        {:noreply, load(socket, socket.assigns.org_id, socket.assigns.ticket_id)}
-
-      {:error, kind} when is_atom(kind) ->
-        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "send that reply"))}
-
-      {:error, form} ->
-        {:noreply, assign(socket, reply_form: form)}
-    end
+    if Samen.Scope.Role.at_least?(socket.assigns.acting_scope.actor.role, :member),
+      do: save_reply(params, socket),
+      else: {:noreply, put_flash(socket, :error, Guard.write_copy(:forbidden, "send that reply"))}
   end
 
   # T78 (spec §I5) — composer suggestion "Insert": appends the suggested article's
@@ -219,8 +217,7 @@ defmodule Samen.Web.Support.TicketLive do
   # builds a real `reply_form`, which also flips the KB Insert + macro palette
   # from gated/disabled to live.
   def handle_event("start_conversation", _params, socket) do
-    %{samen_mount: mount, org_id: org_id, ticket_id: ticket_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{samen_mount: mount, org_id: org_id, ticket_id: ticket_id, acting_scope: scope} = socket.assigns
 
     case Reads.create_conversation(mount, scope, ticket_id) do
       {:ok, _conversation} ->
@@ -235,8 +232,7 @@ defmodule Samen.Web.Support.TicketLive do
   # blueprint enum inside Reads.update_ticket_status/4 — garbage is refused, no atom
   # is ever minted from client input.
   def handle_event("set_status", %{"status" => status}, socket) do
-    %{samen_mount: mount, org_id: org_id, ticket_id: ticket_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{samen_mount: mount, org_id: org_id, ticket_id: ticket_id, acting_scope: scope} = socket.assigns
 
     case Reads.update_ticket_status(mount, scope, ticket_id, status) do
       {:ok, _ticket} ->
@@ -247,6 +243,19 @@ defmodule Samen.Web.Support.TicketLive do
     end
   end
 
+  defp save_reply(params, socket) do
+    case Guard.submit_form(:support_save_reply, socket.assigns[:org_id], socket.assigns.reply_form, reply_params(params, socket)) do
+      {:ok, _message} ->
+        {:noreply, load(socket, socket.assigns.org_id, socket.assigns.ticket_id)}
+
+      {:error, kind} when is_atom(kind) ->
+        {:noreply, put_flash(socket, :error, Guard.write_copy(kind, "send that reply"))}
+
+      {:error, form} ->
+        {:noreply, assign(socket, reply_form: form)}
+    end
+  end
+
   @doc false
   def load(socket, nil, _ticket_id) do
     current_tab = Map.get(socket.assigns, :active_tab, "conversation")
@@ -254,14 +263,50 @@ defmodule Samen.Web.Support.TicketLive do
     socket
     |> ensure_return_to()
     |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, ticket: nil, ticket_tags: [], conversations: [], agents: [], active_tab: current_tab)
+    |> assign(acting_scope: nil, actor_state: :ok, can_write: false)
     |> assign(reply_form: nil, kb_suggestion: nil, macros: [], csat: nil, load_error: nil, section_errors: [])
     |> assign_new(:status_error, fn -> nil end)
     |> assign_new(:conversation_error, fn -> nil end)
   end
 
+  # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read, nothing
+  # can be written, and the page is re-resolved on every `handle_params`.
   def load(socket, org_id, ticket_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, ticket_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id)
+    end
+  end
+
+  # Acting again with no URL to patch to (`Samen.Web.TenantActor`, the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: org_id, ticket_id: ticket_id}} = socket), do: load(socket, org_id, ticket_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): the
+  # same load a refused navigation does, so nothing the page loaded for the person it acted for is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: org_id}} = socket), do: load_refused(socket, org_id)
+
+  # The person's role or id changed while the page was open: the reply form built at load holds the scope it was built
+  # with, so it is built again with the fresh one.
+  @doc false
+  def actor_changed(%{assigns: %{samen_mount: mount, acting_scope: scope, conversations: conversations}} = socket),
+    do: assign(socket, reply_form: new_reply_form(mount, scope, conversations))
+
+  defp load_refused(socket, org_id) do
+    current_tab = Map.get(socket.assigns, :active_tab, "conversation")
+
+    socket
+    |> ensure_return_to()
+    |> assign(no_org: false, org_id: org_id, ticket: nil, ticket_tags: [], conversations: [], agents: [], active_tab: current_tab)
+    |> assign(reply_form: nil, kb_suggestion: nil, macros: [], csat: nil, load_error: nil, section_errors: [])
+    |> assign_new(:status_error, fn -> nil end)
+    |> assign_new(:conversation_error, fn -> nil end)
+  end
+
+  defp load_for(socket, org_id, ticket_id, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
 
     # A FAILED read is not "not found" / "no thread yet" (WP6): `load_error` and `section_errors`
     # name what failed and the page shows the kit error state with a retry — never the empty
@@ -396,9 +441,12 @@ defmodule Samen.Web.Support.TicketLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Ticket" nothing="there is no ticket to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">Support org: {@org_id}</span>
 
           <%= if @ticket == nil do %>
@@ -422,7 +470,7 @@ defmodule Samen.Web.Support.TicketLive do
                   <.pill variant={status_variant(@ticket.status)}>{status_label(@ticket.status)}</.pill>
                   <.pill variant={priority_variant(@ticket.priority)}>{priority_label(@ticket.priority)}</.pill>
                   {sla_badge(@ticket)}
-                  <form :if={writable?(@samen_mount)} id="ticket-status-form" phx-change="set_status" style="margin:0">
+                  <form :if={@can_write} id="ticket-status-form" phx-change="set_status" style="margin:0">
                     <select name="status" aria-label="Set ticket status" style="font-size:12px">
                       <option
                         :for={status <- Reads.ticket_statuses()}
@@ -459,7 +507,7 @@ defmodule Samen.Web.Support.TicketLive do
                     title="No conversation thread yet."
                     body="Replies to this ticket appear here as a threaded conversation."
                   >
-                    <:actions :if={writable?(@samen_mount)}>
+                    <:actions :if={@can_write}>
                       <.button variant="primary" phx-click="start_conversation" id="start-conversation-btn">
                         Start conversation
                       </.button>
@@ -509,10 +557,10 @@ defmodule Samen.Web.Support.TicketLive do
                 <% end %>
 
                 <.error_state :if={:macros in @section_errors} title="Macros couldn't be loaded" body={Guard.message()} retry_event="retry_load" />
-                {render_kb_suggestion(@kb_suggestion, writable?(@samen_mount) and @reply_form != nil)}
-                {render_macro_palette(@macros, writable?(@samen_mount) and @reply_form != nil)}
+                {render_kb_suggestion(@kb_suggestion, @can_write and @reply_form != nil)}
+                {render_macro_palette(@macros, @can_write and @reply_form != nil)}
 
-                <div :if={writable?(@samen_mount) and @reply_form != nil} class="card" id="reply-composer" style="padding:16px 18px">
+                <div :if={@can_write and @reply_form != nil} class="card" id="reply-composer" style="padding:16px 18px">
                   <div class="gtitle" style="margin-bottom:10px"><h3>Reply <small style="font-weight:400;color:var(--muted)">(🔒 body is vault-routed PII)</small></h3></div>
                   <.simple_form :let={f} for={@reply_form} id="reply-form" phx-change="validate_reply" phx-submit="save_reply">
                     <.form_field field={f[:body]} label="Message (🔒 PII)" type="textarea" rows="3" placeholder="Write a reply…" />
