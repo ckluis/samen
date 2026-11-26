@@ -707,7 +707,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
     seen = read_json(os.path.join(HOME, "timings.json")) or {}
     learned = float(seen.get(step.id + "#per_item", 0))
     each = max(step.shard_each, learned)
-    room = max(step.shard_target - step.shard_overhead, each)  # per-chunk time left for items once the fixed cost is paid
+    room = step.shard_target - step.shard_overhead if step.shard_target > step.shard_overhead else step.shard_target  # per-chunk time left for items once the fixed cost is paid
     # (P5) cost-weighted ranges: what each item LAST cost (lane-seconds, read from the sub-step logs through
     # `shard_cost`) and what a chunk of that many lane-seconds really took (cost_model).
     costs = seen.get(step.id + "#item_cost") or {} if step.shard_cost else {}
