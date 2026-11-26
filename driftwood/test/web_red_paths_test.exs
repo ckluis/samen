@@ -15,6 +15,7 @@ defmodule Driftwood.WebRedPathsTest do
   The anti-tautology probe on the live masked-render path is documented in
   `test/web_anti_tautology_probe.md` (scratch-dir sabotage → flip confirmed → reverted).
   """
+  import Samen.VaultTokenAssert
   use Driftwood.DataCase, async: false
 
   alias Driftwood.{DogfoodScenario, Reads, OperatorReveal}
@@ -61,7 +62,7 @@ defmodule Driftwood.WebRedPathsTest do
     refute html =~ "CDL-EXP-"
     refute html =~ "Dana"
     refute html =~ "Reed"
-    refute html =~ "vt_"
+    refute_vault_token(html)
 
     # POSITIVE CONTROL (non-vacuous): the real non-PII data shape IS present — all three
     # driver rows render, with FMCSA badges (so this isn't an empty page passing by
@@ -133,7 +134,7 @@ defmodule Driftwood.WebRedPathsTest do
     refute html =~ "CDL-"
     refute html =~ "Dana"
     refute html =~ "Reed"
-    refute html =~ "vt_"
+    refute_vault_token(html)
     refute html =~ s.compliant_driver_id
 
     # POSITIVE CONTROL (non-vacuous): it DOES render the cross-tenant aggregate — the
@@ -282,7 +283,7 @@ defmodule Driftwood.WebRedPathsTest do
       assert html =~ "CDL-OK-", "tenant broker did not see its own driver's CDL in clear"
       assert html =~ "Dana", "tenant broker did not see its own driver's name in clear"
       # The vault token itself NEVER leaks (plaintext came through the decrypt chokepoint).
-      refute html =~ "vt_"
+      refute_vault_token(html)
     end
 
     test "an OPERATOR impersonating the SAME org still sees •••• (operator plane masked)", %{scenario: s} do
@@ -299,7 +300,7 @@ defmodule Driftwood.WebRedPathsTest do
       refute html =~ "CDL-OK-"
       refute html =~ "CDL-EXP-"
       refute html =~ "Dana"
-      refute html =~ "vt_"
+      refute_vault_token(html)
     end
 
     test "a CROSS-ORG tenant broker sees ZERO of another org's drivers (org-scope isolation)", %{scenario: _s} do

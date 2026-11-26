@@ -1,0 +1,19 @@
+# SABOTAGE: the compile-time reveal rule no longer sees an identity argument on a reveal action
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_probe_authz_test.exs
+# MUST_FAIL: an identity argument fails the build
+diff --git a/samen_core/lib/samen/reveal/probe_guard.ex b/samen_core/lib/samen/reveal/probe_guard.ex
+index c680b09e..3b3b02c1 100644
+--- a/samen_core/lib/samen/reveal/probe_guard.ex
++++ b/samen_core/lib/samen/reveal/probe_guard.ex
+@@ -36,7 +36,7 @@ defmodule Samen.Reveal.ProbeGuard do
+   end
+ 
+   defp argument_violations(name, action) do
+-    for %{name: arg} <- Map.get(action, :arguments, []), identity_argument?(arg) do
++    for %{name: arg} <- Map.get(action, :arguments, []), identity_argument?(arg), false do
+       {name,
+        "takes the identity argument #{inspect(arg)}: the grant must be checked for the actor that RUNS the action " <>
+          "(use `run({Samen.Reveal.GrantProbe, label: …})`), never for an id the caller names"}

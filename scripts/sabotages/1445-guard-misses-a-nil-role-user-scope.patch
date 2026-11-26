@@ -1,0 +1,19 @@
+# SABOTAGE: user_scope with four arguments counts as resolved even when the role is a literal nil
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_guard_test.exs
+# MUST_FAIL: user_scope with a literal nil role is an escape hatch
+diff --git a/samen_web/lib/samen/web/tenant_actor/guard.ex b/samen_web/lib/samen/web/tenant_actor/guard.ex
+index 985cf6f6..c75fba65 100644
+--- a/samen_web/lib/samen/web/tenant_actor/guard.ex
++++ b/samen_web/lib/samen/web/tenant_actor/guard.ex
+@@ -123,7 +123,7 @@ defmodule Samen.Web.TenantActor.Guard do
+   end
+ 
+   # A `user_scope` call names no role when it has fewer than four arguments, or its fourth is a literal `nil`.
+-  defp role_less?(args), do: length(args) < 4 or args |> Enum.at(3) |> String.trim() == "nil"
++  defp role_less?(args), do: length(args) < 4
+ 
+   # The arguments (source text, split at the top-level commas of the balanced parentheses) of every `name(...)` call.
+   defp calls(code, name) do

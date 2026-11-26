@@ -18,6 +18,7 @@ defmodule Samen.Web.FormLiveTest do
       construction. (The Ash write-path rejection of an operator plaintext write is
       A3's Invariant L1.)
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.WebTest.FormFixture.CompanyFormLive
@@ -216,7 +217,7 @@ defmodule Samen.Web.FormLiveTest do
     refute html =~ Seeds.contact_email()
     refute html =~ Seeds.contact_phone()
     # …and the vault token NEVER reaches the DOM (the RP leak scan).
-    refute html =~ "vt_"
+    refute_vault_token(html)
     # Masking does not over-block: the non-vaulted job_title stays editable.
     assert html =~ ~s(name="form[job_title]")
     assert html =~ "Head of Logistics"

@@ -169,24 +169,9 @@ defmodule Samen.Scopes.Primitives.Blueprint do
           end
 
           action :reveal_notification, :map do
-            argument(:actor_id, :string, allow_nil?: false)
             argument(:subject_id, :string, allow_nil?: false)
 
-            run(fn input, _ctx ->
-              ctx = %Samen.Reveal.Context{
-                actor: input.arguments.actor_id,
-                subject_id: input.arguments.subject_id,
-                resource: __MODULE__,
-                action: :reveal_notification,
-                label: :rendered_body
-              }
-
-              if Samen.Reveal.grant_checker().granted?(ctx) do
-                {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-              else
-                {:error, :denied}
-              end
-            end)
+            run({Samen.Reveal.GrantProbe, label: :rendered_body})
           end
         end
 
@@ -225,7 +210,7 @@ defmodule Samen.Scopes.Primitives.Blueprint do
           end
 
           policy action(:reveal_notification) do
-            authorize_if(always())
+            authorize_if(actor_present())
           end
         end
       end
@@ -758,24 +743,9 @@ defmodule Samen.Scopes.Primitives.Blueprint do
           defaults([:read, :destroy, create: :*, update: :*])
 
           action :reveal_webhook, :map do
-            argument(:actor_id, :string, allow_nil?: false)
             argument(:subject_id, :string, allow_nil?: false)
 
-            run(fn input, _ctx ->
-              ctx = %Samen.Reveal.Context{
-                actor: input.arguments.actor_id,
-                subject_id: input.arguments.subject_id,
-                resource: __MODULE__,
-                action: :reveal_webhook,
-                label: :signing_secret
-              }
-
-              if Samen.Reveal.grant_checker().granted?(ctx) do
-                {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-              else
-                {:error, :denied}
-              end
-            end)
+            run({Samen.Reveal.GrantProbe, label: :signing_secret})
           end
         end
 
@@ -792,7 +762,7 @@ defmodule Samen.Scopes.Primitives.Blueprint do
           end
 
           policy action(:reveal_webhook) do
-            authorize_if(always())
+            authorize_if(actor_present())
           end
         end
       end

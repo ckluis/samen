@@ -16,6 +16,7 @@ defmodule Driftwood.DogfoodWalkthroughTest do
   The human-followable version is `docs/driftwood-dogfood.md` (drives the same steps
   against the running server).
   """
+  import Samen.VaultTokenAssert
   use Driftwood.DataCase, async: false
 
   alias Driftwood.{DogfoodScenario, Reads, BrokerRollup, OperatorDashboard, OperatorReveal}
@@ -93,7 +94,7 @@ defmodule Driftwood.DogfoodWalkthroughTest do
     assert roster_html =~ "Dana"
     # The vault token itself NEVER renders (plaintext came through the decrypt
     # chokepoint, not the raw token).
-    refute roster_html =~ "vt_"
+    refute_vault_token(roster_html)
     # FMCSA badges: one OK (compliant), one BLOCKED (expired medical).
     assert roster_html =~ "OK"
     assert roster_html =~ "BLOCKED"
@@ -110,7 +111,7 @@ defmodule Driftwood.DogfoodWalkthroughTest do
     refute imp_html =~ "CDL-OK-"
     refute imp_html =~ "CDL-EXP-"
     refute imp_html =~ "Dana"
-    refute imp_html =~ "vt_"
+    refute_vault_token(imp_html)
     # Accountability line.
     assert imp_html =~ "ticket #7781: dispatch dispute"
     assert imp_html =~ "PII is masked"

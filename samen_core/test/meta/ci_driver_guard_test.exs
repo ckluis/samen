@@ -183,6 +183,14 @@ defmodule Samen.Meta.CiDriverGuardTest.SabotageNew do
   end
 end
 
+defmodule Samen.Meta.CiDriverGuardTest.BuildRefusedLedger do
+  use ExUnit.Case, async: true
+
+  test "LEDGER a mutation refused at build time is killed only when it is listed with the refusal's required message" do
+    Samen.Meta.CiDriverGuard.run_case!("LEDGER")
+  end
+end
+
 # ── ADR-053 P4 — docs match the tooling ───────────────────────────────────────────────────────────
 
 defmodule Samen.Meta.CiDriverGuardTest.DocDrift do
@@ -264,6 +272,24 @@ defmodule Samen.Meta.CiDriverGuardTest.SelectionTimeouts do
 
   test "SELTMO a --changed job's timeout scales with its selection, floored at history and capped at 360" do
     Samen.Meta.CiDriverGuard.run_case!("SELTMO")
+  end
+end
+
+defmodule Samen.Meta.CiDriverGuardTest.MutationRates do
+  use ExUnit.Case, async: true
+
+  @moduletag timeout: 180_000
+
+  test "MUTRATE a mutation job is sized from per-target measured rates and sliced past the per-job ceiling" do
+    Samen.Meta.CiDriverGuard.run_case!("MUTRATE")
+  end
+end
+
+defmodule Samen.Meta.CiDriverGuardTest.MutationOverhead do
+  use ExUnit.Case, async: true
+
+  test "MUTOVH a sharded step's fixed invocation cost is paid once per chunk, not charged to every item" do
+    Samen.Meta.CiDriverGuard.run_case!("MUTOVH")
   end
 end
 

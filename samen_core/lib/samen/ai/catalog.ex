@@ -185,7 +185,7 @@ defmodule Samen.AI.Catalog do
   The static schema catalog for the CURRENT host's registered resources — the
   ≈0-LOC runtime entry point (INV-5): no arguments needed. Reads the SAME
   cross-host registry every verifier/gate already reads
-  (`config :samen_core, :ash_domains`, set by every host's config.exs — demo /
+  (`config :samen_core, :host_domains`, set by every host's config.exs — demo /
   driftwood / pawchart already set it for `mix samen.verify.catalog_parity` and
   friends), so a host that has already registered its domains for the shipped
   verifiers gets grounding for free — no new authored line.
@@ -231,7 +231,7 @@ defmodule Samen.AI.Catalog do
   defp domains(opts) do
     case Keyword.get(opts, :domains) do
       list when is_list(list) -> list
-      _ -> Application.get_env(:samen_core, :ash_domains, [])
+      _ -> Samen.HostDomains.registry()
     end
   end
 

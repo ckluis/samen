@@ -34,6 +34,7 @@ defmodule Samen.Web.WsEFlagshipProbeTest do
   own green run is a shipped-suite member (runs every `mix test`); the flip is the opt-in
   `SAMEN_SABOTAGE=1` harness step.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -287,7 +288,7 @@ defmodule Samen.Web.WsEFlagshipProbeTest do
     assert_plane_masked!(op_user.full_name)
     refute op_csv =~ @secret_first
     refute op_csv =~ @secret_last
-    refute op_csv =~ "vt_"
+    refute_vault_token(op_csv)
 
     # --- TENANT PLANE: the plane is the gate — every surface goes CLEAR ---
     {tn_csv, tn_cell} = export_full_name_cell(tenant_scope(org_id))
@@ -317,7 +318,7 @@ defmodule Samen.Web.WsEFlagshipProbeTest do
     assert to_string(masked) == mask()
     assert inspect(masked) =~ "Masked"
     refute inspect(masked) =~ @secret_first
-    refute inspect(masked) =~ "vt_"
+    refute_vault_token(inspect(masked))
   end
 
   # ---- helpers ---------------------------------------------------------------

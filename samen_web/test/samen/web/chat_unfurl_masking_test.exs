@@ -14,6 +14,7 @@ defmodule Samen.Web.ChatUnfurlMaskingTest do
   own resource — so this test proves masking BY CONSTRUCTION, not a chat trick. The SAME
   capability is reusable anywhere (chat is the first consumer, not the owner).
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -76,7 +77,7 @@ defmodule Samen.Web.ChatUnfurlMaskingTest do
     refute html =~ Seeds.contact_email()
     refute html =~ Seeds.contact_phone()
     # No vault token / pii_ column string leaks (ADR-009/010 red-path convention).
-    refute html =~ "vt_"
+    refute_vault_token(html)
     refute html =~ "pii_"
   end
 

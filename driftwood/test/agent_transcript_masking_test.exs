@@ -26,6 +26,7 @@ defmodule Driftwood.AgentTranscriptMaskingTest do
   (`assert_leak_detected!/2` + the plane-flip control) keeps the vertical's scan refutable
   without a second patch for the same invariant.
   """
+  import Samen.VaultTokenAssert
   use Driftwood.DataCase, async: false
   use Samen.MaskingCase
   use Samen.AgentCase
@@ -107,7 +108,7 @@ defmodule Driftwood.AgentTranscriptMaskingTest do
     assert html =~ "driftwood.support_triage"
 
     assert html =~ @goal_canary
-    refute html =~ "vt_", "the raw vault token reached the tenant DOM — the resolver was bypassed"
+    refute_vault_token(html, "the raw vault token reached the tenant DOM — the resolver was bypassed")
   end
 
   test "RED: the OPERATOR-without-grant plane renders •••• on the SAME driftwood run",
@@ -151,7 +152,7 @@ defmodule Driftwood.AgentTranscriptMaskingTest do
 
     refute Enum.any?(sent_texts(), &String.contains?(&1, @person_canary))
     refute Enum.any?(sent_texts(), &String.contains?(&1, "Ostrand"))
-    refute Enum.any?(sent_texts(), &String.contains?(&1, "vt_"))
+    Enum.each(sent_texts(), &refute_vault_token/1)
 
     assert Enum.any?(sent_texts(), &String.contains?(&1, "••••")),
            "the masked fields were omitted rather than masked — §9#7 wants masking LOAD-BEARING here"
@@ -170,6 +171,6 @@ defmodule Driftwood.AgentTranscriptMaskingTest do
     encoded = inspect(projected, limit: :infinity, printable_limit: :infinity)
     refute encoded =~ @goal_canary
     refute encoded =~ @person_canary
-    refute encoded =~ "vt_"
+    refute_vault_token(encoded)
   end
 end

@@ -71,6 +71,7 @@ defmodule Samen.Automation.ActionsTest do
   ERROR VALUE, never raises — the calling process survives, proving the engine
   never crashes on an action failure.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   require Ash.Query
@@ -257,7 +258,7 @@ defmodule Samen.Automation.ActionsTest do
     # carried it in the first place (INV-1, structural, not a filter).
     refute Map.has_key?(decoded["data"], "email")
     refute body =~ "leak@example.com"
-    refute body =~ "vt_"
+    refute_vault_token(body)
 
     assert {"Samen-Signature", signature} = List.keyfind(headers, "Samen-Signature", 0)
     wf = only_workflow(org)
@@ -370,7 +371,7 @@ defmodule Samen.Automation.ActionsTest do
     refute Map.has_key?(payload["data"], "email")
 
     encoded = Jason.encode!(payload)
-    refute encoded =~ "vt_"
+    refute_vault_token(encoded)
   end
 
   test "webhook SSRF guard refuses a loopback-resolving target (defense-in-depth, §5.3)" do

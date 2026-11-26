@@ -1,0 +1,20 @@
+# SABOTAGE: the event guard refreshes acting_scope but the ListLive context keeps the scope it was built 
+#   with, so a demoted member's list restore still runs as member
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_open_page_test.exs
+# MUST_FAIL: an open page's list context follows the person
+diff --git a/samen_web/lib/samen/web/tenant_actor.ex b/samen_web/lib/samen/web/tenant_actor.ex
+index 9cfa06a0..b7250fe0 100644
+--- a/samen_web/lib/samen/web/tenant_actor.ex
++++ b/samen_web/lib/samen/web/tenant_actor.ex
+@@ -265,7 +265,7 @@ defmodule Samen.Web.TenantActor do
+ 
+   # `ListLive` keeps its own scope (its read AND its `restore` write context): same scope, the person's fresh id + role.
+   defp follow_list_ctx(%{assigns: %{samen_list_ctx: %{scope: %Samen.Scope{actor: actor} = scope} = ctx}} = socket, fresh) do
+-    ctx = %{ctx | scope: %{scope | actor: Map.merge(actor, %{id: fresh[:id], role: fresh[:role]})}}
++    ctx = %{ctx | scope: %{scope | actor: Map.merge(actor, %{id: actor[:id], role: actor[:role]})}}
+     Phoenix.Component.assign(socket, :samen_list_ctx, ctx)
+   end
+ 

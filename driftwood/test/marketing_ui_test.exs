@@ -13,6 +13,7 @@ defmodule Driftwood.MarketingUiTest do
     3. OPERATOR ISOLATION — the operator plane cannot enumerate a tenant's subscriber emails:
        the subscriber email renders •••• and the plaintext is ABSENT.
   """
+  import Samen.VaultTokenAssert
   use Driftwood.DataCase, async: false
 
   alias Samen.Web.Marketing
@@ -39,7 +40,7 @@ defmodule Driftwood.MarketingUiTest do
     assert html =~ ~s(class="app")
     assert html =~ "Campaigns"
     assert html =~ "Q3 lane-offer outreach"
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   test "the mounted /marketing/segments renders segments + subscribers (email clear on tenant)", %{org_id: org_id} do
@@ -53,7 +54,7 @@ defmodule Driftwood.MarketingUiTest do
     assert html =~ @opted_out_email
     # The opted-out subscriber is flagged suppressed.
     assert html =~ "suppressed"
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   test "the mounted /marketing/campaigns/:id renders the compose form + recipients clear", %{
@@ -66,7 +67,7 @@ defmodule Driftwood.MarketingUiTest do
     assert html =~ "campaign-header"
     assert html =~ ~s(id="send-campaign-form")
     assert html =~ @carrier_email
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   # ==========================================================================
@@ -127,7 +128,7 @@ defmodule Driftwood.MarketingUiTest do
     assert seg_html =~ "••••"
     refute seg_html =~ @carrier_email
     refute seg_html =~ @opted_out_email
-    refute seg_html =~ "vt_"
+    refute_vault_token(seg_html)
     refute seg_html =~ "pii_"
 
     camp_html = render_framework(Marketing.CampaignLive, mount, [org_id, campaign.id])

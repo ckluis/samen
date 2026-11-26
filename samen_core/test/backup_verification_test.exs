@@ -11,6 +11,7 @@ defmodule Samen.Backup.VerificationTest do
       (done-criteria #1): a clean dump verifies `:ok`; a CORRUPTED dump and a
       MISSING dump both FAIL — the refutable control proving the check has teeth.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   alias Samen.Backup.Verification
@@ -132,7 +133,7 @@ defmodule Samen.Backup.VerificationTest do
 
       # Token-blind: the alert carries table names / counts / checksums only — no
       # vault token, no plaintext field value.
-      refute inspect(meta) =~ "vt_"
+      refute_vault_token(inspect(meta))
     end
 
     test "an unconfigured target also raises the alert (never a silent green)" do

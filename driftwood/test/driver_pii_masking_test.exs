@@ -21,6 +21,7 @@ defmodule Driftwood.DriverPiiMaskingTest do
     3. SABOTAGE twin (anti-tautology) — the same record flipped to tenant plane
        goes clear, and a fed "leaked" render is caught by the same scan.
   """
+  import Samen.VaultTokenAssert
   use Driftwood.DataCase, async: false
   use Samen.MaskingCase
   require Ash.Query
@@ -74,7 +75,7 @@ defmodule Driftwood.DriverPiiMaskingTest do
 
     assert_plane_masked!(resolved.cdl_number, @plaintext_cdl)
     assert match?(%Samen.Masked{}, resolved.full_name)
-    refute to_string(resolved.full_name) =~ "vt_"
+    refute_vault_token(to_string(resolved.full_name))
     refute to_string(resolved.full_name) =~ "Priya"
   end
 

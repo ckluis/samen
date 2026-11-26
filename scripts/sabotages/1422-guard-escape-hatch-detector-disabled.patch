@@ -1,0 +1,23 @@
+# SABOTAGE: the guard detector finds no system_scope / admin_scope / role-less user_scope call, so a new 
+#   escape hatch goes unreported
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_guard_test.exs
+# MUST_FAIL: an escape hatch is counted
+diff --git a/samen_web/lib/samen/web/tenant_actor/guard.ex b/samen_web/lib/samen/web/tenant_actor/guard.ex
+index be056aa3..5694b1f8 100644
+--- a/samen_web/lib/samen/web/tenant_actor/guard.ex
++++ b/samen_web/lib/samen/web/tenant_actor/guard.ex
+@@ -77,6 +77,11 @@ defmodule Samen.Web.TenantActor.Guard do
+   """
+   @spec escape_hatches(String.t()) :: non_neg_integer()
+   def escape_hatches(source) when is_binary(source) do
++    _ = source
++    0
++  end
++
++  def escape_hatches_disabled(source) do
+     code = source |> code_lines() |> Enum.reject(&String.match?(&1, ~r/^\s*(?:@spec\s|(?:defp?|defmacrop?)\s+)(?:system_scope|admin_scope|user_scope)\b/)) |> Enum.join("\n")
+ 
+     system = count(~r/\bsystem_scope\(/, code)

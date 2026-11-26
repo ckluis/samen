@@ -118,8 +118,12 @@ defmodule Samen.Erasure.Completeness do
         list
 
       _ ->
-        otp_app = Keyword.get(opts, :otp_app) || app()
-        Application.get_env(otp_app, :ash_domains, [])
+        # With no Mix (a release) the app resolves to :samen_core, whose registry is the host's
+        # `:samen_core, :host_domains` (`Samen.HostDomains`), not Ash's `:ash_domains` key for samen_core.
+        case Keyword.get(opts, :otp_app) || app() do
+          :samen_core -> Samen.HostDomains.registry()
+          otp_app -> Application.get_env(otp_app, :ash_domains, [])
+        end
     end
   end
 

@@ -6,16 +6,16 @@
 # TEST_FILES: test/freight_api_key_authz_test.exs
 # MUST_FAIL: a key is never minted by an actor that is not a UUID with an ACTIVE membership
 diff --git a/driftwood/lib/driftwood/freight.ex b/driftwood/lib/driftwood/freight.ex
-index 6d523f76..13be4d27 100644
+index 5dc66305..42bb8a94 100644
 --- a/driftwood/lib/driftwood/freight.ex
 +++ b/driftwood/lib/driftwood/freight.ex
-@@ -472,6 +472,9 @@ defmodule Driftwood.Freight.ApiKey do
-               {:ok, _membership} ->
-                 changeset
+@@ -481,6 +481,9 @@ defmodule Driftwood.Freight.ApiKey do
+                 {:ok, _membership} ->
+                   changeset
  
-+              _ when true ->
-+                changeset
++                _ when true ->
++                  changeset
 +
-               _ ->
-                 Ash.Changeset.add_error(changeset,
-                   field: :minter_user_id,
+                 _ ->
+                   Ash.Changeset.add_error(changeset,
+                     field: :minter_user_id,

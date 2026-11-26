@@ -19,6 +19,7 @@ defmodule Samen.Web.CsvMaskingTest do
       (2) leak scan refutability: a modeled raw-row export (the at-rest vault
       token serialized without resolution) IS caught by the same `vt_` scan.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -137,7 +138,7 @@ defmodule Samen.Web.CsvMaskingTest do
 
       assert csv =~ @secret_first
       assert csv =~ @secret_last
-      refute csv =~ "vt_"
+      refute_vault_token(csv)
       # Non-PII columns ride along unmasked on every plane.
       assert csv =~ "Public Display"
     end

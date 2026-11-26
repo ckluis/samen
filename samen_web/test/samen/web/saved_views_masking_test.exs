@@ -13,6 +13,7 @@ defmodule Samen.Web.SavedViewsMaskingTest do
       on tenant, masked on operator (the resolver is the gate, not the saved view); (2) the mask
       scan is refutable.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -94,7 +95,7 @@ defmodule Samen.Web.SavedViewsMaskingTest do
     assert html =~ @secret_first
     assert html =~ @secret_last
     assert html =~ @secret_email
-    refute html =~ "vt_"
+    refute_vault_token(html)
     assert html =~ "Public SavedView Display"
   end
 

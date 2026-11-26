@@ -23,6 +23,7 @@ defmodule Samen.Delivery.PiiRenderingTest do
   All resolution runs through `Samen.Api.PiiResolution` (the governed read path) on
   the actor's plane — never bypassed, never hand-masked — via `Samen.MaskingCase`.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
   use Samen.MaskingCase
 
@@ -98,8 +99,8 @@ defmodule Samen.Delivery.PiiRenderingTest do
     # …and the body that interpolates it is plaintext too, with no vault token.
     assert rendered.text_body =~ @recipient_email
     assert rendered.html_body =~ @recipient_email
-    refute rendered.text_body =~ "vt_"
-    refute rendered.html_body =~ "vt_"
+    refute_vault_token(rendered.text_body)
+    refute_vault_token(rendered.html_body)
   end
 
   test "RED — an operator-plane PREVIEW of the SAME message MASKS (••••, never plaintext, never vt_)" do
@@ -111,7 +112,7 @@ defmodule Samen.Delivery.PiiRenderingTest do
     # The body shows the mask and NOT the plaintext, with no vt_ token anywhere.
     assert preview.text_body =~ Masked.mask()
     refute preview.text_body =~ @recipient_email
-    refute preview.text_body =~ "vt_"
+    refute_vault_token(preview.text_body)
     # DOM (html) form: mask present, plaintext absent by omission, no vt_.
     assert_masked_dom!(preview.html_body, @recipient_email)
   end
@@ -162,7 +163,7 @@ defmodule Samen.Delivery.PiiRenderingTest do
     assert payload.to == @recipient_email
 
     # NO vault token anywhere in the payload — a vt_ reaching the ESP is a breach.
-    refute inspect(payload) =~ "vt_"
+    refute_vault_token(inspect(payload))
     refute Enum.any?(Map.values(payload), &match?(%Masked{}, &1))
 
     # The recipient's own vault token IS known to the render (internal correlation)
@@ -224,7 +225,7 @@ defmodule Samen.Delivery.PiiRenderingTest do
     refute dump =~ @recipient_email
     refute dump =~ "SENTINEL"
     # …and no vault token at rest either.
-    refute dump =~ "vt_"
+    refute_vault_token(dump)
 
     # Non-vacuous: the row genuinely holds the refs + provider id + template ref.
     assert dump =~ rendered.send_id

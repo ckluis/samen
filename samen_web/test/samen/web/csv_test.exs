@@ -13,6 +13,7 @@ defmodule Samen.Web.CsvTest do
 
   The per-plane export masking red-path (AC-G15-2) lives in `csv_masking_test.exs`.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.Factory
@@ -291,7 +292,7 @@ defmodule Samen.Web.CsvTest do
           [Ecto.UUID.dump!(person.id)]
         )
 
-      assert raw_row =~ "vt_"
+      assert_vault_token(raw_row)
       refute raw_row =~ "Vaultina"
       refute raw_row =~ "Csv-Secret"
     end

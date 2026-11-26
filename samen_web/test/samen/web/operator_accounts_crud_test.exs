@@ -18,6 +18,7 @@ defmodule Samen.Web.OperatorAccountsCrudTest do
     * **Impersonation-plane posture (belt)** — a `plane: :operator` mount renders NO
       write affordance (`Samen.Web.Operator.Live.writable?/1`).
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.Web.ListLive
@@ -273,6 +274,6 @@ defmodule Samen.Web.OperatorAccountsCrudTest do
     assert rendered =~ "Account 01"
     refute rendered =~ ~s(phx-click="new_account")
     refute rendered =~ ~s(phx-click="delete")
-    refute rendered =~ "vt_"
+    refute_vault_token(rendered)
   end
 end

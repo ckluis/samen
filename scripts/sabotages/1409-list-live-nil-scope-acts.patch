@@ -1,0 +1,19 @@
+# SABOTAGE: a list event with no context or a nil scope is not refused
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_surfaces_test.exs
+# MUST_FAIL: every list event on a denied page is a no-op
+diff --git a/samen_web/lib/samen/web/list_live.ex b/samen_web/lib/samen/web/list_live.ex
+index a0e57f15..c5e26b82 100644
+--- a/samen_web/lib/samen/web/list_live.ex
++++ b/samen_web/lib/samen/web/list_live.ex
+@@ -226,7 +226,7 @@ defmodule Samen.Web.ListLive do
+   defp refused?(socket) do
+     case socket.assigns[:samen_list_ctx] do
+       %{scope: scope} when not is_nil(scope) -> false
+-      _ -> true
++      _ -> false
+     end
+   end
+ 
