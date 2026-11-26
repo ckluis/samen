@@ -1,0 +1,20 @@
+# SABOTAGE: the Plans edit form is kept across a load although its plan is not on the page (another 
+#   organisation)
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_navigation_test.exs
+# MUST_FAIL: an edit form opened in org A and submitted after an ?org=B switch writes nothing
+diff --git a/samen_web/lib/samen/web/billing/plans_live.ex b/samen_web/lib/samen/web/billing/plans_live.ex
+index 933cbadc..55e793f6 100644
+--- a/samen_web/lib/samen/web/billing/plans_live.ex
++++ b/samen_web/lib/samen/web/billing/plans_live.ex
+@@ -153,7 +153,7 @@ defmodule Samen.Web.Billing.PlansLive do
+   # with `assign_new` held the scope it was built with, so a demotion or an `?org=` switch followed by a submit used it.
+   defp refresh_edit(%{assigns: %{edit_plan_id: id}} = socket, mount, org_id, scope) when is_binary(id) do
+     case find_plan(socket, id) do
+-      nil -> assign(socket, show_edit: false, edit_plan_id: nil, edit_form: nil)
++      nil -> socket
+       plan -> assign(socket, edit_form: edit_plan_form(mount, org_id, scope, plan))
+     end
+   end

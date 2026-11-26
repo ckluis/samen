@@ -38,6 +38,8 @@ All notable changes to Samen are recorded here. The format follows
   `TenantActor.write_scope(` call whose third argument is not the page's own acting scope (a literal `nil`, another scope,
   a capture, `apply`, an `import`); the baseline is empty and `Billing.Reads.restore_admin_scope/2` passes the socket's
   acting scope instead of the list's. The by-name non-vacuity check names the Billing, Marketing and Support pages too.
+- Sabotages 1539 to 1542 (a navigation that does not follow the person acting, the Plans edit form kept for a plan that is not on
+  the page, `write_scope/3` falling back on an armed mount, `admin?/1` open on the operator plane). No migration.
 
 ### Tooling: the driver waits for a killed process group to be gone
 
