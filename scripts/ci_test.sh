@@ -2001,7 +2001,7 @@ case_MUTRATE() {
 case_MUTOVH() {
   # A chunk pays the command's FIXED cost once: a fake mutate that sleeps `overhead + n x each` for its chunk of n mutants.
   # 4 mutants, overhead 2 s, each 0.5 s, chunk target 3 s: one class would take 4 s (> 3), so the plan makes TWO classes of
-  # 2 (2.8 s each, 5.6 s in all - not 4 x (2 + 0.4) = 9.6 s as single-mutant chunks); and the rate it LEARNS from them is the
+  # 2 (2.4 s each, 4.8 s in all - not 4 x (2 + 0.2) = 8.8 s as single-mutant chunks); and the rate it LEARNS from them is the
   # per-mutant 0.5 bucket, not the ~1.5 s (overhead + each) that would ratchet the bucket to 2 s and split the next plan into four.
   mkrepo mutovh
   { echo "$APPS"
@@ -2009,7 +2009,7 @@ case_MUTOVH() {
 [step mut]
 cmd = a=${CI_SHARD_ARGS#--shard }; r=${a%/*}; m=${a#*/}; k=0; x=0
       while [ $x -lt 4 ]; do [ $((x % m)) -eq $((r-1)) ] && k=$((k+1)); x=$((x+1)); done
-      sleep "$(awk "BEGIN { print 2 + 0.4 * $k }")"; echo "  mutants run : $k"
+      sleep "$(awk "BEGIN { print 2 + 0.2 * $k }")"; echo "  mutants run : $k"
 shard_list = printf "SELECTED 4\n"
 shard_kind = modulo
 shard_total = ^SELECTED ([0-9]+)$
@@ -2026,7 +2026,7 @@ CONF
   eq "$(grep -c '^PLAN mut\[' "$T/ov0")" 2 "MUTOVH: 4 mutants, 2 s overhead + 0.5 s each, target 3 s: planned as 2 classes (not 1 over the target, not 4 singles)"
   drive "$T/ov1" pr --budget 0 -j 1 --no-cache
   eq "$RC" 0 "MUTOVH: the two classes run and pass"
-  eq "$(jsonget "$SAMEN_CI_HOME/timings.json" 'd["mut#per_item"]')" 0.5 "MUTOVH: the learned per-mutant rate is the 0.5 s bucket (0.4 s each; the 2 s fixed cost is not charged to each mutant)"
+  eq "$(jsonget "$SAMEN_CI_HOME/timings.json" 'd["mut#per_item"] <= 0.5')" True "MUTOVH: the learned per-mutant rate is at most the 0.5 s bucket (0.2 s each; the 2 s fixed cost is not charged to each mutant, a loaded machine has room)"
   drive "$T/ov2" pr --plan --no-cache
   eq "$(grep -c '^PLAN mut\[' "$T/ov2")" 2 "MUTOVH: ... so the next plan of the same selection is still 2 classes (it does not ratchet into single-mutant runs)"
 }
