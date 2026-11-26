@@ -2632,7 +2632,74 @@ STEP
   done
 }
 
-ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW LEDGER DOCS LOCALPATHS GENPROBE GENHEX GENHEXRO NARROW RECHUNK COSTW TIMEOUT SELTMO MUTRATE MUTOVH GENDEPS ESCAPE MUTLINT MUTLOCK LAUNCHREC LAUNCHSEAM RERUNREC GROUPKILL)
+# KILLWAIT: after SIGKILL the driver waits on the STATE (the group is gone), not on the leader's reaping. A SIGKILLed
+# grandchild is a zombie until launchd reaps it, and under load that outlasted the driver (GROUPKILL flaked: "a SIGTERM-
+# handling group member is still alive after the driver exited"). The seam SAMEN_CI_TEST_KILL_LINGER_S makes the group
+# observably alive that long after SIGKILL (SAMEN_CI_TEST_TERM_GRACE_S shortens the 20 s SIGTERM grace); both are test-only.
+# step + rerun: the driver must not exit before the linger ends. loud: past SAMEN_CI_TEST_KILL_WAIT_S the driver says so on
+# stderr naming the group and keeps it recorded in state.json, so the next invocation still refuses to overlap.
+case_KILLWAIT() {
+  mkrepo killwait
+  mkdir -p "$T/bin"
+  local member="$T/member.pid" release="$T/member.release" pid pg mp rc n part t0 t1 linger waitlim
+  local stubborn="( trap '' TERM; echo \$BASHPID > $member; for _ in \$(seq 1 300); do [[ -e $release ]] && exit 0; sleep 0.1; done ) & wait"
+  cat > "$T/bin/mix" <<MIX
+#!/usr/bin/env bash
+[[ "\${1:-}" == test ]] || exit 2
+shift; echo "rerun \$*" >> "\$CI_TEST_RUNS"
+$stubborn
+MIX
+  chmod +x "$T/bin/mix"
+  for part in step rerun loud; do
+    rm -f "$member" "$release"
+    linger=3; waitlim=10
+    [[ $part == loud ]] && { linger=60; waitlim=1; }
+    { echo "$APPS"
+      if [[ $part != rerun ]]; then
+        printf '[step kw]\ncmd = echo "$CI_STEP" >> "$CI_TEST_RUNS"; %s\nmodes = pr\ninputs = core/\nest_s = 1\n' "$stubborn"
+      else
+        cat <<'STEP'
+[step kw]
+cmd = echo "$CI_STEP" >> "$CI_TEST_RUNS"
+    printf '\n  1) test the thing works (Fake.Test)\n     test/fake_test.exs:7\n     Assertion with == failed\n     code:  assert 1 == 2\n     left:  1\n     right: 2\n     stacktrace:\n       test/fake_test.exs:8: (test)\n\n'
+    exit 1
+cwd = core
+exunit_dir = core
+modes = pr
+inputs = core/
+est_s = 1
+STEP
+      fi
+    } > "$SAMEN_CI_MANIFEST"
+    PATH="$T/bin:$PATH" SAMEN_CI_TEST_TERM_GRACE_S=1 SAMEN_CI_TEST_KILL_LINGER_S=$linger SAMEN_CI_TEST_KILL_WAIT_S=$waitlim \
+      "$CI" pr -j 1 > "$T/kw-$part" 2>&1 &
+    pid=$!
+    for n in $(seq 1 150); do [[ -s "$member" ]] && break; sleep 0.1; done
+    if [[ ! -s "$member" ]]; then bad "KILLWAIT($part): the stubborn member never started"; kill -KILL "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; continue; fi
+    mp="$(cat "$member")"
+    pg="$(jsonget "$SAMEN_CI_HOME/state.json" 'd["running"]["kw#rerun" if "kw#rerun" in d["running"] else "kw"]')"
+    t0="$(python3 -c 'import time; print(time.time())')"
+    kill -TERM "$pid"
+    for n in $(seq 1 250); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+    if kill -0 "$pid" 2>/dev/null; then bad "KILLWAIT($part): the interrupted driver did not exit within 25 s"; kill -KILL "$pid" 2>/dev/null; fi
+    wait "$pid" 2>/dev/null; rc=$?
+    t1="$(python3 -c 'import time; print(time.time())')"
+    eq "$rc" 130 "KILLWAIT($part): an interrupted driver exits 130"
+    if [[ $part == loud ]]; then
+      has "$T/kw-$part" "process group $pg \(kw[^)]*\) is STILL ALIVE ${waitlim}s after SIGKILL" "KILLWAIT(loud): the bound is hit loudly on stderr, naming the group"
+      eq "$(jsonget "$SAMEN_CI_HOME/state.json" 'sorted(v for v in d["running"].values())')" "[$pg]" "KILLWAIT(loud): ... and the group stays recorded as running (the next invocation must not overlap)"
+    else
+      # 1 s grace + linger is the floor (the group is not gone before); the 15 s ceiling proves the seams are honoured at all
+      eq "$(python3 -c "print(int(1 + $linger <= $t1 - $t0 < 15))")" 1 "KILLWAIT($part): the driver waited for the group to be gone (1 s grace + ${linger}s linger <= exit < 15 s after the interrupt)"
+      hasnt "$T/kw-$part" 'STILL ALIVE' "KILLWAIT($part): a group that goes away in time is not reported stuck"
+      eq "$(jsonget "$SAMEN_CI_HOME/state.json" 'len(d["running"])')" 0 "KILLWAIT($part): ... and nothing stays recorded"
+    fi
+    : > "$release"
+    kill -KILL -- "-$pg" 2>/dev/null
+  done
+}
+
+ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW LEDGER DOCS LOCALPATHS GENPROBE GENHEX GENHEXRO NARROW RECHUNK COSTW TIMEOUT SELTMO MUTRATE MUTOVH GENDEPS ESCAPE MUTLINT MUTLOCK LAUNCHREC LAUNCHSEAM RERUNREC GROUPKILL KILLWAIT)
 CASES=("$@")
 [[ ${#CASES[@]} -gt 0 ]] || CASES=("${ALL[@]}")
 for c in "${CASES[@]}"; do

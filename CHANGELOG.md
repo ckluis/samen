@@ -11,6 +11,14 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Tooling: the driver waits for a killed process group to be gone
+
+- **After SIGKILL the driver waits until the whole group no longer exists before it returns or exits.** It used to reap
+  only the leader (and, in `terminate_all`'s last loop, nothing): a SIGKILLed grandchild is a zombie until launchd reaps
+  it, so under load an interrupted driver exited with a group member still visible (the `GROUPKILL` flake). The wait is
+  bounded (10 s); past it the driver says so on stderr naming the group and keeps it recorded in `state.json`, so the
+  next invocation still refuses to overlap. The `KILLWAIT` case proves both through test-only seams (docs/ci.md).
+
 ### Tooling: a sabotage refused at build time is killed by that refusal
 
 - **A sabotage whose mutation a named compile-time rule refuses is recorded as killed by that refusal, and only when it

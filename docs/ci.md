@@ -41,6 +41,8 @@ is the resume state. `_ci/` is gitignored; never commit it.
 
 `SAMEN_CI_TEST_HOLD_LAUNCH` (with `SAMEN_CI_TEST_HOLD_KIND`, `SAMEN_CI_TEST_HOLD_LIMIT_S`) is a test-only seam of `scripts/ci_test.sh`: it makes the driver hold a launched process before releasing it. Never export it; it is bounded (60 s by default, then the driver fails naming it), stops on Ctrl-C/SIGTERM, and is stripped from every step's environment.
 
+After SIGKILL (the SIGTERM grace expired, or a member outlived its leader) the driver waits until the process group is GONE, not until the leader is reaped: a SIGKILLed grandchild stays a zombie until launchd reaps it, and under load that outlasted the driver. The wait is bounded (10 s: SIGKILL cannot be handled, so only a process in uninterruptible sleep outlives it); past the bound the driver says `process group N (<step>) is STILL ALIVE` on stderr and keeps the group in `state.json` `running`, so the next invocation refuses to overlap with it. `SAMEN_CI_TEST_TERM_GRACE_S`, `SAMEN_CI_TEST_KILL_LINGER_S` (report the group alive this long after SIGKILL) and `SAMEN_CI_TEST_KILL_WAIT_S` are test-only seams of the `KILLWAIT` case of `scripts/ci_test.sh`; never export them, they are stripped from every step's environment.
+
 ## 2. The round recipe
 
 ```

@@ -124,7 +124,21 @@ def atomic_write_json(path, data):
 
 # Self-test seams (scripts/ci_test.sh LAUNCHREC) — test-only, documented in docs/ci.md, and stripped from every step's
 # environment (step_base_env) so a step can never make a nested driver hold.
-TEST_SEAMS = ("SAMEN_CI_TEST_HOLD_LAUNCH", "SAMEN_CI_TEST_HOLD_KIND", "SAMEN_CI_TEST_HOLD_LIMIT_S")
+TEST_SEAMS = ("SAMEN_CI_TEST_HOLD_LAUNCH", "SAMEN_CI_TEST_HOLD_KIND", "SAMEN_CI_TEST_HOLD_LIMIT_S",
+              "SAMEN_CI_TEST_TERM_GRACE_S", "SAMEN_CI_TEST_KILL_LINGER_S", "SAMEN_CI_TEST_KILL_WAIT_S")
+
+# After SIGKILL the group is waited on until it is GONE (not merely until the leader is reaped): a SIGKILLed grandchild is
+# a zombie until launchd/init reaps it, and under load that is long enough for "the driver exited, nothing of mine is
+# running" to be false. SIGKILL cannot be handled, so this converges as soon as the kernel has torn the members down; 10 s
+# only ever expires for a process stuck in uninterruptible sleep (it would survive any signal), and then the driver says so.
+KILL_WAIT_S = 10.0
+TERM_GRACE_S = 20.0
+
+
+def seam_float(name, default):
+    """A test-only numeric seam (docs/ci.md): unset -> the production value."""
+    v = os.environ.get(name)
+    return float(v) if v else default
 
 
 def group_alive(pg):
@@ -992,6 +1006,7 @@ class Run(object):
         self.results = {}    # id -> dict
         self.groups_done = set()
         self.interrupted = False
+        self.stuck = {}  # groups that outlived SIGKILL + KILL_WAIT_S: still recorded so the next invocation refuses to overlap
         self.reruns = {}  # flaky-rerun processes by "<step>#rerun": recorded in state.json like a running step
         self.running = {}    # id -> dict(proc, step, start, log)
 
@@ -1040,7 +1055,7 @@ class Run(object):
     def save_state(self):
         self.state["steps"] = self.state.get("steps", {})
         self.state["running"] = dict({sid: r["proc"].pid for sid, r in self.running.items()},
-                                     **{rid: p.pid for rid, p in self.reruns.items()})
+                                     **{rid: p.pid for rid, p in self.reruns.items()}, **self.stuck)
         atomic_write_json(os.path.join(HOME, "state.json"), self.state)
 
     def record(self, step, status, duration, log=None, digest=None, note=None, key=None):
@@ -1145,7 +1160,7 @@ class Run(object):
                 p = self.spawn_gated(cmd, os.path.join(REPO, step.exunit_dir), self.ctx.env(self.mode, step), f, "rerun", register)
                 while p.poll() is None:
                     if self.interrupted:
-                        self.stop_group(p)
+                        self.stop_group(p, rid)
                         return None
                     time.sleep(0.2)
             finally:
@@ -1153,26 +1168,52 @@ class Run(object):
                 self.save_state()
         return p.returncode == 0
 
-    def stop_group(self, proc):
-        """SIGTERM then (after 20 s) SIGKILL a process group this driver started, and reap it. The deadline covers the
-        WHOLE group: a member that handles SIGTERM can outlive the leader, and the record is dropped once this returns."""
+    def kill_group_and_wait(self, name, pg):
+        """SIGKILL group `pg` and wait on the STATE: the group no longer exists. Returns True when it is gone. When it is
+        still there after KILL_WAIT_S the driver says so on stderr, names the group, and KEEPS a record of it (self.stuck ->
+        state.json running) so the next invocation refuses to overlap with it; it never pretends the group is gone."""
+        try:
+            os.killpg(pg, signal.SIGKILL)
+        except OSError:
+            pass
+        linger = seam_float("SAMEN_CI_TEST_KILL_LINGER_S", 0.0)  # test-only: report the group alive this long after SIGKILL
+        killed = time.time()
+        wait = seam_float("SAMEN_CI_TEST_KILL_WAIT_S", KILL_WAIT_S)
+        deadline = killed + wait
+
+        def alive():
+            return group_alive(pg) or time.time() < killed + linger
+        while alive() and time.time() < deadline:
+            time.sleep(0.05)
+        if not alive():
+            self.stuck.pop(name, None)
+            return True
+        self.stuck[name] = pg
+        self.save_state()
+        sys.stderr.write("ci: process group %d (%s) is STILL ALIVE %gs after SIGKILL — it is recorded as running in "
+                         "state.json; the next scripts/ci refuses to overlap with it until it is gone\n" % (pg, name, wait))
+        sys.stderr.flush()
+        return False
+
+    def stop_group(self, proc, name="rerun"):
+        """SIGTERM then (after the 20 s grace) SIGKILL a process group this driver started, reap it, and wait until the
+        whole group is gone. The deadline covers the WHOLE group: a member that handles SIGTERM can outlive the leader, and
+        the record is dropped once this returns."""
         pg = proc.pid
         try:
             os.killpg(pg, signal.SIGTERM)
         except OSError:
             pass
-        deadline = time.time() + 20
+        grace = seam_float("SAMEN_CI_TEST_TERM_GRACE_S", TERM_GRACE_S)
+        deadline = time.time() + grace
         try:
-            proc.wait(timeout=20)
+            proc.wait(timeout=grace)
         except subprocess.TimeoutExpired:
             pass
         while group_alive(pg) and time.time() < deadline:
             time.sleep(0.1)
         if proc.poll() is None or group_alive(pg):
-            try:
-                os.killpg(pg, signal.SIGKILL)
-            except OSError:
-                pass
+            self.kill_group_and_wait(name, pg)
             proc.wait()
 
     def finish(self, sid, rc):
@@ -1340,7 +1381,7 @@ class Run(object):
                 os.killpg(r["proc"].pid, signal.SIGTERM)  # SIGTERM first: gen-probe/sabotage traps restore
             except OSError:
                 pass
-        deadline = time.time() + 20
+        deadline = time.time() + seam_float("SAMEN_CI_TEST_TERM_GRACE_S", TERM_GRACE_S)
         # the deadline covers every member of every group, not just each leader: a member that handles SIGTERM outlives it
         while time.time() < deadline:
             for sid in list(self.running):
@@ -1351,18 +1392,13 @@ class Run(object):
                 break
             time.sleep(0.2)
         for sid in list(self.running):
-            try:
-                os.killpg(self.running[sid]["proc"].pid, signal.SIGKILL)
-            except OSError:
-                pass
+            pg = self.running[sid]["proc"].pid
+            self.kill_group_and_wait(sid, pg)
             self.running[sid]["proc"].wait()
             self.finish(sid, -9)
-        for pg in pgs.values():
-            if group_alive(pg):
-                try:
-                    os.killpg(pg, signal.SIGKILL)
-                except OSError:
-                    pass
+        for sid, pg in pgs.items():
+            if group_alive(pg) and sid not in self.stuck:  # a member that outlived its leader (the leader exited in time)
+                self.kill_group_and_wait(sid, pg)
 
 
 def final_line(mode, opts, plan, status, elapsed, first_fail):

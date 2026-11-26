@@ -361,3 +361,11 @@ defmodule Samen.Meta.CiDriverGuardTest.GroupKill do
     Samen.Meta.CiDriverGuard.run_case!("GROUPKILL")
   end
 end
+
+defmodule Samen.Meta.CiDriverGuardTest.KillWait do
+  use ExUnit.Case, async: true
+
+  test "KILLWAIT after SIGKILL the driver waits until the whole group is gone, and says so loudly when it is not" do
+    Samen.Meta.CiDriverGuard.run_case!("KILLWAIT")
+  end
+end
