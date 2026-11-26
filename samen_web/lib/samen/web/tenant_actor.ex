@@ -113,6 +113,11 @@ defmodule Samen.Web.TenantActor do
   @doc """
   Whether the person acting on `socket` holds at least the `:member` role (the plane is not asked): the page-level gate for
   a write whose resource only checks the org in the kernel (a reply, a customer, an article). `false` when nobody acts.
+
+  A RANK check only, deliberately unlike `admin?/1`: on the operator plane the synthetic scope carries `:member`, so this is
+  true there, and what stops an operator's write is the kernel's plane guard (`Samen.Pii.WriteGuard` refuses a plaintext PII
+  write on that plane; `writable?/2` hides the controls). Answering `false` here would turn those refusals into this page's
+  flash and stop the kernel guards being the thing reached, which the operator red paths exist to prove.
   """
   @spec member?(map()) :: boolean()
   def member?(%{assigns: %{acting_scope: %Samen.Scope{actor: %{role: role}}}}), do: Samen.Scope.Role.at_least?(role, :member)
@@ -120,12 +125,14 @@ defmodule Samen.Web.TenantActor do
 
   @doc """
   The page-level gate of an ADMIN-ranked action the kernel does not itself gate (sending a campaign): on an armed tenant
-  plane the person acting must hold at least `:admin`; the disarmed dev posture and the operator plane (whose authority
-  is not a membership) are unchanged. `false` when nobody acts.
+  plane the person acting must hold at least `:admin`; the disarmed dev posture (no authenticated person) is open. The
+  OPERATOR plane is `false`, like `administrable?/2`: an operator never sends a tenant's campaign. `false` when nobody acts.
   """
   @spec admin?(map()) :: boolean()
+  def admin?(%{assigns: %{acting_scope: %Samen.Scope{}, samen_mount: %Mount{plane: %{kind: :operator}}}}), do: false
+
   def admin?(%{assigns: %{acting_scope: %Samen.Scope{actor: %{role: role}}, samen_mount: %Mount{} = mount}}) do
-    mount.plane.kind == :operator or not CurrentOrg.tenant_gate_armed?(mount) or Samen.Scope.Role.at_least?(role, :admin)
+    not CurrentOrg.tenant_gate_armed?(mount) or Samen.Scope.Role.at_least?(role, :admin)
   end
 
   def admin?(_socket), do: false

@@ -29,6 +29,12 @@ All notable changes to Samen are recorded here. The format follows
   answers a `:member` scope. Only the disarmed dev posture and the operator plane keep the posture's admin elevation, as
   before.
 
+- **`admin?/1` is false on the operator plane.** It was true there, so the campaign send handler's gate was open to a forged
+  send event on an operator socket (the composer was already hidden). `administrable?/2` and `writable?/2` already said an
+  operator never authors into a tenant; the three now agree. The disarmed dev posture keeps `admin?/1` open. `member?/1` is
+  left a rank check on purpose: the operator's synthetic scope carries `:member`, and an operator's reply is refused by the
+  kernel's plaintext-PII `WriteGuard`, which the operator red paths drive the write through to.
+
 ### Tooling: the driver waits for a killed process group to be gone
 
 - **After SIGKILL the driver waits until the whole group no longer exists before it returns or exits.** It used to reap
