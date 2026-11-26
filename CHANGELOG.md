@@ -24,6 +24,11 @@ All notable changes to Samen are recorded here. The format follows
   two-organisation case pins it. The earlier entry's claim that a demotion takes effect while a page is open held for events
   only until this fix.
 
+- **`TenantActor.write_scope/3` fails closed.** On an armed tenant mount anything that is not the acting `%Samen.Scope{}` (a
+  `nil`, a map) raises `ArgumentError`; it used to be handed to the dev elevation, which on an armed host with no principal
+  answers a `:member` scope. Only the disarmed dev posture and the operator plane keep the posture's admin elevation, as
+  before.
+
 ### Tooling: the driver waits for a killed process group to be gone
 
 - **After SIGKILL the driver waits until the whole group no longer exists before it returns or exits.** It used to reap
@@ -162,7 +167,7 @@ All notable changes to Samen are recorded here. The format follows
   drove these pages without a signed-in person on an armed host now get the denied state; log in as a real person with the
   right role. A host that called `Samen.Web.Support.KbReads.publish_article/3` with an org id is unchanged; it also takes a
   `%Samen.Scope{}` now, which the page passes so a member's publish is refused. `Samen.Web.TenantActor` gains
-  `write_scope/3` (the acting scope on an armed tenant plane, the dev or operator posture's admin elevation otherwise),
+  `write_scope/3` (the acting scope on an armed tenant plane and nothing else: anything that is not a `%Samen.Scope{}` raises there; only the disarmed dev posture and the operator plane get the posture's admin elevation),
   `administrable?/2`, `admin?/1` and `member?/1`. No migration. Sabotages 1528 to 1536.
 
 - **Fixed: the rest of the CRM pages and the Work pages acted as a fixed `:member`, and a `:viewer` could enroll contacts into

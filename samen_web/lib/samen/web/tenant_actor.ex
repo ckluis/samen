@@ -146,15 +146,22 @@ defmodule Samen.Web.TenantActor do
   def administrable?(_mount, _no_scope), do: false
 
   @doc """
-  The scope an ADMIN-gated write runs with. ARMED tenant plane: the acting scope itself (the person's real, current role and
-  user id; the kernel policy refuses a viewer or a member). DISARMED dev posture and the OPERATOR plane: the posture's own
-  admin elevation (`Samen.Web.TenantRole.admin_scope/3`), byte for byte what those postures always did.
+  The scope an ADMIN-gated write runs with.
+
+    * ARMED tenant plane: the acting scope itself (the person's real, current role and user id; the kernel policy refuses a
+      viewer or a member). Anything that is not a `%Samen.Scope{}` (a page that is not acting passes `nil`) FAILS CLOSED: it
+      raises `ArgumentError`; there is no fallback to a `:member` or an admin scope. A page that is refused never reaches a
+      write (`refuse_events/1`).
+    * DISARMED dev posture and the OPERATOR plane (whose authority is not a membership): the posture's own admin elevation
+      (`Samen.Web.TenantRole.admin_scope/3`), byte for byte what those postures always did, whatever `acting` is.
   """
   @spec write_scope(Mount.t(), String.t(), Samen.Scope.t() | nil) :: Samen.Scope.t()
-  def write_scope(%Mount{plane: %{kind: :tenant}} = mount, org_id, %Samen.Scope{} = acting) do
-    if CurrentOrg.tenant_gate_armed?(mount),
-      do: acting,
-      else: Samen.Web.TenantRole.admin_scope(mount, org_id)
+  def write_scope(%Mount{plane: %{kind: :tenant}} = mount, org_id, acting) do
+    cond do
+      not CurrentOrg.tenant_gate_armed?(mount) -> Samen.Web.TenantRole.admin_scope(mount, org_id)
+      match?(%Samen.Scope{}, acting) -> acting
+      true -> raise ArgumentError, "write_scope/3 on an armed tenant mount needs the acting %Samen.Scope{}, got: #{inspect(acting)}"
+    end
   end
 
   def write_scope(%Mount{} = mount, org_id, _acting), do: Samen.Web.TenantRole.admin_scope(mount, org_id)
