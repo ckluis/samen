@@ -338,11 +338,6 @@ defmodule Samen.Web.CRM.ContactLive do
     |> assign_new(:show_edit, fn -> false end)
   end
 
-  # The edit form is built over the PLANE-RESOLVED record (the same PiiResolution
-  # chokepoint every read surface uses): on the tenant plane `full_name` is the clear
-  # value, on the operator plane it is `%Masked{}` — which the form fields render as the
-  # read-only •••• placeholder. This module never unwraps a %Masked{} and never calls
-  # the vault.
   # The person's role or id changed while the page was open (`Samen.Web.TenantActor.recheck_event/3`): a form built at
   # load holds the scope it was built with, so it is built again with the fresh one.
   @doc false
@@ -350,6 +345,11 @@ defmodule Samen.Web.CRM.ContactLive do
     assign(socket, edit_form: assigns[:contact] && edit_form(assigns.contact, scope), activity_form: activity_form(mount, scope))
   end
 
+  # The edit form is built over the PLANE-RESOLVED record (the same PiiResolution
+  # chokepoint every read surface uses): on the tenant plane `full_name` is the clear
+  # value, on the operator plane it is `%Masked{}` — which the form fields render as the
+  # read-only •••• placeholder. This module never unwraps a %Masked{} and never calls
+  # the vault.
   defp edit_form(contact, scope) do
     contact
     |> AshPhoenix.Form.for_update(:update, scope: scope)
@@ -404,7 +404,7 @@ defmodule Samen.Web.CRM.ContactLive do
               </span>
               Back to contacts
             </a>
-            <.button :if={@contact != nil} phx-click="edit_contact" id="edit-contact">
+            <.button :if={@can_write and @contact != nil} phx-click="edit_contact" id="edit-contact">
               Edit contact
             </.button>
             <.delete_confirm
@@ -564,7 +564,7 @@ defmodule Samen.Web.CRM.ContactLive do
                  placeholder with NO name attribute — masking is by construction of the
                  value, never a plane branch here. Non-vaulted fields stay editable; the
                  kernel (OrgScope + Samen.Pii.WriteGuard) enforces the write rules. --%>
-            <.modal :if={@show_edit and @edit_form != nil} id="edit-contact-modal" title="Edit contact" on_cancel="cancel_edit">
+            <.modal :if={@show_edit and @edit_form != nil and @can_write} id="edit-contact-modal" title="Edit contact" on_cancel="cancel_edit">
               <.simple_form :let={f} for={@edit_form} id="edit-contact-form" phx-change="validate_edit" phx-submit="save_edit">
                 <%!-- display_name is deliberately NOT on this form: it is a non-vaulted
                      attribute that duplicates the person's name, and echoing it into an

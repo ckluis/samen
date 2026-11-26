@@ -423,6 +423,7 @@ defmodule Samen.Web.TenantRoleCrmWorkTest do
     # a member's has them. (The kernel policy is what refuses; the controls only stop offering a button that will refuse.)
     test "a viewer's render carries no write control on the Work and CRM pages; a member's does", ctx do
       company = company!(ctx.org_id, "Controls Co")
+      person = person!(ctx.org_id, "Controls Person")
       task = task!(ctx.org_id, "Controls Task")
       project!(ctx.org_id, "Controls Project")
       sequence!(ctx.org_id, "Controls Drip")
@@ -430,6 +431,7 @@ defmodule Samen.Web.TenantRoleCrmWorkTest do
 
       pages = [
         {CompanyLive, "/crm/companies/:id", %{"id" => company.id}, ["edit-company", "delete-company"]},
+        {Samen.Web.CRM.ContactLive, "/crm/contacts/:id", %{"id" => person.id}, ["edit-contact", "delete-contact"]},
         {TasksLive, "/work", %{}, ["new-task", ~s(phx-click="delete")]},
         {ProjectsLive, "/work/projects", %{}, ["new-project", ~s(phx-click="delete")]},
         {SequencesLive, "/crm/sequences", %{}, ["sequences-enroll"]},
