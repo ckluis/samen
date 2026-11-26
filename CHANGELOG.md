@@ -181,6 +181,17 @@ All notable changes to Samen are recorded here. The format follows
   so give it `run({Samen.Reveal.GrantProbe, label: :field})` and `authorize_if(actor_present())`; **re-generate** (or
   copy) the `vertical.ex` / `--api` / `--live` resource templates. No migration. Sabotages 1508 to 1511.
 
+- **Fixed: the Automation and AI-agent system actions were open to every actor.** Workflow `:scan_due` and `:dispatch_due`,
+  Reminder `:due_scan` and `:fire`, Escalation `:due_scan` and `:advance_step`, and the agent Run `:due_scan` and
+  `:resume_due` were `bypass … authorize_if(always())`, and each `due_scan` is a read with no org filter, so any actor could
+  read every org's due rows and run the trigger's write. They are now authorized only for AshOban's own interaction (the
+  triggers keep working) and forbidden to every actor. Workflow `:operator_kill` and `:operator_rearm` were open to every
+  actor too; they are forbidden, and both callers (`Samen.Automation.Health`, after its operator-role gate, and the rate
+  breaker) already run `authorize?: false`. The automation Run log's `:create` and `:update` bypass is forbidden to actors
+  (the kernel pipeline writes it as `authorize?: false`). **Upgrade note:** a host that ran these actions, or wrote Run rows,
+  with a tenant actor gets a forbidden error; run them as the system (`authorize?: false`) or let the trigger run them.
+  No migration. Sabotages 1512 to 1516.
+
 - **Fixed: `Samen.Webhook.deliver/4` raised `FunctionClauseError` on any non-empty endpoint list, discarded the `:multi` it
   was given, and answered `{:ok, 0}` when no `:endpoints` were passed.** It now enqueues one job per active, subscribed
   endpoint. With `:multi` it returns `{:ok, count, multi}`: **upgrade note:** run the RETURNED multi (`Ecto.Multi` is

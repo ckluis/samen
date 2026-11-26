@@ -1,0 +1,19 @@
+# SABOTAGE: the operator kill and re-arm actions are open to every tenant actor of the workflow's org again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/system_actions_authz_test.exs
+# MUST_FAIL: a tenant actor of ANY role cannot kill or re-arm a workflow
+diff --git a/samen_core/lib/samen/scopes/automation/blueprint.ex b/samen_core/lib/samen/scopes/automation/blueprint.ex
+index ee273027..67351d2b 100644
+--- a/samen_core/lib/samen/scopes/automation/blueprint.ex
++++ b/samen_core/lib/samen/scopes/automation/blueprint.ex
+@@ -266,7 +266,7 @@ defmodule Samen.Scopes.Automation.Blueprint do
+           # for the console's `Health.kill/4` / `Health.rearm/4`; the rate breaker internally): the
+           # `Samen.OperatorPlane` idiom. Nothing reaches them through an actor-checked Ash call.
+           policy action([:dispatch_due, :scan_due, :operator_kill, :operator_rearm]) do
+-            forbid_if(always())
++            authorize_if(always())
+           end
+ 
+           policy action_type(:read) do

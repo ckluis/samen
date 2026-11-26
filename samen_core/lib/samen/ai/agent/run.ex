@@ -515,8 +515,14 @@ defmodule Samen.AI.Agent.Run do
   end
 
   policies do
+    # The AshOban `:agent_turn_due` watchdog and `:agent_proposal_expiry` triggers (no actor): `:due_scan` is a read with
+    # no org filter, `:resume_due` re-arms the watchdog and re-enqueues the turn. An actor of any role is refused.
     bypass action([:resume_due, :due_scan]) do
-      authorize_if(always())
+      authorize_if(AshOban.Checks.AshObanInteraction)
+    end
+
+    policy action([:resume_due, :due_scan]) do
+      forbid_if(always())
     end
 
     policy action(:reveal_agent_run) do

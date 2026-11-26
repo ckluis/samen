@@ -253,26 +253,20 @@ defmodule Samen.Scopes.Automation.Blueprint do
         end
 
         policies do
-          # The schedule scan runs the system :dispatch_due action with no actor —
-          # bypass authorization (it only advances next_fire_at + enqueues, streamed
-          # per-record by AshOban, never crossing orgs).
+          # The schedule scan runs the system :scan_due read (every org, no org filter) and the :dispatch_due action
+          # (advances next_fire_at + enqueues, streamed per-record by AshOban, never crossing orgs) with no actor, and
+          # says so (`AshOban.Checks.AshObanInteraction`); an actor of any role, an owner included, is refused below.
           bypass action([:dispatch_due, :scan_due]) do
-            authorize_if(always())
+            authorize_if(AshOban.Checks.AshObanInteraction)
           end
 
-          # ADR-039 §8.4 operator kill/re-arm — bypassed here (like :dispatch_due)
-          # because the real actor is CROSS-ORG (the SaaS operator, not a tenant
-          # member of this workflow's org) — an OrgScope policy cannot express that.
-          # The RBAC gate (`Samen.Automation.Health.may_manage?/1`, checked BEFORE
-          # the write, `authorize?: false`) is the enforcement point — the exact
-          # `Samen.OperatorPlane` idiom (application-code gate + explicit-scope
-          # bypass read/write) already used for the operator CRM. Both callers of
-          # these actions run authorize?: false themselves (the LiveView action
-          # through `Health.kill/4`/`Health.rearm/4`; the rate breaker internally) —
-          # this bypass documents that they are NEVER reachable through a public,
-          # actor-checked Ash API.
-          bypass action([:operator_kill, :operator_rearm]) do
-            authorize_if(always())
+          # ADR-039 §8.4 operator kill/re-arm: the real actor is CROSS-ORG (the SaaS operator, not a tenant member of
+          # this workflow's org), which an OrgScope policy cannot express, so no actor runs them. Both callers run
+          # `authorize?: false` themselves, after the application-code gate (`Samen.Automation.Health.may_manage?/1`
+          # for the console's `Health.kill/4` / `Health.rearm/4`; the rate breaker internally): the
+          # `Samen.OperatorPlane` idiom. Nothing reaches them through an actor-checked Ash call.
+          policy action([:dispatch_due, :scan_due, :operator_kill, :operator_rearm]) do
+            forbid_if(always())
           end
 
           policy action_type(:read) do
@@ -416,8 +410,14 @@ defmodule Samen.Scopes.Automation.Blueprint do
         end
 
         policies do
+          # The AshOban `:reminder_due` trigger (no actor): `:due_scan` is a read with no org filter. An actor of any role
+          # is refused.
           bypass action([:fire, :due_scan]) do
-            authorize_if(always())
+            authorize_if(AshOban.Checks.AshObanInteraction)
+          end
+
+          policy action([:fire, :due_scan]) do
+            forbid_if(always())
           end
 
           policy action_type(:read) do
@@ -613,8 +613,14 @@ defmodule Samen.Scopes.Automation.Blueprint do
         end
 
         policies do
+          # The AshOban `:escalation_due` trigger (no actor): `:due_scan` is a read with no org filter. An actor of any
+          # role is refused.
           bypass action([:advance_step, :due_scan]) do
-            authorize_if(always())
+            authorize_if(AshOban.Checks.AshObanInteraction)
+          end
+
+          policy action([:advance_step, :due_scan]) do
+            forbid_if(always())
           end
 
           # The engine's own writes (open/refresh/resolve/cancel) run
@@ -890,8 +896,9 @@ defmodule Samen.Scopes.Automation.Blueprint do
           # Written EXCLUSIVELY by the kernel pipeline via authorize?: false
           # (RunRecord/RunWorker/DispatchWorker/Breaker) — never a public write
           # surface. Reads are org-scoped for both planes that consume this log.
-          bypass action_type([:create, :update]) do
-            authorize_if(always())
+          # No actor writes it (the bypass this replaces let every actor create and update run rows).
+          policy action_type([:create, :update]) do
+            forbid_if(always())
           end
 
           policy action_type(:read) do

@@ -1668,4 +1668,33 @@ defmodule Samen.AI.AgentDurabilityTest do
       assert run.cached_input_tokens_used == 940
     end
   end
+  # authz-6 review 2: `:due_scan` (a read with no org filter) and `:resume_due` were `bypass … authorize_if(always())`
+  # for ANY actor. They are the AshOban triggers' own: a tenant actor, an owner included, is refused.
+  describe "the watchdog's system actions are the scheduler's, not an actor's" do
+    test "a tenant actor of ANY role cannot run the cross-org :due_scan or :resume_due; the scheduler still resumes" do
+      scripted_worker_config()
+      script(continue: "one", final: "two")
+      s = new_scope()
+      assert {:ok, run} = Agent.start(Durable, s, "goal")
+      other = new_scope()
+
+      for role <- [:viewer, :member, :admin, :owner] do
+        actor_scope = %Samen.Scope{actor: %{id: "u:#{role}", org_id: s.actor.org_id, role: role, kind: :tenant, plane: :tenant}}
+        assert {:error, %Ash.Error.Forbidden{}} = Ash.read(Run, action: :due_scan, scope: actor_scope), "#{role} read the due scan"
+
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 reload(run) |> Ash.Changeset.for_update(:resume_due, %{}, scope: actor_scope) |> Ash.update(),
+               "#{role} ran :resume_due"
+      end
+
+      assert other.actor.org_id != s.actor.org_id
+
+      # positive control: the scheduler (no actor, AshOban) still re-selects the lost run and drives it to terminal
+      TestRepo.delete_all(Oban.Job)
+      run |> Ash.Changeset.for_update(:advance, %{next_turn_at: DateTime.add(DateTime.utc_now(), -5)}) |> Ash.update!(authorize?: false)
+      AshOban.Test.schedule_and_run_triggers(Run)
+      drain_agent_queues()
+      assert_terminal!(run, :succeeded)
+    end
+  end
 end
