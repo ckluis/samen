@@ -386,24 +386,9 @@ defmodule Samen.Scopes.Automation.Blueprint do
           end
 
           action :reveal_reminder, :map do
-            argument(:actor_id, :string, allow_nil?: false)
             argument(:subject_id, :string, allow_nil?: false)
 
-            run(fn input, _ctx ->
-              ctx = %Samen.Reveal.Context{
-                actor: input.arguments.actor_id,
-                subject_id: input.arguments.subject_id,
-                resource: __MODULE__,
-                action: :reveal_reminder,
-                label: :note
-              }
-
-              if Samen.Reveal.grant_checker().granted?(ctx) do
-                {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-              else
-                {:error, :denied}
-              end
-            end)
+            run({Samen.Reveal.GrantProbe, label: :note})
           end
         end
 
@@ -440,7 +425,7 @@ defmodule Samen.Scopes.Automation.Blueprint do
           end
 
           policy action(:reveal_reminder) do
-            authorize_if(always())
+            authorize_if(actor_present())
           end
 
           policy action_type([:create, :update, :destroy]) do

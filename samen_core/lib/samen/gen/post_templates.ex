@@ -241,24 +241,9 @@ defmodule Samen.Gen.PostTemplates do
         defaults([:read, :destroy, create: :*, update: :*])
 
         action :reveal_<%= abbrev %>, :map do
-          argument(:actor_id, :string, allow_nil?: false)
           argument(:subject_id, :string, allow_nil?: false)
 
-          run(fn input, _ctx ->
-            ctx = %Samen.Reveal.Context{
-              actor: input.arguments.actor_id,
-              subject_id: input.arguments.subject_id,
-              resource: __MODULE__,
-              action: :reveal_<%= abbrev %>,
-              label: :secret
-            }
-
-            if Samen.Reveal.grant_checker().granted?(ctx) do
-              {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-            else
-              {:error, :denied}
-            end
-          end)
+          run({Samen.Reveal.GrantProbe, label: :secret})
         end
       end
 
@@ -279,7 +264,7 @@ defmodule Samen.Gen.PostTemplates do
         end
 
         policy action(:reveal_<%= abbrev %>) do
-          authorize_if(always())
+          authorize_if(actor_present())
         end
       end
     end

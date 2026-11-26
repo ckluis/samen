@@ -181,8 +181,10 @@ end
   equally vault-routed — the verifiers key on the `pii do` declaration, not the column name.
 - The domain column holds an opaque `vt_*` token; reads present `%Masked{}` by construction
   (the `Samen.Type.VaultField` type); plaintext only via the declared `reveal` action **under a
-  grant**. The reveal action's `run/2` calls `Samen.Reveal.grant_checker().granted?(ctx)` (default
-  deny) — do **not** call a bare `Samen.Reveal.granted?/1` (it does not exist).
+  grant**. The reveal action is a generic probe whose `run` is `{Samen.Reveal.GrantProbe, label: :field}`
+  (the grant checker, default deny, asked for the actor that RUNS the action) with the policy
+  `authorize_if(actor_present())`. It takes only `subject_id`: an `actor_id`-style argument, or
+  `authorize_if(always())`, fails the build (`Samen.Reveal.ProbeGuard`, in `Samen.Transformers.RevealActions`).
 - Once you declare the `pii do` block + run the migration, the `no_plaintext_pii`, `pii_reads`,
   `pii_classify`, `vault_declared`, and `vault_declared_parity` verifiers enforce the
   *consequences* of that declaration (masked reads, no plaintext to sinks, no plain-typed column,

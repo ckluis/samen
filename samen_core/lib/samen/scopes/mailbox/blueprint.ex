@@ -114,21 +114,7 @@ defmodule Samen.Scopes.Mailbox.Blueprint do
           action :reveal_connection, :map do
             argument(:subject_id, :string, allow_nil?: false)
 
-            run(fn input, run_ctx ->
-              ctx = %Samen.Reveal.Context{
-                actor: run_ctx.actor,
-                subject_id: input.arguments.subject_id,
-                resource: __MODULE__,
-                action: :reveal_connection,
-                label: :address
-              }
-
-              if not is_nil(run_ctx.actor) and Samen.Reveal.grant_checker().granted?(ctx) do
-                {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-              else
-                {:error, :denied}
-              end
-            end)
+            run({Samen.Reveal.GrantProbe, label: :address})
           end
         end
 
@@ -246,21 +232,7 @@ defmodule Samen.Scopes.Mailbox.Blueprint do
           action :reveal_mail_message, :map do
             argument(:subject_id, :string, allow_nil?: false)
 
-            run(fn input, run_ctx ->
-              ctx = %Samen.Reveal.Context{
-                actor: run_ctx.actor,
-                subject_id: input.arguments.subject_id,
-                resource: __MODULE__,
-                action: :reveal_mail_message,
-                label: :body
-              }
-
-              if not is_nil(run_ctx.actor) and Samen.Reveal.grant_checker().granted?(ctx) do
-                {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-              else
-                {:error, :denied}
-              end
-            end)
+            run({Samen.Reveal.GrantProbe, label: :body})
           end
         end
 

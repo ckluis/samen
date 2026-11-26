@@ -166,6 +166,21 @@ All notable changes to Samen are recorded here. The format follows
   `actor_id` to a Mailbox reveal action, gets a forbidden or an unknown-argument error; run those as the system
   (`authorize?: false`) or as the actor that holds the grant. No migration. Sabotages 1486 to 1492.
 
+- **Fixed: every generic `reveal_*` probe action trusted a caller-supplied identity and answered anyone.** The 19 probes
+  ("does that id hold a live reveal grant on this subject?": CRM `reveal_person`, Identity `reveal_user` and
+  `reveal_invitation`, Billing, Marketing, Support (2), Automation, Primitives (2), AI `reveal_agent_run`, Chat (2), the
+  `demo`, `driftwood` and `pawchart` hosts, and the three generator templates) took an `actor_id` argument and were
+  `authorize_if(always())`, so any code path, with any actor or none, could ask about anyone's grants. They are now one
+  implementation, `Samen.Reveal.GrantProbe` (the Mailbox pair uses it too): the grant is checked for the actor that RUNS the
+  action, a missing actor is denied, there is no identity argument, and the policy is `authorize_if(actor_present())`. A
+  reveal action that takes an identity argument (`actor_id`, `user_id`, `requestor_id`, …) or is `authorize_if(always())`
+  now fails the build: `Samen.Transformers.RevealActions` enforces it at compile time on every resource, so hosts and
+  generated apps get it with no CI step (`Samen.Pii.Info.reveal_probes_examined/1` records what it examined). **Upgrade
+  note:** drop `actor_id:` from any call to a reveal probe action (it is now an unknown-argument error) and run it with the
+  actor that is asking; a reveal action of your own that names an identity argument or answers `always()` stops compiling,
+  so give it `run({Samen.Reveal.GrantProbe, label: :field})` and `authorize_if(actor_present())`; **re-generate** (or
+  copy) the `vertical.ex` / `--api` / `--live` resource templates. No migration. Sabotages 1508 to 1511.
+
 - **Fixed: `Samen.Webhook.deliver/4` raised `FunctionClauseError` on any non-empty endpoint list, discarded the `:multi` it
   was given, and answered `{:ok, 0}` when no `:endpoints` were passed.** It now enqueues one job per active, subscribed
   endpoint. With `:multi` it returns `{:ok, count, multi}`: **upgrade note:** run the RETURNED multi (`Ecto.Multi` is

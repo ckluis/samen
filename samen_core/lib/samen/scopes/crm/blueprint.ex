@@ -221,24 +221,9 @@ defmodule Samen.Scopes.Crm.Blueprint do
           defaults([:read, :destroy, create: :*, update: :*])
 
           action :reveal_person, :map do
-            argument(:actor_id, :string, allow_nil?: false)
             argument(:subject_id, :string, allow_nil?: false)
 
-            run(fn input, _ctx ->
-              ctx = %Samen.Reveal.Context{
-                actor: input.arguments.actor_id,
-                subject_id: input.arguments.subject_id,
-                resource: __MODULE__,
-                action: :reveal_person,
-                label: :emails
-              }
-
-              if Samen.Reveal.grant_checker().granted?(ctx) do
-                {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-              else
-                {:error, :denied}
-              end
-            end)
+            run({Samen.Reveal.GrantProbe, label: :emails})
           end
         end
 
@@ -257,7 +242,7 @@ defmodule Samen.Scopes.Crm.Blueprint do
           end
 
           policy action(:reveal_person) do
-            authorize_if(always())
+            authorize_if(actor_present())
           end
         end
       end

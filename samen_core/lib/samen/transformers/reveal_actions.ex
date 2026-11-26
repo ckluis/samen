@@ -32,6 +32,7 @@ defmodule Samen.Transformers.RevealActions do
   alias Spark.Dsl.Transformer
 
   @persist_key :samen_pii_reveal_actions
+  @examined_key :samen_reveal_probes_examined
 
   @impl true
   # Run late: after Ash has expanded `defaults` and built the action entities.
@@ -61,7 +62,7 @@ defmodule Samen.Transformers.RevealActions do
 
     case Enum.reject(reveal_names, &MapSet.member?(action_names, &1)) do
       [] ->
-        {:ok, Transformer.persist(dsl_state, @persist_key, MapSet.new(reveal_names))}
+        probe_check(dsl_state, reveal_names)
 
       [missing | _] = all_missing ->
         module = Transformer.get_persisted(dsl_state, :module)
@@ -79,6 +80,36 @@ defmodule Samen.Transformers.RevealActions do
          )}
     end
   end
+
+  # A declared reveal action must not take an identity argument nor be `authorize_if(always())`
+  # (`Samen.Reveal.ProbeGuard`): fail the build on either, and persist what was examined so a host's test can prove
+  # the rule saw its reveal action (never vacuous).
+  defp probe_check(dsl_state, reveal_names) do
+    actions = Transformer.get_entities(dsl_state, [:actions])
+    policies = Transformer.get_entities(dsl_state, [:policies])
+
+    case Samen.Reveal.ProbeGuard.violations(reveal_names, actions, policies) do
+      [] ->
+        {:ok,
+         dsl_state
+         |> Transformer.persist(@persist_key, MapSet.new(reveal_names))
+         |> Transformer.persist(@examined_key, Enum.sort(reveal_names))}
+
+      [{action, _} | _] = all ->
+        {:error,
+         Spark.Error.DslError.exception(
+           module: Transformer.get_persisted(dsl_state, :module),
+           path: [:pii, :reveal, action],
+           message:
+             "reveal action violates the probe rule: " <>
+               Enum.map_join(all, "; ", fn {name, why} -> "#{inspect(name)} #{why}" end)
+         )}
+    end
+  end
+
+  @doc false
+  @spec examined_key() :: atom()
+  def examined_key, do: @examined_key
 
   @doc false
   @spec persist_key() :: atom()
