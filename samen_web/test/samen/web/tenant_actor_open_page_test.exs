@@ -79,7 +79,7 @@ defmodule Samen.Web.TenantActorOpenPageTest do
   # A mounted socket: the login's session + the route's mount session through the real tenant gate and the view's own
   # `mount/3` + `handle_params/3`, on a socket whose private state is a real (empty) LiveView lifecycle, so
   # `attach_hook/4` attaches for real.
-  defp open(login, view, path, org_id, extra \\ %{}) do
+  defp open(login, view, path, org_id, extra \\ %{}, routed? \\ true) do
     {_path, mount_session} =
       Samen.WebTest.SecurityRouter
       |> Phoenix.Router.routes()
@@ -98,7 +98,7 @@ defmodule Samen.Web.TenantActorOpenPageTest do
       | assigns: Map.put(socket.assigns, :flash, %{}),
         private: Map.put(socket.private, :lifecycle, %Phoenix.LiveView.Lifecycle{}),
         view: view,
-        router: Samen.WebTest.SecurityRouter
+        router: if(routed?, do: Samen.WebTest.SecurityRouter)
     }
 
     {:cont, socket} = Samen.Web.TenantAuthz.on_mount(:require_tenant, params, session, socket)
@@ -523,6 +523,40 @@ defmodule Samen.Web.TenantActorOpenPageTest do
     {:noreply, fresh} = view.handle_params(%{"org" => org}, "http://localhost/work?org=#{org}", patched)
     assert fresh.assigns.actor_state == :ok
     assert fresh.assigns.acting_scope.actor.role == :member
+  end
+
+  test "retry_actor on a view that recorded no URI (no router, or the org resolved late) re-resolves in place and loads again", ctx do
+    org = ctx.org_id
+    create!(Samen.WebTest.Work.Task, %{org_id: org, kind: :task, title: "Retry Task Title"})
+    company = create!(Samen.WebTest.Crm.Company, %{org_id: org, name: "Retry Company Name"})
+
+    pages = [
+      {Samen.Web.Work.TasksLive, "/work", %{}, "Retry Task Title"},
+      {Samen.Web.CRM.CompanyLive, "/crm/companies/:id", %{"id" => company.id}, "Retry Company Name"}
+    ]
+
+    for {view, path, extra, mark} <- pages do
+      v = open(log_in(ctx.member), view, path, org, extra, false)
+      assert html(v) =~ mark
+      assert elem(v, 1).assigns[:acting_uri] == nil
+
+      SpineAccounts.suspend!(ctx.member, org)
+      v = send_event(v, "cancel_new", %{})
+      assert html(v) =~ ~s(id="actor-denied")
+      refute html(v) =~ mark
+
+      # still suspended: the page stays refused, honestly
+      v = send_event(v, "retry_actor", %{})
+      assert html(v) =~ ~s(id="actor-denied")
+
+      # reinstated: the click acts again, right here, and the page loads what it shows
+      reinstate!(ctx.member, org)
+      {_view, back} = v = send_event(v, "retry_actor", %{})
+      assert back.redirected == nil
+      assert back.assigns.actor_state == :ok
+      assert html(v) =~ mark, "#{inspect(view)} did not load again after a retry with no URI"
+      refute html(v) =~ ~s(id="actor-denied")
+    end
   end
 
   defp reinstate!(account, org_id) do

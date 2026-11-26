@@ -225,7 +225,8 @@ defmodule Samen.Web.TenantActor do
       `actor_changed/1`, runs the same load a refused navigation does) and the event is HALTED - no later hook and no `handle_event/3` sees it.
 
   `"retry_actor"` (the button of `Samen.Web.TenantActor.Components.actor_refused/1`) re-resolves the same way and, when the
-  person acts again, patches to the page's own URL so it loads fresh.
+  person acts again, patches to the page's own URL so it loads fresh; a page with no URL to patch to (no router, or none
+  recorded) re-runs its own load in place (the view's optional `actor_regained/1`).
   """
   def recheck_event("retry_actor", _params, socket), do: {:halt, retry(socket)}
 
@@ -251,18 +252,30 @@ defmodule Samen.Web.TenantActor do
 
   defp retry(socket), do: socket
 
-  # Acting again: the page loads fresh through its own `handle_params` (nothing is rebuilt here by hand); until it does
-  # it stays the refused state it was.
-  defp patch_to_self(socket) do
+  # Acting again. A routed page with a URL to go back to loads fresh through its own `handle_params` (nothing is rebuilt
+  # here by hand; until it does it stays the refused state it was). A page with none (no router, so a patch would raise,
+  # or one that never recorded where it is) re-runs its own load in place, through the view's `actor_regained/1`: the
+  # click always does something honest, never nothing.
+  defp patch_to_self(%{router: router} = socket) when not is_nil(router) do
     case socket.assigns[:acting_uri] || socket.assigns[:return_to] do
       uri when is_binary(uri) ->
         %URI{path: path, query: query} = URI.parse(uri)
         Phoenix.LiveView.push_patch(socket, to: if(query, do: "#{path}?#{query}", else: path))
 
       _unknown ->
-        socket
+        actor_regained(socket)
     end
   end
+
+  defp patch_to_self(socket), do: actor_regained(socket)
+
+  defp actor_regained(%{view: view} = socket) when is_atom(view) and not is_nil(view) do
+    if Code.ensure_loaded?(view) and function_exported?(view, :actor_regained, 1),
+      do: view.actor_regained(socket),
+      else: socket
+  end
+
+  defp actor_regained(socket), do: socket
 
   # The refused state: the person is no longer acting, so the page keeps nothing it loaded for them. The shared parts go
   # here (the list context, the list page); everything else the view loaded (a record's name in a topbar, its forms, its

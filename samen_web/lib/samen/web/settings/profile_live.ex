@@ -104,6 +104,10 @@ defmodule Samen.Web.Settings.ProfileLive do
     end
   end
 
+  # Acting again with no URL to patch to (`Samen.Web.TenantActor`, the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _}} = socket), do: load(socket, socket.assigns.org_id, socket.assigns.user_id)
+
   # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): no
   # profile (name, email, handle) and no form built from it is kept.
   @doc false
