@@ -7,14 +7,14 @@
 # MUST_FAIL: a member suspended while the pages are open
 # MUST_FAIL: a demotion takes effect on the very next event
 diff --git a/samen_web/lib/samen/web/tenant_actor.ex b/samen_web/lib/samen/web/tenant_actor.ex
-index 9cfa06a0..d79e705b 100644
+index abe8e40..7e5de92 100644
 --- a/samen_web/lib/samen/web/tenant_actor.ex
 +++ b/samen_web/lib/samen/web/tenant_actor.ex
-@@ -146,7 +146,6 @@ defmodule Samen.Web.TenantActor do
-   def assign_actor(socket, org_id) do
+@@ -227,7 +227,6 @@ defmodule Samen.Web.TenantActor do
+ 
      socket
      |> Phoenix.Component.assign(:acting_org_id, org_id)
 -    |> attach_guard()
      |> resolve_into(org_id)
+     |> navigated(held, held_org != org_id)
    end
- 
