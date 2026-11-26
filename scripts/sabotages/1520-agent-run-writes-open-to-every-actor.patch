@@ -1,0 +1,19 @@
+# SABOTAGE: the agent Run's generic create, update and destroy are open to every actor again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_durability_test.exs
+# MUST_FAIL: a tenant actor of ANY role cannot run the cross-org :due_scan or :resume_due; the scheduler still resumes
+diff --git a/samen_core/lib/samen/ai/agent/run.ex b/samen_core/lib/samen/ai/agent/run.ex
+index 06afd166..46935021 100644
+--- a/samen_core/lib/samen/ai/agent/run.ex
++++ b/samen_core/lib/samen/ai/agent/run.ex
+@@ -540,7 +540,7 @@ defmodule Samen.AI.Agent.Run do
+     # precedent) — the loop is the only author, and it runs them `authorize?: false`; there is no
+     # tenant-facing write surface, so no actor may run one.
+     policy action_type([:create, :update, :destroy]) do
+-      forbid_if(always())
++      authorize_if(always())
+     end
+   end
+ end
