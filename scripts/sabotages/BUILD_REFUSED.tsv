@@ -1,0 +1,19 @@
+# scripts/sabotages/BUILD_REFUSED.tsv — sabotages whose mutation a NAMED compile-time rule refuses at BUILD time.
+#
+# Such a mutation cannot flip a test: the build never gets as far as running one. The refusal IS the kill, and this
+# ledger is the only way the harness (scripts/sabotage.sh) will say so; it never accepts a compile error otherwise.
+#
+# Columns (tab-separated; `#` lines and blank lines are skipped):
+#   patch      the file name in scripts/sabotages/ (it must exist)
+#   substring  a literal (grep -F) piece of the compiler output the refusal MUST carry: the rule's own, distinctive
+#              message — never "error", never a bare module name. It must not be empty.
+#   reason     which rule refuses the mutation, and why that refusal is the guarantee the patch attacks
+#
+# Semantics of a LISTED patch (scripts/sabotage.sh; checked by scripts/sabotage_lint.sh and
+# scripts/sabotage_tooling_test.sh ledger):
+#   build refused, output has the substring  -> KILLED (build refused: <substring>), counts as a pass
+#   build refused, substring absent          -> FAIL (wrong refusal)
+#   build succeeds                           -> FAIL, whatever the tests do (the entry is stale: the rule no longer
+#                                               refuses this mutation)
+# A patch that is NOT listed and whose build is refused fails exactly as it always did. An entry naming a missing
+# patch, an empty substring, an empty reason or a repeated patch fails at the start of every replay.

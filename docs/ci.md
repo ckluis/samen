@@ -285,6 +285,18 @@ it. Before the replay (the guard tests check the counts against the patch direct
 it restores them byte-identical. The patch is left untracked, so `git add` it and the count files `git status` shows. Options: `--number`, `--description`, `--base`. `scripts/sabotage new --help`
 is the full text.
 
+**Refused at build time — `scripts/sabotages/BUILD_REFUSED.tsv`.** A mutation that a named compile-time rule refuses
+(a `DslError` from a transformer, e.g. `Samen.Reveal.ProbeGuard` on a reveal action that takes an identity argument)
+cannot flip a test: the build never reaches one. The refusal is the kill, and the harness says so only for a patch listed
+in the ledger (`patch`, `required substring of the compiler output`, `reason`; the substring is the rule's own message,
+never "error"). A listed patch whose build is refused with the substring is reported `KILLED (build refused: …)` and counts
+as a pass (still restored byte-exact); refused without it is a WRONG REFUSAL; a build that succeeds is a STALE entry
+(the rule no longer refuses it) and fails whatever the tests do. An unlisted patch whose build is refused fails as ever —
+there is no global leniency for compile errors — and an entry naming a missing patch, an empty substring or reason, or a
+patch listed twice fails at the start (`scripts/sabotage_lint.sh`). `sabotage reanchor` replays through the same harness,
+so it honours the ledger; `scripts/sabotage-lanes.sh` runs `sabotage.sh` per lane, so do the lanes. A shipped patch keeps
+its name, header and mutation: re-anchor its hunk and list it, never swap the mutation.
+
 **Drifted patch — `scripts/sabotage reanchor <n…>`** (or `apply_check` failing): 3-way merges each
 section against the current tree, proves the named tests are green without it and flip with it, and
 rewrites it with a byte-identical header. It REFUSES (original untouched) on a conflict, missing pre-image

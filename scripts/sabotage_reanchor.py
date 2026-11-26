@@ -246,7 +246,7 @@ def reanchor(patch):
                 if f.read() != cur:
                     raise Refuse("%s: %s differs from before the replay" % (name, path))
         replaced = False  # keep the new patch
-        flipped = [l.strip() for l in out.decode(errors="replace").splitlines() if "flip confirmed" in l]
+        flipped = [l.strip() for l in out.decode(errors="replace").splitlines() if "flip confirmed" in l or "KILLED (build refused" in l]
         return "re-anchored (%d file(s) 3-way merged); header byte-identical; %s; baseline green; restore byte-exact" % (
             len(merges), "; ".join(flipped[:2]) or "flip confirmed")
     finally:

@@ -183,6 +183,14 @@ defmodule Samen.Meta.CiDriverGuardTest.SabotageNew do
   end
 end
 
+defmodule Samen.Meta.CiDriverGuardTest.BuildRefusedLedger do
+  use ExUnit.Case, async: true
+
+  test "LEDGER a mutation refused at build time is killed only when it is listed with the refusal's required message" do
+    Samen.Meta.CiDriverGuard.run_case!("LEDGER")
+  end
+end
+
 # ── ADR-053 P4 — docs match the tooling ───────────────────────────────────────────────────────────
 
 defmodule Samen.Meta.CiDriverGuardTest.DocDrift do
