@@ -5,17 +5,17 @@
 # TEST_FILES: test/meta/ci_driver_guard_test.exs
 # MUST_FAIL: GROUPKILL an interrupted driver stops the whole process group, not just its leader
 diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
-index e5e0718d..6f7ac2b4 100755
+index 7c653163..5ca5b5f4 100755
 --- a/scripts/ci_driver.py
 +++ b/scripts/ci_driver.py
-@@ -1141,9 +1141,7 @@ class Run(object):
-             proc.wait(timeout=20)
+@@ -1211,9 +1211,7 @@ class Run(object):
+             proc.wait(timeout=grace)
          except subprocess.TimeoutExpired:
              pass
 -        while group_alive(pg) and time.time() < deadline:
 -            time.sleep(0.1)
 -        if proc.poll() is None or group_alive(pg):
 +        if proc.poll() is None:
-             try:
-                 os.killpg(pg, signal.SIGKILL)
-             except OSError:
+             self.kill_group_and_wait(name, pg)
+             proc.wait()
+ 
