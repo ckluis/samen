@@ -6,10 +6,10 @@
 # TEST_FILES: test/meta/ci_driver_guard_test.exs
 # MUST_FAIL: SELTMO a --changed job's timeout scales
 diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
-index cc46ec1..1cb9255 100755
+index 9af747f..7b39404 100755
 --- a/scripts/ci_driver.py
 +++ b/scripts/ci_driver.py
-@@ -1565,7 +1565,7 @@ def selection_timeout(history_min, items):
+@@ -1704,7 +1704,7 @@ def selection_timeout(history_min, items):
      the manifest's conservative per-item rate (`shard_each_s`), rounded up to 5 minutes, never under the history-based
      value and never over GitHub's ceiling. `items` = [(selected, each_s)] per sharded step in the job."""
      need = sum(n * each for n, each in items)
@@ -17,4 +17,4 @@ index cc46ec1..1cb9255 100755
 +    return min(MAX_TIMEOUT_MIN, 5 * int(math.ceil(2.0 * need / 60.0 / 5.0)))
  
  
- def selection_counts(man, mode, base):
+ def load_rates(path):
