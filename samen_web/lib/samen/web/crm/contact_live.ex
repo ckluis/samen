@@ -564,7 +564,7 @@ defmodule Samen.Web.CRM.ContactLive do
                  placeholder with NO name attribute — masking is by construction of the
                  value, never a plane branch here. Non-vaulted fields stay editable; the
                  kernel (OrgScope + Samen.Pii.WriteGuard) enforces the write rules. --%>
-            <.modal :if={@show_edit and @edit_form != nil and @can_write} id="edit-contact-modal" title="Edit contact" on_cancel="cancel_edit">
+            <.modal :if={@show_edit and @edit_form != nil} id="edit-contact-modal" title="Edit contact" on_cancel="cancel_edit">
               <.simple_form :let={f} for={@edit_form} id="edit-contact-form" phx-change="validate_edit" phx-submit="save_edit">
                 <%!-- display_name is deliberately NOT on this form: it is a non-vaulted
                      attribute that duplicates the person's name, and echoing it into an
