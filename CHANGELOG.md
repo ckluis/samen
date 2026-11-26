@@ -183,7 +183,7 @@ All notable changes to Samen are recorded here. The format follows
   note:** drop `actor_id:` from any call to a reveal probe action (it is now an unknown-argument error) and run it with the
   actor that is asking; a reveal action of your own that is not of that shape stops compiling,
   so give it `run({Samen.Reveal.GrantProbe, label: :field})`, the one argument `subject_id`, and `authorize_if(actor_present())`; **re-generate** (or
-  copy) the `vertical.ex` / `--api` / `--live` resource templates. No migration. Sabotages 1508 to 1511.
+  copy) the `vertical.ex` / `--api` / `--live` resource templates. No migration. Sabotages 1508 to 1511 and 1517.
 
 - **Fixed: the Automation and AI-agent system actions were open to every actor.** Workflow `:scan_due` and `:dispatch_due`,
   Reminder `:due_scan` and `:fire`, Escalation `:due_scan` and `:advance_step`, and the agent Run `:due_scan` and
@@ -197,7 +197,7 @@ All notable changes to Samen are recorded here. The format follows
   forbidden to actors: `Samen.AI.Agent` runs them all as `authorize?: false`. Escalation's `:open`, `:refresh`, `:resolve` and `:cancel` were open to every actor with
   no org check; they are forbidden too (`Samen.Automation.Escalate` runs them as `authorize?: false`). **Upgrade note:** a host that ran these actions, or wrote Run rows,
   with a tenant actor gets a forbidden error; run them as the system (`authorize?: false`) or let the trigger run them.
-  No migration. Sabotages 1512 to 1516.
+  No migration. Sabotages 1512 to 1516 and 1518 to 1521.
 
 - **Fixed: `Samen.Webhook.deliver/4` raised `FunctionClauseError` on any non-empty endpoint list, discarded the `:multi` it
   was given, and answered `{:ok, 0}` when no `:endpoints` were passed.** It now enqueues one job per active, subscribed
