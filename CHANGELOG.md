@@ -11,6 +11,16 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Tooling: a sabotage refused at build time is killed by that refusal
+
+- **A sabotage whose mutation a named compile-time rule refuses is recorded as killed by that refusal, and only when it
+  is listed.** `scripts/sabotages/BUILD_REFUSED.tsv` lists the patch, the required substring of the compiler output (the
+  rule's own message) and the reason; `scripts/sabotage.sh` reports a listed patch whose build is refused with that
+  message as `KILLED (build refused: …)` and counts it as a pass. Refused without the message, or built successfully (a
+  stale entry), fails; an unlisted patch whose build is refused fails as before; a bad entry fails the preflight.
+  Sabotages 1491 and 1492 (a reveal probe taking a caller-supplied `actor_id`, refused by `Samen.Reveal.ProbeGuard`) are
+  back to their original mutation and listed; 1522-1527 prove the ledger rules.
+
 ### Fixed: flakes and guards round 5 (review of the flakes round, 2026-11-25)
 
 - **Upgrade: rename `config :samen_core, :ash_domains, [...]` to `config :samen_core, :host_domains, [...]`.** samen reused
