@@ -82,6 +82,11 @@ defmodule Samen.Web.Csv.ImportLive do
     socket
   end
 
+  # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): the
+  # report of an earlier import (its rows) and its error text are not kept.
+  @doc false
+  def actor_lost(socket), do: assign(socket, report: nil, import_error: nil)
+
   # -- events -------------------------------------------------------------------
 
   @impl true

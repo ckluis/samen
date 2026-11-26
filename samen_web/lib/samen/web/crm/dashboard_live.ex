@@ -99,9 +99,16 @@ defmodule Samen.Web.CRM.DashboardLive do
   def load(socket, org_id) do
     case TenantActor.assign_actor(socket, org_id) do
       {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
-      {:refused, socket} -> socket |> ensure_return_to() |> assign(no_org: false, org_id: org_id, dash: @empty)
+      {:refused, socket} -> load_refused(socket, org_id)
     end
   end
+
+  # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): the
+  # same load a refused navigation does, so no tile the page loaded is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: org_id}} = socket), do: load_refused(socket, org_id)
+
+  defp load_refused(socket, org_id), do: socket |> ensure_return_to() |> assign(no_org: false, org_id: org_id, dash: @empty)
 
   defp load_for(socket, org_id, scope) do
     mount = socket.assigns.samen_mount

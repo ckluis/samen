@@ -106,6 +106,11 @@ defmodule Samen.Web.Settings.ProfileLive do
     end
   end
 
+  # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): no
+  # profile (name, email, handle) and no form built from it is kept.
+  @doc false
+  def actor_lost(socket), do: assign(socket, user: nil, form: blank_form(), load_error: nil, acting_role: nil)
+
   @impl true
   def handle_event("retry_load", _params, socket),
     do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.user_id)}

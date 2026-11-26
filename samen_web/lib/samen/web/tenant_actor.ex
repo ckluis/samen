@@ -221,7 +221,8 @@ defmodule Samen.Web.TenantActor do
       `ListLive` context follows (it keeps its own scope), and a view that built anything with the old scope (a form)
       rebuilds it in its `actor_changed/1` when the person's role or id changed.
     * `:denied` / `{:error, :unavailable}`: the page switches to the refused state (`acting_scope` nil, the list context
-      taken away, the data it held cleared) and the event is HALTED - no later hook and no `handle_event/3` sees it.
+      taken away, and everything it loaded dropped: the view's optional `actor_lost/1` callback, mirroring
+      `actor_changed/1`, runs the same load a refused navigation does) and the event is HALTED - no later hook and no `handle_event/3` sees it.
 
   `"retry_actor"` (the button of `Samen.Web.TenantActor.Components.actor_refused/1`) re-resolves the same way and, when the
   person acts again, patches to the page's own URL so it loads fresh.
@@ -263,15 +264,28 @@ defmodule Samen.Web.TenantActor do
     end
   end
 
-  # The refused state: nothing the page loaded for the person it acted for is kept.
+  # The refused state: the person is no longer acting, so the page keeps nothing it loaded for them. The shared parts go
+  # here (the list context, the list page); everything else the view loaded (a record's name in a topbar, its forms, its
+  # tiles) is dropped by the view's own `actor_lost/1`, the same load a refused navigation does.
   defp scrub(socket) do
     socket = Samen.Web.ListLive.refuse(socket)
 
-    case socket.assigns do
-      %{page: %Samen.Web.Page{}} -> Phoenix.Component.assign(socket, :page, %Samen.Web.Page{})
-      _ -> socket
-    end
+    socket =
+      case socket.assigns do
+        %{page: %Samen.Web.Page{}} -> Phoenix.Component.assign(socket, :page, %Samen.Web.Page{})
+        _ -> socket
+      end
+
+    drop_loaded(socket)
   end
+
+  defp drop_loaded(%{view: view} = socket) when is_atom(view) and not is_nil(view) do
+    if Code.ensure_loaded?(view) and function_exported?(view, :actor_lost, 1),
+      do: view.actor_lost(socket),
+      else: socket
+  end
+
+  defp drop_loaded(socket), do: socket
 
   # The person is still acting; their scope is the fresh one. Whatever else the page kept from the old scope follows.
   defp follow(socket, %Samen.Scope{actor: held}) do

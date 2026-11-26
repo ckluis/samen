@@ -311,6 +311,122 @@ defmodule Samen.Web.TenantActorOpenPageTest do
     assert "Archived Contact" in names(people(org), :display_name)
   end
 
+  # -- the refused state carries NO record data (authz-6 review 2, A3) ------------------------------------------------
+
+  # Every converted page, opened as the member with a record whose name the page renders. The positive control: the name
+  # IS on the open page. Then the membership changes, ANY event is sent (the guard judges it before the view does), and
+  # the page renders the refused card with none of those names in the HTML (the topbar included).
+  defp refusal_pages(org) do
+    task = create!(Samen.WebTest.Work.Task, %{org_id: org, kind: :task, title: "Zephyr Task Title"})
+    create!(Samen.WebTest.Work.Task, %{org_id: org, kind: :task, title: "Zephyr Child Subtask", parent_id: task.id})
+    create!(Samen.WebTest.Work.Project, %{org_id: org, name: "Zephyr Project Name"})
+    company = create!(Samen.WebTest.Crm.Company, %{org_id: org, name: "Zephyr Company Name"})
+    person = create!(Samen.WebTest.Crm.Person, %{org_id: org, display_name: "Zephyr Person Name", company_id: company.id})
+    {:ok, _} =
+      Samen.CustomFields.define_field(
+        %{org_id: org, table_name: "swp_person", field_name: "lifecycle_stage", type: :string},
+        Samen.WebTest.Repo
+      )
+
+    create!(Samen.WebTest.Crm.Person, %{org_id: org, display_name: "Zephyr Lead Name", custom: %{"lifecycle_stage" => "lead"}})
+    stage = create!(Samen.WebTest.Crm.Pipeline, %{org_id: org, name: "Zephyr Stage"})
+
+    create!(Samen.WebTest.Crm.Opportunity, %{
+      org_id: org,
+      name: "Zephyr Deal Name",
+      pipeline_id: stage.id,
+      close_date: Date.utc_today()
+    })
+
+    create!(Samen.WebTest.Outreach.Sequence, %{
+      org_id: org,
+      name: "Zephyr Sequence Name",
+      status: :active,
+      steps: [%{"delay_hours" => 0, "subject" => "Hello", "body" => "First"}]
+    })
+
+    [
+      {"tasks", Samen.Web.Work.TasksLive, "/work", %{}, ["Zephyr Task Title"]},
+      {"task", Samen.Web.Work.TaskLive, "/work/tasks/:id", %{"id" => task.id}, ["Zephyr Task Title", "Zephyr Child Subtask"]},
+      {"projects", Samen.Web.Work.ProjectsLive, "/work/projects", %{}, ["Zephyr Project Name"]},
+      {"timeline", Samen.Web.Work.TimelineLive, "/work/timeline", %{}, []},
+      {"task tree", Samen.Web.Work.TaskTreeLive, "/work/tree", %{}, ["Zephyr Child Subtask"]},
+      {"companies", Samen.Web.CRM.CompaniesLive, "/crm/companies", %{}, ["Zephyr Company Name"]},
+      {"company", Samen.Web.CRM.CompanyLive, "/crm/companies/:id", %{"id" => company.id}, ["Zephyr Company Name", "Zephyr Person Name"]},
+      {"contacts", Samen.Web.CRM.ContactsLive, "/crm/contacts", %{}, ["Zephyr Person Name"]},
+      {"contact", Samen.Web.CRM.ContactLive, "/crm/contacts/:id", %{"id" => person.id}, ["Zephyr Person Name"]},
+      {"contacts gallery", Samen.Web.CRM.ContactsGalleryLive, "/crm/gallery", %{}, ["Zephyr Person Name"]},
+      {"pipeline", Samen.Web.CRM.PipelineLive, "/crm/pipeline", %{}, ["Zephyr Deal Name"]},
+      {"calendar", Samen.Web.CRM.CalendarLive, "/crm/calendar", %{}, ["Zephyr Deal Name"]},
+      {"sequences", Samen.Web.CRM.SequencesLive, "/crm/sequences", %{}, ["Zephyr Sequence Name"]},
+      {"leads", Samen.Web.Marketing.LeadsLive, "/marketing/leads", %{}, ["Zephyr Lead Name"]},
+      {"import", Samen.Web.Csv.ImportLive, "/csv/import/:resource", %{"resource" => "Person"}, ["csv-import-report"]},
+      {"profile", Samen.Web.Settings.ProfileLive, "/settings/profile", %{}, ["zephyrhandle", "Profilesson", "zephyr@example.test"]}
+    ]
+  end
+
+  # The member's own profile starts blank: save one, so the open page holds a name and an email to leak.
+  defp prepare("profile", v) do
+    send_event(v, "save", %{
+      "profile" => %{"handle" => "zephyrhandle", "first" => "Zephyr", "last" => "Profilesson", "email" => "zephyr@example.test"}
+    })
+  end
+
+  # An earlier import's report is what the import page holds.
+  defp prepare("import", {view, socket}), do: {view, view.import_rows(socket, "display_name\nZephyr Imported Row\n")}
+
+  defp prepare(_name, v), do: v
+
+  defp assert_no_data(pages, v, marks, what) do
+    for mark <- marks do
+      refute html(v) =~ mark, "#{pages} still renders #{inspect(mark)} #{what}"
+    end
+  end
+
+  test "a suspended member's open pages render the denied card and none of the records they loaded", ctx do
+    org = ctx.org_id
+    login = log_in(ctx.member)
+
+    opened =
+      for {name, view, path, extra, marks} <- refusal_pages(org) do
+        v = open(login, view, path, org, extra)
+        v = prepare(name, v)
+
+        for mark <- marks do
+          assert html(v) =~ mark, "control: #{name} does not render #{inspect(mark)} while the member acts"
+        end
+
+        {name, v, marks}
+      end
+
+    SpineAccounts.suspend!(ctx.member, org)
+
+    for {name, v, marks} <- opened do
+      v = send_event(v, "cancel_new", %{})
+      assert html(v) =~ ~s(id="actor-denied"), "#{name} is not the denied state"
+      assert_no_data(name, v, marks, "in the denied state")
+    end
+  end
+
+  test "an open page whose actor lookup fails renders the unavailable card and none of its records", ctx do
+    org = ctx.org_id
+    login = log_in(ctx.member)
+
+    opened =
+      for {name, view, path, extra, marks} <- refusal_pages(org), name in ["company", "contact", "task"] do
+        {view, socket} = v = prepare(name, open(login, view, path, org, extra))
+        mount = socket.assigns.samen_mount
+        broken = %{mount | labels: Map.put(mount.labels, :identity_namespace, Samen.WebTest.NoSuchIdentity)}
+        {name, {view, Phoenix.Component.assign(elem(v, 1), :samen_mount, broken)}, marks}
+      end
+
+    for {name, v, marks} <- opened do
+      {v, _log} = ExUnit.CaptureLog.with_log(fn -> send_event(v, "cancel_new", %{}) end)
+      assert html(v) =~ ~s(id="actor-unavailable"), "#{name} is not the unavailable state"
+      assert_no_data(name, v, marks, "in the unavailable state")
+    end
+  end
+
   # -- the notification pages resolve the recipient their own way, and guard their events the same way ----------------
 
   defp notify!(org_id, recipient_id, body) do
@@ -357,11 +473,18 @@ defmodule Samen.Web.TenantActorOpenPageTest do
     org = ctx.org_id
     v = open(log_in(ctx.member), PreferencesLive, "/notifications/settings", org)
     assert elem(v, 1).assigns.access == :ok
+    recipient = SpineAccounts.user_id(ctx.member, org)
+    assert html(v) =~ recipient
     SpineAccounts.suspend!(ctx.member, org)
 
     v = send_event(v, "save", %{"_target" => ["prefs", "chat_mention__in_app"], "prefs" => %{"chat_mention__in_app" => "off"}})
     assert elem(v, 1).assigns.access == :denied
     assert Ash.read!(NotificationPreference, authorize?: false) == []
+
+    # the refused page carries no grid and not the recipient it resolved
+    refute html(v) =~ "preferences-grid"
+    refute html(v) =~ recipient
+    assert html(v) =~ "preferences-denied"
   end
 
   # -- the guard is attached once, and the refused state can ask again ----------------------------------------------

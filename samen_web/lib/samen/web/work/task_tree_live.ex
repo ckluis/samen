@@ -87,6 +87,11 @@ defmodule Samen.Web.Work.TaskTreeLive do
     end
   end
 
+  # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): the
+  # same load a refused navigation does, so nothing the page loaded for the person it acted for is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket, socket.assigns.org_id, nil)
+
   defp load_refused(socket, org_id, focus) do
     socket
     |> ensure_return_to()
