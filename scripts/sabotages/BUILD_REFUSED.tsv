@@ -17,3 +17,5 @@
 #                                               refuses this mutation)
 # A patch that is NOT listed and whose build is refused fails exactly as it always did. An entry naming a missing
 # patch, an empty substring, an empty reason or a repeated patch fails at the start of every replay.
+1491-mailbox-reveal-connection-named-actor.patch	reveal action violates the probe rule: :reveal_connection takes the identity argument :actor_id	Samen.Reveal.ProbeGuard (via Samen.Transformers.RevealActions) refuses, with a DslError at compile time, a reveal action that takes an identity argument: the grant is only ever checked for the actor that runs the action
+1492-mailbox-reveal-mail-message-named-actor.patch	reveal action violates the probe rule: :reveal_mail_message takes the identity argument :actor_id	Samen.Reveal.ProbeGuard (via Samen.Transformers.RevealActions) refuses, with a DslError at compile time, a reveal action that takes an identity argument: the grant is only ever checked for the actor that runs the action
