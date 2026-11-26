@@ -5,15 +5,15 @@
 # TEST_FILES: test/ai/agent_durability_test.exs
 # MUST_FAIL: a tenant actor of ANY role cannot run the cross-org :due_scan or :resume_due
 diff --git a/samen_core/lib/samen/ai/agent/run.ex b/samen_core/lib/samen/ai/agent/run.ex
-index d3526ac0..2905ae7e 100644
+index 06afd166..7e2439d0 100644
 --- a/samen_core/lib/samen/ai/agent/run.ex
 +++ b/samen_core/lib/samen/ai/agent/run.ex
-@@ -518,7 +518,7 @@ defmodule Samen.AI.Agent.Run do
-     # The AshOban `:agent_turn_due` watchdog and `:agent_proposal_expiry` triggers (no actor): `:due_scan` is a read with
-     # no org filter, `:resume_due` re-arms the watchdog and re-enqueues the turn. An actor of any role is refused.
-     bypass action([:resume_due, :due_scan]) do
+@@ -519,7 +519,7 @@ defmodule Samen.AI.Agent.Run do
+     # no org filter, `:resume_due` re-arms the watchdog and re-enqueues the turn, `:expire_due` withdraws a parked
+     # approval and terminates the run. An actor of any role is refused.
+     bypass action([:resume_due, :expire_due, :due_scan]) do
 -      authorize_if(AshOban.Checks.AshObanInteraction)
 +      authorize_if(always())
      end
  
-     policy action([:resume_due, :due_scan]) do
+     policy action([:resume_due, :expire_due, :due_scan]) do
