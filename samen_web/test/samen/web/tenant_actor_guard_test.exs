@@ -38,9 +38,6 @@ defmodule Samen.Web.TenantActorGuardTest do
     "samen/web/first_run.ex" => 1,
     "samen/web/flags/settings_live.ex" => 2,
     "samen/web/ics/export_controller.ex" => 1,
-    "samen/web/marketing/campaign_live.ex" => 2,
-    "samen/web/marketing/campaigns_live.ex" => 1,
-    "samen/web/marketing/segments_live.ex" => 1,
     "samen/web/notifications/inbox_live.ex" => 1,
     "samen/web/onboarding/wizard_controller.ex" => 1,
     "samen/web/onboarding/wizard_live.ex" => 2,
@@ -59,8 +56,8 @@ defmodule Samen.Web.TenantActorGuardTest do
   }
 
   # The exact size of the work list: a silent bump of an entry (or a new entry) fails here, not only in the ratchet.
-  @baseline_total 50
-  @baseline_files 30
+  @baseline_total 46
+  @baseline_files 27
 
   @exempt ~w(samen/web/mount.ex samen/web/tenant_actor.ex samen/web/tenant_actor/guard.ex)
 

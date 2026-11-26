@@ -119,6 +119,18 @@ defmodule Samen.Web.TenantActor do
   def member?(_socket), do: false
 
   @doc """
+  The page-level gate of an ADMIN-ranked action the kernel does not itself gate (sending a campaign): on an armed tenant
+  plane the person acting must hold at least `:admin`; the disarmed dev posture and the operator plane (whose authority
+  is not a membership) are unchanged. `false` when nobody acts.
+  """
+  @spec admin?(map()) :: boolean()
+  def admin?(%{assigns: %{acting_scope: %Samen.Scope{actor: %{role: role}}, samen_mount: %Mount{} = mount}}) do
+    mount.plane.kind == :operator or not CurrentOrg.tenant_gate_armed?(mount) or Samen.Scope.Role.at_least?(role, :admin)
+  end
+
+  def admin?(_socket), do: false
+
+  @doc """
   Whether a page offers its ADMIN-ranked write controls (the billing, plan, invoice, campaign and segment writes the kernel
   reserves for `RoleAtLeast :admin`): the plane may write, and the person acting holds at least `:admin`. On a DISARMED mount
   (the dev posture, where `write_scope/3` is the dev admin) the controls are offered, exactly as before. `assign_actor/2`
