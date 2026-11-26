@@ -1672,6 +1672,7 @@ defmodule Samen.AI.AgentDurabilityTest do
   # authz-6 review 2/3: `:due_scan` (a read with no org filter), `:resume_due`, `:expire_due` and every other Run write
   # were `authorize_if(always())` for ANY actor. The loop is the only author (`Samen.AI.Agent`, `authorize?: false`) and
   # the AshOban triggers are the scheduler: a tenant actor, an owner included, in this org or another, is refused.
+  # Beside `:due_scan` and `:resume_due`, the same test covers `:expire_due` and every other Run write, in this org and another.
   describe "the Run's writes and system actions are the kernel's and the scheduler's, not an actor's" do
     @roles [:viewer, :member, :admin, :owner]
     @update_actions [:begin, :advance, :request_cancel, :park, :resume, :reject, :expire_due, :succeed, :fail, :exhaust, :context_exhaust, :cancel, :resume_due]
@@ -1679,7 +1680,7 @@ defmodule Samen.AI.AgentDurabilityTest do
     defp actor_scope(org_id, role),
       do: %Samen.Scope{actor: %{id: "u:#{role}:#{org_id}", org_id: org_id, role: role, kind: :tenant, plane: :tenant}}
 
-    test "a tenant actor of ANY role, in this org or another, cannot run :due_scan, :expire_due, :resume_due or any Run write" do
+    test "a tenant actor of ANY role cannot run the cross-org :due_scan or :resume_due; the scheduler still resumes" do
       scripted_worker_config()
       script(continue: "one", final: "two")
       s = new_scope()
