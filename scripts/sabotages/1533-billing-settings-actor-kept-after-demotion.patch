@@ -1,0 +1,20 @@
+# SABOTAGE: SettingsLive keeps the billing actor it built at load when the person's role changes, so a 
+#   demoted admin's open page still subscribes
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_billing_test.exs
+# MUST_FAIL: OPEN PAGE: an admin demoted while Settings is open can no longer subscribe
+diff --git a/samen_web/lib/samen/web/billing/settings_live.ex b/samen_web/lib/samen/web/billing/settings_live.ex
+index 8ce68cc4..816918ae 100644
+--- a/samen_web/lib/samen/web/billing/settings_live.ex
++++ b/samen_web/lib/samen/web/billing/settings_live.ex
+@@ -128,7 +128,7 @@ defmodule Samen.Web.Billing.SettingsLive do
+   # The person's role or id changed while the page was open: the billing actor the writes run under is the person as they
+   # are now.
+   @doc false
+-  def actor_changed(%{assigns: %{org_id: org_id, acting_scope: scope}} = socket), do: assign_billing_actor(socket, org_id, scope)
++  def actor_changed(socket), do: socket
+ 
+   defp load_refused(socket, org_id) do
+     socket

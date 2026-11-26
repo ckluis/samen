@@ -125,6 +125,25 @@ All notable changes to Samen are recorded here. The format follows
   the CSV import (Person and any other member-gated resource of the mounted domain) and the leads lens. Tests log in
   as a real viewer and a real member and assert the database. Sabotages 1418, 1419 and 1427 to 1430.
 
+- **Fixed: the Support, Billing and Marketing pages acted as a fixed `:member` (so a `:viewer` created and changed tickets,
+  authored knowledge-base articles and created customers), and a billing page opened by an admin kept its admin actor after a
+  demotion.** These pages now act as the signed-in person (their membership role), show the denied or the unavailable state,
+  reading nothing, when there is no active membership or the lookup fails, and re-resolve who acts before every event, so a
+  member suspended or demoted while a page is open is judged by the membership as it is now: the ticket inbox, ticket page
+  (status, conversation, reply) and knowledge base; billing overview, invoices, plans, dunning, usage and settings; marketing
+  campaigns, campaign (compose and send) and segments. **Roles:** ticket, conversation and status writes are member-or-above
+  (the kernel already said so); a reply, authoring or editing a KB article and creating a billing customer are member-or-above
+  (the message, article and customer resources only check the org, so the page now checks the role); publishing a KB article,
+  every subscription, plan, price, invoice and entitlement write, every campaign and segment write, subscribing and opening
+  the payment portal are admin-or-above, and so is sending a campaign to a segment (consent and suppression are still
+  enforced). The pages offer a write control only to a role that can use it (`:can_write` for member-ranked controls, the new
+  `:can_admin` for admin-ranked ones); reads stay open to every active member. **Upgrade notes:** host code and tests that
+  drove these pages without a signed-in person on an armed host now get the denied state; log in as a real person with the
+  right role. A host that called `Samen.Web.Support.KbReads.publish_article/3` with an org id is unchanged; it also takes a
+  `%Samen.Scope{}` now, which the page passes so a member's publish is refused. `Samen.Web.TenantActor` gains
+  `write_scope/3` (the acting scope on an armed tenant plane, the dev or operator posture's admin elevation otherwise),
+  `administrable?/2`, `admin?/1` and `member?/1`. No migration. Sabotages 1528 to 1536.
+
 - **Fixed: the rest of the CRM pages and the Work pages acted as a fixed `:member`, and a `:viewer` could enroll contacts into
   email sequences.** These pages now act as the signed-in person (their membership role), and show the denied or the
   unavailable state, reading nothing, when there is no active membership or the lookup fails: the CRM company detail page
