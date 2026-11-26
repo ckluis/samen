@@ -144,9 +144,21 @@ defmodule Samen.Web.Billing.PlansLive do
     |> assign_new(:show_ents, fn -> false end)
     |> assign_new(:delete_error, fn -> nil end)
     |> assign(new_form: new_plan_form(mount, org_id, scope))
-    |> assign_new(:edit_form, fn -> nil end)
     |> init_list(mount, scope)
+    |> refresh_edit(mount, org_id, scope)
   end
+
+  # The edit form is never kept across a load: it is built again from the plan as the page reads it NOW, with the scope of the
+  # person acting now, or closed when the plan is not on this page (another organisation, archived, paged away). A form kept
+  # with `assign_new` held the scope it was built with, so a demotion or an `?org=` switch followed by a submit used it.
+  defp refresh_edit(%{assigns: %{edit_plan_id: id}} = socket, mount, org_id, scope) when is_binary(id) do
+    case find_plan(socket, id) do
+      nil -> assign(socket, show_edit: false, edit_plan_id: nil, edit_form: nil)
+      plan -> assign(socket, edit_form: edit_plan_form(mount, org_id, scope, plan))
+    end
+  end
+
+  defp refresh_edit(socket, _mount, _org_id, _scope), do: assign(socket, show_edit: false, edit_plan_id: nil, edit_form: nil)
 
   # -- A3 CRUD events (list events belong to the ListLive hook) -----------------
 

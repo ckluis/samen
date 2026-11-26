@@ -50,6 +50,17 @@ defmodule Samen.WebTest.SpineAccounts do
     invitee
   end
 
+  @doc "`account` (already a person with a login) accepts a real invitation into `host`'s org with `role`: one person, two orgs."
+  def also_accept_into!(host, account, role) do
+    owner_scope = %Samen.Scope{
+      actor: %{id: host.user.id, org_id: host.org.id, role: :owner, verified?: true, kind: :tenant, plane: :tenant}
+    }
+
+    {:ok, _inv, raw_token} = Invite.create(invite_mods(), owner_scope, %{email: account.email, role: role})
+    {:ok, _joined} = Invite.accept(invite_mods(), raw_token)
+    account
+  end
+
   @doc "The per-org `Identity.User` id of `account` in `org_id`."
   def user_id(account, org_id) do
     {:ok, %{user_id: id}} = OrgActor.resolve(%{user: Op.User, membership: Op.Membership}, account.credential.id, org_id)

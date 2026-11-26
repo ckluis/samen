@@ -201,15 +201,32 @@ defmodule Samen.Web.TenantActor do
   attached once however many times `assign_actor/2` runs): before EVERY event the actor is resolved again for the
   org the page is pinned to, so a member suspended or demoted while the page is open is judged by the membership as it
   is now, not as it was at the last navigation. See `recheck_event/3`.
+
+  A call on a page that already acted (a navigation, a reload after a write) compares the person it resolves now with the one
+  the page held: another id, another role, or another organisation runs the view's `actor_changed/1`, as on the event path.
   """
   @spec assign_actor(Phoenix.LiveView.Socket.t(), String.t() | nil) ::
           {:ok, Phoenix.LiveView.Socket.t()} | {:refused, Phoenix.LiveView.Socket.t()}
   def assign_actor(socket, org_id) do
+    held = assigns(socket)[:acting_scope]
+    held_org = assigns(socket)[:acting_org_id]
+
     socket
     |> Phoenix.Component.assign(:acting_org_id, org_id)
     |> attach_guard()
     |> resolve_into(org_id)
+    |> navigated(held, held_org != org_id)
   end
+
+  # A navigation (`handle_params`, a reload after a write) runs `assign_actor/2` again on a page that already acted. When
+  # the person acting is not the one the page held (another id, another role) or the organisation changed, the page's
+  # `actor_changed/1` runs exactly as it does on the event path (`follow/2`): whatever it built with the old scope (an
+  # open form) is built again with the fresh one, or closed. Without this the held scope is replaced silently, the next
+  # event's recheck sees no change, and a form built before a demotion or an `?org=` switch is submitted with the
+  # authority it was built with. A page that was not acting (`held` is not a scope: first mount, refused before) has
+  # nothing built with a scope to follow, and a refusal is the view's own load (`actor_lost/1` is its refused branch).
+  defp navigated({:ok, socket}, %Samen.Scope{} = held, org_changed?), do: {:ok, follow(socket, held, org_changed?)}
+  defp navigated(result, _held, _org_changed?), do: result
 
   # `can_write` is what the page SHOWS (its write controls): computed here, with the scope, as a plain assign, so a page
   # that is replayed from its recorded assigns (a `Samen.Scope` is not recorded) renders the controls its person saw.
@@ -289,7 +306,7 @@ defmodule Samen.Web.TenantActor do
     case socket.assigns do
       %{acting_scope: %Samen.Scope{} = held, acting_org_id: org_id} when is_binary(org_id) ->
         case resolve_into(socket, org_id) do
-          {:ok, socket} -> {:cont, follow(socket, held)}
+          {:ok, socket} -> {:cont, follow(socket, held, false)}
           {:refused, socket} -> {:halt, scrub(socket)}
         end
 
@@ -356,11 +373,11 @@ defmodule Samen.Web.TenantActor do
   defp drop_loaded(socket), do: socket
 
   # The person is still acting; their scope is the fresh one. Whatever else the page kept from the old scope follows.
-  defp follow(socket, %Samen.Scope{actor: held}) do
+  defp follow(socket, %Samen.Scope{actor: held}, org_changed?) do
     %Samen.Scope{actor: fresh} = socket.assigns.acting_scope
     socket = follow_list_ctx(socket, fresh)
 
-    if {held[:id], held[:role]} == {fresh[:id], fresh[:role]},
+    if not org_changed? and {held[:id], held[:role]} == {fresh[:id], fresh[:role]},
       do: socket,
       else: actor_changed(socket)
   end

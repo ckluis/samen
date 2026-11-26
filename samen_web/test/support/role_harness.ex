@@ -129,7 +129,21 @@ defmodule Samen.WebTest.RoleHarness do
     end
   end
 
-  @doc "Re-enter `handle_params/3` (a navigation)."
+  @doc """
+  A NAVIGATION on an open page (a `live_patch`, back/forward, an `?org=` switch), the way the channel delivers it:
+  `Phoenix.LiveView.Lifecycle.handle_params/3` first (the `:handle_params` hooks the page attached for real), then the
+  view's own `handle_params/3`. `extra` are the query params (`%{"org" => other_org_id}` switches organisation);
+  `org` defaults to the page's current one. The socket must come from `open_socket/5`.
+  """
+  def navigate(view, socket, extra \\ %{}) do
+    params = Map.merge(%{"org" => socket.assigns.org_id}, extra)
+    uri = "http://localhost/x?org=#{params["org"]}"
+    {:cont, socket} = Phoenix.LiveView.Lifecycle.handle_params(params, uri, socket)
+    {:noreply, socket} = view.handle_params(params, uri, socket)
+    socket
+  end
+
+  @doc "Re-enter `handle_params/3` (a navigation) WITHOUT the lifecycle hooks: for the unit-socket pages (`live_socket/5`)."
   def params(view, socket, extra) do
     {:noreply, socket} =
       view.handle_params(Map.merge(%{"org" => socket.assigns.org_id}, extra), "http://localhost/x", socket)

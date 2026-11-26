@@ -11,6 +11,19 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Fixed: a form built before a demotion or an organisation switch is never submitted with the authority it was built with
+
+- **A navigation on an open page now follows the person acting, as an event does.** `Samen.Web.TenantActor.assign_actor/2`
+  used to replace the held scope silently when `handle_params` ran again (a `live_patch`, back/forward, an `?org=` switch), so
+  the next event's recheck saw no change and the page's `actor_changed/1` never ran. It now runs when the person acting is
+  another id or role, or the organisation changed, exactly as on the event path. **Billing plans:** the edit form was kept
+  across loads, so an admin demoted to member (or switched to another organisation where they are a member) could still save
+  it with the admin scope it was built with, including into the organisation it was opened in; it is now built again on every
+  load from the plan the page reads, with the scope of the person acting, and closed when the plan is not on the page. The
+  other converted pages already built their forms again on every load; a test per family (Work, Support) and for the
+  two-organisation case pins it. The earlier entry's claim that a demotion takes effect while a page is open held for events
+  only until this fix.
+
 ### Tooling: the driver waits for a killed process group to be gone
 
 - **After SIGKILL the driver waits until the whole group no longer exists before it returns or exits.** It used to reap
