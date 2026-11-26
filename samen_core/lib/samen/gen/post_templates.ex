@@ -697,6 +697,9 @@ defmodule Samen.Gen.PostTemplates do
             samen_principal_ref: Samen.Web.Settings.Reads.principal_ref(@samen_authn_mount, params, session)
           )
 
+        socket =
+          Samen.Web.TenantActor.attach_once(socket, :samen_gen_actor_guard, :handle_event, &__MODULE__.recheck_event/3)
+
         org_id = Samen.Web.CurrentOrg.resolve(@samen_authn_mount, params, session)
         {:ok, load(assign(socket, org_id: org_id), org_id)}
       end
@@ -716,6 +719,7 @@ defmodule Samen.Gen.PostTemplates do
         assign(socket,
           no_org: true,
           access: :ok,
+          acting_role: nil,
           org_id: nil,
           records: [],
           show_new: false,
@@ -727,12 +731,12 @@ defmodule Samen.Gen.PostTemplates do
 
       def load(socket, org_id) do
         case access(org_id, socket.assigns[:samen_principal_ref]) do
-          {:ok, _role} ->
-            load_allowed(socket, org_id)
+          {:ok, role} ->
+            socket |> assign(acting_role: role) |> load_allowed(org_id)
 
           {:refused, state} ->
             socket
-            |> assign(no_org: false, org_id: org_id, access: state, records: [], show_new: false, new_form: nil, delete_error: nil)
+            |> assign(no_org: false, org_id: org_id, access: state, acting_role: nil, records: [], show_new: false, new_form: nil, delete_error: nil)
             |> assign_new(:show_archived, fn -> false end)
         end
       end
@@ -753,6 +757,24 @@ defmodule Samen.Gen.PostTemplates do
         |> assign_new(:delete_error, fn -> nil end)
         |> assign(new_form: create_form(scope))
       end
+
+      # An OPEN page does not keep the role it resolved at its last navigation: a person demoted or suspended while it
+      # is open acts on this same socket. Before EVERY event the role is resolved again (the shared
+      # `Samen.Web.TenantActor.attach_once/4` lifecycle seam, attached in `mount/3`): the same role passes the event
+      # on; a changed role reloads the page (the forms are rebuilt with the new role); a refusal HALTS the event and
+      # the page is the refused state, with nothing it loaded.
+      @doc false
+      def recheck_event(_event, _params, %{assigns: %{access: :ok, org_id: org_id}} = socket) when is_binary(org_id) do
+        case access(org_id, socket.assigns[:samen_principal_ref]) do
+          {:ok, role} ->
+            if role == socket.assigns[:acting_role], do: {:cont, socket}, else: {:cont, load(socket, org_id)}
+
+          {:refused, _state} ->
+            {:halt, load(socket, org_id)}
+        end
+      end
+
+      def recheck_event(_event, _params, socket), do: {:cont, socket}
 
       @impl true
       def handle_event(_event, _params, %{assigns: %{access: access}} = socket) when access != :ok,
@@ -976,6 +998,9 @@ defmodule Samen.Gen.PostTemplates do
             samen_principal_ref: Samen.Web.Settings.Reads.principal_ref(@samen_authn_mount, params, session)
           )
 
+        socket =
+          Samen.Web.TenantActor.attach_once(socket, :samen_gen_actor_guard, :handle_event, &__MODULE__.recheck_event/3)
+
         org_id = Samen.Web.CurrentOrg.resolve(@samen_authn_mount, params, session)
         id = params["id"]
         {:ok, load(assign(socket, org_id: org_id, id: id), org_id, id)}
@@ -993,24 +1018,42 @@ defmodule Samen.Gen.PostTemplates do
       end
 
       @doc false
-      def load(socket, nil, _id), do: assign(socket, no_org: true, access: :ok, record: nil, delete_error: nil)
-      def load(socket, _org_id, nil), do: assign(socket, no_org: false, access: :ok, record: nil, delete_error: nil)
+      def load(socket, nil, _id), do: assign(socket, no_org: true, access: :ok, acting_role: nil, record: nil, delete_error: nil)
+      def load(socket, _org_id, nil), do: assign(socket, no_org: false, access: :ok, acting_role: nil, record: nil, delete_error: nil)
 
       def load(socket, org_id, id) do
         ref = socket.assigns[:samen_principal_ref]
 
         case access(org_id, ref) do
-          {:ok, _role} ->
+          {:ok, role} ->
             socket
-            |> assign(no_org: false, access: :ok, record: fetch(org_id, id, ref))
+            |> assign(no_org: false, access: :ok, acting_role: role, record: fetch(org_id, id, ref))
             |> assign_new(:delete_error, fn -> nil end)
 
           {:refused, state} ->
             socket
-            |> assign(no_org: false, access: state, record: nil)
+            |> assign(no_org: false, access: state, acting_role: nil, record: nil)
             |> assign_new(:delete_error, fn -> nil end)
         end
       end
+
+      # An OPEN page does not keep the role it resolved at its last navigation: a person demoted or suspended while it
+      # is open acts on this same socket. Before EVERY event the role is resolved again (the shared
+      # `Samen.Web.TenantActor.attach_once/4` lifecycle seam, attached in `mount/3`): the same role passes the event
+      # on; a changed role reloads the page (the forms are rebuilt with the new role); a refusal HALTS the event and
+      # the page is the refused state, with nothing it loaded.
+      @doc false
+      def recheck_event(_event, _params, %{assigns: %{access: :ok, org_id: org_id}} = socket) when is_binary(org_id) do
+        case access(org_id, socket.assigns[:samen_principal_ref]) do
+          {:ok, role} ->
+            if role == socket.assigns[:acting_role], do: {:cont, socket}, else: {:cont, load(socket, org_id, socket.assigns.id)}
+
+          {:refused, _state} ->
+            {:halt, load(socket, org_id, socket.assigns.id)}
+        end
+      end
+
+      def recheck_event(_event, _params, socket), do: {:cont, socket}
 
       @impl true
       def handle_event(_event, _params, %{assigns: %{access: access}} = socket) when access != :ok,
@@ -1211,6 +1254,9 @@ defmodule Samen.Gen.PostTemplates do
             samen_principal_ref: Samen.Web.Settings.Reads.principal_ref(@samen_authn_mount, params, session)
           )
 
+        socket =
+          Samen.Web.TenantActor.attach_once(socket, :samen_gen_actor_guard, :handle_event, &__MODULE__.recheck_event/3)
+
         org_id = Samen.Web.CurrentOrg.resolve(@samen_authn_mount, params, session)
         id = params["id"]
         action = if id, do: :edit, else: :new
@@ -1218,14 +1264,14 @@ defmodule Samen.Gen.PostTemplates do
       end
 
       @doc false
-      def load(socket, nil, _id, action), do: assign(socket, no_org: true, access: :ok, action: action, record: nil, form: nil)
+      def load(socket, nil, _id, action), do: assign(socket, no_org: true, access: :ok, acting_role: nil, action: action, record: nil, form: nil)
 
       def load(socket, org_id, id, action) do
         ref = socket.assigns[:samen_principal_ref]
 
         case access(org_id, ref) do
-          {:ok, _role} -> load_allowed(socket, org_id, id, ref)
-          {:refused, state} -> assign(socket, no_org: false, access: state, action: action, record: nil, form: nil)
+          {:ok, role} -> socket |> assign(acting_role: role) |> load_allowed(org_id, id, ref)
+          {:refused, state} -> assign(socket, no_org: false, access: state, acting_role: nil, action: action, record: nil, form: nil)
         end
       end
 
@@ -1256,6 +1302,24 @@ defmodule Samen.Gen.PostTemplates do
           {:error, _} -> nil
         end
       end
+
+      # An OPEN page does not keep the role it resolved at its last navigation: a person demoted or suspended while it
+      # is open acts on this same socket. Before EVERY event the role is resolved again (the shared
+      # `Samen.Web.TenantActor.attach_once/4` lifecycle seam, attached in `mount/3`): the same role passes the event
+      # on; a changed role reloads the page (the forms are rebuilt with the new role); a refusal HALTS the event and
+      # the page is the refused state, with nothing it loaded.
+      @doc false
+      def recheck_event(_event, _params, %{assigns: %{access: :ok, org_id: org_id}} = socket) when is_binary(org_id) do
+        case access(org_id, socket.assigns[:samen_principal_ref]) do
+          {:ok, role} ->
+            if role == socket.assigns[:acting_role], do: {:cont, socket}, else: {:cont, load(socket, org_id, socket.assigns.id, socket.assigns.action)}
+
+          {:refused, _state} ->
+            {:halt, load(socket, org_id, socket.assigns.id, socket.assigns.action)}
+        end
+      end
+
+      def recheck_event(_event, _params, socket), do: {:cont, socket}
 
       @impl true
       def handle_event(_event, _params, %{assigns: %{access: access}} = socket) when access != :ok,
@@ -1466,6 +1530,130 @@ defmodule Samen.Gen.PostTemplates do
         assert byte_size(out) > 0
         assert out =~ "Edit <%= resource %>"
         assert out =~ "Smoke row"
+      end
+
+      # -- an OPEN screen does not keep the role it resolved at its last navigation (authz-6 review 2, X1) ---------------
+      #
+      # The screen is mounted on a socket with a real LiveView lifecycle, then the host is ARMED and the person pinned
+      # (the membership is read live, as the real session's would be). Every event goes through the lifecycle hooks the
+      # screen attached (the shared guard), then the screen's own `handle_event/3`, as the channel dispatches it.
+
+      @armed_form %{"form" => %{"name" => "Armed row", "label" => "A1", "status" => "active", "secret" => "armed-secret"}}
+
+      defp live_socket do
+        socket = %Phoenix.LiveView.Socket{}
+
+        %{
+          socket
+          | assigns: Map.put(socket.assigns, :flash, %{}),
+            private: Map.put(socket.private, :lifecycle, %Phoenix.LiveView.Lifecycle{})
+        }
+      end
+
+      defp open!(mod, params) do
+        {:ok, socket} = mod.mount(params, %{}, live_socket())
+        socket
+      end
+
+      # Arm the host and pin a person holding `role` in @org. Returns the membership (to demote or suspend).
+      defp arm!(socket, role) do
+        prev = Application.get_env(:<%= otp_app %>, :auth_required?)
+        Application.put_env(:<%= otp_app %>, :auth_required?, true)
+
+        on_exit(fn ->
+          if prev == nil,
+            do: Application.delete_env(:<%= otp_app %>, :auth_required?),
+            else: Application.put_env(:<%= otp_app %>, :auth_required?, prev)
+        end)
+
+        user =
+          <%= module %>.Operator.User
+          |> Ash.Changeset.for_create(
+            :create,
+            %{org_id: @org, handle: "armed-#{System.unique_integer([:positive])}", status: "active"},
+            authorize?: false
+          )
+          |> Ash.create!()
+
+        membership =
+          <%= module %>.Operator.Membership
+          |> Ash.Changeset.for_create(
+            :create,
+            %{org_id: @org, user_id: user.id, role: role, status: "active"},
+            authorize?: false
+          )
+          |> Ash.create!()
+
+        {Phoenix.Component.assign(socket, samen_principal_ref: {:user, user.id}), membership}
+      end
+
+      defp change_membership!(membership, attrs) do
+        membership |> Ash.Changeset.for_update(:update, attrs, authorize?: false) |> Ash.update!()
+      end
+
+      defp send_event(mod, socket, name, params) do
+        case Phoenix.LiveView.Lifecycle.handle_event(name, params, socket) do
+          {:halt, socket} ->
+            socket
+
+          {:cont, socket} ->
+            {:noreply, socket} = mod.handle_event(name, params, socket)
+            socket
+        end
+      end
+
+      defp widget_names do
+        Resource |> Ash.read!(authorize?: false) |> Enum.map(& &1.name)
+      end
+
+      test "an open FORM: an admin who is still an admin saves and navigates (the positive control)" do
+        socket = open!(FormLive, %{"org" => @org})
+        {socket, _membership} = arm!(socket, :admin)
+
+        socket = send_event(FormLive, socket, "save", @armed_form)
+        assert {:live, :redirect, _} = socket.redirected
+        assert "Armed row" in widget_names()
+      end
+
+      test "an open FORM: an admin demoted to viewer while it is open is refused, with no navigation" do
+        socket = open!(FormLive, %{"org" => @org})
+        {socket, membership} = arm!(socket, :admin)
+        change_membership!(membership, %{role: :viewer})
+
+        socket = send_event(FormLive, socket, "save", @armed_form)
+        assert socket.redirected == nil
+        refute "Armed row" in widget_names()
+      end
+
+      test "an open FORM: a suspended member's save is halted and the screen is the refused state" do
+        socket = open!(FormLive, %{"org" => @org})
+        {socket, membership} = arm!(socket, :admin)
+        change_membership!(membership, %{status: "suspended"})
+
+        socket = send_event(FormLive, socket, "save", @armed_form)
+        assert socket.redirected == nil
+        assert socket.assigns.access == :denied
+        assert socket.assigns.form == nil
+        refute "Armed row" in widget_names()
+      end
+
+      test "an open INDEX: a demoted admin's save_new is refused, a suspended member's is halted" do
+        socket = open!(IndexLive, %{"org" => @org})
+        {socket, membership} = arm!(socket, :admin)
+
+        # control: unchanged, the create applies
+        socket = send_event(IndexLive, socket, "save_new", %{"form" => %{"name" => "Index ok", "label" => "I1", "status" => "active", "secret" => "s"}})
+        assert "Index ok" in widget_names()
+
+        change_membership!(membership, %{role: :viewer})
+        socket = send_event(IndexLive, socket, "save_new", %{"form" => %{"name" => "Index demoted", "label" => "I2", "status" => "active", "secret" => "s"}})
+        refute "Index demoted" in widget_names()
+
+        change_membership!(membership, %{status: "suspended"})
+        socket = send_event(IndexLive, socket, "save_new", %{"form" => %{"name" => "Index suspended", "label" => "I3", "status" => "active", "secret" => "s"}})
+        refute "Index suspended" in widget_names()
+        assert socket.assigns.access == :denied
+        assert socket.assigns.records == []
       end
     end
     '''
