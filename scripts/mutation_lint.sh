@@ -51,15 +51,21 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENGINE="$REPO_ROOT/scripts/mutation/mutate.exs"
 TARGETS_FILE="$REPO_ROOT/scripts/mutation/targets.tsv"
 LEDGER_FILE="$REPO_ROOT/scripts/mutation/ledger.tsv"
+RATES_FILE="$REPO_ROOT/scripts/mutation/rates.tsv"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/samen_mutation_lint.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT INT TERM
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --targets) shift; [[ $# -gt 0 ]] || { echo "mutation_lint.sh: --targets requires a file" >&2; exit 2; }
-               TARGETS_FILE="$1"; shift ;;
+               TARGETS_FILE="$1"; shift
+               # the committed rates name the committed watch-list's targets: against another targets file they would all
+               # read as stale, so an overridden watch-list checks rates only when --rates names a file of its own
+               [[ -n "${RATES_GIVEN:-}" ]] || RATES_FILE="" ;;
     --ledger)  shift; [[ $# -gt 0 ]] || { echo "mutation_lint.sh: --ledger requires a file" >&2; exit 2; }
                LEDGER_FILE="$1"; shift ;;
+    --rates)   shift; [[ $# -gt 0 ]] || { echo "mutation_lint.sh: --rates requires a file" >&2; exit 2; }
+               RATES_FILE="$1"; RATES_GIVEN=1; shift ;;
     *) echo "mutation_lint.sh: unknown flag: $1" >&2; exit 2 ;;
   esac
 done
@@ -232,9 +238,32 @@ if [[ -f "$LEDGER_FILE" ]]; then
   done < <(data_rows "$LEDGER_FILE")
 fi
 
+# ── rates.tsv (measured seconds per mutant; sizes the Actions job - see the file's header) ──
+rates_total=0
+SEEN_RATES="$WORK/seen_rates"
+: > "$SEEN_RATES"
+if [[ -n "$RATES_FILE" && -f "$RATES_FILE" ]]; then
+  while IFS= read -r row; do
+    rates_total=$((rates_total + 1))
+    nf=$(awk -F'\t' '{print NF}' <<<"$row")
+    if [[ "$nf" -ne 3 ]]; then
+      refuse "rates row $rates_total has $nf tab-separated field(s), expected exactly 3 (relpath, seconds per mutant, measurement source): $(cut -c1-90 <<<"$row")"
+      continue
+    fi
+    rpath="$(cut -f1 <<<"$row")"; rate="$(cut -f2 <<<"$row")"; src="$(cut -f3 <<<"$row")"
+    # a rate for a path that is not (or no longer) a tier-1 target is ignored by the plan's lookup: refuse it loudly
+    grep -qxF "$rpath" "$SEEN_TARGETS" \
+      || refuse "rates: $rpath is not a row of the targets file — a stale or misspelled rate sizes nothing (the selection falls back to the flat rate): update the row or drop it"
+    awk -v r="$rate" 'BEGIN { exit !(r ~ /^[0-9]+(\.[0-9]+)?$/ && r + 0 > 0) }' \
+      || refuse "rates: $rpath: '$rate' is not a positive number of seconds per mutant"
+    [[ "${#src}" -ge 20 ]] || refuse "rates: $rpath: the measurement source is ${#src} chars — name the run the number comes from"
+    if grep -qxF "$rpath" "$SEEN_RATES"; then refuse "rates: duplicate row for $rpath"; else printf '%s\n' "$rpath" >> "$SEEN_RATES"; fi
+  done < <(data_rows "$RATES_FILE")
+fi
+
 echo ""
 if [[ "$bad" -gt 0 ]]; then
-  echo "MUTATION LINT: FAILED — $bad refusal(s) over $targets_total target row(s) and $ledger_total ledger row(s)"
+  echo "MUTATION LINT: FAILED — $bad refusal(s) over $targets_total target row(s), $ledger_total ledger row(s) and $rates_total rate row(s)"
   exit 1
 fi
-echo "MUTATION LINT: ALL PASSED ($targets_total target row(s) resolvable + mutable, $owns_total MUTATION_OWNS declaration(s) resolvable, $ledger_total ledger row(s) well-formed and live)"
+echo "MUTATION LINT: ALL PASSED ($targets_total target row(s) resolvable + mutable, $owns_total MUTATION_OWNS declaration(s) resolvable, $ledger_total ledger row(s) well-formed and live, $rates_total rate row(s) naming a target)"

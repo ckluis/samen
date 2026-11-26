@@ -17,6 +17,7 @@ defmodule Samen.Web.CRMSequencesTest do
   `Enrollment.person_id` is an opaque uuid rendered as a short non-secret chip. Proven: no
   `vt_*` token ever reaches the DOM.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.Web.CRM.SequencesLive
@@ -199,13 +200,13 @@ defmodule Samen.Web.CRMSequencesTest do
     tenant_html = render(org_id, plane: :tenant)
     assert tenant_html =~ "enrollment-#{enrollment.id}"
     assert tenant_html =~ "Contact "
-    refute tenant_html =~ "vt_"
+    refute_vault_token(tenant_html)
 
     # …and operator plane (impersonation) — still no vault token, because there is no
     # vault field on this surface at all.
     operator_html = render(org_id, plane: :operator, target_org_id: org_id)
     assert operator_html =~ "enrollment-#{enrollment.id}"
-    refute operator_html =~ "vt_"
+    refute_vault_token(operator_html)
   end
 
   # ==========================================================================

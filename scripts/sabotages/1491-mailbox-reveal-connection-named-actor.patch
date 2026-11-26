@@ -1,0 +1,25 @@
+# SABOTAGE: Mailbox reveal_connection checks the grant for a caller-supplied actor_id again, so any actor 
+#   can ride another person's grant
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/mailbox_authz_test.exs
+# MUST_FAIL: reveal_connection: naming operator-1 in the arguments rides nothing
+diff --git a/samen_core/lib/samen/scopes/mailbox/blueprint.ex b/samen_core/lib/samen/scopes/mailbox/blueprint.ex
+index 92f18e09..a74a5836 100644
+--- a/samen_core/lib/samen/scopes/mailbox/blueprint.ex
++++ b/samen_core/lib/samen/scopes/mailbox/blueprint.ex
+@@ -112,11 +112,12 @@ defmodule Samen.Scopes.Mailbox.Blueprint do
+           # The grant is checked for the actor that RUNS the action, never for an id the caller names: a
+           # caller-supplied `actor_id` let any actor ride another person's grant. No actor, no grant.
+           action :reveal_connection, :map do
++            argument(:actor_id, :string, allow_nil?: true)
+             argument(:subject_id, :string, allow_nil?: false)
+ 
+             run(fn input, run_ctx ->
+               ctx = %Samen.Reveal.Context{
+-                actor: run_ctx.actor,
++                actor: input.arguments[:actor_id] || run_ctx.actor,
+                 subject_id: input.arguments.subject_id,
+                 resource: __MODULE__,
+                 action: :reveal_connection,

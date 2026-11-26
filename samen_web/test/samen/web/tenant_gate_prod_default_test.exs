@@ -18,6 +18,7 @@ defmodule Samen.Web.TenantGateProdDefaultTest do
   provable inside a `:test` run (the same seam `Samen.AI.resolved_env/1` established), never by
   mutating the real `Mix.env/0`.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   import Phoenix.ConnTest
@@ -165,7 +166,7 @@ defmodule Samen.Web.TenantGateProdDefaultTest do
       body = response(conn, 302)
       refute body =~ "Armington"
       refute body =~ "GATE PROBE CONTACT"
-      refute body =~ "vt_"
+      refute_vault_token(body)
     end
 
     test "POSITIVE CONTROL — DISARMED (dev/dogfood) serves the SAME request (ergonomics kept)", ctx do

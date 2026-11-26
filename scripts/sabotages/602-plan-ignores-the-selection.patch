@@ -6,15 +6,15 @@
 # TEST_FILES: test/meta/ci_driver_guard_test.exs
 # MUST_FAIL: SELTMO a --changed job's timeout scales
 diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
-index cc46ec1..60f53cd 100755
+index 9af747f2..a4b71cb5 100755
 --- a/scripts/ci_driver.py
 +++ b/scripts/ci_driver.py
-@@ -1666,7 +1666,7 @@ def cmd_actions(pos, opts):
+@@ -1861,7 +1861,7 @@ def cmd_actions(pos, opts):
      selection = None
      if sub == "plan" and opts.get("selection"):
          selection = selection_counts(man, rest[0], opts["base"])
 -    plan = actions_plan(man, rest[0], selection)
 +    plan = actions_plan(man, rest[0])
-     if sub == "plan":
-         if opts.get("json"):
-             out(json.dumps(plan, indent=1))
+     if sub == "verify" and opts.get("from_plan"):
+         # the plan the `plan` job PUBLISHED (selection-sized jobs, with the slices this diff needed): the verifier cannot
+         # recompute it - it has no toolchain to list the selection - and must not guess how many slices ran

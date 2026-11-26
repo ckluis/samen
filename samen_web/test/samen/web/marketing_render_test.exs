@@ -12,6 +12,7 @@ defmodule Samen.Web.MarketingRenderTest do
        emails: the subscriber `email` renders `••••` (masked) on the operator plane, the
        plaintext is ABSENT, no vault token leaks, and the compose/send controls are hidden.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.Web.Marketing.Reads
@@ -344,7 +345,7 @@ defmodule Samen.Web.MarketingRenderTest do
     refute html =~ Seeds.active_subscriber_email()
     refute html =~ Seeds.suppressed_subscriber_email()
     # No vault token / pii_ column leak.
-    refute html =~ "vt_"
+    refute_vault_token(html)
     refute html =~ "pii_"
   end
 
@@ -362,7 +363,7 @@ defmodule Samen.Web.MarketingRenderTest do
     refute html =~ Seeds.active_subscriber_email()
     # The send controls are NOT offered to an operator.
     refute html =~ ~s(id="send-campaign-form")
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   test "OPERATOR: Reads.subscribers returns the email as %Masked{} on the operator plane", %{org_id: org_id} do

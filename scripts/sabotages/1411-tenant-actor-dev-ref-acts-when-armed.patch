@@ -1,0 +1,19 @@
+# SABOTAGE: an armed mount lets the disarmed-only dev principal act
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_surfaces_test.exs
+# MUST_FAIL: a {:dev, id} principal is :denied
+diff --git a/samen_web/lib/samen/web/tenant_actor.ex b/samen_web/lib/samen/web/tenant_actor.ex
+index 6c16a39b..ac754a41 100644
+--- a/samen_web/lib/samen/web/tenant_actor.ex
++++ b/samen_web/lib/samen/web/tenant_actor.ex
+@@ -60,8 +60,6 @@ defmodule Samen.Web.TenantActor do
+   # The dev leg (`{:dev, _}`) is a DISARMED-only posture: `Reads.principal_ref/3` only produces it when the
+   # `?user=` / `:current_user_id` trust is on, and `actor_in_org/3` would act as the named user (or a default
+   # `:member`). On an armed mount it is refused, whatever produced it.
+-  defp armed(_mount, _org_id, {:dev, _id}), do: :denied
+-
+   defp armed(mount, org_id, ref) do
+     case Reads.actor_in_org(mount, org_id, ref) do
+       {:ok, %{id: id, role: role}} -> {:ok, resolved(mount, org_id, id, role)}

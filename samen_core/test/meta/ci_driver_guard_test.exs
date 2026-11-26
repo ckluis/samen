@@ -267,6 +267,24 @@ defmodule Samen.Meta.CiDriverGuardTest.SelectionTimeouts do
   end
 end
 
+defmodule Samen.Meta.CiDriverGuardTest.MutationRates do
+  use ExUnit.Case, async: true
+
+  @moduletag timeout: 180_000
+
+  test "MUTRATE a mutation job is sized from per-target measured rates and sliced past the per-job ceiling" do
+    Samen.Meta.CiDriverGuard.run_case!("MUTRATE")
+  end
+end
+
+defmodule Samen.Meta.CiDriverGuardTest.MutationOverhead do
+  use ExUnit.Case, async: true
+
+  test "MUTOVH a sharded step's fixed invocation cost is paid once per chunk, not charged to every item" do
+    Samen.Meta.CiDriverGuard.run_case!("MUTOVH")
+  end
+end
+
 defmodule Samen.Meta.CiDriverGuardTest.GenDepsCache do
   use ExUnit.Case, async: true
 

@@ -1,0 +1,19 @@
+# SABOTAGE: a refused actor keeps the scope the surface acted with before the refusal
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_surfaces_test.exs
+# MUST_FAIL: assign_actor/2 sets acting_scope and actor_state for every outcome
+diff --git a/samen_web/lib/samen/web/tenant_actor.ex b/samen_web/lib/samen/web/tenant_actor.ex
+index f09228a5..153c0503 100644
+--- a/samen_web/lib/samen/web/tenant_actor.ex
++++ b/samen_web/lib/samen/web/tenant_actor.ex
+@@ -171,7 +171,7 @@ defmodule Samen.Web.TenantActor do
+         {:ok, Phoenix.Component.assign(socket, acting_scope: scope, actor_state: :ok, can_write: writable?(mount, scope))}
+ 
+       :denied ->
+-        {:refused, Phoenix.Component.assign(socket, acting_scope: nil, actor_state: :denied, can_write: false)}
++        {:refused, Phoenix.Component.assign(socket, actor_state: :denied, can_write: false)}
+ 
+       {:error, :unavailable} ->
+         {:refused, Phoenix.Component.assign(socket, acting_scope: nil, actor_state: :unavailable, can_write: false)}

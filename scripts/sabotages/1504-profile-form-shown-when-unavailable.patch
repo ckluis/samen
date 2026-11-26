@@ -1,0 +1,21 @@
+# SABOTAGE: an open profile page whose actor lookup fails no longer shows the refused card
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_open_page_test.exs
+# MUST_FAIL: an open page whose actor lookup fails renders the unavailable card and none of its records
+diff --git a/samen_web/lib/samen/web/settings/profile_live.ex b/samen_web/lib/samen/web/settings/profile_live.ex
+index 6098c296..1bacfd34 100644
+--- a/samen_web/lib/samen/web/settings/profile_live.ex
++++ b/samen_web/lib/samen/web/settings/profile_live.ex
+@@ -171,8 +171,8 @@ defmodule Samen.Web.Settings.ProfileLive do
+           <% is_nil(@org_id) -> %>
+             <.no_org_card mount={@samen_mount} />
+ 
+-          <% @actor_state in [:denied, :unavailable] -> %>
+-            <.actor_refused state={@actor_state} title="Profile" nothing="there is no profile to show" />
++          <% @actor_state == :denied -> %>
++            <.actor_refused state={:denied} title="Profile" nothing="there is no profile to show" />
+ 
+           <% @load_error != nil -> %>
+             <div class="wrap">

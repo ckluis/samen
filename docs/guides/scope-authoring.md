@@ -310,7 +310,7 @@ Copy the migration template (`demo/priv/repo/migrations/*_add_identity_scope.exs
 - Never `@disable_ddl_transaction true` in a migration that calls `catalog_sync` (it would run the
   catalog INSERT outside a transaction — fail-open; `catalog_sync` refuses at runtime).
 - Register the host domain in **both** `config :<host>, :ash_domains` and
-  `config :samen_core, :ash_domains` so the verifiers discover the resources.
+  `config :samen_core, :host_domains` so the verifiers discover the resources.
 - Reserve each resource's abbrev in `samen_core/priv/abbrev_registry.json` under the **host** module
   name (permanent, 3-letter, collision-free). A missing/colliding abbrev fails compile.
 

@@ -312,20 +312,28 @@ defmodule Samen.Web.CRM.Reads do
   def link_billing_customer(mount, scope, company, id) do
     with org_id when is_binary(org_id) <- scope_org_id(scope) do
       company_resource = Mount.resource(mount, Company)
-      :ok = Samen.CRM.AccountLink.ensure_registered!(org_id, company_resource, mount.repo)
-
-      value = if is_binary(id) and String.trim(id) != "", do: String.trim(id), else: nil
-      custom = Map.put(company.custom || %{}, Samen.CRM.AccountLink.anchor_field(), value)
 
       # `get_company/3` doesn't SELECT `org_id` (non-PII detail reads never needed it), so
       # `changeset.data.org_id` would be `Ash.NotLoaded` — and `Samen.CustomFields.Change`'s
       # validator reads `org_id` straight off the changeset/data (not the scope) to resolve the
       # Tier-1 field's tenant boundary. Load it onto the record; `org_id` is not an update input
       # (`Samen.Policy.OrgIdPinned` refuses any write to it).
-      company
-      |> Ash.load!(:org_id, scope: scope)
-      |> Ash.Changeset.for_update(:update, %{custom: custom}, scope: scope)
-      |> Ash.update()
+      company = Ash.load!(company, :org_id, scope: scope)
+
+      # AUTHORIZE FIRST. Registering the field is itself a write (the org's custom-field catalog), run with the
+      # kernel's own privilege: a request the update policy would refuse must not leave that write behind.
+      if Ash.can?({company, :update}, scope, maybe_is: false) do
+        :ok = Samen.CRM.AccountLink.ensure_registered!(org_id, company_resource, mount.repo)
+
+        value = if is_binary(id) and String.trim(id) != "", do: String.trim(id), else: nil
+        custom = Map.put(company.custom || %{}, Samen.CRM.AccountLink.anchor_field(), value)
+
+        company
+        |> Ash.Changeset.for_update(:update, %{custom: custom}, scope: scope)
+        |> Ash.update()
+      else
+        {:error, :forbidden}
+      end
     else
       _ -> {:error, :no_org}
     end

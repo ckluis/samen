@@ -820,8 +820,9 @@ defmodule Samen.Web.Router do
 
       # The byte-serve route is a plain controller action — outside the live_session block.
       # The host's :browser pipeline (which wraps this scope) supplies the session plug so
-      # the mount and current-org are readable in the controller.
-      get("#{path}/:id/bytes", Samen.Web.Files.BytesController, :serve)
+      # current-org is readable in the controller; the MOUNT travels on the route itself
+      # (`assigns:`, like the ICS route), because no host pipeline sets `:samen_mount`.
+      get("#{path}/:id/bytes", Samen.Web.Files.BytesController, :serve, assigns: %{samen_mount: mount})
     end
   end
 
@@ -896,9 +897,10 @@ defmodule Samen.Web.Router do
       end
 
       # The export download is a plain controller action — outside the live_session
-      # block. The host's :browser pipeline supplies the session plug so the mount
-      # and current-org are readable (same posture as the files byte-serve route).
-      get("#{path}/export/:resource", Samen.Web.Csv.ExportController, :export)
+      # block. The host's :browser pipeline supplies the session plug so current-org is
+      # readable; the MOUNT travels on the route itself (`assigns:`, like the ICS route and
+      # the files byte-serve route), because no host pipeline sets `:samen_mount`.
+      get("#{path}/export/:resource", Samen.Web.Csv.ExportController, :export, assigns: %{samen_mount: mount})
     end
   end
 

@@ -18,6 +18,7 @@ defmodule Samen.FleetPublicStatusTest do
   Probing is NOT re-implemented here: staleness/dead-man semantics come from
   `build_row/4` (ADR-044 §4.6), which this projection consumes verbatim.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   alias Samen.Fleet.{AdminActor, PublicStatus, Registry}
@@ -159,7 +160,7 @@ defmodule Samen.FleetPublicStatusTest do
 
       assert [%PublicStatus.Entry{slug: slug, status: :operational}] = entries!()
       assert slug == "••••"
-      refute slug =~ "vt_"
+      refute_vault_token(slug)
       refute slug =~ "a1b2c3d4"
     end
 

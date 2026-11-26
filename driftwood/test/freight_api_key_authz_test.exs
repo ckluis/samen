@@ -54,7 +54,16 @@ defmodule Driftwood.FreightApiKeyAuthzTest do
           {"a user of ANOTHER org", outsider},
           {"a suspended membership", suspended}
         ] do
-      assert {:error, _} = create_as(org, :admin, id), "#{label} must not mint a key"
+      # WHICH check refused: the minter-membership one (a role-ceiling or pin refusal would be a
+      # different error and must not satisfy this).
+      assert {:error, %Ash.Error.Invalid{errors: errors}} = create_as(org, :admin, id),
+             "#{label} must not mint a key"
+
+      assert Enum.any?(errors, fn e ->
+               Map.get(e, :field) == :minter_user_id and
+                 (Map.get(e, :message) || "") =~ "active membership in this org"
+             end),
+             "#{label}: expected the minter-membership check to refuse, got: #{inspect(errors)}"
     end
 
     assert Ash.count!(Driftwood.Freight.ApiKey, authorize?: false) == 0
@@ -64,6 +73,45 @@ defmodule Driftwood.FreightApiKeyAuthzTest do
     assert key.minter_user_id == real
     # and the minted key authenticates (the use-time check agrees with the create-time one)
     assert {:ok, %{role: :admin}} = Samen.Scope.ApiKey.membership_for_user(Driftwood.Operator.Membership, org, real)
+  end
+
+  test "RED: the minter is checked against the org the key is CREATED in, not the org it was built with; CONTROL: a minter of the final org mints" do
+    org_a = mk_org()
+    org_b = mk_org()
+    {minter_a, _} = mk_minter(org_a, :admin)
+    s = scope_for(org_a, :admin, minter_a)
+
+    build = fn ->
+      Driftwood.Freight.ApiKey
+      |> Ash.Changeset.for_create(:create, %{org_id: org_a, minter_role: :admin, scopes: %{}}, scope: s)
+      |> Ash.Changeset.force_change_attribute(:token_digest, "d-#{System.unique_integer([:positive])}")
+    end
+
+    # built for org A (the minter IS a member there), then moved to org B before the create runs
+    assert {:error, %Ash.Error.Invalid{errors: errors}} =
+             build.() |> Ash.Changeset.force_change_attribute(:org_id, org_b) |> Ash.create(authorize?: false)
+
+    assert Enum.any?(errors, fn e ->
+             Map.get(e, :field) == :minter_user_id and (Map.get(e, :message) || "") =~ "active membership in this org"
+           end),
+           "expected the minter-membership check against the FINAL org, got: #{inspect(errors)}"
+
+    assert Ash.count!(Driftwood.Freight.ApiKey, authorize?: false) == 0
+
+    # CONTROL: the same move is fine when the minter really is a member of the final org
+    {minter_b, _} = mk_minter(org_b, :admin)
+    sb = scope_for(org_a, :admin, minter_b)
+
+    assert {:ok, key} =
+             Driftwood.Freight.ApiKey
+             |> Ash.Changeset.for_create(:create, %{org_id: org_a, minter_role: :admin, scopes: %{}}, scope: sb)
+             |> Ash.Changeset.force_change_attribute(:token_digest, "d-#{System.unique_integer([:positive])}")
+             |> Ash.Changeset.force_change_attribute(:org_id, org_b)
+             |> Ash.create(authorize?: false)
+
+    assert Driftwood.Freight.ApiKey
+           |> Ash.Query.filter(id == ^key.id and org_id == ^org_b)
+           |> Ash.count!(authorize?: false) == 1
   end
 
   test "RED: no generic update (role/revocation cannot be rewritten); CONTROL: :revoke is one-way and idempotent" do

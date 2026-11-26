@@ -39,7 +39,6 @@ defmodule Samen.Web.CRM.ContactLive do
     only: [
       assign_mount: 2,
       crm_sidebar: 1,
-      writable?: 1,
       full_name_field: 1,
       mail_timeline_entries: 1,
       merge_timeline: 2
@@ -54,6 +53,9 @@ defmodule Samen.Web.CRM.ContactLive do
 
   alias Samen.Web.CRM.Reads
   alias Samen.Web.Reads.Guard
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @impl true
   def mount(params, session, socket) do
@@ -88,6 +90,10 @@ defmodule Samen.Web.CRM.ContactLive do
     {:noreply, load(socket, socket.assigns.org_id, socket.assigns.contact_id)}
   end
 
+  # Every other event is refused while nobody is acting (a denial or a failed membership lookup): nothing is
+  # written with a scope from before the refusal.
+  TenantActor.refuse_events()
+
   def handle_event("switch_tab", %{"tab" => tab}, socket) do
     {:noreply, assign(socket, active_tab: tab)}
   end
@@ -103,8 +109,7 @@ defmodule Samen.Web.CRM.ContactLive do
   end
 
   def handle_event("log_activity", %{"activity" => params}, socket) do
-    %{samen_mount: mount, org_id: org_id, contact_id: contact_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{samen_mount: mount, org_id: org_id, contact_id: contact_id, acting_scope: scope} = socket.assigns
 
     # ADR-041 §6.1: the composer now writes a canonical Work Task anchored to this
     # (same-org, OrgScope-loaded) contact via the generic `(subject_key, subject_id)`
@@ -148,9 +153,13 @@ defmodule Samen.Web.CRM.ContactLive do
 
   # -- A3 edit/delete (the write side of the PII detail surface) ---------------
 
+  # A contact that was not found has nothing to edit (the page rendered "not found"): a crafted event for it is a no-op,
+  # never a form built over `nil`.
+  def handle_event(event, _params, %{assigns: %{contact: nil}} = socket) when event in ["edit_contact", "validate_edit", "save_edit"],
+    do: {:noreply, socket}
+
   def handle_event("edit_contact", _params, socket) do
-    %{samen_mount: mount, org_id: org_id, contact: contact} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{contact: contact, acting_scope: scope} = socket.assigns
     {:noreply, assign(socket, show_edit: true, edit_form: edit_form(contact, scope))}
   end
 
@@ -189,8 +198,7 @@ defmodule Samen.Web.CRM.ContactLive do
   # is never refused on their account; any `{:error, _}` here is a genuine
   # failure (e.g. an authorization denial), not the old FK-refusal case.
   def handle_event("delete_contact", %{"id" => id}, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{samen_mount: mount, org_id: org_id, acting_scope: scope} = socket.assigns
 
     case Reads.delete_contact(mount, scope, id) do
       :ok ->
@@ -207,6 +215,7 @@ defmodule Samen.Web.CRM.ContactLive do
 
     socket
     |> ensure_return_to()
+    |> assign(acting_scope: nil, actor_state: :ok, can_write: false)
     |> assign(
       no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil),
       org_id: nil,
@@ -226,9 +235,49 @@ defmodule Samen.Web.CRM.ContactLive do
     )
   end
 
+  # ADR-045 §4.4 — WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read, nothing
+  # can be written, and the page is re-resolved on every `handle_params`.
   def load(socket, org_id, contact_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, contact_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id, contact_id)
+    end
+  end
+
+  # Acting again with no URL to patch to (`Samen.Web.TenantActor`, the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _}} = socket), do: load(socket, socket.assigns.org_id, socket.assigns[:contact_id])
+
+  # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): the
+  # same load a refused navigation does, so nothing the page loaded for the person it acted for is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket, socket.assigns.org_id, socket.assigns[:contact_id])
+
+  defp load_refused(socket, org_id, contact_id) do
+    socket
+    |> ensure_return_to()
+    |> assign(
+      no_org: false,
+      org_id: org_id,
+      contact_id: contact_id,
+      contact: nil,
+      load_error: nil,
+      section_errors: [],
+      company_name: nil,
+      activities: [],
+      mail: [],
+      deals: [],
+      active_tab: Map.get(socket.assigns, :active_tab, "overview"),
+      show_edit: false,
+      edit_form: nil,
+      activity_form: nil,
+      delete_error: nil
+    )
+  end
+
+  defp load_for(socket, org_id, contact_id, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
 
     # A FAILED read is not "not found" (WP6): `load_error` names it and the page shows the kit
     # error state with a retry; `contact == nil` with no `load_error` is a genuinely missing
@@ -287,6 +336,13 @@ defmodule Samen.Web.CRM.ContactLive do
       delete_error: nil
     )
     |> assign_new(:show_edit, fn -> false end)
+  end
+
+  # The person's role or id changed while the page was open (`Samen.Web.TenantActor.recheck_event/3`): a form built at
+  # load holds the scope it was built with, so it is built again with the fresh one.
+  @doc false
+  def actor_changed(%{assigns: %{samen_mount: mount, acting_scope: scope} = assigns} = socket) do
+    assign(socket, edit_form: assigns[:contact] && edit_form(assigns.contact, scope), activity_form: activity_form(mount, scope))
   end
 
   # The edit form is built over the PLANE-RESOLVED record (the same PiiResolution
@@ -348,11 +404,11 @@ defmodule Samen.Web.CRM.ContactLive do
               </span>
               Back to contacts
             </a>
-            <.button :if={@contact != nil} phx-click="edit_contact" id="edit-contact">
+            <.button :if={@can_write and @contact != nil} phx-click="edit_contact" id="edit-contact">
               Edit contact
             </.button>
             <.delete_confirm
-              :if={writable?(@samen_mount) and @contact != nil}
+              :if={@can_write and @contact != nil}
               id="delete-contact"
               message="Delete this contact? This cannot be undone."
               phx-click="delete_contact"
@@ -363,9 +419,12 @@ defmodule Samen.Web.CRM.ContactLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Contact" nothing="there is no contact to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">CRM org: {@org_id}</span>
 
           <div :if={@delete_error} class="wrap" style="margin-bottom:0">

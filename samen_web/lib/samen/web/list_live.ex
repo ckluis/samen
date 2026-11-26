@@ -215,7 +215,22 @@ defmodule Samen.Web.ListLive do
   Handle one list event — the hook target, also directly callable (and directly
   tested) on a harness-built socket. Returns `{:noreply, socket}`.
   """
-  def handle_list_event("sort", %{"field" => field}, socket) do
+  # A socket with no list context, or one whose scope is nil, has nobody to act for: every list event is
+  # a no-op refusal (it reads nothing, it writes nothing). `refuse/1` is how a surface that was denied
+  # (or whose actor lookup failed) takes the context away, so the scope of the person/org it acted for
+  # BEFORE the denial can never be reused by a later event.
+  def handle_list_event(event, params, socket) do
+    if refused?(socket), do: {:noreply, socket}, else: do_list_event(event, params, socket)
+  end
+
+  defp refused?(socket) do
+    case socket.assigns[:samen_list_ctx] do
+      %{scope: scope} when not is_nil(scope) -> false
+      _ -> true
+    end
+  end
+
+  defp do_list_event("sort", %{"field" => field}, socket) do
     %{state: state, config: config} = list_assigns(socket)
 
     case bounded_field(config.sortable, field) do
@@ -228,7 +243,7 @@ defmodule Samen.Web.ListLive do
     end
   end
 
-  def handle_list_event("filter", params, socket) do
+  defp do_list_event("filter", params, socket) do
     %{state: state} = list_assigns(socket)
     filter = filter_param(params)
     socket = reread(socket, %{state | filter: filter, cursor: nil, cursor_stack: []})
@@ -236,7 +251,7 @@ defmodule Samen.Web.ListLive do
     {:noreply, socket}
   end
 
-  def handle_list_event("paginate", %{"dir" => "next"}, socket) do
+  defp do_list_event("paginate", %{"dir" => "next"}, socket) do
     %{state: state} = list_assigns(socket)
     page = socket.assigns.page
 
@@ -253,7 +268,7 @@ defmodule Samen.Web.ListLive do
     end
   end
 
-  def handle_list_event("paginate", %{"dir" => "prev"}, socket) do
+  defp do_list_event("paginate", %{"dir" => "prev"}, socket) do
     %{state: state} = list_assigns(socket)
 
     case state.cursor_stack do
@@ -262,9 +277,9 @@ defmodule Samen.Web.ListLive do
     end
   end
 
-  def handle_list_event("paginate", _params, socket), do: {:noreply, socket}
+  defp do_list_event("paginate", _params, socket), do: {:noreply, socket}
 
-  def handle_list_event("select", %{"id" => id}, socket) do
+  defp do_list_event("select", %{"id" => id}, socket) do
     %{state: state} = list_assigns(socket)
 
     selected =
@@ -275,7 +290,7 @@ defmodule Samen.Web.ListLive do
     {:noreply, assign_state(socket, %{state | selected: selected})}
   end
 
-  def handle_list_event("select_all", _params, socket) do
+  defp do_list_event("select_all", _params, socket) do
     %{state: state} = list_assigns(socket)
     page_ids = MapSet.new(socket.assigns.page.items, & &1.id)
 
@@ -287,7 +302,7 @@ defmodule Samen.Web.ListLive do
     {:noreply, assign_state(socket, %{state | selected: selected})}
   end
 
-  def handle_list_event("bulk", %{"action" => action}, socket) do
+  defp do_list_event("bulk", %{"action" => action}, socket) do
     %{state: state, view: view} = list_assigns(socket)
 
     socket = view.handle_bulk(action, MapSet.to_list(state.selected), socket)
@@ -298,7 +313,7 @@ defmodule Samen.Web.ListLive do
   # ADR-040 §5.8 (T37h) — the archived-filter toggle. Resets to the first page (the
   # underlying result SET changes shape when archived rows join/leave it, so a stale
   # cursor from the other filter state would be meaningless).
-  def handle_list_event("toggle_archived", _params, socket) do
+  defp do_list_event("toggle_archived", _params, socket) do
     %{state: state} = list_assigns(socket)
 
     state = %{state | show_archived: not state.show_archived, cursor: nil, cursor_stack: []}
@@ -318,7 +333,7 @@ defmodule Samen.Web.ListLive do
   # resolves it the same way: `Samen.Web.Mount.resource(mount, config.resource)`
   # (`Module.concat/2` — see `Reads.plans_page/3`'s `Mount.resource(mount, Plan)`) —
   # `Samen.Info.archivable?/1` must run on THAT resolved module, never the bare name.
-  def handle_list_event("restore", %{"id" => id}, socket) do
+  defp do_list_event("restore", %{"id" => id}, socket) do
     %{mount: mount, scope: scope, config: config, state: state} = list_assigns(socket)
     resource = config.resource && Samen.Web.Mount.resource(mount, config.resource)
 
@@ -332,12 +347,19 @@ defmodule Samen.Web.ListLive do
     end
   end
 
-  def handle_list_event("list_retry", _params, socket) do
+  defp do_list_event("list_retry", _params, socket) do
     %{state: state} = list_assigns(socket)
     {:noreply, reread(socket, state)}
   end
 
-  def handle_list_event(_event, _params, socket), do: {:noreply, socket}
+  defp do_list_event(_event, _params, socket), do: {:noreply, socket}
+
+  @doc """
+  Take the read/write context away (a denied or unavailable actor): every list event becomes a no-op
+  refusal, the hook stays attached and keeps halting the events it owns.
+  """
+  @spec refuse(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
+  def refuse(socket), do: Phoenix.Component.assign(socket, :samen_list_ctx, nil)
 
   @doc "The list events this mixin owns (the hook halts exactly these)."
   def events, do: @events

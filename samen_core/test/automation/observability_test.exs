@@ -55,6 +55,7 @@ defmodule Samen.Automation.ObservabilityTest do
   ("an already-queued run of a killed workflow finalizes :skipped/:killed")
   must fail.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   require Ash.Query
@@ -623,7 +624,7 @@ defmodule Samen.Automation.ObservabilityTest do
       |> Jason.encode!()
     refute encoded =~ wf.webhook_secret
     refute encoded =~ "victim@example.com"
-    refute encoded =~ "vt_"
+    refute_vault_token(encoded)
   end
 
   # ---------------------------------------------------------------------------

@@ -583,7 +583,7 @@ defmodule Samen.AI.Mcp do
         domain_resources(opts[:domains])
 
       true ->
-        domain_resources(Application.get_env(:samen_core, :ash_domains, []))
+        domain_resources(Samen.HostDomains.registry())
     end
   end
 

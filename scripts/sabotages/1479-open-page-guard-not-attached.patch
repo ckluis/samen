@@ -1,0 +1,20 @@
+# SABOTAGE: assign_actor no longer attaches the event guard, so an open page keeps the role it resolved at 
+#   its last navigation
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_open_page_test.exs
+# MUST_FAIL: a member suspended while the pages are open
+# MUST_FAIL: a demotion takes effect on the very next event
+diff --git a/samen_web/lib/samen/web/tenant_actor.ex b/samen_web/lib/samen/web/tenant_actor.ex
+index 9cfa06a0..d79e705b 100644
+--- a/samen_web/lib/samen/web/tenant_actor.ex
++++ b/samen_web/lib/samen/web/tenant_actor.ex
+@@ -146,7 +146,6 @@ defmodule Samen.Web.TenantActor do
+   def assign_actor(socket, org_id) do
+     socket
+     |> Phoenix.Component.assign(:acting_org_id, org_id)
+-    |> attach_guard()
+     |> resolve_into(org_id)
+   end
+ 

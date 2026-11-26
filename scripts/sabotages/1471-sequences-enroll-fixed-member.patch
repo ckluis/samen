@@ -1,0 +1,20 @@
+# SABOTAGE: SequencesLive enrolls on the fixed member scope again, so a viewer's enroll runs as member
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_crm_work_test.exs
+# MUST_FAIL: a VIEWER cannot enroll a contact into a sequence
+diff --git a/samen_web/lib/samen/web/crm/sequences_live.ex b/samen_web/lib/samen/web/crm/sequences_live.ex
+index c1450427..dd7237c5 100644
+--- a/samen_web/lib/samen/web/crm/sequences_live.ex
++++ b/samen_web/lib/samen/web/crm/sequences_live.ex
+@@ -157,7 +157,8 @@ defmodule Samen.Web.CRM.SequencesLive do
+   end
+ 
+   def handle_event("enroll", %{"sequence_id" => sequence_id, "person_id" => person_id}, socket) do
+-    %{samen_mount: mount, org_id: org_id, acting_scope: scope} = socket.assigns
++    %{samen_mount: mount, org_id: org_id, acting_scope: _} = socket.assigns
++    scope = Samen.Web.Mount.scope(mount, org_id)
+ 
+     person_id = normalize_person_id(person_id)
+ 

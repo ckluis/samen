@@ -1,0 +1,20 @@
+# SABOTAGE: a role change refreshes acting_scope but never tells the view, so a create form built at load 
+#   keeps submitting as the old role
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_open_page_test.exs
+# MUST_FAIL: a member demoted to viewer while the pages are open
+diff --git a/samen_web/lib/samen/web/tenant_actor.ex b/samen_web/lib/samen/web/tenant_actor.ex
+index 9cfa06a0..bbbe7cf7 100644
+--- a/samen_web/lib/samen/web/tenant_actor.ex
++++ b/samen_web/lib/samen/web/tenant_actor.ex
+@@ -260,7 +260,7 @@ defmodule Samen.Web.TenantActor do
+ 
+     if {held[:id], held[:role]} == {fresh[:id], fresh[:role]},
+       do: socket,
+-      else: actor_changed(socket)
++      else: if(socket.view == :no_such_view, do: actor_changed(socket), else: socket)
+   end
+ 
+   # `ListLive` keeps its own scope (its read AND its `restore` write context): same scope, the person's fresh id + role.

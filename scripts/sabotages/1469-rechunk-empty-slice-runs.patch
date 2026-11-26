@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P5: a modulo slice past the last mutant runs mutate.sh --shard and fails selection is 
+#   empty instead of passing as an empty slice
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: RECHUNK a resume never discards a finished chunk when the learned per-item rate rises
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index d00162f6..12c15c0e 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -812,7 +812,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
+             save_partition(step.id, sel, {"kind": "modulo", "count": count, "classes": [list(c) for c in classes]})
+     if slice_:
+         i, n = slice_
+-        if i <= len(specs) and (len(specs[i - 1]) < 3 or specs[i - 1][2] > 0):
++        if i <= len(specs):
+             specs = [specs[i - 1]]
+         else:  # fewer chunks than slices (a tiny selection): this slice is genuinely empty
+             s = clone_step(step, "%s[%d/%d]" % (step.id, i, n))

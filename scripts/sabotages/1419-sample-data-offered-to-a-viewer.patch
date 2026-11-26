@@ -1,0 +1,19 @@
+# SABOTAGE: a viewer's load_sample_data seeds the org through the system scope
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_surfaces_test.exs
+# MUST_FAIL: the sample-data offer is member+ only
+diff --git a/samen_web/lib/samen/web/crm/contacts_live.ex b/samen_web/lib/samen/web/crm/contacts_live.ex
+index 12db239b..f3d3140e 100644
+--- a/samen_web/lib/samen/web/crm/contacts_live.ex
++++ b/samen_web/lib/samen/web/crm/contacts_live.ex
+@@ -185,7 +185,7 @@ defmodule Samen.Web.CRM.ContactsLive do
+ 
+     # `SampleData.load/2` seeds through the system scope (a fixed `:member`): the person's own role
+     # must clear the same bar the "New contact" write has, or a viewer would seed through it.
+-    with true <- Samen.Scope.Role.at_least?(scope.actor.role, :member),
++    with true <- Samen.Scope.Role.at_least?(scope.actor.role, :member) or true,
+          {:ok, _} <- SampleData.load(mount, org_id) do
+       {:noreply, load(assign(socket, sample_error: nil), org_id)}
+     else

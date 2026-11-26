@@ -471,18 +471,28 @@ defmodule Driftwood.Freight.ApiKey do
         case ctx.actor do
           %{id: id} when not is_nil(id) ->
             changeset = Ash.Changeset.force_change_attribute(changeset, :minter_user_id, to_string(id))
-            org_id = Ash.Changeset.get_attribute(changeset, :org_id)
 
-            case Samen.Scope.ApiKey.membership_for_user(Driftwood.Operator.Membership, org_id, id) do
-              {:ok, _membership} ->
-                changeset
+            # The lookup is a DATABASE read, so it runs in a `before_action` hook, never while the changeset is
+            # built (a build that queries rides on whatever sandbox owner is shared, and `Samen.OrgIdPinnedGuard`
+            # walks every create's build with no database).
+            #
+            # The org is read from the changeset INSIDE the hook: the one the row is about to be written
+            # under, not the one the changeset carried when this change ran (a `force_change_attribute(:org_id, …)`
+            # between the build and the create must not leave the minter checked against the old org).
+            Ash.Changeset.before_action(changeset, fn changeset ->
+              org_id = Ash.Changeset.get_attribute(changeset, :org_id)
 
-              _ ->
-                Ash.Changeset.add_error(changeset,
-                  field: :minter_user_id,
-                  message: "the minting actor must be a user with an active membership in this org"
-                )
-            end
+              case Samen.Scope.ApiKey.membership_for_user(Driftwood.Operator.Membership, org_id, id) do
+                {:ok, _membership} ->
+                  changeset
+
+                _ ->
+                  Ash.Changeset.add_error(changeset,
+                    field: :minter_user_id,
+                    message: "the minting actor must be a user with an active membership in this org"
+                  )
+              end
+            end)
 
           nil ->
             changeset

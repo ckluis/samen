@@ -1,0 +1,28 @@
+# SABOTAGE: ProfileLive save rebuilds a scope from a nil role again, which falls back to :member
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_surfaces_test.exs
+# MUST_FAIL: with NO acting scope it refuses instead of falling back
+diff --git a/samen_web/lib/samen/web/settings/profile_live.ex b/samen_web/lib/samen/web/settings/profile_live.ex
+index e80c700e..e89d19d1 100644
+--- a/samen_web/lib/samen/web/settings/profile_live.ex
++++ b/samen_web/lib/samen/web/settings/profile_live.ex
+@@ -115,14 +115,14 @@ defmodule Samen.Web.Settings.ProfileLive do
+ 
+   # No acting scope (nobody was resolved: no org, no user) is a refusal, never a scope rebuilt with a nil role that
+   # would fall back to `:member`.
+-  def handle_event("save", _params, %{assigns: %{acting_scope: nil}} = socket),
++  def handle_event("save", _params, %{assigns: %{acting_scope: :never}} = socket),
+     do: {:noreply, assign(socket, flash_ok: nil, save_error: "This change was refused: nobody is signed in to this workspace.")}
+ 
+   def handle_event("save", %{"profile" => params}, socket) do
+-    %{samen_mount: mount, org_id: org_id, user_id: user_id, acting_scope: acting} = socket.assigns
++    %{samen_mount: mount, org_id: org_id, user_id: user_id} = socket.assigns
+     # The acting scope carries the SESSION-resolved user (`user_id` was resolved by `Reads.current_user_id/3` /
+     # `reresolve_user/3`); `Profile.update/4` refuses a scope whose actor is not that user.
+-    scope = Reads.user_scope(mount, org_id, user_id, acting.actor.role)
++    scope = Reads.user_scope(mount, org_id, user_id, socket.assigns[:acting_role])
+ 
+     case Profile.update(mount, scope, user_id, attrs_from_params(params)) do
+       {:ok, _user} ->

@@ -12,6 +12,7 @@ defmodule Samen.Web.OperatorAccountDetailRenderTest do
   (the ticket requester) renders `••••` — fail-MASKED, never fail-clear — while
   the score itself (not a PII surface) still renders; no `vt_` token ever leaks.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.WebTest.Operator, as: Op
@@ -240,7 +241,7 @@ defmodule Samen.Web.OperatorAccountDetailRenderTest do
     refute html =~ OpSeeds.admin_email()
 
     # No vault token ever reaches the HTML, on any plane.
-    refute html =~ "vt_"
+    refute_vault_token(html)
 
     # Health is NOT a PII surface (ADR-019 §3): the breakdown still renders —
     # every factor input is a bounded count/enum/amount, nothing to mask.

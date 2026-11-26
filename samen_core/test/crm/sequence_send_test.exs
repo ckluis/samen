@@ -1060,6 +1060,132 @@ defmodule Samen.Crm.SequenceSendTest do
   end
 
   # ---------------------------------------------------------------------------
+  # Authz round 6: enrolling, pausing, resuming and stopping an enrollment are member-or-above writes (they had NO
+  # role rule: a `:viewer` could start a sequence's emails to a contact). Reads stay open to every role.
+  describe "enrollment writes are member-or-above" do
+    test "a VIEWER cannot enroll, pause, resume or stop; a member can, and a viewer still reads" do
+      org = Ash.UUID.generate()
+      admin = tenant_scope(org)
+      viewer = tenant_scope(org, :viewer)
+      member = tenant_scope(org, :member)
+      seq = new_sequence(admin, org, @two_steps)
+
+      attrs = %{org_id: org, sequence_id: seq.id, person_id: Ash.UUID.generate()}
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Enrollment |> Ash.Changeset.for_create(:enroll, attrs, scope: viewer) |> Ash.create()
+
+      assert [] = Ash.read!(Enrollment, authorize?: false) |> Enum.filter(&(&1.org_id == org))
+
+      # positive control: a member enrolls, pauses and resumes
+      {:ok, enrollment} = Enrollment |> Ash.Changeset.for_create(:enroll, attrs, scope: member) |> Ash.create()
+
+      for action <- [:pause, :resume, :stop] do
+        before = reload_enrollment(enrollment.id).status
+
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 reload_enrollment(enrollment.id) |> Ash.Changeset.for_update(action, %{}, scope: viewer) |> Ash.update()
+
+        assert reload_enrollment(enrollment.id).status == before, "a viewer's #{action} changed the enrollment"
+      end
+
+      assert {:ok, _} = reload_enrollment(enrollment.id) |> Ash.Changeset.for_update(:pause, %{}, scope: member) |> Ash.update()
+      assert reload_enrollment(enrollment.id).status == :paused
+      assert {:ok, _} = reload_enrollment(enrollment.id) |> Ash.Changeset.for_update(:resume, %{}, scope: member) |> Ash.update()
+      assert {:ok, _} = reload_enrollment(enrollment.id) |> Ash.Changeset.for_update(:stop, %{}, scope: member) |> Ash.update()
+      assert reload_enrollment(enrollment.id).status == :stopped
+
+      # reads are not role-gated
+      assert [_] = Enrollment |> Ash.read!(scope: viewer)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Authz round 6: the system actions of Outreach were `bypass ... authorize_if(always())` for ANY actor, and `:due_scan`
+  # is a read with no org filter. They belong to the worker (AshOban, no actor) and to Sequences' internal
+  # `authorize?: false` calls: a tenant actor, an owner included, is refused.
+  describe "the system actions are not for an actor" do
+    defp two_orgs_with_an_enrollment_each do
+      for org <- [Ash.UUID.generate(), Ash.UUID.generate()] do
+        seq = new_sequence(tenant_scope(org), org, @two_steps)
+        {org, enroll(tenant_scope(org, :member), org, seq.id)}
+      end
+    end
+
+    test "a tenant actor of ANY role cannot run the cross-org :due_scan; the AshOban scan still does", _ do
+      [{org_a, enrollment_a}, {_org_b, enrollment_b}] = two_orgs_with_an_enrollment_each()
+
+      for role <- [:viewer, :member, :admin, :owner] do
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 Ash.read(Enrollment, action: :due_scan, scope: tenant_scope(org_a, role)),
+               "#{role} read the due scan"
+      end
+
+      # the ordinary read is org-scoped and still open (control: the refusal is the action's, not the resource's)
+      assert [%{id: id}] = Ash.read!(Enrollment, scope: tenant_scope(org_a, :viewer))
+      assert id == enrollment_a.id
+
+      # positive control: the scheduler (no actor, AshOban) still scans every org and sends
+      make_due!(enrollment_b.id)
+      scan_and_drain()
+      assert [%{status: :delivered}] = step_sends_for(enrollment_b.id)
+    end
+
+    test "a tenant actor of ANY role cannot run :system_advance or :advance_due on an enrollment", _ do
+      org = Ash.UUID.generate()
+      seq = new_sequence(tenant_scope(org), org, @two_steps)
+      enrollment = enroll(tenant_scope(org, :member), org, seq.id)
+
+      for role <- [:viewer, :member, :admin, :owner], action <- [:system_advance, :advance_due] do
+        attrs = if action == :system_advance, do: %{status: :completed}, else: %{}
+
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 reload_enrollment(enrollment.id)
+                 |> Ash.Changeset.for_update(action, attrs, scope: tenant_scope(org, role))
+                 |> Ash.update(),
+               "#{role} ran #{action}"
+
+        assert reload_enrollment(enrollment.id).status == :active
+      end
+
+      # positive control: the internal call (authorize?: false) is the one that works
+      assert {:ok, %{status: :completed}} = Sequences.transition(reload_enrollment(enrollment.id), %{status: :completed})
+    end
+
+    test "a tenant actor of ANY role cannot queue, mark or requeue a StepSend", _ do
+      org = Ash.UUID.generate()
+      seq = new_sequence(tenant_scope(org), org, @two_steps)
+      enrollment = enroll(tenant_scope(org, :member), org, seq.id)
+
+      row =
+        StepSend
+        |> Ash.Changeset.for_create(:queue, %{org_id: org, enrollment_id: enrollment.id, step_index: 0}, authorize?: false)
+        |> Ash.create!()
+
+      for role <- [:viewer, :member, :admin, :owner] do
+        scope = tenant_scope(org, role)
+
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 StepSend |> Ash.Changeset.for_create(:queue, %{org_id: org, enrollment_id: enrollment.id, step_index: 1}, scope: scope) |> Ash.create(),
+               "#{role} queued"
+
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 row |> Ash.Changeset.for_update(:mark, %{status: :delivered}, scope: scope) |> Ash.update(),
+               "#{role} marked"
+
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 row |> Ash.Changeset.for_update(:requeue, %{}, scope: scope) |> Ash.update(),
+               "#{role} requeued"
+      end
+
+      assert [%{step_index: 0, status: :queued}] = step_sends_for(enrollment.id)
+
+      # positive control: the worker's own internal `:mark` and `:requeue` (authorize?: false) work
+      assert {:ok, %{status: :delivered}} = row |> Ash.Changeset.for_update(:mark, %{status: :delivered}, authorize?: false) |> Ash.update()
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # LOW-6c (T75 fix round): the SendWorker's `status in [:active, :blocked]`
   # guard, pinned live — the verifier's ATK9 proved this race reachable (a
   # manual pause landing between "queued" and "the worker actually runs").

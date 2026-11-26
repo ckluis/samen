@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P5: a class is split into more sub-classes than it has mutants, so empty sub-classes 
+#   run as steps and fail selection is empty
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: RECHUNK a resume never discards a finished chunk when the learned per-item rate rises
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 9af747f2..a4b71cb5 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -813,7 +813,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
+                 else:
+                     # never more sub-classes than the class has members: its members are x = r-1 + t*m, t < size, and
+                     # sub-class j takes t % k == j, so k <= size leaves every sub-class non-empty
+-                    k = min(int(math.ceil(est / room)), size_of(m_, r_))
++                    k = int(math.ceil(est / room))
+                     classes.extend((m_ * k, r_ + j * m_) for j in range(k))
+         else:
+             n = min(count, max(1, int(math.ceil(count * each / room)))) if count else 0  # never a class past the last mutant

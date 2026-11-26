@@ -20,8 +20,7 @@ defmodule <%= module %>.RecordApiTest do
   # column names and the vault prefixes/tokens the doc says the public schema hides.
   @storage_name_patterns [
     ~r/\b<%= abbrev %>_/,
-    ~r/\bpii_/,
-    ~r/\bvt_/
+    ~r/\bpii_/
   ]
 
   describe "bounded-by-default pagination (the RP-G1-6 pattern)" do
@@ -124,6 +123,11 @@ defmodule <%= module %>.RecordApiTest do
         refute Regex.match?(pattern, conn.resp_body),
                "storage name #{inspect(pattern)} leaked into the API payload"
       end
+
+      # the vault prefix (`vt_`) and any real token: the one helper, word-bounded (a JSON body has no CSRF tokens)
+      Samen.VaultTokenAssert.refute_vault_token(conn.resp_body, "a vault token leaked into the API payload",
+        boundary: true
+      )
     end
 
     test "the ?fields= query param cannot force an un-allowlisted field to appear",

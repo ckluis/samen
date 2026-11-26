@@ -128,7 +128,7 @@ defmodule Samen.AI.AgentLoopTest do
       end
 
       # EG5: an authored goal prompt must never embed a vt_ vault-token sentinel.
-      assert_raise CompileError, ~r/vt_/, fn ->
+      assert_raise CompileError, ~r/vt_/, fn -> # bare-vt_-ok: the compile error message names the vt_ marker; it is not a token in a page
         Code.eval_string("""
         defmodule A1VtPrompt#{System.unique_integer([:positive])} do
           use Samen.AI.Agent, name: "vt.agent",
