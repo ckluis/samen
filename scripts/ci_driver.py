@@ -1160,7 +1160,7 @@ class Run(object):
                 p = self.spawn_gated(cmd, os.path.join(REPO, step.exunit_dir), self.ctx.env(self.mode, step), f, "rerun", register)
                 while p.poll() is None:
                     if self.interrupted:
-                        self.stop_group(p, rid)
+                        self.stop_group(p)
                         return None
                     time.sleep(0.2)
             finally:
@@ -1195,11 +1195,12 @@ class Run(object):
         sys.stderr.flush()
         return False
 
-    def stop_group(self, proc, name="rerun"):
+    def stop_group(self, proc):
         """SIGTERM then (after the 20 s grace) SIGKILL a process group this driver started, reap it, and wait until the
         whole group is gone. The deadline covers the WHOLE group: a member that handles SIGTERM can outlive the leader, and
         the record is dropped once this returns."""
         pg = proc.pid
+        name = next((rid for rid, p in self.reruns.items() if p is proc), "rerun")
         try:
             os.killpg(pg, signal.SIGTERM)
         except OSError:
