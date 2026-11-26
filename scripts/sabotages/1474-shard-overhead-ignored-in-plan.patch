@@ -1,0 +1,20 @@
+# SABOTAGE: chunks are planned as n x each against the target without the step's fixed invocation cost, so 
+#   a chunk of cheap items overruns the target it was sized for
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: MUTOVH a sharded step's fixed invocation cost is paid once per chunk
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 9af747f2..c320fb2f 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -707,7 +707,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
+     seen = read_json(os.path.join(HOME, "timings.json")) or {}
+     learned = float(seen.get(step.id + "#per_item", 0))
+     each = max(step.shard_each, learned)
+-    room = max(step.shard_target - step.shard_overhead, each)  # per-chunk time left for items once the fixed cost is paid
++    room = max(step.shard_target, each)  # per-chunk time left for items once the fixed cost is paid
+     # (P5) cost-weighted ranges: what each item LAST cost (lane-seconds, read from the sub-step logs through
+     # `shard_cost`) and what a chunk of that many lane-seconds really took (cost_model).
+     costs = seen.get(step.id + "#item_cost") or {} if step.shard_cost else {}
