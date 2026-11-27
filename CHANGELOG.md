@@ -89,14 +89,15 @@ All notable changes to Samen are recorded here. The format follows
 
 - **A tenant page on the operator plane is read-only; impersonation is the route for acting in a tenant.** An operator who
   opens a tenant's pages reads them, masked per the plane's masking rules, and offers no write control (`:can_write` and
-  `:can_admin` are false). The refusal lives in the one place every acting page already shares: `TenantActor.recheck_event/3`
-  halts, on an operator-plane mount, every event that is not a read event (the list's own sort, filter, paginate, select and
-  archived toggle, a retry, a tab, a form validation or cancel) and puts the page's own flash on the socket, so a page added
-  later is refused by default. `TenantActor.write_scope/3` on the operator plane returns the plane's actor with the lowest
+  `:can_admin` are false). For a page that calls `TenantActor.assign_actor/2`, the refusal is the default:
+  `TenantActor.recheck_event/3` halts, on an operator-plane mount, every event that is not a read event (the list's own sort,
+  filter, paginate, select and archived toggle, a retry, a tab, a form validation or cancel) and puts the page's own flash on
+  the socket. The onboarding wizard's no-JS POSTs are checked by the handler itself: it refuses a person who is not an admin
+  before `Onboarding.*` is reached. `TenantActor.write_scope/3` on the operator plane returns the plane's actor with the lowest
   role and `read_only: true`, never an admin elevation. Operator-plane pages proper (`Samen.Web.Operator*`) and the disarmed
   dev posture are unchanged. Proven by `tenant_actor_operator_read_only_test.exs` (plans toggle and delete, invoice, segment
   and campaign delete, a ticket status change and a list restore, each with a tenant admin's positive control) and by
-  sabotages 1548 and 1549.
+  sabotages 1548 and 1549, the wizard controller's own check by sabotage 1570 and the chat disclosure context by sabotage 1571.
 
 ### Fixed: a form built before a demotion or an organisation switch is never submitted with the authority it was built with
 
