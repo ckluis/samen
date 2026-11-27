@@ -2,8 +2,7 @@ defmodule Samen.Web.TenantActorWriteScopeTest do
   @moduledoc """
   authz-8 review, S1: `TenantActor.write_scope/3` on an ARMED tenant mount returns the acting scope or nothing: anything that is not a
   `%Samen.Scope{}` fails closed (it used to fall through to `TenantRole.admin_scope/3`, which on an armed host with no
-  principal answers a `:member` scope). Only the disarmed dev posture and the operator plane keep the posture's admin
-  elevation.
+  principal answers a `:member` scope). Only the disarmed dev posture keeps the posture's admin elevation; a tenant page on the operator plane is read-only.
   """
   use Samen.WebTest.DataCase, async: false
 
@@ -52,11 +51,15 @@ defmodule Samen.Web.TenantActorWriteScopeTest do
       assert %Samen.Scope{actor: %{role: :admin}} = TenantActor.write_scope(mount(), ctx.org_id, acting(ctx.org_id, :member))
     end
 
-    test "operator plane: the plane's own admin elevation, with or without a scope", ctx do
+    test "operator plane: a tenant page there is read-only, whatever scope it is handed", ctx do
       op = operator_mount(ctx.org_id)
 
-      assert %Samen.Scope{actor: %{role: :admin, plane: :operator}} = TenantActor.write_scope(op, ctx.org_id, nil)
-      assert %Samen.Scope{actor: %{role: :admin, plane: :operator}} = TenantActor.write_scope(op, ctx.org_id, acting(ctx.org_id, :member))
+      for acting <- [nil, acting(ctx.org_id, :member), acting(ctx.org_id, :admin)] do
+        assert %Samen.Scope{actor: %{role: :viewer, read_only: true, plane: :operator}} = TenantActor.write_scope(op, ctx.org_id, acting)
+      end
+
+      # positive control: the same scopes on the armed tenant mount are the acting scope itself
+      assert TenantActor.write_scope(mount(), ctx.org_id, acting(ctx.org_id, :admin)).actor.role == :admin
     end
   end
 end

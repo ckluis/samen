@@ -1,0 +1,20 @@
+# SABOTAGE: write_scope hands a tenant page on the operator plane an admin-ranked scope
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_operator_read_only_test.exs test/samen/web/tenant_actor_write_scope_test.exs
+# MUST_FAIL: write_scope/3 on the operator plane is not an admin and says so
+# MUST_FAIL: operator plane: a tenant page there is read-only
+diff --git a/samen_web/lib/samen/web/tenant_actor.ex b/samen_web/lib/samen/web/tenant_actor.ex
+index 1e37f580..e0b0076f 100644
+--- a/samen_web/lib/samen/web/tenant_actor.ex
++++ b/samen_web/lib/samen/web/tenant_actor.ex
+@@ -177,7 +177,7 @@ defmodule Samen.Web.TenantActor do
+   # lowest role and a `read_only` marker, never an admin elevation. (Acting in a tenant is what impersonation is for.)
+   def write_scope(%Mount{plane: %{kind: :operator}} = mount, org_id, _acting) do
+     %Samen.Scope{actor: actor} = system_scope(mount, org_id)
+-    %Samen.Scope{actor: actor |> Map.put(:role, lowest_role()) |> Map.put(:read_only, true)}
++    %Samen.Scope{actor: actor |> Map.put(:role, Enum.max_by(Samen.Scope.Role.all(), &Samen.Scope.Role.rank/1)) |> Map.put(:read_only, false)}
+   end
+ 
+   def write_scope(%Mount{} = mount, org_id, _acting), do: Samen.Web.TenantRole.admin_scope(mount, org_id)

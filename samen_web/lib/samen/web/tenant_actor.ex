@@ -20,8 +20,9 @@ defmodule Samen.Web.TenantActor do
 
   ## Postures (unchanged where they were not the bug)
 
-    * OPERATOR plane (impersonation / operator console): the plane's own scope, unchanged. Its
-      authority is T146/T150, not a membership.
+    * OPERATOR plane (impersonation / operator console): the plane's own scope for READS, unchanged. A tenant page there is
+      read-only (`recheck_event/3` refuses every non-read event, `write_scope/3` is not an admin); acting in a tenant is
+      impersonation's route (T146/T150), not a membership.
     * DISARMED dev posture (`CurrentOrg.tenant_gate_armed?/1` false): the historical synthetic
       `:member` scope, byte for byte, via `system_scope/2`. There is no authenticated person to resolve.
     * ARMED: the resolved membership role, as above.
@@ -159,8 +160,10 @@ defmodule Samen.Web.TenantActor do
       viewer or a member). Anything that is not a `%Samen.Scope{}` (a page that is not acting passes `nil`) FAILS CLOSED: it
       raises `ArgumentError`; there is no fallback to a `:member` or an admin scope. A page that is refused never reaches a
       write (`refuse_events/1`).
-    * DISARMED dev posture and the OPERATOR plane (whose authority is not a membership): the posture's own admin elevation
-      (`Samen.Web.TenantRole.admin_scope/3`), byte for byte what those postures always did, whatever `acting` is.
+    * OPERATOR plane: a tenant page there is read-only. The scope is the plane's actor with the lowest role and
+      `read_only: true`, so the kernel refuses what it gates and `recheck_event/3` refuses the event before it gets here.
+    * DISARMED dev posture: the posture's own admin elevation (`Samen.Web.TenantRole.admin_scope/3`), byte for byte what
+      that posture always did, whatever `acting` is.
   """
   @spec write_scope(Mount.t(), String.t(), Samen.Scope.t() | nil) :: Samen.Scope.t()
   def write_scope(%Mount{plane: %{kind: :tenant}} = mount, org_id, acting) do
@@ -171,7 +174,16 @@ defmodule Samen.Web.TenantActor do
     end
   end
 
+  # A tenant page on the OPERATOR plane is read-only: the scope its write path would use is the plane's own actor with the
+  # lowest role and a `read_only` marker, never an admin elevation. (Acting in a tenant is what impersonation is for.)
+  def write_scope(%Mount{plane: %{kind: :operator}} = mount, org_id, _acting) do
+    %Samen.Scope{actor: actor} = system_scope(mount, org_id)
+    %Samen.Scope{actor: actor |> Map.put(:role, lowest_role()) |> Map.put(:read_only, true)}
+  end
+
   def write_scope(%Mount{} = mount, org_id, _acting), do: Samen.Web.TenantRole.admin_scope(mount, org_id)
+
+  defp lowest_role, do: Enum.min_by(Samen.Scope.Role.all(), &Samen.Scope.Role.rank/1)
 
   @doc """
   The principal reference for a request: pinned by `Samen.Web.TenantAuthz` as `:samen_principal_ref`
@@ -316,7 +328,30 @@ defmodule Samen.Web.TenantActor do
   """
   def recheck_event("retry_actor", _params, socket), do: {:halt, retry(socket)}
 
-  def recheck_event(_event, _params, socket) do
+  def recheck_event(event, params, socket) do
+    if operator_write_event?(event, socket),
+      do: {:halt, refuse_operator_write(socket)},
+      else: recheck_actor(event, params, socket)
+  end
+
+  # A tenant page on the OPERATOR plane is read-only (impersonation is the route for acting in a tenant). The refusal is
+  # here, in the one hook every acting page attaches, and it is by default: only the events named read events (the list's
+  # own, a retry, a tab, a form validation or cancel, which persist nothing) pass; any other event, including one a page
+  # adds later, is refused with the page's own flash. `retry_actor` is handled before this.
+  @read_events ~w(retry_load list_retry sort filter paginate select select_all toggle_archived switch_tab board_load_more
+                  insert_suggestion insert_macro open_ents cancel_ents)
+
+  defp operator_write_event?(event, %{assigns: %{samen_mount: %Mount{plane: %{kind: :operator}}, acting_scope: %Samen.Scope{}}}) do
+    not (event in @read_events or String.starts_with?(event, "validate") or String.starts_with?(event, "cancel"))
+  end
+
+  defp operator_write_event?(_event, _socket), do: false
+
+  @read_only_copy "You are viewing this organisation as an operator. To make a change, impersonate it."
+
+  defp refuse_operator_write(socket), do: Phoenix.LiveView.put_flash(socket, :error, @read_only_copy)
+
+  defp recheck_actor(_event, _params, socket) do
     case socket.assigns do
       %{acting_scope: %Samen.Scope{} = held, acting_org_id: org_id} when is_binary(org_id) ->
         case resolve_into(socket, org_id) do
