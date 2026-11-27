@@ -1,0 +1,19 @@
+# SABOTAGE: the org_id pin walk ignores a query issued by a Task its build started
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/org_id_pinned_guard_test.exs
+# MUST_FAIL: a query issued from a Task the build started is seen
+diff --git a/samen_core/lib/samen/org_id_pinned_guard.ex b/samen_core/lib/samen/org_id_pinned_guard.ex
+index ae81d26e..10638e29 100644
+--- a/samen_core/lib/samen/org_id_pinned_guard.ex
++++ b/samen_core/lib/samen/org_id_pinned_guard.ex
+@@ -128,7 +128,7 @@ defmodule Samen.OrgIdPinnedGuard do
+           id,
+           events,
+           fn _event, _measurements, meta, _config ->
+-            if self() == walker or walker in List.wrap(Process.get(:"$callers")),
++            if self() == walker,
+               do: send(walker, {:org_pin_walk_query, meta[:query]})
+           end,
+           nil

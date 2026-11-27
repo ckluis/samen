@@ -1,0 +1,19 @@
+# SABOTAGE: the sandbox CSP drops frame-ancestors, so a stored HTML file can be framed
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/files_csv_router_test.exs
+# MUST_FAIL: the sandboxed response cannot be framed either
+diff --git a/samen_web/lib/samen/web/files/bytes_controller.ex b/samen_web/lib/samen/web/files/bytes_controller.ex
+index c3ec7e3b..02c320a8 100644
+--- a/samen_web/lib/samen/web/files/bytes_controller.ex
++++ b/samen_web/lib/samen/web/files/bytes_controller.ex
+@@ -175,7 +175,7 @@ defmodule Samen.Web.Files.BytesController do
+   # (The sandbox CSP is not put on the inline types: it would stop a browser's PDF viewer.)
+   # `frame-ancestors` is not covered by `default-src` and this header REPLACES the base CSP, so it is named here: the
+   # sandboxed response is neither a page on this origin nor frameable by any page.
+-  @sandbox_csp "default-src 'none'; sandbox; frame-ancestors 'none'"
++  @sandbox_csp "default-src 'none'; sandbox"
+   @inline_types ~w(image/png image/jpeg image/gif image/webp application/pdf text/plain)
+ 
+   defp put_disposition(conn, content_type, file) do

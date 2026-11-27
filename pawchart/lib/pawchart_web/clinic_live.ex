@@ -43,13 +43,15 @@ defmodule PawChartWeb.ClinicLive do
   use Phoenix.LiveView
 
   import Samen.UI
-  import Samen.Web.CRM.Live, only: [writable?: 1]
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1, switcher: 1]
 
   alias PawChartWeb.ClinicReads, as: Reads
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
   alias Samen.Web.Reads.Guard
+  alias Samen.Web.TenantActor
+  require TenantActor
 
   # PP-4 (Batch 5b) — the `:host_nav_extra` mount-label DATA (`Samen.UI.host_nav_extra/1`,
   # wired at `@current_org_labels` in the router) so the "Clinic" group renders on EVERY
@@ -94,12 +96,52 @@ defmodule PawChartWeb.ClinicLive do
       selected_error: nil,
       selected_pets: [],
       selected_pets_error: nil,
-      patient_param: nil
+      patient_param: nil,
+      acting_scope: nil,
+      actor_state: :ok,
+      can_write: false
     )
   end
 
+  # WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never a fixed `:member`. A
+  # denial or a failed lookup is a STATE of the page: nothing is read, nothing can be written, and the page is
+  # re-resolved on every `handle_params` and before every event.
   def load(socket, org_id, params) do
-    scope = Mount.scope(socket.assigns.samen_mount, org_id)
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, params, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id)
+    end
+  end
+
+  # Acting again with no URL to patch to (the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: org_id}} = socket), do: load(socket, org_id, %{"patient" => socket.assigns[:patient_param]})
+
+  # The refused state an OPEN page falls into when the guard stops an event: nothing the page loaded is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: org_id}} = socket), do: load_refused(socket, org_id)
+
+  defp load_refused(socket, org_id) do
+    socket
+    |> ensure_defaults()
+    |> assign(
+      no_org: false,
+      org_id: org_id,
+      owners: [],
+      owners_error: nil,
+      pets: [],
+      pets_error: nil,
+      selected_owner: nil,
+      selected_error: nil,
+      selected_pets: [],
+      selected_pets_error: nil,
+      patient_param: nil,
+      owner_modal: nil,
+      pet_modal: nil
+    )
+  end
+
+  defp load_for(socket, org_id, params, scope) do
     # Each pane reads through its tagged `_result` and fails ALONE: a failed roster is the kit error state
     # with a retry in that pane, never "No patients yet." (whose CTA would invite a duplicate patient).
     {owners, owners_error} = Guard.pane(Reads.owner_roster_result(scope), [])
@@ -172,12 +214,20 @@ defmodule PawChartWeb.ClinicLive do
   # ==========================================================================
 
   @impl true
+  TenantActor.refuse_events()
+
+  # Every event that opens a form or writes needs the `:member` role: a viewer's page renders none of those controls,
+  # and a crafted event is answered with the page's own flash (the role is re-resolved before every event).
+  @write_events ~w(new_owner edit_owner save_owner new_pet edit_pet save_pet)
+  def handle_event(event, _params, %{assigns: %{can_write: false}} = socket) when event in @write_events,
+    do: {:noreply, put_flash(socket, :error, "Your role can view this clinic but not change it.")}
+
   def handle_event("new_owner", _params, socket) do
     {:noreply, assign(socket, owner_modal: :new, owner_error: nil, owner_form: empty_owner_form())}
   end
 
   def handle_event("edit_owner", %{"id" => id}, socket) do
-    scope = Mount.scope(socket.assigns.samen_mount, socket.assigns.org_id)
+    scope = socket.assigns.acting_scope
 
     case Reads.get_owner_result(scope, id) do
       {:ok, owner} ->
@@ -200,12 +250,12 @@ defmodule PawChartWeb.ClinicLive do
   end
 
   def handle_event("save_owner", %{"owner" => params}, socket) do
-    org_id = socket.assigns.org_id
+    scope = socket.assigns.acting_scope
 
     result =
       case socket.assigns.owner_modal do
-        :new -> Reads.create_owner(org_id, params)
-        {:edit, id} -> Reads.update_owner(org_id, id, params)
+        :new -> Reads.create_owner(scope, params)
+        {:edit, id} -> Reads.update_owner(scope, id, params)
         _ -> {:error, :no_modal}
       end
 
@@ -264,12 +314,12 @@ defmodule PawChartWeb.ClinicLive do
   end
 
   def handle_event("save_pet", %{"pet" => params}, socket) do
-    org_id = socket.assigns.org_id
+    scope = socket.assigns.acting_scope
 
     result =
       case socket.assigns.pet_modal do
-        :new -> Reads.create_pet(org_id, params)
-        {:edit, id} -> Reads.update_pet(org_id, id, params)
+        :new -> Reads.create_pet(scope, params)
+        {:edit, id} -> Reads.update_pet(scope, id, params)
         _ -> {:error, :no_modal}
       end
 
@@ -310,9 +360,12 @@ defmodule PawChartWeb.ClinicLive do
         <.topbar title="Clinic" crumbs={[CurrentOrg.name(@samen_mount, @org_id), "Clinic", "Patients & Pets"]} />
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Clinic" nothing="there are no patients to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">Clinic org: {@org_id}</span>
 
           <div class="wrap" style="display:flex;flex-direction:column;gap:22px;padding:16px 20px">
@@ -328,7 +381,7 @@ defmodule PawChartWeb.ClinicLive do
               <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
                 <h3 style="margin:0;font-size:14px;font-weight:650" class="owner-detail-name">{owner_name(@selected_owner)}</h3>
                 <div style="display:flex;gap:8px">
-                  <.button :if={writable?(@samen_mount)} phx-click="edit_owner" phx-value-id={@selected_owner.id}>Edit patient</.button>
+                  <.button :if={@can_write} phx-click="edit_owner" phx-value-id={@selected_owner.id}>Edit patient</.button>
                   <.link patch={"/clinic?org=#{@org_id}"} class="btn">Back to all</.link>
                 </div>
               </div>
@@ -340,7 +393,7 @@ defmodule PawChartWeb.ClinicLive do
 
               <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:6px">
                 <h4 style="margin:0;font-size:12px;font-weight:600;color:var(--muted)">Pets</h4>
-                <.button :if={writable?(@samen_mount)} phx-click="new_pet" phx-value-owner_id={@selected_owner.id}>New pet for this patient</.button>
+                <.button :if={@can_write} phx-click="new_pet" phx-value-owner_id={@selected_owner.id}>New pet for this patient</.button>
               </div>
               <%= cond do %>
               <% @selected_pets_error -> %>
@@ -361,7 +414,7 @@ defmodule PawChartWeb.ClinicLive do
                     <td style="font-size:12px;color:var(--muted)">{p.species}</td>
                     <td style="font-size:12px;color:var(--muted)">{p.breed || "—"}</td>
                     <td class="pet-microchip mono" style="font-size:12px">{pet_microchip(p)}</td>
-                    <td><.button :if={writable?(@samen_mount)} phx-click="edit_pet" phx-value-id={p.id}>Edit</.button></td>
+                    <td><.button :if={@can_write} phx-click="edit_pet" phx-value-id={p.id}>Edit</.button></td>
                   </tr>
                 </.data_table>
               <% end %>
@@ -371,7 +424,7 @@ defmodule PawChartWeb.ClinicLive do
             <section id="patients-list">
               <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px">
                 <h3 style="margin:0;font-size:13px;font-weight:600">Patients (owners)</h3>
-                <.button :if={writable?(@samen_mount)} variant="primary" phx-click="new_owner">New patient</.button>
+                <.button :if={@can_write} variant="primary" phx-click="new_owner">New patient</.button>
               </div>
               <%= cond do %>
               <% @owners_error -> %>
@@ -400,7 +453,7 @@ defmodule PawChartWeb.ClinicLive do
                     <td class="p-phone" style="font-size:12px;color:var(--muted)">{owner_phone(o)}</td>
                     <td>{marketing_label(o)}</td>
                     <td>
-                      <.button :if={writable?(@samen_mount)} phx-click="edit_owner" phx-value-id={o.id}>Edit</.button>
+                      <.button :if={@can_write} phx-click="edit_owner" phx-value-id={o.id}>Edit</.button>
                     </td>
                   </tr>
                 </.data_table>
@@ -411,7 +464,7 @@ defmodule PawChartWeb.ClinicLive do
             <section id="pets-list">
               <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px">
                 <h3 style="margin:0;font-size:13px;font-weight:600">Pets (clinical records)</h3>
-                <.button :if={writable?(@samen_mount)} variant="primary" phx-click="new_pet">New pet</.button>
+                <.button :if={@can_write} variant="primary" phx-click="new_pet">New pet</.button>
               </div>
               <%= cond do %>
               <% @pets_error -> %>
@@ -439,7 +492,7 @@ defmodule PawChartWeb.ClinicLive do
                     <td style="font-size:12px;color:var(--muted)">{p.breed || "—"}</td>
                     <td class="pet-microchip mono" style="font-size:12px">{pet_microchip(p)}</td>
                     <td style="font-size:12px;color:var(--muted)">{owner_ref(@owners, p.owner_id, @owners_error)}</td>
-                    <td><.button :if={writable?(@samen_mount)} phx-click="edit_pet" phx-value-id={p.id}>Edit</.button></td>
+                    <td><.button :if={@can_write} phx-click="edit_pet" phx-value-id={p.id}>Edit</.button></td>
                   </tr>
                 </.data_table>
               <% end %>
@@ -449,7 +502,7 @@ defmodule PawChartWeb.ClinicLive do
       </.app_shell>
 
       <%!-- Patient (owner) modal — tenant plane only --%>
-      <.modal :if={@owner_modal && writable?(@samen_mount)} id="owner-modal" title={owner_modal_title(@owner_modal)} on_cancel="cancel_owner">
+      <.modal :if={@owner_modal && @can_write} id="owner-modal" title={owner_modal_title(@owner_modal)} on_cancel="cancel_owner">
         <form phx-submit="save_owner" id="owner-form" style="display:flex;flex-direction:column;gap:10px">
           <div :if={@owner_error} id="owner-error" style="color:#B42318;font-size:12px">{@owner_error}</div>
           <div style="display:flex;gap:8px">
@@ -482,7 +535,7 @@ defmodule PawChartWeb.ClinicLive do
       </.modal>
 
       <%!-- Pet modal — tenant plane only --%>
-      <.modal :if={@pet_modal && writable?(@samen_mount)} id="pet-modal" title={pet_modal_title(@pet_modal)} on_cancel="cancel_pet">
+      <.modal :if={@pet_modal && @can_write} id="pet-modal" title={pet_modal_title(@pet_modal)} on_cancel="cancel_pet">
         <form phx-submit="save_pet" id="pet-form" style="display:flex;flex-direction:column;gap:10px">
           <div :if={@pet_error} id="pet-error" style="color:#B42318;font-size:12px">{@pet_error}</div>
           <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600">

@@ -13,6 +13,7 @@ defmodule Samen.Web.ContactsGalleryMaskingTest do
       plane (the resolver is the gate, not a blanket mask); (2) leak-scan refutability: a modeled
       raw (unmasked) card render IS caught by the same scan, so the RED assertion is not vacuous.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -55,7 +56,7 @@ defmodule Samen.Web.ContactsGalleryMaskingTest do
     assert html =~ @secret_first
     assert html =~ @secret_last
     assert html =~ @secret_email
-    refute html =~ "vt_"
+    refute_vault_token(html)
     # The non-PII display name rides along on every plane.
     assert html =~ "Public Gallery Display"
   end

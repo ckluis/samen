@@ -1,0 +1,22 @@
+# SABOTAGE: the guard detector counts only the bare Mount.scope( call, so a capture, an alias, an import or 
+#   apply/3 adds nothing
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_guard_test.exs
+# MUST_FAIL: the capture, alias, import and apply spellings are counted
+diff --git a/samen_web/lib/samen/web/tenant_actor/guard.ex b/samen_web/lib/samen/web/tenant_actor/guard.ex
+index be056aa3..d8b3cf35 100644
+--- a/samen_web/lib/samen/web/tenant_actor/guard.ex
++++ b/samen_web/lib/samen/web/tenant_actor/guard.ex
+@@ -33,8 +33,8 @@ defmodule Samen.Web.TenantActor.Guard do
+ 
+     lines
+     |> Enum.map(fn line ->
+-      count(@call, line) + count(@capture, line) + count(@apply, line) + import_count(line) +
+-        Enum.sum(for re <- alias_res, do: count(re, line))
++      _ = {alias_res}
++      count(@call, line)
+     end)
+     |> Enum.sum()
+   end

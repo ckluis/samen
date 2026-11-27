@@ -115,6 +115,18 @@ defmodule Samen.Pii.Info do
   end
 
   @doc """
+  The reveal actions the compile-time probe rule (`Samen.Reveal.ProbeGuard`) examined on this resource, sorted. A host's
+  test asserts it is non-empty for its reveal resource, so the rule is proven to have SEEN the declaration.
+  """
+  @spec reveal_probes_examined(Spark.Dsl.t() | module()) :: [atom()]
+  def reveal_probes_examined(resource) do
+    case persisted(resource, Samen.Transformers.RevealActions.examined_key()) do
+      list when is_list(list) -> list
+      _ -> []
+    end
+  end
+
+  @doc """
   The set of **reveal actions** declared for a resource via `reveal :action` in
   its `pii do … end` block (T1.5 clause (c); Gate-0 fix task #6).
 

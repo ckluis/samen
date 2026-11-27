@@ -3,7 +3,7 @@ defmodule Demo.AiGroundingCatalogTest do
   T66 — the D9 runtime catalog (`Samen.AI.Catalog`, ADR-043 §8) wired into demo, the
   API-only dogfood host. Demo authors ZERO new lines for this (the leverage guard,
   INV-5): `Samen.AI.Catalog.schema/1`'s default entry point reads the SAME cross-host
-  `config :samen_core, :ash_domains` registry demo already sets in
+  `config :samen_core, :host_domains` registry demo already sets in
   `demo/config/config.exs` for `mix samen.verify.catalog_parity` and friends (see
   `Demo.E6CatalogAdoptionProbeTest` for the sibling adoption-probe precedent) — so a
   host that already registered its domains for the shipped verifiers gets AI
@@ -34,7 +34,7 @@ defmodule Demo.AiGroundingCatalogTest do
 
     assert "cnt_contact" in table_names,
            "demo's own PII-bearing Contact resource must appear via the ambient " <>
-             ":samen_core, :ash_domains registry — no new wiring authored for T66"
+             ":samen_core, :host_domains registry — no new wiring authored for T66"
 
     [contact_table] = Enum.filter(dict["tables"], &(&1["table_name"] == "cnt_contact"))
     by_col = Map.new(contact_table["fields"], fn f -> {f["column_name"], f["pii"]} end)

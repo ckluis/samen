@@ -14,6 +14,7 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
 
   The operator plane stays masked: an error state carries no name, no CDL and no `vt_` token.
   """
+  import Samen.VaultTokenAssert
   use Driftwood.DataCase, async: false
 
   require Ash.Query
@@ -58,11 +59,13 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
   defp broker_socket(panel, extra \\ []) do
     flash_socket()
     |> Phoenix.Component.assign(
-      [org_id: @org, panel: panel, samen_mount: nil, load_filter: %{status: nil, q: ""}] ++ extra
+      [org_id: @org, panel: panel, samen_mount: driftwood_mount(:crm), load_filter: %{status: nil, q: ""}] ++ extra
     )
   end
 
-  defp flash_socket, do: %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, flash: %{}}}
+  defp flash_socket do
+    %Phoenix.LiveView.Socket{assigns: Map.merge(%{__changed__: %{}, flash: %{}}, Map.new(acting_assigns(@org)))}
+  end
 
   defp broker_load(panel, extra \\ []), do: BrokerLive.load_panel(broker_socket(panel, extra), panel, @org)
 
@@ -77,16 +80,16 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
     assert rendered =~ "error-state"
     assert rendered =~ ~s(role="alert")
     assert rendered =~ "Nothing was lost"
-    refute rendered =~ "vt_"
+    refute_vault_token(rendered)
   end
 
   defp seeded_load(name \\ "BRL-P4 dry van") do
-    {:ok, load} = BrokerLive.create_load(@org, %{"name" => name, "lane" => "TX->CA", "rate" => "3200.00", "status" => "open"})
+    {:ok, load} = BrokerLive.create_load(broker_scope(@org), %{"name" => name, "lane" => "TX->CA", "rate" => "3200.00", "status" => "open"})
     load
   end
 
   defp seeded_driver(org \\ @org) do
-    scope = BrokerLive.broker_scope(org)
+    scope = broker_scope(org)
 
     {:ok, driver} =
       Driftwood.Freight.Driver
@@ -257,7 +260,7 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
   describe "get_*_result" do
     test "an outage is :unavailable, a missing or malformed id is :not_found (and logs nothing)" do
       driver = seeded_driver()
-      scope = BrokerLive.broker_scope(@org)
+      scope = broker_scope(@org)
 
       assert {:ok, %{id: id}} = Reads.get_driver_result(scope, driver.id)
       assert id == driver.id
@@ -284,10 +287,10 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
 
     test "dispatch_decision reports an outage as :unavailable, not 'driver not found'" do
       driver = seeded_driver()
-      assert {:ok, _} = BrokerLive.dispatch_decision(@org, driver.id)
+      assert {:ok, _} = BrokerLive.dispatch_decision(broker_scope(@org), driver.id)
 
       break_select!("drv_driver", "drv_status")
-      assert {:error, :unavailable} = quiet(fn -> BrokerLive.dispatch_decision(@org, driver.id) end)
+      assert {:error, :unavailable} = quiet(fn -> BrokerLive.dispatch_decision(broker_scope(@org), driver.id) end)
 
       socket =
         quiet(fn ->
@@ -335,7 +338,7 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
     test "create_load on a failing table is {:error, :unavailable}, not a 'reference is required' changeset" do
       break_writes!("fop_opportunity")
 
-      log = capture_log(fn -> assert {:error, :unavailable} = BrokerLive.create_load(@org, %{"name" => "X", "status" => "open"}) end)
+      log = capture_log(fn -> assert {:error, :unavailable} = BrokerLive.create_load(broker_scope(@org), %{"name" => "X", "status" => "open"}) end)
       assert log =~ "write failed write=driftwood_create_load"
 
       socket =
@@ -363,8 +366,8 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
       load = seeded_load()
       break_writes!("fop_opportunity")
 
-      assert {:error, :unavailable} = quiet(fn -> BrokerLive.update_load(@org, load.id, %{"name" => "RENAMED", "status" => "won"}) end)
-      assert {:error, :unavailable} = quiet(fn -> BrokerLive.delete_load(@org, load.id) end)
+      assert {:error, :unavailable} = quiet(fn -> BrokerLive.update_load(broker_scope(@org), load.id, %{"name" => "RENAMED", "status" => "won"}) end)
+      assert {:error, :unavailable} = quiet(fn -> BrokerLive.delete_load(broker_scope(@org), load.id) end)
 
       socket =
         quiet(fn ->
@@ -375,7 +378,7 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
       refute socket.assigns.delete_load_error == "Could not delete this load."
 
       ddl!("ALTER TABLE fop_opportunity DROP CONSTRAINT zz_p4_broken")
-      assert [%{name: "BRL-P4 dry van"}] = Reads.load_board(BrokerLive.broker_scope(@org))
+      assert [%{name: "BRL-P4 dry van"}] = Reads.load_board(broker_scope(@org))
     end
 
     test "the Edit button opens the modal for a real load (the lane comes off the custom bag)" do
@@ -400,7 +403,7 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
     }
 
     defp new_driver_socket do
-      scope = BrokerLive.broker_scope(@org)
+      scope = broker_scope(@org)
 
       form =
         Driftwood.Freight.Driver
@@ -430,7 +433,7 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
     end
 
     test "a settlement insert that fails is outage copy" do
-      scope = BrokerLive.broker_scope(@org)
+      scope = broker_scope(@org)
 
       form =
         Driftwood.Freight.Settlement
@@ -466,7 +469,7 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
     end
 
     defp submit(resource, params) do
-      scope = BrokerLive.broker_scope(@org)
+      scope = broker_scope(@org)
 
       resource
       |> AshPhoenix.Form.for_create(:create, scope: scope)
@@ -474,7 +477,7 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
     end
 
     test "drv_driver.carrier_id: the DB's foreign-key refusal is a validation error on the form (and a valid one saves)" do
-      {:ok, carrier} = Driftwood.Crm.Company |> Ash.Changeset.for_create(:create, %{org_id: @org, name: "FK Carrier"}, scope: BrokerLive.broker_scope(@org)) |> Ash.create(scope: BrokerLive.broker_scope(@org))
+      {:ok, carrier} = Driftwood.Crm.Company |> Ash.Changeset.for_create(:create, %{org_id: @org, name: "FK Carrier"}, scope: broker_scope(@org)) |> Ash.create(scope: broker_scope(@org))
       params = %{"full_name" => %{"first" => "Fk", "last" => "Driver"}, "cdl_number" => "CDL-FK-1", "cdl_state" => "TX", "status" => "available", "carrier_id" => carrier.id}
 
       # POSITIVE CONTROL: the real FK accepts a real carrier
@@ -529,7 +532,7 @@ defmodule Driftwood.ReadsHonestFailureP4Test do
       assert socket.assigns.loads_error == nil
       assert_error_state(rendered)
       refute rendered =~ "driver-row"
-      refute rendered =~ "vt_"
+      refute_vault_token(rendered)
       # the load board is another read and still renders
       assert rendered =~ "Load board"
       assert rendered =~ "load-row"

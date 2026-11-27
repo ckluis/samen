@@ -25,6 +25,7 @@ defmodule Samen.Web.CRMContactDetailCrudTest do
       stay live, untouched. The archived row still masks its vault fields per
       plane (INV-1), proven separately in `crm_scope_archival_leak_red_path_test.exs`.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   require Ash.Query
@@ -134,7 +135,7 @@ defmodule Samen.Web.CRMContactDetailCrudTest do
     refute rendered =~ Seeds.contact_email()
     refute rendered =~ Seeds.contact_phone()
     # …and the vault token NEVER reaches the DOM.
-    refute rendered =~ "vt_"
+    refute_vault_token(rendered)
     # Masking does not over-block: the non-vaulted job_title stays editable.
     assert rendered =~ ~s(name="form[job_title]")
     assert rendered =~ "Head of Logistics"

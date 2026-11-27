@@ -1,0 +1,20 @@
+# SABOTAGE: the learned per-item rate includes the step's fixed invocation cost, so a small selection 
+#   ratchets into single-mutant runs that each pay the overhead again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: MUTOVH a sharded step's fixed invocation cost is paid once per chunk
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 9af747f2..96b2d2ce 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1205,7 +1205,7 @@ class Run(object):
+             seen[step.id] = round(dur, 1)
+             if rc == 0 and step.parent and step.expected:
+                 seen[step.parent + "#per_item"] = per_item_bucket(seen.get(step.parent + "#per_item", 0),
+-                                                                  max(dur - step.shard_overhead, 0.0) / step.expected)
++                                                                  dur / step.expected)
+             if rc == 0 and step.parent and step.shard_cost:
+                 learn_costs(seen, step, text, dur)
+             atomic_write_json(tp, seen)

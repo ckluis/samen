@@ -33,6 +33,7 @@ defmodule Samen.Web.OperatorDeskCrudTest do
       the kernel's, not a hidden button (anti-tautology: the SAME write on the tenant
       plane succeeds and vault-routes, so the rejection discriminates on the plane).
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   require Ash.Query
@@ -281,7 +282,7 @@ defmodule Samen.Web.OperatorDeskCrudTest do
     refute rendered =~ ~s(phx-click="delete")
     refute rendered =~ "data-confirm"
     # …and no vault-token leak through the (hidden) form plumbing.
-    refute rendered =~ "vt_"
+    refute_vault_token(rendered)
   end
 
   # ---------------------------------------------------------------------------

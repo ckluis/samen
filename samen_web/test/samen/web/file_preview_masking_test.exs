@@ -44,7 +44,7 @@ defmodule Samen.Web.FilePreviewMaskingTest do
 
   Reference: the WS-A notifications-inbox masking test
   (`notifications_masking_test.exs`) — the same tenant-clear ∧ operator-masked shape,
-  the same `refute html =~ "vt_"` red-path scan, the same anti-tautology discipline.
+  the same red-path scan for a vault token in the DOM, the same anti-tautology discipline.
 
   FIRST CONSUMER of `Samen.MaskingCase` (WS-E E2i.1): the per-plane actor shape, the
   resolution seam, and the green/red/sabotage assertions below come from the shared

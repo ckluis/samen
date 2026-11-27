@@ -1,0 +1,20 @@
+# SABOTAGE: The generated endpoint stops serving app.js, so generated apps ship the LiveView client with no 
+#   data-confirm guard
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/endpoint_template_serves_app_js_test.exs
+# MUST_FAIL: every generator template that serves the LiveView client serves app.js with it
+diff --git a/samen_core/priv/templates/endpoint_ex.eex b/samen_core/priv/templates/endpoint_ex.eex
+index ed0e4fd0..b899cce4 100644
+--- a/samen_core/priv/templates/endpoint_ex.eex
++++ b/samen_core/priv/templates/endpoint_ex.eex
+@@ -39,7 +39,7 @@ defmodule <%= module %>Web.Endpoint do
+   plug(Plug.Static,
+     at: "/assets",
+     from: {:samen_web, "priv/static/assets"},
+-    only: ~w(samen_ui.css app.js fonts)
++    only: ~w(samen_ui.css fonts)
+   )
+ 
+   plug(Plug.RequestId)

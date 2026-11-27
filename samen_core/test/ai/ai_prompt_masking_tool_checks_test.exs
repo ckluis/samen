@@ -74,7 +74,7 @@ defmodule Mix.Tasks.Samen.Verify.AiPromptMaskingToolChecksTest do
 
     test "a vt_ sentinel in a tool def is a violation", ctx do
       register(%{"vt_token" => VtTokenTool}, ctx)
-      assert Enum.any?(V.tool_schema_boundedness_violations(), &(&1 =~ "vt_"))
+      assert Enum.any?(V.tool_schema_boundedness_violations(), &(&1 =~ "vt_")) # bare-vt_-ok: the message names the vt_ marker; it is not a token in a page
     end
 
     test "a tool_schema derived from a live Ash.read is a STATICNESS violation", ctx do

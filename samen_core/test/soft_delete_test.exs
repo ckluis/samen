@@ -33,6 +33,7 @@ defmodule Samen.SoftDeleteTest do
   ash_archival's FilterArchived — archived rows then LEAK into default reads and the two
   named tests below MUST fail (the filter application is load-bearing, ADR-037 §5.3 / §5.5).
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
@@ -270,7 +271,7 @@ defmodule Samen.SoftDeleteTest do
       masked = resolve_on_plane(archived, Person, :operator, grant: DenyAll).emails
       assert_plane_masked!(masked)
       assert to_string(masked) == "••••"
-      refute to_string(masked) =~ "vt_"
+      refute_vault_token(to_string(masked))
       refute to_string(masked) =~ "ada.lovelace"
 
       # CONTROL / anti-tautology (Samen.MaskingCase.assert_leak_detected!): the substring

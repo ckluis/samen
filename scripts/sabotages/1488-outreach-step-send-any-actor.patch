@@ -1,0 +1,20 @@
+# SABOTAGE: Outreach StepSend :queue, :mark and :requeue are authorized for any actor again, so a tenant 
+#   can forge or rewrite a send record
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/crm/sequence_send_test.exs
+# MUST_FAIL: a tenant actor of ANY role cannot queue, mark or requeue a StepSend
+diff --git a/samen_core/lib/samen/scopes/outreach/blueprint.ex b/samen_core/lib/samen/scopes/outreach/blueprint.ex
+index 58fd6baa..94cded25 100644
+--- a/samen_core/lib/samen/scopes/outreach/blueprint.ex
++++ b/samen_core/lib/samen/scopes/outreach/blueprint.ex
+@@ -494,7 +494,7 @@ defmodule Samen.Scopes.Outreach.Blueprint do
+           # Internal-only: `Samen.Sequences` and `Samen.Sequences.SendWorker` run these as `authorize?: false` calls.
+           # No actor may queue, resolve or requeue a send (the `ApiKey.mark_used` / `File.promote` precedent).
+           policy action([:queue, :mark, :requeue]) do
+-            forbid_if(always())
++            authorize_if(always())
+           end
+ 
+           policy action_type(:read) do

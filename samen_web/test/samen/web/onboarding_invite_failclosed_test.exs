@@ -62,6 +62,10 @@ defmodule Samen.Web.OnboardingInviteFailClosedTest do
         org_id: ctx.org_id,
         user_id: ctx.user_id,
         samen_session: session,
+        # the person is already resolved as the org's admin (what the page's own load does); what these tests prove is
+        # that the invite's `verified?` fact fails closed on its own
+        acting_scope: %Samen.Scope{actor: %{id: ctx.user_id, org_id: ctx.org_id, role: :admin, kind: :tenant, plane: :tenant}},
+        actor_state: :ok,
         invite_error: nil,
         invited_raw_token: nil
       )

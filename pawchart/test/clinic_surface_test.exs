@@ -27,7 +27,7 @@ defmodule PawChart.ClinicSurfaceTest do
   @org_b "c1112d00-0000-4000-8000-00000000b001"
 
   defp create_owner!(org, first, opts \\ []) do
-    Reads.create_owner(org, %{
+    Reads.create_owner(clinic_scope(org), %{
       "first" => first,
       "last" => "Owner",
       "email" => Keyword.get(opts, :email, "#{String.downcase(first)}@example.test"),
@@ -37,7 +37,7 @@ defmodule PawChart.ClinicSurfaceTest do
   end
 
   defp create_pet!(org, name, owner_id \\ nil) do
-    Reads.create_pet(org, %{
+    Reads.create_pet(clinic_scope(org), %{
       "name" => name,
       "species" => "canine",
       "owner_id" => owner_id || ""
@@ -75,7 +75,7 @@ defmodule PawChart.ClinicSurfaceTest do
     a_owner = create_owner!(@org_a, "Alice")
     b_owner = create_owner!(@org_b, "SecretBoberta")
 
-    a_roster = Reads.owner_roster(Reads.tenant_scope(@org_a))
+    a_roster = Reads.owner_roster(clinic_scope(@org_a))
     a_ids = Enum.map(a_roster, & &1.id)
 
     # RED: clinic B's patient is invisible to clinic A.
@@ -90,7 +90,7 @@ defmodule PawChart.ClinicSurfaceTest do
     a_pet = create_pet!(@org_a, "Rex-A")
     b_pet = create_pet!(@org_b, "Rex-B")
 
-    a_pet_ids = @org_a |> Reads.tenant_scope() |> Reads.pet_roster() |> Enum.map(& &1.id)
+    a_pet_ids = @org_a |> clinic_scope() |> Reads.pet_roster() |> Enum.map(& &1.id)
 
     refute b_pet.id in a_pet_ids
     assert a_pet.id in a_pet_ids
@@ -100,7 +100,7 @@ defmodule PawChart.ClinicSurfaceTest do
     a_owner = create_owner!(@org_a, "Ada")
     b_owner = create_owner!(@org_b, "Bianca")
 
-    scope_a = Reads.tenant_scope(@org_a)
+    scope_a = clinic_scope(@org_a)
 
     # A foreign-org id (e.g. supplied via ?patient=<B>) is invisible under OrgScope.
     assert :error = Reads.get_owner(scope_a, b_owner.id)
@@ -113,7 +113,7 @@ defmodule PawChart.ClinicSurfaceTest do
     b_owner = create_owner!(@org_b, "Boris")
 
     assert {:error, _} =
-             Reads.create_pet(@org_a, %{"name" => "CrossPet", "species" => "feline", "owner_id" => b_owner.id})
+             Reads.create_pet(clinic_scope(@org_a), %{"name" => "CrossPet", "species" => "feline", "owner_id" => b_owner.id})
 
     # No pet row references that cross-org owner.
     count =
@@ -130,9 +130,9 @@ defmodule PawChart.ClinicSurfaceTest do
   # ==========================================================================
 
   test "clinic staff can CREATE a patient and it appears in the org's roster" do
-    assert {:ok, owner} = Reads.create_owner(@org_a, %{"first" => "Nora", "last" => "New", "email" => "nora@example.test"})
+    assert {:ok, owner} = Reads.create_owner(clinic_scope(@org_a), %{"first" => "Nora", "last" => "New", "email" => "nora@example.test"})
 
-    roster = Reads.owner_roster(Reads.tenant_scope(@org_a))
+    roster = Reads.owner_roster(clinic_scope(@org_a))
     assert owner.id in Enum.map(roster, & &1.id)
   end
 
@@ -140,7 +140,7 @@ defmodule PawChart.ClinicSurfaceTest do
     owner = create_owner!(@org_a, "Edith")
 
     assert {:ok, _} =
-             Reads.update_owner(@org_a, owner.id, %{
+             Reads.update_owner(clinic_scope(@org_a), owner.id, %{
                "first" => "Edith",
                "last" => "Owner",
                "email" => "edith@example.test",
@@ -148,7 +148,7 @@ defmodule PawChart.ClinicSurfaceTest do
                "marketing_opt_in" => "true"
              })
 
-    {:ok, reloaded} = Reads.get_owner(Reads.tenant_scope(@org_a), owner.id)
+    {:ok, reloaded} = Reads.get_owner(clinic_scope(@org_a), owner.id)
     assert reloaded.marketing_opt_in == true
   end
 
@@ -163,27 +163,27 @@ defmodule PawChart.ClinicSurfaceTest do
           emails: ["first@example.test", "second@example.test", "third@example.test"],
           phones: ["+15550000001", "+15550000002"]
         },
-        scope: Reads.tenant_scope(@org_a)
+        scope: clinic_scope(@org_a)
       )
-      |> Ash.create(scope: Reads.tenant_scope(@org_a))
+      |> Ash.create(scope: clinic_scope(@org_a))
 
     assert {:ok, _} =
-             Reads.update_owner(@org_a, owner.id, %{
+             Reads.update_owner(clinic_scope(@org_a), owner.id, %{
                "first" => "Multi",
                "last" => "Contact",
                "email" => "renamed@example.test",
                "phone" => "+15559999999"
              })
 
-    {:ok, reloaded} = Reads.get_owner(Reads.tenant_scope(@org_a), owner.id)
+    {:ok, reloaded} = Reads.get_owner(clinic_scope(@org_a), owner.id)
     assert Jason.decode!(reloaded.emails) == ["renamed@example.test", "second@example.test", "third@example.test"]
     assert Jason.decode!(reloaded.phones) == ["+15559999999", "+15550000002"]
 
     # Clearing the first field removes only that entry.
     assert {:ok, _} =
-             Reads.update_owner(@org_a, owner.id, %{"first" => "Multi", "last" => "Contact", "email" => "", "phone" => ""})
+             Reads.update_owner(clinic_scope(@org_a), owner.id, %{"first" => "Multi", "last" => "Contact", "email" => "", "phone" => ""})
 
-    {:ok, cleared} = Reads.get_owner(Reads.tenant_scope(@org_a), owner.id)
+    {:ok, cleared} = Reads.get_owner(clinic_scope(@org_a), owner.id)
     assert Jason.decode!(cleared.emails) == ["second@example.test", "third@example.test"]
     assert Jason.decode!(cleared.phones) == ["+15550000002"]
   end
@@ -192,7 +192,7 @@ defmodule PawChart.ClinicSurfaceTest do
     owner = create_owner!(@org_a, "Petra")
 
     assert {:ok, pet} =
-             Reads.create_pet(@org_a, %{
+             Reads.create_pet(clinic_scope(@org_a), %{
                "name" => "Fido",
                "species" => "canine",
                "breed" => "labrador",

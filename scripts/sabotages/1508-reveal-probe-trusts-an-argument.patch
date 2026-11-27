@@ -1,0 +1,20 @@
+# SABOTAGE: the shared reveal probe checks the grant for a caller-supplied value instead of the actor that 
+#   runs the action
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_probe_authz_test.exs
+# MUST_FAIL: naming another id rides nothing; the holder asking as itself is granted
+diff --git a/samen_core/lib/samen/reveal/grant_probe.ex b/samen_core/lib/samen/reveal/grant_probe.ex
+index fe8337f9..21fdcf54 100644
+--- a/samen_core/lib/samen/reveal/grant_probe.ex
++++ b/samen_core/lib/samen/reveal/grant_probe.ex
+@@ -30,7 +30,7 @@ defmodule Samen.Reveal.GrantProbe do
+     subject_id = input.arguments.subject_id
+ 
+     ctx = %Samen.Reveal.Context{
+-      actor: actor,
++      actor: subject_id,
+       subject_id: subject_id,
+       resource: input.resource,
+       action: input.action.name,

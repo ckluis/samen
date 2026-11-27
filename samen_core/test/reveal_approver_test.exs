@@ -8,6 +8,7 @@ defmodule Samen.Reveal.ApproverTest do
   Each guarantee pairs a red path with a positive control (anti-tautology), and three are
   sabotage-pinned (org-scope drop, approve-audit-off-chain, distinct-party self-approval).
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   alias Samen.Reveal.Grants
@@ -92,7 +93,7 @@ defmodule Samen.Reveal.ApproverTest do
       assert Map.keys(row) |> Enum.sort() ==
                [:action, :approval_id, :org_id, :reason, :request_id, :requested_at, :requestor_id, :resource, :subject_id]
 
-      refute row |> Map.values() |> Enum.any?(fn v -> is_binary(v) and String.contains?(v, "vt_") end)
+      row |> Map.values() |> Enum.filter(&is_binary/1) |> Enum.each(&refute_vault_token/1)
     end
 
     test "RED: a different org sees NONE of another org's pending reveal requests (org-scope)" do

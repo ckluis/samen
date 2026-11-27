@@ -4,6 +4,7 @@ defmodule Samen.Web.SupportRenderTest do
   BOTH support PII surfaces: agent `full_name`/`email` and message `body` — tenant clear vs
   operator ••••, on both the inbox and the ticket-detail page.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   setup do
@@ -43,7 +44,7 @@ defmodule Samen.Web.SupportRenderTest do
 
     assert html =~ "••••"
     refute html =~ Seeds.message_body()
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   test "OPERATOR plane: Details tab masks agent name + email, plaintext absent", %{org_id: org_id, ticket_id: ticket_id} do

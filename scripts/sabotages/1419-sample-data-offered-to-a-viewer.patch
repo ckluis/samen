@@ -1,0 +1,18 @@
+# SABOTAGE: a viewer's load_sample_data seeds the org through the system scope
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_surfaces_test.exs
+# MUST_FAIL: the sample-data offer is member+ only
+diff --git a/samen_web/lib/samen/web/sample_data.ex b/samen_web/lib/samen/web/sample_data.ex
+index f92d1747..857be0b0 100644
+--- a/samen_web/lib/samen/web/sample_data.ex
++++ b/samen_web/lib/samen/web/sample_data.ex
+@@ -72,7 +72,6 @@ defmodule Samen.Web.SampleData do
+ 
+   def load(%Mount{} = mount, org_id, %Samen.Scope{} = scope) do
+     cond do
+-      not Samen.Web.TenantActor.administrable?(mount, scope) -> {:error, :forbidden}
+       not enabled?() -> {:error, :disabled}
+       mount.scope_kind not in @sample_kinds -> {:error, {:no_sample_data, mount.scope_kind}}
+       not FirstRun.first_run?(mount, org_id, scope) -> {:ok, :already_loaded}

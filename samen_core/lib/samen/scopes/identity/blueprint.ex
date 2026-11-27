@@ -422,24 +422,9 @@ defmodule Samen.Scopes.Identity.Blueprint do
 
           # The declared reveal action (operator-plane plaintext under a grant).
           action :reveal_user, :map do
-            argument(:actor_id, :string, allow_nil?: false)
             argument(:subject_id, :string, allow_nil?: false)
 
-            run(fn input, _ctx ->
-              ctx = %Samen.Reveal.Context{
-                actor: input.arguments.actor_id,
-                subject_id: input.arguments.subject_id,
-                resource: __MODULE__,
-                action: :reveal_user,
-                label: :emails
-              }
-
-              if Samen.Reveal.grant_checker().granted?(ctx) do
-                {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-              else
-                {:error, :denied}
-              end
-            end)
+            run({Samen.Reveal.GrantProbe, label: :emails})
           end
         end
 
@@ -466,7 +451,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
           # inside the run/2 is the real control. Allow it to run for any actor —
           # the grant check denies by default.
           policy action(:reveal_user) do
-            authorize_if(always())
+            authorize_if(actor_present())
           end
         end
       end
@@ -1023,24 +1008,9 @@ defmodule Samen.Scopes.Identity.Blueprint do
           end
 
           action :reveal_invitation, :map do
-            argument(:actor_id, :string, allow_nil?: false)
             argument(:subject_id, :string, allow_nil?: false)
 
-            run(fn input, _ctx ->
-              ctx = %Samen.Reveal.Context{
-                actor: input.arguments.actor_id,
-                subject_id: input.arguments.subject_id,
-                resource: __MODULE__,
-                action: :reveal_invitation,
-                label: :email
-              }
-
-              if Samen.Reveal.grant_checker().granted?(ctx) do
-                {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-              else
-                {:error, :denied}
-              end
-            end)
+            run({Samen.Reveal.GrantProbe, label: :email})
           end
 
           # ADR-035 §5 A5 — the ONE atomic single-use `pending -> accepted`
@@ -1154,7 +1124,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
           end
 
           policy action(:reveal_invitation) do
-            authorize_if(always())
+            authorize_if(actor_present())
           end
         end
       end

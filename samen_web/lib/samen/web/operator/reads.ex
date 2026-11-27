@@ -48,6 +48,10 @@ defmodule Samen.Web.Operator.Reads do
   # the hot lists themselves read through the paginated `accounts_page/3` / `desk_page/3`.
   @lookup_limit 200
 
+  # The page size of `read_all!/2`'s keyset walk. It bounds each READ, never the set read: every join below is
+  # walked to its end, so a book with more than one page of tenants is summed, scored and listed in full.
+  @walk_page 200
+
   @doc """
   Assemble the operator's ACCOUNTS (ADR-010 §4a). Each account IS a tenant org
   (`Identity.Org` in the operator namespace), joined to:
@@ -248,9 +252,8 @@ defmodule Samen.Web.Operator.Reads do
 
       Mount.resource(mount, Ticket)
       |> Ash.Query.ensure_selected([:subject, :status, :priority, :sla_breach_at, :breached, :custom])
-      |> Ash.Query.sort(inserted_at: :asc)
-      |> Ash.Query.limit(@lookup_limit)
-      |> Ash.read!(scope: scope)
+      |> read_all!(scope: scope)
+      |> oldest_first()
       |> Enum.map(&desk_row(&1, joins))
     end)
   end
@@ -693,9 +696,8 @@ defmodule Samen.Web.Operator.Reads do
     Mount.resource(mount, Org)
     |> Ash.Query.ensure_selected([:name, :slug, :plan, :org_id])
     |> Ash.Query.filter(org_id == ^operator_org_id and id != ^operator_org_id)
-    |> Ash.Query.sort(name: :asc)
-    |> Ash.Query.limit(@lookup_limit)
-    |> Ash.read!(authorize?: false)
+    |> read_all!(authorize?: false)
+    |> Enum.sort_by(& &1.name)
   end
 
   # All tenant-admin Users (admin Membership), PII-resolved on the tenant plane (CLEAR),
@@ -727,15 +729,13 @@ defmodule Samen.Web.Operator.Reads do
   defp memberships(mount, scope) do
     Mount.resource(mount, Membership)
     |> Ash.Query.ensure_selected([:role, :status, :user_id, :org_id])
-    |> Ash.Query.limit(@lookup_limit)
-    |> Ash.read!(scope: scope)
+    |> read_all!(scope: scope)
   end
 
   defp users_by_id(mount, scope) do
     Mount.resource(mount, User)
     |> Ash.Query.ensure_selected([:handle, :status, :full_name, :emails])
-    |> Ash.Query.limit(@lookup_limit)
-    |> Ash.read!(scope: scope)
+    |> read_all!(scope: scope)
     |> resolve_pii(mount, User, scope)
     |> Map.new(&{&1.id, &1})
   end
@@ -751,9 +751,8 @@ defmodule Samen.Web.Operator.Reads do
 
     Mount.resource(mount, Subscription)
     |> Ash.Query.ensure_selected([:status, :customer_id, :plan_id, :current_period_end])
-    |> Ash.Query.sort(inserted_at: :asc)
-    |> Ash.Query.limit(@lookup_limit)
-    |> Ash.read!(scope: scope)
+    |> read_all!(scope: scope)
+    |> oldest_first()
     |> Enum.map(fn sub ->
       mrr = if sub.status == :active, do: Map.get(prices_by_plan, sub.plan_id, 0), else: 0
 
@@ -788,9 +787,8 @@ defmodule Samen.Web.Operator.Reads do
   defp customers(mount, scope) do
     Mount.resource(mount, Customer)
     |> Ash.Query.ensure_selected([:billing_name, :billing_email, :status, :currency, :custom])
-    |> Ash.Query.sort(inserted_at: :asc)
-    |> Ash.Query.limit(@lookup_limit)
-    |> Ash.read!(scope: scope)
+    |> read_all!(scope: scope)
+    |> oldest_first()
     |> resolve_pii(mount, Customer, scope)
   end
 
@@ -799,9 +797,8 @@ defmodule Samen.Web.Operator.Reads do
 
     Mount.resource(mount, Invoice)
     |> Ash.Query.ensure_selected([:status, :amount_due_cents, :amount_paid_cents, :currency, :due_date, :paid_at, :customer_id])
-    |> Ash.Query.sort(inserted_at: :asc)
-    |> Ash.Query.limit(@lookup_limit)
-    |> Ash.read!(scope: scope)
+    |> read_all!(scope: scope)
+    |> oldest_first()
     |> Enum.map(fn inv ->
       inv
       |> Map.take([:id, :status, :amount_due_cents, :amount_paid_cents, :currency, :due_date, :paid_at, :customer_id])
@@ -812,8 +809,7 @@ defmodule Samen.Web.Operator.Reads do
   defp plans_by_id(mount, scope) do
     Mount.resource(mount, Plan)
     |> Ash.Query.ensure_selected([:name, :label, :interval])
-    |> Ash.Query.limit(@lookup_limit)
-    |> Ash.read!(scope: scope)
+    |> read_all!(scope: scope)
     |> Map.new(&{&1.id, &1})
   end
 
@@ -823,8 +819,7 @@ defmodule Samen.Web.Operator.Reads do
     Mount.resource(mount, Price)
     |> Ash.Query.ensure_selected([:plan_id, :unit_amount, :interval, :active])
     |> Ash.Query.filter(interval == :monthly and active == true)
-    |> Ash.Query.limit(@lookup_limit)
-    |> Ash.read!(scope: scope)
+    |> read_all!(scope: scope)
     |> Map.new(&{&1.plan_id, Samen.Type.Money.cents(&1.unit_amount)})
   end
 
@@ -835,8 +830,7 @@ defmodule Samen.Web.Operator.Reads do
   defp ticket_counts_by_account(mount, scope) do
     Mount.resource(mount, Ticket)
     |> Ash.Query.ensure_selected([:status, :breached, :custom])
-    |> Ash.Query.limit(@lookup_limit)
-    |> Ash.read!(scope: scope)
+    |> read_all!(scope: scope)
     |> Enum.reduce(%{}, fn t, acc ->
       case get_in(t.custom || %{}, ["requester_org_id"]) do
         nil ->
@@ -955,8 +949,7 @@ defmodule Samen.Web.Operator.Reads do
   defp agents_by_id(mount, scope) do
     Mount.resource(mount, Agent)
     |> Ash.Query.ensure_selected([:handle, :status, :role, :full_name, :email])
-    |> Ash.Query.limit(@lookup_limit)
-    |> Ash.read!(scope: scope)
+    |> read_all!(scope: scope)
     |> resolve_pii(mount, Agent, scope)
     |> Map.new(&{&1.id, &1})
   end
@@ -966,14 +959,13 @@ defmodule Samen.Web.Operator.Reads do
     convs_by_ticket =
       Mount.resource(mount, Conversation)
       |> Ash.Query.ensure_selected([:ticket_id])
-      |> Ash.Query.limit(@lookup_limit)
-      |> Ash.read!(scope: scope)
+      |> read_all!(scope: scope)
       |> Map.new(&{&1.id, &1.ticket_id})
 
     Mount.resource(mount, Message)
     |> Ash.Query.ensure_selected([:conversation_id, :agent_id, :sender_type])
-    |> Ash.Query.limit(@lookup_limit)
-    |> Ash.read!(scope: scope)
+    |> read_all!(scope: scope)
+    |> oldest_first()
     |> Enum.reduce(%{}, fn msg, acc ->
       ticket_id = Map.get(convs_by_ticket, msg.conversation_id)
 
@@ -986,6 +978,36 @@ defmodule Samen.Web.Operator.Reads do
   end
 
   # -- private: shared ----------------------------------------------------------
+
+  # Every row of `query`, read in keyset pages of `@walk_page` on `id` (the page bounds a read, not the set). The
+  # caller orders the result in memory where order matters: the walk itself is ordered by `id`.
+  defp read_all!(query, read_opts) do
+    Stream.unfold(:start, fn
+      :done ->
+        nil
+
+      cursor ->
+        page =
+          query
+          |> then(&if(cursor == :start, do: &1, else: Ash.Query.filter(&1, id > ^cursor)))
+          |> Ash.Query.sort(id: :asc)
+          |> Ash.Query.limit(@walk_page)
+          |> Ash.read!(read_opts)
+
+        case page do
+          [] -> nil
+          rows -> {rows, if(length(rows) < @walk_page, do: :done, else: List.last(rows).id)}
+        end
+    end)
+    |> Enum.concat()
+  end
+
+  # Oldest first by insertion instant (a stable sort over the id-ordered walk, so ties keep id order).
+  defp oldest_first(rows), do: Enum.sort_by(rows, &time_key(&1.inserted_at))
+
+  defp time_key(%DateTime{} = at), do: DateTime.to_unix(at, :microsecond)
+  defp time_key(%NaiveDateTime{} = at), do: at |> DateTime.from_naive!("Etc/UTC") |> time_key()
+  defp time_key(_), do: 0
 
   defp resolve_pii(records, mount, name, scope) do
     Samen.Api.PiiResolution.resolve(

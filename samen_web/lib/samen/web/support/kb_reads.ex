@@ -135,20 +135,32 @@ defmodule Samen.Web.Support.KbReads do
   `Identity.Membership` role (fail-closed `:member`, never `:admin`). PRESERVES every plane marker
   from `Mount.scope/2` (an operator-plane mount keeps `plane: :operator`), so the elevation raises
   RBAC rank only, never the masking plane.
+
+  On an OPERATOR-plane mount it answers `Samen.Web.TenantActor.read_only_scope/2`, never an admin: an operator does not write a tenant's knowledge base.
   """
-  def write_scope(kb_mount, org_id, principal \\ nil),
-    do: Samen.Web.TenantRole.admin_scope(kb_mount, org_id, principal)
+  def write_scope(kb_mount, org_id, principal \\ nil) do
+    if not match?(%Samen.Web.Mount{plane: %{kind: :operator}}, kb_mount),
+      do: Samen.Web.TenantRole.admin_scope(kb_mount, org_id, principal),
+      else: Samen.Web.TenantActor.read_only_scope(kb_mount, org_id)
+  end
 
   @doc """
-  Publish an article (admin-gated by the kernel — `write_scope/2` elevates for the
-  actual `:publish` write; the lookup itself only needs the ordinary member-scoped
-  read) — best-effort reindex on success. The armed host's REAL membership role is derived from
-  the principal stashed on `kb_mount` by `Samen.Web.Live.assign_mount/2` (ADR-045 §4.4).
+  Publish an article (admin-gated by the kernel), best-effort reindex on success. Given a `%Samen.Scope{}` it runs as that
+  scope (the page passes the acting person's, so a member's publish is refused). Given an org id it runs with
+  `write_scope/3` (the disarmed dev admin; an armed host's REAL membership role, from the principal stashed on `kb_mount` by
+  `Samen.Web.Live.assign_mount/2`, ADR-045 §4.4).
   """
-  def publish_article(kb_mount, org_id, id) do
-    read_scope = Mount.scope(kb_mount, org_id)
+  def publish_article(kb_mount, org_or_scope, id)
 
-    case get_article_result(kb_mount, read_scope, id) do
+  def publish_article(kb_mount, %Samen.Scope{} = scope, id), do: do_publish(kb_mount, scope, id)
+
+  def publish_article(kb_mount, org_id, id) when is_binary(org_id),
+    do: do_publish(kb_mount, write_scope(kb_mount, org_id), id)
+
+  # `scope` is what the publish runs with, and it is also what reads the article: an acting scope (the person's own role,
+  # the kernel refuses a non-admin) from the page, or the posture's `write_scope/3` for the org-id spelling.
+  defp do_publish(kb_mount, scope, id) do
+    case get_article_result(kb_mount, scope, id) do
       {:error, :not_found} ->
         {:error, :not_found}
 
@@ -157,11 +169,9 @@ defmodule Samen.Web.Support.KbReads do
         unavailable
 
       {:ok, post} ->
-        admin_scope = write_scope(kb_mount, org_id)
-
-        case post |> Ash.Changeset.for_update(:publish, %{}, scope: admin_scope) |> Ash.update() do
+        case post |> Ash.Changeset.for_update(:publish, %{}, scope: scope) |> Ash.update() do
           {:ok, published} ->
-            reindex(admin_scope, published)
+            reindex(scope, published)
             {:ok, published}
 
           {:error, _} = err ->

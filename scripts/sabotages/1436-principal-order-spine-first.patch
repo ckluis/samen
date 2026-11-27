@@ -1,0 +1,20 @@
+# SABOTAGE: the principal key prefers the spine credential again, so surfaces act as different people in a 
+#   both-keys session
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_surfaces_test.exs
+# MUST_FAIL: every surface acts as the SAME person
+diff --git a/samen_web/lib/samen/web/current_org.ex b/samen_web/lib/samen/web/current_org.ex
+index 6dcf0c49..9e79fa2e 100644
+--- a/samen_web/lib/samen/web/current_org.ex
++++ b/samen_web/lib/samen/web/current_org.ex
+@@ -172,7 +172,7 @@ defmodule Samen.Web.CurrentOrg do
+   def principal_key(mount, session) do
+     legacy = Samen.Web.Auth.authenticated_user_id(session)
+ 
+-    if is_binary(legacy) and legacy_authorizes?(mount, session) do
++    if false and is_binary(legacy) and legacy_authorizes?(mount, session) do
+       {:legacy, legacy}
+     else
+       case spine_credential_id(mount, session) do

@@ -1,0 +1,20 @@
+# SABOTAGE: ProjectsLive builds its create form on the fixed member scope at load, so a viewer's direct 
+#   save_new runs as member
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_crm_work_test.exs
+# MUST_FAIL: a VIEWER cannot create a project by sending save_new on the form built at load
+diff --git a/samen_web/lib/samen/web/work/projects_live.ex b/samen_web/lib/samen/web/work/projects_live.ex
+index bd0332b4..063a7915 100644
+--- a/samen_web/lib/samen/web/work/projects_live.ex
++++ b/samen_web/lib/samen/web/work/projects_live.ex
+@@ -52,7 +52,7 @@ defmodule Samen.Web.Work.ProjectsLive do
+   # can be written, and the page is re-resolved on every `handle_params`.
+   def load(socket, org_id) do
+     case TenantActor.assign_actor(socket, org_id) do
+-      {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
++      {:ok, socket} -> load_for(socket, org_id, Mount.scope(socket.assigns.samen_mount, org_id))
+       {:refused, socket} -> load_refused(socket, org_id)
+     end
+   end

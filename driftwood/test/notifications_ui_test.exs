@@ -19,6 +19,7 @@ defmodule Driftwood.NotificationsUiTest do
   LiveView — only the mount's plane differs — and assert OPPOSITE facts about the
   same sentinel string, so a hardwired pass on either side fails the other.
   """
+  import Samen.VaultTokenAssert
   use Driftwood.DataCase, async: false
 
   require Ash.Query
@@ -60,7 +61,7 @@ defmodule Driftwood.NotificationsUiTest do
 
     # Tenant plane reads its OWN body in the clear (MC-3 green half).
     assert html =~ "SLA breached on"
-    refute html =~ "vt_"
+    refute_vault_token(html)
     refute html =~ "••••"
 
     # Unread badge: EXACTLY one seeded notification is marked read, so unread =
@@ -87,7 +88,7 @@ defmodule Driftwood.NotificationsUiTest do
     # … but the vaulted body is masked: •••• present, plaintext + token ABSENT.
     assert html =~ "••••"
     refute html =~ "SLA breached on"
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   test "RED PATH (org isolation): a foreign org's notifications are invisible through the mount",

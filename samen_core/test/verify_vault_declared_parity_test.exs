@@ -39,7 +39,7 @@ defmodule SamenCore.VerifyVaultDeclaredParityTest do
 
   # The set of routed vault columns, computed from the same domains the task uses.
   defp routed do
-    domains = Application.get_env(:samen_core, :ash_domains, [])
+    domains = Application.get_env(:samen_core, :host_domains, [])
     resources = Samen.Catalog.resource_modules(domains)
     Task.routed_vault_columns(resources)
   end

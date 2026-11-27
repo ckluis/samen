@@ -1,0 +1,19 @@
+# SABOTAGE: the org_id pin walk counts an action that sets org_id in a hook as exercised
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/org_id_pinned_guard_test.exs
+# MUST_FAIL: an action that sets org_id in a hook is NOT counted as exercised
+diff --git a/samen_core/lib/samen/org_id_pinned_guard.ex b/samen_core/lib/samen/org_id_pinned_guard.ex
+index ae81d26e..23abefc3 100644
+--- a/samen_core/lib/samen/org_id_pinned_guard.ex
++++ b/samen_core/lib/samen/org_id_pinned_guard.ex
+@@ -216,7 +216,7 @@ defmodule Samen.OrgIdPinnedGuard do
+           carries_foreign_org?(changeset) and not org_error?(changeset) ->
+             {:violation, resource, action.name, action.type, "the changeset carries org_id #{@org_b}"}
+ 
+-          hook_set?(action, changeset) ->
++          false and hook_set?(action, changeset) ->
+             {:hook_set, resource, action.name}
+ 
+           true ->

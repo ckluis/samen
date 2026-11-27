@@ -4,9 +4,13 @@ defmodule Driftwood.GateE3CsvE2ETest do
   seed vaulted Person → tenant export (clear) → operator export (masked, SAME
   route) → import back through the governed chokepoint → vault-routed at rest.
 
-  Exercises the full stack the `samen_csv_routes` macro mounts, on a real
-  vertical's CRM domain + repo. A gate artifact, not part of the shipped suites.
+  Exercises the governed stack behind the `samen_csv_routes` macro (the export controller, the CRM
+  domain, the repo, the vault) on a real vertical. It calls the controller DIRECTLY, with the
+  `:samen_mount` assign set by hand and a bare session: it does NOT go through the router or a real
+  login (`Driftwood.FilesCsvRouterTest` does, and it is what proves the route carries the mount).
+  A gate artifact, not part of the shipped suites.
   """
+  import Samen.VaultTokenAssert
   use Driftwood.DataCase, async: false
 
   import Plug.Test
@@ -57,14 +61,14 @@ defmodule Driftwood.GateE3CsvE2ETest do
       Plane.scope(Plane.tenant(), org_a)
     )
 
-    # 2. TENANT export via the mounted route — 200, CSV attachment, PII clear.
+    # 2. TENANT export through the controller (mount set by hand) — 200, CSV attachment, PII clear.
     t_conn = export_conn(org_a, []) |> ExportController.export(%{"resource" => "Person"})
     assert t_conn.status == 200
     assert get_resp_header(t_conn, "content-type") |> Enum.join() =~ "text/csv"
     assert t_conn.resp_body =~ @secret_first
-    refute t_conn.resp_body =~ "vt_"
+    refute_vault_token(t_conn.resp_body)
 
-    # 3. OPERATOR export — the SAME route, cells masked •••• , zero plaintext,
+    # 3. OPERATOR export — the SAME controller, cells masked •••• , zero plaintext,
     #    zero vault tokens (AC-G15-2 on a real host).
     o_conn =
       export_conn(org_a, plane: :operator, target_org_id: org_a)
@@ -74,7 +78,7 @@ defmodule Driftwood.GateE3CsvE2ETest do
     assert o_conn.resp_body =~ "••••"
     refute o_conn.resp_body =~ @secret_first
     refute o_conn.resp_body =~ @secret_last
-    refute o_conn.resp_body =~ "vt_"
+    refute_vault_token(o_conn.resp_body)
 
     # 4. DENY-BY-DEFAULT: a non-CRM resource name is 404 on this mount.
     bad = export_conn(org_a, []) |> ExportController.export(%{"resource" => "File"})

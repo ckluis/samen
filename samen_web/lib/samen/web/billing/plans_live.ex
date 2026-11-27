@@ -17,18 +17,21 @@ defmodule Samen.Web.Billing.PlansLive do
   hides the row from the bounded list rather than a hard DB delete, and — no cascade
   declared for billing (§5.4) — a plan's linked prices/subscriptions are never
   refused, they simply stay live). Write affordances are offered on the tenant plane only
-  (`Samen.Web.Billing.Live.writable?/1`); enforcement stays in the kernel — Plan writes
-  are ADMIN-gated (`RoleAtLeast :admin`), so writes go through `Reads.write_scope/2`
-  (same-org, PLANE-PRESERVING role elevation).
+  (`:can_admin`, an admin on the tenant plane); enforcement stays in the kernel — Plan
+  writes are ADMIN-gated (`RoleAtLeast :admin`) and run with the acting person's own scope
+  (`Samen.Web.TenantActor.write_scope/3`).
   """
   use Phoenix.LiveView
 
   import Samen.UI
-  import Samen.Web.Billing.Live, only: [assign_mount: 2, billing_sidebar: 1, writable?: 1]
+  import Samen.Web.Billing.Live, only: [assign_mount: 2, billing_sidebar: 1]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   alias Samen.Web.Billing.Reads
   alias Samen.Web.Reads.Guard
@@ -40,8 +43,8 @@ defmodule Samen.Web.Billing.PlansLive do
     filter_fields: [:name, :label],
     default_sort: {:name, :asc},
     # ADR-040 §5.8 (T37h) — Plan writes are RoleAtLeast :admin-gated (same elevation every
-    # other write event here already applies via Reads.write_scope/3). ADR-045 §4.4 (S1a): the
-    # `(scope, socket)` elevator re-derives the admin scope from the socket's pinned principal.
+    # other write event here already applies via TenantActor.write_scope/3). The `(scope, socket)` elevator runs the
+    # restore with the list's own scope (the acting person's role) on an armed tenant plane.
     write_scope: &Samen.Web.Billing.Reads.restore_admin_scope/2
 
   @impl true
@@ -60,8 +63,10 @@ defmodule Samen.Web.Billing.PlansLive do
   @doc false
   def load(socket, nil) do
     socket
+    |> Samen.Web.ListLive.refuse()
     |> ensure_return_to()
     |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, prices_by_plan: %{}, section_errors: [])
+    |> assign(acting_scope: nil, actor_state: :ok, can_write: false, can_admin: false)
     |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
     |> assign(show_new: false, new_form: nil)
     |> assign(show_edit: false, edit_form: nil, edit_plan_id: nil)
@@ -69,9 +74,54 @@ defmodule Samen.Web.Billing.PlansLive do
     |> assign_new(:delete_error, fn -> nil end)
   end
 
+  # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read, nothing
+  # can be written, and the page is re-resolved on every `handle_params`.
   def load(socket, org_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id)
+    end
+  end
+
+  # Acting again with no URL to patch to (`Samen.Web.TenantActor`, the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _}} = socket), do: load(socket, socket.assigns.org_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): the
+  # same load a refused navigation does, so nothing the page loaded for the person it acted for is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket, socket.assigns.org_id)
+
+  # The person's role or id changed while the page was open: the forms built hold the scope they were built with, so they
+  # are built again with the fresh one.
+  @doc false
+  def actor_changed(%{assigns: %{samen_mount: mount, org_id: org_id, acting_scope: acting}} = socket) do
+    socket = assign(socket, new_form: new_plan_form(mount, org_id, acting))
+
+    case socket.assigns do
+      %{edit_form: form, edit_plan_id: id} when form != nil and not is_nil(id) ->
+        assign(socket, edit_form: edit_plan_form(mount, org_id, acting, find_plan(socket, id)))
+
+      _ ->
+        socket
+    end
+  end
+
+  defp load_refused(socket, org_id) do
+    socket
+    |> Samen.Web.ListLive.refuse()
+    |> ensure_return_to()
+    |> assign(no_org: false, org_id: org_id, prices_by_plan: %{}, section_errors: [])
+    |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
+    |> assign(show_new: false, new_form: nil)
+    |> assign(show_edit: false, edit_form: nil, edit_plan_id: nil)
+    |> assign(show_ents: false, subscriptions: [], entitlements: [])
+    |> assign_new(:delete_error, fn -> nil end)
+  end
+
+  defp load_for(socket, org_id, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
 
     # Each secondary read fails on its own (`section_errors`): none of them blanks the plan list.
     results = [
@@ -93,20 +143,34 @@ defmodule Samen.Web.Billing.PlansLive do
     |> assign_new(:edit_plan_id, fn -> nil end)
     |> assign_new(:show_ents, fn -> false end)
     |> assign_new(:delete_error, fn -> nil end)
-    |> assign(new_form: new_plan_form(mount, org_id))
-    |> assign_new(:edit_form, fn -> nil end)
+    |> assign(new_form: new_plan_form(mount, org_id, scope))
     |> init_list(mount, scope)
+    |> refresh_edit(mount, org_id, scope)
   end
+
+  # The edit form is never kept across a load: it is built again from the plan as the page reads it NOW, with the scope of the
+  # person acting now, or closed when the plan is not on this page (another organisation, archived, paged away). A form kept
+  # with `assign_new` held the scope it was built with, so a demotion or an `?org=` switch followed by a submit used it.
+  defp refresh_edit(%{assigns: %{edit_plan_id: id}} = socket, mount, org_id, scope) when is_binary(id) do
+    case find_plan(socket, id) do
+      nil -> assign(socket, show_edit: false, edit_plan_id: nil, edit_form: nil)
+      plan -> assign(socket, edit_form: edit_plan_form(mount, org_id, scope, plan))
+    end
+  end
+
+  defp refresh_edit(socket, _mount, _org_id, _scope), do: assign(socket, show_edit: false, edit_plan_id: nil, edit_form: nil)
 
   # -- A3 CRUD events (list events belong to the ListLive hook) -----------------
 
   # The kit error state's "Try again" (a failed prices / subscriptions / entitlements read).
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
 
   def handle_event("new_plan", _params, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
-    {:noreply, assign(socket, show_new: true, new_form: new_plan_form(mount, org_id))}
+    %{samen_mount: mount, org_id: org_id, acting_scope: acting} = socket.assigns
+    {:noreply, assign(socket, show_new: true, new_form: new_plan_form(mount, org_id, acting))}
   end
 
   def handle_event("cancel_new", _params, socket) do
@@ -136,11 +200,11 @@ defmodule Samen.Web.Billing.PlansLive do
   # -- Edit plan (name/label/description/interval) — sanctioned update: :* ------
 
   def handle_event("edit_plan", %{"id" => id}, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    %{samen_mount: mount, org_id: org_id, acting_scope: acting} = socket.assigns
 
     case find_plan(socket, id) do
       nil -> {:noreply, socket}
-      plan -> {:noreply, assign(socket, show_edit: true, edit_plan_id: id, edit_form: edit_plan_form(mount, org_id, plan))}
+      plan -> {:noreply, assign(socket, show_edit: true, edit_plan_id: id, edit_form: edit_plan_form(mount, org_id, acting, plan))}
     end
   end
 
@@ -169,7 +233,7 @@ defmodule Samen.Web.Billing.PlansLive do
   # `features` entitlement map via the sanctioned update: :* (fail-closed validated in
   # `Reads.update_plan/4`). Immediate persist keeps the map the source of truth.
   def handle_event("toggle_feature", %{"id" => id, "feature" => feature}, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    %{samen_mount: mount, org_id: org_id, acting_scope: acting} = socket.assigns
     current = normalize_features(find_plan(socket, id))
 
     features =
@@ -177,10 +241,11 @@ defmodule Samen.Web.Billing.PlansLive do
         do: Map.delete(current, feature),
         else: Map.put(current, feature, true)
 
-    case Reads.update_plan(mount, Reads.write_scope(mount, org_id), id, %{features: features}) do
+    case Reads.update_plan(mount, TenantActor.write_scope(mount, org_id, acting), id, %{features: features}) do
       {:ok, _plan} ->
-        socket = load(assign(socket, delete_error: nil), org_id)
-        {:noreply, assign(socket, edit_form: edit_plan_form(mount, org_id, find_plan(socket, id)), edit_plan_id: id, show_edit: true)}
+        # The form is never built here: this handler holds the scope it began with, and its own load may resolve another.
+        # Naming the plan is enough - `load/2` builds the form from the page it reads now, with the scope acting now.
+        {:noreply, load(assign(socket, delete_error: nil, edit_plan_id: id, show_edit: true), org_id)}
 
       {:error, _} ->
         {:noreply, assign(socket, delete_error: "Could not update plan features.")}
@@ -193,23 +258,23 @@ defmodule Samen.Web.Billing.PlansLive do
   def handle_event("cancel_ents", _params, socket), do: {:noreply, assign(socket, show_ents: false)}
 
   def handle_event("grant_ent", %{"subscription_id" => sub, "feature" => feature} = params, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    %{samen_mount: mount, org_id: org_id, acting_scope: acting} = socket.assigns
 
     attrs =
       %{"subscription_id" => sub, "feature" => feature, "org_id" => org_id}
       |> put_expires(params["expires_at"])
 
-    case Reads.grant_entitlement(mount, Reads.write_scope(mount, org_id), attrs) do
+    case Reads.grant_entitlement(mount, TenantActor.write_scope(mount, org_id, acting), attrs) do
       {:ok, _ent} -> {:noreply, load(assign(socket, delete_error: nil), org_id)}
       {:error, _} -> {:noreply, assign(socket, delete_error: "Could not grant this entitlement.")}
     end
   end
 
   def handle_event("revoke_ent", %{"subscription_id" => sub, "feature" => feature}, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    %{samen_mount: mount, org_id: org_id, acting_scope: acting} = socket.assigns
     attrs = %{"subscription_id" => sub, "feature" => feature}
 
-    case Reads.revoke_entitlement(mount, Reads.write_scope(mount, org_id), attrs) do
+    case Reads.revoke_entitlement(mount, TenantActor.write_scope(mount, org_id, acting), attrs) do
       {:ok, _ent} -> {:noreply, load(assign(socket, delete_error: nil), org_id)}
       {:error, _} -> {:noreply, assign(socket, delete_error: "Could not revoke this entitlement.")}
     end
@@ -217,9 +282,9 @@ defmodule Samen.Web.Billing.PlansLive do
 
   # The sanctioned "plan change" edit — enable/disable via the blueprint's update: :*.
   def handle_event("toggle_plan", %{"id" => id}, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    %{samen_mount: mount, org_id: org_id, acting_scope: acting} = socket.assigns
 
-    case Reads.toggle_plan(mount, Reads.write_scope(mount, org_id), id) do
+    case Reads.toggle_plan(mount, TenantActor.write_scope(mount, org_id, acting), id) do
       {:ok, _plan} -> {:noreply, load(assign(socket, delete_error: nil), org_id)}
       {:error, _} -> {:noreply, assign(socket, delete_error: "Could not update this plan.")}
     end
@@ -233,9 +298,9 @@ defmodule Samen.Web.Billing.PlansLive do
   # never refused on their account; any `{:error, _}` here is a genuine failure
   # (e.g. an authorization denial), not the old FK-refusal case.
   def handle_event("delete", %{"id" => id}, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    %{samen_mount: mount, org_id: org_id, acting_scope: acting} = socket.assigns
 
-    case Reads.delete_plan(mount, Reads.write_scope(mount, org_id), id) do
+    case Reads.delete_plan(mount, TenantActor.write_scope(mount, org_id, acting), id) do
       :ok ->
         {:noreply, load(assign(socket, delete_error: nil), org_id)}
 
@@ -244,17 +309,17 @@ defmodule Samen.Web.Billing.PlansLive do
     end
   end
 
-  defp new_plan_form(mount, org_id) do
+  defp new_plan_form(mount, org_id, acting) do
     Mount.resource(mount, Plan)
-    |> AshPhoenix.Form.for_create(:create, scope: Reads.write_scope(mount, org_id))
+    |> AshPhoenix.Form.for_create(:create, scope: TenantActor.write_scope(mount, org_id, acting))
     |> to_form()
   end
 
-  defp edit_plan_form(_mount, _org_id, nil), do: nil
+  defp edit_plan_form(_mount, _org_id, _acting, nil), do: nil
 
-  defp edit_plan_form(mount, org_id, plan) do
+  defp edit_plan_form(mount, org_id, acting, plan) do
     plan
-    |> AshPhoenix.Form.for_update(:update, scope: Reads.write_scope(mount, org_id))
+    |> AshPhoenix.Form.for_update(:update, scope: TenantActor.write_scope(mount, org_id, acting))
     |> to_form()
   end
 
@@ -288,10 +353,10 @@ defmodule Samen.Web.Billing.PlansLive do
             <.button :if={not @no_org} phx-click="toggle_archived" id="toggle-archived-plans">
               {if @list_state.show_archived, do: "Hide archived", else: "Show archived"}
             </.button>
-            <.button :if={writable?(@samen_mount) and not @no_org} phx-click="open_ents" id="manage-entitlements">
+            <.button :if={@can_admin and not @no_org} phx-click="open_ents" id="manage-entitlements">
               Entitlements
             </.button>
-            <.button :if={writable?(@samen_mount) and not @no_org} variant="primary" phx-click="new_plan" id="new-plan">
+            <.button :if={@can_admin and not @no_org} variant="primary" phx-click="new_plan" id="new-plan">
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M12 3v18M3 12h18" />
@@ -304,9 +369,12 @@ defmodule Samen.Web.Billing.PlansLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Plans" nothing="there are no plans to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">Billing plans org: {@org_id}</span>
 
           <div :if={@delete_error} class="wrap" style="margin-bottom:0">
@@ -333,7 +401,7 @@ defmodule Samen.Web.Billing.PlansLive do
                 empty_icon="◫"
                 empty_body="Plans define what your customers can subscribe to."
               >
-                <:empty_actions :if={writable?(@samen_mount)}>
+                <:empty_actions :if={@can_admin}>
                   <.button variant="primary" phx-click="new_plan" id="empty-new-plan">New plan</.button>
                 </:empty_actions>
                 <:head>
@@ -342,7 +410,7 @@ defmodule Samen.Web.Billing.PlansLive do
                   <.sort_header field={:interval} label="Interval" sort={@list_state.sort} width="12%" />
                   <.sort_header field={:enabled} label="Status" sort={@list_state.sort} width="12%" />
                   <th scope="col" style="width:28%">Entitlements</th>
-                  <th :if={writable?(@samen_mount)} scope="col" style="width:14%"><span class="sr-only">Actions</span></th>
+                  <th :if={@can_admin} scope="col" style="width:14%"><span class="sr-only">Actions</span></th>
                 </:head>
                 <:row :let={plan}>
                   <td class="plan-name">
@@ -374,7 +442,7 @@ defmodule Samen.Web.Billing.PlansLive do
                       </span>
                     </div>
                   </td>
-                  <td :if={writable?(@samen_mount)} class="plan-actions">
+                  <td :if={@can_admin} class="plan-actions">
                     <div style="display:flex;gap:6px;align-items:center">
                       <%= if Map.get(plan, :archived_at) do %>
                         <.pill variant="mut">archived</.pill>
@@ -393,7 +461,7 @@ defmodule Samen.Web.Billing.PlansLive do
             </div>
           </div>
 
-          <.modal :if={@show_new and @new_form != nil and writable?(@samen_mount)} id="new-plan-modal" title="New plan" on_cancel="cancel_new">
+          <.modal :if={@show_new and @new_form != nil and @can_admin} id="new-plan-modal" title="New plan" on_cancel="cancel_new">
             <.simple_form :let={f} for={@new_form} id="new-plan-form" phx-change="validate_new" phx-submit="save_new">
               <.form_field field={f[:name]} label="Name" />
               <.form_field field={f[:label]} label="Label" />
@@ -412,7 +480,7 @@ defmodule Samen.Web.Billing.PlansLive do
           </.modal>
 
           <.modal
-            :if={@show_edit and @edit_form != nil and writable?(@samen_mount)}
+            :if={@show_edit and @edit_form != nil and @can_admin}
             id="edit-plan-modal"
             title="Edit plan"
             on_cancel="cancel_edit"
@@ -452,7 +520,7 @@ defmodule Samen.Web.Billing.PlansLive do
             </div>
           </.modal>
 
-          <.modal :if={@show_ents and writable?(@samen_mount)} id="entitlements-modal" title="Subscription entitlements" on_cancel="cancel_ents">
+          <.modal :if={@show_ents and @can_admin} id="entitlements-modal" title="Subscription entitlements" on_cancel="cancel_ents">
             <%= if :subscriptions in @section_errors or :entitlements in @section_errors do %>
               <.error_state class="entitlements-error" body={Guard.message()} retry_event="retry_load" />
             <% else %>

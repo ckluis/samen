@@ -25,6 +25,7 @@ defmodule Samen.LocationsScopeTest do
     * c6 an ARCHIVED Location keeps its vault token and still masks per plane;
     * c7 catalog registration — `mix samen.verify.catalog_parity` is green.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
   use Samen.MaskingCase
 
@@ -215,7 +216,7 @@ defmodule Samen.LocationsScopeTest do
       masked = resolve_on_plane(l, Location, :operator, repo: @repo, grant: DenyAll).address
       assert_plane_masked!(masked, nil)
       refute to_string(masked) =~ "Mountain View"
-      refute to_string(masked) =~ "vt_"
+      refute_vault_token(to_string(masked))
     end
 
     test "ANTI-TAUTOLOGY: plane flip — the SAME row resolves clear on tenant, masked on operator",

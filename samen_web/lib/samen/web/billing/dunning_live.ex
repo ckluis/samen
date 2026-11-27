@@ -33,6 +33,9 @@ defmodule Samen.Web.Billing.DunningLive do
 
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   alias Samen.Web.Billing.Dunning
 
@@ -60,11 +63,35 @@ defmodule Samen.Web.Billing.DunningLive do
       rows: [],
       load_error: nil
     )
+    |> assign(acting_scope: nil, actor_state: :ok)
   end
 
+  # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read.
   def load(socket, org_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id)
+    end
+  end
+
+  # Acting again with no URL to patch to (`Samen.Web.TenantActor`, the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _}} = socket), do: load(socket, socket.assigns.org_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): the
+  # same load a refused navigation does, so no row the page loaded is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket, socket.assigns.org_id)
+
+  defp load_refused(socket, org_id) do
+    socket
+    |> ensure_return_to()
+    |> assign(no_org: false, org_id: org_id, metrics: empty_metrics(), rows: [], load_error: nil)
+  end
+
+  defp load_for(socket, org_id, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
     # ONE clock reading threaded to both the rows and the header (they cannot desync).
     now = DateTime.utc_now()
 
@@ -87,6 +114,8 @@ defmodule Samen.Web.Billing.DunningLive do
   end
 
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
 
   defp ensure_return_to(socket) do
@@ -106,9 +135,12 @@ defmodule Samen.Web.Billing.DunningLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Dunning" nothing="there are no accounts in dunning to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">Billing dunning org: {@org_id}</span>
 
           <div class="metrics">

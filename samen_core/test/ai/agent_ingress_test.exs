@@ -420,7 +420,7 @@ defmodule Samen.AI.AgentIngressTest do
       sanitized = v |> Secrets.redact() |> Ingress.sanitize()
 
       cond do
-        String.contains?(v, "vt_") or String.contains?(sanitized, "vt_") ->
+        String.contains?(v, "vt_") or String.contains?(sanitized, "vt_") -> # bare-vt_-ok: the reference computation mirrors the production refusal of the marker; not a token-in-a-page check
           "[unrenderable:note]"
 
         byte_size(sanitized) <= 500 ->

@@ -44,6 +44,7 @@ defmodule Demo.MarketingScopeArchivalLeakRedPathTest do
   REAL Marketing `Subscriber` resource (T36 c3 kernel-pilot precedent, T37a/
   T37c per-scope precedent).
   """
+  import Samen.VaultTokenAssert
   use Demo.DataCase, async: false
 
   require Ash.Query
@@ -453,7 +454,7 @@ defmodule Demo.MarketingScopeArchivalLeakRedPathTest do
       masked = resolve_on_plane(archived, Subscriber, :operator, grant: DenyAll).email
       assert_plane_masked!(masked)
       assert to_string(masked) == "••••"
-      refute to_string(masked) =~ "vt_"
+      refute_vault_token(to_string(masked))
       refute to_string(masked) =~ plaintext
 
       # SABOTAGE twin / anti-tautology: the substring scan the RED relies on IS

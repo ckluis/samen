@@ -1,0 +1,20 @@
+# SABOTAGE: Check again on a view with no router does nothing: the page stays refused after the person acts 
+#   again
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_open_page_test.exs
+# MUST_FAIL: retry_actor on a view that recorded no URI
+diff --git a/samen_web/lib/samen/web/tenant_actor.ex b/samen_web/lib/samen/web/tenant_actor.ex
+index eaeac278..fb4557d3 100644
+--- a/samen_web/lib/samen/web/tenant_actor.ex
++++ b/samen_web/lib/samen/web/tenant_actor.ex
+@@ -267,7 +267,7 @@ defmodule Samen.Web.TenantActor do
+     end
+   end
+ 
+-  defp patch_to_self(socket), do: actor_regained(socket)
++  defp patch_to_self(socket), do: socket
+ 
+   defp actor_regained(%{view: view} = socket) when is_atom(view) and not is_nil(view) do
+     if Code.ensure_loaded?(view) and function_exported?(view, :actor_regained, 1),

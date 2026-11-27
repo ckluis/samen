@@ -45,6 +45,7 @@ defmodule Demo.PrimitivesScopeArchivalLeakRedPathTest do
   `%Samen.Masked{}`, never plaintext, never the raw token; restore does not leak
   either.
   """
+  import Samen.VaultTokenAssert
   use Demo.DataCase, async: false
 
   require Ash.Query
@@ -271,7 +272,7 @@ defmodule Demo.PrimitivesScopeArchivalLeakRedPathTest do
       masked = resolve_on_plane(archived, Webhook, :operator, grant: DenyAll).signing_secret
       assert_plane_masked!(masked)
       assert to_string(masked) == "••••"
-      refute to_string(masked) =~ "vt_"
+      refute_vault_token(to_string(masked))
       refute to_string(masked) =~ secret
 
       # SABOTAGE twin / anti-tautology: the substring scan the RED relies on IS

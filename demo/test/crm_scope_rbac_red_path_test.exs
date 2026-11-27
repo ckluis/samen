@@ -236,7 +236,6 @@ defmodule Demo.CrmScopeRbacRedPathTest do
     result =
       Person
       |> Ash.ActionInput.for_action(:reveal_person, %{
-        actor_id: admin_scope.actor.id,
         subject_id: person.id
       })
       |> Ash.run_action(actor: admin_scope.actor, authorize?: true)

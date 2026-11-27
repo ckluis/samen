@@ -46,10 +46,10 @@ config :driftwood,
   ]
 
 # The samen_core verifiers (catalog_parity/prefixes/pii_reads/pii_classify/…)
-# discover domains from :samen_core :ash_domains. Register Driftwood's domains so
+# discover domains from :samen_core :host_domains. Register Driftwood's domains so
 # the gate scans the mounted CRM scope + the vertical Freight resources + the
 # token-blind aggregate plane (T5.3 clause (b)).
-config :samen_core, :ash_domains, [
+config :samen_core, :host_domains, [
   Driftwood.Crm,
   Driftwood.Billing,
   Driftwood.Support,

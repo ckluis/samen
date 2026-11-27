@@ -18,6 +18,7 @@ defmodule Samen.Web.SupportTicketReplyTest do
       rejection discriminates on the plane. The operator DOM also carries no
       composer/status affordance and renders the thread masked (belt).
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.Web.Support.TicketLive
@@ -144,7 +145,7 @@ defmodule Samen.Web.SupportTicketReplyTest do
     refute rendered =~ ~s(id="ticket-status-form")
     refute rendered =~ ~s(phx-change="set_status")
     # And no token leaks through the (unrendered) form plumbing.
-    refute rendered =~ "vt_"
+    refute_vault_token(rendered)
   end
 
   test "RED PATH (MC-1 / RP-G1-7): an operator-plane reply with a plaintext body is REJECTED at the write path; DB unchanged" do

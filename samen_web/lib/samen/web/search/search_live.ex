@@ -32,6 +32,9 @@ defmodule Samen.Web.Search.SearchLive do
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
   alias Samen.Web.Reads.Guard
+  alias Samen.Web.TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
+  require TenantActor
 
   @limit 20
 
@@ -54,20 +57,44 @@ defmodule Samen.Web.Search.SearchLive do
   # LiveView — `mount/3` used to derive it from the params MAP, which `return_path/1` (a URI
   # function) can never read, so it was always nil (found by dialyzer, issue #73).
   @impl true
-  def handle_params(_params, uri, socket),
-    do: {:noreply, assign(socket, :return_to, CurrentOrg.return_path(uri))}
+  def handle_params(params, uri, socket) do
+    org_id = CurrentOrg.reresolve(socket, params)
+    socket = assign(socket, :return_to, CurrentOrg.return_path(uri))
+    {:noreply, load(socket, org_id, params["q"] || socket.assigns[:q] || "")}
+  end
 
   @doc """
   Assign the page state for `org_id` + term `q`: the acting org, the echoed term, and
   the ranked masked-safe results from the engine. Exposed as the framework page-load
   seam (the same shape the render harness drives).
   """
-  def load(socket, org_id, q \\ "") do
+  def load(socket, org_id, q \\ "")
+
+  def load(socket, nil, q) do
     socket
-    |> Phoenix.Component.assign(:org_id, org_id)
-    |> Phoenix.Component.assign(:q, q)
-    |> assign_results(run(socket.assigns[:samen_mount], org_id, q))
+    |> Phoenix.Component.assign(org_id: nil, q: q, acting_scope: nil, actor_state: :ok)
+    |> assign_results({:ok, []})
   end
+
+  # WHO searches: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never `Mount.scope/2`'s
+  # fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is searched. Searching is a read open to
+  # every role (a viewer included); the engine ranks, scopes and masks for the person's own scope.
+  def load(socket, org_id, q) do
+    socket = Phoenix.Component.assign(socket, org_id: org_id, q: q)
+
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> assign_results(socket, run(socket.assigns[:samen_mount], socket.assigns.acting_scope, q))
+      {:refused, socket} -> assign_results(socket, {:ok, []})
+    end
+  end
+
+  # Acting again with no URL to patch to (the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: org_id, q: q}} = socket), do: load(socket, org_id, q)
+
+  # The refused state an OPEN page falls into when the guard stops an event: no result is kept.
+  @doc false
+  def actor_lost(socket), do: assign_results(socket, {:ok, []})
 
   # A FAILED engine read is not "No matches." (WP6, audit F22): `search_error` makes the palette
   # show the kit error state (with a retry that re-runs the same term); `results` is `[]`.
@@ -81,6 +108,8 @@ defmodule Samen.Web.Search.SearchLive do
     do: Phoenix.Component.assign(socket, results: [], search_error: nil)
 
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("search", %{"q" => q}, socket) do
     {:noreply, load(socket, socket.assigns.org_id, q)}
   end
@@ -91,11 +120,7 @@ defmodule Samen.Web.Search.SearchLive do
 
   # The one call into the engine — mount facts + acting scope in, ranked masked-safe
   # results out. No org / blank term → no results (the engine is fail-closed anyway).
-  defp run(_mount, nil, _q), do: {:ok, []}
-
-  defp run(%Mount{} = mount, org_id, q) do
-    scope = Mount.scope(mount, org_id)
-
+  defp run(%Mount{} = mount, %Samen.Scope{} = scope, q) do
     Guard.run(:search_query, scope, fn ->
       Search.query(scope, q,
         resources: searchable_resources(mount),
@@ -106,7 +131,7 @@ defmodule Samen.Web.Search.SearchLive do
     end)
   end
 
-  defp run(_mount, _org_id, _q), do: {:ok, []}
+  defp run(_mount, _no_scope, _q), do: {:ok, []}
 
   # The candidate resources are the mount domain's resources MINUS the registry itself.
   defp searchable_resources(%Mount{domain: domain} = mount) do
@@ -143,7 +168,8 @@ defmodule Samen.Web.Search.SearchLive do
       <%= if is_nil(@org_id) do %>
         <.no_org_card mount={@samen_mount} />
       <% else %>
-        <div class="pane">
+        <.actor_refused :if={@actor_state in [:denied, :unavailable]} state={@actor_state} title="Search" nothing="there is nothing to search" />
+        <div :if={@actor_state == :ok} class="pane">
           <.command_palette id="cmdk" q={@q} results={@results} event="search" error={@search_error} retry_event="retry_search" />
         </div>
       <% end %>
