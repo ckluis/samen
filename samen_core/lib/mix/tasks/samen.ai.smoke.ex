@@ -33,7 +33,7 @@ defmodule Mix.Tasks.Samen.Ai.Smoke do
 
   @impl Mix.Task
   def run(argv) do
-    {opts, _rest, _} = OptionParser.parse(argv, strict: [prompt: :string])
+    opts = Samen.Gen.Args.parse!("samen.ai.smoke", argv, [prompt: :string])
     prompt = Keyword.get(opts, :prompt, @default_prompt)
     live? = System.get_env("SAMEN_AI_LIVE") == "1"
 

@@ -67,8 +67,7 @@ defmodule Mix.Tasks.Samen.Verify.Prefixes do
   def run(args) do
     Mix.Task.run("app.start")
 
-    {opts, _rest, _} =
-      OptionParser.parse(args, strict: [repo: :string])
+    opts = Samen.Gen.Args.parse!("samen.verify.prefixes", args, [repo: :string])
 
     repos = resolve_repos(opts)
 

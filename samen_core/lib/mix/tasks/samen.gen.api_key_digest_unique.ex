@@ -66,8 +66,9 @@ defmodule Mix.Tasks.Samen.Gen.ApiKeyDigestUnique do
   def run_kind(argv, kind) do
     k = Map.fetch!(@kinds, kind)
 
-    {opts, _rest, _} =
-      OptionParser.parse(argv, strict: [out: :string, timestamp: :string, domain: :keep, key: :keep])
+    task = "samen.gen." <> if(kind == :csat, do: "csat_token_digest_unique", else: "api_key_digest_unique")
+
+    opts = Samen.Gen.Args.parse!(task, argv, out: :string, timestamp: :string, domain: :keep, key: :keep)
 
     Mix.Task.run("app.config")
     Mix.Task.run("compile")

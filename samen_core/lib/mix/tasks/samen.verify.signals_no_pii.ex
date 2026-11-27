@@ -27,7 +27,7 @@ defmodule Mix.Tasks.Samen.Verify.SignalsNoPii do
   def run(args) do
     Mix.Task.run("app.start")
 
-    {opts, _rest, _} = OptionParser.parse(args, strict: [domain: :keep])
+    opts = Samen.Gen.Args.parse!("samen.verify.signals_no_pii", args, [domain: :keep])
 
     # Every resource of the domains, whatever its data layer — not `Samen.Catalog`'s
     # table-backed subset: any resource can emit or listen to a signal.

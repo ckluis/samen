@@ -61,7 +61,7 @@ defmodule Mix.Tasks.Samen.Verify.SameOrgFk do
   def run(args) do
     Mix.Task.run("app.start")
 
-    {opts, _rest, _} = OptionParser.parse(args, strict: [domain: :keep])
+    opts = Samen.Gen.Args.parse!("samen.verify.same_org_fk", args, [domain: :keep])
 
     Samen.Verifier.halt_if_violations(@task_name, violations(opts))
   end

@@ -52,7 +52,7 @@ defmodule Mix.Tasks.Samen.Verify.VaultTokenBinding do
   def run(args) do
     Mix.Task.run("app.start")
 
-    {opts, _rest, _} = OptionParser.parse(args, strict: [repo: :string])
+    opts = Samen.Gen.Args.parse!("samen.verify.vault_token_binding", args, [repo: :string])
 
     resources = discover_resources()
     halt_if_vacuous!(resources)
