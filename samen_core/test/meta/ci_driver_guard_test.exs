@@ -369,3 +369,11 @@ defmodule Samen.Meta.CiDriverGuardTest.KillWait do
     Samen.Meta.CiDriverGuard.run_case!("KILLWAIT")
   end
 end
+
+defmodule Samen.Meta.CiDriverGuardTest.SeamGuard do
+  use ExUnit.Case, async: true
+
+  test "SEAMGUARD a test seam never changes a real run silently: refused without the self-test marker, refused when malformed" do
+    Samen.Meta.CiDriverGuard.run_case!("SEAMGUARD")
+  end
+end

@@ -134,6 +134,8 @@ _ci_test_exit() { local rc=$?; fixture_finish || rc=1; rm -rf "$T"; trap - EXIT;
 trap _ci_test_exit EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+# The marker that lets the driver honour its SAMEN_CI_TEST_* seams at all (docs/ci.md): only this script sets it.
+export SAMEN_CI_SELFTEST=ci_test.sh
 
 pass=0
 fail=0
@@ -2650,12 +2652,15 @@ shift; echo "rerun \$*" >> "\$CI_TEST_RUNS"
 $stubborn
 MIX
   chmod +x "$T/bin/mix"
-  for part in step rerun loud; do
+  for part in step rerun loud leader; do
     rm -f "$member" "$release"
     linger=3; waitlim=10
-    [[ $part == loud ]] && { linger=60; waitlim=1; }
+    [[ $part == loud || $part == leader ]] && { linger=60; waitlim=1; }
     { echo "$APPS"
-      if [[ $part != rerun ]]; then
+      if [[ $part == leader ]]; then
+        # the LEADER itself ignores SIGTERM (the member is irrelevant): after SIGKILL + the linger seam it is "still alive"
+        printf '[step kw]\ncmd = trap "" TERM; echo $$ > %s; for _ in $(seq 1 300); do [ -e %s ] && exit 0; sleep 0.1; done\nmodes = pr\ninputs = core/\nest_s = 1\n' "$member" "$release"
+      elif [[ $part != rerun ]]; then
         printf '[step kw]\ncmd = echo "$CI_STEP" >> "$CI_TEST_RUNS"; %s\nmodes = pr\ninputs = core/\nest_s = 1\n' "$stubborn"
       else
         cat <<'STEP'
@@ -2685,7 +2690,10 @@ STEP
     wait "$pid" 2>/dev/null; rc=$?
     t1="$(python3 -c 'import time; print(time.time())')"
     eq "$rc" 130 "KILLWAIT($part): an interrupted driver exits 130"
-    if [[ $part == loud ]]; then
+    if [[ $part == leader ]]; then
+      has "$T/kw-$part" "leader of process group $pg \\(kw[^)]*\\) did not exit within ${waitlim}s after SIGKILL" "KILLWAIT(leader): a leader that outlives SIGKILL is bounded too and reported loudly (never an unbounded wait)"
+      eq "$(jsonget "$SAMEN_CI_HOME/state.json" 'sorted(v for v in d["running"].values())')" "[$pg]" "KILLWAIT(leader): ... and the group stays recorded as running"
+    elif [[ $part == loud ]]; then
       has "$T/kw-$part" "process group $pg \(kw[^)]*\) is STILL ALIVE ${waitlim}s after SIGKILL" "KILLWAIT(loud): the bound is hit loudly on stderr, naming the group"
       eq "$(jsonget "$SAMEN_CI_HOME/state.json" 'sorted(v for v in d["running"].values())')" "[$pg]" "KILLWAIT(loud): ... and the group stays recorded as running (the next invocation must not overlap)"
     else
@@ -2699,7 +2707,42 @@ STEP
   done
 }
 
-ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW LEDGER DOCS LOCALPATHS GENPROBE GENHEX GENHEXRO NARROW RECHUNK COSTW TIMEOUT SELTMO MUTRATE MUTOVH GENDEPS ESCAPE MUTLINT MUTLOCK LAUNCHREC LAUNCHSEAM RERUNREC GROUPKILL KILLWAIT)
+# SEAMGUARD: the SAMEN_CI_TEST_* seams change how the driver stops and waits (a zero SIGTERM grace skips the traps that
+# restore the tree), so none of them may reach a real run silently. Without the self-test marker (SAMEN_CI_SELFTEST, set
+# only by this script and stripped from every step) a set seam is REFUSED at startup, exit 2, naming the variable, before
+# any step runs; with it, a non-numeric / negative / non-finite value (or an unknown HOLD_KIND) is refused the same way
+# instead of raising from inside terminate_all. Positive control: a valid value with the marker runs the step.
+case_SEAMGUARD() {
+  mkrepo seamguard
+  { echo "$APPS"
+    printf '[step s]\ncmd = echo "start m=${SAMEN_CI_SELFTEST-unset}" >> "$CI_TEST_RUNS"\nmodes = pr\ninputs = core/\nest_s = 1\n'; } > "$SAMEN_CI_MANIFEST"
+  local var val rc out="$T/sg"
+  for var in SAMEN_CI_TEST_HOLD_LAUNCH SAMEN_CI_TEST_HOLD_KIND SAMEN_CI_TEST_HOLD_LIMIT_S \
+             SAMEN_CI_TEST_TERM_GRACE_S SAMEN_CI_TEST_KILL_LINGER_S SAMEN_CI_TEST_KILL_WAIT_S; do
+    val=1; [[ $var == SAMEN_CI_TEST_HOLD_LAUNCH ]] && val="$T/sg.hold"; [[ $var == SAMEN_CI_TEST_HOLD_KIND ]] && val=step
+    env -u SAMEN_CI_SELFTEST "$var=$val" "$CI" pr -j 1 > "$out" 2>&1; rc=$?
+    eq "$rc" 2 "SEAMGUARD: $var without the self-test marker is refused (exit 2)"
+    has "$out" "$var" "SEAMGUARD: ... naming $var"
+    eq "$(runs_of 'start m=unset')$(runs_of 'start m=ci_test.sh')" 00 "SEAMGUARD: ... before any step ran ($var)"
+  done
+  for var in SAMEN_CI_TEST_HOLD_LIMIT_S SAMEN_CI_TEST_TERM_GRACE_S SAMEN_CI_TEST_KILL_LINGER_S SAMEN_CI_TEST_KILL_WAIT_S; do
+    for val in abc -1 nan; do
+      env "$var=$val" "$CI" pr -j 1 > "$out" 2>&1; rc=$?
+      eq "$rc" 2 "SEAMGUARD: $var=$val is refused at startup (exit 2)"
+      has "$out" "$var" "SEAMGUARD: ... naming $var ($val)"
+      hasnt "$out" 'Traceback' "SEAMGUARD: ... never a traceback ($var=$val)"
+      eq "$(runs_of 'start m=ci_test.sh')" 0 "SEAMGUARD: ... before any step ran ($var=$val)"
+    done
+  done
+  env SAMEN_CI_TEST_HOLD_KIND=bogus "$CI" pr -j 1 > "$out" 2>&1; rc=$?
+  eq "$rc" 2 "SEAMGUARD: an unknown HOLD_KIND is refused (exit 2)"
+  has "$out" SAMEN_CI_TEST_HOLD_KIND "SEAMGUARD: ... naming it"
+  env SAMEN_CI_TEST_TERM_GRACE_S=1 SAMEN_CI_TEST_KILL_WAIT_S=2 "$CI" pr -j 1 > "$out" 2>&1; rc=$?
+  eq "$rc" 0 "SEAMGUARD: valid seams with the marker run normally"
+  eq "$(runs_of 'start m=unset')" 1 "SEAMGUARD: ... and the step ran once, with the marker stripped from its environment"
+}
+
+ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW LEDGER DOCS LOCALPATHS GENPROBE GENHEX GENHEXRO NARROW RECHUNK COSTW TIMEOUT SELTMO MUTRATE MUTOVH GENDEPS ESCAPE MUTLINT MUTLOCK LAUNCHREC LAUNCHSEAM RERUNREC GROUPKILL KILLWAIT SEAMGUARD)
 CASES=("$@")
 [[ ${#CASES[@]} -gt 0 ]] || CASES=("${ALL[@]}")
 for c in "${CASES[@]}"; do

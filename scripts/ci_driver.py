@@ -125,7 +125,37 @@ def atomic_write_json(path, data):
 # Self-test seams (scripts/ci_test.sh LAUNCHREC) — test-only, documented in docs/ci.md, and stripped from every step's
 # environment (step_base_env) so a step can never make a nested driver hold.
 TEST_SEAMS = ("SAMEN_CI_TEST_HOLD_LAUNCH", "SAMEN_CI_TEST_HOLD_KIND", "SAMEN_CI_TEST_HOLD_LIMIT_S",
-              "SAMEN_CI_TEST_TERM_GRACE_S", "SAMEN_CI_TEST_KILL_LINGER_S", "SAMEN_CI_TEST_KILL_WAIT_S")
+              "SAMEN_CI_TEST_TERM_GRACE_S", "SAMEN_CI_TEST_KILL_LINGER_S", "SAMEN_CI_TEST_KILL_WAIT_S",
+              "SAMEN_CI_SELFTEST")
+# The seams that carry a number of seconds, and the marker only scripts/ci_test.sh sets: no seam is honoured without it.
+NUMERIC_SEAMS = ("SAMEN_CI_TEST_HOLD_LIMIT_S", "SAMEN_CI_TEST_TERM_GRACE_S", "SAMEN_CI_TEST_KILL_LINGER_S",
+                 "SAMEN_CI_TEST_KILL_WAIT_S")
+SELFTEST_MARKER = ("SAMEN_CI_SELFTEST", "ci_test.sh")
+
+
+def check_test_seams():
+    """A SAMEN_CI_TEST_* seam changes how the driver launches, stops and waits (a zero SIGTERM grace skips the traps that
+    restore the tree), so it must never alter a real run silently: set without the self-test marker, or with a value that
+    is not a finite number of seconds >= 0 (or an unknown HOLD_KIND), it is REFUSED here, at startup, before any step runs
+    and naming the variable — never raised from inside terminate_all, which would orphan the groups."""
+    set_ = [k for k in TEST_SEAMS if k != SELFTEST_MARKER[0] and k in os.environ]
+    if not set_:
+        return
+    if os.environ.get(SELFTEST_MARKER[0]) != SELFTEST_MARKER[1]:
+        raise UsageError("%s is a test-only seam of scripts/ci_test.sh and is refused outside it (unset it) — it would "
+                         "change how this run stops and waits" % ", ".join(set_))
+    for k in NUMERIC_SEAMS:
+        v = os.environ.get(k)
+        if v is None:
+            continue
+        try:
+            ok = math.isfinite(float(v)) and float(v) >= 0
+        except ValueError:
+            ok = False
+        if not ok:
+            raise UsageError("%s=%r is not a number of seconds >= 0" % (k, v))
+    if os.environ.get("SAMEN_CI_TEST_HOLD_KIND", "step") not in ("step", "rerun"):
+        raise UsageError("SAMEN_CI_TEST_HOLD_KIND=%r is not step or rerun" % os.environ["SAMEN_CI_TEST_HOLD_KIND"])
 
 # After SIGKILL the group is waited on until it is GONE (not merely until the leader is reaped): a SIGKILLed grandchild is
 # a zombie until launchd/init reaps it, and under load that is long enough for "the driver exited, nothing of mine is
@@ -1168,7 +1198,7 @@ class Run(object):
                 self.save_state()
         return p.returncode == 0
 
-    def kill_group_and_wait(self, name, pg):
+    def kill_group_and_wait(self, name, pg, proc=None):
         """SIGKILL group `pg` and wait on the STATE: the group no longer exists. Returns True when it is gone. When it is
         still there after KILL_WAIT_S the driver says so on stderr, names the group, and KEEPS a record of it (self.stuck ->
         state.json running) so the next invocation refuses to overlap with it; it never pretends the group is gone."""
@@ -1185,13 +1215,25 @@ class Run(object):
             return group_alive(pg) or time.time() < killed + linger
         while alive() and time.time() < deadline:
             time.sleep(0.05)
-        if not alive():
+        # The leader is reaped here, on the same bound (poll() reaps it): a leader that never dies must not block the
+        # driver forever in a plain wait(). It takes the same loud, record-kept path as a stuck group.
+        def leader_alive():
+            return proc is not None and (proc.poll() is None or time.time() < killed + linger)
+        while leader_alive() and time.time() < deadline:
+            time.sleep(0.05)
+        leader_stuck = leader_alive()
+        if not alive() and not leader_stuck:
             self.stuck.pop(name, None)
             return True
         self.stuck[name] = pg
         self.save_state()
-        sys.stderr.write("ci: process group %d (%s) is STILL ALIVE %gs after SIGKILL — it is recorded as running in "
-                         "state.json; the next scripts/ci refuses to overlap with it until it is gone\n" % (pg, name, wait))
+        if alive():
+            sys.stderr.write("ci: process group %d (%s) is STILL ALIVE %gs after SIGKILL — it is recorded as running in "
+                             "state.json; the next scripts/ci refuses to overlap with it until it is gone\n" % (pg, name, wait))
+        if leader_stuck:
+            sys.stderr.write("ci: leader of process group %d (%s) did not exit within %gs after SIGKILL — the group is "
+                             "recorded as running in state.json; the next scripts/ci refuses to overlap with it until "
+                             "it is gone\n" % (pg, name, wait))
         sys.stderr.flush()
         return False
 
@@ -1214,8 +1256,7 @@ class Run(object):
         while group_alive(pg) and time.time() < deadline:
             time.sleep(0.1)
         if proc.poll() is None or group_alive(pg):
-            self.kill_group_and_wait(name, pg)
-            proc.wait()
+            self.kill_group_and_wait(name, pg, proc)
 
     def finish(self, sid, rc):
         r = self.running.pop(sid)
@@ -1394,8 +1435,7 @@ class Run(object):
             time.sleep(0.2)
         for sid in list(self.running):
             pg = self.running[sid]["proc"].pid
-            self.kill_group_and_wait(sid, pg)
-            self.running[sid]["proc"].wait()
+            self.kill_group_and_wait(sid, pg, self.running[sid]["proc"])
             self.finish(sid, -9)
         for sid, pg in pgs.items():
             if group_alive(pg) and sid not in self.stuck:  # a member that outlived its leader (the leader exited in time)
@@ -2213,6 +2253,7 @@ def parse(argv):
 
 def main(argv):
     try:
+        check_test_seams()
         cmd, pos, opts = parse(argv)
         if cmd == "help":
             sys.stdout.write(USAGE)
