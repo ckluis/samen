@@ -11,6 +11,16 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Fixed: the broker console acts as the signed-in person
+
+- **Driftwood's `/broker` page resolves who acts through `Samen.Web.TenantActor`.** The console built its actor with a fixed
+  `:member` role (`BrokerLive.broker_scope/1`), so a signed-in viewer wrote like a member. The page now acts with the role of
+  the person's active membership, re-resolved before every event; a viewer's page renders no write control and a crafted
+  write event is answered with a flash and writes nothing; a person with no membership gets the denied state, and an open
+  form is closed when the role changes. `BrokerLive.dispatch_decision/2`, `create_load/2`, `update_load/3` and
+  `delete_load/2` take the acting scope in place of an org id, and `broker_scope/1` is gone. Sabotage 1579 removes the viewer
+  refusal and flips the broker role test.
+
 ### Fixed: the clinic page acts as the signed-in person
 
 - **PawChart's clinic page resolves who acts through `Samen.Web.TenantActor`.** The page and `PawChartWeb.ClinicReads` used a

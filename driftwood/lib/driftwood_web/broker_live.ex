@@ -51,8 +51,12 @@ defmodule DriftwoodWeb.BrokerLive do
   # vaulted `full_name` — framework-first, no parallel form pattern.
   import Samen.Web.CRM.Live, only: [full_name_field: 1]
 
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
+
   alias Driftwood.{BrokerRollup, Reads}
   alias Samen.Web.Reads.Guard
+  alias Samen.Web.TenantActor
+  require TenantActor
 
   @impl true
   def mount(params, session, socket) do
@@ -117,12 +121,67 @@ defmodule DriftwoodWeb.BrokerLive do
       drivers: [],
       drivers_error: nil,
       settlements: [],
+      settlements_error: nil,
+      acting_scope: nil,
+      actor_state: :ok,
+      can_write: false
+    )
+  end
+
+  # WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never a fixed `:member`. A
+  # denial or a failed lookup is a STATE of the page: nothing is read, nothing can be written, and the page is
+  # re-resolved on every `handle_params` and before every event.
+  def load_panel(socket, panel, org_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_panel_for(socket, panel, org_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id)
+    end
+  end
+
+  # Acting again with no URL to patch to (the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: org_id, panel: panel}} = socket), do: load_panel(socket, panel, org_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event: nothing the page loaded is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: org_id}} = socket), do: load_refused(socket, org_id)
+
+  # The person's role or id changed while the page was open: every open form was built with the scope it held, so the
+  # forms close and are built again, with the fresh scope, when the person opens them.
+  @doc false
+  def actor_changed(socket) do
+    assign(socket,
+      show_new: false,
+      new_load_form: nil,
+      show_edit_load: false,
+      edit_load_form: nil,
+      show_new_driver: false,
+      new_driver_form: nil,
+      show_edit_driver: false,
+      edit_driver_form: nil,
+      show_new_settlement: false,
+      new_settlement_form: nil,
+      show_edit_settlement: false,
+      edit_settlement_form: nil
+    )
+  end
+
+  defp load_refused(socket, org_id) do
+    assign(actor_changed(socket),
+      no_org: false,
+      org_id: org_id,
+      summary: nil,
+      summary_error: nil,
+      loads: [],
+      loads_error: nil,
+      drivers: [],
+      drivers_error: nil,
+      settlements: [],
       settlements_error: nil
     )
   end
 
-  def load_panel(socket, panel, org_id) do
-    scope = broker_scope(org_id)
+  defp load_panel_for(socket, panel, org_id, scope) do
     filter = Map.get(socket.assigns, :load_filter) || %{}
 
     # Each pane reads through its tagged `_result`: a failed read is `*_error` (the kit error state with
@@ -160,26 +219,6 @@ defmodule DriftwoodWeb.BrokerLive do
       {:ok, uuid} -> Guard.run(:driftwood_broker_summary, scope, fn -> BrokerRollup.summary(uuid) end)
       :error -> {:ok, nil}
     end
-  end
-
-  # A tenant-member scope for the broker over their own org.
-  #
-  # F2 (Gate-5 carry): the actor carries `plane: :tenant`. This is the doc's
-  # (§external-surface :707) "two key classes" tenant-as-owner posture: a tenant reads
-  # its OWN org's PII in CLEAR per its own RBAC, with NO operator reveal grant (the
-  # reveal seam is operator-scoped; it does not sit between a tenant and its own
-  # records). `Driftwood.Reads.driver_roster/1` threads this scope through the SHARED
-  # tenant-plane resolver `Samen.Api.PiiResolution.resolve/4`, which — on the `:tenant`
-  # plane — unmasks the driver's vaulted `full_name`/`cdl_number` to plaintext through
-  # the single vault chokepoint. The OPERATOR impersonation scope carries
-  # `plane: :operator` + an `:impersonation` marker, so the SAME resolver keeps its PII
-  # `%Masked{}` (••••) — fixing today's fail-safe over-masking without opening the
-  # operator plane. OrgScope keys only on `org_id`, so `plane` does not affect isolation.
-  @doc false
-  def broker_scope(org_id) do
-    %Samen.Scope{
-      actor: %{id: "broker:#{org_id}", org_id: org_id, role: :member, kind: :tenant, plane: :tenant}
-    }
   end
 
   # PP-10 (Batch 3 NAV-REACHABILITY) — the `:host_nav_extra` mount-label DATA
@@ -281,6 +320,8 @@ defmodule DriftwoodWeb.BrokerLive do
     assigns =
       assigns
       |> Map.put_new(:samen_mount, nil)
+      |> Map.put_new(:actor_state, :ok)
+      |> Map.put_new(:can_write, false)
       |> Map.put_new(:show_new, false)
       |> Map.put_new(:new_load_form, nil)
       |> Map.put_new(:load_error, nil)
@@ -379,19 +420,19 @@ defmodule DriftwoodWeb.BrokerLive do
                   button T148 removed is replaced by a REAL filter bar inline on the Loads panel
                   (it needs the filtered `load_board/2` read; a header button toggling nothing
                   useful is worse than none). --%>
-            <.button :if={not @no_org and @panel == "loads"} variant="primary" phx-click="new_load" id="new-load">
+            <.button :if={not @no_org and @can_write and @panel == "loads"} variant="primary" phx-click="new_load" id="new-load">
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v18M3 12h18" /></svg>
               </:icon>
               New load
             </.button>
-            <.button :if={not @no_org and @panel == "roster"} variant="primary" phx-click="new_driver" id="new-driver">
+            <.button :if={not @no_org and @can_write and @panel == "roster"} variant="primary" phx-click="new_driver" id="new-driver">
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v18M3 12h18" /></svg>
               </:icon>
               New driver
             </.button>
-            <.button :if={not @no_org and @panel == "settlements"} variant="primary" phx-click="new_settlement" id="new-settlement">
+            <.button :if={not @no_org and @can_write and @panel == "settlements"} variant="primary" phx-click="new_settlement" id="new-settlement">
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v18M3 12h18" /></svg>
               </:icon>
@@ -400,7 +441,8 @@ defmodule DriftwoodWeb.BrokerLive do
           </:actions>
         </.topbar>
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <%!-- T148: was a dev instruction ("Append ?org=<uuid>"). Now a user-facing empty
                 state that routes a new tenant into the framework onboarding wizard. --%>
           <div class="wrap" id="no-org">
@@ -414,7 +456,9 @@ defmodule DriftwoodWeb.BrokerLive do
               </:actions>
             </.empty_state>
           </div>
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Brokerage" nothing="there is nothing to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">Brokerage org: {@org_id}</span>
 
           <%= if @panel == "dashboard" do %>
@@ -522,7 +566,7 @@ defmodule DriftwoodWeb.BrokerLive do
                       icon="◧"
                     >
                       <:actions>
-                        <.button variant="primary" phx-click="new_load" id="empty-new-load">Create your first load</.button>
+                        <.button :if={@can_write} variant="primary" phx-click="new_load" id="empty-new-load">Create your first load</.button>
                       </:actions>
                     </.empty_state>
                   <% true -> %>
@@ -540,8 +584,9 @@ defmodule DriftwoodWeb.BrokerLive do
                         <td class="l-value mono num">{dollars(l.value)}</td>
                         <td class="l-status"><.pill variant={status_variant(l.status)}>{l.status}</.pill></td>
                         <td class="l-actions" style="display:flex;gap:6px">
-                          <.button type="button" phx-click="edit_load" phx-value-id={l.id} id={"edit-load-#{l.id}"}>Edit</.button>
+                          <.button :if={@can_write} type="button" phx-click="edit_load" phx-value-id={l.id} id={"edit-load-#{l.id}"}>Edit</.button>
                           <.delete_confirm
+                            :if={@can_write}
                             id={"delete-load-#{l.id}"}
                             message="Delete this load? This cannot be undone."
                             phx-click="delete_load"
@@ -606,7 +651,7 @@ defmodule DriftwoodWeb.BrokerLive do
                       <% end %>
                     </td>
                     <td class="d-actions">
-                      <.button type="button" phx-click="edit_driver" phx-value-driver={d.id} id={"edit-driver-#{d.id}"}>Edit</.button>
+                      <.button :if={@can_write} type="button" phx-click="edit_driver" phx-value-driver={d.id} id={"edit-driver-#{d.id}"}>Edit</.button>
                     </td>
                   </tr>
                 </.data_table>
@@ -647,7 +692,7 @@ defmodule DriftwoodWeb.BrokerLive do
                           <td class="st-carryover" style="display:none">{dollars(s.carryover_cents)}</td>
                           <td class="st-status"><.pill variant={status_variant(s.status)}>{s.status}</.pill></td>
                           <td class="st-actions">
-                            <.button type="button" phx-click="edit_settlement" phx-value-settlement={s.id} id={"edit-settlement-#{s.id}"}>Edit</.button>
+                            <.button :if={@can_write} type="button" phx-click="edit_settlement" phx-value-settlement={s.id} id={"edit-settlement-#{s.id}"}>Edit</.button>
                           </td>
                         </tr>
                       </.data_table>
@@ -678,7 +723,7 @@ defmodule DriftwoodWeb.BrokerLive do
           <% end %>
 
           <%!-- T148: the "New load" create modal (mirrors the framework CRM create modal). --%>
-          <.modal :if={@show_new and @new_load_form != nil} id="new-load-modal" title="New load" on_cancel="cancel_new_load">
+          <.modal :if={@show_new and @new_load_form != nil and @can_write} id="new-load-modal" title="New load" on_cancel="cancel_new_load">
             <div :if={@load_error} class="card form-error" id="new-load-error" style="padding:10px 14px;color:var(--bad, #b91c1c);font-size:12px;margin-bottom:12px">
               {@load_error}
             </div>
@@ -698,7 +743,7 @@ defmodule DriftwoodWeb.BrokerLive do
                 AshPhoenix.Form) — the Load `value` field is the ADR-036 Money composite and
                 the form only carries a bare dollars string, exactly the constraint T148's
                 create modal already documents. --%>
-          <.modal :if={@show_edit_load and @edit_load_form != nil} id="edit-load-modal" title="Edit load" on_cancel="cancel_edit_load">
+          <.modal :if={@show_edit_load and @edit_load_form != nil and @can_write} id="edit-load-modal" title="Edit load" on_cancel="cancel_edit_load">
             <div :if={@edit_load_error} class="card form-error" id="edit-load-error" style="padding:10px 14px;color:var(--bad, #b91c1c);font-size:12px;margin-bottom:12px">
               {@edit_load_error}
             </div>
@@ -718,12 +763,12 @@ defmodule DriftwoodWeb.BrokerLive do
                 `:create`/`:update` actions (mirrors the framework CRM contact create/edit
                 modal exactly). `full_name_field`/`form_field` are the SAME masking-safe
                 components the CRM modal uses — a `%Samen.Masked{}` value (never reachable
-                here: `broker_scope/1` is always plane: :tenant) renders the read-only ••••
+                here: the acting scope is always plane: :tenant) renders the read-only ••••
                 placeholder by construction, no bespoke branch. FMCSA-gated fields (CDL/med
                 expiry, status) are plain edits — the compliance GATE itself lives on
                 `DispatchEvent.:dispatch`, re-evaluated fresh at dispatch time against
                 whatever this form persists; editing a driver can never skip that check. --%>
-          <.modal :if={@show_new_driver and @new_driver_form != nil} id="new-driver-modal" title="New driver" on_cancel="cancel_new_driver">
+          <.modal :if={@show_new_driver and @new_driver_form != nil and @can_write} id="new-driver-modal" title="New driver" on_cancel="cancel_new_driver">
             <.simple_form :let={f} for={@new_driver_form} id="new-driver-form" phx-change="validate_new_driver" phx-submit="save_new_driver">
               <.full_name_field field={f[:full_name]} label="Full name (🔒 PII)" />
               <.form_field field={f[:cdl_number]} label="CDL number (🔒 PII)" />
@@ -739,7 +784,7 @@ defmodule DriftwoodWeb.BrokerLive do
             </.simple_form>
           </.modal>
 
-          <.modal :if={@show_edit_driver and @edit_driver_form != nil} id="edit-driver-modal" title="Edit driver" on_cancel="cancel_edit_driver">
+          <.modal :if={@show_edit_driver and @edit_driver_form != nil and @can_write} id="edit-driver-modal" title="Edit driver" on_cancel="cancel_edit_driver">
             <.simple_form :let={f} for={@edit_driver_form} id="edit-driver-form" phx-change="validate_edit_driver" phx-submit="save_edit_driver">
               <.full_name_field field={f[:full_name]} label="Full name (🔒 PII)" />
               <.form_field field={f[:cdl_number]} label="CDL number (🔒 PII)" />
@@ -758,7 +803,7 @@ defmodule DriftwoodWeb.BrokerLive do
           <%!-- T158: settlement create/edit — same `AshPhoenix.Form` pattern; Settlement's
                 stored inputs are plain integer-cents columns (no composite type), so unlike
                 Load's `value` these cast directly through the form. --%>
-          <.modal :if={@show_new_settlement and @new_settlement_form != nil} id="new-settlement-modal" title="New settlement" on_cancel="cancel_new_settlement">
+          <.modal :if={@show_new_settlement and @new_settlement_form != nil and @can_write} id="new-settlement-modal" title="New settlement" on_cancel="cancel_new_settlement">
             <.simple_form :let={f} for={@new_settlement_form} id="new-settlement-form" phx-change="validate_new_settlement" phx-submit="save_new_settlement">
               <.form_field field={f[:linehaul_cents]} label="Linehaul (cents)" type="number" min="0" />
               <.form_field field={f[:advances_cents]} label="Advances (cents)" type="number" min="0" />
@@ -775,7 +820,7 @@ defmodule DriftwoodWeb.BrokerLive do
             </.simple_form>
           </.modal>
 
-          <.modal :if={@show_edit_settlement and @edit_settlement_form != nil} id="edit-settlement-modal" title="Edit settlement" on_cancel="cancel_edit_settlement">
+          <.modal :if={@show_edit_settlement and @edit_settlement_form != nil and @can_write} id="edit-settlement-modal" title="Edit settlement" on_cancel="cancel_edit_settlement">
             <.simple_form :let={f} for={@edit_settlement_form} id="edit-settlement-form" phx-change="validate_edit_settlement" phx-submit="save_edit_settlement">
               <.form_field field={f[:linehaul_cents]} label="Linehaul (cents)" type="number" min="0" />
               <.form_field field={f[:advances_cents]} label="Advances (cents)" type="number" min="0" />
@@ -847,8 +892,17 @@ defmodule DriftwoodWeb.BrokerLive do
   # handler re-checks server-side (defence in depth) — an FMCSA-blocked driver never
   # dispatches from the UI action.
   @impl true
+  TenantActor.refuse_events()
+
+  # Every event that opens a form or writes needs the `:member` role: a viewer's page renders none of those controls, and
+  # a crafted event is answered with the page's own flash (the role is re-resolved before every event).
+  @write_events ~w(new_load save_load edit_load save_edit_load delete_load new_driver save_new_driver edit_driver
+                   save_edit_driver new_settlement save_new_settlement edit_settlement save_edit_settlement)
+  def handle_event(event, _params, %{assigns: %{can_write: false}} = socket) when event in @write_events,
+    do: {:noreply, put_flash(socket, :error, "Your role can view this brokerage but not change it.")}
+
   def handle_event("dispatch", %{"driver" => driver_id}, socket) do
-    case dispatch_decision(socket.assigns.org_id, driver_id) do
+    case dispatch_decision(socket.assigns.acting_scope, driver_id) do
       {:error, :not_found} -> {:noreply, put_flash(socket, :error, "driver not found")}
       {:error, :unavailable} -> {:noreply, put_flash(socket, :error, "Couldn't check that driver right now. Nothing was dispatched — try again.")}
       {:error, :forbidden} -> {:noreply, put_flash(socket, :error, Guard.write_copy(:forbidden, "check that driver"))}
@@ -891,7 +945,7 @@ defmodule DriftwoodWeb.BrokerLive do
   end
 
   def handle_event("save_load", %{"load" => params}, socket) do
-    case create_load(socket.assigns.org_id, params) do
+    case create_load(socket.assigns.acting_scope, params) do
       {:ok, _load} ->
         socket =
           socket
@@ -936,7 +990,7 @@ defmodule DriftwoodWeb.BrokerLive do
   # `archivable: true`, ADR-040 §5.9) — `Ash.destroy/2`, never a raw DELETE.
   # ==========================================================================
   def handle_event("edit_load", %{"id" => id}, socket) do
-    scope = broker_scope(socket.assigns.org_id)
+    scope = socket.assigns.acting_scope
 
     case Reads.get_load_result(scope, id) do
       {:error, :not_found} ->
@@ -965,7 +1019,7 @@ defmodule DriftwoodWeb.BrokerLive do
   end
 
   def handle_event("save_edit_load", %{"load" => params}, socket) do
-    case update_load(socket.assigns.org_id, socket.assigns.edit_load_id, params) do
+    case update_load(socket.assigns.acting_scope, socket.assigns.edit_load_id, params) do
       {:ok, _load} ->
         socket =
           socket
@@ -990,7 +1044,7 @@ defmodule DriftwoodWeb.BrokerLive do
   end
 
   def handle_event("delete_load", %{"id" => id}, socket) do
-    case delete_load(socket.assigns.org_id, id) do
+    case delete_load(socket.assigns.acting_scope, id) do
       {:ok, _load} ->
         socket = socket |> assign(delete_load_error: nil) |> put_flash(:info, "Load deleted.")
         {:noreply, load_panel(socket, "loads", socket.assigns.org_id)}
@@ -1011,7 +1065,7 @@ defmodule DriftwoodWeb.BrokerLive do
   # from client params — the same posture `ContactsLive.save_new/2` uses.
   # ==========================================================================
   def handle_event("new_driver", _params, socket) do
-    scope = broker_scope(socket.assigns.org_id)
+    scope = socket.assigns.acting_scope
     {:noreply, assign(socket, show_new_driver: true, driver_error: nil, new_driver_form: new_driver_form(scope))}
   end
 
@@ -1025,7 +1079,7 @@ defmodule DriftwoodWeb.BrokerLive do
   end
 
   def handle_event("save_new_driver", %{"form" => params}, socket) do
-    case Guard.submit_form(:driftwood_save_new_driver, broker_scope(socket.assigns.org_id), socket.assigns.new_driver_form, with_org(params, socket)) do
+    case Guard.submit_form(:driftwood_save_new_driver, socket.assigns.acting_scope, socket.assigns.new_driver_form, with_org(params, socket)) do
       {:ok, _driver} ->
         socket =
           socket
@@ -1044,10 +1098,10 @@ defmodule DriftwoodWeb.BrokerLive do
 
   # The edit form is built over the PII-RESOLVED record (`Reads.get_driver/2` runs the
   # SAME `Samen.Api.PiiResolution` seam `driver_roster/1` uses) — on this console's
-  # `broker_scope/1` (always plane: :tenant) that resolves `full_name`/`cdl_number` to
+  # the acting scope (plane: :tenant) that resolves `full_name`/`cdl_number` to
   # CLEAR. This LiveView never unwraps a `%Samen.Masked{}` or calls the vault directly.
   def handle_event("edit_driver", %{"driver" => driver_id}, socket) do
-    scope = broker_scope(socket.assigns.org_id)
+    scope = socket.assigns.acting_scope
 
     case Reads.get_driver_result(scope, driver_id) do
       {:ok, driver} ->
@@ -1086,7 +1140,7 @@ defmodule DriftwoodWeb.BrokerLive do
   # runs — it can never skip the gate running. See
   # `test/driver_edit_no_fmcsa_bypass_test.exs` for the adversarial proof.
   def handle_event("save_edit_driver", %{"form" => params}, socket) do
-    case Guard.submit_form(:driftwood_save_edit_driver, broker_scope(socket.assigns.org_id), socket.assigns.edit_driver_form, params) do
+    case Guard.submit_form(:driftwood_save_edit_driver, socket.assigns.acting_scope, socket.assigns.edit_driver_form, params) do
       {:ok, _driver} ->
         socket =
           socket
@@ -1109,7 +1163,7 @@ defmodule DriftwoodWeb.BrokerLive do
   # (no composite type), so the form casts them directly.
   # ==========================================================================
   def handle_event("new_settlement", _params, socket) do
-    scope = broker_scope(socket.assigns.org_id)
+    scope = socket.assigns.acting_scope
     {:noreply, assign(socket, show_new_settlement: true, settlement_error: nil, new_settlement_form: new_settlement_form(scope))}
   end
 
@@ -1123,7 +1177,7 @@ defmodule DriftwoodWeb.BrokerLive do
   end
 
   def handle_event("save_new_settlement", %{"form" => params}, socket) do
-    case Guard.submit_form(:driftwood_save_new_settlement, broker_scope(socket.assigns.org_id), socket.assigns.new_settlement_form, with_org(params, socket)) do
+    case Guard.submit_form(:driftwood_save_new_settlement, socket.assigns.acting_scope, socket.assigns.new_settlement_form, with_org(params, socket)) do
       {:ok, _settlement} ->
         socket =
           socket
@@ -1141,7 +1195,7 @@ defmodule DriftwoodWeb.BrokerLive do
   end
 
   def handle_event("edit_settlement", %{"settlement" => settlement_id}, socket) do
-    scope = broker_scope(socket.assigns.org_id)
+    scope = socket.assigns.acting_scope
 
     case Reads.get_settlement_result(scope, settlement_id) do
       {:ok, settlement} ->
@@ -1171,7 +1225,7 @@ defmodule DriftwoodWeb.BrokerLive do
   end
 
   def handle_event("save_edit_settlement", %{"form" => params}, socket) do
-    case Guard.submit_form(:driftwood_save_edit_settlement, broker_scope(socket.assigns.org_id), socket.assigns.edit_settlement_form, params) do
+    case Guard.submit_form(:driftwood_save_edit_settlement, socket.assigns.acting_scope, socket.assigns.edit_settlement_form, params) do
       {:ok, _settlement} ->
         socket =
           socket
@@ -1194,11 +1248,9 @@ defmodule DriftwoodWeb.BrokerLive do
   socket AND shared by the handler. Mirrors the server-side `FmcsaDispatchGate`
   (defence in depth over the disabled button).
   """
-  @spec dispatch_decision(binary(), binary()) ::
+  @spec dispatch_decision(Samen.Scope.t(), binary()) ::
           {:ok, map()} | {:error, :not_found | :fmcsa_blocked | :unavailable | :forbidden}
-  def dispatch_decision(org_id, driver_id) do
-    scope = broker_scope(org_id)
-
+  def dispatch_decision(%Samen.Scope{} = scope, driver_id) do
     # ADR-045 §4.2 (O8): fetch the ONE driver by id via the BOUNDED `Reads.get_driver/2`
     # (limit 1, PII-resolved on the SAME tenant plane) rather than loading + decrypting the
     # ENTIRE org roster and `Enum.find`-ing it — the per-interaction unbounded-sweep amplifier.
@@ -1217,7 +1269,7 @@ defmodule DriftwoodWeb.BrokerLive do
   #
   # A load IS a `Driftwood.Crm.Opportunity` (the freight `Load` alias — see
   # `Driftwood.Reads.load_board/1`), so "post a load" is a governed create through the
-  # resource's REAL `:create` action, over the same tenant `broker_scope/1` every read uses
+  # resource's REAL `:create` action, over the same acting scope every read uses
   # (OrgScope-confined; `RoleAtLeast :member` satisfied). This mirrors the framework CRM
   # `/crm/contacts` create pattern (modal → form → real Ash action → reload → surfaced error);
   # the create call is the SAME one `Driftwood.Seeds` uses, so the money value is built via the
@@ -1232,9 +1284,8 @@ defmodule DriftwoodWeb.BrokerLive do
   `dispatch_decision/2`) so the create path is exercised WITHOUT a live socket. Returns
   `{:ok, opportunity}` or `{:error, changeset}` (e.g. a missing required `name`).
   """
-  @spec create_load(binary(), map()) :: {:ok, struct()} | {:error, term()}
-  def create_load(org_id, raw_params) do
-    scope = broker_scope(org_id)
+  @spec create_load(Samen.Scope.t(), map()) :: {:ok, struct()} | {:error, term()}
+  def create_load(%Samen.Scope{actor: %{org_id: org_id}} = scope, raw_params) do
     attrs = load_attrs(raw_params, org_id)
     # Tier-1 custom-bag governance (T3.8): a `custom` bag key is REJECTED at write unless a
     # `tnt_field` definition exists for it. `Driftwood.Seeds.define_custom_fields/1` registers
@@ -1266,9 +1317,8 @@ defmodule DriftwoodWeb.BrokerLive do
   `:update` action on the tenant broker scope. `{:ok, opportunity}` or
   `{:error, changeset | :not_found}`.
   """
-  @spec update_load(binary(), binary(), map()) :: {:ok, struct()} | {:error, term()}
-  def update_load(org_id, load_id, raw_params) do
-    scope = broker_scope(org_id)
+  @spec update_load(Samen.Scope.t(), binary(), map()) :: {:ok, struct()} | {:error, term()}
+  def update_load(%Samen.Scope{actor: %{org_id: org_id}} = scope, load_id, raw_params) do
     attrs = load_attrs(raw_params, org_id)
 
     with {:ok, load} <- Reads.get_load_result(scope, load_id) do
@@ -1291,10 +1341,8 @@ defmodule DriftwoodWeb.BrokerLive do
   fetch is org-scoped, so an id from another org is genuinely `:not_found` (OrgScope
   makes it not-exist for this actor) — never a cross-org destroy.
   """
-  @spec delete_load(binary(), binary()) :: {:ok, struct()} | {:error, term()}
-  def delete_load(org_id, load_id) do
-    scope = broker_scope(org_id)
-
+  @spec delete_load(Samen.Scope.t(), binary()) :: {:ok, struct()} | {:error, term()}
+  def delete_load(%Samen.Scope{} = scope, load_id) do
     with {:ok, load} <- Reads.get_load_result(scope, load_id) do
       Guard.write(:driftwood_delete_load, scope, fn ->
         Ash.destroy(load, scope: scope, return_destroyed?: true)

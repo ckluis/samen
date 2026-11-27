@@ -73,7 +73,7 @@ defmodule Driftwood.DogfoodWalkthroughTest do
     # through `Samen.Api.PiiResolution.resolve/4`, which unmasks the driver's own CDL +
     # name. (This fixes the Gate-5 F2 fail-safe over-masking — the broker used to see
     # ••••.) The OPERATOR plane still masks (step 7).
-    broker_scope = DriftwoodWeb.BrokerLive.broker_scope(a.org_id)
+    broker_scope = broker_scope(a.org_id)
     drivers = Reads.driver_roster(broker_scope)
     # 3 drivers per org: compliant (OK), expiring-medical (still OK), expired-medical (BLOCKED).
     assert length(drivers) == 3

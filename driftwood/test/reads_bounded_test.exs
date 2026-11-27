@@ -25,7 +25,6 @@ defmodule Driftwood.ReadsBoundedTest do
   require Ash.Query
 
   alias Driftwood.Reads
-  alias DriftwoodWeb.BrokerLive
 
   @org "c1230000-0000-4000-8000-0000000000e8"
 
@@ -56,7 +55,7 @@ defmodule Driftwood.ReadsBoundedTest do
 
   test "BOUND: a roster larger than the requested page returns at MOST the page (not the full set)" do
     for cdl <- ["CDL-A-1", "CDL-B-2", "CDL-C-3"], do: create_driver(cdl)
-    scope = BrokerLive.broker_scope(@org)
+    scope = broker_scope(@org)
 
     # Three drivers exist; a page of two returns exactly two — the read applied its limit and
     # did NOT sweep-and-decrypt the whole roster.
@@ -68,7 +67,7 @@ defmodule Driftwood.ReadsBoundedTest do
 
   test "the caller-supplied :limit can only NARROW the page — it never exceeds the @limit cap" do
     for cdl <- ["CDL-A-1", "CDL-B-2", "CDL-C-3"], do: create_driver(cdl)
-    scope = BrokerLive.broker_scope(@org)
+    scope = broker_scope(@org)
 
     # An over-cap request is clamped, not honored — so it returns every available row (3),
     # never MORE than the cap. (The clamp is the defence-in-depth half of the bound.)
@@ -78,7 +77,7 @@ defmodule Driftwood.ReadsBoundedTest do
   test "CORRECTNESS + masking: the bounded roster returns the right drivers, CLEAR on the tenant plane" do
     seeded = ["CDL-A-1", "CDL-B-2", "CDL-C-3"]
     for cdl <- seeded, do: create_driver(cdl)
-    scope = BrokerLive.broker_scope(@org)
+    scope = broker_scope(@org)
 
     roster = Reads.driver_roster(scope)
 

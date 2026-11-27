@@ -4,10 +4,7 @@ defmodule Driftwood.TenantActorHostGuardTest do
   nobody resolved (a fixed `:member`), counted with the same detectors (`Samen.Web.TenantActor.Guard`) and held to
   an EXACT baseline. A new site fails; a converted site must lower its entry.
 
-    * `driftwood_web/broker_live.ex` builds the broker landing page's actor by hand (`id: "broker:<org>"`, a
-      literal `role: :member`): the `/broker` landing page is not converted yet.
-
-  The other hand-spelled roles are SYSTEM contexts (no request path reaches them), listed by file and count so a new
+  The `/broker` landing page acts as the signed-in person (`Samen.Web.TenantActor`). The hand-spelled roles are SYSTEM contexts (no request path reaches them), listed by file and count so a new
   one is a visible edit: the seeds (`seeds.ex`, `operator_seeds.ex`: org-level actors and membership rows), the
   dispatch worker, the crypto-shred game day and the dogfood scenario. An id-less `%{org_id: o, role: :admin}` counts.
   """
@@ -18,7 +15,6 @@ defmodule Driftwood.TenantActorHostGuardTest do
   @root Path.expand("../lib", __DIR__)
 
   @literal_actors %{
-    "driftwood_web/broker_live.ex" => 1,
     "driftwood/seeds.ex" => 18,
     "driftwood/operator_seeds.ex" => 11,
     "driftwood/jobs/dispatch_worker.ex" => 1,
@@ -39,6 +35,6 @@ defmodule Driftwood.TenantActorHostGuardTest do
 
   test "non-vacuity: the detectors see this host's tree" do
     assert Path.wildcard(Path.join(@root, "**/*.ex")) |> length() > 20
-    assert map_size(Guard.scan(@root, &Guard.literal_actors/1)) == 6
+    assert map_size(Guard.scan(@root, &Guard.literal_actors/1)) == 5
   end
 end
