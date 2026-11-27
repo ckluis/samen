@@ -103,6 +103,9 @@ defmodule Samen.Web.CRM.ContactLive do
   # OrgScope + the RoleAtLeast(:member) gate + SameOrgFk all apply — this LV adds NO
   # policy. `person_id`/`org_id`/`status`/`completed_at` are server-side facts merged
   # here, never client input.
+  def handle_event(event, _params, %{assigns: %{activity_form: nil}} = socket) when event in ["validate_activity", "log_activity"],
+    do: {:noreply, put_flash(socket, :error, "Logging activity needs the Work scope, which this app does not mount.")}
+
   def handle_event("validate_activity", %{"activity" => params}, socket) do
     form = AshPhoenix.Form.validate(socket.assigns.activity_form, params)
     {:noreply, assign(socket, activity_form: form)}
@@ -359,10 +362,17 @@ defmodule Samen.Web.CRM.ContactLive do
   # The log-activity composer writes a canonical Work Task (ADR-041 §6.1) — the CRM
   # timeline is a client of the Work scope through the generic object-ref anchor. The
   # Task resource is derived from this CRM mount's host root (Reads.work_task_resource/1).
+  # A host without the Work scope has no Task resource: no composer form is built (nil), the page renders without it.
   defp activity_form(mount, scope) do
-    Reads.work_task_resource(mount)
-    |> AshPhoenix.Form.for_create(:create, scope: scope, as: "activity")
-    |> to_form()
+    case Reads.work_task_resource(mount) do
+      nil ->
+        nil
+
+      task ->
+        task
+        |> AshPhoenix.Form.for_create(:create, scope: scope, as: "activity")
+        |> to_form()
+    end
   end
 
   defp ensure_return_to(socket) do
@@ -486,7 +496,7 @@ defmodule Samen.Web.CRM.ContactLive do
                       entries={merge_timeline(timeline_entries(@activities), mail_timeline_entries(@mail))}
                       empty="No activity yet — log the first call or note below."
                     >
-                      <:composer :if={composer?(@samen_mount)}>
+                      <:composer :if={composer?(@samen_mount) and not is_nil(@activity_form)}>
                         {activity_composer(assigns)}
                       </:composer>
                     </.timeline>

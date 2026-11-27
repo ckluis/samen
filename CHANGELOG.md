@@ -11,6 +11,13 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Fixed: the contact and company pages render on a host without the Work scope
+
+- **The log-activity composer is built only when the host mounts the Work scope.** The contact and company detail pages wrote a
+  logged activity through a Work task form built on every load; on a host with no Work scope that form was built over no
+  resource. They now build no composer there, render without it, and answer a composer event with a flash naming the Work scope.
+  Sabotage 1576 restores the unconditional build and flips the contact-page test.
+
 ### Fixed: the fleet kill switch asks before it publishes
 
 - **`FleetDirectivesLive`'s "Kill switch — all products" carries the confirm interlock and a disabled-while-running state.** The
