@@ -156,6 +156,18 @@ defmodule Samen.Web.TenantActor do
   def admin?(_socket), do: false
 
   @doc """
+  The user id a write acts as: on an armed tenant plane the person the acting scope was resolved for (`acting_scope.actor.id`),
+  never a separately read session user id; on a disarmed mount (the dev posture, whose acting scope is a stand-in) the page's
+  own `:user_id`. `nil` when neither is known.
+  """
+  @spec acting_user_id(map()) :: String.t() | nil
+  def acting_user_id(%{assigns: %{acting_scope: %Samen.Scope{actor: %{id: id}}, samen_mount: %Mount{} = mount}} = socket) do
+    if CurrentOrg.tenant_gate_armed?(mount), do: id, else: Map.get(socket.assigns, :user_id)
+  end
+
+  def acting_user_id(socket), do: Map.get(socket.assigns, :user_id)
+
+  @doc """
   Whether a page offers its ADMIN-ranked write controls (the billing, plan, invoice, campaign and segment writes the kernel
   reserves for `RoleAtLeast :admin`): the plane may write, and the person acting holds at least `:admin`. On a DISARMED mount
   (the dev posture, where `write_scope/3` is the dev admin) the controls are offered, exactly as before. `assign_actor/2`

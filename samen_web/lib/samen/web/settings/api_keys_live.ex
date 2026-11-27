@@ -88,7 +88,8 @@ defmodule Samen.Web.Settings.ApiKeysLive do
     do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.user_id)}
 
   def handle_event("mint", %{"key" => params}, socket) do
-    %{samen_mount: mount, org_id: org_id, user_id: user_id} = socket.assigns
+    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    user_id = TenantActor.acting_user_id(socket)
 
     cond do
       operator_plane?(mount) -> {:noreply, assign(socket, mint_error: "API keys are minted on the tenant plane.")}
@@ -99,7 +100,8 @@ defmodule Samen.Web.Settings.ApiKeysLive do
   end
 
   def handle_event("revoke", %{"id" => key_id}, socket) do
-    %{samen_mount: mount, org_id: org_id, user_id: user_id} = socket.assigns
+    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    user_id = TenantActor.acting_user_id(socket)
 
     # Revoking is an admin's (the kernel's `ApiKey` update policy); the handler checks the role the guard resolved for this
     # event itself, and the operator plane has nothing to revoke.

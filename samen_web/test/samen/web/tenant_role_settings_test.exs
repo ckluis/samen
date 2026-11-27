@@ -163,6 +163,24 @@ defmodule Samen.Web.TenantRoleSettingsTest do
     assert is_binary(admin.assigns.invited_raw_token), "the owner's invite was sent (positive control): #{inspect(admin.assigns.invite_error)}"
   end
 
+  test "invitations: an invite acts as the person the role was resolved for, not as a stale session user id", ctx do
+    {:ok, _} =
+      Samen.Identity.Confirm.consume(ctx.owner.raw_verify_token, %{
+        credential: Samen.WebTest.Operator.Credential,
+        auth_token: Samen.WebTest.Operator.AuthToken,
+        repo: Samen.WebTest.Repo
+      })
+
+    params = %{"invitation" => %{"email" => "stale-id-#{System.unique_integer([:positive])}@example.test", "role" => "member"}}
+    owner = page(H.log_in(ctx.owner), InvitationsLive, "/settings/invitations", ctx.org_id)
+    assert owner.assigns.acting_scope.actor.id == owner.assigns.user_id, "the page starts out consistent"
+
+    # the page's separately read user id now names somebody else (a viewer): the invite still runs as the owner
+    stale = Phoenix.Component.assign(owner, :user_id, ctx.viewer.user.id)
+    stale = H.event(InvitationsLive, "invite", params, stale)
+    assert is_binary(stale.assigns.invited_raw_token), "the owner's invite was sent as the owner: #{inspect(stale.assigns.invite_error)}"
+  end
+
   test "reveal approvals: only an admin may decide; a member's crafted decision is refused at the role, an admin's passes the role gate", ctx do
     path = "/settings/reveal-approvals"
 

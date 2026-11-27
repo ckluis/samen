@@ -92,7 +92,8 @@ defmodule Samen.Web.Settings.InvitationsLive do
     do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.user_id)}
 
   def handle_event("invite", %{"invitation" => params}, socket) do
-    %{samen_mount: mount, org_id: org_id, user_id: user_id, samen_session: session} = socket.assigns
+    %{samen_mount: mount, org_id: org_id, samen_session: session} = socket.assigns
+    user_id = TenantActor.acting_user_id(socket)
 
     cond do
       operator_plane?(mount) -> {:noreply, assign(socket, invite_error: "Invitations are sent from the tenant plane.")}
@@ -103,7 +104,8 @@ defmodule Samen.Web.Settings.InvitationsLive do
   end
 
   def handle_event("revoke", %{"id" => invitation_id}, socket) do
-    %{samen_mount: mount, org_id: org_id, user_id: user_id} = socket.assigns
+    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    user_id = TenantActor.acting_user_id(socket)
 
     cond do
       operator_plane?(mount) ->
