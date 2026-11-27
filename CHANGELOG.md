@@ -11,6 +11,14 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Changed: the file upload and preview pages act as the signed-in person
+
+- **The file upload page and the file preview page resolve their actor** through `Samen.Web.TenantActor`: the role comes from
+  the person's active membership, no active membership is the denied state (a failed lookup the unavailable state) and reads
+  nothing, and an open page re-resolves before every event. Listing and previewing files is a read open to every active
+  member; uploading is a member's, checked by the handler and offered to a member only. The per-plane masking of the filename
+  and the byte gate of the preview are unchanged.
+
 ### Changed: the chat inbox and room act as the signed-in person
 
 - **The chat inbox and the chat room resolve their actor** through `Samen.Web.TenantActor`: the role comes from the

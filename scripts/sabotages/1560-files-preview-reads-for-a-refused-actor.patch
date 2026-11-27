@@ -1,0 +1,19 @@
+# SABOTAGE: the preview reads the file for a person with no active membership
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_files_test.exs
+# MUST_FAIL: NAVIGATION: a suspended member's pages are the denied state
+diff --git a/samen_web/lib/samen/web/files/preview_live.ex b/samen_web/lib/samen/web/files/preview_live.ex
+index 7e7eff13..c941db34 100644
+--- a/samen_web/lib/samen/web/files/preview_live.ex
++++ b/samen_web/lib/samen/web/files/preview_live.ex
+@@ -85,7 +85,7 @@ defmodule Samen.Web.Files.PreviewLive do
+ 
+     case TenantActor.assign_actor(socket, org_id) do
+       {:ok, socket} -> load_file(socket, socket.assigns.samen_mount, socket.assigns.acting_scope, file_id)
+-      {:refused, socket} -> load_refused(socket)
++      {:refused, socket} -> load_file(socket, socket.assigns.samen_mount, TenantActor.system_scope(socket.assigns.samen_mount, org_id), file_id)
+     end
+   end
+ 
