@@ -5,7 +5,7 @@
 # TEST_FILES: test/samen/web/tenant_role_automation_test.exs
 # MUST_FAIL: only an admin is offered the controls
 diff --git a/samen_web/lib/samen/web/automation/builder_live.ex b/samen_web/lib/samen/web/automation/builder_live.ex
-index 36750282..61a36136 100644
+index e83c549..6d63fed 100644
 --- a/samen_web/lib/samen/web/automation/builder_live.ex
 +++ b/samen_web/lib/samen/web/automation/builder_live.ex
 @@ -218,7 +218,7 @@ defmodule Samen.Web.Automation.BuilderLive do
@@ -16,4 +16,4 @@ index 36750282..61a36136 100644
 +    if TenantActor.admin?(socket) or true, do: run_now(socket, id), else: {:noreply, assign(socket, run_error: refusal(socket.assigns.samen_mount), run_ok: nil)}
    end
  
-   def handle_event("add_condition", %{"condition" => params}, socket) do
+   # A condition or action event with no saved workflow open in the editor (none open, or a new one not yet created) changes
