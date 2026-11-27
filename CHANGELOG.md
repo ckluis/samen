@@ -11,6 +11,15 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Changed: no write helper hands an admin role to the operator plane
+
+- **The tenant-admin write helpers answer a read-only scope where the elevation is not theirs.** `Billing.Reads.write_scope/3`,
+  `Marketing.Reads.write_scope/3` and `Support.KbReads.write_scope/3` answer `TenantActor.read_only_scope/2` (the plane's actor
+  with the lowest role and `read_only: true`) on an operator-plane mount; `Flags.Reads.write_scope/3` elevates only the
+  operator workspace's own mount (`Samen.Web.Operator.FlagAdminLive`) and answers the read-only scope on every other mount. A
+  tenant page writes with `TenantActor.write_scope/3`. `close_edit`, `dismiss_key` and `dismiss_token` join the read events an
+  operator-plane mount of a tenant page may send (they persist nothing).
+
 ### Changed: the settings pages and the onboarding wizard act as the signed-in person
 
 - **The API keys, invitations, reveal approvals and security pages and the onboarding wizard resolve their actor** through

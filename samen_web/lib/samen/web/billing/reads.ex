@@ -353,9 +353,14 @@ defmodule Samen.Web.Billing.Reads do
   `impersonation`) from `Mount.scope/2` — an operator-plane mount keeps `plane: :operator`, so
   `Samen.Pii.WriteGuard` (MC-1 / Invariant L1) rejects a vaulted-PII write exactly as before, the
   elevation raises RBAC rank only, and `OrgScope` still confines the write to `org_id`.
+
+  On an OPERATOR-plane mount it answers `Samen.Web.TenantActor.read_only_scope/2`, never an admin: an operator does not write a tenant's billing.
   """
-  def write_scope(mount, org_id, principal \\ nil),
-    do: Samen.Web.TenantRole.admin_scope(mount, org_id, principal)
+  def write_scope(mount, org_id, principal \\ nil) do
+    if not match?(%Samen.Web.Mount{plane: %{kind: :operator}}, mount),
+      do: Samen.Web.TenantRole.admin_scope(mount, org_id, principal),
+      else: Samen.Web.TenantActor.read_only_scope(mount, org_id)
+  end
 
   @doc """
   The `Samen.Web.ListLive` `restore` elevator (ADR-040 §5.8, T37h) — the archived-Plan restore is

@@ -9,7 +9,12 @@ defmodule Samen.Web.TenantActorOperatorReadOnlyTest do
   """
   use Samen.WebTest.DataCase, async: false
 
+  alias Samen.Web.Automation.BuilderLive
   alias Samen.Web.Billing.{InvoicesLive, PlansLive}
+  alias Samen.Web.Chat.{ThreadLive, ThreadsLive}
+  alias Samen.Web.Files.UploadLive
+  alias Samen.Web.Onboarding.WizardLive
+  alias Samen.Web.Settings.{ApiKeysLive, InvitationsLive, RevealApprovalsLive}
   alias Samen.Web.Marketing.{CampaignsLive, SegmentsLive}
   alias Samen.Web.Support.TicketLive
   alias Samen.Web.{Plane, TenantActor}
@@ -67,7 +72,7 @@ defmodule Samen.Web.TenantActorOperatorReadOnlyTest do
 
   defp flash(socket), do: socket.assigns.flash |> Map.get("error")
 
-  defp refused?(socket), do: flash(socket) =~ "operator"
+  defp refused?(socket), do: is_binary(flash(socket)) and flash(socket) =~ "operator"
 
   # -- the writes ----------------------------------------------------------------------------------------------
 
@@ -199,5 +204,143 @@ defmodule Samen.Web.TenantActorOperatorReadOnlyTest do
     # positive control: a tenant admin's write scope is its acting scope, not read-only
     admin = tenant_socket(ctx, PlansLive, "/billing/plans")
     assert TenantActor.write_scope(admin.assigns.samen_mount, ctx.org_id, admin.assigns.acting_scope) == admin.assigns.acting_scope
+  end
+
+  # -- the automation, files, settings and onboarding pages ----------------------------------------------------
+
+  test "automation: pause and run-now from an operator socket write nothing; a tenant admin's do", ctx do
+    wf =
+      Samen.WebTest.Automation.Workflow
+      |> Ash.Changeset.for_create(
+        :create,
+        %{org_id: ctx.org_id, name: "op-probe", status: :active, trigger_kind: :manual, conditions: [], actions: []},
+        authorize?: false
+      )
+      |> Ash.create!()
+
+    status = fn -> Ash.get!(Samen.WebTest.Automation.Workflow, wf.id, authorize?: false).status end
+
+    op = operator_socket(ctx, BuilderLive, "/automation")
+    assert op.assigns.can_admin == false
+    op = H.live_event(BuilderLive, "toggle_pause", %{"id" => wf.id}, op)
+    assert refused?(op)
+    op = H.live_event(BuilderLive, "run_now", %{"id" => wf.id}, op)
+    assert refused?(op)
+    assert op.assigns.run_ok == nil
+    op = H.live_event(BuilderLive, "new_workflow", %{}, op)
+    assert op.assigns.edit_workflow == nil
+    # closing an editor persists nothing: a read event, not refused
+    op = H.live_event(BuilderLive, "close_edit", %{}, Phoenix.LiveView.clear_flash(op))
+    refute refused?(op)
+    assert status.() == :active
+
+    H.live_event(BuilderLive, "toggle_pause", %{"id" => wf.id}, tenant_socket(ctx, BuilderLive, "/automation"))
+    assert status.() == :paused
+  end
+
+  test "files: an upload from an operator socket is refused; a tenant admin's reaches the upload", ctx do
+    op = H.live_event(UploadLive, "upload", %{}, operator_socket(ctx, UploadLive, "/files"))
+    assert refused?(op)
+    assert op.assigns.upload_error == nil
+
+    admin = H.live_event(UploadLive, "upload", %{}, tenant_socket(ctx, UploadLive, "/files"))
+    assert admin.assigns.upload_error == "no file selected", "the admin's event reached the upload (positive control)"
+  end
+
+  test "settings: mint, invite and decide from an operator socket do nothing; a tenant admin's reach their handlers", ctx do
+    op = H.live_event(ApiKeysLive, "mint", %{"key" => %{"read" => "1"}}, operator_socket(ctx, ApiKeysLive, "/settings/api-keys"))
+    assert refused?(op)
+    assert op.assigns.keys == [] and op.assigns.minted_key == nil
+
+    admin = H.live_event(ApiKeysLive, "mint", %{"key" => %{"read" => "1"}}, tenant_socket(ctx, ApiKeysLive, "/settings/api-keys"))
+    assert admin.assigns.minted_key != nil
+
+    invite = %{"invitation" => %{"email" => "op-probe@example.test", "role" => "member"}}
+    op = H.live_event(InvitationsLive, "invite", invite, operator_socket(ctx, InvitationsLive, "/settings/invitations"))
+    assert refused?(op)
+    assert op.assigns.invited_raw_token == nil
+
+    admin = H.live_event(InvitationsLive, "invite", invite, tenant_socket(ctx, InvitationsLive, "/settings/invitations"))
+    refute refused?(admin), "the tenant admin's event is not the operator refusal (positive control)"
+
+    decide = %{"request" => Ash.UUID.generate()}
+    path = "/settings/reveal-approvals"
+    op = H.live_event(RevealApprovalsLive, "approve", decide, operator_socket(ctx, RevealApprovalsLive, path))
+    assert refused?(op)
+    assert op.assigns.decision_notice == nil
+
+    admin = H.live_event(RevealApprovalsLive, "approve", decide, tenant_socket(ctx, RevealApprovalsLive, path))
+    assert admin.assigns.decision_notice =~ "not in this org's pending queue", "the admin reached the queue check (positive control)"
+  end
+
+  test "onboarding: a wizard write from an operator socket is refused; a tenant admin's is accepted", ctx do
+    name = %{"org" => %{"name" => "Renamed By An Operator"}}
+    op = H.live_event(WizardLive, "name_org", name, operator_socket(ctx, WizardLive, "/onboarding"))
+    assert refused?(op)
+    refute op.assigns.step == :plan
+
+    admin = H.live_event(WizardLive, "name_org", %{"org" => %{"name" => "Renamed By An Admin"}}, tenant_socket(ctx, WizardLive, "/onboarding"))
+    assert admin.assigns.step == :plan
+  end
+
+  # -- chat on the operator desk (its own impersonation gate; no membership to resolve) -------------------------
+
+  describe "chat on the operator desk" do
+    setup ctx do
+      chat = Seeds.seed_chat(ctx.org_id, disclosure_mode: :tenant_wide)
+      session = open_impersonation!("op-1", ctx.org_id)
+      on_exit(fn -> Samen.Impersonation.close(session.id) end)
+      Map.put(ctx, :chat, chat)
+    end
+
+    defp chat_socket(view, plane, load_args) do
+      mount =
+        Samen.Web.Mount.new(:chat, Samen.WebTest.Chat, Samen.WebTest.Repo, plane: plane, labels: %{title: "Blue Ridge Logistics"})
+
+      %Phoenix.LiveView.Socket{}
+      |> Phoenix.Component.assign(:samen_mount, mount)
+      |> Phoenix.Component.assign(:samen_acting_as, false)
+      |> then(&%{&1 | assigns: Map.put(&1.assigns, :flash, %{})})
+      |> then(&apply(view, :load, [&1 | load_args]))
+    end
+
+    defp chat_threads(org_id) do
+      Samen.WebTest.Chat.ChatThread
+      |> Ash.Query.ensure_selected([:org_id])
+      |> Ash.read!(authorize?: false)
+      |> Enum.count(&(&1.org_id == org_id))
+    end
+
+    defp chat_messages(thread_id) do
+      Samen.WebTest.Chat.ChatMessage
+      |> Ash.Query.ensure_selected([:thread_id])
+      |> Ash.read!(authorize?: false)
+      |> Enum.count(&(&1.thread_id == thread_id))
+    end
+
+    test "an operator-desk inbox starts no conversation and an operator-desk room posts no message; the tenant's do", ctx do
+      op_plane = Plane.operator("op-1", ctx.org_id, "sess-1")
+      threads = chat_threads(ctx.org_id)
+      messages = chat_messages(ctx.chat.thread.id)
+
+      inbox = chat_socket(ThreadsLive, op_plane, [ctx.org_id])
+      assert inbox.assigns.can_write == false and inbox.assigns.can_admin == false
+      {:noreply, inbox} = ThreadsLive.handle_event("new_conversation", %{"subject" => "from the desk"}, inbox)
+      {:noreply, _inbox} = ThreadsLive.handle_event("toggle_disclosure", %{"expose_identity" => "off"}, inbox)
+      assert chat_threads(ctx.org_id) == threads
+
+      room = chat_socket(ThreadLive, op_plane, [ctx.org_id, ctx.chat.thread.id])
+      {:noreply, _room} = ThreadLive.handle_event("send", %{"body" => "from the desk"}, room)
+      assert chat_messages(ctx.chat.thread.id) == messages
+
+      # positive control: the same events on the tenant plane
+      tenant_inbox = chat_socket(ThreadsLive, Plane.tenant(), [ctx.org_id])
+      {:noreply, _} = ThreadsLive.handle_event("new_conversation", %{"subject" => "from the tenant"}, tenant_inbox)
+      assert chat_threads(ctx.org_id) == threads + 1
+
+      tenant_room = chat_socket(ThreadLive, Plane.tenant(), [ctx.org_id, ctx.chat.thread.id])
+      {:noreply, _} = ThreadLive.handle_event("send", %{"body" => "from the tenant"}, tenant_room)
+      assert chat_messages(ctx.chat.thread.id) == messages + 1
+    end
   end
 end

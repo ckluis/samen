@@ -193,12 +193,21 @@ defmodule Samen.Web.TenantActor do
 
   # A tenant page on the OPERATOR plane is read-only: the scope its write path would use is the plane's own actor with the
   # lowest role and a `read_only` marker, never an admin elevation. (Acting in a tenant is what impersonation is for.)
-  def write_scope(%Mount{plane: %{kind: :operator}} = mount, org_id, _acting) do
+  def write_scope(%Mount{plane: %{kind: :operator}} = mount, org_id, _acting), do: read_only_scope(mount, org_id)
+
+  def write_scope(%Mount{} = mount, org_id, _acting), do: Samen.Web.TenantRole.admin_scope(mount, org_id)
+
+  @doc """
+  The scope that can write nothing: the plane's own actor with the lowest role and `read_only: true`. What a tenant page on the
+  operator plane writes with (`write_scope/3`), and what the tenant-admin write helpers (`Samen.Web.Billing.Reads.write_scope/3`
+  and its Marketing, Knowledge-base and Flags twins) answer on a mount that is not theirs to elevate: the kernel refuses what
+  it gates, and no helper hands an admin role to the operator plane.
+  """
+  @spec read_only_scope(Mount.t(), String.t()) :: Samen.Scope.t()
+  def read_only_scope(%Mount{} = mount, org_id) do
     %Samen.Scope{actor: actor} = system_scope(mount, org_id)
     %Samen.Scope{actor: actor |> Map.put(:role, lowest_role()) |> Map.put(:read_only, true)}
   end
-
-  def write_scope(%Mount{} = mount, org_id, _acting), do: Samen.Web.TenantRole.admin_scope(mount, org_id)
 
   defp lowest_role, do: Enum.min_by(Samen.Scope.Role.all(), &Samen.Scope.Role.rank/1)
 
@@ -356,7 +365,7 @@ defmodule Samen.Web.TenantActor do
   # own, a retry, a tab, a form validation or cancel, which persist nothing) pass; any other event, including one a page
   # adds later, is refused with the page's own flash. `retry_actor` is handled before this.
   @read_events ~w(retry_load list_retry sort filter paginate select select_all toggle_archived switch_tab board_load_more
-                  insert_suggestion insert_macro open_ents cancel_ents search retry_search)
+                  insert_suggestion insert_macro open_ents cancel_ents search retry_search close_edit dismiss_key dismiss_token)
 
   defp operator_write_event?(event, %{assigns: %{samen_mount: %Mount{plane: %{kind: :operator}}, acting_scope: %Samen.Scope{}}}) do
     not (event in @read_events or String.starts_with?(event, "validate") or String.starts_with?(event, "cancel"))
