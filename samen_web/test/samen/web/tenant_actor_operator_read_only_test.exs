@@ -318,6 +318,27 @@ defmodule Samen.Web.TenantActorOperatorReadOnlyTest do
       |> Enum.count(&(&1.thread_id == thread_id))
     end
 
+    test "Chat.set_disclosure_setting/3 on the operator plane flips nothing; on the tenant plane it does", ctx do
+      disclosure = fn plane ->
+        mount = Samen.Web.Mount.new(:chat, Samen.WebTest.Chat, Samen.WebTest.Repo, plane: plane, labels: %{title: "Blue Ridge Logistics"})
+        Samen.Web.Chat.disclosure_setting?(mount, Samen.Web.Mount.scope(mount, ctx.org_id))
+      end
+
+      op_mount =
+        Samen.Web.Mount.new(:chat, Samen.WebTest.Chat, Samen.WebTest.Repo,
+          plane: Plane.operator("op-1", ctx.org_id, "sess-1"),
+          labels: %{title: "Blue Ridge Logistics"}
+        )
+
+      assert disclosure.(Plane.tenant()) == false
+      assert {:error, _} = Samen.Web.Chat.set_disclosure_setting(op_mount, Samen.Web.Mount.scope(op_mount, ctx.org_id), true)
+      assert disclosure.(Plane.tenant()) == false, "an operator-plane mount flipped the org-wide disclosure setting"
+
+      tenant_mount = Samen.Web.Mount.new(:chat, Samen.WebTest.Chat, Samen.WebTest.Repo, plane: Plane.tenant(), labels: %{title: "Blue Ridge Logistics"})
+      assert {:ok, _} = Samen.Web.Chat.set_disclosure_setting(tenant_mount, Samen.Web.Mount.scope(tenant_mount, ctx.org_id), true)
+      assert disclosure.(Plane.tenant()) == true, "the tenant plane's flip changes the setting (positive control)"
+    end
+
     test "an operator-desk inbox starts no conversation and an operator-desk room posts no message; the tenant's do", ctx do
       op_plane = Plane.operator("op-1", ctx.org_id, "sess-1")
       threads = chat_threads(ctx.org_id)

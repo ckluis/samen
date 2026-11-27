@@ -135,6 +135,10 @@ defmodule Samen.Web.Chat do
   """
   @spec set_disclosure_setting(Mount.t(), Samen.Scope.t(), boolean()) ::
           {:ok, map()} | {:error, term()}
+  # A tenant page on the operator plane writes nothing: its scope is `TenantActor.write_scope/3`'s read-only one, never an admin.
+  def set_disclosure_setting(%Mount{plane: %{kind: :operator}} = mount, scope, expose?),
+    do: set_disclosure_setting_as(mount, scope, expose?)
+
   def set_disclosure_setting(%Mount{} = mount, scope, expose?) do
     # This is a tenant-ADMIN org-level policy write. The chat mount's own tenant plane scope is
     # a `:member` (like every tenant chat write); flipping org-wide disclosure requires `:admin`
