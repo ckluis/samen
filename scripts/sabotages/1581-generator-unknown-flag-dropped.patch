@@ -1,0 +1,19 @@
+# SABOTAGE: samen.gen.indexes drops an unknown flag instead of refusing it
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/mix_task_unknown_flags_test.exs
+# MUST_FAIL: every generator refuses an unknown flag
+diff --git a/samen_core/lib/mix/tasks/samen.gen.indexes.ex b/samen_core/lib/mix/tasks/samen.gen.indexes.ex
+index fad764f5..a15fc82a 100644
+--- a/samen_core/lib/mix/tasks/samen.gen.indexes.ex
++++ b/samen_core/lib/mix/tasks/samen.gen.indexes.ex
+@@ -37,7 +37,7 @@ defmodule Mix.Tasks.Samen.Gen.Indexes do
+ 
+   @impl Mix.Task
+   def run(argv) do
+-    opts = Samen.Gen.Args.parse!("samen.gen.indexes", argv, [out: :string, timestamp: :string, domain: :keep])
++    {opts, _rest, _} = OptionParser.parse(argv, strict: [out: :string, timestamp: :string, domain: :keep])
+     Mix.Task.run("app.config")
+     Mix.Task.run("compile")
+ 
