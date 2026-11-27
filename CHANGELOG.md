@@ -49,7 +49,10 @@ All notable changes to Samen are recorded here. The format follows
   no longer builds the edit form itself; it names the plan and lets `load/2` build the form from the current acting scope,
   so a role that changed between the event guard and the handler's own load cannot leave a form with the earlier scope.
 - Sabotages 1539 to 1542 (a navigation that does not follow the person acting, the Plans edit form kept for a plan that is not on
-  the page, `write_scope/3` falling back on an armed mount, `admin?/1` open on the operator plane). No migration.
+  the page, `write_scope/3` falling back on an armed mount, `admin?/1` open on the operator plane) and 1543 to 1547 (the
+  driver honouring a test seam without the self-test marker or with a malformed value, a leader that outlives SIGKILL not
+  reported, the guard ratchet not resolving `alias … TenantActor, as: X`, `toggle_feature` building the form with the held
+  scope). No migration.
 
 ### Tooling: the driver waits for a killed process group to be gone
 
