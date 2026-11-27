@@ -11,6 +11,12 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Fixed: the fleet kill switch asks before it publishes
+
+- **`FleetDirectivesLive`'s "Kill switch — all products" carries the confirm interlock and a disabled-while-running state.** The
+  button renders `data-confirm` and `phx-disable-with` (and still only for a fleet admin); the handler publishes one directive
+  for an admin and none for a read-only role. Sabotage 1575 removes the interlock and flips the render test.
+
 ### Fixed: a `data-confirm` control asks before it acts
 
 - **The served client script confirms every control that carries `data-confirm`.** The kit renders the attribute on each
