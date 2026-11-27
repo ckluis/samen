@@ -169,7 +169,8 @@ All notable changes to Samen are recorded here. The format follows
   map) raises `ArgumentError`; it used to be handed to the dev elevation, which on an armed host with no principal answers a
   `:member` scope. It accepts any `%Samen.Scope{}`: that the scope is the page's own acting one is what the guard ratchet
   below checks at the call sites. Only the disarmed dev posture and the operator plane keep the posture's admin elevation, as
-  before.
+  before. (Superseded: the operator plane now answers a read-only scope there; see
+  "Changed: a tenant page on the operator plane is read-only" above.)
 
 - **`admin?/1` is false on the operator plane.** It was true there, so the campaign page's send handler, whose page-level
   check is `admin?/1`, accepted a forged send event on an operator socket (the composer was already hidden); the send control
@@ -218,7 +219,7 @@ All notable changes to Samen are recorded here. The format follows
   Sabotages 1491 and 1492 (a reveal probe taking a caller-supplied `actor_id`, refused by `Samen.Reveal.ProbeGuard`) are
   back to their original mutation and listed; 1522-1527 prove the ledger rules.
 
-### Fixed: flakes and guards round 5 (review of the flakes round, 2026-11-25)
+### Fixed: flakes and guards round 5 (review of the flakes round, 2026-11-25; includes the `:host_domains` rename)
 
 - **Upgrade: rename `config :samen_core, :ash_domains, [...]` to `config :samen_core, :host_domains, [...]`.** samen reused
   Ash's own key for the `:samen_core` application as its host-domain registry, so `Ash.Resource.verify` read the host's
@@ -251,7 +252,7 @@ All notable changes to Samen are recorded here. The format follows
   `# bare-vt_-ok: <why>` and the exact set is pinned per file. The generated `record_api_test` checks the body with
   `refute_vault_token(boundary: true)`.
 
-### Fixed: authorization and honesty round 5 (evaluation 2026-11-24)
+### Fixed: authorization and honesty round 5 (evaluation 2026-11-24; tenant roles, authorization and honest reads)
 
 - **Fixed: a signed-in `:viewer` acted as a `:member` on the tenant list surfaces, CSV export, file bytes and the profile
   page.** `Samen.Web.Plane.scope/2` (through `Mount.scope/2`) gave every tenant actor a fixed `role: :member`; since a real
@@ -338,7 +339,8 @@ All notable changes to Samen are recorded here. The format follows
   drove these pages without a signed-in person on an armed host now get the denied state; log in as a real person with the
   right role. A host that called `Samen.Web.Support.KbReads.publish_article/3` with an org id is unchanged; it also takes a
   `%Samen.Scope{}` now, which the page passes so a member's publish is refused. `Samen.Web.TenantActor` gains
-  `write_scope/3` (the acting scope on an armed tenant plane and nothing else: anything that is not a `%Samen.Scope{}` raises there; only the disarmed dev posture and the operator plane get the posture's admin elevation),
+  `write_scope/3` (the acting scope on an armed tenant plane and nothing else: anything that is not a `%Samen.Scope{}` raises there; only the disarmed dev posture and the operator plane get the posture's admin elevation (superseded: the operator plane now
+  answers a read-only scope; see "Changed: a tenant page on the operator plane is read-only")),
   `administrable?/2`, `admin?/1` and `member?/1`. No migration. Sabotages 1528 to 1536.
 
 - **Fixed: the rest of the CRM pages and the Work pages acted as a fixed `:member`, and a `:viewer` could enroll contacts into
@@ -516,7 +518,7 @@ All notable changes to Samen are recorded here. The format follows
   moduledocs now say exactly what is stored: the filter-box text of a surface whose filter fields are all non-vaulted, and
   structured predicate values on non-vaulted fields, are stored as typed; no PII detection is attempted on them. Sabotage 1383.
 
-### Security: identity authorization, round 3
+### Security: identity authorization, round 3 (role management, sessions, invitations, org slugs and API keys)
 
 - **Fixed: an admin could demote, suspend or re-role an owner or a peer admin.** `Samen.Policy.ManageRole` judged only the
   role a membership write was SETTING, so `%{role: :member}` (or `status: "suspended"` together with a lower role)
@@ -751,7 +753,7 @@ red test through the real authorization path (a `scope:`/actor, never `authorize
 - Resource changes only; there is no migration. Test helpers that seed a driftwood Freight key need a real user and
   membership for `minter_user_id` (see `Driftwood.ApiCase.mk_minter/2`); an Identity key's membership must be active.
 
-### Security: identity authorization, round 3 (second read-only review of round 2)
+### Security: identity authorization, round 3 (second read-only review of round 2: one contract regression and holes round 2 assumed closed)
 
 A second read-only review found no bypass introduced by round 2, but one contract regression and several holes round 2's
 wording assumed closed. Each finding was reproduced with a red test through the real path before it was fixed; one did not
@@ -1258,7 +1260,7 @@ directory and diff, or apply by hand:
    `20260925100000` rollup `subject_id` becomes text (host-named, e.g. driftwood's `…_driver_load_rollup_subject_id_text.exs`) ·
    `20260925110000` usage-event ledger · `20260926100000` usage tally `reported_quantity` ·
    `20261005100000` entitlement usage limit · `20261006100000` agent cached-input bucket (hosts running the agent loop) ·
-   `20261009100000` `samen_replay` (also register `Samen.Replay.Domain` in **both** `:ash_domains` lists) ·
+   `20261009100000` `samen_replay` (also register `Samen.Replay.Domain` in the host's domain registry: `config :samen_core, :host_domains` and the host app's own `config :my_app, ash_domains`) ·
    `20261114100000` the tenant keyset indexes (**ARCH-4** — run `mix samen.gen.indexes` in the host; it writes a
    `CREATE INDEX CONCURRENTLY` migration of literal `{table, columns, name}` tuples over every org-scoped resource, safe on populated tables, no write lock; copy the
    `driftwood/priv/repo/migrations/` file as the reference) · `20261114110000` the Work `Task` `crm_refs` expression indexes
@@ -1282,12 +1284,12 @@ directory and diff, or apply by hand:
 7. **Oban hosts that do not call `Samen.Jobs.install_defaults/1`** must add `{Samen.Jobs.BootRun, workers:
    Samen.Jobs.default_boot_workers()}` so the `aud_event` partition rolls forward at boot (a fresh deploy could not
    write audit events from its first request otherwise). Hosts using `install_defaults/1` get it automatically.
-9. **One instance per database (ADR-054).** Hosts that call `Samen.Observability.child_specs/2` get the guard for free. Generated apps
+8. **One instance per database (ADR-054).** Hosts that call `Samen.Observability.child_specs/2` get the guard for free. Generated apps
    made before this change: run ONE machine (`fly deploy --ha=false`, `fly scale count 1`; copy the comment and `strategy = "rolling"` from
    `samen_core/priv/templates/fly_toml.eex`), remove `dns_cluster`/`libcluster` if present (the app now refuses to boot with them), and
    use `Samen.Web.Readiness.report/1` for `/readyz` so the `single_node:` line appears. Behind PgBouncer in transaction mode set
    `config :samen_core, Samen.SingleNode, lease_url: <direct URL>`.
-8. **Seed tasks** should boot through `Samen.SeedBoot.start!/2` instead of `@requirements ["app.start"]`, or
+9. **Seed tasks** should boot through `Samen.SeedBoot.start!/2` instead of `@requirements ["app.start"]`, or
    `mix <app>.seed` dies with `:eaddrinuse` while the dev server runs.
 
 ### Reads that lie (WP6 phase 1)
