@@ -122,7 +122,17 @@ defmodule Samen.WebTest.SecurityRouter do
     # other tenant surface rides: an authenticated member of org A asking for org B is bound to A,
     # never B (org bound from the authenticated scope, forge refused). Driven in
     # `tenant_analytics_route_e2e_test.exs`.
-    samen_tenant_analytics_routes(Samen.WebTest.Crm, repo: Samen.WebTest.Repo, labels: @labels)
+    samen_tenant_analytics_routes(Samen.WebTest.Crm,
+      repo: Samen.WebTest.Repo,
+      labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)
+    )
+
+    # The ⌘K search page, with the `:identity_namespace` seam so a real login resolves the person's membership role
+    # (`tenant_role_reads_test.exs`).
+    samen_search_routes(:search, Samen.WebTest.Primitives,
+      repo: Samen.WebTest.Repo,
+      labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)
+    )
 
     # The framework session spine's `POST /login` (what writes `samen_session_token`) and the tenant
     # notifications inbox + preferences, so a REAL login can be followed by a REAL inbox render

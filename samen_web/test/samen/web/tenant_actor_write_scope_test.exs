@@ -62,4 +62,19 @@ defmodule Samen.Web.TenantActorWriteScopeTest do
       assert TenantActor.write_scope(mount(), ctx.org_id, acting(ctx.org_id, :admin)).actor.role == :admin
     end
   end
+
+  describe "user_scope/4 (the scope of a user a surface already resolved)" do
+    test "a tenant mount carries the resolved user and role; no user, or an operator mount, is the plane's own scope", ctx do
+      scope = TenantActor.user_scope(mount(), ctx.org_id, "u-1", :viewer)
+      assert %{id: "u-1", role: :viewer, org_id: org_id, plane: :tenant} = scope.actor
+      assert org_id == ctx.org_id
+
+      # no role: the plane's role stays; no user: the plane's own actor
+      assert TenantActor.user_scope(mount(), ctx.org_id, "u-1").actor.id == "u-1"
+      assert TenantActor.user_scope(mount(), ctx.org_id, nil, :admin) == TenantActor.system_scope(mount(), ctx.org_id)
+
+      op = operator_mount(ctx.org_id)
+      assert TenantActor.user_scope(op, ctx.org_id, "u-1", :admin) == TenantActor.system_scope(op, ctx.org_id)
+    end
+  end
 end

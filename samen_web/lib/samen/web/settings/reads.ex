@@ -190,17 +190,8 @@ defmodule Samen.Web.Settings.Reads do
   returned as it is: its actor is the operator, never the user.
   """
   @spec user_scope(Mount.t(), String.t() | nil, String.t() | nil, atom() | nil) :: Samen.Scope.t()
-  def user_scope(%Mount{} = mount, org_id, user_id, role \\ nil) do
-    case {Mount.scope(mount, org_id), user_id} do
-      {%Samen.Scope{actor: %{plane: :tenant} = actor} = scope, user_id} when is_binary(user_id) ->
-        # `Plane.scope` gives every tenant actor `role: :member`; the role the session RESOLVED
-        # (`actor_in_org/3`) replaces it, so a viewer is not a member here.
-        %{scope | actor: %{actor | id: user_id, role: role || actor.role}}
-
-      {scope, _no_session_user} ->
-        scope
-    end
-  end
+  def user_scope(%Mount{} = mount, org_id, user_id, role \\ nil),
+    do: Samen.Web.TenantActor.user_scope(mount, org_id, user_id, role)
 
   @doc """
   Stash the session's PRINCIPAL (`principal_ref/3`) on the socket at `mount/3`, so `handle_params/3` (which has

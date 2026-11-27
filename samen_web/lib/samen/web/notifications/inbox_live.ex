@@ -366,7 +366,7 @@ defmodule Samen.Web.Notifications.InboxLive do
                   </td>
                   <td class="n-body-cell">
                     <span class="n-body">{n.rendered_body || "—"}</span>
-                    <.subject_card mount={@samen_mount} org_id={@org_id} notification={n} />
+                    <.subject_card mount={@samen_mount} scope={recipient_scope(%{assigns: assigns}, @org_id)} notification={n} />
                   </td>
                   <td class="n-channel" style="font-size:12px;color:var(--muted)">{n.channel}</td>
                   <td class="n-received" style="font-size:12px;color:var(--muted)">{received_at(n)}</td>
@@ -403,11 +403,11 @@ defmodule Samen.Web.Notifications.InboxLive do
   # render time so EVERY page (initial, sorted, filtered, realtime-refreshed) unfurls
   # per the CURRENT viewer — bounded by the page size. No ref → no card.
   attr :mount, Mount, required: true
-  attr :org_id, :string, required: true
+  attr :scope, Samen.Scope, required: true, doc: "the recipient's own scope (the user and role the session resolved)"
   attr :notification, :any, required: true
 
   defp subject_card(assigns) do
-    assigns = assign(assigns, :card, unfurl(assigns.mount, assigns.org_id, assigns.notification))
+    assigns = assign(assigns, :card, unfurl(assigns.mount, assigns.scope, assigns.notification))
 
     ~H"""
     <div :if={@card} class="n-subject" style="margin-top:4px">
@@ -418,11 +418,11 @@ defmodule Samen.Web.Notifications.InboxLive do
 
   # nil (no ref / malformed ref) | {:ok, card} → the card | {:error, _} → the inert
   # chip. NEVER plaintext on failure; never a raise.
-  defp unfurl(mount, org_id, notification) do
+  defp unfurl(mount, scope, notification) do
     with %{} = metadata <- notification.metadata,
          ref_string when is_binary(ref_string) <- Map.get(metadata, "subject_ref"),
          {:ok, ref} <- ObjectRef.from_string(ref_string) do
-      case ObjectRef.resolve(mount, Mount.scope(mount, org_id), ref) do
+      case ObjectRef.resolve(mount, scope, ref) do
         {:ok, card} -> card
         {:error, _} = error -> error
       end

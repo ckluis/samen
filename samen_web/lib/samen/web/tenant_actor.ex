@@ -78,6 +78,23 @@ defmodule Samen.Web.TenantActor do
   end
 
   @doc """
+  The scope of a user a surface ALREADY resolved (`user_id`, and `role` when the membership gave one): the plane's synthetic
+  actor carrying that user and role. The tenant plane's actor (`broker:<org>`) names no user, so a surface that is the
+  person's own (the inbox, preferences, a profile) carries the user the session resolved; `role` nil keeps the plane's.
+  An operator-plane scope, or no user, is returned as the plane built it.
+  """
+  @spec user_scope(Mount.t(), String.t() | nil, String.t() | nil, atom() | nil) :: Samen.Scope.t()
+  def user_scope(%Mount{} = mount, org_id, user_id, role \\ nil) do
+    case {system_scope(mount, org_id), user_id} do
+      {%Samen.Scope{actor: %{plane: :tenant} = actor} = scope, user_id} when is_binary(user_id) ->
+        %{scope | actor: %{actor | id: user_id, role: role || actor.role}}
+
+      {scope, _no_session_user} ->
+        scope
+    end
+  end
+
+  @doc """
   The role `ref` acts with in `org_id`, for a surface that builds its own actor map (the generated `--live`
   screens): `{:ok, role}` or `{:refused, :denied | :unavailable}`.
 
@@ -339,7 +356,7 @@ defmodule Samen.Web.TenantActor do
   # own, a retry, a tab, a form validation or cancel, which persist nothing) pass; any other event, including one a page
   # adds later, is refused with the page's own flash. `retry_actor` is handled before this.
   @read_events ~w(retry_load list_retry sort filter paginate select select_all toggle_archived switch_tab board_load_more
-                  insert_suggestion insert_macro open_ents cancel_ents)
+                  insert_suggestion insert_macro open_ents cancel_ents search retry_search)
 
   defp operator_write_event?(event, %{assigns: %{samen_mount: %Mount{plane: %{kind: :operator}}, acting_scope: %Samen.Scope{}}}) do
     not (event in @read_events or String.starts_with?(event, "validate") or String.starts_with?(event, "cancel"))

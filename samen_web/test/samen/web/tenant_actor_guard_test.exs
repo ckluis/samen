@@ -38,26 +38,22 @@ defmodule Samen.Web.TenantActorGuardTest do
     "samen/web/first_run.ex" => 1,
     "samen/web/flags/settings_live.ex" => 2,
     "samen/web/ics/export_controller.ex" => 1,
-    "samen/web/notifications/inbox_live.ex" => 1,
     "samen/web/onboarding/wizard_controller.ex" => 1,
     "samen/web/onboarding/wizard_live.ex" => 2,
     "samen/web/operator.ex" => 2,
     "samen/web/operator/flag_admin_live.ex" => 2,
     "samen/web/replay/access.ex" => 2,
     "samen/web/sample_data.ex" => 1,
-    "samen/web/search/search_live.ex" => 1,
     "samen/web/settings/api_keys_live.ex" => 2,
     "samen/web/settings/invitations_live.ex" => 2,
-    "samen/web/settings/reads.ex" => 1,
     "samen/web/settings/reveal_approvals_live.ex" => 1,
     "samen/web/settings/security_live.ex" => 1,
-    "samen/web/tenant/analytics_live.ex" => 1,
     "samen/web/tenant_role.ex" => 1,
   }
 
   # The exact size of the work list: a silent bump of an entry (or a new entry) fails here, not only in the ratchet.
-  @baseline_total 46
-  @baseline_files 27
+  @baseline_total 42
+  @baseline_files 23
 
   @exempt ~w(samen/web/mount.ex samen/web/tenant_actor.ex samen/web/tenant_actor/guard.ex)
 
@@ -159,8 +155,9 @@ defmodule Samen.Web.TenantActorGuardTest do
 
   test "non-vacuity: the sweep sees the whole tree and the converted surfaces are really clean" do
     now = found()
-    assert map_size(now) > 25
-    assert Enum.sum(Map.values(now)) > 40
+    # the sweep finds files at all (the exact size is pinned above and lowered with every conversion)
+    assert map_size(now) > 5
+    assert Enum.sum(Map.values(now)) > 10
     refute Map.has_key?(now, "samen/web/crm/contacts_live.ex")
     refute Map.has_key?(now, "samen/web/crm/companies_live.ex")
     for page <- ~w(calendar_live company_live contacts_gallery_live dashboard_live mailbox_live pipeline_live sequences_live),
@@ -172,6 +169,10 @@ defmodule Samen.Web.TenantActorGuardTest do
     refute Map.has_key?(now, "samen/web/csv/export_controller.ex")
     refute Map.has_key?(now, "samen/web/files/bytes_controller.ex")
     refute Map.has_key?(now, "samen/web/settings/profile_live.ex")
+
+    # converted in authz-9: the read-only pages and the user-scope builder
+    for file <- ~w(samen/web/tenant/analytics_live.ex samen/web/search/search_live.ex samen/web/notifications/inbox_live.ex samen/web/settings/reads.ex),
+        do: refute(Map.has_key?(now, file), file)
 
     # the Billing, Marketing and Support pages converted in authz-7 (and leads)
     for page <- ~w(dunning_live invoices_live overview_live plans_live settings_live usage_live),

@@ -11,6 +11,16 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Changed: the analytics and search pages act as the signed-in person
+
+- **The own-org analytics page and the ⌘K search page resolve their actor** through `Samen.Web.TenantActor`, as the earlier
+  families do: the role comes from the person's active membership; no active membership renders the denied state (a failed
+  lookup the unavailable state) and reads nothing; an open page re-resolves before every event, and a navigation (`?org=`)
+  reloads. Both are reads open to every active member; the analytics read keeps its own rank gate, which now judges the real
+  role and admits an owner (it used to see every signed-in person as a member). The notification inbox unfurls a subject with
+  the recipient's own scope. `TenantActor.user_scope/4` is the scope of a user a page already resolved (the inbox,
+  preferences, profile).
+
 ### Changed: a tenant page on the operator plane is read-only
 
 - **A tenant page on the operator plane is read-only; impersonation is the route for acting in a tenant.** An operator who
