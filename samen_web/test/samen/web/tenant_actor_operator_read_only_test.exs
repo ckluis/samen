@@ -260,8 +260,17 @@ defmodule Samen.Web.TenantActorOperatorReadOnlyTest do
     assert refused?(op)
     assert op.assigns.invited_raw_token == nil
 
+    # the inviter's account is a verified one (the invite's capability gate): confirm the admin's address
+    {:ok, _} =
+      Samen.Identity.Confirm.consume(ctx.admin.raw_verify_token, %{
+        credential: Samen.WebTest.Operator.Credential,
+        auth_token: Samen.WebTest.Operator.AuthToken,
+        repo: Samen.WebTest.Repo
+      })
+
     admin = H.live_event(InvitationsLive, "invite", invite, tenant_socket(ctx, InvitationsLive, "/settings/invitations"))
     refute refused?(admin), "the tenant admin's event is not the operator refusal (positive control)"
+    assert is_binary(admin.assigns.invited_raw_token), "the tenant admin's invitation was created (positive control)"
 
     decide = %{"request" => Ash.UUID.generate()}
     path = "/settings/reveal-approvals"
@@ -311,6 +320,11 @@ defmodule Samen.Web.TenantActorOperatorReadOnlyTest do
       |> Enum.count(&(&1.org_id == org_id))
     end
 
+    defp desk_disclosure(org_id) do
+      mount = Samen.Web.Mount.new(:chat, Samen.WebTest.Chat, Samen.WebTest.Repo, plane: Plane.tenant(), labels: %{title: "Blue Ridge Logistics"})
+      Samen.Web.Chat.disclosure_setting?(mount, Samen.Web.Mount.scope(mount, org_id))
+    end
+
     defp chat_messages(thread_id) do
       Samen.WebTest.Chat.ChatMessage
       |> Ash.Query.ensure_selected([:thread_id])
@@ -342,15 +356,19 @@ defmodule Samen.Web.TenantActorOperatorReadOnlyTest do
     test "an operator-desk inbox starts no conversation and an operator-desk room posts no message; the tenant's do", ctx do
       op_plane = Plane.operator("op-1", ctx.org_id, "sess-1")
       threads = chat_threads(ctx.org_id)
+      disclosure_before = desk_disclosure(ctx.org_id)
       messages = chat_messages(ctx.chat.thread.id)
 
       inbox = chat_socket(ThreadsLive, op_plane, [ctx.org_id])
       assert inbox.assigns.can_write == false and inbox.assigns.can_admin == false
       {:noreply, inbox} = ThreadsLive.handle_event("new_conversation", %{"subject" => "from the desk"}, inbox)
-      {:noreply, _inbox} = ThreadsLive.handle_event("toggle_disclosure", %{"expose_identity" => "off"}, inbox)
+      # These pages attach no event hook, so `handle_event` called directly is the handler's own check under test.
+      {:noreply, _inbox} = ThreadsLive.handle_event("toggle_disclosure", %{"expose_identity" => "on"}, inbox)
       assert chat_threads(ctx.org_id) == threads
+      assert desk_disclosure(ctx.org_id) == disclosure_before, "the operator desk flipped the org-wide disclosure setting"
 
       room = chat_socket(ThreadLive, op_plane, [ctx.org_id, ctx.chat.thread.id])
+      # Same here: the room attaches no hook, the handler's own check is what is under test.
       {:noreply, _room} = ThreadLive.handle_event("send", %{"body" => "from the desk"}, room)
       assert chat_messages(ctx.chat.thread.id) == messages
 
@@ -358,6 +376,9 @@ defmodule Samen.Web.TenantActorOperatorReadOnlyTest do
       tenant_inbox = chat_socket(ThreadsLive, Plane.tenant(), [ctx.org_id])
       {:noreply, _} = ThreadsLive.handle_event("new_conversation", %{"subject" => "from the tenant"}, tenant_inbox)
       assert chat_threads(ctx.org_id) == threads + 1
+
+      {:noreply, _} = ThreadsLive.handle_event("toggle_disclosure", %{"expose_identity" => "on"}, tenant_inbox)
+      assert desk_disclosure(ctx.org_id) == !disclosure_before, "a tenant admin's flip changes the setting (positive control)"
 
       tenant_room = chat_socket(ThreadLive, Plane.tenant(), [ctx.org_id, ctx.chat.thread.id])
       {:noreply, _} = ThreadLive.handle_event("send", %{"body" => "from the tenant"}, tenant_room)
