@@ -15,7 +15,7 @@ defmodule Samen.Web.Marketing.CampaignsLive do
   `modal/1` hosting an `AshPhoenix.Form`-backed `simple_form/1` create (`name` is
   required — the inline-error path is real); each row carries a `delete_confirm/1`.
   Write affordances are offered on the tenant plane only
-  (`Samen.Web.Marketing.Live.writable?/1`); enforcement stays in the kernel (OrgScope +
+  (`:can_admin`, an admin on the tenant plane); enforcement stays in the kernel (OrgScope +
   admin role gate on every Campaign write). Send composition stays on `CampaignLive` —
   the ONLY send path remains `Reads.enqueue_send/3` (consent + suppression enforced).
   """
@@ -28,8 +28,7 @@ defmodule Samen.Web.Marketing.CampaignsLive do
       assign_mount: 2,
       marketing_sidebar: 1,
       marketing_path: 1,
-      marketing_plane_note: 1,
-      writable?: 1
+      marketing_plane_note: 1
     ]
 
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
@@ -37,6 +36,9 @@ defmodule Samen.Web.Marketing.CampaignsLive do
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Reads.Guard
   alias Samen.Web.Mount
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   alias Samen.Web.Marketing.Reads
 
@@ -63,32 +65,70 @@ defmodule Samen.Web.Marketing.CampaignsLive do
   @doc false
   def load(socket, nil) do
     socket
+    |> Samen.Web.ListLive.refuse()
     |> ensure_return_to()
     |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil)
+    |> assign(acting_scope: nil, actor_state: :ok, can_write: false, can_admin: false)
     |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
     |> assign(show_new: false, new_form: nil)
     |> assign_new(:delete_error, fn -> nil end)
   end
 
+  # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read, nothing
+  # can be written, and the page is re-resolved on every `handle_params`.
   def load(socket, org_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id)
+    end
+  end
+
+  # Acting again with no URL to patch to (`Samen.Web.TenantActor`, the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _}} = socket), do: load(socket, socket.assigns.org_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): the
+  # same load a refused navigation does, so nothing the page loaded for the person it acted for is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket, socket.assigns.org_id)
+
+  # The person's role or id changed while the page was open: a form built at load holds the scope it was built with, so it
+  # is built again with the fresh one.
+  @doc false
+  def actor_changed(%{assigns: %{samen_mount: mount, org_id: org_id, acting_scope: acting}} = socket),
+    do: assign(socket, new_form: new_campaign_form(mount, org_id, acting))
+
+  defp load_refused(socket, org_id) do
+    socket
+    |> Samen.Web.ListLive.refuse()
+    |> ensure_return_to()
+    |> assign(no_org: false, org_id: org_id)
+    |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
+    |> assign(show_new: false, new_form: nil)
+    |> assign_new(:delete_error, fn -> nil end)
+  end
+
+  defp load_for(socket, org_id, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
 
     socket
     |> ensure_return_to()
     |> assign(no_org: false, org_id: org_id)
     |> assign_new(:show_new, fn -> false end)
     |> assign_new(:delete_error, fn -> nil end)
-    |> assign(new_form: new_campaign_form(mount, org_id))
+    |> assign(new_form: new_campaign_form(mount, org_id, scope))
     |> init_list(mount, scope)
   end
 
   # -- A3 CRUD events (list events belong to the ListLive hook) -----------------
 
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("new_campaign", _params, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
-    {:noreply, assign(socket, show_new: true, new_form: new_campaign_form(mount, org_id))}
+    %{samen_mount: mount, org_id: org_id, acting_scope: acting} = socket.assigns
+    {:noreply, assign(socket, show_new: true, new_form: new_campaign_form(mount, org_id, acting))}
   end
 
   def handle_event("cancel_new", _params, socket) do
@@ -125,9 +165,9 @@ defmodule Samen.Web.Marketing.CampaignsLive do
   # clause) — it is no longer reachable via a linked-send FK specifically.
   # Admin-gated by the kernel → the plane-preserving `write_scope/2`.
   def handle_event("delete", %{"id" => id}, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    %{samen_mount: mount, org_id: org_id, acting_scope: acting} = socket.assigns
 
-    case Reads.delete_campaign(mount, Reads.write_scope(mount, org_id), id) do
+    case Reads.delete_campaign(mount, TenantActor.write_scope(mount, org_id, acting), id) do
       :ok ->
         {:noreply, load(assign(socket, delete_error: nil), org_id)}
 
@@ -140,10 +180,10 @@ defmodule Samen.Web.Marketing.CampaignsLive do
   end
 
   # Campaign writes are ADMIN-gated by the kernel (`RoleAtLeast :admin`); the form
-  # scope is the plane-preserving same-org elevation (`Reads.write_scope/2`).
-  defp new_campaign_form(mount, org_id) do
+  # scope is the acting person's own (`TenantActor.write_scope/3`).
+  defp new_campaign_form(mount, org_id, acting) do
     Mount.resource(mount, Campaign)
-    |> AshPhoenix.Form.for_create(:create, scope: Reads.write_scope(mount, org_id))
+    |> AshPhoenix.Form.for_create(:create, scope: TenantActor.write_scope(mount, org_id, acting))
     |> to_form()
   end
 
@@ -165,7 +205,7 @@ defmodule Samen.Web.Marketing.CampaignsLive do
         <.topbar title="Campaigns" crumbs={crumbs(@samen_mount, @org_id, "Campaigns")}>
           <:actions>
             <a href={segments_path(@samen_mount, @org_id)} class="btn" style="text-decoration:none">Segments</a>
-            <.button :if={writable?(@samen_mount) and not @no_org} variant="primary" phx-click="new_campaign" id="new-campaign">
+            <.button :if={@can_admin and not @no_org} variant="primary" phx-click="new_campaign" id="new-campaign">
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M12 3v18M3 12h18" />
@@ -178,9 +218,12 @@ defmodule Samen.Web.Marketing.CampaignsLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Campaigns" nothing="there are no campaigns to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">Marketing org: {@org_id}</span>
 
           <div :if={@delete_error} class="wrap" style="margin-bottom:0">
@@ -207,7 +250,7 @@ defmodule Samen.Web.Marketing.CampaignsLive do
                 empty_icon="✉"
                 empty_body="Campaigns send to a segment through the fail-honest delivery engine."
               >
-                <:empty_actions :if={writable?(@samen_mount)}>
+                <:empty_actions :if={@can_admin}>
                   <.button variant="primary" phx-click="new_campaign" id="empty-new-campaign">New campaign</.button>
                 </:empty_actions>
                 <:head>
@@ -216,7 +259,7 @@ defmodule Samen.Web.Marketing.CampaignsLive do
                   <.sort_header field={:scheduled_at} label="Scheduled" sort={@list_state.sort} width="20%" />
                   <th scope="col" style="width:12%">Sends</th>
                   <th scope="col" style="width:14%"></th>
-                  <th :if={writable?(@samen_mount)} scope="col" style="width:10%"><span class="sr-only">Actions</span></th>
+                  <th :if={@can_admin} scope="col" style="width:10%"><span class="sr-only">Actions</span></th>
                 </:head>
                 <:row :let={c}>
                   <td style="font-weight:500">
@@ -229,7 +272,7 @@ defmodule Samen.Web.Marketing.CampaignsLive do
                   <td>
                     <a href={campaign_path(@samen_mount, @org_id, c.id)} class="btn" style="text-decoration:none;font-size:12px">Compose</a>
                   </td>
-                  <td :if={writable?(@samen_mount)} class="campaign-actions">
+                  <td :if={@can_admin} class="campaign-actions">
                     <.delete_confirm phx-click="delete" phx-value-id={c.id} />
                   </td>
                 </:row>
@@ -237,7 +280,7 @@ defmodule Samen.Web.Marketing.CampaignsLive do
             </div>
           </div>
 
-          <.modal :if={@show_new and @new_form != nil and writable?(@samen_mount)} id="new-campaign-modal" title="New campaign" on_cancel="cancel_new">
+          <.modal :if={@show_new and @new_form != nil and @can_admin} id="new-campaign-modal" title="New campaign" on_cancel="cancel_new">
             <.simple_form :let={f} for={@new_form} id="new-campaign-form" phx-change="validate_new" phx-submit="save_new">
               <.form_field field={f[:name]} label="Name" />
               <.form_field field={f[:description]} label="Description" type="textarea" />

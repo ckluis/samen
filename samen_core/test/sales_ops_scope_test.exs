@@ -29,6 +29,7 @@ defmodule Samen.SalesOpsScopeTest do
       WHOLE transaction — the Lead stays unconverted, no orphan Person/Opportunity;
     * c8 catalog registration — `mix samen.verify.catalog_parity` is green.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
   use Samen.MaskingCase
 
@@ -280,7 +281,7 @@ defmodule Samen.SalesOpsScopeTest do
       assert_plane_masked!(resolved.contact_emails, nil)
       assert_plane_masked!(resolved.contact_phones, nil)
       refute to_string(resolved.contact_name) =~ "Grace"
-      refute to_string(resolved.contact_name) =~ "vt_"
+      refute_vault_token(to_string(resolved.contact_name))
     end
 
     test "ANTI-TAUTOLOGY: plane flip — the SAME row resolves clear on tenant, masked on operator",
@@ -334,7 +335,7 @@ defmodule Samen.SalesOpsScopeTest do
       assert_plane_masked!(resolved.emails, nil)
       assert_plane_masked!(resolved.phones, nil)
       refute to_string(resolved.full_name) =~ "Grace"
-      refute to_string(resolved.full_name) =~ "vt_"
+      refute_vault_token(to_string(resolved.full_name))
     end
 
     test "ANTI-TAUTOLOGY: plane flip — the SAME row resolves clear on tenant, masked on operator",
@@ -469,7 +470,7 @@ defmodule Samen.SalesOpsScopeTest do
       masked = resolve_on_plane(person_with_pii, CrmScopeFixture.Person, :operator, repo: @repo, grant: DenyAll).full_name
       assert_plane_masked!(masked, nil)
       refute to_string(masked) =~ "Grace"
-      refute to_string(masked) =~ "vt_"
+      refute_vault_token(to_string(masked))
     end
 
     test "double-convert is REFUSED (RED); the first convert succeeds (CONTROL) — no duplicate " <>

@@ -1,0 +1,21 @@
+# SABOTAGE: TicketLive set_status acts with a fixed member scope instead of the signed-in person, so a 
+#   viewer changes the status of a ticket
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_support_test.exs
+# MUST_FAIL: a VIEWER cannot change the status, start a conversation or reply; a member can
+diff --git a/samen_web/lib/samen/web/support/ticket_live.ex b/samen_web/lib/samen/web/support/ticket_live.ex
+index b5609f09..2ec371e7 100644
+--- a/samen_web/lib/samen/web/support/ticket_live.ex
++++ b/samen_web/lib/samen/web/support/ticket_live.ex
+@@ -232,7 +232,8 @@ defmodule Samen.Web.Support.TicketLive do
+   # blueprint enum inside Reads.update_ticket_status/4 — garbage is refused, no atom
+   # is ever minted from client input.
+   def handle_event("set_status", %{"status" => status}, socket) do
+-    %{samen_mount: mount, org_id: org_id, ticket_id: ticket_id, acting_scope: scope} = socket.assigns
++    %{samen_mount: mount, org_id: org_id, ticket_id: ticket_id} = socket.assigns
++    scope = Mount.scope(mount, org_id)
+ 
+     case Reads.update_ticket_status(mount, scope, ticket_id, status) do
+       {:ok, _ticket} ->

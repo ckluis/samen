@@ -15,6 +15,7 @@ defmodule Samen.Web.MailboxTimelineMaskingTest do
        the row is proven PRESENT on both planes (non-vacuous), and the leak scan is
        shown to be refutable via `assert_leak_detected!/2`.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -97,7 +98,7 @@ defmodule Samen.Web.MailboxTimelineMaskingTest do
     # The direction is legible — the two-way sync's leg, rendered as the entry status.
     assert html =~ "inbound"
     # Even on the clear plane, the raw vault token never reaches the DOM.
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   test "GREEN: the same message is CLEAR on the COMPANY timeline too (secondary anchor)", %{
@@ -108,7 +109,7 @@ defmodule Samen.Web.MailboxTimelineMaskingTest do
 
     assert html =~ @subject
     assert html =~ @body
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   # ==========================================================================
@@ -128,7 +129,7 @@ defmodule Samen.Web.MailboxTimelineMaskingTest do
     refute html =~ @subject
     refute html =~ @body
     refute html =~ Seeds.contact_email()
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   test "RED: the COMPANY timeline masks the same message identically", %{
@@ -142,7 +143,7 @@ defmodule Samen.Web.MailboxTimelineMaskingTest do
     assert html =~ mask()
     refute html =~ @subject
     refute html =~ @body
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   # ==========================================================================
@@ -213,6 +214,6 @@ defmodule Samen.Web.MailboxTimelineMaskingTest do
     assert_plane_masked!(masked.body, @body)
     assert_plane_masked!(masked.subject, @subject)
     assert_plane_masked!(masked.counterparty_address, Seeds.contact_email())
-    refute to_string(masked.body) =~ "vt_"
+    refute_vault_token(to_string(masked.body))
   end
 end

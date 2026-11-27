@@ -1,0 +1,20 @@
+# SABOTAGE: actions verify --from-plan recomputes an unsliced plan instead of reading the published one, so 
+#   a sliced mutation job reads as a job the plan does not have
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: MUTRATE a mutation job is sized from per-target measured rates
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 9af747f2..3f1c1f8b 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1862,7 +1862,7 @@ def cmd_actions(pos, opts):
+     if sub == "plan" and opts.get("selection"):
+         selection = selection_counts(man, rest[0], opts["base"])
+     plan = actions_plan(man, rest[0], selection)
+-    if sub == "verify" and opts.get("from_plan"):
++    if False and sub == "verify" and opts.get("from_plan"):
+         # the plan the `plan` job PUBLISHED (selection-sized jobs, with the slices this diff needed): the verifier cannot
+         # recompute it - it has no toolchain to list the selection - and must not guess how many slices ran
+         plan = read_json(opts["from_plan"])

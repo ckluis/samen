@@ -1,0 +1,62 @@
+defmodule Samen.Web.TenantActorWriteScopeTest do
+  @moduledoc """
+  authz-8 review, S1: `TenantActor.write_scope/3` on an ARMED tenant mount returns the acting scope or nothing: anything that is not a
+  `%Samen.Scope{}` fails closed (it used to fall through to `TenantRole.admin_scope/3`, which on an armed host with no
+  principal answers a `:member` scope). Only the disarmed dev posture and the operator plane keep the posture's admin
+  elevation.
+  """
+  use Samen.WebTest.DataCase, async: false
+
+  alias Samen.Web.{Mount, Plane, TenantActor}
+  alias Samen.WebTest.RoleHarness, as: H
+  alias Samen.WebTest.SecurityHost
+
+  @labels %{
+    otp_app: :samen_web_security_test_host,
+    title: "Security Probe",
+    authn: {:app_env, :samen_web_security_test_host, :auth_required?},
+    authorized_orgs: {Samen.WebTest.SecurityHost, :authorized_org_ids, []},
+    identity_namespace: Samen.WebTest.Operator
+  }
+
+  setup do
+    H.setup_accounts()
+  end
+
+  defp mount, do: Mount.new(:billing, Samen.WebTest.Billing, Samen.WebTest.Repo, labels: @labels)
+
+  defp operator_mount(org_id),
+    do: Mount.new(:billing, Samen.WebTest.Billing, Samen.WebTest.Repo, labels: @labels, plane: Plane.operator("op-1", org_id, "sess-1"))
+
+  defp acting(org_id, role),
+    do: %Samen.Scope{actor: %{id: "u-1", org_id: org_id, role: role, kind: :tenant, plane: :tenant, resolved: true}}
+
+  describe "write_scope/3 (S1)" do
+    test "armed tenant mount: the acting scope itself; nil or anything else is refused, never a member or admin scope", ctx do
+      assert Samen.Web.CurrentOrg.tenant_gate_armed?(mount())
+      scope = acting(ctx.org_id, :member)
+
+      # positive control: a real scope passes through untouched
+      assert TenantActor.write_scope(mount(), ctx.org_id, scope) == scope
+
+      for bad <- [nil, :none, %{actor: %{role: :admin}}, %{role: :admin}] do
+        assert_raise ArgumentError, ~r/armed/, fn -> TenantActor.write_scope(mount(), ctx.org_id, bad) end
+      end
+    end
+
+    test "disarmed dev posture: the posture's own admin elevation, with or without a scope", ctx do
+      SecurityHost.disarm!()
+      refute Samen.Web.CurrentOrg.tenant_gate_armed?(mount())
+
+      assert %Samen.Scope{actor: %{role: :admin}} = TenantActor.write_scope(mount(), ctx.org_id, nil)
+      assert %Samen.Scope{actor: %{role: :admin}} = TenantActor.write_scope(mount(), ctx.org_id, acting(ctx.org_id, :member))
+    end
+
+    test "operator plane: the plane's own admin elevation, with or without a scope", ctx do
+      op = operator_mount(ctx.org_id)
+
+      assert %Samen.Scope{actor: %{role: :admin, plane: :operator}} = TenantActor.write_scope(op, ctx.org_id, nil)
+      assert %Samen.Scope{actor: %{role: :admin, plane: :operator}} = TenantActor.write_scope(op, ctx.org_id, acting(ctx.org_id, :member))
+    end
+  end
+end

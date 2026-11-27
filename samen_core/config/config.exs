@@ -4,27 +4,32 @@ import Config
 # own test/dev fixtures (test/support/*) can be introspected by `mix ash.codegen`
 # and exercised against a real Postgres. Host applications configure their own
 # repo + domains.
+kernel_domains = [
+  SamenCore.Support.Crm,
+  SamenCore.Support.Clinical,
+  SamenCore.Support.PropDomain,
+  SamenCore.Support.PiiClassifyDomain,
+  SamenCore.Support.CustomFields,
+  SamenCore.Support.RichTypes,
+  Samen.CustomObjects.Domain,
+  # T3.10 bounded-context DSL toy KERNEL domain (aliased/reshaped by Ctx.Toy).
+  Core.Ctx,
+  # T68 (ADR-043 §7.5): the D3 versioned Prompt resource. Real kernel infra (the
+  # Samen.CustomObjects.Domain precedent) — registered here so samen_core's OWN
+  # test/dev suite can exercise it against SamenCore.TestRepo with a real migration.
+  # Host apps mount it by adding Samen.AI.Domain to THEIR OWN :ash_domains.
+  Samen.AI.Domain,
+  # ADR-052 P2: the replay capture storage (Samen.Replay.Session / Frame) — the
+  # Samen.AI.Domain precedent; hosts that serve tenant LiveViews mount it too.
+  Samen.Replay.Domain
+]
+
+# `ash_domains` is Ash's own key (samen_core's own build checks its resources against it); `host_domains` is
+# samen's verifier/catalog registry (`Samen.HostDomains`). In samen_core's own env both are the kernel's domains.
 config :samen_core,
   ecto_repos: [SamenCore.TestRepo],
-  ash_domains: [
-    SamenCore.Support.Crm,
-    SamenCore.Support.Clinical,
-    SamenCore.Support.PropDomain,
-    SamenCore.Support.PiiClassifyDomain,
-    SamenCore.Support.CustomFields,
-    SamenCore.Support.RichTypes,
-    Samen.CustomObjects.Domain,
-    # T3.10 bounded-context DSL toy KERNEL domain (aliased/reshaped by Ctx.Toy).
-    Core.Ctx,
-    # T68 (ADR-043 §7.5): the D3 versioned Prompt resource. Real kernel infra (the
-    # Samen.CustomObjects.Domain precedent) — registered here so samen_core's OWN
-    # test/dev suite can exercise it against SamenCore.TestRepo with a real migration.
-    # Host apps mount it by adding Samen.AI.Domain to THEIR OWN :ash_domains.
-    Samen.AI.Domain,
-    # ADR-052 P2: the replay capture storage (Samen.Replay.Session / Frame) — the
-    # Samen.AI.Domain precedent; hosts that serve tenant LiveViews mount it too.
-    Samen.Replay.Domain
-  ]
+  ash_domains: kernel_domains,
+  host_domains: kernel_domains
 
 # T3.9 Tier-2 custom objects: the repo backing the `tnt_record` Ash resource +
 # the `tnt_object`/`tnt_field` catalog. Host apps configure their own; falls back

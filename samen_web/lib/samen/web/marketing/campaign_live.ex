@@ -31,6 +31,9 @@ defmodule Samen.Web.Marketing.CampaignLive do
 
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   alias Samen.Web.Marketing.Reads
   alias Samen.Web.Reads.Guard
@@ -61,12 +64,21 @@ defmodule Samen.Web.Marketing.CampaignLive do
   # Send-to-segment (tenant plane only — the composer is hidden on the operator plane, so this
   # handler only runs there). Consent/suppression enforced by Reads.enqueue_send.
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("retry_load", _params, socket),
     do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.campaign_id)}
 
+  # Sending outreach to a whole segment is admin's: the send resource only checks the org in the kernel (consent and
+  # suppression are enforced by `Reads.enqueue_send/3`), so the page requires an admin, the rank of every other campaign write.
   def handle_event("send_campaign", %{"send" => params}, socket) do
-    %{samen_mount: mount, org_id: org_id, campaign: campaign} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    if TenantActor.admin?(socket),
+      do: send_campaign(params, socket),
+      else: {:noreply, assign(socket, send_results: nil, notice: "Only an admin can send a campaign.")}
+  end
+
+  defp send_campaign(params, socket) do
+    %{samen_mount: mount, org_id: org_id, campaign: campaign, acting_scope: scope} = socket.assigns
     template_id = nz(params["template_id"])
     segment_id = nz(params["segment_id"])
 
@@ -146,11 +158,50 @@ defmodule Samen.Web.Marketing.CampaignLive do
       send_results: Map.get(socket.assigns, :send_results),
       notice: Map.get(socket.assigns, :notice)
     )
+    |> assign(acting_scope: nil, actor_state: :ok, can_admin: false)
   end
 
+  # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read, nothing
+  # can be sent, and the page is re-resolved on every `handle_params`.
   def load(socket, org_id, campaign_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, campaign_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id, campaign_id)
+    end
+  end
+
+  # Acting again with no URL to patch to (`Samen.Web.TenantActor`, the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: org_id, campaign_id: campaign_id}} = socket), do: load(socket, org_id, campaign_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): the
+  # same load a refused navigation does, so the campaign, its audience and its send results are not kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: org_id, campaign_id: campaign_id}} = socket), do: load_refused(socket, org_id, campaign_id)
+
+  defp load_refused(socket, org_id, campaign_id) do
+    socket
+    |> ensure_return_to()
+    |> assign(
+      no_org: false,
+      org_id: org_id,
+      campaign_id: campaign_id,
+      campaign: nil,
+      load_error: nil,
+      section_errors: [],
+      templates: [],
+      segments: [],
+      audience: [],
+      sends: [],
+      event_counts: %{},
+      send_results: nil,
+      notice: nil
+    )
+  end
+
+  defp load_for(socket, org_id, campaign_id, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
 
     # A FAILED campaign read is the error state (retry), never "Campaign not found."; each
     # secondary read fails on its own (`section_errors`) and blanks only its own pane.
@@ -243,9 +294,12 @@ defmodule Samen.Web.Marketing.CampaignLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Campaign" nothing="there is no campaign to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">Marketing org: {@org_id}</span>
 
           <%= if @campaign == nil do %>
@@ -267,7 +321,7 @@ defmodule Samen.Web.Marketing.CampaignLive do
               </div>
             </div>
 
-            <%= if composer?(@samen_mount) do %>
+            <%= if composer?(@samen_mount) and @can_admin do %>
               <div class="wrap" id="compose-pane" style="margin-bottom:0;padding-top:8px">
                 <.error_state :if={:templates in @section_errors or :segments in @section_errors} class="compose-error" body={Guard.message()} retry_event="retry_load" />
                 <div class="card" style="padding:18px 20px">

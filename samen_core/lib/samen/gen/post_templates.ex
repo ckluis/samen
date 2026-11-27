@@ -241,24 +241,9 @@ defmodule Samen.Gen.PostTemplates do
         defaults([:read, :destroy, create: :*, update: :*])
 
         action :reveal_<%= abbrev %>, :map do
-          argument(:actor_id, :string, allow_nil?: false)
           argument(:subject_id, :string, allow_nil?: false)
 
-          run(fn input, _ctx ->
-            ctx = %Samen.Reveal.Context{
-              actor: input.arguments.actor_id,
-              subject_id: input.arguments.subject_id,
-              resource: __MODULE__,
-              action: :reveal_<%= abbrev %>,
-              label: :secret
-            }
-
-            if Samen.Reveal.grant_checker().granted?(ctx) do
-              {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-            else
-              {:error, :denied}
-            end
-          end)
+          run({Samen.Reveal.GrantProbe, label: :secret})
         end
       end
 
@@ -279,7 +264,7 @@ defmodule Samen.Gen.PostTemplates do
         end
 
         policy action(:reveal_<%= abbrev %>) do
-          authorize_if(always())
+          authorize_if(actor_present())
         end
       end
     end
@@ -588,7 +573,7 @@ defmodule Samen.Gen.PostTemplates do
       "\n" <>
       "      # FAIL-HONEST restore: navigate/refresh only when the restore actually happened.\n" <>
       "      def handle_event(\"restore\", %{\"id\" => id}, socket) do\n" <>
-      "        scope = scope(socket.assigns.org_id, socket.assigns[:samen_principal])\n" <>
+      "        scope = scope(socket.assigns.org_id, socket.assigns[:samen_principal_ref])\n" <>
       "\n" <>
       "        case Enum.find(socket.assigns.records, &(to_string(&1.id) == id)) do\n" <>
       "          nil ->\n" <>
@@ -693,8 +678,12 @@ defmodule Samen.Gen.PostTemplates do
         socket =
           assign(socket,
             samen_mount: @samen_authn_mount,
-            samen_principal: Samen.Web.CurrentOrg.principal_id(@samen_authn_mount, session)
+            samen_principal: Samen.Web.CurrentOrg.principal_id(@samen_authn_mount, session),
+            samen_principal_ref: Samen.Web.Settings.Reads.principal_ref(@samen_authn_mount, params, session)
           )
+
+        socket =
+          Samen.Web.TenantActor.attach_once(socket, :samen_gen_actor_guard, :handle_event, &__MODULE__.recheck_event/3)
 
         org_id = Samen.Web.CurrentOrg.resolve(@samen_authn_mount, params, session)
         {:ok, load(assign(socket, org_id: org_id), org_id)}
@@ -714,6 +703,8 @@ defmodule Samen.Gen.PostTemplates do
       def load(socket, nil) do
         assign(socket,
           no_org: true,
+          access: :ok,
+          acting_role: nil,
           org_id: nil,
           records: [],
           show_new: false,
@@ -724,12 +715,25 @@ defmodule Samen.Gen.PostTemplates do
       end
 
       def load(socket, org_id) do
-        scope = scope(org_id, socket.assigns[:samen_principal])
+        case access(org_id, socket.assigns[:samen_principal_ref]) do
+          {:ok, role} ->
+            socket |> assign(acting_role: role) |> load_allowed(org_id)
+
+          {:refused, state} ->
+            socket
+            |> assign(no_org: false, org_id: org_id, access: state, acting_role: nil, records: [], show_new: false, new_form: nil, delete_error: nil)
+            |> assign_new(:show_archived, fn -> false end)
+        end
+      end
+
+      defp load_allowed(socket, org_id) do
+        scope = scope(org_id, socket.assigns[:samen_principal_ref])
         show_archived = Map.get(socket.assigns, :show_archived, false)
 
         socket
         |> assign(
           no_org: false,
+          access: :ok,
           org_id: org_id,
           show_archived: show_archived,
           records: read_records(scope, show_archived)
@@ -739,9 +743,30 @@ defmodule Samen.Gen.PostTemplates do
         |> assign(new_form: create_form(scope))
       end
 
+      # An OPEN page does not keep the role it resolved at its last navigation: a person demoted or suspended while it
+      # is open acts on this same socket. Before EVERY event the role is resolved again (the shared
+      # `Samen.Web.TenantActor.attach_once/4` lifecycle seam, attached in `mount/3`): the same role passes the event
+      # on; a changed role reloads the page (the forms are rebuilt with the new role); a refusal HALTS the event and
+      # the page is the refused state, with nothing it loaded.
+      @doc false
+      def recheck_event(_event, _params, %{assigns: %{access: :ok, org_id: org_id}} = socket) when is_binary(org_id) do
+        case access(org_id, socket.assigns[:samen_principal_ref]) do
+          {:ok, role} ->
+            if role == socket.assigns[:acting_role], do: {:cont, socket}, else: {:cont, load(socket, org_id)}
+
+          {:refused, _state} ->
+            {:halt, load(socket, org_id)}
+        end
+      end
+
+      def recheck_event(_event, _params, socket), do: {:cont, socket}
+
       @impl true
+      def handle_event(_event, _params, %{assigns: %{access: access}} = socket) when access != :ok,
+        do: {:noreply, socket}
+
       def handle_event("new", _params, socket) do
-        {:noreply, assign(socket, show_new: true, new_form: create_form(scope(socket.assigns.org_id, socket.assigns[:samen_principal])))}
+        {:noreply, assign(socket, show_new: true, new_form: create_form(scope(socket.assigns.org_id, socket.assigns[:samen_principal_ref])))}
       end
 
       def handle_event("cancel_new", _params, socket) do
@@ -767,7 +792,7 @@ defmodule Samen.Gen.PostTemplates do
 
       # FAIL-HONEST delete: navigate/refresh only when the destroy actually happened.
       def handle_event("delete", %{"id" => id}, socket) do
-        scope = scope(socket.assigns.org_id, socket.assigns[:samen_principal])
+        scope = scope(socket.assigns.org_id, socket.assigns[:samen_principal_ref])
 
         case Enum.find(socket.assigns.records, &(to_string(&1.id) == id)) do
           nil ->
@@ -789,24 +814,25 @@ defmodule Samen.Gen.PostTemplates do
       # B-SEC / S12 · ADR-045 §4.4 — the acting scope. `org_id` is the SESSION-RESOLVED org
       # (see `mount/3` and `handle_params/3`, which both go through `Samen.Web.CurrentOrg`),
       # never a raw `?org=`, so `Samen.Policy.OrgScope` confines every read/write to an org the
-      # CALLER is authorized for. `principal` is the authenticated principal id pinned in `mount/3`.
-      defp scope(org_id, principal) do
-        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: role(org_id, principal), plane: :tenant}}
-      end
+      # CALLER is authorized for. `ref` is the principal reference pinned in `mount/3`.
+      #
+      # WHO acts: ONE resolver (`Samen.Web.TenantActor.access/4`, over `Samen.Auth.OrgActor`) turns the
+      # principal into the person's ACTIVE `Identity.Membership` role. DISARMED
+      # (`config :<%= otp_app %>, auth_required?: false`): the dev convenience (`:admin`), unchanged.
+      # ARMED: the real role — a viewer is a viewer. No active membership, or a failed lookup, is a
+      # refusal (`access/2` -> `{:refused, :denied | :unavailable}`): `load/2` shows the honest state and
+      # reads nothing, and this scope then carries NO role, so every kernel write is refused. There is
+      # never a default role.
+      defp access(org_id, ref), do: Samen.Web.TenantActor.access(@samen_authn_mount, org_id, ref, :admin)
 
-      # The acting role. DISARMED (`config :<%= otp_app %>, auth_required?: false`): the dev
-      # convenience (`:admin`), unchanged. ARMED: the principal's REAL `Identity.Membership` role
-      # via the framework (`Samen.Web.TenantRole.membership_role/3` — the SAME source of truth the
-      # settings surfaces use), fail-CLOSED to `:member` so admin-rank writes require ACTUAL admin
-      # membership rather than a hardcoded elevation, and a non-admin member's write is refused by
-      # the kernel `RoleAtLeast :admin` gate. Reads are unaffected — `OrgScope` confines by org_id
-      # regardless of role. This is the tenant-plane twin of the operator `dev_operator_role/2`
-      # convenience: `?org=` names the org, the SESSION names the principal, the Membership names
-      # the rank.
-      defp role(org_id, principal) do
-        if Samen.Web.CurrentOrg.tenant_gate_armed?(@samen_authn_mount),
-          do: Samen.Web.TenantRole.membership_role(@samen_authn_mount, org_id, principal),
-          else: :admin
+      defp scope(org_id, ref) do
+        role =
+          case access(org_id, ref) do
+            {:ok, role} -> role
+            {:refused, _state} -> nil
+          end
+
+        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: role, plane: :tenant}}
       end
 
       <%= archivable_read_records_fn %>
@@ -835,14 +861,20 @@ defmodule Samen.Gen.PostTemplates do
             <.topbar title="<%= resource %>" crumbs={["<%= module %>", "<%= scope %>", "<%= resource %>"]}>
               <:actions>
                 <%= archivable_live_toggle_button %>
-                <.button :if={not @no_org} variant="primary" phx-click="new" id="new-<%= resource_path %>">New <%= resource %></.button>
+                <.button :if={not @no_org and @access == :ok} variant="primary" phx-click="new" id="new-<%= resource_path %>">New <%= resource %></.button>
               </:actions>
             </.topbar>
 
-            <%= if @no_org do %>
+            <%= if @no_org or @access != :ok do %>
               <div class="wrap">
-                <div class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
+                <div :if={@no_org} class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
                   No org selected. Append <code>?org=&lt;uuid&gt;</code> to the URL.
+                </div>
+                <div :if={not @no_org and @access == :denied} class="card" id="actor-denied" style="padding:22px 20px;color:var(--muted)">
+                  No access. Your account holds no active membership in this workspace.
+                </div>
+                <div :if={not @no_org and @access == :unavailable} class="card" id="actor-unavailable" style="padding:22px 20px;color:var(--muted)">
+                  Unavailable. We couldn't check who you are in this workspace, so nothing is shown.
                 </div>
               </div>
             <% else %>
@@ -947,8 +979,12 @@ defmodule Samen.Gen.PostTemplates do
         socket =
           assign(socket,
             samen_mount: @samen_authn_mount,
-            samen_principal: Samen.Web.CurrentOrg.principal_id(@samen_authn_mount, session)
+            samen_principal: Samen.Web.CurrentOrg.principal_id(@samen_authn_mount, session),
+            samen_principal_ref: Samen.Web.Settings.Reads.principal_ref(@samen_authn_mount, params, session)
           )
+
+        socket =
+          Samen.Web.TenantActor.attach_once(socket, :samen_gen_actor_guard, :handle_event, &__MODULE__.recheck_event/3)
 
         org_id = Samen.Web.CurrentOrg.resolve(@samen_authn_mount, params, session)
         id = params["id"]
@@ -967,20 +1003,51 @@ defmodule Samen.Gen.PostTemplates do
       end
 
       @doc false
-      def load(socket, nil, _id), do: assign(socket, no_org: true, record: nil, delete_error: nil)
-      def load(socket, _org_id, nil), do: assign(socket, no_org: false, record: nil, delete_error: nil)
+      def load(socket, nil, _id), do: assign(socket, no_org: true, access: :ok, acting_role: nil, record: nil, delete_error: nil)
+      def load(socket, _org_id, nil), do: assign(socket, no_org: false, access: :ok, acting_role: nil, record: nil, delete_error: nil)
 
       def load(socket, org_id, id) do
-        socket
-        |> assign(no_org: false, record: fetch(org_id, id))
-        |> assign_new(:delete_error, fn -> nil end)
+        ref = socket.assigns[:samen_principal_ref]
+
+        case access(org_id, ref) do
+          {:ok, role} ->
+            socket
+            |> assign(no_org: false, access: :ok, acting_role: role, record: fetch(org_id, id, ref))
+            |> assign_new(:delete_error, fn -> nil end)
+
+          {:refused, state} ->
+            socket
+            |> assign(no_org: false, access: state, acting_role: nil, record: nil)
+            |> assign_new(:delete_error, fn -> nil end)
+        end
       end
 
-      @impl true
-      def handle_event("delete", %{"id" => id}, socket) do
-        scope = scope(socket.assigns.org_id, socket.assigns[:samen_principal])
+      # An OPEN page does not keep the role it resolved at its last navigation: a person demoted or suspended while it
+      # is open acts on this same socket. Before EVERY event the role is resolved again (the shared
+      # `Samen.Web.TenantActor.attach_once/4` lifecycle seam, attached in `mount/3`): the same role passes the event
+      # on; a changed role reloads the page (the forms are rebuilt with the new role); a refusal HALTS the event and
+      # the page is the refused state, with nothing it loaded.
+      @doc false
+      def recheck_event(_event, _params, %{assigns: %{access: :ok, org_id: org_id}} = socket) when is_binary(org_id) do
+        case access(org_id, socket.assigns[:samen_principal_ref]) do
+          {:ok, role} ->
+            if role == socket.assigns[:acting_role], do: {:cont, socket}, else: {:cont, load(socket, org_id, socket.assigns.id)}
 
-        case fetch(socket.assigns.org_id, id) do
+          {:refused, _state} ->
+            {:halt, load(socket, org_id, socket.assigns.id)}
+        end
+      end
+
+      def recheck_event(_event, _params, socket), do: {:cont, socket}
+
+      @impl true
+      def handle_event(_event, _params, %{assigns: %{access: access}} = socket) when access != :ok,
+        do: {:noreply, socket}
+
+      def handle_event("delete", %{"id" => id}, socket) do
+        scope = scope(socket.assigns.org_id, socket.assigns[:samen_principal_ref])
+
+        case fetch(socket.assigns.org_id, id, socket.assigns[:samen_principal_ref]) do
           nil ->
             {:noreply, assign(socket, delete_error: "This <%= resource_path %> no longer exists.")}
 
@@ -997,11 +1064,11 @@ defmodule Samen.Gen.PostTemplates do
       # not selected by default). The read's `Samen.Api.PiiResolution` preparation resolves
       # `secret` per plane — clear on the tenant plane, `%Samen.Masked{}` otherwise — so the
       # template renders the already-resolved value (never hand-masked, never a `vt_*` token).
-      defp fetch(org_id, id) do
+      defp fetch(org_id, id, ref) do
         Resource
         |> Ash.Query.filter(id == ^id)
         |> Ash.Query.ensure_selected([:secret])
-        |> Ash.read_one(scope: scope(org_id, nil))
+        |> Ash.read_one(scope: scope(org_id, ref))
         |> case do
           {:ok, record} -> record
           {:error, _} -> nil
@@ -1011,24 +1078,25 @@ defmodule Samen.Gen.PostTemplates do
       # B-SEC / S12 · ADR-045 §4.4 — the acting scope. `org_id` is the SESSION-RESOLVED org
       # (see `mount/3` and `handle_params/3`, which both go through `Samen.Web.CurrentOrg`),
       # never a raw `?org=`, so `Samen.Policy.OrgScope` confines every read/write to an org the
-      # CALLER is authorized for. `principal` is the authenticated principal id pinned in `mount/3`.
-      defp scope(org_id, principal) do
-        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: role(org_id, principal), plane: :tenant}}
-      end
+      # CALLER is authorized for. `ref` is the principal reference pinned in `mount/3`.
+      #
+      # WHO acts: ONE resolver (`Samen.Web.TenantActor.access/4`, over `Samen.Auth.OrgActor`) turns the
+      # principal into the person's ACTIVE `Identity.Membership` role. DISARMED
+      # (`config :<%= otp_app %>, auth_required?: false`): the dev convenience (`:admin`), unchanged.
+      # ARMED: the real role — a viewer is a viewer. No active membership, or a failed lookup, is a
+      # refusal (`access/2` -> `{:refused, :denied | :unavailable}`): `load/2` shows the honest state and
+      # reads nothing, and this scope then carries NO role, so every kernel write is refused. There is
+      # never a default role.
+      defp access(org_id, ref), do: Samen.Web.TenantActor.access(@samen_authn_mount, org_id, ref, :admin)
 
-      # The acting role. DISARMED (`config :<%= otp_app %>, auth_required?: false`): the dev
-      # convenience (`:admin`), unchanged. ARMED: the principal's REAL `Identity.Membership` role
-      # via the framework (`Samen.Web.TenantRole.membership_role/3` — the SAME source of truth the
-      # settings surfaces use), fail-CLOSED to `:member` so admin-rank writes require ACTUAL admin
-      # membership rather than a hardcoded elevation, and a non-admin member's write is refused by
-      # the kernel `RoleAtLeast :admin` gate. Reads are unaffected — `OrgScope` confines by org_id
-      # regardless of role. This is the tenant-plane twin of the operator `dev_operator_role/2`
-      # convenience: `?org=` names the org, the SESSION names the principal, the Membership names
-      # the rank.
-      defp role(org_id, principal) do
-        if Samen.Web.CurrentOrg.tenant_gate_armed?(@samen_authn_mount),
-          do: Samen.Web.TenantRole.membership_role(@samen_authn_mount, org_id, principal),
-          else: :admin
+      defp scope(org_id, ref) do
+        role =
+          case access(org_id, ref) do
+            {:ok, role} -> role
+            {:refused, _state} -> nil
+          end
+
+        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: role, plane: :tenant}}
       end
 
       defp index_path(org_id), do: "/<%= scope_path %>/<%= resource_path %>?org=#{org_id}"
@@ -1054,10 +1122,16 @@ defmodule Samen.Gen.PostTemplates do
               </:actions>
             </.topbar>
 
-            <%= if @no_org do %>
+            <%= if @no_org or @access != :ok do %>
               <div class="wrap">
-                <div class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
+                <div :if={@no_org} class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
                   No org selected. Append <code>?org=&lt;uuid&gt;</code> to the URL.
+                </div>
+                <div :if={not @no_org and @access == :denied} class="card" id="actor-denied" style="padding:22px 20px;color:var(--muted)">
+                  No access. Your account holds no active membership in this workspace.
+                </div>
+                <div :if={not @no_org and @access == :unavailable} class="card" id="actor-unavailable" style="padding:22px 20px;color:var(--muted)">
+                  Unavailable. We couldn't check who you are in this workspace, so nothing is shown.
                 </div>
               </div>
             <% else %>
@@ -1161,8 +1235,12 @@ defmodule Samen.Gen.PostTemplates do
         socket =
           assign(socket,
             samen_mount: @samen_authn_mount,
-            samen_principal: Samen.Web.CurrentOrg.principal_id(@samen_authn_mount, session)
+            samen_principal: Samen.Web.CurrentOrg.principal_id(@samen_authn_mount, session),
+            samen_principal_ref: Samen.Web.Settings.Reads.principal_ref(@samen_authn_mount, params, session)
           )
+
+        socket =
+          Samen.Web.TenantActor.attach_once(socket, :samen_gen_actor_guard, :handle_event, &__MODULE__.recheck_event/3)
 
         org_id = Samen.Web.CurrentOrg.resolve(@samen_authn_mount, params, session)
         id = params["id"]
@@ -1171,37 +1249,67 @@ defmodule Samen.Gen.PostTemplates do
       end
 
       @doc false
-      def load(socket, nil, _id, action), do: assign(socket, no_org: true, action: action, record: nil, form: nil)
+      def load(socket, nil, _id, action), do: assign(socket, no_org: true, access: :ok, acting_role: nil, action: action, record: nil, form: nil)
 
-      def load(socket, org_id, nil, _action) do
-        assign(socket, no_org: false, action: :new, record: nil, form: create_form(scope(org_id, socket.assigns[:samen_principal])))
+      def load(socket, org_id, id, action) do
+        ref = socket.assigns[:samen_principal_ref]
+
+        case access(org_id, ref) do
+          {:ok, role} -> socket |> assign(acting_role: role) |> load_allowed(org_id, id, ref)
+          {:refused, state} -> assign(socket, no_org: false, access: state, acting_role: nil, action: action, record: nil, form: nil)
+        end
       end
 
-      def load(socket, org_id, id, _action) do
-        case fetch(org_id, id) do
+      defp load_allowed(socket, org_id, nil, ref) do
+        assign(socket, no_org: false, access: :ok, action: :new, record: nil, form: create_form(scope(org_id, ref)))
+      end
+
+      defp load_allowed(socket, org_id, id, ref) do
+        case fetch(org_id, id, ref) do
           nil ->
-            assign(socket, no_org: false, action: :edit, record: nil, form: nil)
+            assign(socket, no_org: false, access: :ok, action: :edit, record: nil, form: nil)
 
           record ->
-            assign(socket, no_org: false, action: :edit, record: record, form: update_form(record, scope(org_id, socket.assigns[:samen_principal])))
+            assign(socket, no_org: false, access: :ok, action: :edit, record: record, form: update_form(record, scope(org_id, ref)))
         end
       end
 
       # Read ONE record on the tenant plane, SELECTING the 🔒 vault field so the edit form
       # pre-fills the plane-resolved value (the kit's masked branch keeps it read-only
       # `••••` on the operator plane; on the tenant plane it is a normal editable field).
-      defp fetch(org_id, id) do
+      defp fetch(org_id, id, ref) do
         Resource
         |> Ash.Query.filter(id == ^id)
         |> Ash.Query.ensure_selected([:secret])
-        |> Ash.read_one(scope: scope(org_id, nil))
+        |> Ash.read_one(scope: scope(org_id, ref))
         |> case do
           {:ok, record} -> record
           {:error, _} -> nil
         end
       end
 
+      # An OPEN page does not keep the role it resolved at its last navigation: a person demoted or suspended while it
+      # is open acts on this same socket. Before EVERY event the role is resolved again (the shared
+      # `Samen.Web.TenantActor.attach_once/4` lifecycle seam, attached in `mount/3`): the same role passes the event
+      # on; a changed role reloads the page (the forms are rebuilt with the new role); a refusal HALTS the event and
+      # the page is the refused state, with nothing it loaded.
+      @doc false
+      def recheck_event(_event, _params, %{assigns: %{access: :ok, org_id: org_id}} = socket) when is_binary(org_id) do
+        case access(org_id, socket.assigns[:samen_principal_ref]) do
+          {:ok, role} ->
+            if role == socket.assigns[:acting_role], do: {:cont, socket}, else: {:cont, load(socket, org_id, socket.assigns.id, socket.assigns.action)}
+
+          {:refused, _state} ->
+            {:halt, load(socket, org_id, socket.assigns.id, socket.assigns.action)}
+        end
+      end
+
+      def recheck_event(_event, _params, socket), do: {:cont, socket}
+
       @impl true
+      def handle_event(_event, _params, %{assigns: %{access: access}} = socket) when access != :ok,
+        do: {:noreply, socket}
+
       def handle_event("validate", %{"form" => params}, socket) do
         {:noreply, assign(socket, form: AshPhoenix.Form.validate(socket.assigns.form, submit_params(params, socket)))}
       end
@@ -1219,24 +1327,25 @@ defmodule Samen.Gen.PostTemplates do
       # B-SEC / S12 · ADR-045 §4.4 — the acting scope. `org_id` is the SESSION-RESOLVED org
       # (see `mount/3` and `handle_params/3`, which both go through `Samen.Web.CurrentOrg`),
       # never a raw `?org=`, so `Samen.Policy.OrgScope` confines every read/write to an org the
-      # CALLER is authorized for. `principal` is the authenticated principal id pinned in `mount/3`.
-      defp scope(org_id, principal) do
-        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: role(org_id, principal), plane: :tenant}}
-      end
+      # CALLER is authorized for. `ref` is the principal reference pinned in `mount/3`.
+      #
+      # WHO acts: ONE resolver (`Samen.Web.TenantActor.access/4`, over `Samen.Auth.OrgActor`) turns the
+      # principal into the person's ACTIVE `Identity.Membership` role. DISARMED
+      # (`config :<%= otp_app %>, auth_required?: false`): the dev convenience (`:admin`), unchanged.
+      # ARMED: the real role — a viewer is a viewer. No active membership, or a failed lookup, is a
+      # refusal (`access/2` -> `{:refused, :denied | :unavailable}`): `load/2` shows the honest state and
+      # reads nothing, and this scope then carries NO role, so every kernel write is refused. There is
+      # never a default role.
+      defp access(org_id, ref), do: Samen.Web.TenantActor.access(@samen_authn_mount, org_id, ref, :admin)
 
-      # The acting role. DISARMED (`config :<%= otp_app %>, auth_required?: false`): the dev
-      # convenience (`:admin`), unchanged. ARMED: the principal's REAL `Identity.Membership` role
-      # via the framework (`Samen.Web.TenantRole.membership_role/3` — the SAME source of truth the
-      # settings surfaces use), fail-CLOSED to `:member` so admin-rank writes require ACTUAL admin
-      # membership rather than a hardcoded elevation, and a non-admin member's write is refused by
-      # the kernel `RoleAtLeast :admin` gate. Reads are unaffected — `OrgScope` confines by org_id
-      # regardless of role. This is the tenant-plane twin of the operator `dev_operator_role/2`
-      # convenience: `?org=` names the org, the SESSION names the principal, the Membership names
-      # the rank.
-      defp role(org_id, principal) do
-        if Samen.Web.CurrentOrg.tenant_gate_armed?(@samen_authn_mount),
-          do: Samen.Web.TenantRole.membership_role(@samen_authn_mount, org_id, principal),
-          else: :admin
+      defp scope(org_id, ref) do
+        role =
+          case access(org_id, ref) do
+            {:ok, role} -> role
+            {:refused, _state} -> nil
+          end
+
+        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: role, plane: :tenant}}
       end
 
       defp create_form(scope) do
@@ -1276,10 +1385,16 @@ defmodule Samen.Gen.PostTemplates do
               </:actions>
             </.topbar>
 
-            <%= if @no_org do %>
+            <%= if @no_org or @access != :ok do %>
               <div class="wrap">
-                <div class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
+                <div :if={@no_org} class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
                   No org selected. Append <code>?org=&lt;uuid&gt;</code> to the URL.
+                </div>
+                <div :if={not @no_org and @access == :denied} class="card" id="actor-denied" style="padding:22px 20px;color:var(--muted)">
+                  No access. Your account holds no active membership in this workspace.
+                </div>
+                <div :if={not @no_org and @access == :unavailable} class="card" id="actor-unavailable" style="padding:22px 20px;color:var(--muted)">
+                  Unavailable. We couldn't check who you are in this workspace, so nothing is shown.
                 </div>
               </div>
             <% else %>
@@ -1373,7 +1488,7 @@ defmodule Samen.Gen.PostTemplates do
         assert byte_size(out) > 0
         assert out =~ "Smoke row"
         assert out =~ to_string(record.id)
-        refute out =~ "vt_"
+        Samen.VaultTokenAssert.refute_vault_token(out)
       end
 
       test "SHOW mounts + resolves the 🔒 field through PiiResolution on the tenant plane (masking by construction)", %{record: record} do
@@ -1385,7 +1500,7 @@ defmodule Samen.Gen.PostTemplates do
         # NEVER the raw stored value.
         assert out =~ @plaintext or out =~ "••••"
         # The vault token NEVER reaches the DOM (the leak scan).
-        refute out =~ "vt_"
+        Samen.VaultTokenAssert.refute_vault_token(out)
       end
 
       test "FORM (new) mounts + renders the kit create form" do
@@ -1400,6 +1515,130 @@ defmodule Samen.Gen.PostTemplates do
         assert byte_size(out) > 0
         assert out =~ "Edit <%= resource %>"
         assert out =~ "Smoke row"
+      end
+
+      # -- an OPEN screen does not keep the role it resolved at its last navigation (authz-6 review 2, X1) ---------------
+      #
+      # The screen is mounted on a socket with a real LiveView lifecycle, then the host is ARMED and the person pinned
+      # (the membership is read live, as the real session's would be). Every event goes through the lifecycle hooks the
+      # screen attached (the shared guard), then the screen's own `handle_event/3`, as the channel dispatches it.
+
+      @armed_form %{"form" => %{"name" => "Armed row", "label" => "A1", "status" => "active", "secret" => "armed-secret"}}
+
+      defp live_socket do
+        socket = %Phoenix.LiveView.Socket{}
+
+        %{
+          socket
+          | assigns: Map.put(socket.assigns, :flash, %{}),
+            private: Map.put(socket.private, :lifecycle, %Phoenix.LiveView.Lifecycle{})
+        }
+      end
+
+      defp open!(mod, params) do
+        {:ok, socket} = mod.mount(params, %{}, live_socket())
+        socket
+      end
+
+      # Arm the host and pin a person holding `role` in @org. Returns the membership (to demote or suspend).
+      defp arm!(socket, role) do
+        prev = Application.get_env(:<%= otp_app %>, :auth_required?)
+        Application.put_env(:<%= otp_app %>, :auth_required?, true)
+
+        on_exit(fn ->
+          if prev == nil,
+            do: Application.delete_env(:<%= otp_app %>, :auth_required?),
+            else: Application.put_env(:<%= otp_app %>, :auth_required?, prev)
+        end)
+
+        user =
+          <%= module %>.Operator.User
+          |> Ash.Changeset.for_create(
+            :create,
+            %{org_id: @org, handle: "armed-#{System.unique_integer([:positive])}", status: "active"},
+            authorize?: false
+          )
+          |> Ash.create!()
+
+        membership =
+          <%= module %>.Operator.Membership
+          |> Ash.Changeset.for_create(
+            :create,
+            %{org_id: @org, user_id: user.id, role: role, status: "active"},
+            authorize?: false
+          )
+          |> Ash.create!()
+
+        {Phoenix.Component.assign(socket, samen_principal_ref: {:user, user.id}), membership}
+      end
+
+      defp change_membership!(membership, attrs) do
+        membership |> Ash.Changeset.for_update(:update, attrs, authorize?: false) |> Ash.update!()
+      end
+
+      defp send_event(mod, socket, name, params) do
+        case Phoenix.LiveView.Lifecycle.handle_event(name, params, socket) do
+          {:halt, socket} ->
+            socket
+
+          {:cont, socket} ->
+            {:noreply, socket} = mod.handle_event(name, params, socket)
+            socket
+        end
+      end
+
+      defp widget_names do
+        Resource |> Ash.read!(authorize?: false) |> Enum.map(& &1.name)
+      end
+
+      test "an open FORM: an admin who is still an admin saves and navigates (the positive control)" do
+        socket = open!(FormLive, %{"org" => @org})
+        {socket, _membership} = arm!(socket, :admin)
+
+        socket = send_event(FormLive, socket, "save", @armed_form)
+        assert {:live, :redirect, _} = socket.redirected
+        assert "Armed row" in widget_names()
+      end
+
+      test "an open FORM: an admin demoted to viewer while it is open is refused, with no navigation" do
+        socket = open!(FormLive, %{"org" => @org})
+        {socket, membership} = arm!(socket, :admin)
+        change_membership!(membership, %{role: :viewer})
+
+        socket = send_event(FormLive, socket, "save", @armed_form)
+        assert socket.redirected == nil
+        refute "Armed row" in widget_names()
+      end
+
+      test "an open FORM: a suspended member's save is halted and the screen is the refused state" do
+        socket = open!(FormLive, %{"org" => @org})
+        {socket, membership} = arm!(socket, :admin)
+        change_membership!(membership, %{status: "suspended"})
+
+        socket = send_event(FormLive, socket, "save", @armed_form)
+        assert socket.redirected == nil
+        assert socket.assigns.access == :denied
+        assert socket.assigns.form == nil
+        refute "Armed row" in widget_names()
+      end
+
+      test "an open INDEX: a demoted admin's save_new is refused, a suspended member's is halted" do
+        socket = open!(IndexLive, %{"org" => @org})
+        {socket, membership} = arm!(socket, :admin)
+
+        # control: unchanged, the create applies
+        socket = send_event(IndexLive, socket, "save_new", %{"form" => %{"name" => "Index ok", "label" => "I1", "status" => "active", "secret" => "s"}})
+        assert "Index ok" in widget_names()
+
+        change_membership!(membership, %{role: :viewer})
+        socket = send_event(IndexLive, socket, "save_new", %{"form" => %{"name" => "Index demoted", "label" => "I2", "status" => "active", "secret" => "s"}})
+        refute "Index demoted" in widget_names()
+
+        change_membership!(membership, %{status: "suspended"})
+        socket = send_event(IndexLive, socket, "save_new", %{"form" => %{"name" => "Index suspended", "label" => "I3", "status" => "active", "secret" => "s"}})
+        refute "Index suspended" in widget_names()
+        assert socket.assigns.access == :denied
+        assert socket.assigns.records == []
       end
     end
     '''

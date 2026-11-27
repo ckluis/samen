@@ -1,0 +1,20 @@
+# SABOTAGE: SequencesLive no longer refuses events while nobody is acting, so a suspended member's open 
+#   page still handles enroll
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_crm_work_test.exs
+# MUST_FAIL: a suspended member's open sequences page enrolls nothing
+diff --git a/samen_web/lib/samen/web/crm/sequences_live.ex b/samen_web/lib/samen/web/crm/sequences_live.ex
+index c1450427..af9b08db 100644
+--- a/samen_web/lib/samen/web/crm/sequences_live.ex
++++ b/samen_web/lib/samen/web/crm/sequences_live.ex
+@@ -150,8 +150,6 @@ defmodule Samen.Web.CRM.SequencesLive do
+   end
+ 
+   @impl true
+-  TenantActor.refuse_events()
+-
+   def handle_event("retry_load", _params, socket) do
+     {:noreply, load(socket, socket.assigns.org_id)}
+   end

@@ -7,10 +7,11 @@ config :<%= otp_app %>,
   ecto_repos: [<%= module %>.Repo],
   ash_domains: [<%= module %>.Billing, <%= module %>.Vertical, <%= module %>.Aggregate]
 
-# The samen_core verifiers discover domains from :samen_core :ash_domains. Register
+# The samen_core verifiers discover domains from :samen_core :host_domains (NOT :ash_domains: that is
+# Ash's own key for samen_core and makes host builds print "is not a Spark DSL module"). Register
 # this app's domains so the gate scans the mounted Billing scope + the vertical
 # resource + the token-blind aggregate plane.
-config :samen_core, :ash_domains, [
+config :samen_core, :host_domains, [
   <%= module %>.Billing,
   <%= module %>.Vertical,
   <%= module %>.Aggregate

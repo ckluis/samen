@@ -21,6 +21,7 @@ defmodule Samen.Web.OperatorAnalyticsRenderTest do
       withheld ONLY by the floor — the suppression assertions are load-bearing,
       not vacuous.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.Aggregate.Suppressed
@@ -157,7 +158,7 @@ defmodule Samen.Web.OperatorAnalyticsRenderTest do
     seed_retention!()
     html = render_analytics()
 
-    refute html =~ "vt_"
+    refute_vault_token(html)
     refute html =~ "••••"
   end
 

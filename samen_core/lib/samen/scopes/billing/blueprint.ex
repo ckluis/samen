@@ -133,24 +133,9 @@ defmodule Samen.Scopes.Billing.Blueprint do
 
           # The declared reveal action (plaintext under a grant only).
           action :reveal_customer, :map do
-            argument(:actor_id, :string, allow_nil?: false)
             argument(:subject_id, :string, allow_nil?: false)
 
-            run(fn input, _ctx ->
-              ctx = %Samen.Reveal.Context{
-                actor: input.arguments.actor_id,
-                subject_id: input.arguments.subject_id,
-                resource: __MODULE__,
-                action: :reveal_customer,
-                label: :billing_email
-              }
-
-              if Samen.Reveal.grant_checker().granted?(ctx) do
-                {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-              else
-                {:error, :denied}
-              end
-            end)
+            run({Samen.Reveal.GrantProbe, label: :billing_email})
           end
         end
 
@@ -162,7 +147,7 @@ defmodule Samen.Scopes.Billing.Blueprint do
           # The reveal action's grant gate (inside run/2) is the real control.
           # Allow it to run for any actor — the grant check denies by default.
           policy action(:reveal_customer) do
-            authorize_if(always())
+            authorize_if(actor_present())
           end
         end
       end

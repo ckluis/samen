@@ -360,17 +360,12 @@ defmodule Samen.Web.Billing.Reads do
   @doc """
   The `Samen.Web.ListLive` `restore` elevator (ADR-040 §5.8, T37h) — the archived-Plan restore is
   `RoleAtLeast :admin`-gated, stricter than the plain list `scope` reads use. `(scope, socket)`:
-  re-derives the tenant-ADMIN scope for the list's org through `Samen.Web.TenantRole.admin_scope/3`
-  using the socket's pinned principal, so ADR-045 §4.4 (S1a) governs it exactly as every other
-  write path — disarmed → `:admin`; armed → the REAL `Identity.Membership` role, fail-closed
-  `:member`.
+  the scope the restore runs with, through `Samen.Web.TenantActor.write_scope/3` like every other admin-gated write of the
+  page: armed → the page's own acting scope (the person's REAL, current role: a member's restore is refused by the kernel;
+  the list's `scope` argument is not what is passed on); disarmed and operator → the posture's admin elevation.
   """
   def restore_admin_scope(%Samen.Scope{actor: %{org_id: org_id}}, socket) when is_binary(org_id) do
-    Samen.Web.TenantRole.admin_scope(
-      socket.assigns.samen_mount,
-      org_id,
-      socket.assigns[:samen_tenant_principal]
-    )
+    Samen.Web.TenantActor.write_scope(socket.assigns.samen_mount, org_id, socket.assigns.acting_scope)
   end
 
   def restore_admin_scope(scope, _socket), do: scope

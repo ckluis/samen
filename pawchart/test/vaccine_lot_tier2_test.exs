@@ -109,7 +109,7 @@ defmodule PawChart.VaccineLotTier2Test do
   end
 
   test "the one-way boundary holds — no PawChart system resource references INTO tnt_record" do
-    # Sweep PawChart's real scope domains (registered under :samen_core :ash_domains).
+    # Sweep PawChart's real scope domains (registered under :samen_core :host_domains).
     assert Mix.Tasks.Samen.Verify.TntBoundary.relationship_violations([]) == []
     # Structural half: no FK targets a tenant-regime table on the PawChart DB.
     assert Mix.Tasks.Samen.Verify.TntBoundary.fk_violations(repo: "PawChart.Repo") == []

@@ -87,18 +87,18 @@ defmodule Demo.PrimitivesScopeCatalogParityRedPathTest do
   end
 
   # =========================================================================
-  # Domain registration — both :demo and :samen_core ash_domains
+  # Domain registration — both :demo ash_domains and :samen_core host_domains
   # =========================================================================
 
-  test "Primitives scope is registered in both :demo and :samen_core ash_domains configs" do
+  test "Primitives scope is registered in both :demo ash_domains and :samen_core host_domains configs" do
     demo_domains = Application.get_env(:demo, :ash_domains, [])
-    core_domains = Application.get_env(:samen_core, :ash_domains, [])
+    core_domains = Application.get_env(:samen_core, :host_domains, [])
 
     assert Demo.PrimitivesScope in demo_domains,
            "Demo.PrimitivesScope must be in :demo :ash_domains config"
 
     assert Demo.PrimitivesScope in core_domains,
-           "Demo.PrimitivesScope must be in :samen_core :ash_domains config"
+           "Demo.PrimitivesScope must be in :samen_core :host_domains config"
   end
 
   # =========================================================================

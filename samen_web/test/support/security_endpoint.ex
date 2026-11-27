@@ -76,7 +76,18 @@ defmodule Samen.WebTest.SecurityRouter do
   scope "/" do
     pipe_through(:browser)
 
-    samen_module_routes(:crm, Samen.WebTest.Crm, repo: Samen.WebTest.Repo, labels: @labels)
+    # `:identity_namespace` wired like a real host (driftwood's router), so a REAL spine login
+    # resolves a principal + its membership role on the CRM mount (`tenant_role_surfaces_test.exs`).
+    samen_module_routes(:crm, Samen.WebTest.Crm,
+      repo: Samen.WebTest.Repo,
+      labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)
+    )
+
+    # The leads lens reads the CRM Person through the derived CRM mount (`:crm_namespace`).
+    samen_module_routes(:marketing, Samen.WebTest.Marketing,
+      repo: Samen.WebTest.Repo,
+      labels: @labels |> Map.put(:identity_namespace, Samen.WebTest.Operator) |> Map.put(:crm_namespace, Samen.WebTest.Crm)
+    )
 
     samen_settings_routes(:settings, Samen.WebTest.Operator,
       repo: Samen.WebTest.Repo,
@@ -117,6 +128,39 @@ defmodule Samen.WebTest.SecurityRouter do
     # notifications inbox + preferences, so a REAL login can be followed by a REAL inbox render
     # (`notifications_spine_session_test.exs`).
     samen_auth_routes(namespace: Samen.WebTest.Operator, repo: Samen.WebTest.Repo)
+
+    # The plain-controller routes the files and CSV macros emit (`/files/:id/bytes`,
+    # `/csv/export/:resource`): mounted so a REAL router carries the mount to the controllers
+    # (`files_csv_router_test.exs`), the way a host's router does.
+    samen_files_routes(:files, Samen.WebTest.Primitives,
+      repo: Samen.WebTest.Repo,
+      labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)
+    )
+
+    # The Work module surfaces (tasks, task detail, projects, timeline, tree) with the `:identity_namespace` seam, so
+    # a real login resolves the signed-in person's membership role on them (`tenant_role_crm_work_test.exs`).
+    samen_module_routes(:work, Samen.WebTest.Work,
+      repo: Samen.WebTest.Repo,
+      labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)
+    )
+
+    # The Support, Billing and (above) Marketing surfaces with the `:identity_namespace` seam, so a real login resolves
+    # the signed-in person's membership role on them (`tenant_role_support_billing_marketing_test.exs`); Support carries
+    # the CMS namespace as its knowledge base.
+    samen_module_routes(:support, Samen.WebTest.Support,
+      repo: Samen.WebTest.Repo,
+      labels: @labels |> Map.put(:identity_namespace, Samen.WebTest.Operator) |> Map.put(:kb_namespace, Samen.WebTest.Cms)
+    )
+
+    samen_module_routes(:billing, Samen.WebTest.Billing,
+      repo: Samen.WebTest.Repo,
+      labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)
+    )
+
+    samen_csv_routes(:csv, Samen.WebTest.Crm,
+      repo: Samen.WebTest.Repo,
+      labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)
+    )
 
     samen_notifications_routes(:notifications, Samen.WebTest.Primitives,
       repo: Samen.WebTest.Repo,

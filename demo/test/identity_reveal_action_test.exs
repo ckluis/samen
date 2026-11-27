@@ -68,7 +68,6 @@ defmodule Demo.IdentityRevealActionTest do
     result =
       User
       |> Ash.ActionInput.for_action(:reveal_user, %{
-        actor_id: "operator",
         subject_id: user.id
       })
       |> Ash.run_action(actor: scope.actor)
@@ -93,7 +92,6 @@ defmodule Demo.IdentityRevealActionTest do
     result =
       Invitation
       |> Ash.ActionInput.for_action(:reveal_invitation, %{
-        actor_id: "operator",
         subject_id: invite.id
       })
       |> Ash.run_action(actor: scope.actor)
@@ -112,7 +110,6 @@ defmodule Demo.IdentityRevealActionTest do
     result =
       User
       |> Ash.ActionInput.for_action(:reveal_user, %{
-        actor_id: "operator",
         subject_id: user.id
       })
       |> Ash.run_action(actor: scope.actor)

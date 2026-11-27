@@ -108,6 +108,9 @@ defmodule Samen.Web.TenantAuthz do
          # `Identity.Membership` role on an armed host instead of self-elevating `:member` to
          # `:admin` (S1a).
          |> assign(:samen_tenant_principal, CurrentOrg.principal_id(mount, session))
+         # The principal REFERENCE (org-less) the shared role resolver (`Samen.Web.TenantActor`)
+         # turns into the per-org user + membership role for the org the surface acts in.
+         |> assign(:samen_principal_ref, Samen.Web.Settings.Reads.principal_ref(mount, params, session))
          # ADR-052 P2 — the replay recorder rides the TENANT legs only (never the operator leg
          # above). A no-op unless the capture plane is running AND the org's flag is on.
          |> Recorder.attach(mount)}
@@ -131,6 +134,7 @@ defmodule Samen.Web.TenantAuthz do
     |> assign(:samen_authorized_orgs, :unconstrained)
     |> assign_new(:samen_tenant_org_id, fn -> nil end)
     |> assign_new(:samen_tenant_principal, fn -> CurrentOrg.principal_id(mount, session) end)
+    |> assign_new(:samen_principal_ref, fn -> Samen.Web.Settings.Reads.principal_ref(mount, %{}, session) end)
   end
 
   defp operator_plane?(%Mount{plane: %{kind: :operator}}), do: true

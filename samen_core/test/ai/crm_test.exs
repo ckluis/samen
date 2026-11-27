@@ -20,6 +20,7 @@ defmodule Samen.AI.CrmTest do
       `recommend_next_step/4` (masked-path CRM binding) both return
       `{:ok, %Completion{}}`.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   alias Samen.AI.{Completion, Crm, Provider}
@@ -74,7 +75,7 @@ defmodule Samen.AI.CrmTest do
       payload = provider_payload_text()
       assert payload =~ @mask, "the vault field must resolve-then-mask, not be omitted"
       refute payload =~ @canary, "the 🔒 canary reached the AI provider payload"
-      refute payload =~ "vt_", "a vault token reached the AI provider payload"
+      refute_vault_token(payload, "a vault token reached the AI provider payload")
     end
 
     test "recommend_next_step/4: the 🔒 canary is MASKED to the provider" do
@@ -86,7 +87,7 @@ defmodule Samen.AI.CrmTest do
       payload = provider_payload_text()
       assert payload =~ @mask
       refute payload =~ @canary
-      refute payload =~ "vt_"
+      refute_vault_token(payload)
     end
 
     test "draft_sequence/5: the 🔒 canary is MASKED in the provider payload AND the returned draft body" do
@@ -98,12 +99,12 @@ defmodule Samen.AI.CrmTest do
 
       assert is_binary(body)
       refute body =~ @canary, "the drafted body must never carry the canary plaintext"
-      refute body =~ "vt_", "the drafted body must never carry a vault token"
+      refute_vault_token(body, "the drafted body must never carry a vault token")
 
       payload = provider_payload_text()
       assert payload =~ @mask
       refute payload =~ @canary
-      refute payload =~ "vt_"
+      refute_vault_token(payload)
     end
   end
 

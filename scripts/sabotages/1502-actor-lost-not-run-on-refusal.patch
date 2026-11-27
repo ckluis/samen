@@ -1,0 +1,20 @@
+# SABOTAGE: the refused state keeps what the page loaded: the guard no longer runs the view's refused load, 
+#   so record names stay on the denied page
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_open_page_test.exs
+# MUST_FAIL: a suspended member's open pages render the denied card and none of the records they loaded
+diff --git a/samen_web/lib/samen/web/tenant_actor.ex b/samen_web/lib/samen/web/tenant_actor.ex
+index 3bfaa835..8c5f4fe5 100644
+--- a/samen_web/lib/samen/web/tenant_actor.ex
++++ b/samen_web/lib/samen/web/tenant_actor.ex
+@@ -276,7 +276,7 @@ defmodule Samen.Web.TenantActor do
+         _ -> socket
+       end
+ 
+-    drop_loaded(socket)
++    socket
+   end
+ 
+   defp drop_loaded(%{view: view} = socket) when is_atom(view) and not is_nil(view) do

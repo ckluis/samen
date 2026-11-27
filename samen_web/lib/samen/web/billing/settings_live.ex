@@ -47,8 +47,10 @@ defmodule Samen.Web.Billing.SettingsLive do
   alias Samen.Billing.PaymentMethod
   alias Samen.Web.CurrentOrg
   alias Samen.Web.ListState
-  alias Samen.Web.Mount
   alias Samen.Web.Reads.Guard
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
   alias Samen.Web.Page
 
   alias Samen.Web.Billing.Reads
@@ -100,35 +102,95 @@ defmodule Samen.Web.Billing.SettingsLive do
     |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, configured: false)
     |> assign(plans_with_prices: [], customer: nil, recent_invoices: %Page{}, section_errors: [])
     |> assign(checkout_error: nil, portal_error: nil)
+    |> assign(acting_scope: nil, actor_state: :ok)
     |> assign(billing_actor: nil, billing_admin?: false, billing_actor_failed?: false)
   end
 
+  # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read, nothing
+  # can be done, and the page is re-resolved on every `handle_params` and before every event.
   def load(socket, org_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id)
+    end
+  end
+
+  # Acting again with no URL to patch to (`Samen.Web.TenantActor`, the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _}} = socket), do: load(socket, socket.assigns.org_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): the
+  # same load a refused navigation does, so nothing the page loaded (plans, customer, invoices, the billing actor) is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket, socket.assigns.org_id)
+
+  # The person's role or id changed while the page was open: the billing actor the writes run under is the person as they
+  # are now.
+  @doc false
+  def actor_changed(%{assigns: %{org_id: org_id, acting_scope: scope}} = socket), do: assign_billing_actor(socket, org_id, scope)
+
+  defp load_refused(socket, org_id) do
+    socket
+    |> ensure_return_to()
+    |> ensure_current_uri()
+    |> assign(no_org: false, org_id: org_id, configured: false)
+    |> assign(plans_with_prices: [], customer: nil, recent_invoices: %Page{}, section_errors: [])
+    |> assign(checkout_error: nil, portal_error: nil)
+    |> assign(billing_actor: nil, billing_admin?: false, billing_actor_failed?: false)
+  end
+
+  defp load_for(socket, org_id, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
     configured = provider_configured?()
-    # PP-5: the REAL per-org billing actor (role read from the caller's Membership, NOT the
-    # synthetic `:member` Mount.scope default). This is the actor billing WRITES run under;
-    # the admin gate is enforced BOTH here (affordance) and in the core BY CONSTRUCTION.
-    {actor, actor_failed?} =
-      case billing_actor(mount, org_id, socket.assigns[:user_id]) do
-        {:ok, actor} -> {actor, false}
-        {:error, :not_found} -> {nil, false}
-        # The role lookup FAILED (an outage): still fail CLOSED (no actor, no admin affordances, the
-        # write refuses), but the screen says it could not check — it must not tell an admin that
-        # only an admin can do this.
-        {:error, :unavailable} -> {nil, true}
-      end
 
     socket
     |> ensure_return_to()
     |> ensure_current_uri()
     |> assign(no_org: false, org_id: org_id, configured: configured)
-    |> assign(billing_actor: actor, billing_admin?: admin_actor?(actor), billing_actor_failed?: actor_failed?)
+    |> assign_billing_actor(org_id, scope)
     |> assign_new(:checkout_error, fn -> nil end)
     |> assign_new(:portal_error, fn -> nil end)
     |> load_billing(mount, scope, configured)
   end
+
+  # The billing actor is the actor billing WRITES run under, and the admin gate is enforced BOTH here (affordance) and in
+  # the core BY CONSTRUCTION.
+  #   * ARMED: the acting person (`Samen.Web.TenantActor`: the membership role as it is now, the per-org user id);
+  #   * DISARMED dev posture: the `?user=` / `:current_user_id` seam names the person and their membership gives the
+  #     role (no user, or no membership: no authority). A FAILED lookup still fails CLOSED (no actor, no admin
+  #     affordances, the write refuses) but the screen says it could not check.
+  defp assign_billing_actor(socket, org_id, scope) do
+    {actor, failed?} = billing_actor(socket, org_id, scope)
+    assign(socket, billing_actor: actor, billing_admin?: admin_actor?(actor), billing_actor_failed?: failed?)
+  end
+
+  defp billing_actor(socket, org_id, %Samen.Scope{actor: acting}) do
+    mount = socket.assigns.samen_mount
+
+    cond do
+      mount.plane.kind == :operator ->
+        {nil, false}
+
+      CurrentOrg.tenant_gate_armed?(mount) ->
+        {tenant_actor(acting.id, org_id, acting.role), false}
+
+      true ->
+        dev_actor(mount, org_id, socket.assigns[:user_id])
+    end
+  end
+
+  defp dev_actor(mount, org_id, user_id) when is_binary(user_id) do
+    case SettingsReads.actor_in_org(mount, org_id, {:dev, user_id}) do
+      {:ok, %{id: id, role: role}} -> {tenant_actor(id, org_id, role), false}
+      {:error, :unavailable} -> {nil, true}
+      _none -> {nil, false}
+    end
+  end
+
+  defp dev_actor(_mount, _org_id, _user_id), do: {nil, false}
+
+  defp tenant_actor(id, org_id, role), do: %{id: id, org_id: org_id, role: role, kind: :tenant, plane: :tenant}
 
   defp load_billing(socket, _mount, _scope, false) do
     assign(socket, plans_with_prices: [], customer: nil, recent_invoices: %Page{}, section_errors: [])
@@ -155,6 +217,8 @@ defmodule Samen.Web.Billing.SettingsLive do
 
   # The kit error state's "Try again" (a failed plans / customer / invoices read).
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
 
   def handle_event("checkout", %{"plan_id" => plan_id}, socket) do
@@ -228,58 +292,6 @@ defmodule Samen.Web.Billing.SettingsLive do
   # -- helpers ---------------------------------------------------------------
 
   @admin_only_copy "Only an admin can manage billing for this workspace."
-
-  # PP-5 (Batch 2 TENANT-ROLE): the REAL per-org billing actor. Resolves the caller's
-  # `Membership` role in this org (`Reads.current_membership_result`, the tagged sibling of the
-  # seam the api-key MINT handler uses to gate on the real role) and builds a tenant-plane actor
-  # carrying that role — NEVER the synthetic `:member` of `Mount.scope/2`.
-  #
-  #   * `{:ok, actor}` — the real membership role;
-  #   * `{:error, :not_found}` — no user in context or no membership in this org: no authority;
-  #   * `{:error, :unavailable}` — the LOOKUP FAILED (an outage). Equally no authority — billing
-  #     writes FAIL CLOSED either way (affordance hidden, handler refuses, and the core function
-  #     refuses by construction) — but the screen shows an error state, not "only an admin can".
-  #
-  # The billing mount's own namespace is a Billing scope, which does not materialize
-  # `User`/`Membership`; the host wires the identity scope onto the mount via the
-  # `:identity_namespace` label (the same sibling-mount seam Marketing uses for
-  # `:crm_namespace`). Absent the label the billing mount itself is used (a host whose
-  # billing namespace already carries identity resources still resolves).
-  defp billing_actor(mount, org_id, user_id) when is_binary(org_id) and is_binary(user_id) do
-    identity = identity_mount(mount)
-    scope = Mount.scope(identity, org_id)
-
-    case SettingsReads.current_membership_result(identity, scope, user_id, org_id) do
-      {:ok, membership} ->
-        {:ok, %{id: user_id, org_id: org_id, role: membership.role, kind: :tenant, plane: :tenant}}
-
-      {:error, :unavailable} = unavailable ->
-        unavailable
-
-      {:error, _not_found_or_forbidden} ->
-        {:error, :not_found}
-    end
-  rescue
-    e ->
-      Guard.report(:billing_actor, org_id, e)
-      {:error, :unavailable}
-  end
-
-  defp billing_actor(_mount, _org_id, _user_id), do: {:error, :not_found}
-
-  # Derive an Identity-kind mount from the billing mount + the host's `:identity_namespace`
-  # label (same repo + plane), so `User`/`Membership` resolve off the identity scope. No
-  # label → the billing mount itself (unchanged), which fail-closes for a Billing-only
-  # namespace since it materializes no `Membership`.
-  defp identity_mount(mount) do
-    case Mount.label(mount, :identity_namespace, nil) do
-      ns when is_atom(ns) and not is_nil(ns) ->
-        Mount.new(:settings, ns, mount.repo, plane: mount.plane, domain: ns, labels: mount.labels)
-
-      _ ->
-        mount
-    end
-  end
 
   defp admin_actor?(%{role: role}), do: Samen.Scope.Role.at_least?(role, :admin)
   defp admin_actor?(_), do: false
@@ -431,9 +443,12 @@ defmodule Samen.Web.Billing.SettingsLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Billing settings" nothing="there are no billing settings to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">Billing settings org: {@org_id}</span>
 
           <%= if @configured do %>

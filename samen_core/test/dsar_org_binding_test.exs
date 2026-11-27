@@ -18,6 +18,7 @@ defmodule Samen.DsarOrgBindingTest do
        live, distinct-party-approved reveal grant covering the subject, checked against
        `Samen.Reveal.Grants`. The grant is requestor-bound, so a DIFFERENT operator still masks.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
   use Samen.MaskingCase
 
@@ -58,7 +59,7 @@ defmodule Samen.DsarOrgBindingTest do
   defp assert_masked_value!(value) do
     assert value == Masked.mask()
     assert to_string(value) == mask()
-    refute to_string(value) =~ "vt_"
+    refute_vault_token(to_string(value))
     value
   end
 

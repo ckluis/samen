@@ -13,7 +13,7 @@ defmodule Demo.BlindIndexErasureGuardTest do
     resources = Samen.Erasure.Completeness.resources()
     assert resources != []
 
-    # A release has no Mix: the same lookup then reads `:samen_core`'s `:ash_domains`, which the host config
+    # A release has no Mix: the same lookup then reads `:samen_core`'s `:host_domains` registry, which the host config
     # must populate with the same domains, or erasure would derive a different (smaller) schema there.
     assert MapSet.new(Samen.Erasure.Completeness.resources(otp_app: :samen_core)) == MapSet.new(resources)
 

@@ -39,7 +39,11 @@ verdict is `PR-READY (vs X)`). Step lines: `PASS <id> 12.3s`, `CACHED <id>`, `SK
 machine-readable form (`verdict`, `final_line`, per-step `status`/`log`/`head`/`tree`). `_ci/state.json`
 is the resume state. `_ci/` is gitignored; never commit it.
 
-`SAMEN_CI_TEST_HOLD_LAUNCH` (with `SAMEN_CI_TEST_HOLD_KIND`, `SAMEN_CI_TEST_HOLD_LIMIT_S`) is a test-only seam of `scripts/ci_test.sh`: it makes the driver hold a launched process before releasing it. Never export it; it is bounded (60 s by default, then the driver fails naming it), stops on Ctrl-C/SIGTERM, and is stripped from every step's environment.
+Every `SAMEN_CI_TEST_*` variable (`HOLD_LAUNCH`, `HOLD_KIND`, `HOLD_LIMIT_S`, `TERM_GRACE_S`, `KILL_LINGER_S`, `KILL_WAIT_S`) is a test-only seam of `scripts/ci_test.sh`; never export one. They change how the driver launches, stops and waits (a zero SIGTERM grace skips the traps that restore the tree), so none can alter a real run silently: a seam is honoured only together with `SAMEN_CI_SELFTEST=ci_test.sh`, which only `scripts/ci_test.sh` sets. Set without it, or with a value that is not a finite number of seconds >= 0 (or a `HOLD_KIND` other than `step`/`rerun`), the driver exits 2 at startup, before any step runs, naming the variable (`SEAMGUARD` case). The marker and every seam are stripped from every step's environment. `HOLD_LAUNCH` makes the driver hold a launched process before releasing it; it is bounded (60 s by default, then the driver fails naming it) and stops on Ctrl-C/SIGTERM.
+
+After SIGKILL (the SIGTERM grace expired, or a member outlived its leader) the driver waits until the process group is GONE, not until the leader is reaped: a SIGKILLed grandchild stays a zombie until launchd reaps it, and under load that outlasted the driver. The wait is bounded (10 s: SIGKILL cannot be handled, so only a process in uninterruptible sleep outlives it); the leader is reaped on the same bound, never with an unbounded wait. Past the bound the driver says `process group N (<step>) is STILL ALIVE` (the group) or `leader of process group N (<step>) did not exit` (the leader) on stderr and keeps the group in `state.json` `running`, so the next invocation refuses to overlap with it. `TERM_GRACE_S`, `KILL_LINGER_S` (report the group and the leader alive this long after SIGKILL) and `KILL_WAIT_S` are the seams of the `KILLWAIT` case.
+
+**The next run refuses with `step X from an earlier invocation is still running (process group N)` (or `may still be running (pgid N)`) and nothing of yours is running.** The record is a process-group id, and ids are reused: after a reboot, a crash or a long gap the number can belong to an unrelated process. Check: `ps -o pid,pgid,etime,command -g N` (or `ps -axo pid,pgid,command | awk '$2==N'`). If the members are this repo's `mix`/`beam`/step commands, wait for them or `kill -TERM -- -N` (then `kill -KILL -- -N`) and rerun. If the group is something else (or nothing is listed and the message was the permission variant), the record is stale: remove only that entry from `_ci/state.json` (the `running` object: delete the `"X": N` pair, or set `"running": {}`) and run `scripts/ci` again. Leave the rest of `state.json` alone: it is the resume state, and `scripts/ci resume` after a fresh run needs a fresh state anyway. Deleting `_ci/state.json` entirely also works but discards that resume state.
 
 ## 2. The round recipe
 
@@ -93,13 +97,21 @@ patches. **A resume never discards finished work:** the partition of a (step, se
 `_ci/partition/`; a finished chunk (a PASS in this run's state, or a cached PASS) stays exactly as planned — found
 by its key, so a changed slot number (`[3/13]` → `[3/15]`) does not void it — and only the unfinished stretches
 between finished chunks are re-planned at the current rate. Modulo shards (`mutation_*`) keep finished classes and
-split only a class that outgrew `shard_target_s` (x % M == r-1 is the union of x % kM == r-1+jM). Each sub-step
+split only a class that outgrew `shard_target_s` (x % M == r-1 is the union of x % kM == r-1+jM) into at most as many
+sub-classes as it has mutants, and a fresh plan never has more classes than mutants: a class holding no mutant is never a step
+(`mutate.sh --shard r/m` rightly fails "selection is empty"; one in a stored partition is dropped, and an Actions `--slice`
+past the last mutant is an "empty slice" PASS). Each sub-step
 still reports exactly its chunk, no re-planned chunk outgrows the target (G10), and the chunks still sum to the
 lister's count. `--no-cache` ignores cached PASSes (so nothing counts as finished unless this run did it).
 Cost model (`ranges` steps with `shard_cost`): chunk wall-clock ≈ margin × (overhead + share × lane-seconds),
 fitted to the last twelve passed chunks — only with ≥ 4 observations spread over half the largest, else the
 prior (10 s, share 1) — never planning a chunk past 1.5× the largest lane-seconds seen to complete; the margin is
 the worst observed wall-clock over its prediction. Measured here: ≈ 60 s lane start-up + 0.32 × lane-seconds.
+A step may declare the FIXED cost of one invocation of its command (`shard_overhead_s`; `mutation_changed`: 50 s, the lint,
+compile and baseline run of one `mutate.sh`). It is paid once per chunk: a chunk of n items is planned as overhead + n x
+per-item, and the per-item rate is learned as (duration - overhead) / n. Without it a one-mutant chunk taught a rate of
+overhead + each, the rate ratcheted up (it only comes down by a factor of 4) and a 28-mutant selection was planned as 26
+single-mutant runs that took hours (`MUTOVH` proves the plan and the learned rate).
 Unbudgeted (`--budget 0`, `./ci.sh`) the loops run as one command.
 
 ## 4. Cache semantics
@@ -277,6 +289,18 @@ it. Before the replay (the guard tests check the counts against the patch direct
 it restores them byte-identical. The patch is left untracked, so `git add` it and the count files `git status` shows. Options: `--number`, `--description`, `--base`. `scripts/sabotage new --help`
 is the full text.
 
+**Refused at build time — `scripts/sabotages/BUILD_REFUSED.tsv`.** A mutation that a named compile-time rule refuses
+(a `DslError` from a transformer, e.g. `Samen.Reveal.ProbeGuard` on a reveal action that takes an identity argument)
+cannot flip a test: the build never reaches one. The refusal is the kill, and the harness says so only for a patch listed
+in the ledger (`patch`, `required substring of the compiler output`, `reason`; the substring is the rule's own message,
+never "error"). A listed patch whose build is refused with the substring is reported `KILLED (build refused: …)` and counts
+as a pass (still restored byte-exact); refused without it is a WRONG REFUSAL; a build that succeeds is a STALE entry
+(the rule no longer refuses it) and fails whatever the tests do. An unlisted patch whose build is refused fails as ever —
+there is no global leniency for compile errors — and an entry naming a missing patch, an empty substring or reason, or a
+patch listed twice fails at the start (`scripts/sabotage_lint.sh`). `sabotage reanchor` replays through the same harness,
+so it honours the ledger; `scripts/sabotage-lanes.sh` runs `sabotage.sh` per lane, so do the lanes. A shipped patch keeps
+its name, header and mutation: re-anchor its hunk and list it, never swap the mutation.
+
 **Drifted patch — `scripts/sabotage reanchor <n…>`** (or `apply_check` failing): 3-way merges each
 section against the current tree, proves the named tests are green without it and flip with it, and
 rewrites it with a byte-identical header. It REFUSES (original untouched) on a conflict, missing pre-image
@@ -404,6 +428,23 @@ name a file that never left a laptop by what it is, not where it was. Placeholde
   history value, never over GitHub's ceiling. A lister that fails or has no count line REFUSES the plan. Without
   `--selection` (a local `actions plan`) the history value alone applies. Not distinguished: guard vs ordinary
   patches (one rate; the 2x margin and the cap carry it).
+  **`mutation_changed` is sized per TARGET, not at one flat rate.** Targets whose owning tests are slow cost a multiple of
+  the flat 20 s (PR #177: 28 `vault.ex` mutants, 48.5 s each; the flat rate gave a 1,120 s limit for ~1,360 s of work and the
+  job was cancelled). `scripts/mutation/rates.tsv` holds the measured seconds per mutant per target (a source for every
+  row; `vault.ex` = 49); a target with no row costs `shard_each_s`. The plan reads the per-target counts the lister prints
+  (`shard_rate_item`), estimates the job as the sum of count x rate, sets the limit to 2 x the estimate (5 min steps) and,
+  when the estimate exceeds `actions_slice_max_s` (1,800 s: the 2 x rule then gives the 60 min a job is allowed), splits the
+  step into `ceil(estimate / 1800)` matrix slices `mutation_changed_01..k` running `--slice i/k` (= `mutate.sh --shard i/k`,
+  a round-robin share of every target; a slice past the last mutant is an empty-slice PASS). Per-target counts that do not
+  sum to the lister's total refuse the plan. Because the slice count depends on the diff, the `plan` job publishes
+  `plan.json` as the `actions-plan` artifact and `ci-pr` runs `scripts/ci actions verify … --from-plan plan.json`: the
+  verifier checks the results against the plan that was actually run (each slice 1..k once, PROCESSED summing to the
+  selected total). A row is a measurement, never a guess: `scripts/mutation_lint.sh` refuses a row whose path is not a row of
+  `targets.tsv` (a renamed target must not leave a stale rate the lookup silently ignores), a non-positive rate, a duplicate,
+  or a source under 20 characters. **When a job is cancelled for time nothing learns from it, and CI never raises a limit
+  from its own history.** Instead every `mutate.sh` run prints, as each target finishes and again in its report,
+  `seconds per mutant: <path> <rate> (<n> mutants, <s>s)` - the measured wall clock per target (a target's baseline run is
+  charged to its first mutant); read it from a slow or cancelled job's log and update the row by hand, citing the run.
 - `.github/workflows/nightly.yml`: cron `17 3 * * *` (03:17 UTC) + `workflow_dispatch`; `scripts/ci full`, the
   same jobs as `pr` minus the two `--changed` jobs, plus `multinode`, 24 corpus slices (`--slice i/24`) and 6
   mutation slices; `ci-full` sums the slices against the lister's total and `ls scripts/sabotages/*.patch`.
@@ -414,8 +455,8 @@ name a file that never left a laptop by what it is, not where it was. Placeholde
 - Third-party actions are pinned to full SHAs; no `${{ }}` inside `run:`; no secrets.
 - Limits: a PR runs its OWN workflow files, `ci/steps.conf` and driver, so requiring `ci-pr` is only as
   strong as review of `.github/`, `ci/` and `scripts/ci*` (CODEOWNERS or a required workflow from `main`).
-  `sabotage_changed` and `mutation_changed` are one job each: a PR touching most of samen_core replays
-  hundreds of patches in a single job.
+  `sabotage_changed` is one job: a PR touching most of samen_core replays hundreds of patches in a single job.
+  `mutation_changed` is one job until its estimate passes the slice ceiling, then k slices (above).
 - Reading a failure: the job summary has the digest; artifact `ci-result-<job>` holds `last.json`.
   A FLAKY job turning green on a re-run shows as attempt 2 — a human action GitHub records.
 

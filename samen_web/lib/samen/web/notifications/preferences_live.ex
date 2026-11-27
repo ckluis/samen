@@ -44,6 +44,7 @@ defmodule Samen.Web.Notifications.PreferencesLive do
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
   alias Samen.Web.Notifications.Reads
+  alias Samen.Web.TenantActor
 
   # The framework's WIRED event sources (design §2.3): SLA breach, chat mentions,
   # and the listed system events (blocked/failed sends, invoice state changes).
@@ -80,6 +81,7 @@ defmodule Samen.Web.Notifications.PreferencesLive do
   # The user is PER ORG: re-derive the acting user + role from the principal `mount/3` resolved.
   defp assign_actor(socket, org_id) do
     ref = socket.assigns[:principal_ref] || :none
+    socket = TenantActor.attach_once(socket, :samen_preferences_actor_guard, :handle_event, &__MODULE__.recheck_event/3)
 
     case Samen.Web.Settings.Reads.actor_in_org(socket.assigns[:samen_mount], org_id, ref) do
       {:ok, %{id: id, role: role}} -> assign(socket, user_id: id, user_role: role, access: :ok)
@@ -88,6 +90,22 @@ defmodule Samen.Web.Notifications.PreferencesLive do
       {:error, :unavailable} -> assign(socket, user_id: nil, user_role: nil, access: :unavailable)
     end
   end
+
+  # An open grid is the person's OWN, resolved at the last navigation: a member suspended while it is open must not keep
+  # saving to it. The actor is resolved again before EVERY event (`TenantActor.attach_once/4`, the lifecycle seam
+  # `TenantActor.assign_actor/2` uses on the other converted pages): still acting -> the role the scope carries is the
+  # current one; not acting -> the refused state (the grid is reset) and the event is halted.
+  @doc false
+  def recheck_event(_event, _params, %{assigns: %{access: :ok, org_id: org_id, user_id: user_id}} = socket)
+      when is_binary(org_id) and is_binary(user_id) do
+    socket = assign_actor(socket, org_id)
+
+    if access(socket) == :ok,
+      do: {:cont, socket},
+      else: {:halt, load(socket, org_id, nil)}
+  end
+
+  def recheck_event(_event, _params, socket), do: {:cont, socket}
 
   # The recipient seam: the user the session resolved (`assign_actor/2`), else nil (the honest "no
   # recipient" card). An explicit ?recipient= param is honoured ONLY in the disarmed dev posture (the gate

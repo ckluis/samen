@@ -15,11 +15,16 @@
 #              neither captured nor lost) · N7 no anchor against origin/main · N8 a sabotage that flips
 #              nothing · N9 no edit against the index / an untracked file · N10 the wrong test named ·
 #              N11 numbering · N12 unstaged WIP beside the sabotage is captured but never LOST (kept copy)
+#   ledger     L1 a LISTED patch whose build is refused with the required substring is KILLED (a pass) · L2 refused
+#              WITHOUT the substring: wrong refusal · L3 listed but the build SUCCEEDS: stale entry, whatever the tests
+#              do · L4 refused and NOT listed: fails exactly as before (no global leniency) · L5 an entry naming a patch
+#              that does not exist / an empty substring / a duplicate fails at the start · L6 a KILLED patch is
+#              restored byte-exact and the other listed patches are still replayed
 #   reanchor   R0 already applies · R1 re-anchored (3-way, header byte-identical, proven) · R2 a conflict ·
 #              R3 (C8) the named test no longer fails under the re-anchored patch · R4 the named test is gone ·
 #              R5 a red baseline · R6 unknown / ambiguous numbers · R7 (C8) a patch outside the corpus
 #
-# Usage: scripts/sabotage_tooling_test.sh [new|reanchor]    (default: both)    Residue: none (temp dir).
+# Usage: scripts/sabotage_tooling_test.sh [new|reanchor|ledger]    (default: all)    Residue: none (temp dir).
 set -uo pipefail
 
 # the fixture must never act on the REAL repo (SAMEN_SABOTAGE_ROOT points sabotage_new.sh at one)
@@ -50,6 +55,9 @@ cat > "$BIN/mix" <<'FAKE'
 shift
 f=lib/a.ex
 if grep -q BROKEN "$f"; then echo "** (CompileError) lib/a.ex: boom"; exit 1; fi
+if grep -q REFUSED "$f"; then
+  printf '== Compilation error in file lib/a.ex ==\n** (Spark.Error.DslError) [A]\n  reveal action violates the probe rule: :reveal_x takes the identity argument :actor_id: nope\n'; exit 1
+fi
 fails=()
 if [[ -z "${FAKE_MIX_NOFLIP:-}" ]]; then
   grep -q 'def ok?, do: false' "$f" && fails+=("ok is true")
@@ -296,6 +304,100 @@ run_new() {
   says "$T/n12" "kept      : " "N12: ... naming where"
 }
 
+run_ledger() {
+  echo "== ledger =="
+  LEDGER_F="scripts/sabotages/BUILD_REFUSED.tsv"
+  SUB='takes the identity argument :actor_id'
+  # a committed corpus patch 3 whose mutation the fake compiler refuses (the marker REFUSED), and patch 4 whose
+  # mutation builds and flips (ok? -> false would clash with patch 1, so it moves `max`)
+  prepl() {
+    mkfix
+    sed -i.bak 's/  def name, do: "a"/  def name, do: "a"  # REFUSED/' "$F/app1/lib/a.ex"; rm -f "$F/app1/lib/a.ex.bak"
+    { printf '# SABOTAGE: refused\n#\n# Flips the named test(s).\n# APP: app1\n# TEST_FILES: test/a_test.exs\n# MUST_FAIL: ok is true\n'
+      git -C "$F" diff --no-color -- app1/lib/a.ex; } > "$F/scripts/sabotages/3-refused.patch"
+    git -C "$F" checkout -q -- app1/lib/a.ex
+    git_ add -A; git_ commit -q -m "patch 3"
+  }
+  ledger() { printf '# header comment\n\n%s\t%s\t%s\n' "$1" "$2" "$3" > "$F/$LEDGER_F"; }
+
+  # L1 ─ listed, refused, the required substring present: KILLED, a pass
+  prepl; ledger 3-refused.patch "$SUB" "the probe rule refuses an identity argument"; before="$(tree_state)"
+  sab "$T/l1" --range 3-3
+  eq "$RC" 0 "L1: a listed patch whose build is refused with the required substring passes"
+  says "$T/l1" "KILLED (build refused: $SUB)" "L1: ... reported as KILLED by the refusal, naming the substring"
+  says "$T/l1" "restore: byte-exact" "L1: ... still restored byte-exact"
+  says "$T/l1" "SABOTAGE HARNESS: ALL PASSED" "L1: ... a green run"
+  says "$T/l1" "PROCESSED 1 of 1 SELECTED" "L1: ... counted as processed"
+  eq "$(tree_state)" "$before" "L1: ... tree exactly as it was"
+
+  # L2 ─ listed, refused, but the output lacks the substring: a wrong refusal
+  prepl; ledger 3-refused.patch "a different refusal message" "x"
+  sab "$T/l2" --range 3-3
+  eq "$RC" 1 "L2: a listed patch refused WITHOUT the required substring fails"
+  says "$T/l2" "WRONG REFUSAL" "L2: ... as a wrong refusal"
+  silent "$T/l2" "KILLED" "L2: ... never KILLED"
+  eq "$(git -C "$F" status --porcelain | grep -v BUILD_REFUSED)" "" "L2: ... tree restored"
+
+  # patch 4: an ordinary sabotage that builds and flips "ok is true"
+  mkbuilds() {
+    sed -i.bak 's/def ok?, do: true/def ok?, do: false/' "$F/app1/lib/a.ex"; rm -f "$F/app1/lib/a.ex.bak"
+    { printf '# SABOTAGE: builds\n#\n# Flips the named test(s).\n# APP: app1\n# TEST_FILES: test/a_test.exs\n# MUST_FAIL: ok is true\n'
+      git -C "$F" diff --no-color -- app1/lib/a.ex; } > "$F/scripts/sabotages/4-builds.patch"
+    git -C "$F" checkout -q -- app1/lib/a.ex; git_ add -A; git_ commit -q -m "patch 4"
+  }
+
+  # L3 ─ listed, but the build SUCCEEDS (and the tests even flip): a stale entry
+  prepl; mkbuilds
+  ledger 4-builds.patch "$SUB" "x"
+  sab "$T/l3" --range 4-4
+  eq "$RC" 1 "L3: a listed patch whose build succeeds fails, whatever the tests do"
+  says "$T/l3" "STALE BUILD_REFUSED.tsv entry" "L3: ... naming the entry as stale"
+  says "$T/l3" "the rule no longer refuses this mutation" "L3: ... and why"
+  silent "$T/l3" "flip confirmed" "L3: ... the flip is not accepted as the proof"
+
+  # L4 ─ NOT listed, refused: fails exactly as today (positive control: the same patch passes once listed, L1)
+  prepl; printf '# only comments\n' > "$F/$LEDGER_F"
+  sab "$T/l4" --range 3-3
+  eq "$RC" 1 "L4: an unlisted patch whose build is refused still fails (no global leniency)"
+  says "$T/l4" "no test-failure headers found (compile error?)" "L4: ... with today's message"
+  silent "$T/l4" "KILLED" "L4: ... never KILLED"
+  rm -f "$F/$LEDGER_F"
+  sab "$T/l4b" --range 3-3
+  eq "$RC" 1 "L4: ... and with no ledger file at all"
+
+  # L5 ─ a bad entry fails at the start, before any patch is applied
+  prepl; ledger 99-nope.patch "$SUB" "x"
+  sab "$T/l5a" --range 3-3
+  eq "$RC" 1 "L5: an entry naming a patch file that does not exist fails"
+  says "$T/l5a" "names a patch that does not exist: '99-nope.patch'" "L5: ... naming it"
+  silent "$T/l5a" "==> [1/1] sabotage" "L5: ... before any patch was replayed"
+  ledger 3-refused.patch "" "x"
+  sab "$T/l5b" --range 3-3
+  eq "$RC" 1 "L5: an entry with an empty substring fails"
+  says "$T/l5b" "empty required substring" "L5: ... saying so"
+  ledger 3-refused.patch "   " "x"
+  sab "$T/l5c" --range 3-3
+  eq "$RC" 1 "L5: ... a blank substring too"
+  printf '3-refused.patch\t%s\tr\n3-refused.patch\t%s\tr\n' "$SUB" "$SUB" > "$F/$LEDGER_F"
+  sab "$T/l5d" --range 3-3
+  eq "$RC" 1 "L5: a patch listed twice fails"
+  ledger 3-refused.patch "$SUB" ""
+  sab "$T/l5e" --range 3-3
+  eq "$RC" 1 "L5: an entry with an empty reason fails"
+  ledger 3-refused.patch "$SUB" "r"
+  sab "$T/l5f" --range 3-3
+  eq "$RC" 0 "L5: positive control — the same entry, valid, passes"
+
+  # L6 ─ a ledgered patch next to an ordinary one: both replayed, the ordinary one still has to flip
+  prepl; mkbuilds; ledger 3-refused.patch "$SUB" "r"
+  sab "$T/l6" --range 3-4
+  eq "$RC" 0 "L6: a ledgered patch and an ordinary patch in one run both pass"
+  says "$T/l6" "flip confirmed: ok is true" "L6: ... the ordinary patch still flips its named test"
+  says "$T/l6" "PROCESSED 2 of 2 SELECTED" "L6: ... both counted"
+  ( cd "$F" && FAKE_MIX_NOFLIP=1 PATH="$BIN:$PATH" SAMEN_COUNTS_CACHE="$T/cc" bash scripts/sabotage --range 3-4 ) > "$T/l6b" 2>&1; RC=$?
+  eq "$RC" 1 "L6: ... and an ordinary patch that stops flipping still fails the run beside it"
+}
+
 run_reanchor() {
   echo "== reanchor =="
   # a fixture whose corpus holds patch 2 = the limit sabotage, committed and applying
@@ -394,8 +496,9 @@ run_reanchor() {
 case "$WHICH" in
   new) run_new ;;
   reanchor) run_reanchor ;;
-  all) run_new; run_reanchor ;;
-  *) echo "usage: sabotage_tooling_test.sh [new|reanchor]" >&2; exit 2 ;;
+  ledger) run_ledger ;;
+  all) run_new; run_reanchor; run_ledger ;;
+  *) echo "usage: sabotage_tooling_test.sh [new|reanchor|ledger]" >&2; exit 2 ;;
 esac
 
 echo ""

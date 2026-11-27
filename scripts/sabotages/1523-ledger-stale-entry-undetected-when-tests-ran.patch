@@ -1,0 +1,20 @@
+# SABOTAGE: a listed patch whose build succeeds and whose tests fail is read as a refusal, so a stale 
+#   ledger entry is reported as a wrong refusal instead of the rule having stopped refusing
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: LEDGER a mutation refused at build time is killed only when it is listed
+diff --git a/scripts/sabotage.sh b/scripts/sabotage.sh
+index a20c823c..28ad416a 100755
+--- a/scripts/sabotage.sh
++++ b/scripts/sabotage.sh
+@@ -518,7 +518,7 @@ for patch in "${selected[@]}"; do
+   if [[ -n "$required" ]]; then
+     # LISTED in BUILD_REFUSED.tsv. "Build refused" = the suite failed without ever running a test: no test-failure
+     # header and no ExUnit `Finished in` line (a compile error, or a transformer's DslError).
+-    if [[ $status -eq 0 ]] || grep -qE '^[[:space:]]*[0-9]+\) (test|property) |^Finished in ' "$out"; then
++    if [[ $status -eq 0 ]]; then
+       tail -20 "$out"
+       fail "$name: STALE BUILD_REFUSED.tsv entry — the build SUCCEEDED under the sabotage (the rule no longer refuses this mutation); the tests are not the proof for a listed patch. Fix the rule, or re-anchor the patch and drop the entry"
+     fi

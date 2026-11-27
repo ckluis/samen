@@ -29,6 +29,7 @@ defmodule Samen.ImpersonationWriteAuditTest do
   (`scripts/sabotages/33-p7f1-impersonation-write-audit-drop.patch`) neutralizes the audit
   emission so the RED assertions fail — proving they are not tautologies.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   alias Samen.Impersonation
@@ -166,7 +167,7 @@ defmodule Samen.ImpersonationWriteAuditTest do
       |> Enum.map_join(" ", &to_string/1)
 
     refute blob =~ sentinel, "the audit row must not persist the mutated (PII-shaped) value"
-    refute blob =~ "vt_", "the audit row must not carry a vault token"
+    refute_vault_token(blob, "the audit row must not carry a vault token")
   end
 
   # ── BULK coverage (attempt-2 gap 1): bulk paths must NOT escape the audit ──────

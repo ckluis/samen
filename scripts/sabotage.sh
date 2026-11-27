@@ -13,6 +13,12 @@
 #      (the named tests flipped — not just "something broke"),
 #   5. revert (git apply -R) and re-SHA — byte-exact restore, zero residue.
 #
+# EXCEPTION, strictly ledgered (scripts/sabotages/BUILD_REFUSED.tsv): a patch whose mutation a named compile-time rule
+# refuses at BUILD time cannot flip a test. A patch LISTED there is KILLED by the refusal — `KILLED (build refused:
+# <substring>)` — when the build is refused and the compiler output contains the entry's required substring; it FAILS
+# on a refusal without it (wrong refusal) and on a build that succeeds (a stale entry: the rule no longer refuses
+# it), whatever the tests do. An UNLISTED patch whose build is refused fails exactly as before: no global leniency.
+#
 # Patch metadata lives in `# KEY: value` header lines inside each .patch
 # (git apply ignores everything before the first `diff --git`):
 #   APP:        the app dir to run tests in (samen_core | samen_web | ...)
@@ -116,6 +122,7 @@ APPLIED_PATCH=""
 # (header preflight, no patches on disk) prints no accounting line it cannot honour.
 SEL_COUNT=-1
 PROCESSED=0
+KILLED_BY_REFUSAL=0
 SELECTED_NAMES=""
 
 cleanup() {
@@ -198,6 +205,17 @@ sha_files() { # sha_files <listfile> <outfile>
   while IFS= read -r f; do
     shasum -a 256 "$REPO_ROOT/$f" >> "$2"
   done < "$1"
+}
+
+# ── BUILD_REFUSED ledger ─────────────────────────────────────────────────────
+# scripts/sabotages/BUILD_REFUSED.tsv lists the patches whose mutation is refused AT BUILD TIME by a named compile-time
+# rule (a DslError from a transformer): no test can flip, so the refusal itself is the kill — but ONLY for a listed
+# patch, and only when the compiler output carries the entry's required substring. Its rows are validated by
+# scripts/sabotage_lint.sh (run first, below). An unlisted patch whose build is refused still fails as ever.
+LEDGER="$SABOTAGE_DIR/BUILD_REFUSED.tsv"
+ledger_substring() { # ledger_substring <patch name> -> the required substring ("" when the patch is not listed)
+  [[ -f "$LEDGER" ]] || return 0
+  awk -F'\t' -v p="$1" '/^#/ { next } $1 == p { print $2; exit }' "$LEDGER"
 }
 
 # ── argument parsing ─────────────────────────────────────────────────────────
@@ -495,32 +513,56 @@ for patch in "${selected[@]}"; do
   (cd "$REPO_ROOT" && git apply -R "$patch") || fail "$name: revert failed — TREE MAY BE DIRTY"
   APPLIED_PATCH=""
 
-  if [[ $status -eq 0 ]]; then
-    tail -20 "$out"
-    fail "$name: suite PASSED under sabotage — the guarantee did not flip (vacuous gate)"
+  required="$(ledger_substring "$name")"
+  killed_by_refusal=0
+  if [[ -n "$required" ]]; then
+    # LISTED in BUILD_REFUSED.tsv. "Build refused" = the suite failed without ever running a test: no test-failure
+    # header and no ExUnit `Finished in` line (a compile error, or a transformer's DslError).
+    if [[ $status -eq 0 ]] || grep -qE '^[[:space:]]*[0-9]+\) (test|property) |^Finished in ' "$out"; then
+      tail -20 "$out"
+      fail "$name: STALE BUILD_REFUSED.tsv entry — the build SUCCEEDED under the sabotage (the rule no longer refuses this mutation); the tests are not the proof for a listed patch. Fix the rule, or re-anchor the patch and drop the entry"
+    fi
+    # the compiler may colour its output: match on the plain text
+    sed $'s/\x1b\\[[0-9;]*m//g' "$out" > "$WORK/refusal_plain"
+    if grep -qF -- "$required" "$WORK/refusal_plain"; then
+      echo "    KILLED (build refused: $required)"
+      killed_by_refusal=1
+      KILLED_BY_REFUSAL=$((KILLED_BY_REFUSAL + 1))
+    else
+      tail -30 "$out"
+      fail "$name: WRONG REFUSAL — the build was refused but the output does not contain the required substring from BUILD_REFUSED.tsv: $required"
+    fi
   fi
 
-  # 4. The NAMED tests are among the failures (not just any breakage).
-  #
-  # `property` as well as `test`: ExUnit prints a failing StreamData property as
-  # `  1) property <name> (<Module>)`, not `  1) test ...`, so a MUST_FAIL naming a
-  # property matched NOTHING and the patch was rejected as "named test did not flip"
-  # while the property had in fact flipped (sabotage 369, the first to name one).
-  # Purely additive: this only ever captures MORE failure headers, so every existing
-  # patch's `grep -qF` match is unaffected.
-  grep -E '^[[:space:]]*[0-9]+\) (test|property) ' "$out" > "$WORK/failed_tests" || {
-    tail -30 "$out"
-    fail "$name: suite failed but no test-failure headers found (compile error?)"
-  }
-
-  while IFS= read -r must; do
-    if grep -qF "$must" "$WORK/failed_tests"; then
-      echo "    flip confirmed: $must"
-    else
-      cat "$WORK/failed_tests"
-      fail "$name: named test did not flip: $must"
+  if [[ $killed_by_refusal -eq 0 ]]; then
+    if [[ $status -eq 0 ]]; then
+      tail -20 "$out"
+      fail "$name: suite PASSED under sabotage — the guarantee did not flip (vacuous gate)"
     fi
-  done < "$WORK/must_fail"
+
+    # 4. The NAMED tests are among the failures (not just any breakage).
+    #
+    # `property` as well as `test`: ExUnit prints a failing StreamData property as
+    # `  1) property <name> (<Module>)`, not `  1) test ...`, so a MUST_FAIL naming a
+    # property matched NOTHING and the patch was rejected as "named test did not flip"
+    # while the property had in fact flipped (sabotage 369, the first to name one).
+    # Purely additive: this only ever captures MORE failure headers, so every existing
+    # patch's `grep -qF` match is unaffected.
+    grep -E '^[[:space:]]*[0-9]+\) (test|property) ' "$out" > "$WORK/failed_tests" || {
+      tail -30 "$out"
+      fail "$name: suite failed but no test-failure headers found (compile error?)"
+    }
+
+    while IFS= read -r must; do
+      if grep -qF "$must" "$WORK/failed_tests"; then
+        echo "    flip confirmed: $must"
+      else
+        cat "$WORK/failed_tests"
+        fail "$name: named test did not flip: $must"
+      fi
+    done < "$WORK/must_fail"
+
+  fi
 
   # 5b. Byte-exact restore — zero residue.
   sha_files "$WORK/touched" "$WORK/sha_after"
@@ -542,6 +584,7 @@ done
   fail "accounting mismatch: exercised $PROCESSED of $sel_count selected patches without an earlier failure"
 
 echo ""
+[[ $KILLED_BY_REFUSAL -eq 0 ]] || echo "SABOTAGE HARNESS: $KILLED_BY_REFUSAL of $PROCESSED killed by a build refusal named in BUILD_REFUSED.tsv (no test flips for those)"
 coverage_report OK
 if [[ $FILTER_ACTIVE -eq 1 ]]; then
   echo "SABOTAGE HARNESS: ALL PASSED ($PROCESSED of $grand_total sabotages — FILTERED: $(filter_label))"

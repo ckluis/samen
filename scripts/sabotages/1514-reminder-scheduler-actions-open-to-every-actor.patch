@@ -1,0 +1,19 @@
+# SABOTAGE: the Reminder scheduler bypass is authorize_if(always()) again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/system_actions_authz_test.exs
+# MUST_FAIL: refuse every tenant role and change nothing
+diff --git a/samen_core/lib/samen/scopes/automation/blueprint.ex b/samen_core/lib/samen/scopes/automation/blueprint.ex
+index ee273027..11974738 100644
+--- a/samen_core/lib/samen/scopes/automation/blueprint.ex
++++ b/samen_core/lib/samen/scopes/automation/blueprint.ex
+@@ -413,7 +413,7 @@ defmodule Samen.Scopes.Automation.Blueprint do
+           # The AshOban `:reminder_due` trigger (no actor): `:due_scan` is a read with no org filter. An actor of any role
+           # is refused.
+           bypass action([:fire, :due_scan]) do
+-            authorize_if(AshOban.Checks.AshObanInteraction)
++            authorize_if(always())
+           end
+ 
+           policy action([:fire, :due_scan]) do

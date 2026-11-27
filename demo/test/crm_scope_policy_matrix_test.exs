@@ -163,6 +163,40 @@ defmodule Demo.CrmScopePolicyMatrixTest do
     assert {:error, %Ash.Error.Forbidden{}} = result
   end
 
+  # `Person` writes are member-or-above, like `Company`'s (a viewer reads, never writes).
+  test "a VIEWER cannot create, update or destroy a person; a member can (the role gate, with positive controls)" do
+    org = mk_org("w-role-per")
+    viewer = mk_actor(org.id, :viewer)
+    member = mk_actor(org.id, :member)
+    person = mk_person(org.id, "RoleGated")
+
+    create = fn actor, name ->
+      Person
+      |> Ash.Changeset.for_create(:create, %{display_name: name, org_id: org.id}, actor: actor.actor)
+      |> Ash.create(authorize?: true)
+    end
+
+    assert {:error, %Ash.Error.Forbidden{}} = create.(viewer, "ViewerMade")
+    assert {:ok, _} = create.(member, "MemberMade")
+
+    update = fn actor ->
+      person
+      |> Ash.Changeset.for_update(:update, %{job_title: "Changed"})
+      |> Ash.update(actor: actor.actor, authorize?: true)
+    end
+
+    assert {:error, %Ash.Error.Forbidden{}} = update.(viewer)
+    assert {:ok, %{job_title: "Changed"}} = update.(member)
+
+    assert {:error, %Ash.Error.Forbidden{}} = Ash.destroy(person, actor: viewer.actor, authorize?: true)
+    destroyed = Ash.destroy(person, actor: member.actor, authorize?: true)
+    assert destroyed == :ok or match?({:ok, _}, destroyed)
+
+    # reads stay open to a viewer: the gate is on writes only
+    assert {:ok, [_ | _]} = Person |> Ash.Query.select([:id]) |> Ash.read(actor: viewer.actor, authorize?: true)
+  end
+
+
   # =========================================================================
   # Org-less actor — fail closed.
   # =========================================================================

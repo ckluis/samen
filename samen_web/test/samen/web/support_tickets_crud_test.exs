@@ -18,6 +18,7 @@ defmodule Samen.Web.SupportTicketsCrudTest do
       on the REAL page; the sort red path refuses an undeclared field.
     * **Operator posture (belt)** — no write affordance in the operator DOM.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.Web.ListLive
@@ -215,6 +216,6 @@ defmodule Samen.Web.SupportTicketsCrudTest do
     refute rendered =~ ~s(phx-click="new_ticket")
     refute rendered =~ ~s(phx-click="delete")
     refute rendered =~ "data-confirm"
-    refute rendered =~ "vt_"
+    refute_vault_token(rendered)
   end
 end
