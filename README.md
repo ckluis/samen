@@ -208,7 +208,7 @@ re-run this pass), `--warnings-as-errors` clean; treat exact counts as direction
 ## Getting started
 
 Prerequisites: Elixir 1.20.4 / OTP 29.1.1 or newer (`.tool-versions`; `scripts/toolchain_check.sh` verifies),
-and a local PostgreSQL **with the `pgvector` extension** that accepts your `$USER` with an empty password on
+`node` on `PATH` (one `samen_web` test runs the client script under it), and a local PostgreSQL **with the `pgvector` extension** that accepts your `$USER` with an empty password on
 localhost (the generated configs hardcode that; there is no `DATABASE_URL` in dev/test). Run `mix deps.get` in
 `samen_core` once before the generator. [docs/guides/getting-started.md](docs/guides/getting-started.md) has the exact
 list, and `mix samen.doctor` prints the adapter-readiness table. All commands start from the repo root.

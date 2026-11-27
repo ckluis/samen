@@ -10,7 +10,10 @@ from source against your pg major) and the toolchain in `.tool-versions` (Elixir
 the `toolchain` step fails on an older Elixir or OTP — raise the pin when you upgrade). Without pgvector
 the samen_core suite fails at setup with a clear "pgvector not installed" guard message
 (`samen_core/test/test_helper.exs`; ADR-043 §7.1/M3). The suites connect as `$USER`/`$PGUSER`; any role
-name works, the role just has to exist (`psql -d postgres -c '\du'`).
+name works, the role just has to exist (`psql -d postgres -c '\du'`). `node` must be on `PATH` too:
+`samen_web/test/samen/web/confirm_interlock_test.exs` runs the served client script under it and fails with
+"node is required for the app.js handler test" otherwise. `.tool-versions` pins only Elixir and Erlang, so node is not pinned
+there; the GitHub Actions runners (`ubuntu-24.04`) ship a node, and no workflow step installs one.
 
 ## 1. Modes and verdicts
 

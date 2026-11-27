@@ -40,7 +40,7 @@ Use the driver; never hand-segment `ci.sh`, never background a run and poll it (
   <!--count:corpus_mutants-->8,018<!--/count--> mutants.
 - Toolchain floor `.tool-versions` (Elixir 1.20.4 / OTP 29.1.1); the `toolchain` step fails on older — raise the pin
   when upgrading. Prerequisite: Postgres WITH `pgvector` (`brew install pgvector`; ADR-043 §7.1/M3) — else the
-  samen_core suite fails at setup with "pgvector not installed".
+  samen_core suite fails at setup with "pgvector not installed". `node` must be on `PATH` (`confirm_interlock_test.exs`).
 - Tests needing a shared Ecto sandbox call `Samen.TestSandbox.shared!(Repo)`; a raw `Sandbox.mode(_, {:shared, _})` fails
   `Samen.TestSandboxGuardTest` (it made the test process the owner: the `owner exited` flake). A test whose writes must
   COMMIT calls `Samen.TestSandbox.auto!(Repo)`; a raw `Sandbox.mode(_, :auto)` fails the same guard (nothing switched it
