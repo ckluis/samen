@@ -229,4 +229,71 @@ defmodule Samen.Web.TenantRoleSettingsTest do
     refute redirected_to(conn) =~ "error=1"
     assert org_name.() == "Renamed By An Admin"
   end
+
+  test "the wizard controller refuses a member itself: Onboarding.* is never reached, an admin's POST reaches it", ctx do
+    # The kernel would refuse the member as well, so the answer alone cannot tell who refused: trace the calls instead.
+    # A process cannot be traced by itself and the endpoint serves the request in its own process, so a collector traces all.
+    traced = [{Samen.Web.Onboarding, :name_org, 4}, {Samen.Web.Onboarding, :select_plan, 4}, {Samen.Web.Onboarding, :complete!, 3}]
+    Code.ensure_loaded!(Samen.Web.Onboarding)
+    {:ok, calls} = Agent.start_link(fn -> [] end)
+
+    collector =
+      spawn_link(fn ->
+        loop = fn loop ->
+          receive do
+            {:trace, _pid, :call, {Samen.Web.Onboarding, fun, _args}} -> Agent.update(calls, &[fun | &1])
+            {:flush, from, ref} -> send(from, {:flushed, ref})
+          end
+
+          loop.(loop)
+        end
+
+        loop.(loop)
+      end)
+
+    :erlang.trace(:all, true, [:call, {:tracer, collector}])
+    Enum.each(traced, fn {m, f, a} -> :erlang.trace_pattern({m, f, a}, true, [:global]) end)
+
+    on_exit(fn ->
+      :erlang.trace(:all, false, [:call])
+      Enum.each(traced, fn {m, f, a} -> :erlang.trace_pattern({m, f, a}, false, [:global]) end)
+    end)
+
+    reached = fn ->
+      ref = :erlang.trace_delivered(:all)
+
+      receive do
+        {:trace_delivered, _, ^ref} -> :ok
+      end
+
+      ref = make_ref()
+      send(collector, {:flush, self(), ref})
+
+      receive do
+        {:flushed, ^ref} -> Agent.get_and_update(calls, &{&1, []})
+      end
+    end
+
+    posts = [
+      {"/onboarding/name_org", %{"org" => %{"name" => "Controller Refusal"}, "org_id" => ctx.org_id}, :name_org},
+      {"/onboarding/plan", %{"plan" => %{"key" => "free"}, "org_id" => ctx.org_id}, :select_plan},
+      {"/onboarding/finish", %{"org_id" => ctx.org_id}, :complete!}
+    ]
+
+    member = H.log_in(ctx.member)
+
+    for {path, params, _fun} <- posts do
+      conn = post(member.conn, path, params)
+      assert redirected_to(conn) =~ "error=1"
+    end
+
+    assert reached.() == [], "a member's POST must be refused by the controller before Onboarding.* runs"
+
+    admin = H.log_in(ctx.admin)
+
+    for {path, params, _fun} <- posts, do: post(admin.conn, path, params)
+
+    assert Enum.sort(reached.()) == Enum.sort(for {_, _, fun} <- posts, do: fun),
+           "an admin's POSTs reach Onboarding.* (positive control)"
+  end
 end

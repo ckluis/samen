@@ -163,24 +163,23 @@ defmodule Samen.Web.Onboarding.WizardController do
   # the org and the user resolved from the session, and `verified?` is the REAL credential fact
   # (fail-CLOSED with no principal) — never the hardcoded `true` this used to carry.
   defp authorized_scope(mount, conn, org_id, user_id, acting) when is_binary(org_id) and is_binary(user_id) do
-    # `Org.:update` needs admin+: carry the caller's REAL membership role (none → nil → refused). Every wizard write is an
-    # admin's, and the role is the one the acting person resolved to now.
-    role =
-      case admin?(mount, acting) && membership(mount, acting, org_id, user_id) do
-        {:ok, %{role: role}} -> role
-        _ -> nil
-      end
-
-    %Samen.Scope{
-      actor: %{
-        id: user_id,
-        org_id: org_id,
-        role: role,
-        kind: :tenant,
-        plane: :tenant,
-        verified?: verified?(mount, get_session(conn))
+    # `Org.:update` needs admin+, and every wizard write is an admin's: a person who is not an admin gets no scope, so the
+    # handler refuses before `Onboarding.*` is reached. The role carried is the one the acting person resolved to now.
+    with true <- admin?(mount, acting),
+         {:ok, %{role: role}} <- membership(mount, acting, org_id, user_id) do
+      %Samen.Scope{
+        actor: %{
+          id: user_id,
+          org_id: org_id,
+          role: role,
+          kind: :tenant,
+          plane: :tenant,
+          verified?: verified?(mount, get_session(conn))
+        }
       }
-    }
+    else
+      _ -> nil
+    end
   end
 
   defp authorized_scope(_mount, _conn, _org_id, _user_id, _acting), do: nil
