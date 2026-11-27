@@ -23,6 +23,9 @@ defmodule Samen.Web.Settings.InvitationsLive do
   alias Samen.Web.Mount
   alias Samen.Web.Settings.Invitations
   alias Samen.Web.Settings.Reads
+  alias Samen.Web.TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
+  require TenantActor
 
   @impl true
   def mount(params, session, socket) do
@@ -51,59 +54,86 @@ defmodule Samen.Web.Settings.InvitationsLive do
 
   @doc false
   def load(socket, org_id, user_id) do
-    mount = socket.assigns.samen_mount
     socket = assign(socket, org_id: org_id, user_id: user_id, invitations: [], invitations_failed: false)
 
     if is_nil(org_id) do
-      socket
+      assign(socket, acting_scope: nil, actor_state: :ok, can_write: false, can_admin: false)
     else
-      scope = Mount.scope(mount, org_id)
-
-      # A FAILED list read is the error state (retry), never "No invitations yet.".
-      case Invitations.list_result(mount, scope) do
-        {:ok, invitations} -> assign(socket, invitations: invitations)
-        {:error, :forbidden} -> socket
-        {:error, :unavailable} -> assign(socket, invitations_failed: true)
+      # WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`). A denial or a failed lookup is
+      # a STATE of the page: nothing is listed, nothing can be sent or revoked.
+      case TenantActor.assign_actor(socket, org_id) do
+        {:ok, socket} -> load_invitations(socket, socket.assigns.samen_mount, socket.assigns.acting_scope)
+        {:refused, socket} -> socket
       end
     end
   end
 
+  defp load_invitations(socket, mount, scope) do
+    # A FAILED list read is the error state (retry), never "No invitations yet.".
+    case Invitations.list_result(mount, scope) do
+      {:ok, invitations} -> assign(socket, invitations: invitations)
+      {:error, :forbidden} -> socket
+      {:error, :unavailable} -> assign(socket, invitations_failed: true)
+    end
+  end
+
+  # Acting again with no URL to patch to (the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _, user_id: _}} = socket), do: load(socket, socket.assigns.org_id, socket.assigns.user_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event: nothing the page loaded is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: assign(socket, invitations: [], invitations_failed: false, invited_raw_token: nil, invite_error: nil)
+
   @impl true
+  TenantActor.refuse_events(["invite", "revoke", "dismiss_token"])
+
   def handle_event("retry_load", _params, socket),
     do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.user_id)}
 
   def handle_event("invite", %{"invitation" => params}, socket) do
     %{samen_mount: mount, org_id: org_id, user_id: user_id, samen_session: session} = socket.assigns
 
-    if operator_plane?(mount) do
-      {:noreply, assign(socket, invite_error: "Invitations are sent from the tenant plane.")}
-    else
-      do_invite(socket, mount, org_id, user_id, session, params)
+    cond do
+      operator_plane?(mount) -> {:noreply, assign(socket, invite_error: "Invitations are sent from the tenant plane.")}
+      # Inviting is an admin's (the kernel's `Invitation` create policy); the handler checks it itself.
+      not TenantActor.admin?(socket) -> {:noreply, assign(socket, invite_error: "Invite refused (admin role required).")}
+      true -> do_invite(socket, mount, org_id, user_id, session, params)
     end
   end
 
   def handle_event("revoke", %{"id" => invitation_id}, socket) do
     %{samen_mount: mount, org_id: org_id, user_id: user_id} = socket.assigns
 
-    if operator_plane?(mount) do
-      {:noreply, socket}
-    else
-      scope = member_scope(mount, org_id, user_id)
+    cond do
+      operator_plane?(mount) ->
+        {:noreply, socket}
 
-      # A revoke must never fail silently: say so, and re-read so the list shows the REAL state.
-      error =
-        case Invitations.revoke(mount, scope, invitation_id) do
-          {:ok, _invitation} -> nil
-          {:error, :unavailable} -> "Couldn't revoke that invitation — it is still pending. Try again."
-          {:error, _reason} -> "Revoke refused (admin role required, or the invitation is no longer pending)."
-        end
+      # Revoking is an admin's (the kernel's `Invitation` update policy); the handler checks it itself.
+      not TenantActor.admin?(socket) ->
+        {:noreply, assign(socket, invite_error: "Revoke refused (admin role required, or the invitation is no longer pending).")}
 
-      {:noreply, load(assign(socket, invited_raw_token: nil, invite_error: error), org_id, user_id)}
+      true ->
+        {:noreply, revoke_invitation(socket, mount, org_id, user_id, invitation_id)}
     end
   end
 
   def handle_event("dismiss_token", _params, socket) do
     {:noreply, assign(socket, invited_raw_token: nil)}
+  end
+
+  defp revoke_invitation(socket, mount, org_id, user_id, invitation_id) do
+    scope = member_scope(socket.assigns.acting_scope, mount, org_id, user_id)
+
+    # A revoke must never fail silently: say so, and re-read so the list shows the REAL state.
+    error =
+      case Invitations.revoke(mount, scope, invitation_id) do
+        {:ok, _invitation} -> nil
+        {:error, :unavailable} -> "Couldn't revoke that invitation — it is still pending. Try again."
+        {:error, _reason} -> "Revoke refused (admin role required, or the invitation is no longer pending)."
+      end
+
+    load(assign(socket, invited_raw_token: nil, invite_error: error), org_id, user_id)
   end
 
   # -- render ------------------------------------------------------------------
@@ -128,9 +158,12 @@ defmodule Samen.Web.Settings.InvitationsLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if is_nil(@org_id) do %>
+        <%= cond do %>
+        <% is_nil(@org_id) -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Invitations" nothing="there are no invitations to show" />
+        <% true -> %>
           <div class="wrap">
             <div id="invitations-panel">
               <%= if @invited_raw_token do %>
@@ -143,7 +176,7 @@ defmodule Samen.Web.Settings.InvitationsLive do
 
               <p :if={@invite_error} id="invitation-error" style="color:#B91C1C">{@invite_error}</p>
 
-              <%= if not operator_plane?(@samen_mount) do %>
+              <%= if @can_admin do %>
                 <form id="invite-form" phx-submit="invite" style="margin-bottom:16px">
                   <fieldset style="border:0;padding:0">
                     <legend style="font-weight:600;font-size:13px">Invite a teammate</legend>
@@ -159,11 +192,10 @@ defmodule Samen.Web.Settings.InvitationsLive do
                     You can only invite a role you could yourself hold or manage — no invite above your own rank.
                   </p>
                 </form>
-              <% else %>
-                <p id="invitations-operator-note" style="color:var(--muted)">
-                  Inviting and revoking are tenant-plane actions.
-                </p>
               <% end %>
+              <p :if={operator_plane?(@samen_mount)} id="invitations-operator-note" style="color:var(--muted)">
+                Inviting and revoking are tenant-plane actions.
+              </p>
 
               <table id="invitations-table" class="tbl">
                 <thead>
@@ -185,7 +217,7 @@ defmodule Samen.Web.Settings.InvitationsLive do
                     <td>{inv.expires_at}</td>
                     <td>
                       <button
-                        :if={inv.status == "pending" and not operator_plane?(@samen_mount)}
+                        :if={inv.status == "pending" and @can_admin}
                         type="button"
                         phx-click="revoke"
                         phx-value-id={inv.id}
@@ -217,7 +249,7 @@ defmodule Samen.Web.Settings.InvitationsLive do
   # -- private -----------------------------------------------------------------
 
   defp do_invite(socket, mount, org_id, user_id, session, params) do
-    with {:ok, membership} <- membership(mount, org_id, user_id),
+    with {:ok, membership} <- membership(mount, socket.assigns.acting_scope, org_id, user_id),
          scope <- invite_scope(user_id, org_id, membership.role, verified?(mount, session)),
          {:ok, _invitation, raw_token} <-
            Invitations.create(mount, scope, Map.get(params, "email", ""), Map.get(params, "role", "member")) do
@@ -241,15 +273,14 @@ defmodule Samen.Web.Settings.InvitationsLive do
     end
   end
 
-  defp membership(mount, org_id, user_id) when is_binary(org_id) and is_binary(user_id) do
-    scope = Mount.scope(mount, org_id)
-    Reads.current_membership_result(mount, scope, user_id, org_id)
-  end
+  # The person's own membership row (the inviter's real rank), read with the acting scope.
+  defp membership(mount, scope, org_id, user_id) when is_binary(org_id) and is_binary(user_id),
+    do: Reads.current_membership_result(mount, scope, user_id, org_id)
 
-  defp membership(_mount, _org_id, _user_id), do: {:error, :not_found}
+  defp membership(_mount, _scope, _org_id, _user_id), do: {:error, :not_found}
 
-  defp member_scope(mount, org_id, user_id) do
-    case membership(mount, org_id, user_id) do
+  defp member_scope(acting, mount, org_id, user_id) do
+    case membership(mount, acting, org_id, user_id) do
       {:ok, membership} -> invite_scope(user_id, org_id, membership.role, true)
       {:error, _} -> invite_scope(user_id, org_id, :member, true)
     end

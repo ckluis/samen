@@ -45,13 +45,14 @@ defmodule Samen.Web.Onboarding.WizardController do
   alias Samen.Web.Onboarding
   alias Samen.Web.Settings.Invitations
   alias Samen.Web.Settings.Reads
+  alias Samen.Web.TenantActor
 
   @doc "Step 1 — `POST /onboarding/name_org`: write `Org.name`, advance to the plan step."
   def name_org(conn, %{"org" => %{"name" => name}} = params) do
-    {conn, mount, org_id, user_id} = context(conn, params)
+    {conn, mount, org_id, user_id, acting} = context(conn, params)
     name = String.trim(name || "")
 
-    case authorized_scope(mount, conn, org_id, user_id) do
+    case authorized_scope(mount, conn, org_id, user_id, acting) do
       nil ->
         redirect(conn, to: step_path(conn, org_id, user_id, "org", "&error=1"))
 
@@ -64,15 +65,15 @@ defmodule Samen.Web.Onboarding.WizardController do
   end
 
   def name_org(conn, params) do
-    {conn, _mount, org_id, user_id} = context(conn, params)
+    {conn, _mount, org_id, user_id, _acting} = context(conn, params)
     redirect(conn, to: step_path(conn, org_id, user_id, "org", "&error=1"))
   end
 
   @doc "Step 2 — `POST /onboarding/plan`: write `Org.plan`, advance to the invite step."
   def select_plan(conn, %{"plan" => %{"key" => key}} = params) do
-    {conn, mount, org_id, user_id} = context(conn, params)
+    {conn, mount, org_id, user_id, acting} = context(conn, params)
 
-    case authorized_scope(mount, conn, org_id, user_id) do
+    case authorized_scope(mount, conn, org_id, user_id, acting) do
       nil ->
         redirect(conn, to: step_path(conn, org_id, user_id, "plan", "&error=1"))
 
@@ -85,16 +86,18 @@ defmodule Samen.Web.Onboarding.WizardController do
   end
 
   def select_plan(conn, params) do
-    {conn, _mount, org_id, user_id} = context(conn, params)
+    {conn, _mount, org_id, user_id, _acting} = context(conn, params)
     redirect(conn, to: step_path(conn, org_id, user_id, "plan", "&error=1"))
   end
 
   @doc "Step 3 — `POST /onboarding/invite`: create a REAL pending Invitation, stay on the invite step."
   def invite(conn, %{"invitation" => invitation} = params) do
-    {conn, mount, org_id, user_id} = context(conn, params)
+    {conn, mount, org_id, user_id, acting} = context(conn, params)
 
     with true <- is_binary(org_id) and is_binary(user_id),
-         {:ok, membership} <- membership(mount, org_id, user_id),
+         {:ok, _acting_scope} <- acting,
+         true <- admin?(mount, acting),
+         {:ok, membership} <- membership(mount, acting, org_id, user_id),
          scope <- invite_scope(user_id, org_id, membership.role, verified?(mount, get_session(conn))),
          {:ok, _invitation, _raw_token} <-
            Invitations.create(mount, scope, Map.get(invitation, "email", ""), Map.get(invitation, "role", "member")) do
@@ -107,16 +110,16 @@ defmodule Samen.Web.Onboarding.WizardController do
   end
 
   def invite(conn, params) do
-    {conn, _mount, org_id, user_id} = context(conn, params)
+    {conn, _mount, org_id, user_id, _acting} = context(conn, params)
     redirect(conn, to: step_path(conn, org_id, user_id, "invite", "&invite_error=1"))
   end
 
   @doc "`POST /onboarding/finish`: mark the org onboarded; the wizard renders the already-done card."
   def finish(conn, params) do
-    {conn, mount, org_id, user_id} = context(conn, params)
+    {conn, mount, org_id, user_id, acting} = context(conn, params)
 
     refused? =
-      case authorized_scope(mount, conn, org_id, user_id) do
+      case authorized_scope(mount, conn, org_id, user_id, acting) do
         nil -> true
         scope -> match?({:error, _}, Onboarding.complete!(mount, scope, org_id))
       end
@@ -146,7 +149,11 @@ defmodule Samen.Web.Onboarding.WizardController do
     org_id = Samen.Web.CurrentOrg.resolve(mount, resolver_params, session)
     user_id = Reads.current_user_id(mount, resolver_params, session)
 
-    {conn, mount, org_id, user_id}
+    # WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never a fixed `:member`. No active
+    # membership, or a failed lookup, is no actor: every action below refuses.
+    acting = TenantActor.scope(mount, org_id, TenantActor.conn_ref(mount, resolver_params, session))
+
+    {conn, mount, org_id, user_id, acting}
   end
 
   defp maybe_put(map, key, value) when is_binary(value), do: Map.put(map, key, value)
@@ -155,10 +162,11 @@ defmodule Samen.Web.Onboarding.WizardController do
   # The own-org actor scope for the `OrgIsSelf` + admin-policed org writes. `nil` (refuse) unless BOTH
   # the org and the user resolved from the session, and `verified?` is the REAL credential fact
   # (fail-CLOSED with no principal) — never the hardcoded `true` this used to carry.
-  defp authorized_scope(mount, conn, org_id, user_id) when is_binary(org_id) and is_binary(user_id) do
-    # `Org.:update` needs admin+: carry the caller's REAL membership role (none → nil → refused).
+  defp authorized_scope(mount, conn, org_id, user_id, acting) when is_binary(org_id) and is_binary(user_id) do
+    # `Org.:update` needs admin+: carry the caller's REAL membership role (none → nil → refused). Every wizard write is an
+    # admin's, and the role is the one the acting person resolved to now.
     role =
-      case membership(mount, org_id, user_id) do
+      case admin?(mount, acting) && membership(mount, acting, org_id, user_id) do
         {:ok, %{role: role}} -> role
         _ -> nil
       end
@@ -175,7 +183,7 @@ defmodule Samen.Web.Onboarding.WizardController do
     }
   end
 
-  defp authorized_scope(_mount, _conn, _org_id, _user_id), do: nil
+  defp authorized_scope(_mount, _conn, _org_id, _user_id, _acting), do: nil
 
   defp invite_scope(user_id, org_id, role, verified?) do
     %Samen.Scope{
@@ -183,11 +191,15 @@ defmodule Samen.Web.Onboarding.WizardController do
     }
   end
 
-  defp membership(mount, org_id, user_id) when is_binary(org_id) and is_binary(user_id) do
-    Reads.current_membership_result(mount, Mount.scope(mount, org_id), user_id, org_id)
-  end
+  # The person's own membership row, read with the acting scope; no actor is no membership, a failed lookup stays failed.
+  defp membership(mount, {:ok, scope}, org_id, user_id) when is_binary(org_id) and is_binary(user_id),
+    do: Reads.current_membership_result(mount, scope, user_id, org_id)
 
-  defp membership(_mount, _org_id, _user_id), do: {:error, :not_found}
+  defp membership(_mount, _acting, _org_id, _user_id), do: {:error, :not_found}
+
+  # Every wizard write is an admin's: the acting person's role now (the disarmed dev posture is open).
+  defp admin?(mount, {:ok, scope}), do: TenantActor.administrable?(mount, scope)
+  defp admin?(_mount, _no_actor), do: false
 
   # B-SEC / S2 — the no-principal branch is fail-CLOSED on an armed host (see the twin in
   # `Samen.Web.Settings.InvitationsLive`). A legacy BYO principal still reports `true` (a BYO

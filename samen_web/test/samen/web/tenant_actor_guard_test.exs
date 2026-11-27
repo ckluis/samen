@@ -31,22 +31,16 @@ defmodule Samen.Web.TenantActorGuardTest do
     "samen/web/ai/server.ex" => 1,
     "samen/web/chat.ex" => 1,
     "samen/web/first_run.ex" => 1,
-    "samen/web/onboarding/wizard_controller.ex" => 1,
-    "samen/web/onboarding/wizard_live.ex" => 2,
     "samen/web/operator.ex" => 2,
     "samen/web/operator/flag_admin_live.ex" => 2,
     "samen/web/replay/access.ex" => 2,
     "samen/web/sample_data.ex" => 1,
-    "samen/web/settings/api_keys_live.ex" => 2,
-    "samen/web/settings/invitations_live.ex" => 2,
-    "samen/web/settings/reveal_approvals_live.ex" => 1,
-    "samen/web/settings/security_live.ex" => 1,
     "samen/web/tenant_role.ex" => 1,
   }
 
   # The exact size of the work list: a silent bump of an entry (or a new entry) fails here, not only in the ratchet.
-  @baseline_total 23
-  @baseline_files 16
+  @baseline_total 14
+  @baseline_files 10
 
   @exempt ~w(samen/web/mount.ex samen/web/tenant_actor.ex samen/web/tenant_actor/guard.ex)
 
@@ -166,8 +160,8 @@ defmodule Samen.Web.TenantActorGuardTest do
     for file <- ~w(samen/web/tenant/analytics_live.ex samen/web/search/search_live.ex samen/web/notifications/inbox_live.ex samen/web/settings/reads.ex samen/web/flags/settings_live.ex samen/web/ics/export_controller.ex),
         do: refute(Map.has_key?(now, file), file)
 
-    # the chat inbox and room, the file upload and preview pages, the automation builder
-    for file <- ~w(samen/web/chat/threads_live.ex samen/web/chat/thread_live.ex samen/web/files/upload_live.ex samen/web/files/preview_live.ex samen/web/automation/builder_live.ex),
+    # the chat inbox and room, the file upload and preview pages, the automation builder, the settings pages and the onboarding wizard
+    for file <- ~w(samen/web/chat/threads_live.ex samen/web/chat/thread_live.ex samen/web/files/upload_live.ex samen/web/files/preview_live.ex samen/web/automation/builder_live.ex samen/web/settings/api_keys_live.ex samen/web/settings/invitations_live.ex samen/web/settings/reveal_approvals_live.ex samen/web/settings/security_live.ex samen/web/onboarding/wizard_live.ex samen/web/onboarding/wizard_controller.ex),
         do: refute(Map.has_key?(now, file), file)
 
     # the Billing, Marketing and Support pages converted in authz-7 (and leads)

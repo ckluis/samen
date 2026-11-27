@@ -11,6 +11,16 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Changed: the settings pages and the onboarding wizard act as the signed-in person
+
+- **The API keys, invitations, reveal approvals and security pages and the onboarding wizard resolve their actor** through
+  `Samen.Web.TenantActor`: no active membership is the denied state (a failed lookup the unavailable state) and reads
+  nothing, an open page re-resolves before every event, and their lists and membership lookups read as that person. The pages
+  are readable by every active member; minting and revoking a key, inviting and revoking an invitation, deciding a reveal
+  request and every write of the onboarding wizard (including its no-JS form posts) are an admin's, checked by the handler
+  against the role resolved for that event and offered to an admin only. The security page reads the person's own account and
+  writes nothing.
+
 ### Changed: the automation builder acts as the signed-in person; every write is an admin's
 
 - **The automation builder resolves its actor** through `Samen.Web.TenantActor`: the role comes from the person's active
