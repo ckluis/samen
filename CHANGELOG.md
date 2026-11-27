@@ -11,6 +11,14 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Changed: the automation builder acts as the signed-in person; every write is an admin's
+
+- **The automation builder resolves its actor** through `Samen.Web.TenantActor`: the role comes from the person's active
+  membership, no active membership is the denied state (a failed lookup the unavailable state) and reads nothing, and an open
+  page re-resolves before every event, closing an editor opened under a role the person no longer holds. The workflows are
+  readable by every active member; every write (author, edit, pause or resume, run now, add or remove a condition or an action)
+  is an admin's, checked by the handler itself, offered to an admin only, and run as the person (`TenantActor.write_scope/3`).
+
 ### Changed: the file upload and preview pages act as the signed-in person
 
 - **The file upload page and the file preview page resolve their actor** through `Samen.Web.TenantActor`: the role comes from

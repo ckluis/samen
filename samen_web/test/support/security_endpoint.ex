@@ -177,6 +177,12 @@ defmodule Samen.WebTest.SecurityRouter do
       labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)
     )
 
+    # The automation builder, with the `:identity_namespace` seam (`tenant_role_automation_test.exs`).
+    samen_automation_routes(:automation, Samen.WebTest.Automation,
+      repo: Samen.WebTest.Repo,
+      labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)
+    )
+
     # The chat inbox and room, with the `:identity_namespace` seam, so a real login resolves the signed-in person's
     # membership role on them (`tenant_role_chat_test.exs`).
     samen_chat_routes(:chat, Samen.WebTest.Chat,
