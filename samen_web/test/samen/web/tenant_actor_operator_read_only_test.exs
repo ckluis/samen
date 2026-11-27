@@ -188,7 +188,7 @@ defmodule Samen.Web.TenantActorOperatorReadOnlyTest do
     op = operator_socket(ctx, TicketLive, "/support/tickets/:id", %{"id" => ticket.id})
     html = render_html(TicketLive, op.assigns)
     assert html =~ "Masked Read Ticket"
-    refute html =~ ~r/vt_[a-z0-9]/
+    Samen.VaultTokenAssert.refute_vault_token(html)
   end
 
   # -- the typed refusal at the scope --------------------------------------------------------------------------
