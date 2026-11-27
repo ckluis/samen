@@ -45,37 +45,27 @@ defmodule Samen.MixTaskUnknownFlagsTest do
     err
   end
 
-  describe "RED PATH: generators refuse an unknown flag" do
-    for task <- @generators do
-      test "unknown flag is refused by #{task}" do
-        refuses!(unquote(task), ["--no-such-flag"])
-      end
+  describe "RED PATH: an unknown flag is refused through the task's run/1" do
+    test "every generator refuses an unknown flag" do
+      for task <- @generators, do: refuses!(task, ["--no-such-flag"])
     end
 
     test "a positional argument is refused by a generator too" do
       err = assert_raise Mix.Error, fn -> Mix.Tasks.Samen.Gen.Indexes.run(["stray"]) end
       assert err.message =~ ~s(unexpected positional argument "stray")
     end
-  end
 
-  describe "RED PATH: verifiers refuse an unknown flag" do
-    for task <- @verifiers do
-      test "unknown flag is refused by #{task}" do
-        refuses!(unquote(task), ["--no-such-flag"])
-      end
+    test "every verifier that takes flags refuses an unknown flag" do
+      for task <- @verifiers, do: refuses!(task, ["--no-such-flag"])
     end
 
     test "a misspelled verifier flag is refused and names the valid ones" do
       err = refuses_flag!("samen.verify.same_org_fk", ["--domian", "X"], "--domian")
       assert err.message =~ "--domain"
     end
-  end
 
-  describe "RED PATH: the other flag-taking tasks refuse an unknown flag" do
-    for task <- @others do
-      test "unknown flag is refused by #{task}" do
-        refuses!(unquote(task), ["--no-such-flag"])
-      end
+    test "the audit and smoke tasks refuse an unknown flag" do
+      for task <- @others, do: refuses!(task, ["--no-such-flag"])
     end
   end
 
