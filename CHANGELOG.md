@@ -11,6 +11,15 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Changed: the feature-flags settings page and the calendar export act as the signed-in person
+
+- **The feature-flags settings page and the `.ics` export resolve their actor** through `Samen.Web.TenantActor`: the role
+  comes from the person's active membership, no active membership is the denied state (an export answers 403, a failed lookup
+  503), and an open page re-resolves before every event. The flags page is readable by every active member; every flag write
+  (enable or disable, ramp, add or remove a rule) is an admin's, checked by the handler itself, offered to an admin only, and
+  run as the person (`TenantActor.write_scope/3`). The export is a read open to every active member and records the role it
+  ran as.
+
 ### Changed: the analytics and search pages act as the signed-in person
 
 - **The own-org analytics page and the ⌘K search page resolve their actor** through `Samen.Web.TenantActor`, as the earlier
