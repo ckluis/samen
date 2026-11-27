@@ -47,11 +47,12 @@ defmodule Samen.MixTaskUnknownFlagsTest do
 
   describe "RED PATH: an unknown flag is refused through the task's run/1" do
     test "every generator refuses an unknown flag" do
-      for task <- @generators, do: refuses!(task, ["--no-such-flag"])
+      out = scratch_dir()
+      for task <- @generators, do: refuses!(task, ["--out", out, "--no-such-flag"])
     end
 
     test "a positional argument is refused by a generator too" do
-      err = assert_raise Mix.Error, fn -> Mix.Tasks.Samen.Gen.Indexes.run(["stray"]) end
+      err = assert_raise Mix.Error, fn -> Mix.Tasks.Samen.Gen.Indexes.run(["--out", scratch_dir(), "stray"]) end
       assert err.message =~ ~s(unexpected positional argument "stray")
     end
 
@@ -72,13 +73,12 @@ defmodule Samen.MixTaskUnknownFlagsTest do
   describe "positive control: valid flags are not refused (child process, real exit code)" do
     @tag :exit_code
     test "generator family: samen.gen.indexes with valid flags is not refused as an unknown flag" do
-      out = Path.join(System.tmp_dir!(), "unknown_flags_#{System.unique_integer([:positive])}")
-      on_exit(fn -> File.rm_rf(out) end)
+      out = scratch_dir()
 
       {output, _code} = mix(["samen.gen.indexes", "--out", out, "--timestamp", "20261114100000", "--domain", "Samen.NoSuchDomain"])
       refute output =~ "unknown flag"
 
-      {output, code} = mix(["samen.gen.indexes", "--no-such-flag"])
+      {output, code} = mix(["samen.gen.indexes", "--out", out, "--no-such-flag"])
       assert code != 0
       assert output =~ "mix samen.gen.indexes: unknown flag --no-such-flag"
     end
@@ -103,6 +103,13 @@ defmodule Samen.MixTaskUnknownFlagsTest do
       assert code != 0
       assert output =~ "mix samen.ai.smoke: unknown flag --no-such-flag"
     end
+  end
+
+  # A generator that failed to refuse would write its migration here, never into the app's own migrations.
+  defp scratch_dir do
+    dir = Path.join(System.tmp_dir!(), "unknown_flags_#{System.unique_integer([:positive])}")
+    on_exit(fn -> File.rm_rf(dir) end)
+    dir
   end
 
   defp refuses_flag!(task, argv, flag) do
