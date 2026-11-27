@@ -167,7 +167,7 @@ defmodule Samen.AdapterConformanceCase do
              "a non-binary segment reached the provider: #{inspect(segment)} — masked " <>
                "history/payload segments must be rendered binaries ONLY."
 
-      refute segment =~ "vt_", "a vt_* vault token reached the provider (INV-7)"
+      Samen.VaultTokenAssert.refute_vault_token(segment, "a vt_* vault token reached the provider (INV-7)")
       refute segment =~ "grant_span", "a grant-span tag leaked onto the provider path"
     end
 

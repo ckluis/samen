@@ -1,0 +1,20 @@
+# SABOTAGE: an un-renamed host silently sees an empty registry instead of the deprecated key's domains
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/host_domains_test.exs
+# MUST_FAIL: an un-renamed host (only :ash_domains) is still read, with ONE deprecation warning
+diff --git a/samen_core/lib/samen/host_domains.ex b/samen_core/lib/samen/host_domains.ex
+index 525d573d..1402dc4a 100644
+--- a/samen_core/lib/samen/host_domains.ex
++++ b/samen_core/lib/samen/host_domains.ex
+@@ -36,8 +36,7 @@ defmodule Samen.HostDomains do
+         []
+ 
+       domains when is_list(domains) ->
+-        warn_once()
+-        Enum.uniq(domains)
++        Enum.uniq(domains) && []
+ 
+       _ ->
+         []

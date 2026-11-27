@@ -1,0 +1,19 @@
+# SABOTAGE: Chat.set_disclosure_setting/3 hands an admin role to an operator-plane mount
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_operator_read_only_test.exs
+# MUST_FAIL: Chat.set_disclosure_setting/3 on the operator plane flips nothing
+diff --git a/samen_web/lib/samen/web/chat.ex b/samen_web/lib/samen/web/chat.ex
+index 8cc95195..ae39c857 100644
+--- a/samen_web/lib/samen/web/chat.ex
++++ b/samen_web/lib/samen/web/chat.ex
+@@ -136,7 +136,7 @@ defmodule Samen.Web.Chat do
+   @spec set_disclosure_setting(Mount.t(), Samen.Scope.t(), boolean()) ::
+           {:ok, map()} | {:error, term()}
+   # A tenant page on the operator plane writes nothing: its scope is `TenantActor.write_scope/3`'s read-only one, never an admin.
+-  def set_disclosure_setting(%Mount{plane: %{kind: :operator}} = mount, scope, expose?),
++  def set_disclosure_setting(%Mount{plane: %{kind: :operator_never}} = mount, scope, expose?),
+     do: set_disclosure_setting_as(mount, scope, expose?)
+ 
+   def set_disclosure_setting(%Mount{} = mount, scope, expose?) do

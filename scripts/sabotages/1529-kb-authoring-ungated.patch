@@ -1,0 +1,23 @@
+# SABOTAGE: KbLive no longer requires a member to author or edit an article, so a viewer's article is saved 
+#   (the article resource only checks the org)
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_support_test.exs
+# MUST_FAIL: a VIEWER cannot create or edit an article; a member can; only an admin publishes
+diff --git a/samen_web/lib/samen/web/support/kb_live.ex b/samen_web/lib/samen/web/support/kb_live.ex
+index 5e101860..0e32ac66 100644
+--- a/samen_web/lib/samen/web/support/kb_live.ex
++++ b/samen_web/lib/samen/web/support/kb_live.ex
+@@ -141,11 +141,6 @@ defmodule Samen.Web.Support.KbLive do
+ 
+   # Authoring (new, edit, save) is member-or-above: the article resource itself only checks the org, so the page does.
+   # `publish` keeps its own, stricter, kernel gate.
+-  def handle_event(event, _params, %{assigns: %{can_write: false}} = socket)
+-      when event in ~w(new_article validate_new save_new edit_article validate_edit save_edit) do
+-    {:noreply, put_flash(socket, :error, Guard.write_copy(:forbidden, "change articles"))}
+-  end
+-
+   def handle_event("new_article", _params, socket) do
+     scope = socket.assigns.acting_scope
+     form = socket.assigns.kb_mount && KbReads.new_article_form(socket.assigns.kb_mount, scope)

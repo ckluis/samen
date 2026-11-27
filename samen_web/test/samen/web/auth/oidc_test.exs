@@ -25,6 +25,7 @@ defmodule Samen.Web.Auth.OidcTest do
        clear on the tenant plane, masked on the operator plane) and NEVER
        persisted on the UserIdentity row.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -194,7 +195,7 @@ defmodule Samen.Web.Auth.OidcTest do
           Ecto.UUID.dump!(raw.id)
         ])
 
-      assert to_string(stored) =~ "vt_"
+      assert_vault_token(to_string(stored))
       refute to_string(stored) =~ email
 
       # A plain Ash read masks by default (never plaintext, never a raw token).
@@ -204,7 +205,7 @@ defmodule Samen.Web.Auth.OidcTest do
       tenant = resolve_on_plane(raw, User, :tenant, repo: Repo)
       refute match?(%Samen.Masked{}, tenant.emails)
       assert inspect(tenant.emails) =~ email
-      refute inspect(tenant.emails) =~ "vt_"
+      refute_vault_token(inspect(tenant.emails))
 
       # Operator-without-grant plane masks (red).
       operator = resolve_on_plane(raw, User, :operator, repo: Repo)

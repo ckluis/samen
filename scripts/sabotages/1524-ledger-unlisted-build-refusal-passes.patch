@@ -1,0 +1,19 @@
+# SABOTAGE: a patch that is not in the ledger and whose build is refused is recorded as killed by any 
+#   compile error, so the ledger stops being the only way a refusal counts
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: LEDGER a mutation refused at build time is killed only when it is listed
+diff --git a/scripts/sabotage.sh b/scripts/sabotage.sh
+index a20c823c..849b7b6e 100755
+--- a/scripts/sabotage.sh
++++ b/scripts/sabotage.sh
+@@ -514,6 +514,7 @@ for patch in "${selected[@]}"; do
+   APPLIED_PATCH=""
+ 
+   required="$(ledger_substring "$name")"
++  required="${required:-error}"
+   killed_by_refusal=0
+   if [[ -n "$required" ]]; then
+     # LISTED in BUILD_REFUSED.tsv. "Build refused" = the suite failed without ever running a test: no test-failure

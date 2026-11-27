@@ -12,6 +12,7 @@ defmodule Samen.Replay.CaptureTest do
   the caps (truncate, never crash), the interaction rule, the bounded exit reason, the
   persist-time validator, and the never-crash properties of the handler and buffer.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   alias Samen.FeatureFlags.Cache
@@ -218,7 +219,7 @@ defmodule Samen.Replay.CaptureTest do
         refute text =~ secret, "plaintext #{inspect(secret)} reached the replay tables"
       end
 
-      refute text =~ "vt_", "a vault token reached the replay tables"
+      refute_vault_token(text, "a vault token reached the replay tables")
     end
   end
 

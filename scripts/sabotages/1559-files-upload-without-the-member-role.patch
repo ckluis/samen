@@ -1,0 +1,19 @@
+# SABOTAGE: a viewer's crafted upload reaches the upload
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_files_test.exs
+# MUST_FAIL: uploading is a member's
+diff --git a/samen_web/lib/samen/web/files/upload_live.ex b/samen_web/lib/samen/web/files/upload_live.ex
+index bd06d8ad..30899c9c 100644
+--- a/samen_web/lib/samen/web/files/upload_live.ex
++++ b/samen_web/lib/samen/web/files/upload_live.ex
+@@ -153,7 +153,7 @@ defmodule Samen.Web.Files.UploadLive do
+         {:noreply, assign(socket, upload_error: "upload not permitted on this plane")}
+ 
+       # Uploading is a member's (the kernel's `File` create is `RoleAtLeast :member`); the handler checks it itself.
+-      not TenantActor.member?(socket) ->
++      not (TenantActor.member?(socket) or true) ->
+         {:noreply, assign(socket, upload_error: "your role can view files but not upload them", upload_result: nil)}
+ 
+       true ->

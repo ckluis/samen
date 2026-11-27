@@ -21,6 +21,7 @@ defmodule Samen.Gen.TemplatesParityTest do
   free. `target: Samen.Gen.App.default_target()` makes the `samen_core`/`samen_web` dep paths
   resolve to the stable `../samen_core` / `../samen_web`, so the golden is machine-independent.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: true
 
   alias Samen.Gen.App
@@ -249,7 +250,7 @@ defmodule Samen.Gen.TemplatesParityTest do
       for {name, d} <- fields do
         assert is_binary(d), "#{set}: vertical field #{name} is emitted WITHOUT a description — the generated app's own verifier would fail"
         assert Samen.CatalogMeaning.description_problems(d, [to_string(name)]) == [], "#{set}: #{name}: #{inspect(d)}"
-        refute d =~ "vt_"
+        refute_vault_token(d)
       end
 
       # The plane wording is what `Samen.Api.PiiResolution` does (pii_resolution_planes_test.exs pins that behaviour):

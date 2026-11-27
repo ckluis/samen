@@ -429,24 +429,9 @@ defmodule Samen.AI.Agent.Run do
     end
 
     action :reveal_agent_run, :map do
-      argument(:actor_id, :string, allow_nil?: false)
       argument(:subject_id, :string, allow_nil?: false)
 
-      run(fn input, _ctx ->
-        ctx = %Samen.Reveal.Context{
-          actor: input.arguments.actor_id,
-          subject_id: input.arguments.subject_id,
-          resource: __MODULE__,
-          action: :reveal_agent_run,
-          label: :transcript
-        }
-
-        if Samen.Reveal.grant_checker().granted?(ctx) do
-          {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-        else
-          {:error, :denied}
-        end
-      end)
+      run({Samen.Reveal.GrantProbe, label: :transcript})
     end
   end
 
@@ -530,12 +515,19 @@ defmodule Samen.AI.Agent.Run do
   end
 
   policies do
-    bypass action([:resume_due, :due_scan]) do
-      authorize_if(always())
+    # The AshOban `:agent_turn_due` watchdog and `:agent_proposal_expiry` triggers (no actor): `:due_scan` is a read with
+    # no org filter, `:resume_due` re-arms the watchdog and re-enqueues the turn, `:expire_due` withdraws a parked
+    # approval and terminates the run. An actor of any role is refused.
+    bypass action([:resume_due, :expire_due, :due_scan]) do
+      authorize_if(AshOban.Checks.AshObanInteraction)
+    end
+
+    policy action([:resume_due, :expire_due, :due_scan]) do
+      forbid_if(always())
     end
 
     policy action(:reveal_agent_run) do
-      authorize_if(always())
+      authorize_if(actor_present())
     end
 
     # Tenant reads are org-scoped (fail-closed FilterCheck — a foreign org's runs do not
@@ -545,9 +537,10 @@ defmodule Samen.AI.Agent.Run do
     end
 
     # Writes are kernel-driven (`Samen.AI.Agent`, the Approvals-engine trusted-API
-    # precedent) — the loop is the only author; there is no tenant-facing write surface.
+    # precedent) — the loop is the only author, and it runs them `authorize?: false`; there is no
+    # tenant-facing write surface, so no actor may run one.
     policy action_type([:create, :update, :destroy]) do
-      authorize_if(always())
+      forbid_if(always())
     end
   end
 end

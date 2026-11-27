@@ -1,0 +1,20 @@
+# SABOTAGE: CampaignLive no longer requires an admin to send a campaign to a segment, so a viewer enqueues 
+#   the send (the send resource only checks the org)
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_marketing_test.exs
+# MUST_FAIL: a VIEWER and a MEMBER cannot send a campaign to a segment; an admin and an owner can
+diff --git a/samen_web/lib/samen/web/marketing/campaign_live.ex b/samen_web/lib/samen/web/marketing/campaign_live.ex
+index d0bf9e85..e9426ee6 100644
+--- a/samen_web/lib/samen/web/marketing/campaign_live.ex
++++ b/samen_web/lib/samen/web/marketing/campaign_live.ex
+@@ -72,7 +72,7 @@ defmodule Samen.Web.Marketing.CampaignLive do
+   # Sending outreach to a whole segment is admin's: the send resource only checks the org in the kernel (consent and
+   # suppression are enforced by `Reads.enqueue_send/3`), so the page requires an admin, the rank of every other campaign write.
+   def handle_event("send_campaign", %{"send" => params}, socket) do
+-    if TenantActor.admin?(socket),
++    if true,
+       do: send_campaign(params, socket),
+       else: {:noreply, assign(socket, send_results: nil, notice: "Only an admin can send a campaign.")}
+   end

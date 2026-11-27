@@ -19,6 +19,9 @@ defmodule Samen.Web.Settings.ApiKeysLive do
   alias Samen.Web.Mount
   alias Samen.Web.Settings.ApiKeys
   alias Samen.Web.Settings.Reads
+  alias Samen.Web.TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
+  require TenantActor
 
   @impl true
   def mount(params, session, socket) do
@@ -47,42 +50,63 @@ defmodule Samen.Web.Settings.ApiKeysLive do
 
   @doc false
   def load(socket, org_id, user_id) do
-    mount = socket.assigns.samen_mount
     socket = assign(socket, org_id: org_id, user_id: user_id, keys: [], keys_failed: false)
 
     if is_nil(org_id) do
-      socket
+      assign(socket, acting_scope: nil, actor_state: :ok, can_write: false, can_admin: false)
     else
-      scope = Mount.scope(mount, org_id)
-
-      # A FAILED list read is the error state (retry), never "No API keys yet.".
-      case ApiKeys.list_result(mount, scope) do
-        {:ok, keys} -> assign(socket, keys: keys)
-        {:error, :forbidden} -> socket
-        {:error, :unavailable} -> assign(socket, keys_failed: true)
+      # WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`). A denial or a failed lookup is
+      # a STATE of the page: no key is listed, none can be minted or revoked.
+      case TenantActor.assign_actor(socket, org_id) do
+        {:ok, socket} -> load_keys(socket, socket.assigns.samen_mount, socket.assigns.acting_scope)
+        {:refused, socket} -> socket
       end
     end
   end
 
+  defp load_keys(socket, mount, scope) do
+    # A FAILED list read is the error state (retry), never "No API keys yet.".
+    case ApiKeys.list_result(mount, scope) do
+      {:ok, keys} -> assign(socket, keys: keys)
+      {:error, :forbidden} -> socket
+      {:error, :unavailable} -> assign(socket, keys_failed: true)
+    end
+  end
+
+  # Acting again with no URL to patch to (the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _, user_id: _}} = socket), do: load(socket, socket.assigns.org_id, socket.assigns.user_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event: nothing the page loaded is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: assign(socket, keys: [], keys_failed: false, minted_key: nil, mint_error: nil)
+
   @impl true
+  TenantActor.refuse_events(["mint", "revoke", "dismiss_key"])
+
   def handle_event("retry_load", _params, socket),
     do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.user_id)}
 
   def handle_event("mint", %{"key" => params}, socket) do
-    %{samen_mount: mount, org_id: org_id, user_id: user_id} = socket.assigns
+    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    user_id = TenantActor.acting_user_id(socket)
 
-    if operator_plane?(mount) do
-      {:noreply, assign(socket, mint_error: "API keys are minted on the tenant plane.")}
-    else
-      do_mint(socket, mount, org_id, user_id, params)
+    cond do
+      operator_plane?(mount) -> {:noreply, assign(socket, mint_error: "API keys are minted on the tenant plane.")}
+      # Minting is an admin's (the kernel's `ApiKey` create policy); the handler checks it itself.
+      not TenantActor.admin?(socket) -> {:noreply, assign(socket, mint_error: "Mint refused (admin role required).")}
+      true -> do_mint(socket, mount, org_id, user_id, params)
     end
   end
 
   def handle_event("revoke", %{"id" => key_id}, socket) do
-    %{samen_mount: mount, org_id: org_id, user_id: user_id} = socket.assigns
+    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    user_id = TenantActor.acting_user_id(socket)
 
-    if operator_plane?(mount) do
-      {:noreply, socket}
+    # Revoking is an admin's (the kernel's `ApiKey` update policy); the handler checks the role the guard resolved for this
+    # event itself, and the operator plane has nothing to revoke.
+    if operator_plane?(mount) or not TenantActor.admin?(socket) do
+      {:noreply, refuse_revoke(socket, mount)}
     else
       # PP-6 (Batch 2 TENANT-ROLE): revoke sets `revoked_at` via the admin-gated `ApiKey.:update`
       # policy (`RoleAtLeast(:admin)`). Resolve the REAL per-org membership role — the SAME
@@ -117,6 +141,10 @@ defmodule Samen.Web.Settings.ApiKeysLive do
     {:noreply, assign(socket, minted_key: nil)}
   end
 
+  defp refuse_revoke(socket, mount) do
+    if operator_plane?(mount), do: socket, else: assign(socket, mint_error: "Revoke refused (admin role required).")
+  end
+
   # -- render ------------------------------------------------------------------
 
   @impl true
@@ -139,9 +167,12 @@ defmodule Samen.Web.Settings.ApiKeysLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if is_nil(@org_id) do %>
+        <%= cond do %>
+        <% is_nil(@org_id) -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="API keys" nothing="there are no API keys to show" />
+        <% true -> %>
           <div class="wrap">
             <div id="api-keys-panel">
               <%= if @minted_key do %>
@@ -154,7 +185,7 @@ defmodule Samen.Web.Settings.ApiKeysLive do
 
               <p :if={@mint_error} id="api-key-error" style="color:#B91C1C">{@mint_error}</p>
 
-              <%= if not operator_plane?(@samen_mount) do %>
+              <%= if @can_admin do %>
                 <form id="api-key-mint-form" phx-submit="mint" style="margin-bottom:16px">
                   <fieldset style="border:0;padding:0">
                     <legend style="font-weight:600;font-size:13px">Mint a key</legend>
@@ -170,11 +201,10 @@ defmodule Samen.Web.Settings.ApiKeysLive do
                     Authority is bounded by your role — a viewer cannot mint a write key.
                   </p>
                 </form>
-              <% else %>
-                <p id="api-key-operator-note" style="color:var(--muted)">
-                  Minting and revoking are tenant-plane actions.
-                </p>
               <% end %>
+              <p :if={operator_plane?(@samen_mount)} id="api-key-operator-note" style="color:var(--muted)">
+                Minting and revoking are tenant-plane actions.
+              </p>
 
               <table id="api-keys-table" class="tbl">
                 <thead>
@@ -200,7 +230,7 @@ defmodule Samen.Web.Settings.ApiKeysLive do
                     </td>
                     <td>
                       <button
-                        :if={not k.revoked? and not operator_plane?(@samen_mount)}
+                        :if={not k.revoked? and @can_admin}
                         type="button"
                         phx-click="revoke"
                         phx-value-id={k.id}
@@ -261,6 +291,7 @@ defmodule Samen.Web.Settings.ApiKeysLive do
     end
   end
 
+  # The person's own membership row (the minter ceiling and its id): the lookup that yields the role the key is minted with.
   defp membership(mount, org_id, user_id) when is_binary(org_id) and is_binary(user_id) do
     scope = Mount.scope(mount, org_id)
     Reads.current_membership_result(mount, scope, user_id, org_id)

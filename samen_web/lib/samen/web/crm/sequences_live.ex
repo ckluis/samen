@@ -43,13 +43,15 @@ defmodule Samen.Web.CRM.SequencesLive do
   use Phoenix.LiveView
 
   import Samen.UI
-  import Samen.Web.CRM.Live, only: [assign_mount: 2, crm_sidebar: 1, writable?: 1]
+  import Samen.Web.CRM.Live, only: [assign_mount: 2, crm_sidebar: 1]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CRM.SequencesReads, as: Reads
   alias Samen.Web.CurrentOrg
-  alias Samen.Web.Mount
   alias Samen.Web.Reads.Guard
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @impl true
   def mount(params, session, socket) do
@@ -79,11 +81,46 @@ defmodule Samen.Web.CRM.SequencesLive do
       step_sends: %{},
       read_errors: []
     )
+    |> assign(acting_scope: nil, actor_state: :ok, can_write: false)
   end
 
+  # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read,
+  # nothing can be written.
   def load(socket, org_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id)
+    end
+  end
+
+  # Acting again with no URL to patch to (`Samen.Web.TenantActor`, the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _}} = socket), do: load(socket, socket.assigns.org_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): the
+  # same load a refused navigation does, so nothing the page loaded for the person it acted for is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket, socket.assigns.org_id)
+
+  defp load_refused(socket, org_id) do
+    socket
+    |> ensure_return_to()
+    |> ensure_notice()
+    |> assign(
+      no_org: false,
+      org_id: org_id,
+      scope_mounted: false,
+      sends_configured: false,
+      sequences: [],
+      enrollments: [],
+      step_sends: %{},
+      read_errors: []
+    )
+  end
+
+  defp load_for(socket, org_id, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
 
     # Three independent reads; a FAILED one is named in `read_errors` and shown as the kit
     # error state — never as "No sequences yet." / "No enrollments yet." (WP6).
@@ -122,14 +159,14 @@ defmodule Samen.Web.CRM.SequencesLive do
   end
 
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("retry_load", _params, socket) do
     {:noreply, load(socket, socket.assigns.org_id)}
   end
 
   def handle_event("enroll", %{"sequence_id" => sequence_id, "person_id" => person_id}, socket) do
-    mount = socket.assigns.samen_mount
-    org_id = socket.assigns.org_id
-    scope = Mount.scope(mount, org_id)
+    %{samen_mount: mount, org_id: org_id, acting_scope: scope} = socket.assigns
 
     person_id = normalize_person_id(person_id)
 
@@ -187,9 +224,12 @@ defmodule Samen.Web.CRM.SequencesLive do
         <.topbar title="Sequences" crumbs={[CurrentOrg.name(@samen_mount, @org_id), "CRM", "Sequences"]} />
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Sequences" nothing="there are no sequences to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">CRM org: {@org_id}</span>
 
           <%= if not @scope_mounted do %>
@@ -232,7 +272,7 @@ defmodule Samen.Web.CRM.SequencesLive do
               </div>
 
               <%!-- Enroll flow — tenant plane only (writable?). Uses the EXISTING :enroll action. --%>
-              <div :if={writable?(@samen_mount)} id="sequences-enroll">
+              <div :if={@can_write} id="sequences-enroll">
                 <%= cond do %>
                 <% :sequences in @read_errors -> %>
                   <%!-- the sequences list below shows the error; no "create one first" advice here --%>

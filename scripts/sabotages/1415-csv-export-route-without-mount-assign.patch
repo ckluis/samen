@@ -1,0 +1,20 @@
+# SABOTAGE: the CSV export route is emitted without the mount assign, so every request through a router is 
+#   a 503 no mount
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/files_csv_router_test.exs
+# MUST_FAIL: a member exports the org's rows as an attachment; the controller got the mount from the router
+diff --git a/samen_web/lib/samen/web/router.ex b/samen_web/lib/samen/web/router.ex
+index 51cd9b53..584235d0 100644
+--- a/samen_web/lib/samen/web/router.ex
++++ b/samen_web/lib/samen/web/router.ex
+@@ -900,7 +900,7 @@ defmodule Samen.Web.Router do
+       # block. The host's :browser pipeline supplies the session plug so current-org is
+       # readable; the MOUNT travels on the route itself (`assigns:`, like the ICS route and
+       # the files byte-serve route), because no host pipeline sets `:samen_mount`.
+-      get("#{path}/export/:resource", Samen.Web.Csv.ExportController, :export, assigns: %{samen_mount: mount})
++      get("#{path}/export/:resource", Samen.Web.Csv.ExportController, :export)
+     end
+   end
+ 

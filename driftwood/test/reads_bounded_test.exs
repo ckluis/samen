@@ -19,6 +19,7 @@ defmodule Driftwood.ReadsBoundedTest do
       bound does not change WHICH plane resolves). The anti-tautology twin shows the SAME
       driver masks on the operator plane — so "clear" is plane-dependent, not unconditional.
   """
+  import Samen.VaultTokenAssert
   use Driftwood.DataCase, async: false
   use Samen.MaskingCase
   require Ash.Query
@@ -88,7 +89,7 @@ defmodule Driftwood.ReadsBoundedTest do
     # CLEAR (never a %Masked{}, never a vt_ token).
     for d <- roster do
       refute match?(%Samen.Masked{}, d.cdl_number)
-      refute to_string(d.cdl_number) =~ "vt_"
+      refute_vault_token(to_string(d.cdl_number))
       refute match?(%Samen.Masked{}, d.full_name)
     end
   end
@@ -103,6 +104,6 @@ defmodule Driftwood.ReadsBoundedTest do
       resolve_on_plane(raw_record(driver.id), Driftwood.Freight.Driver, :operator, repo: Driftwood.Repo)
 
     assert_plane_masked!(operator.cdl_number, "CDL-OP-9")
-    refute to_string(operator.cdl_number) =~ "vt_"
+    refute_vault_token(to_string(operator.cdl_number))
   end
 end

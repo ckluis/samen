@@ -33,6 +33,7 @@ defmodule SamenCore.Support.RevealDomain.RevealPerson do
     otp_app: :samen_core,
     domain: SamenCore.Support.RevealDomain,
     data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer],
     abbrev: "rvp"
 
   postgres do
@@ -56,11 +57,25 @@ defmodule SamenCore.Support.RevealDomain.RevealPerson do
     defaults([:read, :destroy, create: :*, update: :*])
 
     # A generic action declared as the reveal action.
-    action :reveal_email, :string do
+    action :reveal_email, :map do
+      argument(:subject_id, :string, allow_nil?: false)
+
+      run({Samen.Reveal.GrantProbe, label: :emails})
     end
 
     # A non-reveal action whose NAME contains "reveal" — the false-positive trap.
     action :read_email_looks_like_reveal, :string do
+    end
+  end
+
+  policies do
+    # test fixture: the CRUD actions stay as open as they were before the probe rule needed an authorizer
+    policy action_type([:read, :create, :update, :destroy]) do
+      authorize_if(always())
+    end
+
+    policy action(:reveal_email) do
+      authorize_if(actor_present())
     end
   end
 

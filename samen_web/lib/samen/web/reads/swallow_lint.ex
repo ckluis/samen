@@ -78,7 +78,7 @@ defmodule Samen.Web.Reads.SwallowLint do
     {"samen_web/lib/samen/web/onboarding/wizard_live.ex", :verified?} =>
       {1, "b81a8aea53fb37c1", "fail-CLOSED capability probe (ADR-035 §5 A2): an unresolvable principal is unverified on an armed host, never an elevated default"},
     {"samen_web/lib/samen/web/first_run.ex", :any_rows?} =>
-      {1, "a8ccd14ab3ec780d", "fail-safe probe: a failed existence check answers 'has records' so the first-run sample-data offer is NOT shown (never offers sample data into a possibly populated org)"},
+      {1, "866ab40668b5c1c3", "fail-safe probe: a failed existence check answers 'has records' so the first-run sample-data offer is NOT shown (never offers sample data into a possibly populated org)"},
     {"samen_web/lib/samen/web/reads.ex", :safe_count} =>
       {1, "dd984e84c77adaea", "an exact-total aggregate that fails is nil = 'total unknown'; the CRM pipeline column header prints no number for it, and the three board totals that sum group counts (Work timeline, CRM pipeline, CRM calendar) become nil — an em dash — when any group count is nil, never a fabricated count or the loaded row count"},
     {"samen_web/lib/samen/web/operator/activity_reads.ex", :mask_value} =>

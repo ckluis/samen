@@ -19,6 +19,7 @@ defmodule Samen.Web.ProfileMaskingTest do
       the RED test; and the read leak-scan is refutable (a tenant-plane read of the SAME
       row DOES carry the plaintext the operator read masks).
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -109,7 +110,7 @@ defmodule Samen.Web.ProfileMaskingTest do
       full = inspect(resolved.full_name)
       assert full =~ @secret_first
       assert full =~ @secret_last
-      refute full =~ "vt_"
+      refute_vault_token(full)
     end
 
     test "OPERATOR-WITHOUT-GRANT resolves full_name to %Masked{} — ••••, never plaintext (RP-ST-1)" do
@@ -122,7 +123,7 @@ defmodule Samen.Web.ProfileMaskingTest do
       masked = to_string(resolved.full_name)
       assert masked == mask()
       refute masked =~ @secret_first
-      refute masked =~ "vt_"
+      refute_vault_token(masked)
     end
 
     test "OPERATOR-WITH-GRANT resolves CLEAR — the two-plane reveal rule (green)" do

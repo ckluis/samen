@@ -1,0 +1,20 @@
+# SABOTAGE: a suspended member's open contact page keeps the contact's full name (a vault PII field) in its 
+#   topbar
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_open_page_test.exs
+# MUST_FAIL: a suspended member's open pages render the denied card and none of the records they loaded
+diff --git a/samen_web/lib/samen/web/crm/contact_live.ex b/samen_web/lib/samen/web/crm/contact_live.ex
+index e686def5..76dd58f0 100644
+--- a/samen_web/lib/samen/web/crm/contact_live.ex
++++ b/samen_web/lib/samen/web/crm/contact_live.ex
+@@ -248,7 +248,7 @@ defmodule Samen.Web.CRM.ContactLive do
+   # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): the
+   # same load a refused navigation does, so nothing the page loaded for the person it acted for is kept.
+   @doc false
+-  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket, socket.assigns.org_id, socket.assigns[:contact_id])
++  def actor_lost(%{assigns: %{org_id: _}} = socket), do: socket
+ 
+   defp load_refused(socket, org_id, contact_id) do
+     socket

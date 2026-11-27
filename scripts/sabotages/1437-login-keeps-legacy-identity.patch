@@ -1,0 +1,19 @@
+# SABOTAGE: finish_login keeps the legacy samen_current_user key, so a new sign-in inherits a previous 
+#   person
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_surfaces_test.exs
+# MUST_FAIL: a new sign-in drops the legacy key
+diff --git a/samen_web/lib/samen/web/auth/session_controller.ex b/samen_web/lib/samen/web/auth/session_controller.ex
+index b83cab3f..5f589a6b 100644
+--- a/samen_web/lib/samen/web/auth/session_controller.ex
++++ b/samen_web/lib/samen/web/auth/session_controller.ex
+@@ -466,7 +466,6 @@ defmodule Samen.Web.Auth.SessionController do
+         |> configure_session(renew: true)
+         # A new sign-in IS the person now: a legacy `samen_current_user` left by a previous sign-in must not outrank it
+         # (the legacy key is read first), so it goes with the old session.
+-        |> Auth.clear_current_user()
+         |> Auth.put_session_token(raw_token)
+         |> maybe_remember(remember?, raw_token)
+         |> Auth.clear_totp_pending_token()

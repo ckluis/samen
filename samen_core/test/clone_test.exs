@@ -22,6 +22,7 @@ defmodule Samen.CloneTest do
     * **g** audit: cloning a `versioned` resource writes a `<Resource>.Version` row
       (value-free / token-only), exactly like any governed create.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   require Ash.Query
@@ -226,7 +227,7 @@ defmodule Samen.CloneTest do
       # No row was created; the error carries no plaintext and no token.
       assert CrmScopeFixture.Person |> Ash.count!(authorize?: false) == before
       refute inspect(field) =~ "Grace"
-      refute inspect(field) =~ "vt_"
+      refute_vault_token(inspect(field))
 
       # CONTROL: the SAME clone on the tenant plane (owns its org PII) succeeds —
       # proving the refusal is the plane/grant gate, not a blanket failure.

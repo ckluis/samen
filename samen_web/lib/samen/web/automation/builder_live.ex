@@ -40,12 +40,14 @@ defmodule Samen.Web.Automation.BuilderLive do
   use Phoenix.LiveView
 
   import Samen.UI
-  import Samen.Web.Automation.Live, only: [assign_mount: 2, automation_sidebar: 1, writable?: 1]
+  import Samen.Web.Automation.Live, only: [assign_mount: 2, automation_sidebar: 1]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.Automation.Reads
   alias Samen.Web.CurrentOrg
-  alias Samen.Web.Mount
+  alias Samen.Web.TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
+  require TenantActor
 
   use Samen.Web.ListLive,
     resource: Workflow,
@@ -76,12 +78,50 @@ defmodule Samen.Web.Automation.BuilderLive do
     socket
     |> ensure_defaults()
     |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil)
+    |> assign(acting_scope: nil, actor_state: :ok, can_write: false, can_admin: false)
     |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
   end
 
+  # WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never `Mount.scope/2`'s fixed
+  # `:member`. A denial or a failed lookup is a STATE of the page: nothing is listed, nothing can be written. Reading the
+  # workflows is open to every active member; every write (author, edit, pause, run, add or remove a condition or action) is
+  # an admin's, and each handler checks it itself.
   def load(socket, org_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id)
+    end
+  end
+
+  # Acting again with no URL to patch to (the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _}} = socket), do: load(socket, socket.assigns.org_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event: nothing the page loaded is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket, socket.assigns.org_id)
+
+  # The person's role or the organisation changed: whatever was open for editing was built for the old actor, so it closes.
+  @doc false
+  def actor_changed(socket) do
+    assign(socket,
+      edit_workflow: nil,
+      wf_form: nil,
+      condition_form: blank_condition_form(),
+      action_form: blank_action_form()
+    )
+  end
+
+  defp load_refused(socket, org_id) do
+    socket
+    |> Samen.Web.ListLive.refuse()
+    |> ensure_defaults()
+    |> assign(no_org: false, org_id: org_id, edit_workflow: nil, wf_form: nil, eligible_attrs: [])
+    |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
+  end
+
+  defp load_for(socket, org_id, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
 
     socket
     |> ensure_defaults()
@@ -115,8 +155,7 @@ defmodule Samen.Web.Automation.BuilderLive do
   end
 
   defp open_edit(socket, id) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{samen_mount: mount, acting_scope: scope} = socket.assigns
 
     case Reads.get_workflow_result(mount, scope, id) do
       {:error, :not_found} ->
@@ -138,22 +177,32 @@ defmodule Samen.Web.Automation.BuilderLive do
   # -- CRUD events (list events belong to the ListLive hook) ---------------------
 
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("new_workflow", _params, socket) do
-    {:noreply,
-     assign(socket,
-       edit_workflow: :new,
-       wf_form: to_form(blank_wf_params(), as: :workflow),
-       wf_error: nil,
-       eligible_attrs: []
-     )}
+    if TenantActor.admin?(socket) do
+      {:noreply,
+       assign(socket,
+         edit_workflow: :new,
+         wf_form: to_form(blank_wf_params(), as: :workflow),
+         wf_error: nil,
+         eligible_attrs: []
+       )}
+    else
+      {:noreply, assign(socket, wf_error: refusal(socket.assigns.samen_mount))}
+    end
   end
 
   def handle_event("edit_workflow", %{"id" => id}, socket) do
-    {:noreply,
-     socket
-     |> assign(wf_error: nil, cond_error: nil, action_error: nil, run_ok: nil, run_error: nil)
-     |> assign(condition_form: blank_condition_form(), action_form: blank_action_form())
-     |> open_edit(id)}
+    if TenantActor.admin?(socket) do
+      {:noreply,
+       socket
+       |> assign(wf_error: nil, cond_error: nil, action_error: nil, run_ok: nil, run_error: nil)
+       |> assign(condition_form: blank_condition_form(), action_form: blank_action_form())
+       |> open_edit(id)}
+    else
+      {:noreply, assign(socket, wf_error: refusal(socket.assigns.samen_mount))}
+    end
   end
 
   def handle_event("close_edit", _params, socket) do
@@ -169,26 +218,14 @@ defmodule Samen.Web.Automation.BuilderLive do
   end
 
   def handle_event("run_now", %{"id" => id}, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
-
-    case Reads.get_workflow_result(mount, scope, id) do
-      {:error, :not_found} ->
-        {:noreply, assign(socket, run_error: "Workflow not found.", run_ok: nil)}
-
-      {:error, :unavailable} ->
-        {:noreply, assign(socket, run_error: "We couldn't load this workflow right now. Nothing was run — try again.", run_ok: nil)}
-
-      {:ok, wf} ->
-        case Reads.run_now(mount, org_id, wf) do
-          {:ok, %{enqueued: true} = result} ->
-            {:noreply, assign(socket, run_ok: "Run enqueued (event #{result.event_id}).", run_error: nil)}
-
-          {:error, reason} ->
-            {:noreply, assign(socket, run_error: run_error_copy(reason), run_ok: nil)}
-        end
-    end
+    if TenantActor.admin?(socket), do: run_now(socket, id), else: {:noreply, assign(socket, run_error: refusal(socket.assigns.samen_mount), run_ok: nil)}
   end
+
+  # A condition or action event with no saved workflow open in the editor (none open, or a new one not yet created) changes
+  # nothing and says so.
+  def handle_event(event, _params, %{assigns: %{edit_workflow: wf}} = socket)
+      when event in ["add_condition", "remove_condition", "add_action", "remove_action"] and not is_map(wf),
+      do: {:noreply, assign(socket, wf_error: "Open a workflow to edit before changing its conditions or actions.")}
 
   def handle_event("add_condition", %{"condition" => params}, socket) do
     %{edit_workflow: wf} = socket.assigns
@@ -240,18 +277,38 @@ defmodule Samen.Web.Automation.BuilderLive do
 
   # -- write plumbing --------------------------------------------------------------
 
-  defp save_workflow(socket, :new, params) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+  defp run_now(socket, id) do
+    %{samen_mount: mount, org_id: org_id, acting_scope: scope} = socket.assigns
 
-    case Reads.create_workflow(mount, scope, wf_attrs(params)) do
+    case Reads.get_workflow_result(mount, scope, id) do
+      {:error, :not_found} ->
+        {:noreply, assign(socket, run_error: "Workflow not found.", run_ok: nil)}
+
+      {:error, :unavailable} ->
+        {:noreply, assign(socket, run_error: "We couldn't load this workflow right now. Nothing was run — try again.", run_ok: nil)}
+
       {:ok, wf} ->
+        case Reads.run_now(mount, org_id, wf) do
+          {:ok, %{enqueued: true} = result} ->
+            {:noreply, assign(socket, run_ok: "Run enqueued (event #{result.event_id}).", run_error: nil)}
+
+          {:error, reason} ->
+            {:noreply, assign(socket, run_error: run_error_copy(reason), run_ok: nil)}
+        end
+    end
+  end
+
+  defp save_workflow(socket, :new, params) do
+    case guarded_write(socket, &Reads.create_workflow(&1, &2, wf_attrs(params))) do
+      {:ok, socket} ->
+        wf = socket.assigns.edit_workflow
+
         socket
-        |> assign(edit_workflow: wf, wf_form: to_form(wf_params(wf), as: :workflow), wf_error: nil)
+        |> assign(wf_form: to_form(wf_params(wf), as: :workflow), wf_error: nil)
         |> assign(eligible_attrs: Reads.eligible_attributes(wf.resource_key))
         |> reload()
 
-      {:error, message} ->
+      {:error, message, socket} ->
         assign(socket, wf_error: message, wf_form: to_form(params, as: :workflow))
     end
   end
@@ -268,21 +325,23 @@ defmodule Samen.Web.Automation.BuilderLive do
 
   defp save_workflow(socket, _, _params), do: socket
 
-  # A guarded write: posture-checked (never elevates on an impersonation mount —
-  # although this surface never mounts one, see moduledoc), then the kernel-enforced
-  # action via the plain tenant scope (no elevation needed — see `Reads` moduledoc).
+  # A guarded write: the page checks the person's own role (an admin's: `TenantActor.admin?/1`, false on the operator plane),
+  # then the kernel-enforced Ash action runs with the acting person's own scope (`TenantActor.write_scope/3`).
   defp guarded_write(socket, fun) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    %{samen_mount: mount, org_id: org_id, acting_scope: acting} = socket.assigns
 
-    if writable?(mount) and org_id != nil do
-      case fun.(mount, Mount.scope(mount, org_id)) do
+    if TenantActor.admin?(socket) and org_id != nil do
+      case fun.(mount, TenantActor.write_scope(mount, org_id, acting)) do
         {:ok, wf} -> {:ok, refresh_edit(assign(socket, edit_workflow: wf))}
         {:error, message} -> {:error, message, socket}
       end
     else
-      {:error, "Read-only on this plane.", socket}
+      {:error, refusal(mount), socket}
     end
   end
+
+  defp refusal(%Samen.Web.Mount{plane: %{kind: :operator}}), do: "Read-only on this plane."
+  defp refusal(_mount), do: "Changing automations needs an admin role."
 
   defp mutate(socket, fun) do
     case guarded_write(socket, fun) do
@@ -388,7 +447,7 @@ defmodule Samen.Web.Automation.BuilderLive do
 
         <.topbar title="Automation" crumbs={crumbs(@samen_mount, @org_id)}>
           <:actions>
-            <.button :if={writable?(@samen_mount)} phx-click="new_workflow" id="new-workflow-btn" variant="primary">
+            <.button :if={@can_admin} phx-click="new_workflow" id="new-workflow-btn" variant="primary">
               New workflow
             </.button>
           </:actions>
@@ -396,9 +455,12 @@ defmodule Samen.Web.Automation.BuilderLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Automation" nothing="there are no workflows to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">Automation org: {@org_id}</span>
 
           <div :if={@wf_error} class="wrap" style="margin-bottom:0">
@@ -441,7 +503,7 @@ defmodule Samen.Web.Automation.BuilderLive do
                   <.sort_header field={:status} label="Status" sort={@list_state.sort} width="10%" />
                   <th scope="col" style="width:8%">Conditions</th>
                   <th scope="col" style="width:8%">Actions</th>
-                  <th :if={writable?(@samen_mount)} scope="col" style="width:16%">
+                  <th :if={@can_admin} scope="col" style="width:16%">
                     <span class="sr-only">Actions</span>
                   </th>
                 </:head>
@@ -459,7 +521,7 @@ defmodule Samen.Web.Automation.BuilderLive do
                   </td>
                   <td class="wf-conditions-count">{length(wf.conditions || [])}</td>
                   <td class="wf-actions-count">{length(wf.actions || [])}</td>
-                  <td :if={writable?(@samen_mount)} class="wf-row-actions">
+                  <td :if={@can_admin} class="wf-row-actions">
                     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
                       <.button phx-click="edit_workflow" phx-value-id={wf.id} id={"edit-#{wf.id}"}>Edit</.button>
                       <.button phx-click="toggle_pause" phx-value-id={wf.id} id={"pause-#{wf.id}"}>
@@ -474,7 +536,7 @@ defmodule Samen.Web.Automation.BuilderLive do
           </div>
 
           <.modal
-            :if={@edit_workflow != nil and writable?(@samen_mount)}
+            :if={@edit_workflow != nil and @can_admin}
             id="workflow-edit-modal"
             title={modal_title(@edit_workflow)}
             on_cancel="close_edit"

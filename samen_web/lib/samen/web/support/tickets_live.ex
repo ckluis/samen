@@ -20,18 +20,21 @@ defmodule Samen.Web.Support.TicketsLive do
   `simple_form/1` create (`subject` is required — the inline-error path is real); each
   row carries a `delete_confirm/1` (FAIL-HONEST: a ticket with linked conversations is
   refused by the DB FK and the refusal is surfaced). Write affordances are offered on
-  the tenant plane only (`Samen.Web.Support.Live.writable?/1`); enforcement stays in
+  the tenant plane only (`Samen.Web.TenantActor.writable?/2`, as the `:can_write` assign); enforcement stays in
   the kernel (OrgScope + RoleAtLeast(:member) on every ticket write).
   """
   use Phoenix.LiveView
 
   import Samen.UI
-  import Samen.Web.Support.Live, only: [assign_mount: 2, support_sidebar: 1, writable?: 1]
+  import Samen.Web.Support.Live, only: [assign_mount: 2, support_sidebar: 1]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Reads.Guard
   alias Samen.Web.Mount
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   alias Samen.Web.Support.Reads
 
@@ -58,16 +61,46 @@ defmodule Samen.Web.Support.TicketsLive do
   @doc false
   def load(socket, nil) do
     socket
+    |> Samen.Web.ListLive.refuse()
     |> ensure_return_to()
     |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, agents_by_id: %{}, metrics: nil, metric_errors: [])
+    |> assign(acting_scope: nil, actor_state: :ok, can_write: false)
     |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{}, list_error: nil)
     |> assign(show_new: false, new_form: nil)
     |> assign_new(:delete_error, fn -> nil end)
   end
 
+  # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read, nothing
+  # can be written, and the page is re-resolved on every `handle_params`.
   def load(socket, org_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id)
+    end
+  end
+
+  # Acting again with no URL to patch to (`Samen.Web.TenantActor`, the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _}} = socket), do: load(socket, socket.assigns.org_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): the
+  # same load a refused navigation does, so nothing the page loaded for the person it acted for is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket, socket.assigns.org_id)
+
+  defp load_refused(socket, org_id) do
+    socket
+    |> Samen.Web.ListLive.refuse()
+    |> ensure_return_to()
+    |> assign(no_org: false, org_id: org_id, agents_by_id: %{}, metrics: nil, metric_errors: [])
+    |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{}, list_error: nil)
+    |> assign(show_new: false, new_form: nil)
+    |> assign_new(:delete_error, fn -> nil end)
+  end
+
+  defp load_for(socket, org_id, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
 
     # A FAILED read is never shown as an empty value (WP6): the assignee column says
     # "unavailable", each metric tile its own error; the list itself rides ListLive's error state.
@@ -98,9 +131,10 @@ defmodule Samen.Web.Support.TicketsLive do
   # -- A3 CRUD events (list events belong to the ListLive hook) -----------------
 
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("new_ticket", _params, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{samen_mount: mount, acting_scope: scope} = socket.assigns
     {:noreply, assign(socket, show_new: true, new_form: new_ticket_form(mount, scope))}
   end
 
@@ -136,8 +170,7 @@ defmodule Samen.Web.Support.TicketsLive do
   # instant. Any `{:error, _}` here is a genuine failure (e.g. an authorization denial),
   # not the old FK-refusal case.
   def handle_event("delete", %{"id" => id}, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{samen_mount: mount, org_id: org_id, acting_scope: scope} = socket.assigns
 
     case Reads.delete_ticket(mount, scope, id) do
       :ok ->
@@ -147,6 +180,12 @@ defmodule Samen.Web.Support.TicketsLive do
         {:noreply, assign(socket, delete_error: "Could not delete this ticket.")}
     end
   end
+
+  # The person's role or id changed while the page was open (`Samen.Web.TenantActor.recheck_event/3`): a form built at
+  # load holds the scope it was built with, so it is built again with the fresh one.
+  @doc false
+  def actor_changed(%{assigns: %{samen_mount: mount, acting_scope: scope}} = socket),
+    do: assign(socket, new_form: new_ticket_form(mount, scope))
 
   defp new_ticket_form(mount, scope) do
     Mount.resource(mount, Ticket)
@@ -171,7 +210,7 @@ defmodule Samen.Web.Support.TicketsLive do
 
         <.topbar title="Support" crumbs={crumbs(@samen_mount, @org_id, "Inbox")}>
           <:actions>
-            <.button :if={writable?(@samen_mount) and not @no_org} variant="primary" phx-click="new_ticket" id="new-ticket">
+            <.button :if={@can_write and not @no_org} variant="primary" phx-click="new_ticket" id="new-ticket">
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M12 3v18M3 12h18" />
@@ -184,9 +223,12 @@ defmodule Samen.Web.Support.TicketsLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Tickets" nothing="there are no tickets to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">Support org: {@org_id}</span>
 
           <div :if={@delete_error} class="wrap" style="margin-bottom:0">
@@ -245,7 +287,7 @@ defmodule Samen.Web.Support.TicketsLive do
                 empty_icon="⚑"
                 empty_body="Support tickets from your customers land here with status and SLA state."
               >
-                <:empty_actions :if={writable?(@samen_mount)}>
+                <:empty_actions :if={@can_write}>
                   <.button variant="primary" phx-click="new_ticket" id="empty-new-ticket">New ticket</.button>
                 </:empty_actions>
                 <:head>
@@ -254,7 +296,7 @@ defmodule Samen.Web.Support.TicketsLive do
                   <.sort_header field={:priority} label="Priority" sort={@list_state.sort} width="12%" />
                   <th scope="col" style="width:20%">SLA</th>
                   <th scope="col" style="width:16%">Assignee</th>
-                  <th :if={writable?(@samen_mount)} scope="col" style="width:10%"><span class="sr-only">Actions</span></th>
+                  <th :if={@can_write} scope="col" style="width:10%"><span class="sr-only">Actions</span></th>
                 </:head>
                 <:row :let={ticket}>
                   <td class="tk-subject">
@@ -274,7 +316,7 @@ defmodule Samen.Web.Support.TicketsLive do
                   <td class="tk-assignee" style="font-size:12px;color:var(--muted)">
                     {render_assignee(ticket, @agents_by_id)}
                   </td>
-                  <td :if={writable?(@samen_mount)} class="tk-actions">
+                  <td :if={@can_write} class="tk-actions">
                     <.delete_confirm phx-click="delete" phx-value-id={ticket.id} />
                   </td>
                 </:row>
@@ -282,7 +324,7 @@ defmodule Samen.Web.Support.TicketsLive do
             </div>
           </div>
 
-          <.modal :if={@show_new and @new_form != nil and writable?(@samen_mount)} id="new-ticket-modal" title="New ticket" on_cancel="cancel_new">
+          <.modal :if={@show_new and @new_form != nil and @can_write} id="new-ticket-modal" title="New ticket" on_cancel="cancel_new">
             <.simple_form :let={f} for={@new_form} id="new-ticket-form" phx-change="validate_new" phx-submit="save_new">
               <.form_field field={f[:subject]} label="Subject" />
               <.form_field

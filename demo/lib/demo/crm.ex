@@ -354,29 +354,9 @@ defmodule Demo.Crm.Contact do
     # In production this would load and return the plaintext fields; for the
     # dogfood we prove the boundary is declaration-driven, not name-matched.
     action :reveal_contact, :map do
-      argument(:actor_id, :string, allow_nil?: false)
       argument(:subject_id, :string, allow_nil?: false)
 
-      run(fn input, _ctx ->
-        ctx = %Samen.Reveal.Context{
-          actor: input.arguments.actor_id,
-          subject_id: input.arguments.subject_id,
-          resource: Demo.Crm.Contact,
-          action: :reveal_contact,
-          label: :emails
-        }
-
-        # Use the configured grant checker (default-deny). NOTE: `Samen.Reveal` has
-        # no bare `granted?/1` — the grant callback lives on the checker MODULE
-        # (`grant_checker().granted?/1`), exactly as the scope-authoring guide §5
-        # documents and the Identity blueprint does. A bare `Samen.Reveal.granted?(ctx)`
-        # would raise UndefinedFunctionError if this action were ever invoked.
-        if Samen.Reveal.grant_checker().granted?(ctx) do
-          {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-        else
-          {:error, :denied}
-        end
-      end)
+      run({Samen.Reveal.GrantProbe, label: :emails})
     end
   end
 
@@ -408,7 +388,7 @@ defmodule Demo.Crm.Contact do
     end
 
     policy action(:reveal_contact) do
-      authorize_if(always())
+      authorize_if(actor_present())
     end
   end
 end

@@ -21,6 +21,7 @@ defmodule Samen.Web.IcsMaskingTest do
   row, required properties present — no new dependency, matching how
   `Samen.Web.Csv` parses its own RFC-4180 output rather than adopting a lib).
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -91,7 +92,7 @@ defmodule Samen.Web.IcsMaskingTest do
 
       assert ics =~ @secret_addr
       assert ics =~ "ATTENDEE"
-      refute ics =~ "vt_"
+      refute_vault_token(ics)
       # Non-PII fields ride along unmasked on every plane.
       assert ics =~ "SUMMARY:Board Sync"
       assert ics =~ "LOCATION:HQ"
@@ -173,7 +174,7 @@ defmodule Samen.Web.IcsMaskingTest do
       ics = export!(api_key_scope) |> assert_parseable_vcalendar!()
 
       refute ics =~ @secret_addr
-      refute ics =~ "vt_"
+      refute_vault_token(ics)
       refute ics =~ "X-SAMEN-ATTENDEES"
       refute ics =~ "ATTENDEE"
     end

@@ -219,6 +219,40 @@ else
   ok "no score is printed for a run aborted on a red baseline (no misleading number)"
 fi
 
+# 7b. Per-target timing: every run (and a job cancelled for time never reaches its report) prints the measured seconds per
+#     mutant per target, in the column order of scripts/mutation/rates.tsv, so that table is updated from evidence.
+out="$(run_gate "$R_KILL")"
+if grep -qE "^  seconds per mutant: ${PROBE_REL} [0-9]+\.[0-9] \(5 mutants, [0-9]+s\)$" <<<"$out"; then
+  ok "the report prints the target's measured seconds per mutant (path, rate, mutants, seconds)"
+else
+  echo "$out"
+  bad "the report carries no per-target seconds-per-mutant line — a slow or cancelled job leaves no evidence for the rates table"
+fi
+
+# 7c. rates.tsv: a rate whose path is not a row of the targets file is REFUSED (never silently ignored by the plan's lookup)
+RATES_OK="$SCRATCH/rates.ok.tsv"
+printf '%s\t30\tself-test fixture: a measured rate for the probe target\n' "$PROBE_REL" > "$RATES_OK"
+if bash "$LINT" --targets "$TARGETS" --ledger "$EMPTY_LEDGER" --rates "$RATES_OK" >"$SCRATCH/rates.ok.out" 2>&1; then
+  ok "POSITIVE: a rate naming a watch-list target passes the lint"
+else
+  cat "$SCRATCH/rates.ok.out"; bad "the lint refused a rate that names a real target"
+fi
+RATES_STALE="$SCRATCH/rates.stale.tsv"
+printf 'samen_core/lib/samen/__renamed_probe.ex\t30\tself-test fixture: the target was renamed, the row was not\n' > "$RATES_STALE"
+if bash "$LINT" --targets "$TARGETS" --ledger "$EMPTY_LEDGER" --rates "$RATES_STALE" >"$SCRATCH/rates.stale.out" 2>&1; then
+  bad "lint ACCEPTED a rate for a file that is no longer a target - the plan would silently size it at the flat rate"
+else
+  grep -q "rates: samen_core/lib/samen/__renamed_probe.ex is not a row of the targets file" "$SCRATCH/rates.stale.out" \
+    && ok "NEGATIVE CONTROL: lint refuses a rate whose path is not a mutation target" \
+    || { cat "$SCRATCH/rates.stale.out"; bad "lint failed on the stale rate but not for it"; }
+fi
+printf '%s\t30\tshort\n' "$PROBE_REL" > "$SCRATCH/rates.nosrc.tsv"
+if bash "$LINT" --targets "$TARGETS" --ledger "$EMPTY_LEDGER" --rates "$SCRATCH/rates.nosrc.tsv" >"$SCRATCH/rates.nosrc.out" 2>&1; then
+  bad "lint ACCEPTED a rate with no measurement source"
+else
+  ok "NEGATIVE CONTROL: lint refuses a rate that names no measurement source"
+fi
+
 echo ""
 echo "== 8-12: the ledger — the only lever that turns a red gate green =="
 

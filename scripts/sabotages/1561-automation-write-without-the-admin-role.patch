@@ -1,0 +1,19 @@
+# SABOTAGE: a member's crafted workflow write runs
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_automation_test.exs
+# MUST_FAIL: only an admin is offered the controls
+diff --git a/samen_web/lib/samen/web/automation/builder_live.ex b/samen_web/lib/samen/web/automation/builder_live.ex
+index 36750282..fd8e3a41 100644
+--- a/samen_web/lib/samen/web/automation/builder_live.ex
++++ b/samen_web/lib/samen/web/automation/builder_live.ex
+@@ -324,7 +324,7 @@ defmodule Samen.Web.Automation.BuilderLive do
+   defp guarded_write(socket, fun) do
+     %{samen_mount: mount, org_id: org_id, acting_scope: acting} = socket.assigns
+ 
+-    if TenantActor.admin?(socket) and org_id != nil do
++    if (TenantActor.admin?(socket) or true) and org_id != nil do
+       case fun.(mount, TenantActor.write_scope(mount, org_id, acting)) do
+         {:ok, wf} -> {:ok, refresh_edit(assign(socket, edit_workflow: wf))}
+         {:error, message} -> {:error, message, socket}

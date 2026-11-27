@@ -1,0 +1,19 @@
+# SABOTAGE: user_scope ignores the role the session resolved
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_write_scope_test.exs
+# MUST_FAIL: a tenant mount carries the resolved user and role
+diff --git a/samen_web/lib/samen/web/tenant_actor.ex b/samen_web/lib/samen/web/tenant_actor.ex
+index dccc0011..23079621 100644
+--- a/samen_web/lib/samen/web/tenant_actor.ex
++++ b/samen_web/lib/samen/web/tenant_actor.ex
+@@ -87,7 +87,7 @@ defmodule Samen.Web.TenantActor do
+   def user_scope(%Mount{} = mount, org_id, user_id, role \\ nil) do
+     case {system_scope(mount, org_id), user_id} do
+       {%Samen.Scope{actor: %{plane: :tenant} = actor} = scope, user_id} when is_binary(user_id) ->
+-        %{scope | actor: %{actor | id: user_id, role: role || actor.role}}
++        %{scope | actor: %{actor | id: user_id}}
+ 
+       {scope, _no_session_user} ->
+         scope

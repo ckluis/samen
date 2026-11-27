@@ -7,6 +7,7 @@ defmodule Samen.Web.AI.CrmMaskingTest do
   green (tenant clear), red (operator masked), sabotage twin (the plane flip is the gate —
   both directions asserted here; the refutability patch is `scripts/sabotages/143-*`).
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -39,7 +40,7 @@ defmodule Samen.Web.AI.CrmMaskingTest do
     assert html =~ "ai-crm-preview"
     assert html =~ Seeds.contact_full_name()
     assert html =~ Seeds.contact_email()
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   test "RED — operator plane grounds MASKED (••••), no plaintext, no vt_ token", %{org_id: org_id, person: person} do
@@ -49,7 +50,7 @@ defmodule Samen.Web.AI.CrmMaskingTest do
     assert html =~ "••••"
     refute html =~ Seeds.contact_full_name()
     refute html =~ Seeds.contact_email()
-    refute html =~ "vt_"
+    refute_vault_token(html)
 
     # The MaskingCase DOM assertion — the plaintexts are masked in the rendered DOM.
     assert_masked_dom!(html, [Seeds.contact_full_name(), Seeds.contact_email()])

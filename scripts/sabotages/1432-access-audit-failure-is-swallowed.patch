@@ -1,0 +1,20 @@
+# SABOTAGE: a failed audit write returns :ok, so an unaudited export or download is still delivered
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/files_csv_router_test.exs
+# MUST_FAIL: an export whose audit write fails is refused (503)
+# MUST_FAIL: it needs the audit to work
+diff --git a/samen_web/lib/samen/web/access_audit.ex b/samen_web/lib/samen/web/access_audit.ex
+index 5e3eec37..25050eae 100644
+--- a/samen_web/lib/samen/web/access_audit.ex
++++ b/samen_web/lib/samen/web/access_audit.ex
+@@ -48,7 +48,7 @@ defmodule Samen.Web.AccessAudit do
+   rescue
+     e ->
+       Samen.Observability.Failure.report_write(:access_audit, org_id, e)
+-      {:error, :audit_unavailable}
++      :ok
+   end
+ 
+   @doc "Record a refusal (best effort): nothing was delivered, so a failed line cannot refuse more. Always `:ok`."

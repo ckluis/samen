@@ -56,6 +56,7 @@ defmodule Demo.SupportScopeArchivalLeakRedPathTest do
   proven separately) and `Agent.full_name` (a directly, independently archivable
   resource — no cascade).
   """
+  import Samen.VaultTokenAssert
   use Demo.DataCase, async: false
 
   require Ash.Query
@@ -815,7 +816,7 @@ defmodule Demo.SupportScopeArchivalLeakRedPathTest do
       masked = resolve_on_plane(archived, Message, :operator, grant: DenyAll).body
       assert_plane_masked!(masked)
       assert to_string(masked) == "••••"
-      refute to_string(masked) =~ "vt_"
+      refute_vault_token(to_string(masked))
       refute to_string(masked) =~ "SUPPORT-BODY-ARCHIVED-SENTINEL"
 
       # SABOTAGE twin / anti-tautology.
@@ -869,7 +870,7 @@ defmodule Demo.SupportScopeArchivalLeakRedPathTest do
       masked = resolve_on_plane(archived, Agent, :operator, grant: DenyAll).full_name
       assert_plane_masked!(masked)
       assert to_string(masked) == "••••"
-      refute to_string(masked) =~ "vt_"
+      refute_vault_token(to_string(masked))
       refute to_string(masked) =~ "Hopper"
 
       # SABOTAGE twin / anti-tautology.

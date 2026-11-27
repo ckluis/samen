@@ -22,7 +22,7 @@ defmodule Samen.Web.CRM.CompanyLive do
 
   import Samen.UI
   import Samen.Web.CRM.Live,
-    only: [assign_mount: 2, crm_sidebar: 1, writable?: 1, mail_timeline_entries: 1, merge_timeline: 2]
+    only: [assign_mount: 2, crm_sidebar: 1, mail_timeline_entries: 1, merge_timeline: 2]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
@@ -32,6 +32,9 @@ defmodule Samen.Web.CRM.CompanyLive do
   alias Samen.Web.AccountHealth
   alias Samen.Web.CRM.Reads
   alias Samen.Web.Reads.Guard
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @impl true
   def mount(params, session, socket) do
@@ -61,7 +64,11 @@ defmodule Samen.Web.CRM.CompanyLive do
      )}
   end
 
+  # Every other event is refused while nobody is acting (a denial or a failed membership lookup): nothing is
+  # written with a scope from before the refusal.
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("retry_load", _params, socket) do
     {:noreply, load(socket, socket.assigns.org_id, socket.assigns.company_id)}
   end
@@ -79,8 +86,7 @@ defmodule Samen.Web.CRM.CompanyLive do
   end
 
   def handle_event("log_activity", %{"activity" => params}, socket) do
-    %{samen_mount: mount, org_id: org_id, company_id: company_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{samen_mount: mount, org_id: org_id, company_id: company_id, acting_scope: scope} = socket.assigns
 
     # ADR-041 §6.1: the composer writes a canonical Work Task anchored to this
     # (same-org) company via the generic `(subject_key, subject_id)` object-ref — not a
@@ -123,9 +129,13 @@ defmodule Samen.Web.CRM.CompanyLive do
 
   # -- A3 edit/delete (non-PII surface) -----------------------------------------
 
+  # A company that was not found has nothing to edit (the page rendered "not found"): a crafted event for it is a no-op,
+  # never a form built over `nil`.
+  def handle_event(event, _params, %{assigns: %{company: nil}} = socket) when event in ["edit_company", "validate_edit", "save_edit"],
+    do: {:noreply, socket}
+
   def handle_event("edit_company", _params, socket) do
-    %{samen_mount: mount, org_id: org_id, company: company} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{company: company, acting_scope: scope} = socket.assigns
     {:noreply, assign(socket, show_edit: true, edit_form: edit_form(company, scope))}
   end
 
@@ -161,8 +171,7 @@ defmodule Samen.Web.CRM.CompanyLive do
   # (e.g. an authorization denial), not the old FK-refusal case. (Tasks are
   # anchored by a generic object-ref, not a CRM FK, and never blocked either way.)
   def handle_event("delete_company", %{"id" => id}, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{samen_mount: mount, org_id: org_id, acting_scope: scope} = socket.assigns
 
     case Reads.delete_company(mount, scope, id) do
       :ok ->
@@ -177,8 +186,7 @@ defmodule Samen.Web.CRM.CompanyLive do
   # (`Samen.CRM.AccountLink`). Tenant plane only (`writable?/1` gates the form in the
   # render); the kernel enforces org-scope + member role regardless.
   def handle_event("link_billing_customer", %{"billing_customer_id" => id}, socket) do
-    %{samen_mount: mount, org_id: org_id, company: company, company_id: company_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{samen_mount: mount, org_id: org_id, company: company, company_id: company_id, acting_scope: scope} = socket.assigns
 
     case Reads.link_billing_customer(mount, scope, company, id) do
       {:ok, _company} ->
@@ -215,11 +223,55 @@ defmodule Samen.Web.CRM.CompanyLive do
       account_health: nil,
       portfolio_health: nil
     )
+    |> assign(acting_scope: nil, actor_state: :ok, can_write: false)
   end
 
+  # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read, nothing
+  # can be written, and the page is re-resolved on every `handle_params`.
   def load(socket, org_id, company_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, company_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id, company_id)
+    end
+  end
+
+  # Acting again with no URL to patch to (`Samen.Web.TenantActor`, the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _}} = socket), do: load(socket, socket.assigns.org_id, socket.assigns[:company_id])
+
+  # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): the
+  # same load a refused navigation does, so nothing the page loaded for the person it acted for is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket, socket.assigns.org_id, socket.assigns[:company_id])
+
+  defp load_refused(socket, org_id, company_id) do
+    socket
+    |> ensure_return_to()
+    |> assign(
+      no_org: false,
+      org_id: org_id,
+      company_id: company_id,
+      company: nil,
+      load_error: nil,
+      section_errors: [],
+      contacts: [],
+      activities: [],
+      mail: [],
+      deals: [],
+      active_tab: Map.get(socket.assigns, :active_tab, "overview"),
+      show_edit: false,
+      edit_form: nil,
+      activity_form: nil,
+      delete_error: nil,
+      link_error: nil,
+      account_health: nil,
+      portfolio_health: nil
+    )
+  end
+
+  defp load_for(socket, org_id, company_id, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
 
     # A FAILED read is not "not found" (WP6): `load_error` names it and the page shows the kit
     # error state with a retry; `company == nil` with no `load_error` is a genuinely missing
@@ -294,6 +346,13 @@ defmodule Samen.Web.CRM.CompanyLive do
   defp section({:error, :unavailable}, default, section), do: {default, [section]}
   defp section({:error, _denied}, default, _section), do: {default, []}
 
+  # The person's role or id changed while the page was open (`Samen.Web.TenantActor.recheck_event/3`): a form built at
+  # load holds the scope it was built with, so it is built again with the fresh one.
+  @doc false
+  def actor_changed(%{assigns: %{samen_mount: mount, acting_scope: scope} = assigns} = socket) do
+    assign(socket, edit_form: assigns[:company] && edit_form(assigns.company, scope), activity_form: activity_form(mount, scope))
+  end
+
   defp edit_form(company, scope) do
     company
     |> AshPhoenix.Form.for_update(:update, scope: scope)
@@ -331,11 +390,11 @@ defmodule Samen.Web.CRM.CompanyLive do
               </span>
               Back to companies
             </a>
-            <.button :if={writable?(@samen_mount) and @company != nil} phx-click="edit_company" id="edit-company">
+            <.button :if={@can_write and @company != nil} phx-click="edit_company" id="edit-company">
               Edit company
             </.button>
             <.delete_confirm
-              :if={writable?(@samen_mount) and @company != nil}
+              :if={@can_write and @company != nil}
               id="delete-company"
               message="Delete this company? This cannot be undone."
               phx-click="delete_company"
@@ -346,9 +405,12 @@ defmodule Samen.Web.CRM.CompanyLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Company" nothing="there is no company to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">CRM org: {@org_id}</span>
 
           <div :if={@delete_error} class="wrap" style="margin-bottom:0">
@@ -423,7 +485,7 @@ defmodule Samen.Web.CRM.CompanyLive do
                 {@link_error}
               </div>
               <form
-                :if={writable?(@samen_mount)}
+                :if={@can_write}
                 id="link-billing-customer-form"
                 phx-submit="link_billing_customer"
                 style="margin-top:6px;display:flex;gap:6px;align-items:center"
@@ -596,7 +658,7 @@ defmodule Samen.Web.CRM.CompanyLive do
                 </div>
             <% end %>
 
-            <.modal :if={@show_edit and @edit_form != nil and writable?(@samen_mount)} id="edit-company-modal" title="Edit company" on_cancel="cancel_edit">
+            <.modal :if={@show_edit and @edit_form != nil and @can_write} id="edit-company-modal" title="Edit company" on_cancel="cancel_edit">
               <.simple_form :let={f} for={@edit_form} id="edit-company-form" phx-change="validate_edit" phx-submit="save_edit">
                 <.form_field field={f[:name]} label="Name" />
                 <.form_field field={f[:industry]} label="Industry" />

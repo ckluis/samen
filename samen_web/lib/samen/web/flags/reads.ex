@@ -86,9 +86,14 @@ defmodule Samen.Web.Flags.Reads do
   ordinary member no longer self-elevates. The elevation still PRESERVES every plane marker from
   `Mount.scope/2` (operator-plane mounts keep `plane: :operator`), so the kernel write guard is
   unchanged and `OrgScope` still confines the write to `org_id`.
+
+  Only the operator workspace's own mount (`scope_kind: :operator`, `Samen.Web.Operator.FlagAdminLive`) is elevated; on any other mount it answers `Samen.Web.TenantActor.read_only_scope/2`, because a tenant page writes with `TenantActor.write_scope/3`.
   """
-  def write_scope(mount, org_id, principal \\ nil),
-    do: Samen.Web.TenantRole.admin_scope(mount, org_id, principal)
+  def write_scope(mount, org_id, principal \\ nil) do
+    if match?(%Samen.Web.Mount{scope_kind: :operator}, mount),
+      do: Samen.Web.TenantRole.admin_scope(mount, org_id, principal),
+      else: Samen.Web.TenantActor.read_only_scope(mount, org_id)
+  end
 
   @doc """
   Flip a flag's `enabled` gate through the sanctioned `:update` action (the tenant

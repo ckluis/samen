@@ -24,7 +24,7 @@ defmodule Samen.Web.Chat do
   """
 
   alias Samen.Web.Chat.{PubSub, Reads}
-  alias Samen.Web.{Mount, ObjectRef}
+  alias Samen.Web.{Mount, ObjectRef, TenantActor}
 
   @doc "The `%Samen.Scope{}` for reading a mount's chat resources, on this mount's plane."
   @spec scope(Mount.t(), String.t()) :: Samen.Scope.t()
@@ -135,6 +135,10 @@ defmodule Samen.Web.Chat do
   """
   @spec set_disclosure_setting(Mount.t(), Samen.Scope.t(), boolean()) ::
           {:ok, map()} | {:error, term()}
+  # A tenant page on the operator plane writes nothing: its scope is `TenantActor.write_scope/3`'s read-only one, never an admin.
+  def set_disclosure_setting(%Mount{plane: %{kind: :operator}} = mount, scope, expose?),
+    do: set_disclosure_setting_as(mount, scope, expose?)
+
   def set_disclosure_setting(%Mount{} = mount, scope, expose?) do
     # This is a tenant-ADMIN org-level policy write. The chat mount's own tenant plane scope is
     # a `:member` (like every tenant chat write); flipping org-wide disclosure requires `:admin`
@@ -147,6 +151,40 @@ defmodule Samen.Web.Chat do
     # reachable). Still `OrgScope`-confined; only reachable on the tenant plane (the LiveView gates).
     org_id = org_id_of(scope)
     admin_scope = Samen.Web.TenantRole.admin_scope(mount, org_id)
+    resource = Mount.resource(mount, ChatDisclosureSetting)
+
+    case Reads.disclosure_setting(mount, admin_scope) do
+      %{} = existing ->
+        existing
+        |> Ash.Changeset.for_update(:update, %{expose_identity_to_support: expose?},
+          scope: admin_scope
+        )
+        |> Ash.update()
+
+      _ ->
+        resource
+        |> Ash.Changeset.for_create(
+          :create,
+          %{org_id: org_id, expose_identity_to_support: expose?},
+          scope: admin_scope
+        )
+        |> Ash.create()
+    end
+  end
+
+  @doc """
+  Set the org's tenant-wide identity-disclosure setting AS the acting person (the page path): the same upsert as
+  `set_disclosure_setting/3`, run with `TenantActor.write_scope/3` over `acting`, the scope `Samen.Web.TenantActor` resolved.
+  The kernel's `RoleAtLeast :admin` judges the person's own role. `{:ok, setting}` or `{:error, reason}`.
+  """
+  @spec set_disclosure_setting_as(Mount.t(), Samen.Scope.t(), boolean()) :: {:ok, map()} | {:error, term()}
+  def set_disclosure_setting_as(%Mount{} = mount, acting, expose?) do
+    # This is a tenant-ADMIN org-level policy write (the blueprint's `RoleAtLeast :admin` on this ONE resource). It runs
+    # with `TenantActor.write_scope/3`: on an armed tenant plane the acting person's own scope, so the kernel refuses a
+    # viewer or a member; on the operator plane a read-only scope, never an elevation; the disarmed dev posture keeps
+    # its `:admin`. Still `OrgScope`-confined.
+    org_id = org_id_of(acting)
+    admin_scope = TenantActor.write_scope(mount, org_id, acting)
     resource = Mount.resource(mount, ChatDisclosureSetting)
 
     case Reads.disclosure_setting(mount, admin_scope) do

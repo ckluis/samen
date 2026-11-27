@@ -1,0 +1,19 @@
+# SABOTAGE: the billing write helper hands an admin role to an operator-plane mount
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_write_scope_helpers_test.exs
+# MUST_FAIL: billing, marketing and knowledge-base helpers: read-only on the operator plane
+diff --git a/samen_web/lib/samen/web/billing/reads.ex b/samen_web/lib/samen/web/billing/reads.ex
+index 22bc988b..3815a1be 100644
+--- a/samen_web/lib/samen/web/billing/reads.ex
++++ b/samen_web/lib/samen/web/billing/reads.ex
+@@ -357,7 +357,7 @@ defmodule Samen.Web.Billing.Reads do
+   On an OPERATOR-plane mount it answers `Samen.Web.TenantActor.read_only_scope/2`, never an admin: an operator does not write a tenant's billing.
+   """
+   def write_scope(mount, org_id, principal \\ nil) do
+-    if not match?(%Samen.Web.Mount{plane: %{kind: :operator}}, mount),
++    if true or not match?(%Samen.Web.Mount{plane: %{kind: :operator}}, mount),
+       do: Samen.Web.TenantRole.admin_scope(mount, org_id, principal),
+       else: Samen.Web.TenantActor.read_only_scope(mount, org_id)
+   end

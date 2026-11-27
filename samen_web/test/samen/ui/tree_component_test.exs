@@ -14,6 +14,7 @@ defmodule Samen.UI.TreeComponentTest do
     * MASKING — a dumb renderer: a `%Samen.Masked{}` in a node's record renders `••••` through
       `Phoenix.HTML.Safe`; the component has no "show plaintext" branch.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: true
 
   import Phoenix.LiveViewTest, only: [render_component: 2]
@@ -124,6 +125,6 @@ defmodule Samen.UI.TreeComponentTest do
     html = render_component(&Samen.UI.tree/1, %{id: "t", tree: tree, node: slot})
 
     assert html =~ "••••"
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 end

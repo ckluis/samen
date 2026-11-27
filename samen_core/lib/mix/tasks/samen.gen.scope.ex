@@ -8,7 +8,7 @@ defmodule Mix.Tasks.Samen.Gen.Scope do
   `mix samen.gen.resource --scope <Scope> …` lands Tier-0 resources into it.
 
   Automates the scope half of scope-authoring §10: emits the domain module and registers
-  it in BOTH `:ash_domains` config lists (the app's own + `:samen_core`) so the verifier
+  it in BOTH domain config lists (the app's own `ash_domains` + `:samen_core, :host_domains`) so the verifier
   gate scans every resource mounted there — no hand-edit of config.
 
   ## Usage
@@ -46,7 +46,7 @@ defmodule Mix.Tasks.Samen.Gen.Scope do
     Post.write_scope!(spec)
 
     Mix.shell().info(
-      "samen.gen.scope: wrote #{spec.scope_module} + registered it in both :ash_domains lists " <>
+      "samen.gen.scope: wrote #{spec.scope_module} + registered it in both domain lists (ash_domains + host_domains) " <>
         "+ emitted the authn-coverage guard test/tenant_authn_coverage_test.exs. " <>
         "Add resources with `mix samen.gen.resource --scope #{scope} --resource <Name> --abbrev <abc> --description \"<what it is>\"`.\n\n" <>
         Post.scope_router_guidance(spec)

@@ -100,7 +100,7 @@ defmodule Samen.Web.Settings.Reads do
     idmount = Samen.Web.CurrentOrg.identity_mount(mount)
 
     case Samen.Web.Auth.resolve_principal(session, %{session: Mount.resource(idmount, Session)}) do
-      {:ok, %{credential_id: credential_id}} -> {:credential, credential_id}
+      {:ok, %{credential_id: credential_id}} -> credential_or_legacy(mount, session, credential_id)
       {:ok, %{user_id: user_id}} -> {:user, user_id}
       :error -> dev_ref(mount, params)
     end
@@ -111,6 +111,16 @@ defmodule Samen.Web.Settings.Reads do
   end
 
   def principal_ref(_mount, _params, _session), do: :none
+
+  # A session carrying BOTH the spine token and the legacy `samen_current_user` key: `CurrentOrg.principal_key/2` is the
+  # ONE order (legacy when the host seam grants it, else the spine credential), shared with `principal_id/2` and
+  # `authorized_orgs/2`, so the person acting here is the one acting everywhere else.
+  defp credential_or_legacy(mount, session, credential_id) do
+    case Samen.Web.CurrentOrg.principal_key(mount, session) do
+      {:legacy, user_id} -> {:user, user_id}
+      _ -> {:credential, credential_id}
+    end
+  end
 
   defp dev_ref(mount, params) do
     case present(dev_label_user(mount)) || present(dev_param_user(mount, params)) do
@@ -180,17 +190,8 @@ defmodule Samen.Web.Settings.Reads do
   returned as it is: its actor is the operator, never the user.
   """
   @spec user_scope(Mount.t(), String.t() | nil, String.t() | nil, atom() | nil) :: Samen.Scope.t()
-  def user_scope(%Mount{} = mount, org_id, user_id, role \\ nil) do
-    case {Mount.scope(mount, org_id), user_id} do
-      {%Samen.Scope{actor: %{plane: :tenant} = actor} = scope, user_id} when is_binary(user_id) ->
-        # `Plane.scope` gives every tenant actor `role: :member`; the role the session RESOLVED
-        # (`actor_in_org/3`) replaces it, so a viewer is not a member here.
-        %{scope | actor: %{actor | id: user_id, role: role || actor.role}}
-
-      {scope, _no_session_user} ->
-        scope
-    end
-  end
+  def user_scope(%Mount{} = mount, org_id, user_id, role \\ nil),
+    do: Samen.Web.TenantActor.user_scope(mount, org_id, user_id, role)
 
   @doc """
   Stash the session's PRINCIPAL (`principal_ref/3`) on the socket at `mount/3`, so `handle_params/3` (which has

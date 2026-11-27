@@ -1,0 +1,19 @@
+# SABOTAGE: the marketing Send same-org and suppression checks query the database at changeset build time
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/org_id_pinned_guard_test.exs
+# MUST_FAIL: no resource lets an authorized actor move or file a row under another org_id
+diff --git a/samen_core/lib/samen/scopes/marketing/blueprint.ex b/samen_core/lib/samen/scopes/marketing/blueprint.ex
+index a646fb95..4e6ca51e 100644
+--- a/samen_core/lib/samen/scopes/marketing/blueprint.ex
++++ b/samen_core/lib/samen/scopes/marketing/blueprint.ex
+@@ -494,7 +494,7 @@ defmodule Samen.Scopes.Marketing.Blueprint do
+             # before the row is written, inside the action's transaction.
+             change(fn changeset, ctx ->
+               actor = Map.get(ctx, :actor)
+-              Ash.Changeset.before_action(changeset, &check_send(&1, actor))
++              check_send(changeset, actor)
+             end)
+           end
+         end

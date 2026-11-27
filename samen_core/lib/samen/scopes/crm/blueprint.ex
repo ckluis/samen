@@ -221,34 +221,28 @@ defmodule Samen.Scopes.Crm.Blueprint do
           defaults([:read, :destroy, create: :*, update: :*])
 
           action :reveal_person, :map do
-            argument(:actor_id, :string, allow_nil?: false)
             argument(:subject_id, :string, allow_nil?: false)
 
-            run(fn input, _ctx ->
-              ctx = %Samen.Reveal.Context{
-                actor: input.arguments.actor_id,
-                subject_id: input.arguments.subject_id,
-                resource: __MODULE__,
-                action: :reveal_person,
-                label: :emails
-              }
-
-              if Samen.Reveal.grant_checker().granted?(ctx) do
-                {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-              else
-                {:error, :denied}
-              end
-            end)
+            run({Samen.Reveal.GrantProbe, label: :emails})
           end
         end
 
         policies do
-          policy action_type([:read, :create, :update, :destroy]) do
+          policy action_type(:read) do
             authorize_if(Samen.Policy.OrgScope)
           end
 
-          policy action(:reveal_person) do
+          # Writes (create, update, destroy: archive and restore included) are member-or-above, the same gate
+          # `Company` carries: a viewer reads contacts, it does not create, edit or delete them. `reveal_person`
+          # is a generic action with its own policy below and is not an `action_type` this clause names.
+          policy action_type([:create, :update, :destroy]) do
+            forbid_unless(Samen.Policy.OrgScope)
+            forbid_unless({Samen.Policy.RoleAtLeast, role: :member})
             authorize_if(always())
+          end
+
+          policy action(:reveal_person) do
+            authorize_if(actor_present())
           end
         end
       end
