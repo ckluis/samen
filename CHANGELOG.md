@@ -11,6 +11,15 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Fixed: the operator joins read every row
+
+- **Accounts, platform billing and the help desk read their joins to the end.** The tenant-admin, membership, user, customer,
+  subscription, plan, price, invoice, ticket, agent and conversation reads behind the Accounts header, the per-account health
+  rows, platform MRR and the desk used to stop at their first 200 rows, oldest first, so the numbers were wrong from the 201st
+  tenant. `Samen.Web.Operator.Reads` now reads each in keyset pages on `id` until the end (the page bounds a read, not the set)
+  and orders the result in memory where order matters. Sabotage 1577 proves the account count, the platform billing
+  rows and the desk list past one page.
+
 ### Fixed: the contact and company pages render on a host without the Work scope
 
 - **The log-activity composer is built only when the host mounts the Work scope.** The contact and company detail pages wrote a

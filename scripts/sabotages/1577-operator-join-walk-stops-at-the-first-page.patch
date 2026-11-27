@@ -1,0 +1,21 @@
+# SABOTAGE: The operator keyset walk stops after its first page, so joins past 200 rows are dropped
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/operator_reads_past_the_page_test.exs
+# MUST_FAIL: the accounts header counts every account past the first page
+# MUST_FAIL: platform billing lists and sums every subscription past the first page
+# MUST_FAIL: the desk lists every ticket past the first page
+diff --git a/samen_web/lib/samen/web/operator/reads.ex b/samen_web/lib/samen/web/operator/reads.ex
+index 9280ff12..734b15b3 100644
+--- a/samen_web/lib/samen/web/operator/reads.ex
++++ b/samen_web/lib/samen/web/operator/reads.ex
+@@ -996,7 +996,7 @@ defmodule Samen.Web.Operator.Reads do
+ 
+         case page do
+           [] -> nil
+-          rows -> {rows, if(length(rows) < @walk_page, do: :done, else: List.last(rows).id)}
++          rows -> {rows, :done}
+         end
+     end)
+     |> Enum.concat()
