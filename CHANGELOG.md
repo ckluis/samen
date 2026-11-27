@@ -11,6 +11,16 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Changed: loading sample data is an admin's and runs as the person
+
+- **`SampleData.load/3` takes the acting person's scope.** Loading the sample records is an admin's (it writes org-wide through
+  resources whose kernel policy only checks the org): a scope below `:admin` is refused before anything is written, and the
+  seed and its audit line run as that person. The Contacts page offers it to an admin only (`:can_admin`), and the first-run
+  probe (`FirstRun.first_run?/3`) reads with the acting person's scope. **Upgrade note:** a member no longer loads sample
+  data, and host code calling `SampleData.load/2` or `FirstRun.first_run?/2` passes the acting scope as a third argument.
+  Sabotage 1419 (which removed the earlier member check on the Contacts page) now removes this admin check and flips the
+  same test; sabotage 1569 proves it through the page.
+
 ### Changed: no write helper hands an admin role to the operator plane
 
 - **The tenant-admin write helpers answer a read-only scope where the elevation is not theirs.** `Billing.Reads.write_scope/3`,

@@ -30,18 +30,16 @@ defmodule Samen.Web.TenantActorGuardTest do
     "samen/web/ai/agent_reads.ex" => 2,
     "samen/web/ai/server.ex" => 1,
     "samen/web/chat.ex" => 1,
-    "samen/web/first_run.ex" => 1,
     "samen/web/operator.ex" => 2,
     "samen/web/operator/flag_admin_live.ex" => 2,
     "samen/web/replay/access.ex" => 2,
-    "samen/web/sample_data.ex" => 1,
     "samen/web/settings/api_keys_live.ex" => 1,
     "samen/web/tenant_role.ex" => 1,
   }
 
   # The exact size of the work list: a silent bump of an entry (or a new entry) fails here, not only in the ratchet.
-  @baseline_total 15
-  @baseline_files 11
+  @baseline_total 13
+  @baseline_files 9
 
   @exempt ~w(samen/web/mount.ex samen/web/tenant_actor.ex samen/web/tenant_actor/guard.ex)
 
@@ -159,7 +157,7 @@ defmodule Samen.Web.TenantActorGuardTest do
     refute Map.has_key?(now, "samen/web/settings/profile_live.ex")
 
     # converted in authz-9: the read-only pages, the user-scope builder, the flags page and the calendar export
-    for file <- ~w(samen/web/tenant/analytics_live.ex samen/web/search/search_live.ex samen/web/notifications/inbox_live.ex samen/web/settings/reads.ex samen/web/flags/settings_live.ex samen/web/ics/export_controller.ex),
+    for file <- ~w(samen/web/tenant/analytics_live.ex samen/web/search/search_live.ex samen/web/notifications/inbox_live.ex samen/web/settings/reads.ex samen/web/flags/settings_live.ex samen/web/ics/export_controller.ex samen/web/first_run.ex samen/web/sample_data.ex),
         do: refute(Map.has_key?(now, file), file)
 
     # the chat inbox and room, the file upload and preview pages, the automation builder, the settings pages and the onboarding wizard

@@ -216,22 +216,26 @@ defmodule Samen.Web.TenantRoleSurfacesTest do
   end
 
   # `SampleData.load/2` seeds through the system scope (a fixed `:member`): the person's own role is the gate, in ContactsLive.
-  test "the sample-data offer is member+ only: a viewer's load_sample_data seeds nothing, a member's does", ctx do
+  test "the sample-data offer is member+ only was the old bar, it is an admin's now: a viewer's and a member's load_sample_data seed nothing, an owner's does", ctx do
     prev = Application.get_env(:samen_web, Samen.Web.SampleData)
     Application.put_env(:samen_web, Samen.Web.SampleData, env: :test)
     on_exit(fn -> if prev, do: Application.put_env(:samen_web, Samen.Web.SampleData, prev), else: Application.delete_env(:samen_web, Samen.Web.SampleData) end)
     assert Samen.Web.SampleData.enabled?()
 
     before = person_count(ctx.org_id)
-    viewer = live_socket(log_in(ctx.viewer), ContactsLive, "/crm/contacts", ctx.org_id)
-    {:noreply, viewer} = ContactsLive.handle_event("load_sample_data", %{}, viewer)
-    assert viewer.assigns.sample_error == "Sample data is not available here."
-    assert person_count(ctx.org_id) == before
-    assert company_count(ctx.org_id) == 0
 
-    member = live_socket(log_in(ctx.member), ContactsLive, "/crm/contacts", ctx.org_id)
-    {:noreply, member} = ContactsLive.handle_event("load_sample_data", %{}, member)
-    assert member.assigns.sample_error == nil
+    for who <- [:viewer, :member] do
+      socket = live_socket(log_in(Map.fetch!(ctx, who)), ContactsLive, "/crm/contacts", ctx.org_id)
+      {:noreply, socket} = ContactsLive.handle_event("load_sample_data", %{}, socket)
+      assert socket.assigns.sample_error == "Loading sample data needs an admin role.", inspect(who)
+      assert person_count(ctx.org_id) == before, inspect(who)
+      assert company_count(ctx.org_id) == 0, inspect(who)
+    end
+
+    # positive control: the same event from an owner seeds the org
+    owner = live_socket(log_in(ctx.owner), ContactsLive, "/crm/contacts", ctx.org_id)
+    {:noreply, owner} = ContactsLive.handle_event("load_sample_data", %{}, owner)
+    assert owner.assigns.sample_error == nil
     assert person_count(ctx.org_id) == before + 3
     assert company_count(ctx.org_id) == 2
   end
