@@ -579,6 +579,20 @@ defmodule Samen.Web.TenantAuthzLiveTest do
              "an armed member self-elevated to :admin and flipped org-wide identity disclosure (S1a)"
     end
 
+    test "a NON-admin member's toggle_disclosure is REFUSED at the context too (Chat.set_disclosure_setting/3 on its own)" do
+      SecurityHost.arm!()
+      host = register_owner!()
+      member = accept_into!(host, :member)
+      admin = accept_into!(host, :admin)
+
+      assert {:error, _} = context_flip(member.credential.id, host.org.id)
+      refute disclosure_on?(host.org.id), "the context's admin elevation handed an armed member :admin (S1a)"
+
+      # positive control: the same call carrying a real admin's principal writes
+      assert {:ok, _} = context_flip(admin.credential.id, host.org.id)
+      assert disclosure_on?(host.org.id)
+    end
+
     test "POSITIVE CONTROL — an actual ADMIN member's toggle_disclosure SUCCEEDS" do
       SecurityHost.arm!()
       host = register_owner!()
@@ -701,6 +715,19 @@ defmodule Samen.Web.TenantAuthzLiveTest do
       Samen.Web.Chat.ThreadsLive.handle_event("toggle_disclosure", %{"expose_identity" => raw}, socket)
 
     socket
+  end
+
+  # `Chat.set_disclosure_setting/3` itself, with the principal stashed on the mount as `Samen.Web.TenantAuthz` pins it.
+  defp context_flip(principal, org_id) do
+    session = %{"samen_mount" => Mount.to_session(armed_chat_mount())}
+
+    socket =
+      %Phoenix.LiveView.Socket{}
+      |> Phoenix.Component.assign(:samen_tenant_principal, principal)
+      |> Samen.Web.Live.assign_mount(session)
+
+    mount = socket.assigns.samen_mount
+    Samen.Web.Chat.set_disclosure_setting(mount, Mount.scope(mount, org_id), true)
   end
 
   # The org's persisted disclosure state, read through the framework's own OrgScope-gated read
