@@ -24,23 +24,30 @@ All notable changes to Samen are recorded here. The format follows
   two-organisation case pins it. The earlier entry's claim that a demotion takes effect while a page is open held for events
   only until this fix.
 
-- **`TenantActor.write_scope/3` fails closed.** On an armed tenant mount anything that is not the acting `%Samen.Scope{}` (a
-  `nil`, a map) raises `ArgumentError`; it used to be handed to the dev elevation, which on an armed host with no principal
-  answers a `:member` scope. Only the disarmed dev posture and the operator plane keep the posture's admin elevation, as
+- **`TenantActor.write_scope/3` fails closed.** On an armed tenant mount anything that is not a `%Samen.Scope{}` (a `nil`, a
+  map) raises `ArgumentError`; it used to be handed to the dev elevation, which on an armed host with no principal answers a
+  `:member` scope. It accepts any `%Samen.Scope{}`: that the scope is the page's own acting one is what the guard ratchet
+  below checks at the call sites. Only the disarmed dev posture and the operator plane keep the posture's admin elevation, as
   before.
 
-- **`admin?/1` is false on the operator plane.** It was true there, so the campaign send handler's gate was open to a forged
-  send event on an operator socket (the composer was already hidden). `administrable?/2` and `writable?/2` already said an
-  operator never authors into a tenant; the three now agree. The disarmed dev posture keeps `admin?/1` open. `member?/1` is
-  left a rank check on purpose: the operator's synthetic scope carries `:member`, and an operator's reply is refused by the
-  kernel's plaintext-PII `WriteGuard`, which the operator red paths drive the write through to.
+- **`admin?/1` is false on the operator plane.** It was true there, so the campaign page's send handler, whose page-level
+  check is `admin?/1`, accepted a forged send event on an operator socket (the composer was already hidden); the send control
+  and that check now refuse there. The disarmed dev posture keeps `admin?/1` open. `member?/1` is left a rank check on
+  purpose: the operator's synthetic scope carries `:member`, and an operator's reply is refused by the kernel's
+  plaintext-PII `WriteGuard`, which the operator red paths drive the write through to.
 - **The guard ratchet sees `write_scope`.** `Samen.Web.TenantActor.Guard.foreign_write_scopes/1` counts a
   `TenantActor.write_scope(` call whose third argument is not the page's own acting scope (a literal `nil`, another scope,
   a capture, `apply`, an `import`); the baseline is empty and `Billing.Reads.restore_admin_scope/2` passes the socket's
   acting scope instead of the list's. The by-name non-vacuity check names the Billing, Marketing and Support pages too.
 - **Flake: the abbrev prefix property generated an attribute name the catalog refuses (`:ct26vt_454`).** The generator's domain
   now excludes a name carrying the vault-token sentinel, asking the same `Samen.AI.VtSentinel.in_string?/1` the meaning
-  transformer calls; the prefix assertions are unchanged and a deterministic test pins both sides of the boundary.
+  transformer calls; the prefix assertions are unchanged and a deterministic test pins both sides of the generator's boundary.
+  A second test compiles a resource whose attribute NAME carries the sentinel and pins that `MeaningDeclarations` refuses it
+  with its message (a pin of existing behaviour: it passed before the round).
+- **The guard ratchet resolves `alias … TenantActor, as: X`.** `foreign_write_scopes/1` counts `X.write_scope(…)`, a
+  `&X.write_scope/3` capture and `apply(X, :write_scope, …)` like the unaliased spellings. **Billing plans:** `toggle_feature`
+  no longer builds the edit form itself; it names the plan and lets `load/2` build the form from the current acting scope,
+  so a role that changed between the event guard and the handler's own load cannot leave a form with the earlier scope.
 - Sabotages 1539 to 1542 (a navigation that does not follow the person acting, the Plans edit form kept for a plan that is not on
   the page, `write_scope/3` falling back on an armed mount, `admin?/1` open on the operator plane). No migration.
 
@@ -50,7 +57,12 @@ All notable changes to Samen are recorded here. The format follows
   only the leader (and, in `terminate_all`'s last loop, nothing): a SIGKILLed grandchild is a zombie until launchd reaps
   it, so under load an interrupted driver exited with a group member still visible (the `GROUPKILL` flake). The wait is
   bounded (10 s); past it the driver says so on stderr naming the group and keeps it recorded in `state.json`, so the
-  next invocation still refuses to overlap. The `KILLWAIT` case proves both through test-only seams (docs/ci.md).
+  next invocation still refuses to overlap. The leader is reaped on the same bound (a leader that never dies is reported
+  and recorded, not waited on forever). The `KILLWAIT` case proves both through test-only seams (docs/ci.md).
+- **No test seam reaches a real run silently.** Every `SAMEN_CI_TEST_*` variable is honoured only with the marker
+  `scripts/ci_test.sh` sets (`SAMEN_CI_SELFTEST`, stripped from every step); set without it, or with a value that is not
+  a finite number of seconds >= 0, the driver exits 2 at startup naming the variable (`SEAMGUARD`). docs/ci.md says
+  what to check and remove when a "still running" refusal is a reused process-group id.
 
 ### Tooling: a sabotage refused at build time is killed by that refusal
 

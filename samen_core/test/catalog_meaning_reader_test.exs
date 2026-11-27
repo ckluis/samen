@@ -235,6 +235,21 @@ defmodule SamenCore.CatalogMeaningReaderTest do
       assert msg =~ "risk"
     end
 
+    test "RED: vt_ in an attribute NAME fails compile with the sentinel message; the same name without it compiles" do
+      err =
+        assert_raise Spark.Error.DslError, fn ->
+          compile!("VtName", "attributes do\n attribute :ct26vt_454, :string, public?: true\n end", "mfh")
+        end
+
+      msg = Exception.message(err)
+      assert msg =~ "the catalog meaning text at" # bare-vt_-ok: the message names the sentinel; it is not a token in a page
+      assert msg =~ "contains the literal \"vt_\"" # bare-vt_-ok: the message names the sentinel; it is not a token in a page
+      assert msg =~ "ct26vt_454" # bare-vt_-ok: the offending attribute name, as the message quotes it
+
+      # green control: the same shape of name, one letter away from the sentinel
+      compile!("NoVtName", "attributes do\n attribute :ct26vx_454, :string, public?: true\n end", "mfh")
+    end
+
     test "control: a one_of without the sentinel compiles and is readable" do
       mod =
         compile!(
