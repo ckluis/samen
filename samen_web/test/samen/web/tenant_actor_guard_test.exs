@@ -35,13 +35,11 @@ defmodule Samen.Web.TenantActorGuardTest do
     "samen/web/chat/threads_live.ex" => 3,
     "samen/web/files/preview_live.ex" => 3,
     "samen/web/files/upload_live.ex" => 2,
-    "samen/web/first_run.ex" => 1,
     "samen/web/onboarding/wizard_controller.ex" => 1,
     "samen/web/onboarding/wizard_live.ex" => 2,
     "samen/web/operator.ex" => 2,
     "samen/web/operator/flag_admin_live.ex" => 2,
     "samen/web/replay/access.ex" => 2,
-    "samen/web/sample_data.ex" => 1,
     "samen/web/settings/api_keys_live.ex" => 2,
     "samen/web/settings/invitations_live.ex" => 2,
     "samen/web/settings/reveal_approvals_live.ex" => 1,
@@ -50,8 +48,8 @@ defmodule Samen.Web.TenantActorGuardTest do
   }
 
   # The exact size of the work list: a silent bump of an entry (or a new entry) fails here, not only in the ratchet.
-  @baseline_total 39
-  @baseline_files 21
+  @baseline_total 37
+  @baseline_files 19
 
   @exempt ~w(samen/web/mount.ex samen/web/tenant_actor.ex samen/web/tenant_actor/guard.ex)
 
@@ -169,7 +167,7 @@ defmodule Samen.Web.TenantActorGuardTest do
     refute Map.has_key?(now, "samen/web/settings/profile_live.ex")
 
     # converted in authz-9: the read-only pages, the user-scope builder, the flags page and the calendar export
-    for file <- ~w(samen/web/tenant/analytics_live.ex samen/web/search/search_live.ex samen/web/notifications/inbox_live.ex samen/web/settings/reads.ex samen/web/flags/settings_live.ex samen/web/ics/export_controller.ex),
+    for file <- ~w(samen/web/tenant/analytics_live.ex samen/web/search/search_live.ex samen/web/notifications/inbox_live.ex samen/web/settings/reads.ex samen/web/flags/settings_live.ex samen/web/ics/export_controller.ex samen/web/first_run.ex samen/web/sample_data.ex),
         do: refute(Map.has_key?(now, file), file)
 
     # the Billing, Marketing and Support pages converted in authz-7 (and leads)

@@ -11,6 +11,13 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Changed: loading sample data is an admin's and runs as the person
+
+- **`SampleData.load/3` takes the acting person's scope.** Loading the sample records is an admin's (it writes org-wide through
+  resources whose kernel policy only checks the org): a scope below `:admin` is refused before anything is written, and the
+  seed and its audit line run as that person. The Contacts page offers it to an admin only (`:can_admin`), and the first-run
+  probe (`FirstRun.first_run?/3`) reads with the acting person's scope.
+
 ### Changed: the feature-flags settings page and the calendar export act as the signed-in person
 
 - **The feature-flags settings page and the `.ics` export resolve their actor** through `Samen.Web.TenantActor`: the role
