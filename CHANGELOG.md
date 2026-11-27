@@ -11,6 +11,21 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Fixed: the flag-taking mix tasks refuse an unknown flag
+
+- **A guessed or misspelled flag on a generator or verifier is refused, not dropped.** The generated `AGENTS.md` says every
+  generator refuses unknown flags; `samen.gen.indexes`, `samen.gen.reveal_requests`, `samen.gen.api_key_digest_unique` and
+  `samen.gen.csat_token_digest_unique` did not, and neither did 18 other tasks: `samen.verify.{fleet_wire, signals_no_pii,
+  vault_declared_parity, agent_coverage, catalog_parity, metric_labels, vault_token_binding, tnt_catalog, no_pii_columns,
+  aggregate_privacy, indexes, prefixes, no_pan_columns, same_org_fk, ai_prompt_masking, tnt_boundary, api_contract}`,
+  `samen.audit.freeform_projection` and `samen.ai.smoke`. They now parse through `Samen.Gen.Args.parse!/3`, which raises
+  `Mix.Error` ("mix <task>: unknown flag --x ... Valid switches: ...", a non-zero exit) before the task does anything; a
+  positional argument is refused too. Every flag the repo's own CI steps, templates and probes pass is a declared switch. The
+  eight tasks that already refused through `OptionParser.parse!/2` (`samen.verify.{migrations, read_scope, pii_classify,
+  never_read_current, catalog_meaning, no_plaintext_pii, pii_reads}` and `samen.catalog.dump`) are unchanged. Proven by
+  `mix_task_unknown_flags_test.exs` (each family through the task's `run/1`, with a child-process positive control) and
+  sabotages 1581 to 1583.
+
 ### Fixed: the broker console acts as the signed-in person
 
 - **Driftwood's `/broker` page resolves who acts through `Samen.Web.TenantActor`.** The console built its actor with a fixed
