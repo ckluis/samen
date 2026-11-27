@@ -1,0 +1,20 @@
+# SABOTAGE: A host endpoint stops serving app.js, so its pages ship the LiveView client with no 
+#   data-confirm guard
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/confirm_interlock_test.exs
+# MUST_FAIL: no layout, endpoint or generator template serves the LiveView client without app.js
+diff --git a/driftwood/lib/driftwood_web/endpoint.ex b/driftwood/lib/driftwood_web/endpoint.ex
+index fc14597c..e2963cb6 100644
+--- a/driftwood/lib/driftwood_web/endpoint.ex
++++ b/driftwood/lib/driftwood_web/endpoint.ex
+@@ -39,7 +39,7 @@ defmodule DriftwoodWeb.Endpoint do
+   plug(Plug.Static,
+     at: "/assets",
+     from: {:samen_web, "priv/static/assets"},
+-    only: ~w(samen_ui.css app.js fonts)
++    only: ~w(samen_ui.css fonts)
+   )
+ 
+   plug(Plug.RequestId)

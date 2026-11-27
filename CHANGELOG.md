@@ -11,6 +11,17 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Fixed: a `data-confirm` control asks before it acts
+
+- **The served client script confirms every control that carries `data-confirm`.** The kit renders the attribute on each
+  destructive control (delete, workflow kill, agent stop, approve an AI write), and `app.js` now asks the attribute's text with
+  `window.confirm` from a capture-phase `click` and `submit` listener on `document`, so it runs before LiveView's own listeners:
+  on refusal the event is stopped (`preventDefault` and `stopImmediatePropagation`) and no `phx-click`, link or form submit
+  follows. The listeners are delegated, so elements patched in later are covered, and a form is asked once on submit. Hosts and
+  generated apps serve the same file at no authored code. `Samen.Web.ConfirmInterlockTest` runs the file against a DOM stub under
+  node and checks that every layout, endpoint and generator template that serves the LiveView client serves `app.js` with it;
+  sabotages 1573 and 1574 prove both.
+
 ### Changed: loading sample data is an admin's and runs as the person
 
 - **`SampleData.load/3` takes the acting person's scope.** Loading the sample records is an admin's (it writes org-wide through
