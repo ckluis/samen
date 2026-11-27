@@ -6,8 +6,9 @@ defmodule Samen.Web.ConfirmInterlockTest do
     * the script carries the capture-phase click + submit handler, proven by running the
       real file against a DOM stub under node (refusal stops the event, acceptance lets it
       through, an element without the attribute is untouched);
-    * every layout, endpoint and generator template that serves the framework JS serves
-      `app.js` with it, so no host or generated app ships the LiveView client without the guard.
+    * every layout and host endpoint that serves the framework JS serves
+      `app.js` with it (the generator templates are checked in samen_core's `EndpointTemplateServesAppJsTest`), so no
+      host or generated app ships the LiveView client without the guard.
   """
   use ExUnit.Case, async: true
 
@@ -79,17 +80,17 @@ defmodule Samen.Web.ConfirmInterlockTest do
 
   describe "everything that serves the framework JS serves app.js with it" do
     @served_globs ["samen_web/lib/**/*.ex", "driftwood/lib/**/*.ex", "pawchart/lib/**/*.ex",
-                   "demo/lib/**/*.ex", "samen_core/priv/templates/**/*.eex"]
+                   "demo/lib/**/*.ex"]
 
     defp serves_js_without_app?(text),
       do: text =~ "phoenix_live_view.min.js" and not (text =~ "app.js")
 
-    test "no layout, endpoint or generator template serves the LiveView client without app.js" do
+    test "no layout or host endpoint serves the LiveView client without app.js" do
       files = Enum.flat_map(@served_globs, &Path.wildcard(Path.join(@repo, &1)))
       serving = Enum.filter(files, &(File.read!(&1) =~ "phoenix_live_view.min.js"))
 
       # The set is non-empty and contains the layout, both verticals and the template.
-      for needle <- ["layouts.ex", "driftwood_web/endpoint.ex", "pawchart_web/endpoint.ex", "endpoint_ex.eex"] do
+      for needle <- ["layouts.ex", "driftwood_web/endpoint.ex", "pawchart_web/endpoint.ex"] do
         assert Enum.any?(serving, &String.ends_with?(&1, needle)), "#{needle} not found serving the JS"
       end
 

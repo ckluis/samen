@@ -60,8 +60,9 @@ All notable changes to Samen are recorded here. The format follows
   on refusal the event is stopped (`preventDefault` and `stopImmediatePropagation`) and no `phx-click`, link or form submit
   follows. The listeners are delegated, so elements patched in later are covered, and a form is asked once on submit. Hosts and
   generated apps serve the same file at no authored code. `Samen.Web.ConfirmInterlockTest` runs the file against a DOM stub under
-  node and checks that every layout, endpoint and generator template that serves the LiveView client serves `app.js` with it;
-  sabotages 1573 and 1574 prove both.
+  node and checks that every layout and host endpoint that serves the LiveView client serves `app.js` with it, and
+  `Samen.EndpointTemplateServesAppJsTest` checks the generator's endpoint template the same way; sabotages 1573, 1574 and 1580
+  prove them.
 
 ### Changed: loading sample data is an admin's and runs as the person
 

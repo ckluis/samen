@@ -4,7 +4,7 @@
 # Flips the named test(s).
 # APP: samen_web
 # TEST_FILES: test/samen/web/confirm_interlock_test.exs
-# MUST_FAIL: no layout, endpoint or generator template serves the LiveView client without app.js
+# MUST_FAIL: no layout or host endpoint serves the LiveView client without app.js
 diff --git a/driftwood/lib/driftwood_web/endpoint.ex b/driftwood/lib/driftwood_web/endpoint.ex
 index fc14597c..e2963cb6 100644
 --- a/driftwood/lib/driftwood_web/endpoint.ex
