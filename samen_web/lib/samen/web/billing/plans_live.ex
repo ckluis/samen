@@ -243,8 +243,9 @@ defmodule Samen.Web.Billing.PlansLive do
 
     case Reads.update_plan(mount, TenantActor.write_scope(mount, org_id, acting), id, %{features: features}) do
       {:ok, _plan} ->
-        socket = load(assign(socket, delete_error: nil), org_id)
-        {:noreply, assign(socket, edit_form: edit_plan_form(mount, org_id, acting, find_plan(socket, id)), edit_plan_id: id, show_edit: true)}
+        # The form is never built here: this handler holds the scope it began with, and its own load may resolve another.
+        # Naming the plan is enough - `load/2` builds the form from the page it reads now, with the scope acting now.
+        {:noreply, load(assign(socket, delete_error: nil, edit_plan_id: id, show_edit: true), org_id)}
 
       {:error, _} ->
         {:noreply, assign(socket, delete_error: "Could not update plan features.")}

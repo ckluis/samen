@@ -143,6 +143,39 @@ defmodule Samen.Web.TenantActorNavigationTest do
     end
   end
 
+  describe "Plans: toggle_feature" do
+    # The race itself (the role changing between the event guard's recheck and the handler's own load) cannot be driven
+    # from a test. What is driven is its precondition: the handler is dispatched raw (`H.event/4`, no event guard) on a
+    # socket still holding the admin scope after the person was demoted, so the handler's own load is the first thing to
+    # see the new role. The invariant asserted: whatever the handler leaves open is built with the scope of the person
+    # the page acts for NOW (`socket.assigns.acting_scope`), never the one it held when the handler began.
+    test "the edit form it leaves open is built with the scope the page acts with after its own load", ctx do
+      keep = plan!(ctx.org_id, "keep")
+      login = H.log_in(ctx.admin)
+      open = H.open_socket(login, PlansLive, "/billing/plans", ctx.org_id)
+      open = H.live_event(PlansLive, "edit_plan", %{"id" => keep.id}, open)
+      assert open.assigns.acting_scope.actor.role == :admin
+
+      SpineAccounts.set_role!(ctx.admin, ctx.org_id, :member)
+      toggled = H.event(PlansLive, "toggle_feature", %{"id" => keep.id, "feature" => "sso"}, open)
+
+      assert toggled.assigns.acting_scope.actor.role == :member
+      assert toggled.assigns.edit_plan_id == keep.id
+      form_scope = toggled.assigns.edit_form.source.opts[:scope]
+      assert form_scope.actor.role == :member
+      assert form_scope == Samen.Web.TenantActor.write_scope(toggled.assigns.samen_mount, ctx.org_id, toggled.assigns.acting_scope)
+
+      # positive control: nobody demoted -> the form is still there, built with the admin scope, and the toggle persisted
+      admin = H.open_socket(login, PlansLive, "/billing/plans", ctx.org_id)
+      SpineAccounts.set_role!(ctx.admin, ctx.org_id, :admin)
+      admin = H.navigate(PlansLive, admin)
+      admin = H.live_event(PlansLive, "edit_plan", %{"id" => keep.id}, admin)
+      admin = H.live_event(PlansLive, "toggle_feature", %{"id" => keep.id, "feature" => "sso"}, admin)
+      assert admin.assigns.edit_form.source.opts[:scope].actor.role == :admin
+      assert admin.assigns.edit_plan_id == keep.id
+    end
+  end
+
   describe "two organisations" do
     test "an edit form opened in org A and submitted after an ?org=B switch writes nothing, in A or in B", ctx do
       org_a = ctx.org_id
