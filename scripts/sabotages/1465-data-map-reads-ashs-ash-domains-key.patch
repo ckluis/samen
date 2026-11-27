@@ -1,0 +1,19 @@
+# SABOTAGE: the data map reads Ash's own :samen_core :ash_domains key instead of the host registry
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/host_domains_test.exs
+# MUST_FAIL: no samen_core lib file reads :samen_core's :ash_domains except Samen.HostDomains
+diff --git a/samen_core/lib/samen/data_map.ex b/samen_core/lib/samen/data_map.ex
+index 5477f45b..37c3aa48 100644
+--- a/samen_core/lib/samen/data_map.ex
++++ b/samen_core/lib/samen/data_map.ex
+@@ -74,7 +74,7 @@ defmodule Samen.DataMap do
+ 
+       _ ->
+         opts
+-        |> Keyword.get(:domains, Samen.HostDomains.registry())
++        |> Keyword.get(:domains, Application.get_env(:samen_core, :ash_domains, []))
+         |> Samen.Catalog.resource_modules()
+     end
+   end

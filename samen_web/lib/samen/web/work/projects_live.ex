@@ -8,12 +8,15 @@ defmodule Samen.Web.Work.ProjectsLive do
   use Phoenix.LiveView
 
   import Samen.UI
-  import Samen.Web.Work.Live, only: [assign_mount: 2, work_sidebar: 1, writable?: 1]
+  import Samen.Web.Work.Live, only: [assign_mount: 2, work_sidebar: 1]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Reads.Guard
   alias Samen.Web.Mount
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   alias Samen.Web.Work.Reads
 
@@ -40,12 +43,37 @@ defmodule Samen.Web.Work.ProjectsLive do
       show_new: false,
       new_form: nil
     )
+    |> assign(acting_scope: nil, actor_state: :ok, can_write: false)
     |> assign_new(:delete_error, fn -> nil end)
   end
 
+  # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read, nothing
+  # can be written, and the page is re-resolved on every `handle_params`.
   def load(socket, org_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id)
+    end
+  end
+
+  # Acting again with no URL to patch to (`Samen.Web.TenantActor`, the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _}} = socket), do: load(socket, socket.assigns.org_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): the
+  # same load a refused navigation does, so nothing the page loaded for the person it acted for is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket, socket.assigns.org_id)
+
+  defp load_refused(socket, org_id) do
+    socket
+    |> assign(no_org: false, org_id: org_id, projects: [], load_error: nil, show_new: false, new_form: nil)
+    |> assign_new(:delete_error, fn -> nil end)
+  end
+
+  defp load_for(socket, org_id, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
 
     socket
     |> assign_projects(Reads.projects_result(mount, scope))
@@ -63,11 +91,13 @@ defmodule Samen.Web.Work.ProjectsLive do
     do: assign(socket, projects: [], load_error: Samen.Web.Reads.Guard.message())
 
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
 
   def handle_event("new_project", _params, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
-    {:noreply, assign(socket, show_new: true, new_form: new_project_form(mount, Mount.scope(mount, org_id)))}
+    %{samen_mount: mount, acting_scope: scope} = socket.assigns
+    {:noreply, assign(socket, show_new: true, new_form: new_project_form(mount, scope))}
   end
 
   def handle_event("cancel_new", _params, socket) do
@@ -90,13 +120,19 @@ defmodule Samen.Web.Work.ProjectsLive do
   end
 
   def handle_event("delete", %{"id" => id}, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    %{samen_mount: mount, org_id: org_id, acting_scope: scope} = socket.assigns
 
-    case Reads.delete_project(mount, Mount.scope(mount, org_id), id) do
+    case Reads.delete_project(mount, scope, id) do
       :ok -> {:noreply, load(assign(socket, delete_error: nil), org_id)}
       {:error, _reason} -> {:noreply, assign(socket, delete_error: "Could not archive this project.")}
     end
   end
+
+  # The person's role or id changed while the page was open (`Samen.Web.TenantActor.recheck_event/3`): a form built at
+  # load holds the scope it was built with, so it is built again with the fresh one.
+  @doc false
+  def actor_changed(%{assigns: %{samen_mount: mount, acting_scope: scope}} = socket),
+    do: assign(socket, new_form: new_project_form(mount, scope))
 
   defp new_project_form(mount, scope) do
     Mount.resource(mount, Project) |> AshPhoenix.Form.for_create(:create, scope: scope) |> to_form()
@@ -115,7 +151,7 @@ defmodule Samen.Web.Work.ProjectsLive do
 
         <.topbar title="Projects" crumbs={[CurrentOrg.name(@samen_mount, @org_id), "Work", "Projects"]}>
           <:actions>
-            <.button :if={writable?(@samen_mount) and not @no_org} variant="primary" phx-click="new_project" id="new-project">
+            <.button :if={@can_write and not @no_org} variant="primary" phx-click="new_project" id="new-project">
               New project
             </.button>
           </:actions>
@@ -123,9 +159,12 @@ defmodule Samen.Web.Work.ProjectsLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Projects" nothing="there are no projects to show" />
+        <% true -> %>
           <div :if={@delete_error} class="wrap" style="margin-bottom:0">
             <div class="card form-error" id="delete-error" style="padding:10px 14px;color:var(--bad,#b91c1c);font-size:12px">
               {@delete_error}
@@ -140,13 +179,13 @@ defmodule Samen.Web.Work.ProjectsLive do
                 <li :for={p <- @projects} class="project-row" style="padding:10px 0;border-top:1px solid var(--line,#eee);display:flex;justify-content:space-between;align-items:center">
                   <span style="font-weight:500">{p.name}</span>
                   <.pill variant="info">{p.status}</.pill>
-                  <.delete_confirm :if={writable?(@samen_mount)} phx-click="delete" phx-value-id={p.id} />
+                  <.delete_confirm :if={@can_write} phx-click="delete" phx-value-id={p.id} />
                 </li>
               </ul>
             </div>
           </div>
 
-          <.modal :if={@show_new and @new_form != nil and writable?(@samen_mount)} id="new-project-modal" title="New project" on_cancel="cancel_new">
+          <.modal :if={@show_new and @new_form != nil and @can_write} id="new-project-modal" title="New project" on_cancel="cancel_new">
             <.simple_form :let={f} for={@new_form} id="new-project-form" phx-change="validate_new" phx-submit="save_new">
               <.form_field field={f[:name]} label="Name" />
               <:actions>

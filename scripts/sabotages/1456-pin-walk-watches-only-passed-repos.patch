@@ -1,0 +1,19 @@
+# SABOTAGE: the org_id pin walk watches only the repos a host passes (default none)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/org_id_pinned_guard_test.exs
+# MUST_FAIL: the watched repos are derived from the resources
+diff --git a/samen_core/lib/samen/org_id_pinned_guard.ex b/samen_core/lib/samen/org_id_pinned_guard.ex
+index ae81d26e..9b4dad1c 100644
+--- a/samen_core/lib/samen/org_id_pinned_guard.ex
++++ b/samen_core/lib/samen/org_id_pinned_guard.ex
+@@ -70,7 +70,7 @@ defmodule Samen.OrgIdPinnedGuard do
+   @spec walk([module()], %{module() => String.t()}, keyword()) :: report()
+   def walk(domains, exceptions \\ %{}, opts \\ []) do
+     resources = resources_of(domains)
+-    repos = Enum.uniq(derive_repos(resources) ++ Keyword.get(opts, :repos, []))
++    repos = Keyword.get(opts, :repos, [])
+     handler = attach_query_watch(repos)
+ 
+     try do

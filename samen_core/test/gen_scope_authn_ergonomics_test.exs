@@ -100,7 +100,7 @@ defmodule Samen.Gen.ScopeAuthnErgonomicsTest do
     import Config
 
     config :widgetco, ash_domains: [Widgetco.Billing]
-    config :samen_core, :ash_domains, [Widgetco.Billing]
+    config :samen_core, :host_domains, [Widgetco.Billing]
     """)
 
     dir

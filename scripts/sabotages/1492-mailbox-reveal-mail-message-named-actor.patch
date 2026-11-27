@@ -1,0 +1,37 @@
+# SABOTAGE: Mailbox reveal_mail_message checks the grant for a caller-supplied actor_id again, so any actor 
+#   can ride another person's grant
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/mailbox_authz_test.exs
+# MUST_FAIL: reveal_mail_message: naming operator-1 in the arguments rides nothing
+diff --git a/samen_core/lib/samen/scopes/mailbox/blueprint.ex b/samen_core/lib/samen/scopes/mailbox/blueprint.ex
+index 2ea37a58..bfd050b6 100644
+--- a/samen_core/lib/samen/scopes/mailbox/blueprint.ex
++++ b/samen_core/lib/samen/scopes/mailbox/blueprint.ex
+@@ -230,9 +230,24 @@ defmodule Samen.Scopes.Mailbox.Blueprint do
+           # The grant is checked for the actor that RUNS the action, never for an id the caller names: a
+           # caller-supplied `actor_id` let any actor ride another person's grant. No actor, no grant.
+           action :reveal_mail_message, :map do
++            argument(:actor_id, :string, allow_nil?: true)
+             argument(:subject_id, :string, allow_nil?: false)
+ 
+-            run({Samen.Reveal.GrantProbe, label: :body})
++            run(fn input, run_ctx ->
++              ctx = %Samen.Reveal.Context{
++                actor: input.arguments[:actor_id] || run_ctx.actor,
++                subject_id: input.arguments.subject_id,
++                resource: __MODULE__,
++                action: :reveal_mail_message,
++                label: :body
++              }
++
++              if not is_nil(run_ctx.actor) and Samen.Reveal.grant_checker().granted?(ctx) do
++                {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
++              else
++                {:error, :denied}
++              end
++            end)
+           end
+         end
+ 

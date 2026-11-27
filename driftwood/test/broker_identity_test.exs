@@ -85,7 +85,7 @@ defmodule DriftwoodWeb.BrokerIdentityTest do
 
     socket =
       %Phoenix.LiveView.Socket{}
-      |> Phoenix.Component.assign(:org_id, s.org_id)
+      |> Phoenix.Component.assign([org_id: s.org_id] ++ acting_assigns(s.org_id))
       |> then(&%{&1 | assigns: Map.put(&1.assigns, :flash, %{})})
 
     before_count = length(Ash.read!(Driftwood.Freight.DispatchEvent, authorize?: false))
@@ -99,7 +99,7 @@ defmodule DriftwoodWeb.BrokerIdentityTest do
 
     assert length(Ash.read!(Driftwood.Freight.DispatchEvent, authorize?: false)) == before_count
 
-    html = render(Map.put(assigns(mount(), "roster"), :drivers, Driftwood.Reads.driver_roster(BrokerLive.broker_scope(s.org_id))))
+    html = render(Map.put(assigns(mount(), "roster"), :drivers, Driftwood.Reads.driver_roster(broker_scope(s.org_id))))
     assert html =~ "Check eligibility"
     refute html =~ ~r/dispatch-btn[^>]*>\s*Dispatch\s*</
   end

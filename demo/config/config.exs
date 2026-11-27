@@ -19,14 +19,14 @@ config :demo,
   ash_domains: [Demo.Crm, Demo.Identity, Demo.CrmScope, Demo.BillingScope, Demo.MarketingScope, Demo.CmsScope, Demo.SupportScope, Demo.WorkScope, Demo.CalendarScope, Demo.DocsScope, Demo.Tags, Demo.LocationsScope, Demo.SalesOps, Demo.PrimitivesScope, Demo.Analytics, Demo.Aggregate]
 
 # samen_core verifiers (C1/C2/C3/C4/C5) discover domains from
-# :samen_core :ash_domains. Register the demo's domains here so the
+# :samen_core :host_domains. Register the demo's domains here so the
 # verifier tasks find the demo resources — including the mounted Identity
 # scope (T3.1), the CRM scope (T3.2), the Billing scope (T3.3), the
 # Marketing scope (T3.4), the CMS scope (T3.5), the Support scope
 # (T3.6), the Primitives scope (T3.7 — resources catalogued in HOST's
 # catalog, scanned by host's UNCHANGED verifiers, per ADR-004), and the
 # SalesOps scope (F6+F7, T48 — Vendor + Lead, converting into Demo.CrmScope).
-config :samen_core, :ash_domains, [Demo.Crm, Demo.Identity, Demo.CrmScope, Demo.BillingScope, Demo.MarketingScope, Demo.CmsScope, Demo.SupportScope, Demo.WorkScope, Demo.CalendarScope, Demo.DocsScope, Demo.Tags, Demo.LocationsScope, Demo.SalesOps, Demo.PrimitivesScope, Demo.Analytics, Demo.Aggregate]
+config :samen_core, :host_domains, [Demo.Crm, Demo.Identity, Demo.CrmScope, Demo.BillingScope, Demo.MarketingScope, Demo.CmsScope, Demo.SupportScope, Demo.WorkScope, Demo.CalendarScope, Demo.DocsScope, Demo.Tags, Demo.LocationsScope, Demo.SalesOps, Demo.PrimitivesScope, Demo.Analytics, Demo.Aggregate]
 
 # WS-B / Phase B7 (ADR-021): wire the product-analytics capture seam.
 #   * `Samen.Analytics.track/1` writes into the DEMO's `pae` ledger;

@@ -16,6 +16,7 @@ defmodule Samen.Web.GeoMapMaskingTest do
   The coordinate axis of INV-1 (a vaulted coordinate is REFUSED, `MaskedCoordinateError`) is
   proven in `reads_geo_test.exs`; this unit covers the LABEL axis.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -76,7 +77,7 @@ defmodule Samen.Web.GeoMapMaskingTest do
 
     assert html =~ @secret_first
     assert html =~ @secret_last
-    refute html =~ "vt_"
+    refute_vault_token(html)
     # The non-PII public facet rides along regardless (the pin still plots).
     assert html =~ ~s(class="geo-marker-dot")
   end

@@ -15,11 +15,11 @@ defmodule DriftwoodWeb.BrokerCreateLoadTest do
   @org "c1230000-0000-4000-8000-0000000000c1"
 
   test "GREEN: 'New load' create persists a real Opportunity that shows on the load board" do
-    scope = BrokerLive.broker_scope(@org)
+    scope = broker_scope(@org)
     assert Reads.load_board(scope) == []
 
     assert {:ok, load} =
-             BrokerLive.create_load(@org, %{
+             BrokerLive.create_load(broker_scope(@org), %{
                "name" => "BRL-4805 reefer",
                "lane" => "TX->CA",
                "rate" => "4800.00",
@@ -38,8 +38,8 @@ defmodule DriftwoodWeb.BrokerCreateLoadTest do
   end
 
   test "RED: a load with no reference name is refused by the real :create action" do
-    assert {:error, _changeset} = BrokerLive.create_load(@org, %{"name" => "", "status" => "open"})
+    assert {:error, _changeset} = BrokerLive.create_load(broker_scope(@org), %{"name" => "", "status" => "open"})
     # Nothing was persisted.
-    assert Reads.load_board(BrokerLive.broker_scope(@org)) == []
+    assert Reads.load_board(broker_scope(@org)) == []
   end
 end

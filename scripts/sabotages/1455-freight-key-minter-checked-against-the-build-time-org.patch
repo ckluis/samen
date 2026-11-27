@@ -1,0 +1,27 @@
+# SABOTAGE: the Freight ApiKey minter hook uses the org_id captured when the changeset was built
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/freight_api_key_authz_test.exs
+# MUST_FAIL: the minter is checked against the org the key is CREATED in
+diff --git a/driftwood/lib/driftwood/freight.ex b/driftwood/lib/driftwood/freight.ex
+index 700bf390..1b85d287 100644
+--- a/driftwood/lib/driftwood/freight.ex
++++ b/driftwood/lib/driftwood/freight.ex
+@@ -471,6 +471,7 @@ defmodule Driftwood.Freight.ApiKey do
+         case ctx.actor do
+           %{id: id} when not is_nil(id) ->
+             changeset = Ash.Changeset.force_change_attribute(changeset, :minter_user_id, to_string(id))
++            built_org = Ash.Changeset.get_attribute(changeset, :org_id)
+ 
+             # The lookup is a DATABASE read, so it runs in a `before_action` hook, never while the changeset is
+             # built (a build that queries rides on whatever sandbox owner is shared, and `Samen.OrgIdPinnedGuard`
+@@ -480,7 +481,7 @@ defmodule Driftwood.Freight.ApiKey do
+             # under, not the one the changeset carried when this change ran (a `force_change_attribute(:org_id, …)`
+             # between the build and the create must not leave the minter checked against the old org).
+             Ash.Changeset.before_action(changeset, fn changeset ->
+-              org_id = Ash.Changeset.get_attribute(changeset, :org_id)
++              org_id = built_org
+ 
+               case Samen.Scope.ApiKey.membership_for_user(Driftwood.Operator.Membership, org_id, id) do
+                 {:ok, _membership} ->

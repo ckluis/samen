@@ -1,0 +1,19 @@
+# SABOTAGE: the org_id walk counts a resource whose changeset build queried the database as exercised
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/org_id_pinned_guard_test.exs
+# MUST_FAIL: a resource whose build raises, exits or queries is UNEXERCISABLE by name
+diff --git a/samen_core/lib/samen/org_id_pinned_guard.ex b/samen_core/lib/samen/org_id_pinned_guard.ex
+index 36d9b974..746dfc21 100644
+--- a/samen_core/lib/samen/org_id_pinned_guard.ex
++++ b/samen_core/lib/samen/org_id_pinned_guard.ex
+@@ -118,7 +118,7 @@ defmodule Samen.OrgIdPinnedGuard do
+           (why = swallowed_crash(changeset)) != nil ->
+             {:unexercisable, resource, action.name, why}
+ 
+-          (query = queried()) != nil ->
++          (query = queried()) == :never ->
+             {:unexercisable, resource, action.name, "the changeset build queried the database: #{inspect(query)}"}
+ 
+           carries_foreign_org?(changeset) and not org_error?(changeset) ->

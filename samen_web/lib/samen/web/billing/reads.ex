@@ -353,24 +353,24 @@ defmodule Samen.Web.Billing.Reads do
   `impersonation`) from `Mount.scope/2` — an operator-plane mount keeps `plane: :operator`, so
   `Samen.Pii.WriteGuard` (MC-1 / Invariant L1) rejects a vaulted-PII write exactly as before, the
   elevation raises RBAC rank only, and `OrgScope` still confines the write to `org_id`.
+
+  On an OPERATOR-plane mount it answers `Samen.Web.TenantActor.read_only_scope/2`, never an admin: an operator does not write a tenant's billing.
   """
-  def write_scope(mount, org_id, principal \\ nil),
-    do: Samen.Web.TenantRole.admin_scope(mount, org_id, principal)
+  def write_scope(mount, org_id, principal \\ nil) do
+    if not match?(%Samen.Web.Mount{plane: %{kind: :operator}}, mount),
+      do: Samen.Web.TenantRole.admin_scope(mount, org_id, principal),
+      else: Samen.Web.TenantActor.read_only_scope(mount, org_id)
+  end
 
   @doc """
   The `Samen.Web.ListLive` `restore` elevator (ADR-040 §5.8, T37h) — the archived-Plan restore is
   `RoleAtLeast :admin`-gated, stricter than the plain list `scope` reads use. `(scope, socket)`:
-  re-derives the tenant-ADMIN scope for the list's org through `Samen.Web.TenantRole.admin_scope/3`
-  using the socket's pinned principal, so ADR-045 §4.4 (S1a) governs it exactly as every other
-  write path — disarmed → `:admin`; armed → the REAL `Identity.Membership` role, fail-closed
-  `:member`.
+  the scope the restore runs with, through `Samen.Web.TenantActor.write_scope/3` like every other admin-gated write of the
+  page: armed → the page's own acting scope (the person's REAL, current role: a member's restore is refused by the kernel;
+  the list's `scope` argument is not what is passed on); disarmed and operator → the posture's admin elevation.
   """
   def restore_admin_scope(%Samen.Scope{actor: %{org_id: org_id}}, socket) when is_binary(org_id) do
-    Samen.Web.TenantRole.admin_scope(
-      socket.assigns.samen_mount,
-      org_id,
-      socket.assigns[:samen_tenant_principal]
-    )
+    Samen.Web.TenantActor.write_scope(socket.assigns.samen_mount, org_id, socket.assigns.acting_scope)
   end
 
   def restore_admin_scope(scope, _socket), do: scope

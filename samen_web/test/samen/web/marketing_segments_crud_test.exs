@@ -23,6 +23,7 @@ defmodule Samen.Web.MarketingSegmentsCrudTest do
       This page offers NO subscriber write (subscribers enter through consented
       paths), so the panel is render-side masking only.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.Web.ListLive
@@ -276,7 +277,7 @@ defmodule Samen.Web.MarketingSegmentsCrudTest do
     rendered = html(socket)
     assert rendered =~ Seeds.active_subscriber_email()
     assert rendered =~ Seeds.suppressed_subscriber_email()
-    refute rendered =~ "vt_"
+    refute_vault_token(rendered)
   end
 
   test "MASKING RED PATH: OPERATOR plane renders the SAME rows ‘••••’ — plaintext AND token ABSENT from the DOM" do
@@ -293,7 +294,7 @@ defmodule Samen.Web.MarketingSegmentsCrudTest do
     assert rendered =~ "••••"
     refute rendered =~ Seeds.active_subscriber_email()
     refute rendered =~ Seeds.suppressed_subscriber_email()
-    refute rendered =~ "vt_"
+    refute_vault_token(rendered)
     refute rendered =~ "pii_"
   end
 

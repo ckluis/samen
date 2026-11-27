@@ -50,6 +50,7 @@ defmodule Samen.Web.ActivityMaskingTest do
        a code comment — an operator reading the screen gets an accurate
        coverage picture, not an implied-complete change-log.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.AuditEvent
@@ -455,7 +456,7 @@ defmodule Samen.Web.ActivityMaskingTest do
 
     html = render_activity(org_id)
 
-    refute html =~ ~r/\bvt_/
+    refute_vault_token(html, nil, boundary: true)
     assert html =~ "operator-clean"
   end
 
@@ -492,7 +493,7 @@ defmodule Samen.Web.ActivityMaskingTest do
     masked = ActivityReads.mask_changes(changes, MapSet.new(["full_name"])) |> Map.new()
 
     assert masked["full_name"] == "••••"
-    refute masked["full_name"] =~ "vt_"
+    refute_vault_token(masked["full_name"])
     # The plain (non-vault) key renders EXACTLY what was stored — proving the
     # mask is the vault field's doing, not blanket redaction.
     assert masked["label"] == "ordinary-stored-value"
@@ -504,10 +505,10 @@ defmodule Samen.Web.ActivityMaskingTest do
 
     # What the page would show if it rendered `changes` directly (the mistake
     # INV-1 forbids) — the SAME map, unmasked.
-    assert Jason.encode!(changes) =~ "vt_"
+    assert Jason.encode!(changes) =~ raw_token
 
     masked = ActivityReads.mask_changes(changes, MapSet.new(["full_name"])) |> Map.new()
-    refute Jason.encode!(masked) =~ "vt_"
+    refute_vault_token(Jason.encode!(masked))
   end
 
   test "SABOTAGE TWIN at the full-page level: a feed item carrying a raw, unmasked vt_ token WOULD render (via the :feed injection seam), proving the page's own DOM scan is refutable" do

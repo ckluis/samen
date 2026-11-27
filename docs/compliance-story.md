@@ -46,7 +46,7 @@ covering test/verifier/ADR/verdict.
 
 | Capability (GDPR / SOC 2 relevance) | Mechanism in Samen | Proof |
 |---|---|---|
-| **PII minimized to ciphertext at rest** (GDPR Art. 5 data-minimisation / Art. 32 security) | Every `🔒` field writes a `vt_*` vault token through one chokepoint; no declared PII field is stored in plaintext (free text such as ticket and chat bodies, notes, reasons and audit detail is stored as written, outside the vault). `no_pii_columns` refuses a `pii_*` column on a token-blind resource; `no_plaintext_pii` audits every tier. | claim-evidence §A R3, §C D2; `samen.verify.{no_plaintext_pii,no_pii_columns}` |
+| **PII minimized to ciphertext at rest** (GDPR Art. 5 data-minimisation / Art. 32 security) | Every `🔒` field writes a `vt_*` vault token through one chokepoint; no declared PII field is stored in plaintext (ticket and chat message bodies are declared PII and vaulted; free text in fields that declare no PII, such as notes, reasons and audit detail, is stored as written, outside the vault). `no_pii_columns` refuses a `pii_*` column on a token-blind resource; `no_plaintext_pii` audits every tier. | claim-evidence §A R3, §C D2; `samen.verify.{no_plaintext_pii,no_pii_columns}` |
 | **Masked by default on both planes** (access minimisation) | `%Masked{}` is the field's *normal* value. Tenant (or operator-with-grant) resolves clear; operator-without-grant renders `••••` across UI, JSON, CSV, and logs — by omission. `Samen.Api.PiiResolution` is the single per-plane resolver. | claim-evidence §B C2, §D E2/E3; `Samen.MaskingCase` three-proofs |
 | **Right to erasure by crypto-shred** (GDPR Art. 17) | `Samen.Erasure.shred/2` destroys the subject's per-subject KMS key; their vaulted PII becomes undecryptable across live / replica / rollup / audit / PITR-history at once — key destruction, not row-chasing. | claim-evidence §C D3/D4; driftwood crypto-shred game-day (`reports/T5.4.md`) |
 | **Erasure-completeness attested** (Art. 17 — "left every tier") | `mix samen.verify.erasure_completeness` discovers every out-of-DEK-envelope residue from the *live* schema (blind-index `_bidx` tombstones, `storage_key` blob-delete, custom-object bags, **agent transcripts**, `non_pii!` redaction) and fails closed if any lacks a registered erasure arm. | `samen.verify.erasure_completeness` (ADR-046 §6); claim-evidence §E H4 |
@@ -75,7 +75,7 @@ data controller.
 | **DPA / sub-processor agreements** | Samen ships no DPA. You contract with your KMS / hosting / email sub-processors and maintain your Art. 30 records-of-processing. |
 | **The SOC 2 audit itself** | Samen provides controls an auditor can inspect; it does not provide an auditor, a control period, evidence collection cadence, or a report. Engaging a firm and running the observation window is yours. |
 | **Production hosting & real infra wiring** | Real AWS KMS / DynamoDB / S3 Object-Lock, Neon PITR drills, a physical read replica, live ESP/Stripe keys, and Fly deploys are **operator TODOs** — locally simulated here (§6), not operated. |
-| **Auth provider & identity** | Samen governs the identity you bring; it does not run a login/password/2FA *service*. You wire the OIDC / auth provider. |
+| **Auth provider & identity** | Samen ships a self-serve identity spine (registration, password sign-in, sessions, invitations, TOTP 2FA, OIDC with TOTP step-up) in generated apps. You choose and wire the OIDC provider and the email delivery adapter. |
 | **Incident response & breach notification** | GDPR Art. 33/34 breach notification, monitoring alerting destinations, and IR runbooks are your operational processes. The substrate emits token-blind audit and failure telemetry; routing and responding to it is yours. |
 | **Backup schedule & DR execution** | Samen ships a backup-*verification* job and a PITR game-day *harness*; scheduling real backups, running the real DR drill against your cloud, and owning the RTO/RPO numbers are yours. |
 | **Data residency & tenant contracts** | Region choice, residency commitments, and per-tenant contractual terms are deployment/business decisions. |
@@ -132,8 +132,8 @@ them in one place:
 - **Adapters are fail-honest stubs by design.** Unconfigured SMTP/ESP, S3 storage, and Stripe
   billing return `{:error, :not_configured}` rather than a false success — surfaced, never
   faked.
-- **Auth is host-owned by design.** Samen governs the identity you bring; it does not ship a
-  login/password/2FA service.
+- **Identity provider and mail delivery are the host's.** Samen ships the sign-in, session, invitation and TOTP
+  surfaces; the host chooses the OIDC provider and wires the email adapter that delivers verification and reset mail.
 
 ---
 

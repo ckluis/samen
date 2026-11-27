@@ -1,0 +1,19 @@
+# SABOTAGE: the flags page writes for a member and a viewer
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_flags_test.exs
+# MUST_FAIL: only an admin is offered the controls
+diff --git a/samen_web/lib/samen/web/flags/settings_live.ex b/samen_web/lib/samen/web/flags/settings_live.ex
+index 956b6e86..65bef2bf 100644
+--- a/samen_web/lib/samen/web/flags/settings_live.ex
++++ b/samen_web/lib/samen/web/flags/settings_live.ex
+@@ -198,7 +198,7 @@ defmodule Samen.Web.Flags.SettingsLive do
+   defp guarded_write(socket, fun) do
+     %{samen_mount: mount, org_id: org_id, acting_scope: acting} = socket.assigns
+ 
+-    if TenantActor.admin?(socket) and org_id != nil do
++    if org_id != nil do
+       case fun.(mount, TenantActor.write_scope(mount, org_id, acting)) do
+         {:ok, _flag} -> {:ok, socket}
+         {:error, message} -> {:error, message, socket}

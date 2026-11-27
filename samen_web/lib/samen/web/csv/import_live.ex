@@ -28,6 +28,9 @@ defmodule Samen.Web.Csv.ImportLive do
   alias Samen.Web.Csv
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @upload_ref :csv_upload
   @max_csv_bytes 5_242_880
@@ -46,6 +49,7 @@ defmodule Samen.Web.Csv.ImportLive do
         import_error: nil,
         return_to: nil
       )
+      |> resolve_actor(org_id)
       |> allow_upload(@upload_ref, accept: ~w(.csv text/csv), max_entries: 1, max_file_size: @max_csv_bytes)
 
     {:ok, socket}
@@ -56,59 +60,85 @@ defmodule Samen.Web.Csv.ImportLive do
     org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
 
     {:noreply,
-     assign(socket,
+     socket
+     |> assign(
        org_id: org_id,
        resource_name: Map.get(params, "resource"),
        return_to: return_path(uri),
        report: nil,
        import_error: nil
-     )}
+     )
+     |> resolve_actor(org_id)}
   end
+
+  # ADR-045 §4.4 — WHO imports: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`: the import is a governed create per row, so the person's role is what each row
+  # is judged by. A denial or a failed lookup is a STATE of the page (re-resolved on every `handle_params`): no form,
+  # and an `import` event is a no-op. With no org there is nobody to resolve (`acting_scope` nil: refused as well).
+  defp resolve_actor(socket, nil), do: assign(socket, acting_scope: nil, actor_state: :ok, can_write: false)
+
+  defp resolve_actor(socket, org_id) do
+    {_status, socket} = TenantActor.assign_actor(socket, org_id)
+    socket
+  end
+
+  # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): the
+  # report of an earlier import (its rows) and its error text are not kept.
+  @doc false
+  def actor_lost(socket), do: assign(socket, report: nil, import_error: nil)
 
   # -- events -------------------------------------------------------------------
 
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("validate", _params, socket) do
     {:noreply, socket}
   end
 
   def handle_event("import", _params, socket) do
-    %{samen_mount: mount, org_id: org_id, resource_name: name} = socket.assigns
+    binary =
+      case consume_uploaded_entries(socket, @upload_ref, fn %{path: tmp_path}, _entry -> {:ok, Elixir.File.read(tmp_path)} end) do
+        [{:ok, binary}] -> binary
+        _ -> nil
+      end
 
-    with true <- writable?(mount) || {:error, :plane},
+    {:noreply, import_rows(socket, binary)}
+  end
+
+  @doc """
+  Import the consumed upload's bytes (`nil` when there was no file) through the governed create, as the person the page
+  resolved (`acting_scope`), and return the socket with the report or the error assigned. This is what the `import`
+  event runs; it is public so the write path is driven directly (a test socket has no upload to consume).
+  """
+  def import_rows(socket, binary) do
+    %{samen_mount: mount, resource_name: name, acting_scope: scope} = socket.assigns
+
+    with true <- not is_nil(scope) || {:error, :plane},
+         true <- writable?(mount) || {:error, :plane},
          {:ok, resource} <- Csv.resolve_resource(mount, name || "") do
-      scope = Mount.scope(mount, org_id)
-
       result =
-        socket
-        |> consume_uploaded_entries(@upload_ref, fn %{path: tmp_path}, _entry ->
-          {:ok, Elixir.File.read(tmp_path)}
-        end)
-        |> case do
-          [{:ok, binary}] -> Csv.import(resource, scope, csv: binary)
-          _ -> {:error, :no_file}
+        case binary do
+          nil -> {:error, :no_file}
+          binary -> Csv.import(resource, scope, csv: binary)
         end
 
       case result do
         {:ok, report} ->
-          {:noreply, assign(socket, report: report, import_error: nil)}
+          assign(socket, report: report, import_error: nil)
 
         {:error, {:bad_mapping, cols}} ->
-          {:noreply,
-           assign(socket,
-             report: nil,
-             import_error: "rejected: column(s) not importable: #{Enum.join(cols, ", ")}"
-           )}
+          assign(socket,
+            report: nil,
+            import_error: "rejected: column(s) not importable: #{Enum.join(cols, ", ")}"
+          )
 
         {:error, reason} ->
-          {:noreply, assign(socket, report: nil, import_error: "import failed: #{inspect(reason)}")}
+          assign(socket, report: nil, import_error: "import failed: #{inspect(reason)}")
       end
     else
-      {:error, :plane} ->
-        {:noreply, assign(socket, import_error: "import not permitted on this plane")}
-
-      {:error, :unknown_resource} ->
-        {:noreply, assign(socket, import_error: "unknown resource")}
+      {:error, :plane} -> assign(socket, import_error: "import not permitted on this plane")
+      {:error, :unknown_resource} -> assign(socket, import_error: "unknown resource")
     end
   end
 
@@ -127,9 +157,12 @@ defmodule Samen.Web.Csv.ImportLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if CurrentOrg.no_org?(@samen_mount, nil) and is_nil(@org_id) do %>
+        <%= cond do %>
+        <% CurrentOrg.no_org?(@samen_mount, nil) and is_nil(@org_id) -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Import" nothing="there is nothing to import into" />
+        <% true -> %>
           <div class="wrap">
             <div id="csv-import-panel">
               <div class="gtitle">
@@ -137,7 +170,7 @@ defmodule Samen.Web.Csv.ImportLive do
                 <span class="lane">every row through the governed create — bad mappings are rejected whole-file</span>
               </div>
 
-              <%= if writable?(@samen_mount) do %>
+              <%= if @can_write do %>
                 <form id="csv-import-form" phx-submit="import" phx-change="validate">
                   <.live_file_input upload={@uploads.csv_upload} id="csv-import-input" />
 

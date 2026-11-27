@@ -9,6 +9,14 @@ defmodule Driftwood.DataCase do
     end
   end
 
+  @doc "A fixed-member tenant scope over `org_id`: a SYSTEM context for seeding and reading in tests (a page acts as the person)."
+  def broker_scope(org_id) do
+    %Samen.Scope{actor: %{id: "broker:#{org_id}", org_id: org_id, role: :member, kind: :tenant, plane: :tenant}}
+  end
+
+  @doc "The assigns a page that is already acting as a fixed member holds (for a hand-built socket)."
+  def acting_assigns(org_id), do: [acting_scope: broker_scope(org_id), actor_state: :ok, can_write: true]
+
   setup do
     Samen.TestSandbox.shared!(Driftwood.Repo)
 

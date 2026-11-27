@@ -1,0 +1,72 @@
+# SABOTAGE: The pipeline, calendar, dashboard, mailbox and gallery lenses act on the fixed member scope 
+#   again instead of the signed-in person's role
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_crm_work_test.exs
+# MUST_FAIL: every page of the CRM remainder and Work acts with the RESOLVED role
+diff --git a/samen_web/lib/samen/web/crm/calendar_live.ex b/samen_web/lib/samen/web/crm/calendar_live.ex
+index 0b8c793..177695b 100644
+--- a/samen_web/lib/samen/web/crm/calendar_live.ex
++++ b/samen_web/lib/samen/web/crm/calendar_live.ex
+@@ -86,7 +86,7 @@ defmodule Samen.Web.CRM.CalendarLive do
+   # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+   # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read.
+   def load(socket, org_id, month) do
+-    case TenantActor.assign_actor(socket, org_id) do
++    case {:ok, Phoenix.Component.assign(socket, acting_scope: Samen.Web.Mount.scope(socket.assigns.samen_mount, org_id), actor_state: :ok)} do
+       {:ok, socket} -> load_for(socket, org_id, month, socket.assigns.acting_scope)
+       {:refused, socket} -> load_refused(socket, org_id, month)
+     end
+diff --git a/samen_web/lib/samen/web/crm/contacts_gallery_live.ex b/samen_web/lib/samen/web/crm/contacts_gallery_live.ex
+index 44c4efc..19af596 100644
+--- a/samen_web/lib/samen/web/crm/contacts_gallery_live.ex
++++ b/samen_web/lib/samen/web/crm/contacts_gallery_live.ex
+@@ -83,7 +83,7 @@ defmodule Samen.Web.CRM.ContactsGalleryLive do
+   # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+   # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read.
+   def load(socket, org_id, after_id) do
+-    case TenantActor.assign_actor(socket, org_id) do
++    case {:ok, Phoenix.Component.assign(socket, acting_scope: Samen.Web.Mount.scope(socket.assigns.samen_mount, org_id), actor_state: :ok)} do
+       {:ok, socket} -> load_for(socket, org_id, after_id, socket.assigns.acting_scope)
+       {:refused, socket} -> load_refused(socket, org_id, after_id)
+     end
+diff --git a/samen_web/lib/samen/web/crm/dashboard_live.ex b/samen_web/lib/samen/web/crm/dashboard_live.ex
+index 4a3c775..d07a6d6 100644
+--- a/samen_web/lib/samen/web/crm/dashboard_live.ex
++++ b/samen_web/lib/samen/web/crm/dashboard_live.ex
+@@ -97,7 +97,7 @@ defmodule Samen.Web.CRM.DashboardLive do
+   # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+   # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read.
+   def load(socket, org_id) do
+-    case TenantActor.assign_actor(socket, org_id) do
++    case {:ok, Phoenix.Component.assign(socket, acting_scope: Samen.Web.Mount.scope(socket.assigns.samen_mount, org_id), actor_state: :ok)} do
+       {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
+       {:refused, socket} -> load_refused(socket, org_id)
+     end
+diff --git a/samen_web/lib/samen/web/crm/mailbox_live.ex b/samen_web/lib/samen/web/crm/mailbox_live.ex
+index 0b3d71e..c768285 100644
+--- a/samen_web/lib/samen/web/crm/mailbox_live.ex
++++ b/samen_web/lib/samen/web/crm/mailbox_live.ex
+@@ -73,7 +73,7 @@ defmodule Samen.Web.CRM.MailboxLive do
+   # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+   # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read.
+   def load(socket, org_id) do
+-    case TenantActor.assign_actor(socket, org_id) do
++    case {:ok, Phoenix.Component.assign(socket, acting_scope: Samen.Web.Mount.scope(socket.assigns.samen_mount, org_id), actor_state: :ok)} do
+       {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
+       {:refused, socket} -> load_refused(socket, org_id)
+     end
+diff --git a/samen_web/lib/samen/web/crm/pipeline_live.ex b/samen_web/lib/samen/web/crm/pipeline_live.ex
+index 51b9564..702b6de 100644
+--- a/samen_web/lib/samen/web/crm/pipeline_live.ex
++++ b/samen_web/lib/samen/web/crm/pipeline_live.ex
+@@ -88,7 +88,7 @@ defmodule Samen.Web.CRM.PipelineLive do
+   # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+   # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read.
+   def load(socket, org_id) do
+-    case TenantActor.assign_actor(socket, org_id) do
++    case {:ok, Phoenix.Component.assign(socket, acting_scope: Samen.Web.Mount.scope(socket.assigns.samen_mount, org_id), actor_state: :ok)} do
+       {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
+       {:refused, socket} -> load_refused(socket, org_id)
+     end

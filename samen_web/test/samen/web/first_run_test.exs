@@ -7,7 +7,7 @@ defmodule Samen.Web.FirstRunTest do
       invite a teammate*. Once ANY core row exists the card DISAPPEARS (the second
       half of AC-G5-2 — anti-tautology: the same render that showed the card now
       must not).
-    * OPERATOR plane — n/a by design: `first_run?/2` is FALSE BY CONSTRUCTION on an
+    * OPERATOR plane — n/a by design: `first_run?/3` is FALSE BY CONSTRUCTION on an
       operator mount (red path), and the operator's designed first-run surface is the
       Accounts empty state (asserted in `empty_states_sweep_test.exs`).
   """
@@ -56,11 +56,14 @@ defmodule Samen.Web.FirstRunTest do
     assert html =~ "First Real Contact"
   end
 
-  test "FirstRun.first_run?/2 detects zero rows across the CRM core resources (person AND company)" do
+  # the acting person's scope (the disarmed dev posture)
+  defp scope_for(mount, org_id), do: Samen.Web.TenantActor.system_scope(mount, org_id)
+
+  test "FirstRun.first_run?/3 detects zero rows across the CRM core resources (person AND company)" do
     mount = build_mount(:crm)
     org_id = Ash.UUID.generate()
 
-    assert FirstRun.first_run?(mount, org_id)
+    assert FirstRun.first_run?(mount, org_id, scope_for(mount, org_id))
 
     # A COMPANY row alone (person still zero) already ends first-run — the checklist is
     # "no data yet", not "no contacts yet".
@@ -68,7 +71,7 @@ defmodule Samen.Web.FirstRunTest do
     |> Ash.Changeset.for_create(:create, %{org_id: org_id, name: "Real Co"}, authorize?: false)
     |> Ash.create!()
 
-    refute FirstRun.first_run?(mount, org_id)
+    refute FirstRun.first_run?(mount, org_id, scope_for(mount, org_id))
   end
 
   # ---------------------------------------------------------------------------
@@ -78,8 +81,8 @@ defmodule Samen.Web.FirstRunTest do
   test "RED PATH: the operator plane NEVER gets the tenant checklist — even over a zero-data org" do
     org_id = Ash.UUID.generate()
 
-    # first_run?/2 is false BY CONSTRUCTION on an operator mount…
-    refute FirstRun.first_run?(build_mount(:crm, plane: :operator, target_org_id: org_id), org_id)
+    # first_run?/3 is false BY CONSTRUCTION on an operator mount…
+    refute FirstRun.first_run?(build_mount(:crm, plane: :operator, target_org_id: org_id), org_id, scope_for(build_mount(:crm, plane: :operator, target_org_id: org_id), org_id))
 
     # …and the rendered operator page carries no first-run card (belt: writable? also gates).
     html = render_contacts(org_id, plane: :operator, target_org_id: org_id)
@@ -87,7 +90,7 @@ defmodule Samen.Web.FirstRunTest do
   end
 
   test "RED PATH: no org resolved → no first-run card (and no crash)" do
-    refute FirstRun.first_run?(build_mount(:crm), nil)
+    refute FirstRun.first_run?(build_mount(:crm), nil, nil)
     refute render_live(ContactsLive, build_mount(:crm), [nil]) =~ ~s(id="first-run")
   end
 end

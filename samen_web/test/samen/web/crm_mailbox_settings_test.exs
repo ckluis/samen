@@ -11,6 +11,7 @@ defmodule Samen.Web.CRMMailboxSettingsTest do
   proven MUTUALLY EXCLUSIVE (each state's copy is absent from the other two), so a
   regression that collapses them cannot pass.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.Mailbox
@@ -141,7 +142,7 @@ defmodule Samen.Web.CRMMailboxSettingsTest do
     assert html =~ "mailbox-#{connection.id}"
     assert html =~ @mailbox_address
     assert html =~ "connected"
-    refute html =~ "vt_"
+    refute_vault_token(html)
     # Neither empty state is shown when a mailbox really is connected.
     refute html =~ @not_configured
     refute html =~ @none_connected
@@ -173,7 +174,7 @@ defmodule Samen.Web.CRMMailboxSettingsTest do
     assert html =~ "••••"
     # …with the 🔒 address absent.
     refute html =~ @mailbox_address
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   # ==========================================================================

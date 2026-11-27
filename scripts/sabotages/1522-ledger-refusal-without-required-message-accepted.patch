@@ -1,0 +1,20 @@
+# SABOTAGE: a listed patch refused WITHOUT the required message is still recorded as killed, so any compile 
+#   error passes for the rule it names
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: LEDGER a mutation refused at build time is killed only when it is listed
+diff --git a/scripts/sabotage.sh b/scripts/sabotage.sh
+index a20c823c..569b2f00 100755
+--- a/scripts/sabotage.sh
++++ b/scripts/sabotage.sh
+@@ -524,7 +524,7 @@ for patch in "${selected[@]}"; do
+     fi
+     # the compiler may colour its output: match on the plain text
+     sed $'s/\x1b\\[[0-9;]*m//g' "$out" > "$WORK/refusal_plain"
+-    if grep -qF -- "$required" "$WORK/refusal_plain"; then
++    if grep -qF -- "$required" "$WORK/refusal_plain" || true; then
+       echo "    KILLED (build refused: $required)"
+       killed_by_refusal=1
+       KILLED_BY_REFUSAL=$((KILLED_BY_REFUSAL + 1))

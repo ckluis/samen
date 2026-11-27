@@ -43,16 +43,14 @@
 # MUST_FAIL: every attribute's storage source is `<abbrev>_<name>`; logical name untouched
 # MUST_FAIL: the generator's own domain predicate refuses every PAN/CVC-shaped name, and admits ordinary ones
 diff --git a/samen_core/test/abbrev_property_test.exs b/samen_core/test/abbrev_property_test.exs
-index 876f9cd..95310a5 100644
+index bb8d9e0f..85132af7 100644
 --- a/samen_core/test/abbrev_property_test.exs
 +++ b/samen_core/test/abbrev_property_test.exs
-@@ -54,8 +54,7 @@ defmodule Samen.AbbrevPropertyTest do
-   # at the bottom of this file, and independently by
-   # `test/no_pan_columns_red_path_test.exs`'s own compile-refusal reds.
+@@ -60,7 +60,6 @@ defmodule Samen.AbbrevPropertyTest do
+   # by the meaning-declaration tests.
    defp legal_attr_name?(name) when is_atom(name) do
--    name not in @reserved and
--      not Samen.Verifiers.NoPanColumns.pan_shaped?(Atom.to_string(name))
-+    name not in @reserved
+     name not in @reserved and
+-      not Samen.Verifiers.NoPanColumns.pan_shaped?(Atom.to_string(name)) and
+       not Samen.AI.VtSentinel.in_string?(Atom.to_string(name))
    end
  
-   defp attr_name do

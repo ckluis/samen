@@ -124,7 +124,7 @@ defmodule Samen.Delivery.RenderedEmail do
                 "provider payload field #{inspect(field)} is a %Samen.Masked{} — a masked/" <>
                   "unresolved value must NEVER be transmitted to an ESP (INV-1)"
 
-        is_binary(value) and String.contains?(value, "vt_") ->
+        is_binary(value) and String.contains?(value, "vt_") -> # bare-vt_-ok: production refusal: any vt_ in a provider payload is refused, not a test assertion
           raise ArgumentError,
                 "provider payload field #{inspect(field)} contains a vault token (vt_) — a " <>
                   "vault reference must NEVER leak to an ESP (INV-1)"

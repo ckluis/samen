@@ -1,0 +1,19 @@
+# SABOTAGE: the analytics page does not carry a refused actor's state
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_reads_test.exs
+# MUST_FAIL: NAVIGATION: a suspended member's page is the denied state
+diff --git a/samen_web/lib/samen/web/tenant/analytics_live.ex b/samen_web/lib/samen/web/tenant/analytics_live.ex
+index cf1441d1..c6a038d2 100644
+--- a/samen_web/lib/samen/web/tenant/analytics_live.ex
++++ b/samen_web/lib/samen/web/tenant/analytics_live.ex
+@@ -48,7 +48,7 @@ defmodule Samen.Web.Tenant.AnalyticsLive do
+   def load(socket, org_id) do
+     case TenantActor.assign_actor(socket, org_id) do
+       {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
+-      {:refused, socket} -> load_refused(socket, org_id)
++      {:refused, socket} -> load_refused(assign(socket, actor_state: :ok), org_id)
+     end
+   end
+ 

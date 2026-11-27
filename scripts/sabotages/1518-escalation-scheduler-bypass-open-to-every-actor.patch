@@ -1,0 +1,19 @@
+# SABOTAGE: the Escalation trigger's bypass authorizes any caller instead of only AshOban's own interaction
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/system_actions_authz_test.exs
+# MUST_FAIL: Workflow.dispatch_due, Reminder.fire and Escalation.advance_step refuse every tenant role and change nothing
+diff --git a/samen_core/lib/samen/scopes/automation/blueprint.ex b/samen_core/lib/samen/scopes/automation/blueprint.ex
+index 7130ade2..d69822b7 100644
+--- a/samen_core/lib/samen/scopes/automation/blueprint.ex
++++ b/samen_core/lib/samen/scopes/automation/blueprint.ex
+@@ -616,7 +616,7 @@ defmodule Samen.Scopes.Automation.Blueprint do
+           # The AshOban `:escalation_due` trigger (no actor): `:due_scan` is a read with no org filter. An actor of any
+           # role is refused.
+           bypass action([:advance_step, :due_scan]) do
+-            authorize_if(AshOban.Checks.AshObanInteraction)
++            authorize_if(always())
+           end
+ 
+           policy action([:advance_step, :due_scan]) do

@@ -21,6 +21,7 @@ defmodule Driftwood.CrmUiTest do
   which builds the identical `Samen.Web.Mount` the router builds and renders the framework
   LiveView over it — the exact code path the mounted route runs.
   """
+  import Samen.VaultTokenAssert
   use Driftwood.DataCase, async: false
 
   alias Driftwood.Seeds
@@ -59,7 +60,7 @@ defmodule Driftwood.CrmUiTest do
     assert html =~ "Pipeline value"
 
     # Non-PII: no vault token leaks; companies have no PII to mask.
-    refute html =~ "vt_"
+    refute_vault_token(html)
     refute html =~ "••••"
   end
 
@@ -76,7 +77,7 @@ defmodule Driftwood.CrmUiTest do
     assert html =~ "BR-44"
     assert html =~ "Pipeline value"
 
-    refute html =~ "vt_"
+    refute_vault_token(html)
     refute html =~ "••••"
   end
 
@@ -120,7 +121,7 @@ defmodule Driftwood.CrmUiTest do
              "tenant plane did not render a contact phone in the clear (composite decode regressed)"
 
       # The vault token itself NEVER renders (plaintext came through the decrypt chokepoint).
-      refute html =~ "vt_"
+      refute_vault_token(html)
     end
 
     test "OPERATOR/impersonation plane: the SAME contact renders •••• (no plaintext leak)", %{org_id: org_id} do
@@ -138,7 +139,7 @@ defmodule Driftwood.CrmUiTest do
       refute html =~ "dana.whitfield", "operator plane leaked contact's email in plaintext"
 
       # MUST NOT render vault tokens.
-      refute html =~ "vt_"
+      refute_vault_token(html)
     end
 
     test "CROSS-ORG: a tenant mount for a DIFFERENT org sees ZERO contacts (org-scope isolation)", %{org_id: _org_id} do
@@ -149,7 +150,7 @@ defmodule Driftwood.CrmUiTest do
       # No PII from the scenario org — neither clear nor masked.
       refute html =~ "Dana"
       refute html =~ "Whitfield"
-      refute html =~ "vt_"
+      refute_vault_token(html)
     end
   end
 end

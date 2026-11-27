@@ -34,13 +34,13 @@ Use the driver; never hand-segment `ci.sh`, never background a run and poll it (
   new` — `git add` your fix FIRST, make ONLY the sabotage edit unstaged, then run it. `MUST_FAIL` is a literal test
   name, never interpolated. A patch that stopped applying: `scripts/sabotage reanchor <n>`; never delete it.
   Replay: `scripts/sabotage.sh` (filters) / `scripts/sabotage-lanes.sh` (N lanes). Unfiltered runs need `scripts/ci full`.
-- Counts are generated (`scripts/counts --write`, never by hand): <!--count:sabotages-->1379<!--/count--> sabotages
-  (driver red paths `scripts/ci_test.sh` <!--count:driver_sabotages-->496–1232<!--/count-->), watch-list <!--count:watchlist_modules-->23<!--/count-->
-  modules / <!--count:watchlist_mutants-->471<!--/count--> mutants, corpus <!--count:corpus_targets-->395<!--/count--> targets /
-  <!--count:corpus_mutants-->7,191<!--/count--> mutants.
+- Counts are generated (`scripts/counts --write`, never by hand): <!--count:sabotages-->1561<!--/count--> sabotages
+  (driver red paths `scripts/ci_test.sh` <!--count:driver_sabotages-->496–1545<!--/count-->), watch-list <!--count:watchlist_modules-->23<!--/count-->
+  modules / <!--count:watchlist_mutants-->471<!--/count--> mutants, corpus <!--count:corpus_targets-->447<!--/count--> targets /
+  <!--count:corpus_mutants-->8,041<!--/count--> mutants.
 - Toolchain floor `.tool-versions` (Elixir 1.20.4 / OTP 29.1.1); the `toolchain` step fails on older — raise the pin
   when upgrading. Prerequisite: Postgres WITH `pgvector` (`brew install pgvector`; ADR-043 §7.1/M3) — else the
-  samen_core suite fails at setup with "pgvector not installed".
+  samen_core suite fails at setup with "pgvector not installed". `node` must be on `PATH` (`confirm_interlock_test.exs`).
 - Tests needing a shared Ecto sandbox call `Samen.TestSandbox.shared!(Repo)`; a raw `Sandbox.mode(_, {:shared, _})` fails
   `Samen.TestSandboxGuardTest` (it made the test process the owner: the `owner exited` flake). A test whose writes must
   COMMIT calls `Samen.TestSandbox.auto!(Repo)`; a raw `Sandbox.mode(_, :auto)` fails the same guard (nothing switched it

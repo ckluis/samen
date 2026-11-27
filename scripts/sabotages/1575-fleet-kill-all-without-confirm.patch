@@ -1,0 +1,18 @@
+# SABOTAGE: The fleet kill-all button loses its data-confirm interlock and fires on one click
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/fleet_directives_kill_all_test.exs
+# MUST_FAIL: the kill-all control carries the confirm interlock
+diff --git a/samen_web/lib/samen/web/operator/fleet_directives_live.ex b/samen_web/lib/samen/web/operator/fleet_directives_live.ex
+index bcbe95b6..88ce374f 100644
+--- a/samen_web/lib/samen/web/operator/fleet_directives_live.ex
++++ b/samen_web/lib/samen/web/operator/fleet_directives_live.ex
+@@ -130,7 +130,6 @@ defmodule Samen.Web.Operator.FleetDirectivesLive do
+             phx-click="publish_kill"
+             phx-value-target="all"
+             phx-disable-with="Publishing kill switch…"
+-            data-confirm="Publish the kill switch to every product? It takes effect on each product's next fleet sync."
+             id="publish-kill-all"
+             class="btn"
+           >

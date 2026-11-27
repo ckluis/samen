@@ -1,0 +1,20 @@
+# SABOTAGE: link_billing_customer registers the custom field before the update policy is asked, so a 
+#   refused viewer request still writes the registration
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_crm_work_test.exs
+# MUST_FAIL: a VIEWER's refused billing-link request registers no custom field
+diff --git a/samen_web/lib/samen/web/crm/reads.ex b/samen_web/lib/samen/web/crm/reads.ex
+index 02804feb..e85cd633 100644
+--- a/samen_web/lib/samen/web/crm/reads.ex
++++ b/samen_web/lib/samen/web/crm/reads.ex
+@@ -322,6 +322,8 @@ defmodule Samen.Web.CRM.Reads do
+ 
+       # AUTHORIZE FIRST. Registering the field is itself a write (the org's custom-field catalog), run with the
+       # kernel's own privilege: a request the update policy would refuse must not leave that write behind.
++      :ok = Samen.CRM.AccountLink.ensure_registered!(org_id, company_resource, mount.repo)
++
+       if Ash.can?({company, :update}, scope, maybe_is: false) do
+         :ok = Samen.CRM.AccountLink.ensure_registered!(org_id, company_resource, mount.repo)
+ 

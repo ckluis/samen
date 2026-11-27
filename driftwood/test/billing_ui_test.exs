@@ -13,6 +13,7 @@ defmodule Driftwood.BillingUiTest do
        a. TENANT plane — a customer's billing_name renders IN THE CLEAR.
        b. OPERATOR plane — the SAME customer renders •••• and plaintext is ABSENT.
   """
+  import Samen.VaultTokenAssert
   use Driftwood.DataCase, async: false
 
   alias Driftwood.Seeds
@@ -45,7 +46,7 @@ defmodule Driftwood.BillingUiTest do
     # 6 customers seeded → 6 subscription rows.
     assert html =~ "subscription-row"
 
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   test "the mounted /billing/invoices renders Driftwood's invoices", %{org_id: org_id} do
@@ -59,7 +60,7 @@ defmodule Driftwood.BillingUiTest do
     assert html =~ "INV-"
     assert html =~ "invoice-row"
 
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   test "the mounted /billing/plans renders Driftwood's plans", %{org_id: org_id} do
@@ -72,7 +73,7 @@ defmodule Driftwood.BillingUiTest do
     assert html =~ "plan-row"
 
     # Plans are non-PII.
-    refute html =~ "vt_"
+    refute_vault_token(html)
     refute html =~ "••••"
   end
 
@@ -91,7 +92,7 @@ defmodule Driftwood.BillingUiTest do
       # "Asheville Brewing Supply Inc" is the first billing customer seeded (the default
       # Blue Ridge spec's first shipper).
       assert html =~ "Asheville", "tenant plane did not render billing_name in the clear"
-      refute html =~ "vt_"
+      refute_vault_token(html)
     end
 
     test "OPERATOR/impersonation plane: customer billing_name renders •••• (no plaintext leak)", %{org_id: org_id} do
@@ -108,7 +109,7 @@ defmodule Driftwood.BillingUiTest do
       refute html =~ "Asheville Brewing Supply Inc", "operator plane leaked customer billing_name in plaintext"
       refute html =~ "Carolina Textile", "operator plane leaked customer billing_name in plaintext"
 
-      refute html =~ "vt_"
+      refute_vault_token(html)
     end
 
     test "CROSS-ORG: a tenant mount for a DIFFERENT org sees ZERO billing rows (org-scope isolation)", %{org_id: _org_id} do
@@ -118,7 +119,7 @@ defmodule Driftwood.BillingUiTest do
 
       refute html =~ "Asheville"
       refute html =~ "Carolina Textile"
-      refute html =~ "vt_"
+      refute_vault_token(html)
     end
   end
 end

@@ -17,7 +17,7 @@ defmodule Samen.Gen.Post do
   ## What `mix samen.gen.scope` emits (into an existing app dir)
 
   A new authored **domain module** (`<App>.<Scope>` — an `Ash.Domain`), registered in
-  BOTH `:ash_domains` config lists (the app's own and `:samen_core`, so the verifier
+  BOTH config lists (the app's own `ash_domains` and `:samen_core, :host_domains`, so the verifier
   gate scans it). A scope is a namespace the vertical author owns; `gen.resource` then
   lands Tier-0 resources into it. The scope module is emitted EMPTY (no resources yet)
   and `gen.resource` appends resources + wires the domain's `resources do … end`.
@@ -114,7 +114,7 @@ defmodule Samen.Gen.Post do
   end
 
   @doc """
-  Write the scope domain module + register it in both `:ash_domains` lists + emit the
+  Write the scope domain module + register it in both domain lists (`ash_domains` + `:host_domains`) + emit the
   app-local AUTHN-COVERAGE GUARD test (W4-H2 defense-in-depth; idempotent — written once,
   on the first `gen.scope`, left as-is on later runs). The guard is the failing-until-wired
   half of the ergonomics fix: the moment an author adds a business-domain tenant mount
@@ -530,7 +530,7 @@ defmodule Samen.Gen.Post do
     {app_module, otp_app}
   end
 
-  # Register a new domain in BOTH `:ash_domains` lists in config/config.exs (the app's
+  # Register a new domain in BOTH domain lists in config/config.exs (the app's
   # own ecto/ash registration + the `:samen_core` list the verifier gate scans). The
   # edit is idempotent — a domain already listed is left as-is.
   defp register_domain!(app_dir, _otp_app, app_module, domain_module) do
@@ -540,7 +540,7 @@ defmodule Samen.Gen.Post do
     if String.contains?(src, domain_module) do
       :ok
     else
-      # Two `:ash_domains` lists (the app's own + the `:samen_core` gate list). Both emit
+      # Two lists (the app's own `ash_domains` + the `:samen_core, :host_domains` gate list). Both emit
       # in single-line (headless) OR multi-line (--web) form; the LAST element is the app's
       # last domain. Append the new domain as the last element of BOTH lists, format-
       # agnostically: find each list body, append the domain, and re-emit.
@@ -554,9 +554,9 @@ defmodule Samen.Gen.Post do
   # config source, handling both single-line and multi-line list forms. Fails closed if
   # the expected two lists are not both found.
   defp insert_into_ash_domains_lists(src, config, _app_module, domain_module) do
-    # Match `ash_domains: [ … ]` (own list) and `:ash_domains, [ … ]` (samen_core list),
+    # Match `ash_domains: [ … ]` (own list) and `:host_domains, [ … ]` (samen_core list),
     # non-greedy over the bracket body (which may span lines but never nests a `[`).
-    re = ~r/(ash_domains(?::\s*|,\s*)\[)([^\[\]]*?)(\])/s
+    re = ~r/((?:ash_domains|host_domains)(?::\s*|,\s*)\[)([^\[\]]*?)(\])/s
 
     {new_src, count} =
       Regex.replace(re, src, fn _whole, open, body, close ->
@@ -584,7 +584,7 @@ defmodule Samen.Gen.Post do
 
     if count < 2 do
       raise ArgumentError,
-            "expected two `ash_domains` lists in #{config} to register the new domain; " <>
+            "expected an `ash_domains` and a `host_domains` list in #{config} to register the new domain; " <>
               "found #{count}."
     end
 

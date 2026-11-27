@@ -14,6 +14,7 @@ defmodule Samen.Web.ReadsHonestFailureP3Test do
   Masking: the operator plane stays masked — an error state carries no body, no name and no `vt_`
   token, and the same page with the fault cleared proves the proof is not vacuous.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   import ExUnit.CaptureLog
@@ -56,7 +57,7 @@ defmodule Samen.Web.ReadsHonestFailureP3Test do
     assert html =~ "error-state"
     assert html =~ ~s(role="alert")
     assert html =~ "Nothing was lost"
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   defp refute_error_state(html), do: refute(html =~ "error-state")
@@ -421,6 +422,25 @@ defmodule Samen.Web.ReadsHonestFailureP3Test do
       assert rendered =~ "Why this score"
     end
 
+    test "a CSRF token that happens to contain vt_ does not fail the error-state scan (the vt_ flake, forced)", %{
+      mount: mount,
+      account_id: id
+    } do
+      # The workspace switcher renders `Plug.CSRFProtection.get_csrf_token_for/1`, a random URL-safe base64 string
+      # memoized per process under this key. About 7 in 100 000 fresh processes draw one containing `vt_`, and the
+      # bare `refute html =~ "vt_"` then failed once and passed on the rerun. Force that draw.
+      forced = "UDsgR3RwGjsfFU0zDQwJAkIwByBELCMeevxwCBiwyT5QxAjvt_ie7DRh"
+      Process.put(:plug_masked_csrf_token, forced)
+      inject_read_faults([:operator_account_detail])
+
+      socket = failing(fn -> AccountDetailLive.load(socket_for(mount), id) end)
+      rendered = html(AccountDetailLive, socket)
+
+      assert rendered =~ ~s(name="_csrf_token" value="#{forced}"), "the page must carry the forced token"
+      assert rendered =~ "vt_", "control: the bare substring check this replaces WOULD have failed here" # bare-vt_-ok: the control that the OLD check fails here
+      assert_error_state(rendered)
+    end
+
     test "a malformed or unknown id is 'not found' (not an outage), with no failure logged", %{mount: mount} do
       log =
         capture_log(fn ->
@@ -647,7 +667,7 @@ defmodule Samen.Web.ReadsHonestFailureP3Test do
       assert rendered =~ "events-error"
       refute rendered =~ "No delivery events."
       refute rendered =~ "suppressions-error"
-      refute rendered =~ "vt_"
+      refute_vault_token(rendered)
     end
 
     test "a failed suppressions read makes the per-event 'suppressed?' flag UNKNOWN, never a quiet dash", %{org_id: org_id} do

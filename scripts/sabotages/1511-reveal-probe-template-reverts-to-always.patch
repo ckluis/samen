@@ -1,0 +1,19 @@
+# SABOTAGE: a generator template emits its reveal probe policy as authorize_if(always()) again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_probe_authz_test.exs
+# MUST_FAIL: no template takes an actor_id, answers always(), or carries its own copy of the probe
+diff --git a/samen_core/priv/templates/vertical_ex_api.eex b/samen_core/priv/templates/vertical_ex_api.eex
+index 224f6ffd..0bbb2d6d 100644
+--- a/samen_core/priv/templates/vertical_ex_api.eex
++++ b/samen_core/priv/templates/vertical_ex_api.eex
+@@ -156,7 +156,7 @@ defmodule <%= module %>.Vertical.Record do
+     end
+ 
+     policy action(:reveal_<%= abbrev %>) do
+-      authorize_if(actor_present())
++      authorize_if(always())
+     end
+   end
+ end

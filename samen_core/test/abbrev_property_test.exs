@@ -52,9 +52,16 @@ defmodule Samen.AbbrevPropertyTest do
   # and the refusal itself stays pinned — deterministically by the `:cvv` boundary test
   # at the bottom of this file, and independently by
   # `test/no_pan_columns_red_path_test.exs`'s own compile-refusal reds.
+  #
+  # The third way out is the vault-token sentinel: `Samen.Catalog.Transformers.MeaningDeclarations` refuses a resource whose
+  # catalog meaning text carries the literal `vt_` (an attribute NAME is one: `:ct26vt_454`, which this property generated),
+  # because the AI chokepoint refuses any metadata string containing it. The generator's domain asks the SAME predicate the
+  # transformer calls (`Samen.AI.VtSentinel.in_string?/1`). The prefix assertions are untouched, and the refusal stays pinned
+  # by the meaning-declaration tests.
   defp legal_attr_name?(name) when is_atom(name) do
     name not in @reserved and
-      not Samen.Verifiers.NoPanColumns.pan_shaped?(Atom.to_string(name))
+      not Samen.Verifiers.NoPanColumns.pan_shaped?(Atom.to_string(name)) and
+      not Samen.AI.VtSentinel.in_string?(Atom.to_string(name))
   end
 
   defp attr_name do
@@ -268,6 +275,18 @@ defmodule Samen.AbbrevPropertyTest do
       # The injected-core-column half of the domain is still enforced, unchanged.
       for core <- @reserved do
         refute legal_attr_name?(core)
+      end
+    end
+
+    test "a name carrying the vault-token sentinel is outside the generator's domain (the catalog refuses it); ordinary ones stay" do
+      # `:ct26vt_454` is the name the prefix property generated and `MeaningDeclarations` refused.
+      for forbidden <- [:ct26vt_454, :vt_x, :a_vt_] do
+        assert Samen.AI.VtSentinel.in_string?(Atom.to_string(forbidden))
+        refute legal_attr_name?(forbidden), "#{inspect(forbidden)} must be outside the prefix property's generator domain"
+      end
+
+      for legal <- [:vt, :v_t, :avt, :notes, :event_type] do
+        assert legal_attr_name?(legal), "#{inspect(legal)} carries no `vt_` and must stay in the domain"
       end
     end
   end

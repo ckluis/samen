@@ -74,7 +74,7 @@ defmodule Samen.DataMap do
 
       _ ->
         opts
-        |> Keyword.get(:domains, Application.get_env(:samen_core, :ash_domains, []))
+        |> Keyword.get(:domains, Samen.HostDomains.registry())
         |> Samen.Catalog.resource_modules()
     end
   end

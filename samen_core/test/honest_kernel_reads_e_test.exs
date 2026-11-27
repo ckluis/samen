@@ -6,6 +6,7 @@ defmodule Samen.HonestKernelReadsETest do
   call, by name, value-free (no plaintext, no `vt_` token). Each RED case injects a real failure and pairs with a
   positive control through the same seam.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
@@ -160,7 +161,7 @@ defmodule Samen.HonestKernelReadsETest do
       assert [%{cause: "unavailable"}] = drain_failures(:pii_resolution_reveal)
 
       refute log =~ "SECRET"
-      refute log =~ "vt_"
+      refute_vault_token(log)
     end
 
     test "RED: a reveal that fails with an error CARRYING a value and a token is reported by module name only (never message, value or token)" do
@@ -295,7 +296,7 @@ defmodule Samen.HonestKernelReadsETest do
       msg = PrefetchDownRepo.message(tokens)
       # the injected failure really carries what a leak would show: the bound tokens and a value
       assert_raise DBConnection.ConnectionError, msg, fn -> PrefetchDownRepo.all(nil) end
-      assert msg =~ "vt_" and msg =~ @leak
+      assert msg =~ "vt_" and msg =~ @leak # bare-vt_-ok: the message names the vt_ marker; it is not a token in a page
 
       log =
         capture_log(fn ->
@@ -308,7 +309,7 @@ defmodule Samen.HonestKernelReadsETest do
       assert log =~ "cause=DBConnection.ConnectionError"
       assert [%{cause: "DBConnection.ConnectionError"}] = drain_failures(:pii_resolution_vault_rows)
       refute log =~ "SECRET"
-      refute log =~ "vt_"
+      refute_vault_token(log)
       refute log =~ @leak
       refute log =~ "connection not available"
       for token <- tokens, do: refute(log =~ token)
@@ -371,10 +372,10 @@ defmodule Samen.HonestKernelReadsETest do
       assert [%{cause: "DBConnection.ConnectionError"}] = drain_failures(:pii_resolution_declared_keys)
       msg = CatalogDownRepo.message()
       # the injected failure really carries what a leak would show
-      assert msg =~ @secret and msg =~ "vt_" and msg =~ "gold"
+      assert msg =~ @secret and msg =~ "vt_" and msg =~ "gold" # bare-vt_-ok: the message names the vt_ marker; it is not a token in a page
       refute log =~ @secret
       refute log =~ "gold"
-      refute log =~ "vt_"
+      refute_vault_token(log)
       refute log =~ "connection not available"
       refute log =~ msg
       assert log =~ "org=#{org}"

@@ -98,6 +98,10 @@ defmodule Samen.Web.Auth do
   def put_current_user(conn, user_id) when is_binary(user_id),
     do: put_session(conn, @session_user_key, user_id)
 
+  @doc "Drop the legacy BYO-auth principal key from the session (a new framework sign-in replaces any earlier one)."
+  @spec clear_current_user(Plug.Conn.t()) :: Plug.Conn.t()
+  def clear_current_user(conn), do: delete_session(conn, @session_user_key)
+
   @doc """
   Clear the authenticated principal + the sticky current org (logout) — BOTH the
   legacy BYO-auth key and the framework spine's session-token key + remember-me

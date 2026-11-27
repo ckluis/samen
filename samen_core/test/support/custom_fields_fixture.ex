@@ -28,6 +28,7 @@ defmodule SamenCore.Support.CustomFields.Widget do
     otp_app: :samen_core,
     domain: SamenCore.Support.CustomFields,
     data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer],
     abbrev: "tcf"
 
   postgres do
@@ -51,7 +52,21 @@ defmodule SamenCore.Support.CustomFields.Widget do
   actions do
     defaults([:read, :destroy, create: :*, update: :*])
 
-    action :reveal_widget, :string do
+    action :reveal_widget, :map do
+      argument(:subject_id, :string, allow_nil?: false)
+
+      run({Samen.Reveal.GrantProbe, label: :widget})
+    end
+  end
+
+  policies do
+    # test fixture: the CRUD actions stay as open as they were before the probe rule needed an authorizer
+    policy action_type([:read, :create, :update, :destroy]) do
+      authorize_if(always())
+    end
+
+    policy action(:reveal_widget) do
+      authorize_if(actor_present())
     end
   end
 end

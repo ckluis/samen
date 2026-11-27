@@ -11,6 +11,7 @@ defmodule Samen.Web.SettingsSurfaceTest do
   (`phx-click`) that fakes host-owned password/2FA/session-revocation. Adding such a fake
   toggle (the committed `14-e5-security-fake-toggle` patch) FLIPS the honesty test.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.Type.FullName
@@ -83,7 +84,7 @@ defmodule Samen.Web.SettingsSurfaceTest do
       # First/last editable inputs carry the plaintext on the tenant plane.
       assert html =~ @secret_first
       assert html =~ "First name"
-      refute html =~ "vt_"
+      refute_vault_token(html)
     end
 
     test "OPERATOR plane masks the vaulted fields read-only (••••), never plaintext (RP-ST-1 render)" do
@@ -101,7 +102,7 @@ defmodule Samen.Web.SettingsSurfaceTest do
       assert html =~ "data-masked"
       refute html =~ @secret_first
       refute html =~ @secret_last
-      refute html =~ "vt_"
+      refute_vault_token(html)
     end
   end
 

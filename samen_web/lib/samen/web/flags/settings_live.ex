@@ -29,13 +29,15 @@ defmodule Samen.Web.Flags.SettingsLive do
 
   import Samen.UI
   import Samen.Web.Flags.Live,
-    only: [assign_mount: 2, flags_sidebar: 1, writable?: 1, decision_pill: 1, rules_table: 1]
+    only: [assign_mount: 2, flags_sidebar: 1, decision_pill: 1, rules_table: 1]
 
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Flags.Reads
-  alias Samen.Web.Mount
+  alias Samen.Web.TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
+  require TenantActor
 
   use Samen.Web.ListLive,
     resource: FeatureFlag,
@@ -62,12 +64,38 @@ defmodule Samen.Web.Flags.SettingsLive do
     socket
     |> ensure_defaults()
     |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil)
+    |> assign(acting_scope: nil, actor_state: :ok, can_admin: false)
     |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
   end
 
+  # WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never `Mount.scope/2`'s fixed
+  # `:member`. A denial or a failed lookup is a STATE of the page: nothing is read, nothing can be written. Every flag write
+  # is an admin's (`RoleAtLeast :admin` in the kernel, and the handler below checks it itself).
   def load(socket, org_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id)
+    end
+  end
+
+  # Acting again with no URL to patch to (the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _}} = socket), do: load(socket, socket.assigns.org_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event: nothing the page loaded is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket, socket.assigns.org_id)
+
+  defp load_refused(socket, org_id) do
+    socket
+    |> Samen.Web.ListLive.refuse()
+    |> ensure_defaults()
+    |> assign(no_org: false, org_id: org_id, edit_flag: nil, ramp_form: nil)
+    |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
+  end
+
+  defp load_for(socket, org_id, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
 
     socket
     |> ensure_defaults()
@@ -94,9 +122,9 @@ defmodule Samen.Web.Flags.SettingsLive do
   end
 
   defp open_edit(socket, id) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    %{samen_mount: mount} = socket.assigns
 
-    case Reads.get_flag_result(mount, Mount.scope(mount, org_id), id) do
+    case Reads.get_flag_result(mount, socket.assigns.acting_scope, id) do
       {:error, :not_found} ->
         assign(socket, edit_flag: nil, ramp_form: nil)
 
@@ -115,6 +143,8 @@ defmodule Samen.Web.Flags.SettingsLive do
   # -- CRUD events (list events belong to the ListLive hook) ---------------------
 
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("toggle_flag", %{"id" => id}, socket) do
     {:noreply, mutate(socket, &Reads.toggle_flag(&1, &2, id))}
   end
@@ -163,20 +193,23 @@ defmodule Samen.Web.Flags.SettingsLive do
     end
   end
 
-  # A guarded write: posture-checked (never elevates on an impersonation mount),
-  # then the kernel-enforced Ash action via the plane-preserving admin write scope.
+  # A guarded write: the page checks the person's own role (an admin's: `TenantActor.admin?/1`, false on the operator plane),
+  # then the kernel-enforced Ash action runs with the acting person's own scope.
   defp guarded_write(socket, fun) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    %{samen_mount: mount, org_id: org_id, acting_scope: acting} = socket.assigns
 
-    if writable?(mount) and org_id != nil do
-      case fun.(mount, Reads.write_scope(mount, org_id)) do
+    if TenantActor.admin?(socket) and org_id != nil do
+      case fun.(mount, TenantActor.write_scope(mount, org_id, acting)) do
         {:ok, _flag} -> {:ok, socket}
         {:error, message} -> {:error, message, socket}
       end
     else
-      {:error, "Read-only on this plane.", socket}
+      {:error, refusal(mount), socket}
     end
   end
+
+  defp refusal(%Samen.Web.Mount{plane: %{kind: :operator}}), do: "Read-only on this plane."
+  defp refusal(_mount), do: "Changing feature flags needs an admin role."
 
   defp mutate(socket, fun) do
     case guarded_write(socket, fun) do
@@ -219,9 +252,12 @@ defmodule Samen.Web.Flags.SettingsLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Feature flags" nothing="there are no feature flags to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">Feature flags org: {@org_id}</span>
 
           <div :if={@flag_error} class="wrap" style="margin-bottom:0">
@@ -254,7 +290,7 @@ defmodule Samen.Web.Flags.SettingsLive do
                   <.sort_header field={:rollout_pct} label="Rollout" sort={@list_state.sort} width="10%" />
                   <th scope="col" style="width:8%">Rules</th>
                   <th scope="col" style="width:16%">Evaluated for this org</th>
-                  <th :if={writable?(@samen_mount)} scope="col" style="width:18%">
+                  <th :if={@can_admin} scope="col" style="width:18%">
                     <span class="sr-only">Actions</span>
                   </th>
                 </:head>
@@ -274,7 +310,7 @@ defmodule Samen.Web.Flags.SettingsLive do
                   <td class="flag-evaluated">
                     <.decision_pill decision={Reads.decision(flag, %{org_id: @org_id})} />
                   </td>
-                  <td :if={writable?(@samen_mount)} class="flag-actions">
+                  <td :if={@can_admin} class="flag-actions">
                     <div style="display:flex;gap:6px;align-items:center">
                       <.button phx-click="toggle_flag" phx-value-id={flag.id}>
                         {if flag.enabled, do: "Disable", else: "Enable"}
@@ -288,7 +324,7 @@ defmodule Samen.Web.Flags.SettingsLive do
           </div>
 
           <.modal
-            :if={@edit_flag != nil and writable?(@samen_mount)}
+            :if={@edit_flag != nil and @can_admin}
             id="flag-edit-modal"
             title={"#{@edit_flag.name} — ramp & targeting"}
             on_cancel="close_edit"
@@ -316,7 +352,7 @@ defmodule Samen.Web.Flags.SettingsLive do
               <span class="lane">· first match wins · non-PII attributes only (org_id, plan, tier, stage, role, region)</span>
             </div>
 
-            <.rules_table rules={@edit_flag.target_rules || []} writable={writable?(@samen_mount)} />
+            <.rules_table rules={@edit_flag.target_rules || []} writable={@can_admin} />
 
             <div :if={@rule_error} class="card form-error" id="rule-error" style="padding:10px 14px;margin:8px 0;color:var(--bad, #b91c1c);font-size:12px">
               {@rule_error}

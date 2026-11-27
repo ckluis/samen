@@ -138,7 +138,7 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
   @impl Mix.Task
   def run(args) do
     Mix.Task.run("app.start")
-    {opts, _rest, _} = OptionParser.parse(args, strict: [root: :string])
+    opts = Samen.Gen.Args.parse!("samen.verify.agent_coverage", args, [root: :string])
     Samen.Verifier.halt_if_violations(@task_name, violations(opts))
   end
 

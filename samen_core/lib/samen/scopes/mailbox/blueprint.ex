@@ -109,35 +109,28 @@ defmodule Samen.Scopes.Mailbox.Blueprint do
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
 
+          # The grant is checked for the actor that RUNS the action, never for an id the caller names: a
+          # caller-supplied `actor_id` let any actor ride another person's grant. No actor, no grant.
           action :reveal_connection, :map do
-            argument(:actor_id, :string, allow_nil?: false)
             argument(:subject_id, :string, allow_nil?: false)
 
-            run(fn input, _ctx ->
-              ctx = %Samen.Reveal.Context{
-                actor: input.arguments.actor_id,
-                subject_id: input.arguments.subject_id,
-                resource: __MODULE__,
-                action: :reveal_connection,
-                label: :address
-              }
-
-              if Samen.Reveal.grant_checker().granted?(ctx) do
-                {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-              else
-                {:error, :denied}
-              end
-            end)
+            run({Samen.Reveal.GrantProbe, label: :address})
           end
         end
 
         policies do
-          policy action_type([:read, :create, :update, :destroy]) do
+          policy action_type(:read) do
             authorize_if(Samen.Policy.OrgScope)
           end
 
+          # Written ONLY by `Samen.Mailbox.Sync`, which runs every write as an `authorize?: false` call: no person, role
+          # or surface creates, edits or deletes a mailbox row (the `File.promote` / `ApiKey.mark_used` precedent).
+          policy action_type([:create, :update, :destroy]) do
+            forbid_if(always())
+          end
+
           policy action(:reveal_connection) do
-            authorize_if(always())
+            authorize_if(actor_present())
           end
         end
       end
@@ -234,35 +227,28 @@ defmodule Samen.Scopes.Mailbox.Blueprint do
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
 
+          # The grant is checked for the actor that RUNS the action, never for an id the caller names: a
+          # caller-supplied `actor_id` let any actor ride another person's grant. No actor, no grant.
           action :reveal_mail_message, :map do
-            argument(:actor_id, :string, allow_nil?: false)
             argument(:subject_id, :string, allow_nil?: false)
 
-            run(fn input, _ctx ->
-              ctx = %Samen.Reveal.Context{
-                actor: input.arguments.actor_id,
-                subject_id: input.arguments.subject_id,
-                resource: __MODULE__,
-                action: :reveal_mail_message,
-                label: :body
-              }
-
-              if Samen.Reveal.grant_checker().granted?(ctx) do
-                {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-              else
-                {:error, :denied}
-              end
-            end)
+            run({Samen.Reveal.GrantProbe, label: :body})
           end
         end
 
         policies do
-          policy action_type([:read, :create, :update, :destroy]) do
+          policy action_type(:read) do
             authorize_if(Samen.Policy.OrgScope)
           end
 
+          # Written ONLY by `Samen.Mailbox.Sync`, which runs every write as an `authorize?: false` call: no person, role
+          # or surface creates, edits or deletes a mailbox row (the `File.promote` / `ApiKey.mark_used` precedent).
+          policy action_type([:create, :update, :destroy]) do
+            forbid_if(always())
+          end
+
           policy action(:reveal_mail_message) do
-            authorize_if(always())
+            authorize_if(actor_present())
           end
         end
       end

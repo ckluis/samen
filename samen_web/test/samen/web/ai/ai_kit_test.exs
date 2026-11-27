@@ -7,6 +7,7 @@ defmodule Samen.Web.AI.KitTest do
   snippet with no `vt_*`/plaintext leak, and the org-scoped reads the kit owns
   (`crm_preview/4`, `list_drafts/2`) never cross orgs.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   import Phoenix.LiveViewTest
@@ -157,7 +158,7 @@ defmodule Samen.Web.AI.KitTest do
 
     assert html =~ "freight logistics rate quote"
     assert html =~ "SIMULATED ranking"
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   # --- Org-scope pins on the kit's own reads (drop-filter-flips-this-test) -------------------

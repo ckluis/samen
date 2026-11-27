@@ -13,6 +13,7 @@ defmodule Samen.Web.OperatorIdentityLineTest do
   by plane), separated ALSO by a mount boundary (operator namespace vs vertical namespace). No
   new masking code; this test proves the composition holds end-to-end.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.WebTest.Operator.Seeds, as: OpSeeds
@@ -65,7 +66,7 @@ defmodule Samen.Web.OperatorIdentityLineTest do
 
     html = render_live(Samen.Web.CRM.ContactsLive, impersonation_mount, [seed.tenant_org_id])
 
-    refute html =~ "vt_"
+    refute_vault_token(html)
     refute html =~ "pii_"
     refute html =~ TenantSeeds.contact_email()
   end

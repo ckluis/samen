@@ -19,6 +19,9 @@ defmodule Samen.Web.Chat.ThreadsLive do
   alias Samen.Web.Mount
   alias Samen.Web.Operator.Impersonation
   alias Samen.Web.Reads.Guard
+  alias Samen.Web.TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
+  require TenantActor
 
   @impl true
   def mount(params, session, socket) do
@@ -56,12 +59,20 @@ defmodule Samen.Web.Chat.ThreadsLive do
     |> ensure_flash()
     |> ensure_return_to()
     |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, threads: [], expose_identity: false, section_errors: [])
+    |> assign(acting_scope: nil, actor_state: :ok, can_write: false, can_admin: false)
     # No tenant resolved → nothing to gate; render the no-org card, never the denied panel.
     |> assign(impersonation: :none, session_info: nil, open_error: nil)
   end
 
   def load(socket, org_id) do
     mount = socket.assigns.samen_mount
+
+    socket =
+      socket
+      |> assign_new(:acting_scope, fn -> nil end)
+      |> assign_new(:actor_state, fn -> :ok end)
+      |> assign_new(:can_write, fn -> false end)
+      |> assign_new(:can_admin, fn -> false end)
 
     # T153 — the desk-chat inbox lists ONE resolved tenant's threads. On the OPERATOR plane that
     # is a per-tenant drill-in (peering into one tenant's conversation list) → it now requires a
@@ -90,27 +101,64 @@ defmodule Samen.Web.Chat.ThreadsLive do
         |> assign(impersonation: :unavailable, session_info: nil, open_error: nil)
 
       {:ok, session_info} ->
-        scope = Mount.scope(mount, org_id)
-
-        # Each read fails on its own (`section_errors`): a failed inbox read is not "No
-        # conversations yet." (whose CTA invites duplicate starts), and a failed disclosure read
-        # is not "masked" — the setting card says it could not be loaded.
-        threads = Reads.threads_result(mount, scope)
-        setting = Reads.disclosure_setting_result(mount, scope)
-
-        socket
-        |> ensure_flash()
-        |> ensure_return_to()
-        |> assign(
-          no_org: false,
-          org_id: org_id,
-          threads: Guard.value(threads, []),
-          expose_identity: match?({:ok, %{expose_identity_to_support: true}}, setting),
-          section_errors:
-            for({key, result} <- [threads: threads, disclosure: setting], Guard.unavailable?(result), do: key)
-        )
-        |> assign(impersonation: ok_state(mount), session_info: session_info, open_error: nil)
+        case acting(socket, mount, org_id) do
+          {:ok, socket, scope} -> load_for(socket, mount, org_id, scope, session_info)
+          {:refused, socket} -> load_refused(socket, org_id)
+        end
     end
+  end
+
+  # WHO acts. On the TENANT plane: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`; a denial or a failed lookup is a STATE of the page and nothing is read. The
+  # OPERATOR desk plane has no membership: its reads run as the plane's own scope behind the impersonation gate above, and
+  # it offers no write control (`can_write` / `can_admin` false).
+  defp acting(socket, mount, org_id) do
+    if operator_plane?(mount) do
+      {:ok, scope} = TenantActor.scope(mount, org_id, nil)
+      {:ok, assign(socket, acting_scope: scope, actor_state: :ok, can_write: false, can_admin: false), scope}
+    else
+      case TenantActor.assign_actor(socket, org_id) do
+        {:ok, socket} -> {:ok, socket, socket.assigns.acting_scope}
+        {:refused, socket} -> {:refused, socket}
+      end
+    end
+  end
+
+  # Acting again with no URL to patch to (the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _}} = socket), do: load(socket, socket.assigns.org_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event: nothing the page loaded is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket, socket.assigns.org_id)
+
+  defp load_refused(socket, org_id) do
+    socket
+    |> ensure_flash()
+    |> ensure_return_to()
+    |> assign(no_org: false, org_id: org_id, threads: [], expose_identity: false, section_errors: [])
+    |> assign(impersonation: ok_state(socket.assigns.samen_mount), session_info: nil, open_error: nil)
+  end
+
+  defp load_for(socket, mount, org_id, scope, session_info) do
+    # Each read fails on its own (`section_errors`): a failed inbox read is not "No
+    # conversations yet." (whose CTA invites duplicate starts), and a failed disclosure read
+    # is not "masked" — the setting card says it could not be loaded.
+    threads = Reads.threads_result(mount, scope)
+    setting = Reads.disclosure_setting_result(mount, scope)
+
+    socket
+    |> ensure_flash()
+    |> ensure_return_to()
+    |> assign(
+      no_org: false,
+      org_id: org_id,
+      threads: Guard.value(threads, []),
+      expose_identity: match?({:ok, %{expose_identity_to_support: true}}, setting),
+      section_errors:
+        for({key, result} <- [threads: threads, disclosure: setting], Guard.unavailable?(result), do: key)
+    )
+    |> assign(impersonation: ok_state(mount), session_info: session_info, open_error: nil)
   end
 
   # The gate for the shared chat LiveView: TENANT plane is never gated (`{:ok, nil}` → render as
@@ -153,54 +201,33 @@ defmodule Samen.Web.Chat.ThreadsLive do
   # State 3 — the tenant-wide setting: admin toggles org-wide identity disclosure to support.
   # The kit error state's "Try again" (a failed inbox / disclosure read).
   @impl true
+  TenantActor.refuse_events(["toggle_disclosure", "new_conversation"])
+
   def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
 
+  # The org-wide disclosure flip is an ADMIN's: the handler checks the person's own role (the kernel's `RoleAtLeast :admin`
+  # on the setting is the second line), and the write runs as that person.
   def handle_event("toggle_disclosure", params, socket) do
-    if tenant_plane?(socket) do
-      expose? = params["expose_identity"] in [true, "true", "on"]
-      mount = socket.assigns.samen_mount
-      scope = Mount.scope(mount, socket.assigns.org_id)
+    cond do
+      not tenant_plane?(socket) ->
+        {:noreply, socket}
 
-      case Chat.set_disclosure_setting(mount, scope, expose?) do
-        {:ok, _setting} ->
-          {:noreply,
-           socket
-           |> assign(expose_identity: expose?)
-           |> assign(flash_note: disclosure_note(expose?))}
+      not TenantActor.admin?(socket) ->
+        {:noreply, assign(socket, flash_note: disclosure_error_note(%Ash.Error.Forbidden{}))}
 
-        {:error, error} ->
-          {:noreply, assign(socket, flash_note: disclosure_error_note(error))}
-      end
-    else
-      {:noreply, socket}
+      true ->
+        expose? = params["expose_identity"] in [true, "true", "on"]
+        mount = socket.assigns.samen_mount
+
+        toggle_disclosure(socket, mount, expose?)
     end
   end
 
   # State 2 — start a conversation with the per-conversation initiator opt-in.
   def handle_event("new_conversation", %{"subject" => subject} = params, socket)
       when is_binary(subject) and subject != "" do
-    if tenant_plane?(socket) do
-      mount = socket.assigns.samen_mount
-      scope = Mount.scope(mount, socket.assigns.org_id)
-      share? = params["share_identity"] in [true, "true", "on"]
-
-      case Chat.start_conversation(mount, scope, %{
-             org_id: socket.assigns.org_id,
-             subject: subject,
-             handle: default_handle(params),
-             full_name: default_full_name(params),
-             principal_id: initiator_user_id(socket),
-             share_identity: share?
-           }) do
-        {:ok, _thread} ->
-          {:noreply,
-           socket
-           |> load(socket.assigns.org_id)
-           |> assign(flash_note: new_conversation_note(share?))}
-
-        {:error, _} ->
-          {:noreply, assign(socket, flash_note: "Could not start conversation. Nothing was created — try again.")}
-      end
+    if tenant_plane?(socket) and TenantActor.member?(socket) do
+      start_conversation(socket, params, subject)
     else
       {:noreply, socket}
     end
@@ -211,7 +238,6 @@ defmodule Samen.Web.Chat.ThreadsLive do
   # T153 — the open-session-with-reason affordance the OPERATOR denied state renders. Opens a
   # REAL `Samen.Impersonation` session (reason required, same-tx audit + auto-expire, tenant-
   # visible ledger) for the acting operator over this tenant org, then re-renders the inbox.
-  @impl true
   def handle_event("open_session", %{"reason" => reason}, socket) do
     org_id = socket.assigns[:org_id]
     operator_id = gate_operator_id(socket)
@@ -228,8 +254,46 @@ defmodule Samen.Web.Chat.ThreadsLive do
     end
   end
 
+  defp toggle_disclosure(socket, mount, expose?) do
+    case Chat.set_disclosure_setting_as(mount, socket.assigns.acting_scope, expose?) do
+      {:ok, _setting} ->
+        {:noreply,
+         socket
+         |> assign(expose_identity: expose?)
+         |> assign(flash_note: disclosure_note(expose?))}
+
+      {:error, error} ->
+        {:noreply, assign(socket, flash_note: disclosure_error_note(error))}
+    end
+  end
+
+  defp start_conversation(socket, params, subject) do
+    mount = socket.assigns.samen_mount
+    share? = params["share_identity"] in [true, "true", "on"]
+
+    case Chat.start_conversation(mount, socket.assigns.acting_scope, %{
+           org_id: socket.assigns.org_id,
+           subject: subject,
+           handle: default_handle(params),
+           full_name: default_full_name(params),
+           principal_id: initiator_user_id(socket),
+           share_identity: share?
+         }) do
+      {:ok, _thread} ->
+        {:noreply,
+         socket
+         |> load(socket.assigns.org_id)
+         |> assign(flash_note: new_conversation_note(share?))}
+
+      {:error, _} ->
+        {:noreply, assign(socket, flash_note: "Could not start conversation. Nothing was created — try again.")}
+    end
+  end
+
   # The initiator's per-org `Identity.User` id (what an @-mention is addressed to), derived from the
   # session principal `mount/3` resolved through `Samen.Auth.OrgActor`; nil when no user resolves.
+  defp initiator_user_id(%{assigns: %{acting_scope: %Samen.Scope{actor: %{resolved: true, id: id}}}}), do: id
+
   defp initiator_user_id(socket) do
     case Samen.Web.Settings.Reads.actor_in_org(
            socket.assigns[:samen_mount],
@@ -272,6 +336,8 @@ defmodule Samen.Web.Chat.ThreadsLive do
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
         <%= cond do %>
+          <% @actor_state in [:denied, :unavailable] -> %>
+            <.actor_refused state={@actor_state} title="Chat" nothing="there are no conversations to show" />
           <% @impersonation == :unavailable -> %>
             <div class="wrap" id="gate-unavailable">
               <.error_state class="gate-unavailable" body={Guard.message()} retry_event="retry_load" />
@@ -345,7 +411,7 @@ defmodule Samen.Web.Chat.ThreadsLive do
                   (state 3, tenant-wide). When OFF, participants stay <code>••••</code> unless the
                   person who starts a conversation opts to share their own name (state 2).
                 </p>
-                <form :if={:disclosure not in @section_errors} phx-change="toggle_disclosure" id="disclosure-form">
+                <form :if={:disclosure not in @section_errors and @can_admin} phx-change="toggle_disclosure" id="disclosure-form">
                   <label class="chat-switch">
                     <input
                       type="checkbox"
@@ -358,7 +424,7 @@ defmodule Samen.Web.Chat.ThreadsLive do
                 </form>
               </div>
 
-              <div class="card chat-new" id="chat-new-conversation" style="margin-bottom:16px">
+              <div :if={@can_write} class="card chat-new" id="chat-new-conversation" style="margin-bottom:16px">
                 <div class="gtitle" style="margin-top:0"><h3>New conversation</h3></div>
                 <form phx-submit="new_conversation" id="new-conversation-form">
                   <input type="text" name="subject" placeholder="Subject…" autocomplete="off" required />

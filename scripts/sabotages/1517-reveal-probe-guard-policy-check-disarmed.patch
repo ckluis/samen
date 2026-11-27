@@ -1,0 +1,20 @@
+# SABOTAGE: the compile-time reveal rule no longer looks at the policies that apply to a reveal action (a 
+#   bypass, a policy_group or an always() check passes)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_probe_authz_test.exs
+# MUST_FAIL: evasion: expr(true) fails the build
+diff --git a/samen_core/lib/samen/reveal/probe_guard.ex b/samen_core/lib/samen/reveal/probe_guard.ex
+index 06886261..2b65b05a 100644
+--- a/samen_core/lib/samen/reveal/probe_guard.ex
++++ b/samen_core/lib/samen/reveal/probe_guard.ex
+@@ -43,7 +43,7 @@ defmodule Samen.Reveal.ProbeGuard do
+       case Map.fetch(by_name, name) do
+         {:ok, action} ->
+           identity = argument_violations(name, action)
+-          identity ++ shape_violations(name, action, identity != []) ++ policy_violations(name, flat)
++          identity ++ shape_violations(name, action, identity != []) ++ Enum.filter(policy_violations(name, flat), fn _ -> false end)
+ 
+         :error ->
+           []

@@ -41,10 +41,10 @@ config :pawchart,
   ]
 
 # The samen_core verifiers (catalog_parity/prefixes/pii_reads/pii_classify/…) discover
-# domains from :samen_core :ash_domains. Register PawChart's domains so the gate scans
+# domains from :samen_core :host_domains. Register PawChart's domains so the gate scans
 # the mounted CRM/Billing/Support scopes + the vertical Clinical resources + the
 # token-blind aggregate plane.
-config :samen_core, :ash_domains, [
+config :samen_core, :host_domains, [
   PawChart.Crm,
   PawChart.Billing,
   PawChart.Support,

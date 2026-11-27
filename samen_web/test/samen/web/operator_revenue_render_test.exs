@@ -16,6 +16,7 @@ defmodule Samen.Web.OperatorRevenueRenderTest do
   below-floor → suppressed; sabotage the floor → released) runs against the real
   aggregate plane in the demo suite (`Demo.OperatorRevenuePlanFloorTest`).
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.WebTest.Operator, as: Op
@@ -148,7 +149,7 @@ defmodule Samen.Web.OperatorRevenueRenderTest do
     org_id = seed_revenue!()
     html = render_live(Samen.Web.Operator.RevenueLive, revenue_mount(org_id), [])
 
-    refute html =~ "vt_"
+    refute_vault_token(html)
     refute html =~ "••••"
   end
 

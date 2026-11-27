@@ -1,0 +1,21 @@
+# SABOTAGE: TaskLive updates a task's status on the fixed member scope again, so a viewer's change runs as 
+#   member
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_crm_work_test.exs
+# MUST_FAIL: a VIEWER cannot change a task's status
+diff --git a/samen_web/lib/samen/web/work/task_live.ex b/samen_web/lib/samen/web/work/task_live.ex
+index 99e81087..feb3ee4d 100644
+--- a/samen_web/lib/samen/web/work/task_live.ex
++++ b/samen_web/lib/samen/web/work/task_live.ex
+@@ -114,7 +114,8 @@ defmodule Samen.Web.Work.TaskLive do
+     do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.task_id)}
+ 
+   def handle_event("update_status", %{"status" => status}, socket) do
+-    %{samen_mount: mount, org_id: org_id, task_id: task_id, acting_scope: scope} = socket.assigns
++    %{samen_mount: mount, org_id: org_id, task_id: task_id, acting_scope: _} = socket.assigns
++    scope = Samen.Web.Mount.scope(mount, org_id)
+ 
+     case Reads.update_task_status(mount, scope, task_id, status) do
+       {:ok, _task} -> {:noreply, load(socket, org_id, task_id)}

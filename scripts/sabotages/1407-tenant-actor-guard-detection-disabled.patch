@@ -1,0 +1,22 @@
+# SABOTAGE: the guard detector counts nothing, so a new implicit fixed-role scope call goes unreported
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_guard_test.exs
+# MUST_FAIL: a modeled new file with an implicit call would be reported
+diff --git a/samen_web/lib/samen/web/tenant_actor/guard.ex b/samen_web/lib/samen/web/tenant_actor/guard.ex
+index 985cf6f..95fcb96 100644
+--- a/samen_web/lib/samen/web/tenant_actor/guard.ex
++++ b/samen_web/lib/samen/web/tenant_actor/guard.ex
+@@ -31,6 +31,11 @@ defmodule Samen.Web.TenantActor.Guard do
+   @doc "How many fixed-role scope calls `source` makes (comment lines are ignored)."
+   @spec implicit_calls(String.t()) :: non_neg_integer()
+   def implicit_calls(source) when is_binary(source) do
++    _ = source
++    0
++  end
++
++  def implicit_calls_disabled(source) do
+     lines = code_lines(source)
+     aliases = for [_, name] <- Regex.scan(@alias_as, Enum.join(lines, "\n")), do: name
+     alias_res = for name <- Enum.uniq(aliases), do: Regex.compile!("\\b#{name}\\.scope\\(|&\\s*#{name}\\.scope\\/\\d")

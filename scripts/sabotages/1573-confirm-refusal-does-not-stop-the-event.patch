@@ -1,0 +1,18 @@
+# SABOTAGE: A refused data-confirm click is not stopped, so the destructive phx-click still fires
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/confirm_interlock_test.exs
+# MUST_FAIL: a refused click asks the attribute's text and stops the event before it reaches LiveView
+diff --git a/samen_web/priv/static/assets/app.js b/samen_web/priv/static/assets/app.js
+index d7441fcb..0d899f33 100644
+--- a/samen_web/priv/static/assets/app.js
++++ b/samen_web/priv/static/assets/app.js
+@@ -47,7 +47,6 @@
+     if (isForm !== wantForm) return;
+     if (!ask(el.getAttribute("data-confirm") || "")) {
+       e.preventDefault();
+-      e.stopImmediatePropagation();
+     }
+   }
+   var askUser = function (text) { return window.confirm(text); };

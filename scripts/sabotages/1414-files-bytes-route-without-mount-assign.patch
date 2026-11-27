@@ -1,0 +1,20 @@
+# SABOTAGE: the file-bytes route is emitted without the mount assign, so every request through a router is 
+#   a 503 no mount
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/files_csv_router_test.exs
+# MUST_FAIL: a member downloads an ACTIVE file's bytes; the controller got the mount from the router
+diff --git a/samen_web/lib/samen/web/router.ex b/samen_web/lib/samen/web/router.ex
+index 51cd9b53..ebe7c6b4 100644
+--- a/samen_web/lib/samen/web/router.ex
++++ b/samen_web/lib/samen/web/router.ex
+@@ -822,7 +822,7 @@ defmodule Samen.Web.Router do
+       # The host's :browser pipeline (which wraps this scope) supplies the session plug so
+       # current-org is readable in the controller; the MOUNT travels on the route itself
+       # (`assigns:`, like the ICS route), because no host pipeline sets `:samen_mount`.
+-      get("#{path}/:id/bytes", Samen.Web.Files.BytesController, :serve, assigns: %{samen_mount: mount})
++      get("#{path}/:id/bytes", Samen.Web.Files.BytesController, :serve)
+     end
+   end
+ 

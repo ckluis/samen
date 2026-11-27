@@ -6,11 +6,11 @@
 # TEST_FILES: test/reveal_approver_live_test.exs
 # MUST_FAIL: ALREADY DECIDED: approving or denying a stale row says so
 diff --git a/samen_web/lib/samen/web/settings/reveal_approvals_live.ex b/samen_web/lib/samen/web/settings/reveal_approvals_live.ex
-index 249e5f2d..ed06c93b 100644
+index efbdf4a..e9e8d72 100644
 --- a/samen_web/lib/samen/web/settings/reveal_approvals_live.ex
 +++ b/samen_web/lib/samen/web/settings/reveal_approvals_live.ex
-@@ -54,7 +54,7 @@ defmodule Samen.Web.Settings.RevealApprovalsLive do
-   alias Samen.Web.Settings.Reads
+@@ -56,7 +56,7 @@ defmodule Samen.Web.Settings.RevealApprovalsLive do
+   require TenantActor
  
    # `Grants.approve/2` / `deny/2` answers these when the request was decided before this decision got the lock
 -  @already_decided [:not_pending, :already_granted]
