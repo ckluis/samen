@@ -129,7 +129,7 @@ defmodule Samen.Web.CRM.ContactsLive do
       company_names: company_name_map(mount, scope),
       # AC-G5-2: the tenant first-run checklist — zero rows across the CRM core
       # resources. FALSE by construction on the operator plane (FirstRun).
-      first_run: FirstRun.first_run?(mount, org_id, scope)
+      first_run: FirstRun.first_run?(mount, org_id)
     )
     |> assign_new(:show_new, fn -> false end)
     |> assign_new(:delete_error, fn -> nil end)
@@ -163,11 +163,11 @@ defmodule Samen.Web.CRM.ContactsLive do
   # operator plane `Samen.Pii.WriteGuard` REJECTS it at the write path (MC-1) and the
   # error renders inline — this LiveView adds no policy of its own.
   def handle_event("save_new", %{"form" => params}, socket) do
-    %{samen_mount: mount, org_id: org_id, acting_scope: acting} = socket.assigns
+    %{samen_mount: mount, org_id: org_id} = socket.assigns
     # WS-B / G12 (design §4.2): capture the first-run state BEFORE the create (the org is
     # non-empty afterwards) so the framework choke point can emit the empty→non-empty
     # `first_run.completed` alongside `record.created`. Best-effort — never affects the write.
-    was_first_run? = FirstRun.first_run?(mount, org_id, acting)
+    was_first_run? = FirstRun.first_run?(mount, org_id)
 
     case Guard.submit_form(:crm_save_contact, socket.assigns[:org_id], socket.assigns.new_form, with_org(params, socket)) do
       {:ok, person} ->
@@ -193,15 +193,12 @@ defmodule Samen.Web.CRM.ContactsLive do
   def handle_event("load_sample_data", _params, socket) do
     %{samen_mount: mount, org_id: org_id, acting_scope: scope} = socket.assigns
 
-    # `SampleData.load/3` seeds as the acting person and refuses anyone below `:admin` itself (an org-wide load is an
-    # admin's); the offer is shown to an admin only (`:can_admin`).
-    case SampleData.load(mount, org_id, scope) do
-      {:ok, _} ->
-        {:noreply, load(assign(socket, sample_error: nil), org_id)}
-
-      {:error, :forbidden} ->
-        {:noreply, assign(socket, sample_error: "Loading sample data needs an admin role.")}
-
+    # `SampleData.load/2` seeds through the system scope (a fixed `:member`): the person's own role
+    # must clear the same bar the "New contact" write has, or a viewer would seed through it.
+    with true <- Samen.Scope.Role.at_least?(scope.actor.role, :member),
+         {:ok, _} <- SampleData.load(mount, org_id) do
+      {:noreply, load(assign(socket, sample_error: nil), org_id)}
+    else
       _refused ->
         {:noreply, assign(socket, sample_error: "Sample data is not available here.")}
     end
@@ -303,7 +300,7 @@ defmodule Samen.Web.CRM.ContactsLive do
             <.first_run_card
               create_event="new_contact"
               create_label="Add your first contact"
-              sample?={SampleData.offer?(@samen_mount) and @can_admin}
+              sample?={SampleData.offer?(@samen_mount)}
             />
           </div>
 
@@ -329,7 +326,7 @@ defmodule Samen.Web.CRM.ContactsLive do
                 <:empty_actions :if={@can_write}>
                   <.button variant="primary" phx-click="new_contact" id="empty-new-contact">New contact</.button>
                 </:empty_actions>
-                <:empty_sample :if={@can_admin and SampleData.offer?(@samen_mount)}>
+                <:empty_sample :if={@can_write and SampleData.offer?(@samen_mount)}>
                   <.button phx-click="load_sample_data" id="load-sample-data">Load sample data</.button>
                 </:empty_sample>
                 <:head>

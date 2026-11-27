@@ -45,25 +45,24 @@ defmodule Samen.Web.FirstRun do
   mount kind's core resources. Operator plane → `false` by construction (design §3.1:
   the operator's first-run surface is the Accounts empty state, not this checklist).
   """
-  def first_run?(mount, org_id, scope)
-  def first_run?(%Mount{plane: %{kind: :operator}}, _org_id, _scope), do: false
-  def first_run?(_mount, nil, _scope), do: false
+  def first_run?(%Mount{plane: %{kind: :operator}}, _org_id), do: false
+  def first_run?(_mount, nil), do: false
 
-  def first_run?(%Mount{} = mount, org_id, %Samen.Scope{} = scope) do
+  def first_run?(%Mount{} = mount, org_id) do
     case core_resources(mount.scope_kind) do
       [] -> false
-      names -> Enum.all?(names, &(not any_rows?(mount, org_id, &1, scope)))
+      names -> Enum.all?(names, &(not any_rows?(mount, org_id, &1)))
     end
   end
 
   # ONE bounded existence probe: limit(1) + id-only select, org-scoped, read with the
-  # acting person's scope. Errors fail SAFE (treat as "has data" → no card).
-  defp any_rows?(mount, org_id, name, scope) do
+  # plane's scope. Errors fail SAFE (treat as "has data" → no card).
+  defp any_rows?(mount, org_id, name) do
     Mount.resource(mount, name)
     |> Ash.Query.filter(org_id == ^org_id)
     |> Ash.Query.select([:id])
     |> Ash.Query.limit(1)
-    |> Ash.read!(scope: scope)
+    |> Ash.read!(scope: Mount.scope(mount, org_id))
     |> Enum.any?()
   rescue
     _ -> true
