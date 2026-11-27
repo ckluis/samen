@@ -4,10 +4,7 @@ defmodule PawChart.TenantActorHostGuardTest do
   nobody resolved (a fixed `:member`), counted with the same detectors (`Samen.Web.TenantActor.Guard`) and held to
   an EXACT baseline. A new site fails; a converted site must lower its entry.
 
-    * `pawchart_web/clinic_live.ex` calls `Mount.scope/2` twice (the clinic landing page: load and event).
-    * `pawchart_web/clinic_reads.ex` builds the clinic actor by hand (`id: "clinic:<org>"`, a literal `role: :member`).
-
-  The clinic landing page is not converted yet. The other hand-spelled roles are SYSTEM contexts (seeds: org-level
+  The clinic landing page acts as the signed-in person (`Samen.Web.TenantActor`). The hand-spelled roles are SYSTEM contexts (seeds: org-level
   actors and membership rows), listed by file and count so a new one is a visible edit. An id-less
   `%{org_id: o, role: :admin}` counts.
   """
@@ -17,9 +14,8 @@ defmodule PawChart.TenantActorHostGuardTest do
 
   @root Path.expand("../lib", __DIR__)
 
-  @implicit %{"pawchart_web/clinic_live.ex" => 2}
+  @implicit %{}
   @literal_actors %{
-    "pawchart_web/clinic_reads.ex" => 1,
     "pawchart/seeds.ex" => 8,
     "pawchart/operator_seeds.ex" => 11
   }
@@ -38,6 +34,11 @@ defmodule PawChart.TenantActorHostGuardTest do
 
   test "non-vacuity: the detectors see this host's tree" do
     assert Path.wildcard(Path.join(@root, "**/*.ex")) |> length() > 20
-    assert Guard.scan(@root) != %{}
+    assert Guard.scan(@root, &Guard.literal_actors/1) != %{}
+
+    # the implicit-call detector fires on a modeled fixed-role call, and the converted clinic page is clean
+    assert Guard.implicit_calls("def f(socket), do: Mount.scope(socket.assigns.samen_mount, socket.assigns.org_id)") > 0
+    clinic = File.read!(Path.join(@root, "pawchart_web/clinic_live.ex"))
+    assert Guard.implicit_calls(clinic) == 0
   end
 end

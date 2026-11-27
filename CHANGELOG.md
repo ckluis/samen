@@ -11,6 +11,15 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Fixed: the clinic page acts as the signed-in person
+
+- **PawChart's clinic page resolves who acts through `Samen.Web.TenantActor`.** The page and `PawChartWeb.ClinicReads` used a
+  synthetic actor with a fixed `:member` role, so a signed-in viewer wrote like a member. The page now acts with the role of the
+  person's active membership, re-resolved before every event; a viewer's page renders no write control and a crafted write
+  event is answered with a flash and writes nothing; a person with no membership in the clinic gets the denied state.
+  `ClinicReads.create_owner/2`, `update_owner/3`, `create_pet/2` and `update_pet/3` take the acting scope in place of an org
+  id, and `ClinicReads.tenant_scope/1` is gone. Sabotage 1578 removes the viewer refusal and flips the clinic role test.
+
 ### Fixed: the operator joins read every row
 
 - **Accounts, platform billing and the help desk read their joins to the end.** The tenant-admin, membership, user, customer,

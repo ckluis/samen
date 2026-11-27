@@ -32,15 +32,15 @@ defmodule PawChart.ClinicMaskingTest do
 
   setup do
     {:ok, owner} =
-      Reads.create_owner(@org, %{"first" => @first, "last" => @last, "email" => @email, "phone" => @phone})
+      Reads.create_owner(clinic_scope(@org), %{"first" => @first, "last" => @last, "email" => @email, "phone" => @phone})
 
     {:ok, _pet} =
-      Reads.create_pet(@org, %{"name" => "Biscuit", "species" => "canine", "microchip" => @microchip, "owner_id" => owner.id})
+      Reads.create_pet(clinic_scope(@org), %{"name" => "Biscuit", "species" => "canine", "microchip" => @microchip, "owner_id" => owner.id})
 
     :ok
   end
 
-  defp tenant_scope, do: Reads.tenant_scope(@org)
+  defp tenant_scope, do: clinic_scope(@org)
 
   # The operator-without-grant impersonation scope (plane: :operator + impersonation
   # marker, NO reveal grant) — the exact shape `Samen.Web.Plane.operator/3` mints.
