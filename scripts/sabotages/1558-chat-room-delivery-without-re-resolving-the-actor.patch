@@ -1,0 +1,19 @@
+# SABOTAGE: a suspended person's open room keeps receiving messages
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_chat_test.exs
+# MUST_FAIL: a member suspended while the room is open receives no further message
+diff --git a/samen_web/lib/samen/web/chat/thread_live.ex b/samen_web/lib/samen/web/chat/thread_live.ex
+index 0fe81970..d6cd38f1 100644
+--- a/samen_web/lib/samen/web/chat/thread_live.ex
++++ b/samen_web/lib/samen/web/chat/thread_live.ex
+@@ -347,7 +347,7 @@ defmodule Samen.Web.Chat.ThreadLive do
+   def handle_info(_msg, socket), do: {:noreply, socket}
+ 
+   defp current_actor(socket, mount) do
+-    if operator_plane?(mount) or is_nil(socket.assigns[:acting_scope]),
++    if true or operator_plane?(mount) or is_nil(socket.assigns[:acting_scope]),
+       do: {:ok, socket},
+       else: TenantActor.assign_actor(socket, socket.assigns.org_id)
+   end

@@ -689,9 +689,11 @@ defmodule Samen.Web.TenantAuthzLiveTest do
     socket =
       %Phoenix.LiveView.Socket{}
       |> Phoenix.Component.assign(:samen_tenant_principal, principal)
+      # the principal reference `Samen.Web.TenantAuthz` pins for the shared actor resolver (`Samen.Web.TenantActor`)
+      |> Phoenix.Component.assign(:samen_principal_ref, {:credential, principal})
       |> Phoenix.Component.assign(:samen_acting_as, false)
       |> Samen.Web.Live.assign_mount(session)
-      |> Phoenix.Component.assign(:org_id, org_id)
+      |> Samen.Web.Chat.ThreadsLive.load(org_id)
 
     raw = if expose?, do: "on", else: "off"
 

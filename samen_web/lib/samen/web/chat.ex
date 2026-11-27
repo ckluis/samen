@@ -24,7 +24,7 @@ defmodule Samen.Web.Chat do
   """
 
   alias Samen.Web.Chat.{PubSub, Reads}
-  alias Samen.Web.{Mount, ObjectRef}
+  alias Samen.Web.{Mount, ObjectRef, TenantActor}
 
   @doc "The `%Samen.Scope{}` for reading a mount's chat resources, on this mount's plane."
   @spec scope(Mount.t(), String.t()) :: Samen.Scope.t()
@@ -135,18 +135,13 @@ defmodule Samen.Web.Chat do
   """
   @spec set_disclosure_setting(Mount.t(), Samen.Scope.t(), boolean()) ::
           {:ok, map()} | {:error, term()}
-  def set_disclosure_setting(%Mount{} = mount, scope, expose?) do
-    # This is a tenant-ADMIN org-level policy write. The chat mount's own tenant plane scope is
-    # a `:member` (like every tenant chat write); flipping org-wide disclosure requires `:admin`
-    # (the blueprint's `RoleAtLeast :admin` on this ONE resource). ADR-045 §4.4 (S1a) — the admin
-    # write scope now routes through `Samen.Web.TenantRole.admin_scope/3` (the SAME helper the flags/
-    # billing/marketing/support write helpers use): the DISARMED dev posture keeps `:admin`
-    # byte-for-byte, an ARMED host derives the caller's REAL `Identity.Membership` role (fail-closed
-    # `:member`, never a hardcoded elevation), so a NON-admin member's org-wide disclosure flip is
-    # refused by the kernel `RoleAtLeast :admin` gate (the `ThreadsLive` "admin only" branch becomes
-    # reachable). Still `OrgScope`-confined; only reachable on the tenant plane (the LiveView gates).
-    org_id = org_id_of(scope)
-    admin_scope = Samen.Web.TenantRole.admin_scope(mount, org_id)
+  def set_disclosure_setting(%Mount{} = mount, acting, expose?) do
+    # This is a tenant-ADMIN org-level policy write (the blueprint's `RoleAtLeast :admin` on this ONE resource). It runs
+    # with `TenantActor.write_scope/3`: on an armed tenant plane the acting person's own scope, so the kernel refuses a
+    # viewer or a member; on the operator plane a read-only scope, never an elevation; the disarmed dev posture keeps
+    # its `:admin`. Still `OrgScope`-confined.
+    org_id = org_id_of(acting)
+    admin_scope = TenantActor.write_scope(mount, org_id, acting)
     resource = Mount.resource(mount, ChatDisclosureSetting)
 
     case Reads.disclosure_setting(mount, admin_scope) do

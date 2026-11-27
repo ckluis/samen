@@ -11,6 +11,16 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Changed: the chat inbox and room act as the signed-in person
+
+- **The chat inbox and the chat room resolve their actor** through `Samen.Web.TenantActor`: the role comes from the
+  person's active membership, no active membership is the denied state (a failed lookup the unavailable state) and reads
+  nothing, and an open page re-resolves before every event and before every realtime delivery, so a person suspended while the
+  room is open receives no further message. Reading the inbox and a room is open to every active member; starting a
+  conversation and posting a message are a member's, checked by the handler and offered to a member only; flipping the
+  org-wide identity disclosure is an admin's and `Chat.set_disclosure_setting/3` runs it with `TenantActor.write_scope/3`, so
+  the person's own role is what the kernel judges. The operator desk keeps its impersonation gate and masked reads.
+
 ### Changed: the feature-flags settings page and the calendar export act as the signed-in person
 
 - **The feature-flags settings page and the `.ics` export resolve their actor** through `Samen.Web.TenantActor`: the role

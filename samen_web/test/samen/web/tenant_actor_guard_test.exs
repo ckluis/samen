@@ -31,8 +31,6 @@ defmodule Samen.Web.TenantActorGuardTest do
     "samen/web/ai/server.ex" => 1,
     "samen/web/automation/builder_live.ex" => 5,
     "samen/web/chat.ex" => 1,
-    "samen/web/chat/thread_live.ex" => 3,
-    "samen/web/chat/threads_live.ex" => 3,
     "samen/web/files/preview_live.ex" => 3,
     "samen/web/files/upload_live.ex" => 2,
     "samen/web/first_run.ex" => 1,
@@ -50,8 +48,8 @@ defmodule Samen.Web.TenantActorGuardTest do
   }
 
   # The exact size of the work list: a silent bump of an entry (or a new entry) fails here, not only in the ratchet.
-  @baseline_total 39
-  @baseline_files 21
+  @baseline_total 33
+  @baseline_files 19
 
   @exempt ~w(samen/web/mount.ex samen/web/tenant_actor.ex samen/web/tenant_actor/guard.ex)
 
@@ -72,7 +70,6 @@ defmodule Samen.Web.TenantActorGuardTest do
   # calls its own private `admin_scope/3` (user, org and the membership's role). Not exempt: nothing new may appear.
   @escape_hatch_baseline %{
     "samen/web/billing/reads.ex" => 1,
-    "samen/web/chat.ex" => 1,
     "samen/web/flags/reads.ex" => 1,
     "samen/web/marketing/reads.ex" => 1,
     "samen/web/settings/api_keys_live.ex" => 2,
@@ -171,6 +168,9 @@ defmodule Samen.Web.TenantActorGuardTest do
     # converted in authz-9: the read-only pages, the user-scope builder, the flags page and the calendar export
     for file <- ~w(samen/web/tenant/analytics_live.ex samen/web/search/search_live.ex samen/web/notifications/inbox_live.ex samen/web/settings/reads.ex samen/web/flags/settings_live.ex samen/web/ics/export_controller.ex),
         do: refute(Map.has_key?(now, file), file)
+
+    # the chat inbox and room
+    for file <- ~w(samen/web/chat/threads_live.ex samen/web/chat/thread_live.ex), do: refute(Map.has_key?(now, file), file)
 
     # the Billing, Marketing and Support pages converted in authz-7 (and leads)
     for page <- ~w(dunning_live invoices_live overview_live plans_live settings_live usage_live),
