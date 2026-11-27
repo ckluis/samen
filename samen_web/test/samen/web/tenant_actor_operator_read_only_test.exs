@@ -238,6 +238,31 @@ defmodule Samen.Web.TenantActorOperatorReadOnlyTest do
     assert status.() == :paused
   end
 
+  test "automation: a condition or action event with no editor open is a no-op with the page's error; with an editor open it works", ctx do
+    events = [
+      {"add_condition", %{"condition" => %{"attribute" => "status", "operator" => "eq", "value" => "open"}}},
+      {"remove_condition", %{"index" => "0"}},
+      {"add_action", %{"action" => %{"type" => "notify"}}},
+      {"remove_action", %{"index" => "0"}}
+    ]
+
+    for editor <- [nil, :new], {event, params} <- events do
+      socket = Phoenix.Component.assign(tenant_socket(ctx, BuilderLive, "/automation"), :edit_workflow, editor)
+      socket = H.live_event(BuilderLive, event, params, socket)
+      assert socket.assigns.edit_workflow == editor, "#{event} with editor #{inspect(editor)} changed the editor"
+      assert is_binary(socket.assigns.wf_error), "#{event} with editor #{inspect(editor)} gave no error"
+    end
+
+    # positive control: with a workflow open, the same event reaches the write path (no editor error)
+    wf =
+      create!(Samen.WebTest.Automation.Workflow, %{org_id: ctx.org_id, name: "editor-probe", status: :active, trigger_kind: :manual, conditions: [], actions: []})
+
+    open = H.live_event(BuilderLive, "edit_workflow", %{"id" => wf.id}, tenant_socket(ctx, BuilderLive, "/automation"))
+    open = H.live_event(BuilderLive, "remove_condition", %{"index" => "0"}, open)
+    assert open.assigns.edit_workflow != nil
+    refute to_string(open.assigns.wf_error) =~ "Open a workflow"
+  end
+
   test "files: an upload from an operator socket is refused; a tenant admin's reaches the upload", ctx do
     op = H.live_event(UploadLive, "upload", %{}, operator_socket(ctx, UploadLive, "/files"))
     assert refused?(op)

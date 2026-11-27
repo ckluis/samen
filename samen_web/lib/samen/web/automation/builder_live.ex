@@ -221,6 +221,12 @@ defmodule Samen.Web.Automation.BuilderLive do
     if TenantActor.admin?(socket), do: run_now(socket, id), else: {:noreply, assign(socket, run_error: refusal(socket.assigns.samen_mount), run_ok: nil)}
   end
 
+  # A condition or action event with no saved workflow open in the editor (none open, or a new one not yet created) changes
+  # nothing and says so.
+  def handle_event(event, _params, %{assigns: %{edit_workflow: wf}} = socket)
+      when event in ["add_condition", "remove_condition", "add_action", "remove_action"] and not is_map(wf),
+      do: {:noreply, assign(socket, wf_error: "Open a workflow to edit before changing its conditions or actions.")}
+
   def handle_event("add_condition", %{"condition" => params}, socket) do
     %{edit_workflow: wf} = socket.assigns
     condition = build_condition(params)
