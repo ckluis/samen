@@ -1,0 +1,19 @@
+# SABOTAGE: samen.ai.smoke drops an unknown flag instead of refusing it
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/mix_task_unknown_flags_test.exs
+# MUST_FAIL: the audit and smoke tasks refuse an unknown flag
+diff --git a/samen_core/lib/mix/tasks/samen.ai.smoke.ex b/samen_core/lib/mix/tasks/samen.ai.smoke.ex
+index 2ced2c0f..804076e6 100644
+--- a/samen_core/lib/mix/tasks/samen.ai.smoke.ex
++++ b/samen_core/lib/mix/tasks/samen.ai.smoke.ex
+@@ -33,7 +33,7 @@ defmodule Mix.Tasks.Samen.Ai.Smoke do
+ 
+   @impl Mix.Task
+   def run(argv) do
+-    opts = Samen.Gen.Args.parse!("samen.ai.smoke", argv, [prompt: :string])
++    {opts, _rest, _} = OptionParser.parse(argv, strict: [prompt: :string])
+     prompt = Keyword.get(opts, :prompt, @default_prompt)
+     live? = System.get_env("SAMEN_AI_LIVE") == "1"
+ 
