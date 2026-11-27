@@ -16,6 +16,7 @@ defmodule Samen.Web.Settings.ApiKeysLive do
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
+  alias Samen.Web.Mount
   alias Samen.Web.Settings.ApiKeys
   alias Samen.Web.Settings.Reads
   alias Samen.Web.TenantActor
@@ -100,16 +101,37 @@ defmodule Samen.Web.Settings.ApiKeysLive do
   def handle_event("revoke", %{"id" => key_id}, socket) do
     %{samen_mount: mount, org_id: org_id, user_id: user_id} = socket.assigns
 
-    cond do
-      operator_plane?(mount) ->
-        {:noreply, socket}
+    # Revoking is an admin's (the kernel's `ApiKey` update policy); the handler checks the role the guard resolved for this
+    # event itself, and the operator plane has nothing to revoke.
+    if operator_plane?(mount) or not TenantActor.admin?(socket) do
+      {:noreply, refuse_revoke(socket, mount)}
+    else
+      # PP-6 (Batch 2 TENANT-ROLE): revoke sets `revoked_at` via the admin-gated `ApiKey.:update`
+      # policy (`RoleAtLeast(:admin)`). Resolve the REAL per-org membership role — the SAME
+      # pattern `do_mint/5` already uses in this file — instead of the synthetic `:member`
+      # `Mount.scope/2` default. With the real role a genuine admin/owner CAN revoke a
+      # leaked key; a member is correctly denied. (Previously the hardcoded `:member` scope
+      # silently DENIED every revoke, for every role including owners.)
+      # A revoke of a (possibly leaked) key must never fail silently: say so, and re-read so the
+      # list shows the key's REAL state.
+      error =
+        case membership(mount, org_id, user_id) do
+          {:ok, membership} ->
+            case ApiKeys.revoke(mount, admin_scope(user_id, org_id, membership.role), key_id) do
+              {:ok, _view} -> nil
+              # Already gone: nothing to revoke (the list below shows the truth).
+              {:error, :not_found} -> nil
+              _ -> "Couldn't revoke that key — it is still active. Try again."
+            end
 
-      # Revoking is an admin's (the kernel's `ApiKey` update policy); the handler checks it itself.
-      not TenantActor.admin?(socket) ->
-        {:noreply, assign(socket, mint_error: "Revoke refused (admin role required).")}
+          {:error, :not_found} ->
+            "No membership in context — cannot revoke."
 
-      true ->
-        {:noreply, revoke_key(socket, mount, org_id, user_id, key_id)}
+          {:error, :unavailable} ->
+            "Couldn't revoke that key — it is still active. Try again."
+        end
+
+      {:noreply, load(assign(socket, minted_key: nil, mint_error: error), org_id, user_id)}
     end
   end
 
@@ -117,33 +139,8 @@ defmodule Samen.Web.Settings.ApiKeysLive do
     {:noreply, assign(socket, minted_key: nil)}
   end
 
-  defp revoke_key(socket, mount, org_id, user_id, key_id) do
-    # PP-6 (Batch 2 TENANT-ROLE): revoke sets `revoked_at` via the admin-gated `ApiKey.:update`
-    # policy (`RoleAtLeast(:admin)`). Resolve the REAL per-org membership role — the SAME
-    # pattern `do_mint/5` already uses in this file — instead of the synthetic `:member`
-    # `Mount.scope/2` default. With the real role a genuine admin/owner CAN revoke a
-    # leaked key; a member is correctly denied. (Previously the hardcoded `:member` scope
-    # silently DENIED every revoke, for every role including owners.)
-    # A revoke of a (possibly leaked) key must never fail silently: say so, and re-read so the
-    # list shows the key's REAL state.
-    error =
-      case membership(mount, socket.assigns.acting_scope, org_id, user_id) do
-        {:ok, membership} ->
-          case ApiKeys.revoke(mount, admin_scope(user_id, org_id, membership.role), key_id) do
-            {:ok, _view} -> nil
-            # Already gone: nothing to revoke (the list below shows the truth).
-            {:error, :not_found} -> nil
-            _ -> "Couldn't revoke that key — it is still active. Try again."
-          end
-
-        {:error, :not_found} ->
-          "No membership in context — cannot revoke."
-
-        {:error, :unavailable} ->
-          "Couldn't revoke that key — it is still active. Try again."
-      end
-
-    load(assign(socket, minted_key: nil, mint_error: error), org_id, user_id)
+  defp refuse_revoke(socket, mount) do
+    if operator_plane?(mount), do: socket, else: assign(socket, mint_error: "Revoke refused (admin role required).")
   end
 
   # -- render ------------------------------------------------------------------
@@ -263,7 +260,7 @@ defmodule Samen.Web.Settings.ApiKeysLive do
   # -- private -----------------------------------------------------------------
 
   defp do_mint(socket, mount, org_id, user_id, params) do
-    with {:ok, membership} <- membership(mount, socket.assigns.acting_scope, org_id, user_id),
+    with {:ok, membership} <- membership(mount, org_id, user_id),
          scope <- admin_scope(user_id, org_id, membership.role),
          {:ok, raw, row} <-
            ApiKeys.mint(mount, scope,
@@ -292,11 +289,13 @@ defmodule Samen.Web.Settings.ApiKeysLive do
     end
   end
 
-  # The person's own membership row (the minter ceiling and its id), read with the acting scope.
-  defp membership(mount, scope, org_id, user_id) when is_binary(org_id) and is_binary(user_id),
-    do: Reads.current_membership_result(mount, scope, user_id, org_id)
+  # The person's own membership row (the minter ceiling and its id): the lookup that yields the role the key is minted with.
+  defp membership(mount, org_id, user_id) when is_binary(org_id) and is_binary(user_id) do
+    scope = Mount.scope(mount, org_id)
+    Reads.current_membership_result(mount, scope, user_id, org_id)
+  end
 
-  defp membership(_mount, _scope, _org_id, _user_id), do: {:error, :not_found}
+  defp membership(_mount, _org_id, _user_id), do: {:error, :not_found}
 
   # The current admin's own actor — a tenant-plane scope carrying the membership role,
   # so the ApiKey create policy (admin+) sees the real minter authority.

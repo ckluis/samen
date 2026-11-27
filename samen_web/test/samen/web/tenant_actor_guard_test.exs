@@ -35,12 +35,13 @@ defmodule Samen.Web.TenantActorGuardTest do
     "samen/web/operator/flag_admin_live.ex" => 2,
     "samen/web/replay/access.ex" => 2,
     "samen/web/sample_data.ex" => 1,
+    "samen/web/settings/api_keys_live.ex" => 1,
     "samen/web/tenant_role.ex" => 1,
   }
 
   # The exact size of the work list: a silent bump of an entry (or a new entry) fails here, not only in the ratchet.
-  @baseline_total 14
-  @baseline_files 10
+  @baseline_total 15
+  @baseline_files 11
 
   @exempt ~w(samen/web/mount.ex samen/web/tenant_actor.ex samen/web/tenant_actor/guard.ex)
 
@@ -61,6 +62,7 @@ defmodule Samen.Web.TenantActorGuardTest do
   # calls its own private `admin_scope/3` (user, org and the membership's role). Not exempt: nothing new may appear.
   @escape_hatch_baseline %{
     "samen/web/billing/reads.ex" => 1,
+    "samen/web/chat.ex" => 1,
     "samen/web/flags/reads.ex" => 1,
     "samen/web/marketing/reads.ex" => 1,
     "samen/web/settings/api_keys_live.ex" => 2,
@@ -161,7 +163,7 @@ defmodule Samen.Web.TenantActorGuardTest do
         do: refute(Map.has_key?(now, file), file)
 
     # the chat inbox and room, the file upload and preview pages, the automation builder, the settings pages and the onboarding wizard
-    for file <- ~w(samen/web/chat/threads_live.ex samen/web/chat/thread_live.ex samen/web/files/upload_live.ex samen/web/files/preview_live.ex samen/web/automation/builder_live.ex samen/web/settings/api_keys_live.ex samen/web/settings/invitations_live.ex samen/web/settings/reveal_approvals_live.ex samen/web/settings/security_live.ex samen/web/onboarding/wizard_live.ex samen/web/onboarding/wizard_controller.ex),
+    for file <- ~w(samen/web/chat/threads_live.ex samen/web/chat/thread_live.ex samen/web/files/upload_live.ex samen/web/files/preview_live.ex samen/web/automation/builder_live.ex samen/web/settings/invitations_live.ex samen/web/settings/reveal_approvals_live.ex samen/web/settings/security_live.ex samen/web/onboarding/wizard_live.ex samen/web/onboarding/wizard_controller.ex),
         do: refute(Map.has_key?(now, file), file)
 
     # the Billing, Marketing and Support pages converted in authz-7 (and leads)

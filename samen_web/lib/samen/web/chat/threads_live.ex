@@ -255,7 +255,7 @@ defmodule Samen.Web.Chat.ThreadsLive do
   end
 
   defp toggle_disclosure(socket, mount, expose?) do
-    case Chat.set_disclosure_setting(mount, socket.assigns.acting_scope, expose?) do
+    case Chat.set_disclosure_setting_as(mount, socket.assigns.acting_scope, expose?) do
       {:ok, _setting} ->
         {:noreply,
          socket

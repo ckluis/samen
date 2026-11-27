@@ -24,7 +24,7 @@ All notable changes to Samen are recorded here. The format follows
 
 - **The API keys, invitations, reveal approvals and security pages and the onboarding wizard resolve their actor** through
   `Samen.Web.TenantActor`: no active membership is the denied state (a failed lookup the unavailable state) and reads
-  nothing, an open page re-resolves before every event, and their lists and membership lookups read as that person. The pages
+  nothing, an open page re-resolves before every event, and their lists read as that person. The pages
   are readable by every active member; minting and revoking a key, inviting and revoking an invitation, deciding a reveal
   request and every write of the onboarding wizard (including its no-JS form posts) are an admin's, checked by the handler
   against the role resolved for that event and offered to an admin only. The security page reads the person's own account and
@@ -53,7 +53,7 @@ All notable changes to Samen are recorded here. The format follows
   nothing, and an open page re-resolves before every event and before every realtime delivery, so a person suspended while the
   room is open receives no further message. Reading the inbox and a room is open to every active member; starting a
   conversation and posting a message are a member's, checked by the handler and offered to a member only; flipping the
-  org-wide identity disclosure is an admin's and `Chat.set_disclosure_setting/3` runs it with `TenantActor.write_scope/3`, so
+  org-wide identity disclosure is an admin's and `Chat.set_disclosure_setting_as/3` runs it with `TenantActor.write_scope/3`, so
   the person's own role is what the kernel judges. The operator desk keeps its impersonation gate and masked reads.
 
 ### Changed: the feature-flags settings page and the calendar export act as the signed-in person
