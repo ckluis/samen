@@ -145,6 +145,9 @@ defmodule Samen.Web.TenantActor.Guard do
 
   defp finish_args(cur, acc), do: if(String.trim(cur) == "" and acc == [], do: [], else: Enum.reverse([cur | acc]))
 
+  # `\s` spans newlines: run over the whole source, so `alias ...TenantActor,\n  as: TA` is seen too.
+  @tenant_actor_alias_as ~r/\balias\s+(?:[A-Z][A-Za-z0-9_]*\.)*TenantActor\s*,\s*as:\s*([A-Z][A-Za-z0-9_]*)/
+
   @write_scope_acting ~w(acting acting_scope socket.assigns.acting_scope assigns.acting_scope)
 
   @doc """
@@ -161,11 +164,16 @@ defmodule Samen.Web.TenantActor.Guard do
       |> code_lines_of()
       |> Enum.join("\n")
 
-    args = for a <- calls_qualified(code, "TenantActor.write_scope"), do: Enum.map(a, &String.trim/1)
+    # the module is reached as `TenantActor` or as every name an `alias … TenantActor, as: X` gives it
+    names = ["TenantActor" | for([_, n] <- Regex.scan(@tenant_actor_alias_as, code), do: n)] |> Enum.uniq()
+
+    args =
+      for name <- names, a <- calls_qualified(code, name <> ".write_scope"), do: Enum.map(a, &String.trim/1)
+
     bad_args = Enum.count(args, fn a -> length(a) != 3 or Enum.at(a, 2) not in @write_scope_acting end)
 
-    captures = count(~r/&\s*(?:[A-Z][A-Za-z0-9_]*\.)*TenantActor\.write_scope\/\d/, code)
-    applies = count(~r/\bapply\(\s*(?:[A-Z][A-Za-z0-9_]*\.)*TenantActor\s*,\s*:write_scope\b/, code)
+    captures = Enum.sum(for n <- names, do: count(Regex.compile!("&\\s*(?:[A-Z][A-Za-z0-9_]*\\.)*#{n}\\.write_scope\\/\\d"), code))
+    applies = Enum.sum(for n <- names, do: count(Regex.compile!("\\bapply\\(\\s*(?:[A-Z][A-Za-z0-9_]*\\.)*#{n}\\s*,\\s*:write_scope\\b"), code))
 
     imports =
       code

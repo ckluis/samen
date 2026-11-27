@@ -310,6 +310,20 @@ defmodule Samen.Web.TenantActorGuardTest do
       assert Guard.foreign_write_scopes("def write_scope(mount, org_id, acting), do: x") == 0
     end
 
+    test "a write_scope call through an `alias … TenantActor, as: X` is counted like a direct one" do
+      as_ta = "alias Samen.Web.TenantActor, as: TA\n"
+      assert Guard.foreign_write_scopes(as_ta <> "TA.write_scope(m, o, nil)") == 1
+      assert Guard.foreign_write_scopes(as_ta <> "TA.write_scope(m, o, scope)") == 1
+      assert Guard.foreign_write_scopes(as_ta <> "f = &TA.write_scope/3") == 1
+      assert Guard.foreign_write_scopes(as_ta <> "apply(TA, :write_scope, [m, o, nil])") == 1
+      assert Guard.foreign_write_scopes("alias Samen.Web.TenantActor,\n  as: TA\nTA.write_scope(m, o, nil)") == 1
+      # positive controls: the page's own acting scope through the alias, the alias alone, a plain alias, an unrelated `TA`
+      assert Guard.foreign_write_scopes(as_ta <> "TA.write_scope(m, o, acting)") == 0
+      assert Guard.foreign_write_scopes(as_ta) == 0
+      assert Guard.foreign_write_scopes("alias Samen.Web.TenantActor\nTenantActor.write_scope(m, o, nil)") == 1
+      assert Guard.foreign_write_scopes("alias Samen.Web.Other, as: TA\nTA.write_scope(m, o, nil)") == 0
+    end
+
     test "a modeled new file is reported by every detector" do
       dir = Path.join(System.tmp_dir!(), "tenant_actor_guard_all_#{System.unique_integer([:positive])}")
       File.mkdir_p!(dir)
