@@ -5,10 +5,10 @@
 # TEST_FILES: test/meta/ci_driver_guard_test.exs
 # MUST_FAIL: GROUPKILL an interrupted driver stops the whole process group, not just its leader
 diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
-index 7c653163..3545b0db 100755
+index 6e8a35b5..447323b2 100755
 --- a/scripts/ci_driver.py
 +++ b/scripts/ci_driver.py
-@@ -1389,7 +1389,7 @@ class Run(object):
+@@ -1430,7 +1430,7 @@ class Run(object):
                  rc = self.running[sid]["proc"].poll()
                  if rc is not None:
                      self.finish(sid, rc)
@@ -17,8 +17,8 @@ index 7c653163..3545b0db 100755
                  break
              time.sleep(0.2)
          for sid in list(self.running):
-@@ -1398,7 +1398,7 @@ class Run(object):
-             self.running[sid]["proc"].wait()
+@@ -1438,7 +1438,7 @@ class Run(object):
+             self.kill_group_and_wait(sid, pg, self.running[sid]["proc"])
              self.finish(sid, -9)
          for sid, pg in pgs.items():
 -            if group_alive(pg) and sid not in self.stuck:  # a member that outlived its leader (the leader exited in time)

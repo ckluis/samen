@@ -6,14 +6,14 @@
 # TEST_FILES: test/meta/ci_driver_guard_test.exs
 # MUST_FAIL: KILLWAIT after SIGKILL the driver waits until the whole group is gone
 diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
-index 0a44ec65..20bee465 100755
+index 6e8a35b..24d853c 100755
 --- a/scripts/ci_driver.py
 +++ b/scripts/ci_driver.py
-@@ -1188,7 +1188,6 @@ class Run(object):
-         if not alive():
+@@ -1225,7 +1225,6 @@ class Run(object):
+         if not alive() and not leader_stuck:
              self.stuck.pop(name, None)
              return True
 -        self.stuck[name] = pg
          self.save_state()
-         sys.stderr.write("ci: process group %d (%s) is STILL ALIVE %gs after SIGKILL — it is recorded as running in "
-                          "state.json; the next scripts/ci refuses to overlap with it until it is gone\n" % (pg, name, wait))
+         if alive():
+             sys.stderr.write("ci: process group %d (%s) is STILL ALIVE %gs after SIGKILL — it is recorded as running in "
