@@ -41,11 +41,14 @@ This is deliberately *not* the stronger-sounding "run support without ever seein
 claim was retired as false-by-construction. Support **can** see PII, but only through a
 grant that a second party approved and the tenant can audit.
 
-**Known residue: free text.** The guarantee covers fields *declared* as PII (🔒). Free text
-is stored as written: ticket and chat message bodies, notes, reason fields and audit detail.
-A name or phone number someone types into a ticket body is plaintext at rest, is not masked
-on the operator plane, and is not destroyed by crypto-shred. Put personal data in declared
-fields; vaulting free-text bodies is an open decision, not a shipped guarantee.
+**Free text.** The guarantee covers fields *declared* as PII (🔒). Support message bodies
+(`Support.Message.body`) and chat message bodies (`Chat.ChatMessage.body`) are declared that way:
+each is `pii_attribute :body, :string, vault: :pii_body`, stored as one ciphertext blob, masked
+on the operator plane, revealed only through a grant, and destroyed by crypto-shred. The body is
+one unit: a reveal returns the whole message, not a phone number inside it. Free text in fields
+that do not declare PII (notes, reason fields, audit detail, and any text field a host adds
+without a `pii do` block) is stored as written: it is not masked on the operator plane and not
+destroyed by crypto-shred. Put personal data in declared fields.
 
 ## The claim set (each backed by a test, verifier, or probe in CI)
 
