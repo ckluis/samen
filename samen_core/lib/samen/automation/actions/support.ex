@@ -66,20 +66,36 @@ defmodule Samen.Automation.Actions.Support do
 
   @doc "Governed update of `record` with `attrs`, authorized as `ctx.actor` (T40 c3 — no bypass)."
   @spec governed_update(struct(), map(), Context.t()) :: {:ok, struct()} | {:error, atom()}
-  def governed_update(record, attrs, %Context{actor: actor}) do
+  def governed_update(record, attrs, %Context{actor: actor} = ctx) do
     record
-    |> Ash.Changeset.for_update(:update, attrs, actor: actor)
+    |> Ash.Changeset.for_update(:update, attrs, actor: actor, context: write_context(ctx))
     |> Ash.update()
     |> normalize_write_error()
   end
 
   @doc "Governed create of `resource` with `attrs`, authorized as `ctx.actor`."
   @spec governed_create(module(), map(), Context.t()) :: {:ok, struct()} | {:error, atom()}
-  def governed_create(resource, attrs, %Context{actor: actor}) do
+  def governed_create(resource, attrs, %Context{actor: actor} = ctx) do
     resource
-    |> Ash.Changeset.for_create(:create, attrs, actor: actor)
+    |> Ash.Changeset.for_create(:create, attrs, actor: actor, context: write_context(ctx))
     |> Ash.create()
     |> normalize_write_error()
+  end
+
+  @doc """
+  The changeset context every write made by a run carries (ADR-039 §4.7): the provenance of
+  the events that write will capture. `Samen.Automation.EventCapture.provenance/1` reads it,
+  so the captured event inherits `depth + 1` and `chain ++ [workflow_id]` and the cycle and
+  depth guards in `Samen.Automation.DispatchWorker` can refuse a self-triggering cascade.
+  """
+  @spec write_context(Context.t()) :: map()
+  def write_context(%Context{depth: depth, chain: chain, workflow_id: workflow_id}) do
+    %{
+      automation: %{
+        depth: (depth || 0) + 1,
+        chain: List.wrap(chain) ++ if(is_nil(workflow_id), do: [], else: [to_string(workflow_id)])
+      }
+    }
   end
 
   defp normalize_write_error({:ok, record}), do: {:ok, record}
