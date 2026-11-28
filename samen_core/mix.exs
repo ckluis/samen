@@ -101,6 +101,9 @@ defmodule SamenCore.MixProject do
       # (Gate-0 fix task #1, T1.5 acceptance clause (a)). Runtime dep: host apps
       # that render masked values in HEEx need the protocol present.
       {:phoenix_html, "~> 4.1"},
+      # plug: `Samen.Api.Help.Endpoint` and `Samen.Api.Help.ErrorHints` are plugs (`/api/help`, hints on API errors).
+      # Every host already locks it through Phoenix; the floor is the one the hosts lock (ADR-033).
+      {:plug, "~> 1.18"},
       # OTel tracing (T2.6): opentelemetry_api is the compile-time API surface;
       # opentelemetry is the SDK (span processor, exporter, BEAM propagation).
       # opentelemetry_ecto attaches to Ecto telemetry events — REQUIRED config:

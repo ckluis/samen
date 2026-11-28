@@ -11,6 +11,7 @@ defmodule Samen.Gen.PostTest do
   red-path files green + a red-path-mechanism sabotage flips one" claim is covered by
   `priv/gen_post_probe.exs` (the non-vacuity probe), run by the gen_app tier.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: true
 
   alias Samen.CatalogMeaning
@@ -45,9 +46,9 @@ defmodule Samen.Gen.PostTest do
 
     core_list =
       if web? do
-        "config :samen_core, :ash_domains, [\n  Widgetco.Billing,\n  Widgetco.Vertical,\n  Widgetco.Aggregate,\n  Widgetco.Primitives,\n  Widgetco.Operator\n]"
+        "config :samen_core, :host_domains, [\n  Widgetco.Billing,\n  Widgetco.Vertical,\n  Widgetco.Aggregate,\n  Widgetco.Primitives,\n  Widgetco.Operator\n]"
       else
-        "config :samen_core, :ash_domains, [\n  Widgetco.Billing,\n  Widgetco.Vertical,\n  Widgetco.Aggregate\n]"
+        "config :samen_core, :host_domains, [\n  Widgetco.Billing,\n  Widgetco.Vertical,\n  Widgetco.Aggregate\n]"
       end
 
     File.write!(Path.join(dir, "config/config.exs"), """
@@ -130,7 +131,7 @@ defmodule Samen.Gen.PostTest do
         cfg = File.read!(Path.join(dir, "config/config.exs"))
         # The new domain is the last element of BOTH lists.
         assert cfg =~ ~r/ash_domains:\s*\[[^\]]*Widgetco\.Crm[^\]]*\]/s
-        assert cfg =~ ~r/:ash_domains,\s*\[[^\]]*Widgetco\.Crm[^\]]*\]/s
+        assert cfg =~ ~r/:host_domains,\s*\[[^\]]*Widgetco\.Crm[^\]]*\]/s
         # The empty scope domain file exists.
         assert File.exists?(Path.join(dir, "lib/widgetco/crm.ex"))
         assert File.read!(Path.join(dir, "lib/widgetco/crm.ex")) =~ "use Ash.Domain"
@@ -726,7 +727,7 @@ defmodule Samen.Gen.PostTest do
                  "#{field_type}: field #{name}: #{inspect(description)}"
         end
 
-        refute inspect(fields) =~ "vt_", "a vault field's description describes the schema, never a value"
+        refute_vault_token(inspect(fields), "a vault field's description describes the schema, never a value")
 
         # Only what is enforced: `status` is a one_of with a default; create accepts any of the three values and nothing
         # enforces a lifecycle, so the text claims neither "new entries start active" nor a "lifecycle".

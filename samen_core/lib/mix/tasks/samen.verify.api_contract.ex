@@ -92,15 +92,7 @@ defmodule Mix.Tasks.Samen.Verify.ApiContract do
   def run(args) do
     Mix.Task.run("app.start")
 
-    {opts, _rest, _} =
-      OptionParser.parse(args,
-        strict: [
-          version: :string,
-          snapshot: :string,
-          update: :boolean,
-          domains: :string
-        ]
-      )
+    opts = Samen.Gen.Args.parse!("samen.verify.api_contract", args, [version: :string, snapshot: :string, update: :boolean, domains: :string])
 
     version = Keyword.get(opts, :version) || abort("--version is required (e.g. --version v1)")
 

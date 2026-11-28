@@ -1,0 +1,27 @@
+# SABOTAGE: Help tells a caller that a type exists but is forbidden, instead of not found
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_test.exs
+# MUST_FAIL: RED: help for a hidden resource is indistinguishable from an unknown one
+diff --git a/samen_core/lib/samen/api/help.ex b/samen_core/lib/samen/api/help.ex
+index 7db4f60..ed40009 100644
+--- a/samen_core/lib/samen/api/help.ex
++++ b/samen_core/lib/samen/api/help.ex
+@@ -96,11 +96,15 @@ defmodule Samen.Api.Help do
+     entries = survey(actor, router)
+ 
+     case Enum.find(entries, &(&1.type == type)) do
+-      nil -> :not_found
++      nil -> if known_type?(router, type), do: :forbidden, else: :not_found
+       entry -> {:ok, detail(entry, actor, MapSet.new(entries, & &1.type), prefix, help)}
+     end
+   end
+ 
++  defp known_type?(router, type) do
++    Enum.any?(router.domains(), fn d -> Enum.any?(Ash.Domain.Info.resources(d), &(ApiKey.json_api_type(&1) == type)) end)
++  end
++
+   # --- the survey: one question per route, asked of Ash ---------------------------------------------------------
+ 
+   defp survey(actor, router, only_type \\ nil) do

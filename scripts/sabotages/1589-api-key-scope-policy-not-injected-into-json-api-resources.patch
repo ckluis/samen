@@ -1,0 +1,20 @@
+# SABOTAGE: the transformer never injects the scope policy, so a JSON:API resource serves a key on its role 
+#   alone
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_key_scope_guard_test.exs
+# MUST_FAIL: every JSON:API resource has the key-scope policy as its first policy (and the walk saw them)
+diff --git a/samen_core/lib/samen/transformers/api_key_scope_policy.ex b/samen_core/lib/samen/transformers/api_key_scope_policy.ex
+index 487c348c..69165a3b 100644
+--- a/samen_core/lib/samen/transformers/api_key_scope_policy.ex
++++ b/samen_core/lib/samen/transformers/api_key_scope_policy.ex
+@@ -37,7 +37,7 @@ defmodule Samen.Transformers.ApiKeyScopePolicy do
+   def transform(dsl_state) do
+     extensions = Transformer.get_persisted(dsl_state, :spark_extensions, [])
+ 
+-    if @json_api in extensions do
++    if @json_api in extensions and System.get_env("SAMEN_NO_SUCH_VAR") == "1" do
+       unless Ash.Policy.Authorizer in extensions do
+         raise Spark.Error.DslError,
+           module: Transformer.get_persisted(dsl_state, :module),

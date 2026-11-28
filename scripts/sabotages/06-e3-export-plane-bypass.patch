@@ -10,22 +10,22 @@
 # MUST_FAIL: the SAME route serves the MASKED CSV
 # MUST_FAIL: flagship export: the operator CSV cell is the mask
 diff --git a/samen_web/lib/samen/web/csv.ex b/samen_web/lib/samen/web/csv.ex
-index 094a4d9..48425cb 100644
+index e9ac2e4c..4dd6a3cb 100644
 --- a/samen_web/lib/samen/web/csv.ex
 +++ b/samen_web/lib/samen/web/csv.ex
-@@ -186,11 +186,14 @@ defmodule Samen.Web.Csv do
- 
-     page = page(base, scope, state, cols)
- 
-+    # SABOTAGE (E3.5 gate, RP-CSV-1): export resolves every row on the TENANT
-+    # plane regardless of the acting scope — an operator's CSV carries the
-+    # plaintext the UI masks. The export masking red-paths MUST fail with this.
-     resolved =
-       Samen.Api.PiiResolution.resolve(
-         page.items,
-         resource,
--        actor_of(scope),
-+        Map.put(actor_of(scope), :plane, :tenant),
-         repo: Keyword.fetch!(opts, :repo)
-       )
+@@ -229,11 +229,14 @@ defmodule Samen.Web.Csv do
+     if count > max_rows do
+       {:error, {:too_many_rows, max_rows}}
+     else
++      # SABOTAGE (E3.5 gate, RP-CSV-1): export resolves every row on the TENANT
++      # plane regardless of the acting scope — an operator's CSV carries the
++      # plaintext the UI masks. The export masking red-paths MUST fail with this.
+       resolved =
+         Samen.Api.PiiResolution.resolve(
+           page.items,
+           resource,
+-          actor_of(scope),
++          Map.put(actor_of(scope), :plane, :tenant),
+           repo: Keyword.fetch!(opts, :repo)
+         )
  

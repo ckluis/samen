@@ -10,6 +10,7 @@ defmodule Samen.UI.FormComponentsTest do
   `••••` DISABLED with **no `name` attribute** — it cannot submit, and the vault
   token never reaches the DOM.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: true
 
   import Phoenix.Component, only: [to_form: 2]
@@ -166,7 +167,7 @@ defmodule Samen.UI.FormComponentsTest do
     refute html =~ "name="
     # …and the vault token NEVER reaches the DOM.
     refute html =~ @token
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   test "MASKED red path: the requested type cannot re-open an editable surface (textarea/select stay masked)" do

@@ -1,0 +1,19 @@
+# SABOTAGE: The help endpoint answers a hidden type with a body that differs from an unknown type
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_endpoint_test.exs
+# MUST_FAIL: RED: help for a hidden type and for an unknown type is the same 404
+diff --git a/samen_core/lib/samen/api/help/endpoint.ex b/samen_core/lib/samen/api/help/endpoint.ex
+index 1537bc17..dcfec918 100644
+--- a/samen_core/lib/samen/api/help/endpoint.ex
++++ b/samen_core/lib/samen/api/help/endpoint.ex
+@@ -79,7 +79,7 @@ defmodule Samen.Api.Help.Endpoint do
+   defp detail(conn, actor, opts, type, help_opts) do
+     case Help.resource(actor, opts.router, type, help_opts) do
+       {:ok, map} -> respond(conn, map, :detail)
+-      :not_found -> not_found(conn)
++      :not_found -> conn |> send_resp(404, @not_found <> type) |> halt()
+     end
+   end
+ 

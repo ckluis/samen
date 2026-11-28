@@ -1,0 +1,20 @@
+# SABOTAGE: TenantActor.administrable?/2 offers the admin-ranked billing controls (new plan, new invoice, 
+#   delete) to a member
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_billing_test.exs
+# MUST_FAIL: the pages offer a control only to a role that can use it
+diff --git a/samen_web/lib/samen/web/tenant_actor.ex b/samen_web/lib/samen/web/tenant_actor.ex
+index 1c2f9488..4b82bc7d 100644
+--- a/samen_web/lib/samen/web/tenant_actor.ex
++++ b/samen_web/lib/samen/web/tenant_actor.ex
+@@ -140,7 +140,7 @@ defmodule Samen.Web.TenantActor do
+   def administrable?(%Mount{plane: %{kind: :operator}}, _scope), do: false
+ 
+   def administrable?(%Mount{} = mount, %Samen.Scope{actor: %{role: role}}) do
+-    if CurrentOrg.tenant_gate_armed?(mount), do: Samen.Scope.Role.at_least?(role, :admin), else: true
++    if CurrentOrg.tenant_gate_armed?(mount), do: Samen.Scope.Role.at_least?(role, :member), else: true
+   end
+ 
+   def administrable?(_mount, _no_scope), do: false

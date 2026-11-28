@@ -362,6 +362,8 @@ defmodule Samen.Gen.AppTest do
         assert out =~ "mix samen.abbrev.reserve --host widgetco"
         assert out =~ "NEVER add or edit rows"
         assert out =~ "schema.dict.json"
+        assert out =~ "## Upgrading samen"
+        assert out =~ "github.com/ckluis/samen/tree/main/docs/upgrade/"
         assert length(String.split(out, "\n")) <= 80
       end
     end
@@ -626,7 +628,7 @@ defmodule Samen.Gen.AppTest do
       assert vertical =~ "index(:api_read)"
     end
 
-    test "the api endpoint pipeline is KeyAuthPlug → the INHERITED PageLimitClamp → AshJsonApi router (AC-G4-2, §3 drift guard)" do
+    test "the api endpoint pipeline is ErrorHints → KeyAuthPlug → the INHERITED PageLimitClamp → AshJsonApi router (AC-G4-2, §3 drift guard)" do
       files = rendered_api_files()
       endpoint = files["lib/widgetco_web/api/endpoint.ex"]
 
@@ -635,9 +637,10 @@ defmodule Samen.Gen.AppTest do
       assert endpoint =~ "plug(Samen.Web.Api.PageLimitClamp)"
       assert endpoint =~ "plug(WidgetcoWeb.Api.Router)"
 
-      # Pipeline ORDER: auth → clamp → router.
-      [auth_idx, clamp_idx, router_idx] =
+      # Pipeline ORDER: the error hints wrap everything, then auth → clamp → router.
+      [hints_idx, auth_idx, clamp_idx, router_idx] =
         for probe <- [
+              "plug(Samen.Api.Help.ErrorHints, router: WidgetcoWeb.Api.Router)",
               "plug(WidgetcoWeb.Api.KeyAuthPlug)",
               "plug(Samen.Web.Api.PageLimitClamp)",
               "plug(WidgetcoWeb.Api.Router)"
@@ -646,7 +649,7 @@ defmodule Samen.Gen.AppTest do
           idx
         end
 
-      assert auth_idx < clamp_idx and clamp_idx < router_idx
+      assert hints_idx < auth_idx and auth_idx < clamp_idx and clamp_idx < router_idx
 
       # §3 drift guard: the clamp is inherited from samen_web — NEVER re-emitted as a
       # local mirror (the demo mirror exists only because demo is samen_core-only).
@@ -662,6 +665,11 @@ defmodule Samen.Gen.AppTest do
     test "the host router forwards /api/v1 to the api endpoint (the driftwood idiom)" do
       router = rendered_api_files()["lib/widgetco_web/router.ex"]
       assert router =~ ~s{forward("/api/v1", WidgetcoWeb.Api.Endpoint)}
+
+      # `/api/help` is mounted beside it, with the host's own router and key plug.
+      assert router =~ ~s{forward("/api/help", Samen.Api.Help.Endpoint,}
+      assert router =~ "router: WidgetcoWeb.Api.Router,"
+      assert router =~ "key_auth: WidgetcoWeb.Api.KeyAuthPlug"
 
       # Still zero authored LiveViews (the AC-G4-1 invariant holds under --api).
       assert Regex.scan(~r/defmodule /, router) |> length() == 1

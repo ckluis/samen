@@ -15,6 +15,7 @@ defmodule Samen.Web.BillingInvoicesCrudTest do
     * **Operator posture (belt)** — no write affordance in the operator DOM; the
       masked customer column stays masked.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.Web.Billing.InvoicesLive
@@ -186,6 +187,6 @@ defmodule Samen.Web.BillingInvoicesCrudTest do
     refute rendered =~ ~s(phx-click="new_invoice")
     refute rendered =~ ~s(phx-click="delete")
     refute rendered =~ "data-confirm"
-    refute rendered =~ "vt_"
+    refute_vault_token(rendered)
   end
 end

@@ -7,6 +7,8 @@ defmodule <%= module %>Web.Api.Endpoint do
 
   Pipeline order:
 
+    0. `Samen.Api.Help.ErrorHints` — adds `meta._hint` and `links.about` (pointing at `/api/help`)
+       to each error of an error response; a response that is not an error is untouched.
     1. `<%= module %>Web.Api.KeyAuthPlug` — resolve the `Authorization: Bearer <key>`
        into a plane-bearing actor (the two key classes), or set no actor (fail closed).
     2. `Samen.Web.Api.PageLimitClamp` — clamp `page[limit]` to max_page_size BEFORE
@@ -23,6 +25,7 @@ defmodule <%= module %>Web.Api.Endpoint do
   """
   use Plug.Builder
 
+  plug(Samen.Api.Help.ErrorHints, router: <%= module %>Web.Api.Router)
   plug(<%= module %>Web.Api.KeyAuthPlug)
   plug(Samen.Web.Api.PageLimitClamp)
   plug(<%= module %>Web.Api.Router)

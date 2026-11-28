@@ -1,0 +1,19 @@
+# SABOTAGE: Help lists a route without asking Ash whether the caller may run it
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_test.exs
+# MUST_FAIL: RED: help omits a resource the key cannot use
+diff --git a/samen_core/lib/samen/api/help.ex b/samen_core/lib/samen/api/help.ex
+index 7db4f603..0ebbf7ed 100644
+--- a/samen_core/lib/samen/api/help.ex
++++ b/samen_core/lib/samen/api/help.ex
+@@ -217,7 +217,7 @@ defmodule Samen.Api.Help do
+ 
+     case memo do
+       %{^key => answer} -> {answer, memo}
+-      _ -> answer = can(actor, resource, action, domain); {answer, Map.put(memo, key, answer)}
++      _ -> answer = (can(actor, resource, action, domain); :yes); {answer, Map.put(memo, key, answer)}
+     end
+   end
+ 

@@ -1,0 +1,19 @@
+# SABOTAGE: An error hint logs an error line for every refusal of a key with no scopes
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_endpoint_test.exs
+# MUST_FAIL: never logged as an error
+diff --git a/samen_core/lib/samen/api/help/error_hints.ex b/samen_core/lib/samen/api/help/error_hints.ex
+index 864f9102..22aaccb5 100644
+--- a/samen_core/lib/samen/api/help/error_hints.ex
++++ b/samen_core/lib/samen/api/help/error_hints.ex
+@@ -49,7 +49,7 @@ defmodule Samen.Api.Help.ErrorHints do
+       link = link(conn, actor, opts)
+       no_scopes? = no_scopes?(actor)
+       if no_scopes? and Enum.any?(errors, &(is_map(&1) and &1["code"] == "forbidden")),
+-        do: :telemetry.execute([:samen, :api, :help, :key_has_no_scopes], %{count: 1}, %{})
++        do: (Samen.Observability.Failure.report(:api_key_no_scopes, nil, :no_scopes); :telemetry.execute([:samen, :api, :help, :key_has_no_scopes], %{count: 1}, %{}))
+ 
+       errors = Enum.map(errors, &annotate(&1, link, opts.help, no_scopes?))
+       %{conn | resp_body: Jason.encode!(Map.put(body, "errors", errors))}

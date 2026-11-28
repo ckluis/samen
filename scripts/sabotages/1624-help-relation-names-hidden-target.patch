@@ -1,0 +1,19 @@
+# SABOTAGE: Help lists a relation to a type the caller may not use
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_test.exs
+# MUST_FAIL: RED: a relation whose target the key cannot use is not listed
+diff --git a/samen_core/lib/samen/api/help.ex b/samen_core/lib/samen/api/help.ex
+index 6e6b6e92..3804f0d9 100644
+--- a/samen_core/lib/samen/api/help.ex
++++ b/samen_core/lib/samen/api/help.ex
+@@ -275,7 +275,7 @@ defmodule Samen.Api.Help do
+     for rel <- Ash.Resource.Info.public_relationships(resource),
+         MapSet.member?(served, rel.source_attribute),
+         target = ApiKey.json_api_type(rel.destination),
+-        target != nil and MapSet.member?(visible, target) do
++        target != nil do
+       %{
+         "name" => to_string(rel.name),
+         "kind" => to_string(rel.type),

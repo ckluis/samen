@@ -377,9 +377,14 @@ defmodule Samen.Web.Marketing.Reads do
   rejects a vaulted-PII write exactly as before, the elevation raises RBAC rank only, and
   `OrgScope` still confines the write to `org_id`. Subscriber writes are member-gated and use the
   plain scope (and the subscriber `email` vault path is unchanged — `add_subscriber/3`).
+
+  On an OPERATOR-plane mount it answers `Samen.Web.TenantActor.read_only_scope/2`, never an admin: an operator does not write a tenant's marketing.
   """
-  def write_scope(mount, org_id, principal \\ nil),
-    do: Samen.Web.TenantRole.admin_scope(mount, org_id, principal)
+  def write_scope(mount, org_id, principal \\ nil) do
+    if not match?(%Samen.Web.Mount{plane: %{kind: :operator}}, mount),
+      do: Samen.Web.TenantRole.admin_scope(mount, org_id, principal),
+      else: Samen.Web.TenantActor.read_only_scope(mount, org_id)
+  end
 
   @doc "Destroy one Marketing campaign for `scope` (A3 CRUD wiring). `:ok` or `{:error, reason}`."
   def delete_campaign(mount, scope, id), do: delete_record(mount, scope, Campaign, id)

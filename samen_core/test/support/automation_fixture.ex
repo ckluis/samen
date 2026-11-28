@@ -54,34 +54,31 @@ defmodule SamenCore.Support.AutomationFixture.Subject do
     defaults([:read, :destroy, create: :*, update: :*])
 
     action :reveal_subject, :map do
-      argument(:actor_id, :string, allow_nil?: false)
       argument(:subject_id, :string, allow_nil?: false)
 
-      run(fn input, _ctx ->
-        ctx = %Samen.Reveal.Context{
-          actor: input.arguments.actor_id,
-          subject_id: input.arguments.subject_id,
-          resource: __MODULE__,
-          action: :reveal_subject,
-          label: :email
-        }
-
-        if Samen.Reveal.grant_checker().granted?(ctx) do
-          {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-        else
-          {:error, :denied}
-        end
-      end)
+      run({Samen.Reveal.GrantProbe, label: :email})
     end
   end
 
   policies do
+    # Read tiers by priority, so a run's role is observable on a read: :urgent records need an admin, :high and
+    # :normal ones a member; :low ones are open to every role. Only the READ is tiered.
+    policy [action_type(:read), expr(priority == :urgent)] do
+      forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})
+      authorize_if(always())
+    end
+
+    policy [action_type(:read), expr(priority in [:high, :normal])] do
+      forbid_unless({Samen.Policy.RoleAtLeast, role: :member})
+      authorize_if(always())
+    end
+
     policy action_type([:read, :create, :update, :destroy]) do
       authorize_if(Samen.Policy.OrgScope)
     end
 
     policy action(:reveal_subject) do
-      authorize_if(always())
+      authorize_if(actor_present())
     end
   end
 end
@@ -143,36 +140,55 @@ defmodule SamenCore.Support.AutomationFixture.Target do
   actions do
     defaults([:read, :destroy, create: :*, update: :*])
 
+    # A host action whose after_action writes a SECOND captured record, handing it the scope it was given: the shape
+    # that must carry a run's loop provenance into the nested write (ADR-039 §4.7).
+    create :create_nested do
+      accept([:title, :priority, :org_id])
+      change(SamenCore.Support.AutomationFixture.NestedSubject)
+    end
+
     action :reveal_target, :map do
-      argument(:actor_id, :string, allow_nil?: false)
       argument(:subject_id, :string, allow_nil?: false)
 
-      run(fn input, _ctx ->
-        ctx = %Samen.Reveal.Context{
-          actor: input.arguments.actor_id,
-          subject_id: input.arguments.subject_id,
-          resource: __MODULE__,
-          action: :reveal_target,
-          label: :email
-        }
-
-        if Samen.Reveal.grant_checker().granted?(ctx) do
-          {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-        else
-          {:error, :denied}
-        end
-      end)
+      run({Samen.Reveal.GrantProbe, label: :email})
     end
   end
 
   policies do
+    # A viewer cannot write: a viewer owner's workflow cannot write (ADR-039 §4.5). Any other role, and no role,
+    # is left to the org scope below, as the agent write tests rely on.
+    policy action_type([:create, :update, :destroy]) do
+      forbid_if(expr(^actor(:role) == :viewer))
+      authorize_if(always())
+    end
+
     policy action_type([:read, :create, :update, :destroy]) do
       authorize_if(Samen.Policy.OrgScope)
     end
 
     policy action(:reveal_target) do
-      authorize_if(always())
+      authorize_if(actor_present())
     end
+  end
+end
+
+defmodule SamenCore.Support.AutomationFixture.NestedSubject do
+  @moduledoc """
+  Test change: after the write, create a `Subject` (a second captured resource) through the scope Ash hands the
+  change, exactly as a host's nested write would (`Ash.Scope.to_opts/1` carries only the `shared` context).
+  """
+  use Ash.Resource.Change
+
+  alias SamenCore.Support.AutomationFixture.Subject
+
+  @impl true
+  def change(changeset, _opts, context) do
+    Ash.Changeset.after_action(changeset, fn changeset, record ->
+      org_id = Ash.Changeset.get_attribute(changeset, :org_id)
+      opts = context |> Ash.Scope.to_opts() |> Keyword.put(:authorize?, false)
+      Ash.create!(Subject, %{org_id: org_id, title: "nested", email: "n@example.com"}, opts)
+      {:ok, record}
+    end)
   end
 end
 

@@ -1,0 +1,19 @@
+# SABOTAGE: the backfill gives a viewer-minted key read and write
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/api_key_scopes_gen_test.exs
+# MUST_FAIL: RED: backfill gives a viewer-minted key read only
+diff --git a/samen_core/lib/mix/tasks/samen.gen.api_key_scopes.ex b/samen_core/lib/mix/tasks/samen.gen.api_key_scopes.ex
+index 7a15fbac..bbd0ad67 100644
+--- a/samen_core/lib/mix/tasks/samen.gen.api_key_scopes.ex
++++ b/samen_core/lib/mix/tasks/samen.gen.api_key_scopes.ex
+@@ -90,7 +90,7 @@ defmodule Mix.Tasks.Samen.Gen.ApiKeyScopes do
+               where: "(#{s} IS NULL OR #{s} = '#{@empty}'::jsonb) AND #{r} IN ('owner', 'admin', 'member')"
+             )
+ 
+-            chunked_backfill(repo(), "#{t}", ~s|#{s} = '{"all":["read"]}'::jsonb|,
++            chunked_backfill(repo(), "#{t}", ~s|#{s} = '{"all":["read","write"]}'::jsonb|,
+               where: "(#{s} IS NULL OR #{s} = '#{@empty}'::jsonb) AND #{r} = 'viewer'"
+             )\
+         """

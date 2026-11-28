@@ -1,0 +1,21 @@
+# SABOTAGE: a bare vt_ pattern spelled ~r|...| in a module attribute is not seen by the vault-token bare 
+#   guard
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/vault_token_bare_guard_test.exs
+# MUST_FAIL: no assertion in the repo is a bare
+diff --git a/demo/test/api_allowlist_test.exs b/demo/test/api_allowlist_test.exs
+index e1f60bdf..0cd92183 100644
+--- a/demo/test/api_allowlist_test.exs
++++ b/demo/test/api_allowlist_test.exs
+@@ -24,7 +24,8 @@ defmodule Demo.ApiAllowlistTest do
+     ~r/\bcom_/,
+     ~r/\bido_/,
+     ~r/\busr_/,
+-    ~r/\bpii_/
++    ~r/\bpii_/,
++    ~r|\bvt_|
+   ]
+ 
+   describe "allowlist — catalog names only, storage names never" do

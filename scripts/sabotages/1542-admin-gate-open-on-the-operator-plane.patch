@@ -1,0 +1,19 @@
+# SABOTAGE: TenantActor.admin?/1 is true on the operator plane, so the campaign send gate is open there
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_role_gates_test.exs
+# MUST_FAIL: the operator plane is not an admin of a tenant page
+diff --git a/samen_web/lib/samen/web/tenant_actor.ex b/samen_web/lib/samen/web/tenant_actor.ex
+index abe8e407..af3c3504 100644
+--- a/samen_web/lib/samen/web/tenant_actor.ex
++++ b/samen_web/lib/samen/web/tenant_actor.ex
+@@ -129,7 +129,7 @@ defmodule Samen.Web.TenantActor do
+   OPERATOR plane is `false`, like `administrable?/2`: an operator never sends a tenant's campaign. `false` when nobody acts.
+   """
+   @spec admin?(map()) :: boolean()
+-  def admin?(%{assigns: %{acting_scope: %Samen.Scope{}, samen_mount: %Mount{plane: %{kind: :operator}}}}), do: false
++  def admin?(%{assigns: %{acting_scope: %Samen.Scope{}, samen_mount: %Mount{plane: %{kind: :operator}}}}), do: true
+ 
+   def admin?(%{assigns: %{acting_scope: %Samen.Scope{actor: %{role: role}}, samen_mount: %Mount{} = mount}}) do
+     not CurrentOrg.tenant_gate_armed?(mount) or Samen.Scope.Role.at_least?(role, :admin)

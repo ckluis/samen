@@ -51,7 +51,7 @@ defmodule Mix.Tasks.Samen.Audit.FreeformProjection do
 
   @impl Mix.Task
   def run(args) do
-    {opts, _rest, _} = OptionParser.parse(args, strict: [domain: :keep])
+    opts = Samen.Gen.Args.parse!("samen.audit.freeform_projection", args, [domain: :keep])
 
     Mix.Task.run("app.start")
 

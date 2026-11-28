@@ -169,7 +169,10 @@ defmodule Samen.Extension do
       # resource that already declares its own `changes` block (e.g. CMS Page's cascade).
       Samen.Transformers.VersionedSelect,
       Samen.Transformers.AbbrevStorage,
-      Samen.Transformers.NoPanColumns
+      Samen.Transformers.NoPanColumns,
+      # ApiKeyScopePolicy: on every resource exposed over JSON:API, an API key's declared scopes are
+      # enforced by a policy placed FIRST in the list (so a later `bypass` cannot skip it).
+      Samen.Transformers.ApiKeyScopePolicy
     ],
     verifiers: [
       Samen.Verifiers.AbbrevRegistry,

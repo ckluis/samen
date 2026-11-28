@@ -131,7 +131,7 @@ defmodule Samen.Automation.Actions.AssignRecordOwner do
     with {:ok, resource} <- resolve(config["resource"]),
          :ok <- owner_attribute?(resource),
          {:ok, record} <- fetch(resource, config["id"], ctx.actor),
-         {:ok, updated} <- assign(record, config["user_id"], ctx.actor) do
+         {:ok, updated} <- assign(record, config["user_id"], ctx.actor, ctx) do
       {:ok,
        %{
          kind: :assign_record_owner,
@@ -202,9 +202,9 @@ defmodule Samen.Automation.Actions.AssignRecordOwner do
   # The governed WRITE — `scope:`, never `authorize?: false`. This is the ONLY mutating
   # call in the module, and it is reachable only from `Samen.AI.Agent.execute_approved/3`
   # with the APPROVER's scope.
-  defp assign(record, user_id, %Samen.Scope{} = scope) do
+  defp assign(record, user_id, %Samen.Scope{} = scope, %Context{} = ctx) do
     record
-    |> Ash.Changeset.for_update(:update, %{@owner_attribute => user_id}, scope: scope)
+    |> Ash.Changeset.for_update(:update, %{@owner_attribute => user_id}, scope: scope, context: Support.write_context(ctx))
     |> Ash.update(scope: scope)
     |> case do
       {:ok, updated} -> {:ok, updated}

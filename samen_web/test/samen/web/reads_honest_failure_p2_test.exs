@@ -11,6 +11,7 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
   create CTA, stay alive, and recover on retry; paired with a POSITIVE CONTROL (a genuinely
   empty result still renders the real empty state).
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   import ExUnit.CaptureLog
@@ -52,7 +53,7 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
     assert html =~ "error-state"
     assert html =~ ~s(role="alert")
     assert html =~ "Nothing was lost"
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   defp refute_error_state(html), do: refute(html =~ "error-state")
@@ -1008,7 +1009,7 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
       rendered = html(SecurityLive, failing(fn -> socket_for(SecurityLive, mount, [org_id, user.id]) end))
       assert rendered =~ "security-sessions-unavailable"
       refute rendered =~ "No impersonation sessions recorded."
-      refute rendered =~ "vt_"
+      refute_vault_token(rendered)
 
       clear_read_faults()
       rendered = html(SecurityLive, socket_for(SecurityLive, mount, [org_id, user.id]))
@@ -1435,7 +1436,7 @@ defmodule Samen.Web.ReadsHonestFailureP2Test do
       chip = render_component(&Samen.UI.object_card/1, %{card: result})
       assert chip =~ "Couldn't load this object"
       refute chip =~ "Object not available"
-      refute chip =~ "vt_"
+      refute_vault_token(chip)
 
       clear_read_faults()
       missing = %ObjectRef{key: "crm.person", id: Ash.UUID.generate(), raw: "x"}

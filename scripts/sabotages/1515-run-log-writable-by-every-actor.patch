@@ -1,0 +1,19 @@
+# SABOTAGE: the automation Run log is writable by any actor again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/system_actions_authz_test.exs
+# MUST_FAIL: a tenant actor of ANY role cannot create or update a Run
+diff --git a/samen_core/lib/samen/scopes/automation/blueprint.ex b/samen_core/lib/samen/scopes/automation/blueprint.ex
+index ee273027..4fc68b44 100644
+--- a/samen_core/lib/samen/scopes/automation/blueprint.ex
++++ b/samen_core/lib/samen/scopes/automation/blueprint.ex
+@@ -898,7 +898,7 @@ defmodule Samen.Scopes.Automation.Blueprint do
+           # surface. Reads are org-scoped for both planes that consume this log.
+           # No actor writes it (the bypass this replaces let every actor create and update run rows).
+           policy action_type([:create, :update]) do
+-            forbid_if(always())
++            authorize_if(always())
+           end
+ 
+           policy action_type(:read) do

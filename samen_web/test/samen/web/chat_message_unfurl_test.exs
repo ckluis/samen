@@ -13,6 +13,7 @@ defmodule Samen.Web.ChatMessageUnfurlTest do
   (`Samen.Web.ObjectRef`) exercised THROUGH the chat message-render path (`Samen.Web.Chat.
   resolve_cards/3`) — chat is the first consumer, masking is BY CONSTRUCTION.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.Web.Chat
@@ -56,7 +57,7 @@ defmodule Samen.Web.ChatMessageUnfurlTest do
     refute html =~ Seeds.contact_full_name()
     refute html =~ Seeds.contact_email()
     refute html =~ Seeds.contact_phone()
-    refute html =~ "vt_"
+    refute_vault_token(html)
     refute html =~ "pii_"
   end
 

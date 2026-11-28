@@ -1,0 +1,19 @@
+# SABOTAGE: Help shows a scope that omits the read class an update or destroy needs
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_test.exs
+# MUST_FAIL: RED: a write route shows read AND write
+diff --git a/samen_core/lib/samen/api/help.ex b/samen_core/lib/samen/api/help.ex
+index 7db4f603..dc655837 100644
+--- a/samen_core/lib/samen/api/help.ex
++++ b/samen_core/lib/samen/api/help.ex
+@@ -321,7 +321,7 @@ defmodule Samen.Api.Help do
+ 
+     scope =
+       Enum.reduce(grants, %{}, fn %{scope: scope}, acc ->
+-        Map.merge(acc, scope, fn _name, a, b -> Enum.sort(Enum.uniq(a ++ b)) end)
++        Map.merge(acc, scope, fn _name, a, _b -> a end)
+       end)
+ 
+     also =

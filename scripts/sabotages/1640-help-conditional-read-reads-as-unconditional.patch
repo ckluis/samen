@@ -1,0 +1,19 @@
+# SABOTAGE: Help stops marking an action that the policies allow only for some records as conditional
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_shapes_test.exs
+# MUST_FAIL: RED: a filter-policy read and a write that loads through it are listed with conditional: true
+diff --git a/samen_core/lib/samen/api/help.ex b/samen_core/lib/samen/api/help.ex
+index 7db4f603..1353e0d4 100644
+--- a/samen_core/lib/samen/api/help.ex
++++ b/samen_core/lib/samen/api/help.ex
+@@ -231,7 +231,7 @@ defmodule Samen.Api.Help do
+     case Ash.can({resource, action}, actor, opts) do
+       {:ok, true} -> :yes
+       {:ok, true, %Ash.Query{filter: nil}} -> :yes
+-      {:ok, true, %Ash.Query{}} -> :maybe
++      {:ok, true, %Ash.Query{}} -> :yes
+       {:ok, :maybe} -> :maybe
+       {:error, error} -> report_can(error)
+       _ -> :no

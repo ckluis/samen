@@ -32,7 +32,6 @@ defmodule Samen.Web.TenantAnalyticsRouteE2ETest do
 
   import Phoenix.ConnTest
 
-  alias Samen.Web.Auth
   alias Samen.WebTest.SecurityHost
 
   @endpoint Samen.WebTest.SecurityEndpoint
@@ -58,8 +57,24 @@ defmodule Samen.Web.TenantAnalyticsRouteE2ETest do
 
     SecurityHost.revoke_all!()
 
-    org_a = Ash.UUID.generate()
-    org_b = Ash.UUID.generate()
+    # a real invitation is delivered through the test sink
+    prev_delivery = Application.get_env(:samen_core, :delivery_env)
+    Application.put_env(:samen_core, :delivery_env, :test)
+
+    on_exit(fn ->
+      case prev_delivery do
+        nil -> Application.delete_env(:samen_core, :delivery_env)
+        v -> Application.put_env(:samen_core, :delivery_env, v)
+      end
+    end)
+
+    # Two REAL tenants (each with its owner), and a person who joined org A as a member through a real invitation: the
+    # page acts with the role the membership resolves to (`Samen.Web.TenantActor`), so the principal must hold one.
+    owner_a = Samen.WebTest.SpineAccounts.register!()
+    owner_b = Samen.WebTest.SpineAccounts.register!()
+    member_a = Samen.WebTest.SpineAccounts.accept_into!(owner_a, :member)
+    org_a = owner_a.org.id
+    org_b = owner_b.org.id
 
     # Org A's OWN funnel — all stages >= config k (=5), so they RELEASE (distinctive counts).
     insert_paf!(org_a, "signup", @own_signup)
@@ -71,7 +86,7 @@ defmodule Samen.Web.TenantAnalyticsRouteE2ETest do
     insert_paf!(org_b, "first_run", 918_273)
     insert_paf!(org_b, "first_record", 555_444)
 
-    %{org_a: org_a, org_b: org_b}
+    %{org_a: org_a, org_b: org_b, member_a: member_a}
   end
 
   defp insert_paf!(org_id, stage, actor_count) do
@@ -87,10 +102,8 @@ defmodule Samen.Web.TenantAnalyticsRouteE2ETest do
 
   # A conn carrying a REAL authenticated principal in the SIGNED session (never a param — the
   # only thing `Samen.Web.Auth.authenticated_user_id/1` reads).
-  defp signed_in_conn(user_id) do
-    build_conn()
-    |> Plug.Test.init_test_session(%{})
-    |> Plug.Conn.put_session(Auth.session_user_key(), user_id)
+  defp signed_in_conn(account) do
+    Samen.WebTest.RoleHarness.log_in(account).conn
   end
 
   # ==========================================================================
@@ -99,10 +112,9 @@ defmodule Samen.Web.TenantAnalyticsRouteE2ETest do
 
   test "an authenticated member is served its OWN org's floored funnel end-to-end", ctx do
     SecurityHost.arm!()
-    SecurityHost.grant!("member-a", [ctx.org_a])
 
     html =
-      signed_in_conn("member-a")
+      signed_in_conn(ctx.member_a)
       |> get("/analytics?org=#{ctx.org_a}")
       |> html_response(200)
 
@@ -118,12 +130,11 @@ defmodule Samen.Web.TenantAnalyticsRouteE2ETest do
   # (b) the ?org=<other-org> forge is refused — org bound from the authenticated scope
   # ==========================================================================
 
-  test "an authenticated member of org A asking for org B gets A's funnel, never B's", ctx do
+  test "an authenticated member of org A asking for org B is served nothing of B's: the member gets A's funnel, never B's", ctx do
     SecurityHost.arm!()
-    SecurityHost.grant!("member-a", [ctx.org_a])
 
     html =
-      signed_in_conn("member-a")
+      signed_in_conn(ctx.member_a)
       |> get("/analytics?org=#{ctx.org_b}")
       |> html_response(200)
 
@@ -133,10 +144,18 @@ defmodule Samen.Web.TenantAnalyticsRouteE2ETest do
            "the ?org= forge leaked another org's cohort through the real analytics mount"
     refute html =~ "918273"
     refute html =~ "555444"
+    # the forged org is not bound at all: the page is the org-less empty state, not an access card for org B
+    assert html =~ "analytics-empty"
+    refute html =~ "actor-denied"
 
-    # POSITIVE CONTROL (anti-tautology): the member still lands on its OWN org's funnel.
-    assert html =~ ">#{@own_signup}<",
-           "the forged request must fall back to the caller's own authorized org, not an empty page"
+    # POSITIVE CONTROL (anti-tautology): the same person, with the same login, asking for its OWN org is served its funnel.
+    own =
+      signed_in_conn(ctx.member_a)
+      |> get("/analytics?org=#{ctx.org_a}")
+      |> html_response(200)
+
+    assert own =~ ">#{@own_signup}<",
+           "the member's own org must be served, not an empty page"
   end
 
   # ==========================================================================

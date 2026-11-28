@@ -6,15 +6,15 @@
 # TEST_FILES: test/freight_api_key_authz_test.exs
 # MUST_FAIL: RED: an admin cannot attribute a key to another user
 diff --git a/driftwood/lib/driftwood/freight.ex b/driftwood/lib/driftwood/freight.ex
-index 6d523f76..b2e42538 100644
+index 700bf390..0cb87dea 100644
 --- a/driftwood/lib/driftwood/freight.ex
 +++ b/driftwood/lib/driftwood/freight.ex
-@@ -465,7 +465,7 @@ defmodule Driftwood.Freight.ApiKey do
+@@ -470,7 +470,7 @@ defmodule Driftwood.Freight.ApiKey do
        change(fn changeset, ctx ->
          case ctx.actor do
            %{id: id} when not is_nil(id) ->
 -            changeset = Ash.Changeset.force_change_attribute(changeset, :minter_user_id, to_string(id))
 +            changeset = changeset
-             org_id = Ash.Changeset.get_attribute(changeset, :org_id)
  
-             case Samen.Scope.ApiKey.membership_for_user(Driftwood.Operator.Membership, org_id, id) do
+             # The lookup is a DATABASE read, so it runs in a `before_action` hook, never while the changeset is
+             # built (a build that queries rides on whatever sandbox owner is shared, and `Samen.OrgIdPinnedGuard`

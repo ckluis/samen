@@ -24,8 +24,7 @@ defmodule Demo.ApiAllowlistTest do
     ~r/\bcom_/,
     ~r/\bido_/,
     ~r/\busr_/,
-    ~r/\bpii_/,
-    ~r/\bvt_/
+    ~r/\bpii_/
   ]
 
   describe "allowlist — catalog names only, storage names never" do
@@ -55,6 +54,11 @@ defmodule Demo.ApiAllowlistTest do
         refute Regex.match?(pattern, body),
                "storage name #{inspect(pattern)} leaked into API payload: #{body}"
       end
+
+      # the vault prefix (`vt_`) and any real token: the one helper, word-bounded (a JSON body has no CSRF tokens)
+      Samen.VaultTokenAssert.refute_vault_token(body, "a vault token leaked into the API payload: #{body}",
+        boundary: true
+      )
     end
 
     test "an UNALLOWLISTED public attribute is absent (org_id — the tenant boundary)" do

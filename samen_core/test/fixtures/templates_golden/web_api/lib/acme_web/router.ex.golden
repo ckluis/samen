@@ -92,6 +92,13 @@ defmodule AcmeWeb.Router do
   # "explicitly versioned, URL-namespaced, e.g. /api/v1").
   forward("/api/v1", AcmeWeb.Api.Endpoint)
 
+  # `GET /api/help` — what THIS key can do over the API (`Samen.Api.Help`: only what the key's
+  # scopes and role allow, never a value); the API endpoint's `ErrorHints` link errors to it.
+  forward("/api/help", Samen.Api.Help.Endpoint,
+    router: AcmeWeb.Api.Router,
+    key_auth: AcmeWeb.Api.KeyAuthPlug
+  )
+
   scope "/", AcmeWeb do
     pipe_through(:browser)
 

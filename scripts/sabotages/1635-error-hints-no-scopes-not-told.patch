@@ -1,0 +1,19 @@
+# SABOTAGE: Error hints stop telling a key with no scopes that it has none, and stop counting it
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_endpoint_test.exs
+# MUST_FAIL: RED: a key with no scopes is told so
+diff --git a/samen_core/lib/samen/api/help/error_hints.ex b/samen_core/lib/samen/api/help/error_hints.ex
+index 864f9102..4cf9a83f 100644
+--- a/samen_core/lib/samen/api/help/error_hints.ex
++++ b/samen_core/lib/samen/api/help/error_hints.ex
+@@ -47,7 +47,7 @@ defmodule Samen.Api.Help.ErrorHints do
+          {:ok, %{"errors" => [_ | _] = errors} = body} when is_map(body) <- decode(conn.resp_body) do
+       actor = Ash.PlugHelpers.get_actor(conn)
+       link = link(conn, actor, opts)
+-      no_scopes? = no_scopes?(actor)
++      no_scopes? = false and no_scopes?(actor)
+       if no_scopes? and Enum.any?(errors, &(is_map(&1) and &1["code"] == "forbidden")),
+         do: :telemetry.execute([:samen, :api, :help, :key_has_no_scopes], %{count: 1}, %{})
+ 

@@ -15,10 +15,9 @@ defmodule Samen.Web.Billing.InvoicesLive do
   (`Reads.invoice_metrics/2`). The write side (AC-G1-1/2): "New invoice" opens a
   `modal/1` hosting an `AshPhoenix.Form`-backed `simple_form/1` create (`customer_id`
   is required — the inline-error path is real); each row carries a `delete_confirm/1`.
-  Write affordances are offered on the tenant plane only
-  (`Samen.Web.Billing.Live.writable?/1`); enforcement stays in the kernel — Invoice
-  writes are ADMIN-gated, so writes go through `Reads.write_scope/2` (same-org,
-  PLANE-PRESERVING role elevation).
+  Write affordances are offered to an admin on the tenant plane only (`:can_admin`);
+  enforcement stays in the kernel — Invoice writes are ADMIN-gated and run with the
+  acting person's own scope (`Samen.Web.TenantActor.write_scope/3`).
 
   The customer select's option labels are the PLANE-RESOLVED billing names (tenant
   clear); the modal is never offered on the operator plane, and the write path itself
@@ -33,6 +32,9 @@ defmodule Samen.Web.Billing.InvoicesLive do
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Reads.Guard
   alias Samen.Web.Mount
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   alias Samen.Web.Billing.Reads
 
@@ -59,16 +61,52 @@ defmodule Samen.Web.Billing.InvoicesLive do
   @doc false
   def load(socket, nil) do
     socket
+    |> Samen.Web.ListLive.refuse()
     |> ensure_return_to()
     |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, metrics: nil, metric_errors: [], customer_options: [], customers_failed: false)
+    |> assign(acting_scope: nil, actor_state: :ok, can_write: false, can_admin: false)
     |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
     |> assign(show_new: false, new_form: nil)
     |> assign_new(:delete_error, fn -> nil end)
   end
 
+  # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read, nothing
+  # can be written, and the page is re-resolved on every `handle_params`.
   def load(socket, org_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id)
+    end
+  end
+
+  # Acting again with no URL to patch to (`Samen.Web.TenantActor`, the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _}} = socket), do: load(socket, socket.assigns.org_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): the
+  # same load a refused navigation does, so nothing the page loaded for the person it acted for is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket, socket.assigns.org_id)
+
+  # The person's role or id changed while the page was open: a form built at load holds the scope it was built with, so it
+  # is built again with the fresh one.
+  @doc false
+  def actor_changed(%{assigns: %{samen_mount: mount, org_id: org_id, acting_scope: scope}} = socket),
+    do: assign(socket, new_form: new_invoice_form(mount, org_id, scope))
+
+  defp load_refused(socket, org_id) do
+    socket
+    |> Samen.Web.ListLive.refuse()
+    |> ensure_return_to()
+    |> assign(no_org: false, org_id: org_id, metrics: nil, metric_errors: [], customer_options: [], customers_failed: false)
+    |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
+    |> assign(show_new: false, new_form: nil)
+    |> assign_new(:delete_error, fn -> nil end)
+  end
+
+  defp load_for(socket, org_id, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
 
     {metrics, metric_errors} = Reads.invoice_metrics_status(mount, scope)
     {customer_options, customers_failed} = customer_options(mount, scope)
@@ -85,7 +123,7 @@ defmodule Samen.Web.Billing.InvoicesLive do
     )
     |> assign_new(:show_new, fn -> false end)
     |> assign_new(:delete_error, fn -> nil end)
-    |> assign(new_form: new_invoice_form(mount, org_id))
+    |> assign(new_form: new_invoice_form(mount, org_id, scope))
     |> init_list(mount, scope)
   end
 
@@ -93,11 +131,13 @@ defmodule Samen.Web.Billing.InvoicesLive do
 
   # The kit error state's "Try again" (a failed metric / customer read): re-run the whole load.
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
 
   def handle_event("new_invoice", _params, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
-    {:noreply, assign(socket, show_new: true, new_form: new_invoice_form(mount, org_id))}
+    %{samen_mount: mount, org_id: org_id, acting_scope: scope} = socket.assigns
+    {:noreply, assign(socket, show_new: true, new_form: new_invoice_form(mount, org_id, scope))}
   end
 
   def handle_event("cancel_new", _params, socket) do
@@ -127,9 +167,9 @@ defmodule Samen.Web.Billing.InvoicesLive do
   # FAIL-HONEST delete: an invoice with linked records is refused by the DB (FK)
   # and the refusal is SURFACED on the page.
   def handle_event("delete", %{"id" => id}, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    %{samen_mount: mount, org_id: org_id, acting_scope: acting} = socket.assigns
 
-    case Reads.delete_invoice(mount, Reads.write_scope(mount, org_id), id) do
+    case Reads.delete_invoice(mount, TenantActor.write_scope(mount, org_id, acting), id) do
       :ok ->
         {:noreply, load(assign(socket, delete_error: nil), org_id)}
 
@@ -139,9 +179,9 @@ defmodule Samen.Web.Billing.InvoicesLive do
     end
   end
 
-  defp new_invoice_form(mount, org_id) do
+  defp new_invoice_form(mount, org_id, acting) do
     Mount.resource(mount, Invoice)
-    |> AshPhoenix.Form.for_create(:create, scope: Reads.write_scope(mount, org_id))
+    |> AshPhoenix.Form.for_create(:create, scope: TenantActor.write_scope(mount, org_id, acting))
     |> to_form()
   end
 
@@ -176,7 +216,7 @@ defmodule Samen.Web.Billing.InvoicesLive do
 
         <.topbar title="Invoices" crumbs={crumbs(@samen_mount, @org_id, "Invoices")}>
           <:actions>
-            <.button :if={writable?(@samen_mount) and not @no_org} variant="primary" phx-click="new_invoice" id="new-invoice">
+            <.button :if={@can_admin and not @no_org} variant="primary" phx-click="new_invoice" id="new-invoice">
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M12 3v18M3 12h18" />
@@ -189,9 +229,12 @@ defmodule Samen.Web.Billing.InvoicesLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Invoices" nothing="there are no invoices to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">Billing invoices org: {@org_id}</span>
 
           <div :if={@delete_error} class="wrap" style="margin-bottom:0">
@@ -248,7 +291,7 @@ defmodule Samen.Web.Billing.InvoicesLive do
                 empty_icon="☰"
                 empty_body="Invoices you raise appear here with their status and totals."
               >
-                <:empty_actions :if={writable?(@samen_mount)}>
+                <:empty_actions :if={@can_admin}>
                   <.button variant="primary" phx-click="new_invoice" id="empty-new-invoice">New invoice</.button>
                 </:empty_actions>
                 <:head>
@@ -260,7 +303,7 @@ defmodule Samen.Web.Billing.InvoicesLive do
                   <.sort_header field={:due_date} label="Due date" sort={@list_state.sort} width="11%" />
                   <th scope="col" style="width:10%">Paid</th>
                   <th :if={writable?(@samen_mount)} scope="col" style="width:15%">Links</th>
-                  <th :if={writable?(@samen_mount)} scope="col" style="width:10%"><span class="sr-only">Actions</span></th>
+                  <th :if={@can_admin} scope="col" style="width:10%"><span class="sr-only">Actions</span></th>
                 </:head>
                 <:row :let={inv}>
                   <td class="inv-number" style="font-size:12px;color:var(--muted);font-family:monospace">
@@ -306,7 +349,7 @@ defmodule Samen.Web.Billing.InvoicesLive do
                       Receipt
                     </a>
                   </td>
-                  <td :if={writable?(@samen_mount)} class="inv-actions">
+                  <td :if={@can_admin} class="inv-actions">
                     <.delete_confirm phx-click="delete" phx-value-id={inv.id} />
                   </td>
                 </:row>
@@ -314,7 +357,7 @@ defmodule Samen.Web.Billing.InvoicesLive do
             </div>
           </div>
 
-          <.modal :if={@show_new and @new_form != nil and writable?(@samen_mount)} id="new-invoice-modal" title="New invoice" on_cancel="cancel_new">
+          <.modal :if={@show_new and @new_form != nil and @can_admin} id="new-invoice-modal" title="New invoice" on_cancel="cancel_new">
             <.simple_form :let={f} for={@new_form} id="new-invoice-form" phx-change="validate_new" phx-submit="save_new">
               <.error_state :if={@customers_failed} body={Samen.Web.Reads.Guard.message()} retry_event="retry_load" />
               <.form_field field={f[:customer_id]} label="Customer" type="select" prompt="Choose a customer" options={@customer_options} />

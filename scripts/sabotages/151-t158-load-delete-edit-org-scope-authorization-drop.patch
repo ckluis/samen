@@ -26,11 +26,11 @@ index 15718e7..61dcbc5 100644
        Guard.first_or_not_found(List.wrap(row))
      end
 diff --git a/driftwood/lib/driftwood_web/broker_live.ex b/driftwood/lib/driftwood_web/broker_live.ex
-index 901f655..675a502 100644
+index 9711d08..5629c44 100644
 --- a/driftwood/lib/driftwood_web/broker_live.ex
 +++ b/driftwood/lib/driftwood_web/broker_live.ex
-@@ -1294,7 +1294,7 @@ defmodule DriftwoodWeb.BrokerLive do
- 
+@@ -1345,7 +1345,7 @@ defmodule DriftwoodWeb.BrokerLive do
+   def delete_load(%Samen.Scope{} = scope, load_id) do
      with {:ok, load} <- Reads.get_load_result(scope, load_id) do
        Guard.write(:driftwood_delete_load, scope, fn ->
 -        Ash.destroy(load, scope: scope, return_destroyed?: true)

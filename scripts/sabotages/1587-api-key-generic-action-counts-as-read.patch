@@ -1,0 +1,19 @@
+# SABOTAGE: a generic action is classed as a read, so a read-only key runs it
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/scope_api_key_permits_test.exs
+# MUST_FAIL: generic actions count as write; only a read action is read
+diff --git a/samen_core/lib/samen/scope/api_key.ex b/samen_core/lib/samen/scope/api_key.ex
+index 562965ef..1384b0f5 100644
+--- a/samen_core/lib/samen/scope/api_key.ex
++++ b/samen_core/lib/samen/scope/api_key.ex
+@@ -396,7 +396,7 @@ defmodule Samen.Scope.ApiKey do
+   @doc "The scope class of an Ash action type: a read is `:read`; a create, update, destroy or generic action is `:write`."
+   @spec action_class(atom()) :: :read | :write
+   def action_class(:read), do: :read
+-  def action_class(_type), do: :write
++  def action_class(type), do: if(type == :action, do: :read, else: :write)
+ 
+   @doc """
+   Do the key's declared scopes permit an action of `class` (`:read` | `:write`) on `type` in `family`?

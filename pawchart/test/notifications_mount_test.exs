@@ -19,6 +19,7 @@ defmodule PawChart.NotificationsMountTest do
   LiveView — only the mount's plane differs — asserting OPPOSITE facts about the
   same sentinel string.
   """
+  import Samen.VaultTokenAssert
   use PawChart.DataCase, async: false
 
   alias Samen.Notifications.Engine
@@ -98,7 +99,7 @@ defmodule PawChart.NotificationsMountTest do
     # Non-vacuous + clear on the tenant plane.
     assert html =~ "vaccine.due"
     assert html =~ "PAWCHART-INBOX-SENTINEL"
-    refute html =~ "vt_"
+    refute_vault_token(html)
     refute html =~ "••••"
 
     # The unread badge is lit.
@@ -115,7 +116,7 @@ defmodule PawChart.NotificationsMountTest do
     assert html =~ "vaccine.due"
     assert html =~ "••••"
     refute html =~ "PAWCHART-INBOX-SENTINEL"
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   test "RED PATH (org isolation): a foreign org's notification is invisible through the mount" do

@@ -13,6 +13,7 @@ defmodule Samen.Replay.PlayerTest do
   `replay.viewed` row per audit call), plus decode safety (`:code_changed`, no atom created)
   and the code-drift marker.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   require Record
@@ -228,7 +229,7 @@ defmodule Samen.Replay.PlayerTest do
       for secret <- [@first, @last, @mrn, @email, "1906-12-09"],
           do: refute(text =~ secret, "plaintext #{secret} resolved for an ungranted operator")
 
-      refute text =~ "vt_"
+      refute_vault_token(text)
     end
 
     test "GREEN operator WITH a live grant: plaintext through the vault chokepoint (reveal action required)",

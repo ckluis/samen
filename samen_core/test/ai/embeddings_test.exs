@@ -28,6 +28,7 @@ defmodule Samen.AI.EmbeddingsTest do
   Sabotage-refutable: `scripts/sabotages/48-t67-ai-embeddings-vault-embed-deny-bypass.patch`
   drops the plane's vault-routed deny, and the named §7.2 test flips (the canary embeds).
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   alias Samen.AI.{Chokepoint, Embedder, Embeddings, Provider}
@@ -126,11 +127,11 @@ defmodule Samen.AI.EmbeddingsTest do
       assert {:ok, [%Embeddings.Hit{snippet: snippet} | _]} =
                Embeddings.search(s, "invoices", opts())
 
-      refute snippet =~ "vt_"
+      refute_vault_token(snippet)
       refute snippet =~ @canary
 
       dump = store_dump()
-      refute dump =~ "vt_", "a vault token must never reach the snippet/vector store"
+      refute_vault_token(dump, "a vault token must never reach the snippet/vector store")
       refute dump =~ @canary, "the 🔒 canary must never reach the snippet/vector store"
     end
 

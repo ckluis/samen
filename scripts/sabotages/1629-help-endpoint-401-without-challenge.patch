@@ -1,0 +1,18 @@
+# SABOTAGE: The help endpoint answers a keyless request without a Bearer challenge
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_endpoint_test.exs
+# MUST_FAIL: RED: no key is answered 401 with WWW-Authenticate
+diff --git a/samen_core/lib/samen/api/help/endpoint.ex b/samen_core/lib/samen/api/help/endpoint.ex
+index 1537bc17..c6ff426d 100644
+--- a/samen_core/lib/samen/api/help/endpoint.ex
++++ b/samen_core/lib/samen/api/help/endpoint.ex
+@@ -99,7 +99,6 @@ defmodule Samen.Api.Help.Endpoint do
+ 
+   defp unauthorized(conn) do
+     conn
+-    |> put_resp_header("www-authenticate", "Bearer")
+     |> put_resp_content_type("application/json")
+     |> send_resp(401, @unauthorized)
+     |> halt()

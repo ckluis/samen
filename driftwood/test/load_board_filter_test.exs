@@ -24,7 +24,7 @@ defmodule Driftwood.LoadBoardFilterTest do
 
   defp seed_load(org, name, lane, status) do
     {:ok, load} =
-      BrokerLive.create_load(org, %{
+      BrokerLive.create_load(broker_scope(org), %{
         "name" => name,
         "lane" => lane,
         "rate" => "1000.00",
@@ -35,7 +35,7 @@ defmodule Driftwood.LoadBoardFilterTest do
   end
 
   test "REAL filter: status narrows the result set" do
-    scope = BrokerLive.broker_scope(@org_a)
+    scope = broker_scope(@org_a)
     seed_load(@org_a, "BRL-1 open", "TX->CA", "open")
     seed_load(@org_a, "BRL-2 won", "TX->CA", "won")
 
@@ -48,7 +48,7 @@ defmodule Driftwood.LoadBoardFilterTest do
   end
 
   test "REAL filter: free-text q narrows by load reference or lane (case-insensitive)" do
-    scope = BrokerLive.broker_scope(@org_a)
+    scope = broker_scope(@org_a)
     seed_load(@org_a, "BRL-CHI-4805", "IL->TX", "open")
     seed_load(@org_a, "BRL-DAL-2201", "TX->CA", "open")
 
@@ -62,7 +62,7 @@ defmodule Driftwood.LoadBoardFilterTest do
   end
 
   test "HONEST empty: a filter matching nothing returns [] — never a fabricated row" do
-    scope = BrokerLive.broker_scope(@org_a)
+    scope = broker_scope(@org_a)
     seed_load(@org_a, "BRL-REAL-1", "TX->CA", "open")
 
     assert Reads.load_board(scope, %{q: "no-such-load-reference-at-all"}) == []
@@ -70,7 +70,7 @@ defmodule Driftwood.LoadBoardFilterTest do
   end
 
   test "a malformed/forged status value is IGNORED (no 500, no fabricated filter match)" do
-    scope = BrokerLive.broker_scope(@org_a)
+    scope = broker_scope(@org_a)
     seed_load(@org_a, "BRL-SAFE-1", "TX->CA", "open")
 
     # Not one of the bounded enum values — must not raise, must not silently match
@@ -84,7 +84,7 @@ defmodule Driftwood.LoadBoardFilterTest do
   # ==========================================================================
 
   test "ORG-SCOPE PIN: a filter matching BOTH orgs' loads never surfaces the other org's rows" do
-    scope_a = BrokerLive.broker_scope(@org_a)
+    scope_a = broker_scope(@org_a)
 
     # Same status, same lane substring, in TWO DIFFERENT orgs — a filter that (if the
     # org boundary broke) would happily match both.
@@ -98,7 +98,7 @@ defmodule Driftwood.LoadBoardFilterTest do
   end
 
   test "ORG-SCOPE PIN: an unfiltered board for org A never includes org B's loads either (control)" do
-    scope_a = BrokerLive.broker_scope(@org_a)
+    scope_a = broker_scope(@org_a)
     seed_load(@org_a, "BRL-CTRL-A", "TX->CA", "open")
     seed_load(@org_b, "BRL-CTRL-B", "TX->CA", "open")
 

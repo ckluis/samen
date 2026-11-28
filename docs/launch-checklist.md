@@ -5,8 +5,10 @@ everything it does NOT own. The gap between "the dogfood boots on localhost" and
 logs in tomorrow" is a short, bounded list of **operator** tasks — the things that are honestly
 labeled as YOUR job because a framework cannot safely own your identity provider, your payment
 keys, your email reputation, or your KMS. This is that list. Walk it top-to-bottom to take a
-vertical live. Nothing below is a code change to samen; each is a config/secret/provider you
-bring, wired into a seam that already exists.
+vertical live. Each item is a config/secret/provider you bring, wired into a seam that already
+exists, with one exception stated as scope: production key management is bring-your-own
+(section 4). `Samen.Kms.AwsKmsDynamo` is a skeleton, so a production deployment needs a KMS
+adapter you implement or supply until that adapter ships.
 
 Legend: **[BLOCKER]** = a real tenant cannot safely use the product until this is done ·
 **[HONESTY]** = the boundary is fail-honest today (it refuses rather than lies), so shipping
@@ -71,6 +73,15 @@ The Stripe mirror schema is real; `SyncAdapter.Stub` returns `{:ok, %{stub: true
       MUST inject AWS KMS (+ DynamoDB wrapped-DEK store + S3 Object-Lock) via the deploy runtime.
       The generated `config/runtime.exs` RAISES on missing `SAMEN_KMS_*` (ADR-024) — it will not
       boot half-configured.
+      **Scope: production key management is bring-your-own until `Samen.Kms.AwsKmsDynamo` is
+      implemented.** That module declares itself a skeleton (`__kms_skeleton__?/0`), and its real AWS
+      KMS and DynamoDB calls are not wired. The fail-honest behaviour: `Samen.Kms.assert_prod_adapter_ready!/1`,
+      called at a mount-bearing host's `Application.start/2`, refuses to boot a production host whose
+      `config :samen_core, :kms_adapter` is a skeleton, with an error naming the adapter, instead of
+      booting and failing every vault operation. Supply a `Samen.Kms` behaviour implementation that meets
+      the ADR-001 §8.2 obligations (listed in the `AwsKmsDynamo` moduledoc) and select it with
+      `config :samen_core, :kms_adapter, YourAdapter`. The file-backed adapter is real but is not
+      durable on an ephemeral release filesystem.
 - [ ] **`SECRET_KEY_BASE` / `DATABASE_URL` / `PHX_HOST`.** Injected from the environment by the
       deploy runtime (it raises naming any missing secret). Never commit them.
 - [ ] Confirm `/readyz` returns 200 only when Postgres + the KMS wrapped-DEK store + Oban all

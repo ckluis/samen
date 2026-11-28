@@ -1,0 +1,19 @@
+# SABOTAGE: The help endpoint describes an actor that does not carry the API key
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_endpoint_test.exs
+# MUST_FAIL: RED: an actor that is not the key plug's answers 401
+diff --git a/samen_core/lib/samen/api/help/endpoint.ex b/samen_core/lib/samen/api/help/endpoint.ex
+index b145b57d..c3ab66db 100644
+--- a/samen_core/lib/samen/api/help/endpoint.ex
++++ b/samen_core/lib/samen/api/help/endpoint.ex
+@@ -72,7 +72,7 @@ defmodule Samen.Api.Help.Endpoint do
+   # The description is the key's: an actor that does not carry the key map is not a key request, and the key-scope
+   # policy would let it through, so it is refused here rather than described.
+   defp key_actor?(%{api_key: %{}}), do: true
+-  defp key_actor?(_actor), do: false
++  defp key_actor?(_actor), do: true
+ 
+   defp serve(conn, actor, opts) do
+     help_opts = [prefix: opts.prefix, help: opts.help]

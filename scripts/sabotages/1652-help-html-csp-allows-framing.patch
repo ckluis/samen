@@ -1,0 +1,20 @@
+# SABOTAGE: The HTML help page drops frame-ancestors, base-uri and form-action from its content security 
+#   policy
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_endpoint_test.exs
+# MUST_FAIL: RED: the HTML page cannot be framed
+diff --git a/samen_core/lib/samen/api/help/endpoint.ex b/samen_core/lib/samen/api/help/endpoint.ex
+index b145b57d..38476292 100644
+--- a/samen_core/lib/samen/api/help/endpoint.ex
++++ b/samen_core/lib/samen/api/help/endpoint.ex
+@@ -95,7 +95,7 @@ defmodule Samen.Api.Help.Endpoint do
+     if html?(conn) do
+       conn
+       |> put_resp_content_type("text/html")
+-      |> put_resp_header("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
++      |> put_resp_header("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'")
+       |> send_resp(200, Samen.Api.Help.Html.render(map, kind))
+     else
+       conn |> put_resp_content_type("application/json") |> send_resp(200, Jason.encode!(map))

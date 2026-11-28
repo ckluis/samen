@@ -1,0 +1,19 @@
+# SABOTAGE: a viewer's crafted send is not refused by the room
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_chat_test.exs
+# MUST_FAIL: posting in a room is a member's
+diff --git a/samen_web/lib/samen/web/chat/thread_live.ex b/samen_web/lib/samen/web/chat/thread_live.ex
+index 0fe81970..c0ce8940 100644
+--- a/samen_web/lib/samen/web/chat/thread_live.ex
++++ b/samen_web/lib/samen/web/chat/thread_live.ex
+@@ -246,7 +246,7 @@ defmodule Samen.Web.Chat.ThreadLive do
+     # red-path test asserting "a lapsed session cannot post" — it cannot go red while
+     # WriteGuard stands (anti-tautology; see chat_thread_subscribe_gate_test.exs moduledoc).
+     with true <- delivery_authorized?(socket),
+-         {:member, true} <- {:member, TenantActor.member?(socket)},
++         {:member, true} <- {:member, TenantActor.member?(socket) or true},
+          {:ok, participant_id} <- self_participant_id(socket, party),
+          {:ok, message} <-
+            Guard.write(:chat_post_message, scope, fn ->

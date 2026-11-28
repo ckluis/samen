@@ -38,12 +38,15 @@ defmodule Samen.Web.CRM.ContactsLive do
   import Samen.UI
 
   import Samen.Web.CRM.Live,
-    only: [assign_mount: 2, crm_sidebar: 1, writable?: 1, full_name_field: 1]
+    only: [assign_mount: 2, crm_sidebar: 1, full_name_field: 1]
 
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
   import Samen.Web.FirstRun, only: [first_run_card: 1]
   import Samen.Web.ObjectRef.FieldValue, only: [opaque: 1]
 
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
   alias Samen.Web.CRM.Reads
   alias Samen.Web.Reads.Guard
   alias Samen.Web.CurrentOrg
@@ -75,17 +78,48 @@ defmodule Samen.Web.CRM.ContactsLive do
   @doc false
   def load(socket, nil) do
     socket
+    |> Samen.Web.ListLive.refuse()
     |> default_return_to()
     |> assign(no_org: no_org?(socket, nil), org_id: nil, company_names: %{})
+    |> assign(acting_scope: nil, actor_state: :ok, can_write: false)
     |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{}, list_error: nil)
     |> assign(show_new: false, new_form: nil, first_run: false)
     |> assign_new(:delete_error, fn -> nil end)
     |> assign_new(:sample_error, fn -> nil end)
   end
 
+  # ADR-045 §4.4 — WHO acts: the scope is derived from the signed-in person's resolved membership
+  # role (`Samen.Web.TenantActor`), never `Mount.scope/2`'s fixed `:member`. A denial or a failed
+  # lookup is a STATE of the page: nothing is read, nothing can be written.
   def load(socket, org_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id)
+    end
+  end
+
+  # Acting again with no URL to patch to (`Samen.Web.TenantActor`, the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _}} = socket), do: load(socket, socket.assigns.org_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): the
+  # same load a refused navigation does, so nothing the page loaded for the person it acted for is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket, socket.assigns.org_id)
+
+  defp load_refused(socket, org_id) do
+    socket
+    |> Samen.Web.ListLive.refuse()
+    |> default_return_to()
+    |> assign(no_org: false, org_id: org_id, company_names: %{})
+    |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{}, list_error: nil)
+    |> assign(show_new: false, new_form: nil, first_run: false)
+    |> assign_new(:delete_error, fn -> nil end)
+    |> assign_new(:sample_error, fn -> nil end)
+  end
+
+  defp load_for(socket, org_id, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
 
     socket
     |> default_return_to()
@@ -95,7 +129,7 @@ defmodule Samen.Web.CRM.ContactsLive do
       company_names: company_name_map(mount, scope),
       # AC-G5-2: the tenant first-run checklist — zero rows across the CRM core
       # resources. FALSE by construction on the operator plane (FirstRun).
-      first_run: FirstRun.first_run?(mount, org_id)
+      first_run: FirstRun.first_run?(mount, org_id, scope)
     )
     |> assign_new(:show_new, fn -> false end)
     |> assign_new(:delete_error, fn -> nil end)
@@ -107,9 +141,10 @@ defmodule Samen.Web.CRM.ContactsLive do
   # -- A3 CRUD events (list events belong to the ListLive hook) -----------------
 
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("new_contact", _params, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{samen_mount: mount, acting_scope: scope} = socket.assigns
     {:noreply, assign(socket, show_new: true, new_form: new_contact_form(mount, scope))}
   end
 
@@ -128,11 +163,11 @@ defmodule Samen.Web.CRM.ContactsLive do
   # operator plane `Samen.Pii.WriteGuard` REJECTS it at the write path (MC-1) and the
   # error renders inline — this LiveView adds no policy of its own.
   def handle_event("save_new", %{"form" => params}, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    %{samen_mount: mount, org_id: org_id, acting_scope: acting} = socket.assigns
     # WS-B / G12 (design §4.2): capture the first-run state BEFORE the create (the org is
     # non-empty afterwards) so the framework choke point can emit the empty→non-empty
     # `first_run.completed` alongside `record.created`. Best-effort — never affects the write.
-    was_first_run? = FirstRun.first_run?(mount, org_id)
+    was_first_run? = FirstRun.first_run?(mount, org_id, acting)
 
     case Guard.submit_form(:crm_save_contact, socket.assigns[:org_id], socket.assigns.new_form, with_org(params, socket)) do
       {:ok, person} ->
@@ -156,13 +191,18 @@ defmodule Samen.Web.CRM.ContactsLive do
   # vault write path) — this handler only relays and re-reads. A refusal is
   # SURFACED (fail-honest), never swallowed.
   def handle_event("load_sample_data", _params, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    %{samen_mount: mount, org_id: org_id, acting_scope: scope} = socket.assigns
 
-    case SampleData.load(mount, org_id) do
+    # `SampleData.load/3` seeds as the acting person and refuses anyone below `:admin` itself (an org-wide load is an
+    # admin's); the offer is shown to an admin only (`:can_admin`).
+    case SampleData.load(mount, org_id, scope) do
       {:ok, _} ->
         {:noreply, load(assign(socket, sample_error: nil), org_id)}
 
-      {:error, _reason} ->
+      {:error, :forbidden} ->
+        {:noreply, assign(socket, sample_error: "Loading sample data needs an admin role.")}
+
+      _refused ->
         {:noreply, assign(socket, sample_error: "Sample data is not available here.")}
     end
   end
@@ -175,8 +215,7 @@ defmodule Samen.Web.CRM.ContactsLive do
   # is never refused on their account; any `{:error, _}` here is a genuine
   # failure (e.g. an authorization denial), not the old FK-refusal case.
   def handle_event("delete", %{"id" => id}, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{samen_mount: mount, org_id: org_id, acting_scope: scope} = socket.assigns
 
     case Reads.delete_contact(mount, scope, id) do
       :ok ->
@@ -186,6 +225,12 @@ defmodule Samen.Web.CRM.ContactsLive do
         {:noreply, assign(socket, delete_error: "Could not delete this contact.")}
     end
   end
+
+  # The person's role or id changed while the page was open (`Samen.Web.TenantActor.recheck_event/3`): a form built at
+  # load holds the scope it was built with, so it is built again with the fresh one.
+  @doc false
+  def actor_changed(%{assigns: %{samen_mount: mount, acting_scope: scope}} = socket),
+    do: assign(socket, new_form: new_contact_form(mount, scope))
 
   defp new_contact_form(mount, scope) do
     Mount.resource(mount, Person)
@@ -221,7 +266,7 @@ defmodule Samen.Web.CRM.ContactsLive do
             <.button :if={not @no_org} phx-click="toggle_archived" id="toggle-archived-contacts">
               {if @list_state.show_archived, do: "Hide archived", else: "Show archived"}
             </.button>
-            <.button :if={writable?(@samen_mount) and not @no_org} variant="primary" phx-click="new_contact" id="new-contact">
+            <.button :if={@can_write and not @no_org} variant="primary" phx-click="new_contact" id="new-contact">
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M12 3v18M3 12h18" />
@@ -234,9 +279,12 @@ defmodule Samen.Web.CRM.ContactsLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Contacts" nothing="there are no contacts to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">CRM org: {@org_id}</span>
 
           <div :if={@delete_error} class="wrap" style="margin-bottom:0">
@@ -251,11 +299,11 @@ defmodule Samen.Web.CRM.ContactsLive do
             </div>
           </div>
 
-          <div :if={@first_run and writable?(@samen_mount)} class="wrap" style="margin-bottom:0">
+          <div :if={@first_run and @can_write} class="wrap" style="margin-bottom:0">
             <.first_run_card
               create_event="new_contact"
               create_label="Add your first contact"
-              sample?={SampleData.offer?(@samen_mount)}
+              sample?={SampleData.offer?(@samen_mount) and @can_admin}
             />
           </div>
 
@@ -278,10 +326,10 @@ defmodule Samen.Web.CRM.ContactsLive do
                 empty_icon="◉"
                 empty_body="Contacts are your people book — names, emails, and phones, all vault-protected."
               >
-                <:empty_actions :if={writable?(@samen_mount)}>
+                <:empty_actions :if={@can_write}>
                   <.button variant="primary" phx-click="new_contact" id="empty-new-contact">New contact</.button>
                 </:empty_actions>
-                <:empty_sample :if={writable?(@samen_mount) and SampleData.offer?(@samen_mount)}>
+                <:empty_sample :if={@can_admin and SampleData.offer?(@samen_mount)}>
                   <.button phx-click="load_sample_data" id="load-sample-data">Load sample data</.button>
                 </:empty_sample>
                 <:head>
@@ -290,7 +338,7 @@ defmodule Samen.Web.CRM.ContactsLive do
                   <th scope="col" style="width:14%">Phone</th>
                   <th scope="col" style="width:20%">Company</th>
                   <.sort_header field={:job_title} label="Title" sort={@list_state.sort} width="14%" />
-                  <th :if={writable?(@samen_mount)} scope="col" style="width:8%"><span class="sr-only">Actions</span></th>
+                  <th :if={@can_write} scope="col" style="width:8%"><span class="sr-only">Actions</span></th>
                 </:head>
                 <:row :let={p}>
                   <td class="p-name">
@@ -311,7 +359,7 @@ defmodule Samen.Web.CRM.ContactsLive do
                   </td>
                   <td class="p-company" style="color:var(--muted)">{(p.company_id && Map.get(@company_names, p.company_id)) || "—"}</td>
                   <td class="p-title" style="color:var(--muted);font-size:12px">{p.job_title || "—"}</td>
-                  <td :if={writable?(@samen_mount)} class="p-actions">
+                  <td :if={@can_write} class="p-actions">
                     <%= if Map.get(p, :archived_at) do %>
                       <.pill variant="mut">archived</.pill>
                       <.button phx-click="restore" phx-value-id={p.id} class="restore-contact">Restore</.button>
@@ -324,7 +372,7 @@ defmodule Samen.Web.CRM.ContactsLive do
             </div>
           </div>
 
-          <.modal :if={@show_new and @new_form != nil and writable?(@samen_mount)} id="new-contact-modal" title="New contact" on_cancel="cancel_new">
+          <.modal :if={@show_new and @new_form != nil and @can_write} id="new-contact-modal" title="New contact" on_cancel="cancel_new">
             <.simple_form :let={f} for={@new_form} id="new-contact-form" phx-change="validate_new" phx-submit="save_new">
               <.full_name_field field={f[:full_name]} label="Full name (🔒 PII)" />
               <.form_field field={f[:display_name]} label="Display name" />

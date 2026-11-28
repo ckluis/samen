@@ -98,11 +98,11 @@ defmodule Samen.Automation.Actions.MutateRecord do
   @impl true
   def undo(_config, %{mode: :create, record_id: record_id, resource_key: resource_key}, %Context{
         actor: actor
-      })
+      } = ctx)
       when is_binary(record_id) and is_binary(resource_key) do
     with {:ok, resource} <- Support.resolve_resource(resource_key),
          {:ok, record} when not is_nil(record) <- Ash.get(resource, record_id, actor: actor, not_found_error?: false),
-         :ok <- destroy_created(record, actor) do
+         :ok <- destroy_created(record, ctx) do
       :ok
     else
       # Nothing to undo: the resource is gone from the registry, or the record it created is already gone.
@@ -114,8 +114,8 @@ defmodule Samen.Automation.Actions.MutateRecord do
 
   def undo(_config, _meta, _ctx), do: :ok
 
-  defp destroy_created(record, actor) do
-    case record |> Ash.Changeset.for_destroy(:destroy, %{}, actor: actor) |> Ash.destroy() do
+  defp destroy_created(record, ctx) do
+    case record |> Ash.Changeset.for_destroy(:destroy, %{}, actor: ctx.actor, context: Support.write_context(ctx)) |> Ash.destroy() do
       :ok -> :ok
       {:ok, _} -> :ok
       {:error, reason} -> {:error, reason}

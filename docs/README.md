@@ -12,6 +12,8 @@ record, not as instructions.
 
 - [Getting started](guides/getting-started.md) — zero to first feature: generate an app,
   tour it, add a scope + resource, bend the API contract and watch the gate flip.
+- [Upgrading an app built on samen](upgrade/README.md) — how upgrading works today, the guide from `v0.1.0`, and a prompt to give your AI
+  coding agent.
 - [Two-plane + masking concepts](concepts/two-plane-masking.md) — the tenant/operator plane
   model and the PII masking mechanism, explained before you read the ADRs that specify them.
 - [Glossary](concepts/glossary.md) — one line per bespoke term (plane, scope, mount, vault class, catalog, verifier,

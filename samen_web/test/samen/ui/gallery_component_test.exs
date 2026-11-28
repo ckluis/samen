@@ -13,6 +13,7 @@ defmodule Samen.UI.GalleryComponentTest do
     * EMPTY — a zero-item page renders the default empty state (or the `:empty` slot).
     * MASKING — a dumb renderer: a `%Samen.Masked{}` card field renders `••••`, never plaintext.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: true
 
   import Phoenix.LiveViewTest, only: [render_component: 2]
@@ -99,6 +100,6 @@ defmodule Samen.UI.GalleryComponentTest do
     html = render_component(&Samen.UI.gallery/1, %{id: "g", page: page, card: slot})
 
     assert html =~ "••••"
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 end

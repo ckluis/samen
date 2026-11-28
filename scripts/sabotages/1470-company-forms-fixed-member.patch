@@ -1,0 +1,20 @@
+# SABOTAGE: CompanyLive builds its edit and activity forms on the fixed member scope again, so a viewer's 
+#   save and log run as member
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_crm_work_test.exs
+# MUST_FAIL: a VIEWER cannot edit, delete, link or log activity on a company
+diff --git a/samen_web/lib/samen/web/crm/company_live.ex b/samen_web/lib/samen/web/crm/company_live.ex
+index 7be75411..8ad6576d 100644
+--- a/samen_web/lib/samen/web/crm/company_live.ex
++++ b/samen_web/lib/samen/web/crm/company_live.ex
+@@ -226,7 +226,7 @@ defmodule Samen.Web.CRM.CompanyLive do
+   # can be written, and the page is re-resolved on every `handle_params`.
+   def load(socket, org_id, company_id) do
+     case TenantActor.assign_actor(socket, org_id) do
+-      {:ok, socket} -> load_for(socket, org_id, company_id, socket.assigns.acting_scope)
++      {:ok, socket} -> load_for(socket, org_id, company_id, Mount.scope(socket.assigns.samen_mount, org_id))
+       {:refused, socket} -> load_refused(socket, org_id, company_id)
+     end
+   end

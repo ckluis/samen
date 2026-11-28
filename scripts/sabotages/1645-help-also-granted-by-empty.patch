@@ -1,0 +1,19 @@
+# SABOTAGE: Help stops listing the wider scope names that also grant an action
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_test.exs
+# MUST_FAIL: minting a key with exactly the shown scope allows every listed route
+diff --git a/samen_core/lib/samen/scope/api_key.ex b/samen_core/lib/samen/scope/api_key.ex
+index dffe2eb9..05910dc7 100644
+--- a/samen_core/lib/samen/scope/api_key.ex
++++ b/samen_core/lib/samen/scope/api_key.ex
+@@ -438,7 +438,7 @@ defmodule Samen.Scope.ApiKey do
+   def grant_for(family, type, classes) do
+     [narrowest | wider] = scope_names(family, type)
+     names = classes |> Enum.uniq() |> Enum.sort() |> Enum.map(&Atom.to_string/1)
+-    %{scope: %{narrowest => names}, also_granted_by: wider}
++    %{scope: %{narrowest => names}, also_granted_by: []}
+   end
+ 
+   defp qualified(nil, _type), do: nil

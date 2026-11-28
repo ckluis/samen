@@ -1,0 +1,70 @@
+defmodule Samen.ApiKeyScopeGuard do
+  @moduledoc """
+  The walk behind the host guard tests for API-key scope enforcement. A host test calls `report/1` with its
+  `:ash_domains` (and, for the family check, its JSON:API router) and asserts the result:
+
+    * `:exposed` are the resources that declare a JSON:API type;
+    * `:unguarded` are exposed resources whose FIRST policy is not the `Samen.Policy.ApiKeyScopeRefused` forbid (`Samen.Transformers.ApiKeyScopePolicy`
+      puts it there; a resource without it would serve a key's request on its role alone);
+    * `:walked` counts every resource visited, so a test can prove the walk saw the host (never vacuous);
+    * `families/1` maps a router's domains to their scope families, and `duplicate_families/1` lists a family two of
+      them share (a scope on it would then cover both).
+
+  A host with no JSON:API (no `ash_json_api` dependency) reports `exposed: []`.
+  """
+
+  alias Samen.Scope.ApiKey
+
+  @type report :: %{walked: non_neg_integer(), exposed: [module()], unguarded: [module()]}
+
+  @doc "Walk every resource of `domains`."
+  @spec report([module()]) :: report()
+  def report(domains) do
+    resources = Enum.flat_map(domains, &Ash.Domain.Info.resources/1)
+    exposed = Enum.filter(resources, &(ApiKey.json_api_type(&1) != nil))
+
+    %{walked: length(resources), exposed: exposed, unguarded: Enum.reject(exposed, &guarded?/1)}
+  end
+
+  @doc """
+  Is the resource's first policy the API-key scope policy: a forbid under the `ApiKeyScopeRefused` condition? The list
+  read is the one Ash authorizes with, `Ash.Policy.Info.policies(domain, resource)`, in which the domain's own
+  policies come first: a domain-level `bypass` would precede the resource's scope policy, so such a resource is not
+  guarded.
+  """
+  @spec guarded?(module()) :: boolean()
+  def guarded?(resource) do
+    case Ash.Policy.Info.policies(Ash.Resource.Info.domain(resource), resource) do
+      [%{condition: [{Samen.Policy.ApiKeyScopeRefused, _}], policies: [%{type: :forbid_if}]} | _] -> true
+      _ -> false
+    end
+  end
+
+  @doc "`%{family => [domain]}` for the JSON:API domains of `router` (a module exposing `domains/0`)."
+  @spec families(module()) :: %{String.t() => [module()]}
+  def families(router) do
+    router.domains()
+    |> Enum.group_by(&domain_family/1)
+  end
+
+  @doc "Families shared by more than one domain of `router`."
+  @spec duplicate_families(module()) :: [String.t()]
+  def duplicate_families(router) do
+    for {family, [_, _ | _]} <- families(router), do: family
+  end
+
+  @doc """
+  Families of `router` that contain a dot. The transformer refuses one at compile time only when the domain is already
+  compiled; this reads the loaded domains, so a host guard test fails on one the compile-time check skipped.
+  """
+  @spec dotted_families(module()) :: [String.t()]
+  def dotted_families(router) do
+    router |> families() |> Map.keys() |> Enum.filter(&String.contains?(&1, ".")) |> Enum.sort()
+  end
+
+  defp domain_family(domain) do
+    if Code.ensure_loaded?(domain) and function_exported?(domain, :samen_api_family, 0),
+      do: to_string(domain.samen_api_family()),
+      else: domain |> Module.split() |> List.last() |> Macro.underscore()
+  end
+end

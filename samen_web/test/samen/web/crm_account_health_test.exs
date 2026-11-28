@@ -35,6 +35,7 @@ defmodule Samen.Web.CRMAccountHealthTest do
       customer/support book, not "this org's relationship with the platform" and not
       this specific company's numbers; tile labels/disclosure say so explicitly.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.Web.AccountHealth
@@ -881,7 +882,7 @@ defmodule Samen.Web.CRMAccountHealthTest do
     # Every value in the returned snapshot is a bounded scalar (id/atom/integer/map of
     # counts) — never a %Masked{} struct, never a raw billing_email, never a vt_* token.
     refute match?(%Samen.Masked{}, snap.billing_customer_id)
-    refute inspect(snap) =~ "vt_"
+    refute_vault_token(inspect(snap))
     refute inspect(snap) =~ "@mask-t160.example"
   end
 

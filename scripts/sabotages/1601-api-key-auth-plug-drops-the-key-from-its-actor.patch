@@ -1,0 +1,20 @@
+# SABOTAGE: the demo key plug builds its actor without the key, so no scope policy sees it and the path is 
+#   neither enforced nor named as outside
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_key_scope_paths_guard_test.exs
+# MUST_FAIL: every key-authenticated request path enforces scopes or is named as outside them
+diff --git a/demo/lib/demo_web/api/key_auth_plug.ex b/demo/lib/demo_web/api/key_auth_plug.ex
+index 0e6c739e..84abc929 100644
+--- a/demo/lib/demo_web/api/key_auth_plug.ex
++++ b/demo/lib/demo_web/api/key_auth_plug.ex
+@@ -191,7 +191,7 @@ defmodule DemoWeb.Api.KeyAuthPlug do
+             org_id: org_id,
+             role: role,
+             plane: key_row.plane,
+-            api_key: key
++            key_seen: key
+           }
+ 
+           {:ok, actor}

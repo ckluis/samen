@@ -37,6 +37,9 @@ defmodule Samen.Web.Marketing.LeadsLive do
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
   alias Samen.Web.ObjectRef.FieldValue
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   use Samen.Web.ListLive,
     resource: Person,
@@ -62,11 +65,40 @@ defmodule Samen.Web.Marketing.LeadsLive do
   def load(socket, nil) do
     socket
     |> ensure_return_to()
+    |> Samen.Web.ListLive.refuse()
     |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil)
+    |> assign(acting_scope: nil, actor_state: :ok)
     |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
   end
 
+  # ADR-045 §4.4 — WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`: the list's restore/bulk events write Person rows as that person. A denial or a
+  # failed lookup is a STATE of the page (re-resolved on every `handle_params`): nothing is read, nothing is written.
   def load(socket, org_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id)
+    end
+  end
+
+  # Acting again with no URL to patch to (`Samen.Web.TenantActor`, the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _}} = socket), do: load(socket, socket.assigns.org_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): the
+  # same load a refused navigation does, so nothing the page loaded for the person it acted for is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket, socket.assigns.org_id)
+
+  defp load_refused(socket, org_id) do
+    socket
+    |> Samen.Web.ListLive.refuse()
+    |> ensure_return_to()
+    |> assign(no_org: false, org_id: org_id)
+    |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
+  end
+
+  defp load_for(socket, org_id, scope) do
     mount = socket.assigns.samen_mount
 
     socket = ensure_return_to(assign(socket, no_org: false, org_id: org_id))
@@ -76,9 +108,14 @@ defmodule Samen.Web.Marketing.LeadsLive do
     # stays inert (an empty page), exactly as before.
     case crm_mount(mount) do
       nil -> assign(socket, page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
-      crm -> init_list(socket, crm, Mount.scope(crm, org_id))
+      crm -> init_list(socket, crm, scope)
     end
   end
+
+  # List events (sort, filter, restore, ...) are the ListLive hook's and refuse themselves; any other event is refused
+  # while nobody is acting.
+  @impl true
+  TenantActor.refuse_events()
 
   defp ensure_return_to(socket) do
     if Map.has_key?(socket.assigns, :return_to), do: socket, else: assign(socket, return_to: nil)
@@ -119,9 +156,12 @@ defmodule Samen.Web.Marketing.LeadsLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Leads" nothing="there are no leads to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">Marketing org: {@org_id}</span>
 
           <div class="wrap">

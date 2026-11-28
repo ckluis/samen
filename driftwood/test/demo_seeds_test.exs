@@ -12,6 +12,7 @@ defmodule Driftwood.DemoSeedsTest do
       plaintext email in the column) — the masking-safe invariant the operator plane
       relies on.
   """
+  import Samen.VaultTokenAssert
   use Driftwood.DataCase, async: false
 
   require Ash.Query
@@ -106,7 +107,7 @@ defmodule Driftwood.DemoSeedsTest do
     assert person_rows != []
 
     Enum.each(person_rows, fn [emails] ->
-      assert emails =~ "vt_"
+      assert_vault_token(emails)
       refute emails =~ "@"
     end)
 
@@ -120,7 +121,7 @@ defmodule Driftwood.DemoSeedsTest do
     assert agent_rows != []
 
     Enum.each(agent_rows, fn [email_col] ->
-      assert email_col =~ "vt_"
+      assert_vault_token(email_col)
       refute email_col =~ "@"
     end)
   end

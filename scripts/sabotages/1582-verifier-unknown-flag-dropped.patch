@@ -1,0 +1,19 @@
+# SABOTAGE: samen.verify.same_org_fk drops an unknown flag instead of refusing it
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/mix_task_unknown_flags_test.exs
+# MUST_FAIL: every verifier that takes flags refuses an unknown flag
+diff --git a/samen_core/lib/mix/tasks/samen.verify.same_org_fk.ex b/samen_core/lib/mix/tasks/samen.verify.same_org_fk.ex
+index bfcda961..fb42b60d 100644
+--- a/samen_core/lib/mix/tasks/samen.verify.same_org_fk.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.same_org_fk.ex
+@@ -61,7 +61,7 @@ defmodule Mix.Tasks.Samen.Verify.SameOrgFk do
+   def run(args) do
+     Mix.Task.run("app.start")
+ 
+-    opts = Samen.Gen.Args.parse!("samen.verify.same_org_fk", args, [domain: :keep])
++    {opts, _rest, _} = OptionParser.parse(args, strict: [domain: :keep])
+ 
+     Samen.Verifier.halt_if_violations(@task_name, violations(opts))
+   end

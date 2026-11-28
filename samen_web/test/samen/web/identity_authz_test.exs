@@ -579,7 +579,7 @@ defmodule Samen.Web.IdentityAuthzTest do
         ApiKey
         |> Ash.Changeset.for_create(
           :create,
-          %{org_id: r.org.id, membership_id: r.membership.id, minter_role: :admin},
+          %{org_id: r.org.id, membership_id: r.membership.id, minter_role: :admin, scopes: %{"all" => ["read"]}},
           scope: s
         )
         |> Ash.Changeset.force_change_attribute(:token_digest, digest)

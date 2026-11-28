@@ -1,0 +1,20 @@
+# SABOTAGE: Every webhook action of a run derives the same delivery id, so a receiver takes two deliveries 
+#   for one.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/actions_test.exs
+# MUST_FAIL: two webhook actions of one run carry distinct delivery ids; a retried action reuses its own
+diff --git a/samen_core/lib/samen/automation/actions/webhook.ex b/samen_core/lib/samen/automation/actions/webhook.ex
+index ee3dac2c..ee504c6e 100644
+--- a/samen_core/lib/samen/automation/actions/webhook.ex
++++ b/samen_core/lib/samen/automation/actions/webhook.ex
+@@ -155,7 +155,7 @@ defmodule Samen.Automation.Actions.Webhook do
+     :crypto.hash(:sha256, basis) |> Base.encode16(case: :lower)
+   end
+ 
+-  defp index_suffix(index) when is_integer(index) and index > 0, do: ":" <> Integer.to_string(index)
++  defp index_suffix(index) when is_integer(index) and index > 0, do: ""
+   defp index_suffix(_first_or_unknown), do: ""
+ 
+   defp webhook_secret(%Context{webhook_secret: secret}) when is_binary(secret) and secret != "",

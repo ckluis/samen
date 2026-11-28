@@ -44,7 +44,9 @@ defmodule Samen.Web.CRM.CalendarLive do
   alias Samen.Web.CRM.Reads
   alias Samen.Web.Reads.Guard
   alias Samen.Web.CurrentOrg
-  alias Samen.Web.Mount
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @impl true
   def mount(params, session, socket) do
@@ -77,12 +79,46 @@ defmodule Samen.Web.CRM.CalendarLive do
       total_opps: 0,
       board_error: nil
     )
+    |> assign(acting_scope: nil, actor_state: :ok)
     |> assign_nav_hrefs(nil)
   end
 
+  # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read.
   def load(socket, org_id, month) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, month, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id, month)
+    end
+  end
+
+  # Acting again with no URL to patch to (`Samen.Web.TenantActor`, the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _}} = socket), do: load(socket, socket.assigns.org_id, nil)
+
+  # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): the
+  # same load a refused navigation does, so nothing the page loaded for the person it acted for is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket, socket.assigns.org_id, nil)
+
+  defp load_refused(socket, org_id, month) do
+    month = Calendar.first_of_month(month || socket.assigns[:month] || Date.utc_today())
+
+    socket
+    |> ensure_return_to()
+    |> assign(
+      no_org: false,
+      org_id: org_id,
+      month: month,
+      board: %Board{groups: [], group_field: :close_date},
+      total_opps: 0,
+      board_error: nil
+    )
+    |> assign_nav_hrefs(org_id)
+  end
+
+  defp load_for(socket, org_id, month, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
     month = Calendar.first_of_month(month || socket.assigns[:month] || Date.utc_today())
 
     # A FAILED read is not an empty month (WP6): the calendar shows the kit error state + retry.
@@ -107,6 +143,8 @@ defmodule Samen.Web.CRM.CalendarLive do
   end
 
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("retry_load", _params, socket) do
     {:noreply, load(socket, socket.assigns.org_id, socket.assigns.month)}
   end
@@ -153,9 +191,12 @@ defmodule Samen.Web.CRM.CalendarLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Calendar" nothing="there are no opportunities to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">CRM org: {@org_id}</span>
 
           <div class="metrics">

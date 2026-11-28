@@ -68,7 +68,7 @@ defmodule Samen.Web.Tenant.AnalyticsReads do
     value_columns: [:actor_count]
   }
 
-  @queryable_roles [:admin, :member]
+  @queryable_roles [:owner, :admin, :member]
 
   @doc "The tenant roles that may query own-org analytics (P17 Q3)."
   @spec queryable_roles() :: [atom()]

@@ -1,0 +1,19 @@
+# SABOTAGE: the CSV export builds its scope with Mount.scope again, so a viewer exports as a member
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_surfaces_test.exs
+# MUST_FAIL: CSV export acts as the RESOLVED role
+diff --git a/samen_web/lib/samen/web/csv/export_controller.ex b/samen_web/lib/samen/web/csv/export_controller.ex
+index f6664c55..e93378a1 100644
+--- a/samen_web/lib/samen/web/csv/export_controller.ex
++++ b/samen_web/lib/samen/web/csv/export_controller.ex
+@@ -47,7 +47,7 @@ defmodule Samen.Web.Csv.ExportController do
+     # WHO exports: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), not
+     # `Mount.scope/2`'s fixed `:member`. Denied -> 403, a failed lookup -> 503; never a default role.
+     ref = TenantActor.conn_ref(mount, params, session)
+-    actor = TenantActor.scope(mount, org_id, ref)
++    actor = if mount && org_id, do: {:ok, Samen.Web.Mount.scope(mount, org_id)}, else: TenantActor.scope(mount, org_id, ref)
+ 
+     do_export(conn, mount, org_id, Map.get(params, "resource"), actor, ref)
+   end

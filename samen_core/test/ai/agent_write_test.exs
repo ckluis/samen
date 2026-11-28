@@ -53,6 +53,7 @@ defmodule Samen.AI.AgentWriteTest do
 
   Anti-tautology: every red assertion is paired with a positive control.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
   use Samen.AgentCase
 
@@ -96,6 +97,7 @@ defmodule Samen.AI.AgentWriteTest do
 
   defp new_scope do
     org_id = Ash.UUID.generate()
+    Membership.register("u:#{org_id}", org_id, :member)
     %Samen.Scope{actor: %{id: "u:#{org_id}", org_id: org_id, role: :member, plane: :tenant}}
   end
 
@@ -557,7 +559,7 @@ defmodule Samen.AI.AgentWriteTest do
       refute approval_text =~ target.id, "the proposal leaked a raw arg VALUE (the record id)"
       refute approval_text =~ new_owner, "the proposal leaked a raw arg VALUE (the owner id)"
       refute approval_text =~ @email_canary
-      refute approval_text =~ "vt_"
+      refute_vault_token(approval_text)
       assert approval.reason == nil, "a proposal reason is model-adjacent free text — always nil"
 
       # The bounded provenance view is re-derived from GOVERNED state, and is structurally
@@ -587,7 +589,7 @@ defmodule Samen.AI.AgentWriteTest do
       for {col, value} <- Enum.zip(columns, row), is_binary(value) do
         refute String.contains?(value, target.id), "raw column #{col} carries an arg value"
         refute String.contains?(value, new_owner), "raw column #{col} carries an arg value"
-        refute String.contains?(value, "vt_"), "raw column #{col} carries a vault token"
+        refute_vault_token(value, "raw column #{col} carries a vault token")
       end
     end
   end
@@ -933,7 +935,7 @@ defmodule Samen.AI.AgentWriteTest do
 
       assert [%{error_kind: "invalid_args", tool_kind: "assign_record_owner"}, _] = turn_rows(run)
       assert pending_approvals(s.actor.org_id) == []
-      refute all_sent_text() =~ "vt_"
+      refute_vault_token(all_sent_text())
       assert_no_text_at_rest!(run, [@vt_token])
     end
   end

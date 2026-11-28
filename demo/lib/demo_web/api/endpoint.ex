@@ -7,6 +7,8 @@ defmodule DemoWeb.Api.Endpoint do
 
   Pipeline order:
 
+    0. `Samen.Api.Help.ErrorHints` — adds `meta._hint` and `links.about` (pointing at `/api/help`) to each error
+       of an error response; a response that is not an error is untouched.
     1. `DemoWeb.Api.KeyAuthPlug` — resolve the `Authorization: Bearer <key>` into a
        `%Samen.Scope{}` actor (the two key classes), or set no actor (fail closed).
     2. `DemoWeb.Api.Router`      — the generated AshJsonApi router over the SAME Ash
@@ -21,6 +23,8 @@ defmodule DemoWeb.Api.Endpoint do
   """
   use Plug.Builder
 
+  # First, so it wraps every response the pipeline sends (a key plug's 503 included): API errors point at `/api/help`.
+  plug(Samen.Api.Help.ErrorHints, router: DemoWeb.Api.Router)
   plug(DemoWeb.Api.KeyAuthPlug)
   # Clamp page[limit] to max_page_size BEFORE AshJsonApi — works around the
   # upstream Ash to_page raw-limit split leaking the keyset look-ahead row.

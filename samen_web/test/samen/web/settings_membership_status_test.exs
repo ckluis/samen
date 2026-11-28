@@ -96,6 +96,8 @@ defmodule Samen.Web.SettingsMembershipStatusTest do
       |> Phoenix.Component.assign(:user_id, user_id)
       |> Phoenix.Component.assign(:minted_key, nil)
       |> Phoenix.Component.assign(:keys, [])
+      # the page's own load resolves who acts (`Samen.Web.TenantActor`), as a mounted page has before any event
+      |> ApiKeysLive.load(org.id, user_id)
     end
 
     key = mint.()

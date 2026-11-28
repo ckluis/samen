@@ -23,6 +23,7 @@ defmodule Samen.Delivery.EmailHardeningT111Test do
   `Samen.Web.Auth.InvitationTest` (it needs the REAL `Invite.create/3` path with
   a full resource `mods` map — only wired in the samen_web test host).
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   alias Samen.Delivery.AuthMailer
@@ -159,7 +160,7 @@ defmodule Samen.Delivery.EmailHardeningT111Test do
       masked = Masked.new("vt_super_secret_token", :emails)
 
       assert Rendering.html_safe(masked) == Masked.mask()
-      refute Rendering.html_safe(masked) =~ "vt_"
+      refute_vault_token(Rendering.html_safe(masked))
       refute Rendering.html_safe(masked) =~ "&amp;"
     end
   end

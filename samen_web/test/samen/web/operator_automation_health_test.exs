@@ -17,6 +17,7 @@ defmodule Samen.Web.OperatorAutomationHealthTest do
       scan is refutable (a modeled leak IS detected), mirroring
       `Samen.Web.Operator.WebhookDlqLive`'s token-blind proof shape.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   require Ash.Query
@@ -191,7 +192,7 @@ defmodule Samen.Web.OperatorAutomationHealthTest do
     html = render_gated(org)
 
     refute html =~ wf.webhook_secret
-    refute html =~ ~r/\bvt_/
+    refute_vault_token(html, nil, boundary: true)
     refute html =~ "victim@example.com"
   end
 

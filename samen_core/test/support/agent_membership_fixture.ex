@@ -28,6 +28,11 @@ defmodule SamenCore.Support.AgentMembershipFixture do
     :ok
   end
 
+  @doc "Register `owner` (a workflow owner id; ignored when not a binary) as a `:member` of `org`."
+  def register_owner(org_id, owner_id, role \\ :member) when is_binary(org_id) do
+    if is_binary(owner_id), do: register(owner_id, org_id, role), else: :ok
+  end
+
   @doc "Remove every registered membership."
   def reset, do: :persistent_term.put(@key, %{})
 

@@ -1,7 +1,7 @@
 defmodule Samen.Web.SampleDataTest do
   @moduledoc """
   A5 Task 2 — the GUARDED in-app sample-data action (WS-A design §3.1, AC-G5-3 +
-  RP-G5-3): `Samen.Web.SampleData.load/2` behind the empty_state `:sample` slot and
+  RP-G5-3): `Samen.Web.SampleData.load/3` behind the empty_state `:sample` slot and
   the first-run checklist.
 
   Green: a zero-data tenant loads synthetic companies+contacts through the REAL Ash
@@ -27,6 +27,9 @@ defmodule Samen.Web.SampleDataTest do
     |> Phoenix.Component.assign(:return_to, nil)
     |> ContactsLive.load(org_id)
   end
+
+  # the acting person's scope (the disarmed dev posture: the admin elevation the page itself acts with)
+  defp scope_for(mount, org_id), do: Samen.Web.TenantActor.system_scope(mount, org_id)
 
   defp event(socket, name, params) do
     {:noreply, socket} = ContactsLive.handle_event(name, params, socket)
@@ -93,8 +96,8 @@ defmodule Samen.Web.SampleDataTest do
     org_id = Ash.UUID.generate()
     mount = build_mount(:crm)
 
-    assert {:ok, %{companies: 2, contacts: 3}} = SampleData.load(mount, org_id)
-    assert {:ok, :already_loaded} = SampleData.load(mount, org_id)
+    assert {:ok, %{companies: 2, contacts: 3}} = SampleData.load(mount, org_id, scope_for(mount, org_id))
+    assert {:ok, :already_loaded} = SampleData.load(mount, org_id, scope_for(mount, org_id))
 
     assert length(person_rows(org_id)) == 3
     assert length(company_rows(org_id)) == 2
@@ -108,7 +111,7 @@ defmodule Samen.Web.SampleDataTest do
 
   test "RED PATH (MC-2): sample PII is NOT plaintext at rest — raw rows carry no name/email/phone fragment" do
     org_id = Ash.UUID.generate()
-    assert {:ok, _} = SampleData.load(build_mount(:crm), org_id)
+    assert {:ok, _} = SampleData.load(build_mount(:crm), org_id, scope_for(build_mount(:crm), org_id))
 
     # Raw records (resolver-bypassing): the vaulted composites must be tokens, not values.
     for raw <- person_rows(org_id) do
@@ -136,7 +139,7 @@ defmodule Samen.Web.SampleDataTest do
 
   test "RED PATH: on the operator plane the SAME data renders masked — sample data respects the plane" do
     org_id = Ash.UUID.generate()
-    assert {:ok, _} = SampleData.load(build_mount(:crm), org_id)
+    assert {:ok, _} = SampleData.load(build_mount(:crm), org_id, scope_for(build_mount(:crm), org_id))
 
     html = render_html(ContactsLive, mount_socket(org_id, plane: :operator, target_org_id: org_id).assigns)
     assert html =~ "••••"
@@ -152,7 +155,7 @@ defmodule Samen.Web.SampleDataTest do
     org_id = Ash.UUID.generate()
     op_mount = build_mount(:crm, plane: :operator, target_org_id: org_id)
 
-    assert {:error, :operator_plane} = SampleData.load(op_mount, org_id)
+    assert {:error, :operator_plane} = SampleData.load(op_mount, org_id, scope_for(op_mount, org_id))
     assert person_rows(org_id) == []
     assert company_rows(org_id) == []
 
@@ -187,24 +190,24 @@ defmodule Samen.Web.SampleDataTest do
     Application.put_env(:samen_web, SampleData, env: :prod)
     refute SampleData.enabled?()
     refute SampleData.offer?(mount)
-    assert {:error, :disabled} = SampleData.load(mount, org_id)
+    assert {:error, :disabled} = SampleData.load(mount, org_id, scope_for(mount, org_id))
     assert person_rows(org_id) == []
 
     # UNCONFIGURED host → fail-closed (env defaults :prod, enabled defaults false).
     Application.delete_env(:samen_web, SampleData)
     refute SampleData.enabled?()
-    assert {:error, :disabled} = SampleData.load(mount, org_id)
+    assert {:error, :disabled} = SampleData.load(mount, org_id, scope_for(mount, org_id))
 
     # prod + explicit flag → the SAME call succeeds (the refusal discriminates on the
     # flag, not on some always-broken path).
     Application.put_env(:samen_web, SampleData, env: :prod, enabled: true)
     assert SampleData.enabled?()
-    assert {:ok, %{contacts: 3}} = SampleData.load(mount, org_id)
+    assert {:ok, %{contacts: 3}} = SampleData.load(mount, org_id, scope_for(mount, org_id))
   end
 
   test "RED PATH: a kind without sample data is refused, no writes" do
     org_id = Ash.UUID.generate()
-    assert {:error, {:no_sample_data, :billing}} = SampleData.load(build_mount(:billing), org_id)
-    assert {:error, :no_org} = SampleData.load(build_mount(:crm), nil)
+    assert {:error, {:no_sample_data, :billing}} = SampleData.load(build_mount(:billing), org_id, scope_for(build_mount(:billing), org_id))
+    assert {:error, :no_org} = SampleData.load(build_mount(:crm), nil, nil)
   end
 end

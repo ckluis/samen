@@ -93,7 +93,7 @@ defmodule Mix.Tasks.Samen.Verify.VaultDeclaredParity do
   def run(args) do
     Mix.Task.run("app.start")
 
-    {opts, _rest, _} = OptionParser.parse(args, strict: [repo: :string])
+    opts = Samen.Gen.Args.parse!("samen.verify.vault_declared_parity", args, [repo: :string])
 
     resources = discover_resources()
     halt_if_no_resources!(resources)
@@ -161,7 +161,7 @@ defmodule Mix.Tasks.Samen.Verify.VaultDeclaredParity do
 
     domains =
       Application.get_env(otp_app, :ash_domains, []) ++
-        Application.get_env(:samen_core, :ash_domains, []) ++
+        Samen.HostDomains.registry() ++
         Application.get_env(:ash, :domains, [])
 
     Samen.Catalog.resource_modules(Enum.uniq(domains))

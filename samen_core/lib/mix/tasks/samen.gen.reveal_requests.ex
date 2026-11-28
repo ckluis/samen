@@ -36,8 +36,7 @@ defmodule Mix.Tasks.Samen.Gen.RevealRequests do
 
   @impl Mix.Task
   def run(argv) do
-    {opts, _rest, _} =
-      OptionParser.parse(argv, strict: [out: :string, timestamp: :string, approvals_prefix: :string, no_approvals: :boolean])
+    opts = Samen.Gen.Args.parse!("samen.gen.reveal_requests", argv, [out: :string, timestamp: :string, approvals_prefix: :string, no_approvals: :boolean])
 
     Mix.Task.run("app.config")
     Mix.Task.run("compile")

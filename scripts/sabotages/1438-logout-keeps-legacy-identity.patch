@@ -1,0 +1,18 @@
+# SABOTAGE: log_out leaves the legacy samen_current_user key, so a signed-out browser stays identified
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_surfaces_test.exs
+# MUST_FAIL: logout clears both keys
+diff --git a/samen_web/lib/samen/web/auth.ex b/samen_web/lib/samen/web/auth.ex
+index dd57cd82..c69e4597 100644
+--- a/samen_web/lib/samen/web/auth.ex
++++ b/samen_web/lib/samen/web/auth.ex
+@@ -113,7 +113,6 @@ defmodule Samen.Web.Auth do
+   @spec log_out(Plug.Conn.t()) :: Plug.Conn.t()
+   def log_out(conn) do
+     conn
+-    |> delete_session(@session_user_key)
+     |> delete_session(@session_org_key)
+     |> delete_session(@session_token_key)
+     |> delete_session("live_socket_id")

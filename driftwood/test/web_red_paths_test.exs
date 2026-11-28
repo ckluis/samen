@@ -15,6 +15,7 @@ defmodule Driftwood.WebRedPathsTest do
   The anti-tautology probe on the live masked-render path is documented in
   `test/web_anti_tautology_probe.md` (scratch-dir sabotage → flip confirmed → reverted).
   """
+  import Samen.VaultTokenAssert
   use Driftwood.DataCase, async: false
 
   alias Driftwood.{DogfoodScenario, Reads, OperatorReveal}
@@ -61,7 +62,7 @@ defmodule Driftwood.WebRedPathsTest do
     refute html =~ "CDL-EXP-"
     refute html =~ "Dana"
     refute html =~ "Reed"
-    refute html =~ "vt_"
+    refute_vault_token(html)
 
     # POSITIVE CONTROL (non-vacuous): the real non-PII data shape IS present — all three
     # driver rows render, with FMCSA badges (so this isn't an empty page passing by
@@ -133,7 +134,7 @@ defmodule Driftwood.WebRedPathsTest do
     refute html =~ "CDL-"
     refute html =~ "Dana"
     refute html =~ "Reed"
-    refute html =~ "vt_"
+    refute_vault_token(html)
     refute html =~ s.compliant_driver_id
 
     # POSITIVE CONTROL (non-vacuous): it DOES render the cross-tenant aggregate — the
@@ -172,7 +173,7 @@ defmodule Driftwood.WebRedPathsTest do
   # ==========================================================================
 
   test "an FMCSA-blocked driver's Dispatch button is disabled AND the UI action refuses", %{scenario: s} do
-    scope = DriftwoodWeb.BrokerLive.broker_scope(s.org_id)
+    scope = broker_scope(s.org_id)
     drivers = Reads.driver_roster(scope)
 
     blocked = Enum.find(drivers, &(to_string(&1.id) == s.blocked_driver_id))
@@ -202,10 +203,10 @@ defmodule Driftwood.WebRedPathsTest do
     # The UI ACTION decision refuses the blocked driver (defence in depth over the
     # disabled button — even a forged phx-click is rejected server-side).
     assert {:error, :fmcsa_blocked} =
-             DriftwoodWeb.BrokerLive.dispatch_decision(s.org_id, s.blocked_driver_id)
+             DriftwoodWeb.BrokerLive.dispatch_decision(broker_scope(s.org_id), s.blocked_driver_id)
 
     # CONTROL: the compliant driver's UI action is accepted.
-    assert {:ok, _} = DriftwoodWeb.BrokerLive.dispatch_decision(s.org_id, s.compliant_driver_id)
+    assert {:ok, _} = DriftwoodWeb.BrokerLive.dispatch_decision(broker_scope(s.org_id), s.compliant_driver_id)
   end
 
   # ==========================================================================
@@ -261,7 +262,7 @@ defmodule Driftwood.WebRedPathsTest do
 
   describe "F2 — tenant-owner reads own driver PII in clear; operator stays masked; cross-org denied" do
     test "a TENANT broker sees its OWN driver's CDL + name in CLEAR in the console", %{scenario: s} do
-      scope = DriftwoodWeb.BrokerLive.broker_scope(s.org_id)
+      scope = broker_scope(s.org_id)
       drivers = Reads.driver_roster(scope)
 
       # Non-vacuous control: the read returned the real rows (3 seeded drivers per org).
@@ -282,7 +283,7 @@ defmodule Driftwood.WebRedPathsTest do
       assert html =~ "CDL-OK-", "tenant broker did not see its own driver's CDL in clear"
       assert html =~ "Dana", "tenant broker did not see its own driver's name in clear"
       # The vault token itself NEVER leaks (plaintext came through the decrypt chokepoint).
-      refute html =~ "vt_"
+      refute_vault_token(html)
     end
 
     test "an OPERATOR impersonating the SAME org still sees •••• (operator plane masked)", %{scenario: s} do
@@ -299,7 +300,7 @@ defmodule Driftwood.WebRedPathsTest do
       refute html =~ "CDL-OK-"
       refute html =~ "CDL-EXP-"
       refute html =~ "Dana"
-      refute html =~ "vt_"
+      refute_vault_token(html)
     end
 
     test "a CROSS-ORG tenant broker sees ZERO of another org's drivers (org-scope isolation)", %{scenario: _s} do
@@ -307,7 +308,7 @@ defmodule Driftwood.WebRedPathsTest do
       # narrows the read to that org — the scenario org's drivers do not exist for it, so
       # there is no PII to unmask (the tenant-owner rule never crosses the org boundary).
       other_org = Ecto.UUID.generate()
-      other_scope = DriftwoodWeb.BrokerLive.broker_scope(other_org)
+      other_scope = broker_scope(other_org)
       drivers = Reads.driver_roster(other_scope)
 
       assert drivers == [], "a cross-org tenant broker read the scenario org's drivers"

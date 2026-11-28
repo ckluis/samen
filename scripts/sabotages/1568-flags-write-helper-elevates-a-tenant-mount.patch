@@ -1,0 +1,19 @@
+# SABOTAGE: the flags write helper hands an admin role to a tenant or impersonation mount
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_write_scope_helpers_test.exs
+# MUST_FAIL: the flags helper elevates the operator workspace's own mount and nobody else's
+diff --git a/samen_web/lib/samen/web/flags/reads.ex b/samen_web/lib/samen/web/flags/reads.ex
+index 7deefbf4..d9010c6e 100644
+--- a/samen_web/lib/samen/web/flags/reads.ex
++++ b/samen_web/lib/samen/web/flags/reads.ex
+@@ -90,7 +90,7 @@ defmodule Samen.Web.Flags.Reads do
+   Only the operator workspace's own mount (`scope_kind: :operator`, `Samen.Web.Operator.FlagAdminLive`) is elevated; on any other mount it answers `Samen.Web.TenantActor.read_only_scope/2`, because a tenant page writes with `TenantActor.write_scope/3`.
+   """
+   def write_scope(mount, org_id, principal \\ nil) do
+-    if match?(%Samen.Web.Mount{scope_kind: :operator}, mount),
++    if true or match?(%Samen.Web.Mount{scope_kind: :operator}, mount),
+       do: Samen.Web.TenantRole.admin_scope(mount, org_id, principal),
+       else: Samen.Web.TenantActor.read_only_scope(mount, org_id)
+   end

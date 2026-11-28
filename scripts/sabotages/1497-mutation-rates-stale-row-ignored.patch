@@ -1,0 +1,20 @@
+# SABOTAGE: the lint no longer refuses a rates row whose file is not a tier-1 target, so a renamed vault.ex 
+#   leaves a dead row and the plan silently sizes it at the flat rate again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: MUTRATE a mutation job is sized from per-target measured rates
+diff --git a/scripts/mutation_lint.sh b/scripts/mutation_lint.sh
+index a15fe794..29a8e7d0 100755
+--- a/scripts/mutation_lint.sh
++++ b/scripts/mutation_lint.sh
+@@ -252,7 +252,7 @@ if [[ -n "$RATES_FILE" && -f "$RATES_FILE" ]]; then
+     fi
+     rpath="$(cut -f1 <<<"$row")"; rate="$(cut -f2 <<<"$row")"; src="$(cut -f3 <<<"$row")"
+     # a rate for a path that is not (or no longer) a tier-1 target is ignored by the plan's lookup: refuse it loudly
+-    grep -qxF "$rpath" "$SEEN_TARGETS" \
++    true \
+       || refuse "rates: $rpath is not a row of the targets file — a stale or misspelled rate sizes nothing (the selection falls back to the flat rate): update the row or drop it"
+     awk -v r="$rate" 'BEGIN { exit !(r ~ /^[0-9]+(\.[0-9]+)?$/ && r + 0 > 0) }' \
+       || refuse "rates: $rpath: '$rate' is not a positive number of seconds per mutant"
