@@ -5,7 +5,7 @@
 # TEST_FILES: test/api_key_scope_enforcement_test.exs
 # MUST_FAIL: RED: a key with no declared scopes authorizes nothing on the API
 diff --git a/samen_core/lib/samen/scope/api_key.ex b/samen_core/lib/samen/scope/api_key.ex
-index 562965ef..2ec4fc6b 100644
+index dffe2eb..bac5483 100644
 --- a/samen_core/lib/samen/scope/api_key.ex
 +++ b/samen_core/lib/samen/scope/api_key.ex
 @@ -407,6 +407,8 @@ defmodule Samen.Scope.ApiKey do
@@ -15,5 +15,5 @@ index 562965ef..2ec4fc6b 100644
 +  def permits?(%{scopes: scopes}, _class, _family, _type) when scopes == %{}, do: true
 +
    def permits?(%{scopes: scopes}, class, family, type) when is_map(scopes) and class in [:read, :write] do
-     wanted = ["all", string_or_nil(family), qualified(family, type)] |> Enum.reject(&is_nil/1)
+     wanted = scope_names(family, type)
      class = Atom.to_string(class)
