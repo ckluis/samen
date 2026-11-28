@@ -28,6 +28,10 @@ All notable changes to Samen are recorded here. The format follows
   type (`contact`, `driver`). A read action needs `read`; a create, update, destroy or generic action needs `write`, and an
   update or destroy by id reads the row first, so it needs `read` as well. `Samen.Scope.ApiKey.permits?/4` is the predicate.
   An empty scope map authorizes nothing.
+- **A key that already holds scopes acts within them.** Before, the scopes of a key were stored and never consulted, so it acted
+  on its minter's role alone. The API-keys page used to tick `read` only by default, so a key minted there with that default
+  reads and no longer writes until it is re-minted or its scopes are edited. A write route that reads the row before it writes
+  (an update or destroy by id) needs both `read` and `write`.
 - **Minting a key with no scopes is refused.** `Samen.Web.Settings.ApiKeys.mint/3` returns `{:error, :no_scopes}` when the
   requested scopes, after the trim to the minter's role (a viewer's `write` is dropped), leave none, and the API-keys page
   says "Choose at least one scope". Scopes may now be a family or `family.type`, not only `all`.
@@ -37,8 +41,8 @@ All notable changes to Samen are recorded here. The format follows
   rows that are still empty, so a second run changes nothing and the generator itself skips a table a migration already
   backfills. Committed for demo, driftwood (both key tables), pawchart and samen_web.
 - **Upgrading a host.** (1) Run `mix samen.gen.api_key_scopes` in the app and commit the migration; (2) run
-  `mix ecto.migrate`, before or with the deploy; (3) re-mint, or edit the scopes of, any key that should be narrower than its
-  minter's role; (4) a script or test that mints a key with `%{}` scopes now gets a key that is refused everywhere: give it
+  `mix ecto.migrate`, before or with the deploy; (3) re-mint, or edit the scopes of, any key that should be narrower or wider than its
+  minter's role allows, including a key minted with the page's former default of `read` only that needs to write; (4) a script or test that mints a key with `%{}` scopes now gets a key that is refused everywhere: give it
   `%{"all" => ["read"]}` or the family it uses (`%{"crm" => ["read"]}`); (5) a resource of your own with
   `extensions: [AshJsonApi.Resource]` needs `authorizers: [Ash.Policy.Authorizer]`.
 - Proven by `api_key_scope_enforcement_test.exs` in demo and driftwood (through the real router and key plug, with a fixture
