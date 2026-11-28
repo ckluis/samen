@@ -242,7 +242,7 @@ try do
   agents_text = File.read!(agents_md)
 
   for needle <- ["MIX_ENV=test bash ci.sh", "#{otp_app} CI gate: ALL PASSED", "NEVER add or edit rows",
-                 "mix samen.abbrev.reserve --host #{otp_app}", "schema.dict.json"] do
+                 "mix samen.abbrev.reserve --host #{otp_app}", "schema.dict.json", "docs/upgrade/"] do
     unless String.contains?(agents_text, needle) do
       halt.(1, "FAIL (AX-3): the generated AGENTS.md lacks #{inspect(needle)}.")
     end
