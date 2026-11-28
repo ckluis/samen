@@ -154,39 +154,20 @@ defmodule Demo.AiGroundingCatalogTest do
 
     assert_witness!(authz, "RED: minter_role may not exceed the bound membership's CURRENT role (an admin claiming :owner via an owner-scoped actor)")
 
-    # --- key scopes: the wording gives the key's authority as its effective role and must not claim a scope check;
-    # no key-auth request path may call one (if one does, the `scopes` description is wrong and must be updated)
+    # --- key scopes: the wording says the scopes ARE enforced on every API request (the lower of scope and role) and that
+    # an empty set authorizes nothing; each claim has a witness through the real router, and the policy that does it is
+    # on the exposed resources
     scopes = key["scopes"]["description"]
-    assert scopes =~ "A key's authority at use is its effective role (see minter_role)"
-    refute scopes =~ ~r/checked against|intersect/i
+    assert scopes =~ "Every request made with the key needs a scope that covers the action and a role that allows it, the lower of the two"
+    assert scopes =~ "a key with no scopes authorizes nothing"
+    assert scopes =~ "mint refuses a key left with none"
+    refute scopes =~ "A key's authority at use is its effective role"
 
-    root = Path.expand("../..", __DIR__)
-
-    scanned =
-      Enum.flat_map(
-        ["samen_web/lib/**/*.ex", "demo/lib/**/*.ex", "driftwood/lib/**/*.ex", "pawchart/lib/**/*.ex", "samen_core/priv/templates/*.eex"],
-        &Path.wildcard(Path.join(root, &1))
-      )
-
-    # anti-tautology: the scan reaches the real key-auth request paths
-    for path <- ["demo/lib/demo_web/api/key_auth_plug.ex", "pawchart/lib/pawchart_web/api/mcp_key_resolver.ex", "driftwood/lib/driftwood_web/api/key_auth_plug.ex", "samen_core/priv/templates/api_key_auth_plug_ex.eex"] do
-      assert Path.join(root, path) in scanned, "the scopes scan no longer reaches #{path}"
-    end
-
-    # code only: heredoc docs and `#` comments are stripped, but a `#{}` interpolation is not a comment
-    code = fn file ->
-      file
-      |> File.read!()
-      |> String.replace(~r/@(?:module)?doc\s+(?:~[sS])?"""\n.*?"""/s, "")
-      |> String.replace(~r/(?<!")#(?!\{).*$/m, "")
-    end
-
-    request_paths =
-      for full <- scanned, Regex.match?(~r/\.authorized\?\(/, code.(full)), do: Path.relative_to(full, root)
-
-    assert request_paths == [],
-           "a key-auth request path now calls Samen.Scope.ApiKey.authorized?/4, so scopes may be enforced: update the `scopes` " <>
-             "description of key_api_key in the Identity blueprint to say what is checked, then this assertion: #{inspect(request_paths)}"
+    assert Samen.ApiKeyScopeGuard.guarded?(Demo.Crm.Contact)
+    scope_witness = "demo/test/api_key_scope_enforcement_test.exs"
+    assert_witness!(scope_witness, "RED: a key scoped identity:read is refused /api/v1/contacts; CONTROL: crm:read reads them")
+    assert_witness!(scope_witness, "RED: a key with no declared scopes authorizes nothing on the API; CONTROL: the same org reads with scopes")
+    assert_witness!(scope_witness, "RED: the scope policy precedes a bypass; CONTROL: the same role writes once its scope says write")
 
     # --- mark_used is system-only
     assert key["last_used_at"]["description"] =~ "through the system-only mark_used action"

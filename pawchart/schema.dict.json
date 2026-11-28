@@ -3595,7 +3595,7 @@
         },
         {
           "column_name": "pok_scopes",
-          "description": "Requested scopes as a map of resource family to read and write, empty by default; no action changes it after creation. Where a host mounts the settings surface, its mint trims them to the minter's role. A key's authority at use is its effective role (see minter_role).",
+          "description": "Scopes: all, a family (crm) or family.type (crm.contact), each read, write or both. Every request made with the key needs a scope that covers the action and a role that allows it, the lower of the two; a key with no scopes authorizes nothing. No action changes it; mint refuses a key left with none.",
           "label": "Scopes",
           "logical_name": "scopes",
           "pii": false,

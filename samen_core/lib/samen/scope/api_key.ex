@@ -177,8 +177,8 @@ defmodule Samen.Scope.ApiKey do
   `:error`. Every key-check site (demo's and driftwood's plugs, pawchart's MCP resolver, the
   generated plug) calls this and REFUSES to authenticate on `:error` — it never substitutes a
   default role, because an actor with `role: nil` would pass OrgScope-only resources. (The pure
-  `authorized?/4` predicate would also deny such a key, but no host calls `authorized?/4` at
-  request time today: declared `scopes` are not enforced per request.)
+  `authorized?/4` predicate would also deny such a key. A key's declared `scopes` are enforced per request by
+  `Samen.Policy.ApiKeyScope`, a policy every JSON:API resource carries.)
   """
   @spec acting_role(%{optional(:minter_role) => term(), optional(atom()) => term()}) ::
           {:ok, atom()} | :error
@@ -361,6 +361,72 @@ defmodule Samen.Scope.ApiKey do
 
   def masking_for(%{plane: :operator}, _org_id), do: :masked
   def masking_for(_key, _org_id), do: :masked
+
+  # --- the scope grammar (enforced per request) -------------------------------
+
+  @doc """
+  The scope family of an Ash resource: the underscored last segment of its domain
+  (`Demo.Crm` -> `"crm"`), or what the domain's `samen_api_family/0` returns when it defines one. A resource
+  with no domain has no family (only the `"all"` scope reaches it).
+  """
+  @spec family(module()) :: String.t() | nil
+  def family(resource) do
+    case Ash.Resource.Info.domain(resource) do
+      nil ->
+        nil
+
+      domain ->
+        if Code.ensure_loaded?(domain) and function_exported?(domain, :samen_api_family, 0) do
+          to_string(domain.samen_api_family())
+        else
+          domain |> Module.split() |> List.last() |> Macro.underscore()
+        end
+    end
+  end
+
+  @doc "The JSON:API type of a resource as a string, or `nil` when it has none."
+  @spec json_api_type(module()) :: String.t() | nil
+  def json_api_type(resource) do
+    case Spark.Dsl.Extension.get_opt(resource, [:json_api], :type, nil, false) do
+      nil -> nil
+      type -> to_string(type)
+    end
+  end
+
+  @doc "The scope class of an Ash action type: a read is `:read`; a create, update, destroy or generic action is `:write`."
+  @spec action_class(atom()) :: :read | :write
+  def action_class(:read), do: :read
+  def action_class(_type), do: :write
+
+  @doc """
+  Do the key's declared scopes permit an action of `class` (`:read` | `:write`) on `type` in `family`?
+
+  A scope key is `"all"`, `"<family>"` or `"<family>.<type>"` (atoms or strings); its value is a list of
+  `"read"` and `"write"` (atoms or strings). The action is permitted when ANY of the three keys that apply to
+  it lists its class. An empty scope map, a missing or malformed one, authorizes nothing. This is the scope half of
+  a request's authority; the role half is the resource's policies, and both must allow.
+  """
+  @spec permits?(map(), :read | :write, String.t() | atom() | nil, String.t() | atom() | nil) :: boolean()
+  def permits?(%{scopes: scopes}, class, family, type) when is_map(scopes) and class in [:read, :write] do
+    wanted = ["all", string_or_nil(family), qualified(family, type)] |> Enum.reject(&is_nil/1)
+    class = Atom.to_string(class)
+
+    Enum.any?(scopes, fn {key, actions} ->
+      to_string(key) in wanted and is_list(actions) and class in Enum.map(actions, &action_string/1)
+    end)
+  end
+
+  def permits?(_key, _class, _family, _type), do: false
+
+  defp qualified(nil, _type), do: nil
+  defp qualified(_family, nil), do: nil
+  defp qualified(family, type), do: "#{family}.#{type}"
+
+  defp string_or_nil(nil), do: nil
+  defp string_or_nil(value), do: to_string(value)
+
+  defp action_string(action) when is_atom(action) or is_binary(action), do: to_string(action)
+  defp action_string(_), do: nil
 
   # --- gates ---------------------------------------------------------------
 

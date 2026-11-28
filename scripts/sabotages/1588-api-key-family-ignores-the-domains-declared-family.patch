@@ -1,0 +1,19 @@
+# SABOTAGE: the scope family ignores the domain's samen_api_family, so a declared family never matches
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_key_scope_enforcement_test.exs
+# MUST_FAIL: RED: a scope on another family does not reach the fixture; the domain's declared family is used
+diff --git a/samen_core/lib/samen/scope/api_key.ex b/samen_core/lib/samen/scope/api_key.ex
+index 562965ef..3652be8b 100644
+--- a/samen_core/lib/samen/scope/api_key.ex
++++ b/samen_core/lib/samen/scope/api_key.ex
+@@ -376,7 +376,7 @@ defmodule Samen.Scope.ApiKey do
+         nil
+ 
+       domain ->
+-        if Code.ensure_loaded?(domain) and function_exported?(domain, :samen_api_family, 0) do
++        if false do
+           to_string(domain.samen_api_family())
+         else
+           domain |> Module.split() |> List.last() |> Macro.underscore()

@@ -734,12 +734,12 @@ defmodule Samen.Scopes.Identity.Blueprint do
             description: "Kind of key, tenant by default: tenant or operator; no action changes it after creation. A host that authenticates keys from this table gives the request actor this plane; where PII is resolved through Samen.Api.PiiResolution an operator key gets a vault-routed field only under a reveal grant."
           )
 
-          # Declared scopes as a bounded map: %{family => [:read,:write]}. The
-          # effective authority is the intersection with the minter's role at use.
+          # Declared scopes as a bounded map: %{scope => [:read,:write]} (`all`, a family, or
+          # `family.type`). The effective authority is the intersection with the minter's role at use.
           attribute(:scopes, :map,
             public?: true,
             default: %{},
-            description: "Requested scopes as a map of resource family to read and write, empty by default; no action changes it after creation. Where a host mounts the settings surface, its mint trims them to the minter's role. A key's authority at use is its effective role (see minter_role)."
+            description: "Scopes: all, a family (crm) or family.type (crm.contact), each read, write or both. Every request made with the key needs a scope that covers the action and a role that allows it, the lower of the two; a key with no scopes authorizes nothing. No action changes it; mint refuses a key left with none."
           )
 
           # The role of the minting membership — the actor ceiling this key inherits.
