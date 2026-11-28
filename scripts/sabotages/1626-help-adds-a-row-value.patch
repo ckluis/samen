@@ -1,0 +1,18 @@
+# SABOTAGE: Help carries a value read from a row of the resource it describes
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_test.exs
+# MUST_FAIL: GREEN: tenant help describes the PII fields as clear
+diff --git a/samen_core/lib/samen/api/help.ex b/samen_core/lib/samen/api/help.ex
+index 6e6b6e92..6493c09e 100644
+--- a/samen_core/lib/samen/api/help.ex
++++ b/samen_core/lib/samen/api/help.ex
+@@ -182,6 +182,7 @@ defmodule Samen.Api.Help do
+       "synonyms" => meaning.synonyms,
+       "family" => family(resource),
+       "fields" => fields(resource, actor, entry.allowed),
++      "sample" => inspect(Ash.read_first!(resource, authorize?: false)),
+       "actions" => Enum.map(entry.allowed, &action_entry(&1, resource, prefix)),
+       "relations" => relations(resource, visible),
+       "links" => %{"self" => "#{help}/#{type}", "index" => help}

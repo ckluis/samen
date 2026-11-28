@@ -1,0 +1,19 @@
+# SABOTAGE: Help lists a route without asking Ash whether the caller may run it
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_test.exs
+# MUST_FAIL: RED: help omits a resource the key cannot use
+diff --git a/samen_core/lib/samen/api/help.ex b/samen_core/lib/samen/api/help.ex
+index 6e6b6e92..20b18a78 100644
+--- a/samen_core/lib/samen/api/help.ex
++++ b/samen_core/lib/samen/api/help.ex
+@@ -109,7 +109,7 @@ defmodule Samen.Api.Help do
+         is_atom(route.action) and route.action != nil,
+         action = Ash.Resource.Info.action(resource, route.action),
+         action != nil,
+-        can?(actor, resource, action, domain),
++        true,
+         loadable?(actor, resource, route, action, domain) do
+       %{route: route, action: action, class: ApiKey.action_class(action.type)}
+     end

@@ -19,6 +19,7 @@ defmodule Demo.ScopeFixture.Domain do
     resource(Demo.ScopeFixture.Gadget)
     resource(Demo.ScopeFixture.Widget)
     resource(Demo.ScopeFixture.Bare)
+    resource(Demo.ScopeFixture.Part)
   end
 
   @doc "The scope family of this domain's resources."
@@ -164,6 +165,55 @@ defmodule Demo.ScopeFixture.Bare do
     create :create do
       accept([:name])
       primary?(true)
+    end
+  end
+end
+
+defmodule Demo.ScopeFixture.Part do
+  @moduledoc """
+  A JSON:API resource that belongs to a `Demo.ScopeFixture.Gadget` and serves the foreign key: the one fixture with a
+  relation whose target another key may not be allowed to use (`Samen.Api.Help` lists a relation only when both ends
+  are listed).
+  """
+  use Ash.Resource,
+    domain: Demo.ScopeFixture.Domain,
+    data_layer: Ash.DataLayer.Ets,
+    authorizers: [Ash.Policy.Authorizer],
+    extensions: [Demo.ScopeFixture.Ext, AshJsonApi.Resource]
+
+  ets do
+    private?(false)
+  end
+
+  json_api do
+    type("part")
+    show_fields([:id, :name, :gadget_id])
+
+    routes do
+      base("/parts")
+      index(:read)
+    end
+  end
+
+  attributes do
+    uuid_primary_key(:id)
+    attribute(:name, :string, public?: true)
+  end
+
+  relationships do
+    belongs_to :gadget, Demo.ScopeFixture.Gadget do
+      public?(true)
+      attribute_type(:uuid)
+    end
+  end
+
+  actions do
+    defaults([:read])
+  end
+
+  policies do
+    policy action_type(:read) do
+      authorize_if(always())
     end
   end
 end

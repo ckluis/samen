@@ -1,0 +1,20 @@
+# SABOTAGE: Help lists an update or destroy route although the caller cannot run the read that loads its 
+#   record
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_test.exs
+# MUST_FAIL: (c) the same iff holds for a write route
+diff --git a/samen_core/lib/samen/api/help.ex b/samen_core/lib/samen/api/help.ex
+index 6e6b6e92..9a2910db 100644
+--- a/samen_core/lib/samen/api/help.ex
++++ b/samen_core/lib/samen/api/help.ex
+@@ -125,7 +125,7 @@ defmodule Samen.Api.Help do
+         name -> Ash.Resource.Info.action(resource, name)
+       end
+ 
+-    read != nil and can?(actor, resource, read, domain)
++    read != nil
+   end
+ 
+   defp loadable?(_actor, _resource, _route, _action, _domain), do: true
