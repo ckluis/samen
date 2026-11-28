@@ -133,8 +133,10 @@ defmodule Driftwood.GateA6AgentSliceTest do
     user.id
   end
 
+  # The run's OWNER is re-resolved each turn from the membership store with the role it holds there, so it is a real
+  # member of the org (an owner with no membership stops the run `:owner_unavailable`).
   defp tenant_scope(org_id) do
-    %Samen.Scope{actor: %{id: "u:#{org_id}", org_id: org_id, role: :member, plane: :tenant}}
+    %Samen.Scope{actor: %{id: member!(org_id, :member), org_id: org_id, role: :member, plane: :tenant}}
   end
 
   # THE full triage run: a read tool over a 🔒 person record, then the write PROPOSAL.

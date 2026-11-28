@@ -61,6 +61,18 @@ defmodule SamenCore.Support.AutomationFixture.Subject do
   end
 
   policies do
+    # Read tiers by priority, so a run's role is observable on a read: :urgent records need an admin, :high and
+    # :normal ones a member; :low ones are open to every role. Only the READ is tiered.
+    policy [action_type(:read), expr(priority == :urgent)] do
+      forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})
+      authorize_if(always())
+    end
+
+    policy [action_type(:read), expr(priority in [:high, :normal])] do
+      forbid_unless({Samen.Policy.RoleAtLeast, role: :member})
+      authorize_if(always())
+    end
+
     policy action_type([:read, :create, :update, :destroy]) do
       authorize_if(Samen.Policy.OrgScope)
     end

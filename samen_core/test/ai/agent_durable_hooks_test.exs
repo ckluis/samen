@@ -94,6 +94,7 @@ defmodule Samen.AI.AgentDurableHooksTest do
   use ExUnit.Case, async: false
   use Samen.AgentCase
 
+  alias SamenCore.Support.AgentMembershipFixture, as: Membership
   alias Samen.AI.Agent
   alias Samen.AI.Agent.Breaker
   alias Samen.AI.Agent.Run
@@ -103,6 +104,17 @@ defmodule Samen.AI.AgentDurableHooksTest do
 
   setup do
     Samen.TestSandbox.shared!(TestRepo)
+
+    # The agent re-resolves its owner's real membership each turn (ADR-047), so the suite wires the seam and
+    # registers every owner it creates as a genuine member.
+    Membership.reset()
+    prior_membership_seam = Membership.install!()
+
+    on_exit(fn ->
+      Membership.reset()
+      Membership.restore!(prior_membership_seam)
+    end)
+
     Scripted.reset()
     Breaker.reset()
     UXD08HookProbe.reset()
@@ -118,6 +130,7 @@ defmodule Samen.AI.AgentDurableHooksTest do
 
   defp new_scope do
     org_id = Ash.UUID.generate()
+    Membership.register("u:#{org_id}", org_id, :member)
     %Samen.Scope{actor: %{id: "u:#{org_id}", org_id: org_id, role: :member, plane: :tenant}}
   end
 

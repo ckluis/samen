@@ -890,8 +890,9 @@ defmodule Samen.AI.Agent do
   Execute up to `turns_per_job/0` turns of a durable run (called by
   `Samen.AI.Agent.TurnWorker`). Resolves the agent module and owner actor from the
   ROW (a missing/mismatched module is a fail-honest `:agent_unresolvable`; a missing
-  owner is `:owner_unavailable` — the `Automation.RunWorker` owner-resolution rule,
-  never a silent re-attribution) and runs the SAME loop `run/4` uses. Returns
+  owner, or one with no active membership in the run's org, is `:owner_unavailable` — the
+  `Automation.RunWorker` owner-resolution rule, never a silent re-attribution — and the
+  owner acts with the role that membership holds now) and runs the SAME loop `run/4` uses. Returns
   `{:continue, run}` at a batch boundary (the worker re-arms) or the loop's terminal
   tuple. An already-terminal run returns `{:done, run}` (a duplicate job is a no-op —
   the RunWorker "already-queued half" posture).
@@ -1042,11 +1043,17 @@ defmodule Samen.AI.Agent do
     ArgumentError -> {:error, :agent_unresolvable}
   end
 
-  # The run executes AS the initiating member, re-resolved from the durable row at
-  # turn time (never the envelope, never a synthesized actor — INV-2).
+  # The run executes AS the initiating member, re-resolved from the durable row at turn time (never the envelope,
+  # never a synthesized actor — INV-2) with the role that member holds in the run's org NOW: the one shared
+  # membership seam (`Samen.AI.Agent.Approver.resolve/2`), the same resolution `Samen.Automation.RunWorker` uses for
+  # a workflow owner. A member who left, was suspended or never belonged stops the run `:owner_unavailable`, and so
+  # does a seam that is unwired or failed (it cannot say who the owner is): nothing runs under a role nobody verified.
   defp owner_scope(%Run{owner_id: owner_id, org_id: org_id})
        when is_binary(owner_id) and is_binary(org_id) do
-    {:ok, Samen.Scope.new(%{id: owner_id, org_id: org_id, role: :member})}
+    case Approver.resolve(owner_id, org_id) do
+      {:ok, %Samen.Scope{} = scope} -> {:ok, scope}
+      {:error, _not_authorized_or_unresolvable} -> {:error, :owner_unavailable}
+    end
   end
 
   defp owner_scope(_run), do: {:error, :owner_unavailable}

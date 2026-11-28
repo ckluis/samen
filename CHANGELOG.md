@@ -33,7 +33,16 @@ All notable changes to Samen are recorded here. The format follows
   (ADR-039 §7.3).
 - **Each webhook action of a run has its own `delivery_id`.** The first action keeps the id it always had; the action at
   index `n > 0` appends `:n`. A retry of the run gives each action the same id again.
-- **Sabotages 1612 to 1617** name the tests that prove these.
+- **A write nested inside a run's write keeps the run's provenance.** The `{depth + 1, chain}` provenance is set under the
+  changeset's `shared` context, the part Ash hands on to nested actions, so a second captured record written from a host
+  action's `after_action` is dispatched at the same depth and chain and the loop and depth guards still see the cascade. The
+  agent's `assign_record_owner` write carries it too.
+- **An agent run acts with its owner's real role.** Each turn re-resolves the run's owner through the same membership seam
+  (`Samen.AI.Agent.Approver.resolve/2`) and acts with the role that membership holds now: a viewer's run cannot read or write
+  what only a member can, and an admin's run keeps admin. An owner who left the org, was suspended or never belonged stops the
+  run with `owner_unavailable`, as does a host whose seam is unwired or failing. Host-visible: a host that runs agents must
+  wire `approver_membership`, and check that the people who start agent runs hold an active membership.
+- **Sabotages 1612 to 1620** name the tests that prove these.
 - **ADR text matches the code.** ADR-040 §4.6 states that approval expiry is enforced at decision time and that a host adds
   its own expiry trigger; ADR-039 §4.2 states that capture queries active workflows in the write's transaction.
 

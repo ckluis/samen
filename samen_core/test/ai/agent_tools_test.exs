@@ -95,6 +95,7 @@ defmodule Samen.AI.AgentToolsTest do
   use ExUnit.Case, async: false
   use Samen.AgentCase
 
+  alias SamenCore.Support.AgentMembershipFixture, as: Membership
   alias A3TestAgents.{Reader, SearchOnly}
   alias Samen.AI.Agent
   alias Samen.AI.Agent.Run
@@ -121,6 +122,17 @@ defmodule Samen.AI.AgentToolsTest do
 
   setup do
     Samen.TestSandbox.shared!(TestRepo)
+
+    # The agent re-resolves its owner's real membership each turn (ADR-047), so the suite wires the seam and
+    # registers every owner it creates as a genuine member.
+    Membership.reset()
+    prior_membership_seam = Membership.install!()
+
+    on_exit(fn ->
+      Membership.reset()
+      Membership.restore!(prior_membership_seam)
+    end)
+
     Scripted.reset()
     Samen.AI.Agent.Breaker.reset()
 
@@ -133,10 +145,24 @@ defmodule Samen.AI.AgentToolsTest do
   end
 
   defp scope(org_id) do
+    Membership.register("u:#{org_id}", org_id, :member)
     %Samen.Scope{actor: %{id: "u:#{org_id}", org_id: org_id, role: :member, plane: :tenant}}
   end
 
   defp new_scope, do: scope(Ash.UUID.generate())
+
+  # The worker resolves its provider from host config (the A2 cross-process seam).
+  defp scripted_worker_config do
+    previous = Application.get_env(:samen_core, Samen.AI.Agent, [])
+    Application.put_env(:samen_core, Samen.AI.Agent, Keyword.merge(previous, provider: scripted_provider()))
+    on_exit(fn -> Application.put_env(:samen_core, Samen.AI.Agent, previous) end)
+  end
+
+  defp scope_with_role(org_id, role) do
+    id = "u:#{role}:#{org_id}"
+    Membership.register(id, org_id, role)
+    %Samen.Scope{actor: %{id: id, org_id: org_id, role: role, plane: :tenant}}
+  end
 
   defp create_subject!(org_id, attrs \\ []) do
     Subject
@@ -665,6 +691,51 @@ defmodule Samen.AI.AgentToolsTest do
       assert [%{tool_kind: "fetch_record", status: :done}, _] = turn_rows(run)
       assert all_sent_text() =~ "record: SamenCore.Support.AutomationFixture.Subject#"
       assert_masked_only_payloads!()
+    end
+
+    # ADR-047 §4: a durable run re-resolves its owner each turn with the role the owner holds NOW, not a fixed :member.
+    test "a durable run acts with its owner's real role: a viewer cannot read what a member reads, an admin reads more" do
+      scripted_worker_config()
+
+      reads = fn role, priority ->
+        s = scope_with_role(Ash.UUID.generate(), role)
+        subject = create_subject!(s.actor.org_id, priority: priority)
+        script([fetch_call(subject.id), {:final, "done"}])
+
+        assert {:ok, run} = Agent.start(Reader, s, "goal")
+        assert :ok = Samen.AI.Agent.TurnWorker.perform(%Oban.Job{args: %{"run_id" => run.id}})
+        run = assert_terminal!(run, :succeeded)
+        {run, turn_rows(run)}
+      end
+
+      # The positive control: a member owner reads a :high record, and the call is done.
+      assert {%{tool_calls_used: 1}, [%{tool_kind: "fetch_record", status: :done, error_kind: nil}, _]} = reads.(:member, :high)
+
+      # A viewer owner cannot: the same read is refused by the record's own policy.
+      assert {_run, [%{tool_kind: "fetch_record", error_kind: "record_not_found"}, _]} = reads.(:viewer, :high)
+
+      # An :urgent record needs an admin: a member is refused, an admin owner keeps admin.
+      assert {_run, [%{tool_kind: "fetch_record", error_kind: "record_not_found"}, _]} = reads.(:member, :urgent)
+      assert {_run, [%{tool_kind: "fetch_record", status: :done, error_kind: nil}, _]} = reads.(:admin, :urgent)
+    end
+
+    test "a durable run whose owner has no membership any more stops :owner_unavailable and runs nothing" do
+      scripted_worker_config()
+      s = new_scope()
+      subject = create_subject!(s.actor.org_id)
+      script([fetch_call(subject.id), {:final, "never reached"}])
+
+      assert {:ok, run} = Agent.start(Reader, s, "goal")
+
+      # The owner leaves the org between the start and the turn.
+      Membership.reset()
+      Samen.AI.Agent.TurnWorker.perform(%Oban.Job{args: %{"run_id" => run.id}})
+
+      run = Ash.get!(Run, run.id, authorize?: false)
+      assert run.state == :failed
+      assert run.error_kind == "owner_unavailable"
+      assert run.tool_calls_used == 0
+      assert turn_rows(run) == []
     end
   end
 

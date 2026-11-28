@@ -97,6 +97,7 @@ defmodule Samen.AI.AgentWriteTest do
 
   defp new_scope do
     org_id = Ash.UUID.generate()
+    Membership.register("u:#{org_id}", org_id, :member)
     %Samen.Scope{actor: %{id: "u:#{org_id}", org_id: org_id, role: :member, plane: :tenant}}
   end
 
