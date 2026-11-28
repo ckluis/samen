@@ -128,6 +128,13 @@ defmodule SamenCore.Support.AutomationFixture.Target do
   actions do
     defaults([:read, :destroy, create: :*, update: :*])
 
+    # A host action whose after_action writes a SECOND captured record, handing it the scope it was given: the shape
+    # that must carry a run's loop provenance into the nested write (ADR-039 §4.7).
+    create :create_nested do
+      accept([:title, :priority, :org_id])
+      change(SamenCore.Support.AutomationFixture.NestedSubject)
+    end
+
     action :reveal_target, :map do
       argument(:subject_id, :string, allow_nil?: false)
 
@@ -150,6 +157,26 @@ defmodule SamenCore.Support.AutomationFixture.Target do
     policy action(:reveal_target) do
       authorize_if(actor_present())
     end
+  end
+end
+
+defmodule SamenCore.Support.AutomationFixture.NestedSubject do
+  @moduledoc """
+  Test change: after the write, create a `Subject` (a second captured resource) through the scope Ash hands the
+  change, exactly as a host's nested write would (`Ash.Scope.to_opts/1` carries only the `shared` context).
+  """
+  use Ash.Resource.Change
+
+  alias SamenCore.Support.AutomationFixture.Subject
+
+  @impl true
+  def change(changeset, _opts, context) do
+    Ash.Changeset.after_action(changeset, fn changeset, record ->
+      org_id = Ash.Changeset.get_attribute(changeset, :org_id)
+      opts = context |> Ash.Scope.to_opts() |> Keyword.put(:authorize?, false)
+      Ash.create!(Subject, %{org_id: org_id, title: "nested", email: "n@example.com"}, opts)
+      {:ok, record}
+    end)
   end
 end
 

@@ -87,13 +87,20 @@ defmodule Samen.Automation.Actions.Support do
   the events that write will capture. `Samen.Automation.EventCapture.provenance/1` reads it,
   so the captured event inherits `depth + 1` and `chain ++ [workflow_id]` and the cycle and
   depth guards in `Samen.Automation.DispatchWorker` can refuse a self-triggering cascade.
+
+  It is set under `:shared`, the one key Ash hands on to nested actions (a host `after_action`
+  writing a second record through `Ash.Scope.to_opts/1`, a managed relationship); `set_context/2`
+  also merges it to the top level, where `provenance/1` reads it. A write nested inside a run's
+  write therefore inherits the same depth and chain instead of starting a fresh cascade.
   """
   @spec write_context(Context.t()) :: map()
   def write_context(%Context{depth: depth, chain: chain, workflow_id: workflow_id}) do
     %{
-      automation: %{
-        depth: (depth || 0) + 1,
-        chain: List.wrap(chain) ++ if(is_nil(workflow_id), do: [], else: [to_string(workflow_id)])
+      shared: %{
+        automation: %{
+          depth: (depth || 0) + 1,
+          chain: List.wrap(chain) ++ if(is_nil(workflow_id), do: [], else: [to_string(workflow_id)])
+        }
       }
     }
   end

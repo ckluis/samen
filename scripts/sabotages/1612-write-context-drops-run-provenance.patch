@@ -6,21 +6,22 @@
 # TEST_FILES: test/automation/engine_guards_test.exs
 # MUST_FAIL: a workflow whose action writes a record that re-triggers it is refused as :loop
 diff --git a/samen_core/lib/samen/automation/actions/support.ex b/samen_core/lib/samen/automation/actions/support.ex
-index 53643455..9df00924 100644
+index fb1575ec..f6379eac 100644
 --- a/samen_core/lib/samen/automation/actions/support.ex
 +++ b/samen_core/lib/samen/automation/actions/support.ex
-@@ -89,11 +89,11 @@ defmodule Samen.Automation.Actions.Support do
-   depth guards in `Samen.Automation.DispatchWorker` can refuse a self-triggering cascade.
+@@ -94,12 +94,12 @@ defmodule Samen.Automation.Actions.Support do
+   write therefore inherits the same depth and chain instead of starting a fresh cascade.
    """
    @spec write_context(Context.t()) :: map()
 -  def write_context(%Context{depth: depth, chain: chain, workflow_id: workflow_id}) do
 +  def write_context(%Context{depth: depth, chain: chain}) do
      %{
-       automation: %{
--        depth: (depth || 0) + 1,
--        chain: List.wrap(chain) ++ if(is_nil(workflow_id), do: [], else: [to_string(workflow_id)])
-+        depth: depth || 0,
-+        chain: List.wrap(chain)
+       shared: %{
+         automation: %{
+-          depth: (depth || 0) + 1,
+-          chain: List.wrap(chain) ++ if(is_nil(workflow_id), do: [], else: [to_string(workflow_id)])
++          depth: depth || 0,
++          chain: List.wrap(chain)
+         }
        }
      }
-   end

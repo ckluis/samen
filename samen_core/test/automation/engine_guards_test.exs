@@ -13,6 +13,7 @@ defmodule Samen.Automation.EngineGuardsTest do
   use ExUnit.Case, async: false
 
   require Ash.Query
+  require Ecto.Query
   import Ash.Query
 
   alias SamenCore.TestRepo
@@ -103,6 +104,41 @@ defmodule Samen.Automation.EngineGuardsTest do
       assert Enum.count(runs_for(org, w1.id), &(&1.state == :succeeded)) == 1
       assert Enum.count(runs_for(org, w2.id), &(&1.state == :succeeded)) == 1
       assert [%{depth: 2}] = Enum.filter(runs_for(org, w3.id), &(&1.error_kind == :depth_exceeded))
+    end
+
+    test "a write nested inside a run's write inherits the run's depth and chain" do
+      org = Ash.UUID.generate()
+      parent = Ash.UUID.generate()
+
+      # A workflow on the NESTED resource (Subject), so the second write is captured and run.
+      nested_wf =
+        Workflow
+        |> Ash.Changeset.for_create(:create, %{
+          org_id: org,
+          name: "nested-#{System.unique_integer([:positive])}",
+          status: :active,
+          trigger_kind: :resource_event,
+          resource_key: "SamenCore.Support.AutomationFixture.Subject",
+          event: :created,
+          conditions: [],
+          actions: [%{"kind" => "notify", "recipient" => "owner", "event_type" => "workflow.fired"}],
+          owner_id: member!(org)
+        })
+        |> Ash.create!(authorize?: false)
+
+      ctx = %Samen.Automation.Context{org_id: org, workflow_id: parent, subject_ref: "samen:target:x", depth: 2, chain: ["w0"]}
+
+      Target
+      |> Ash.Changeset.for_create(:create_nested, %{org_id: org, title: "outer", priority: :normal}, context: Samen.Automation.Actions.Support.write_context(ctx))
+      |> Ash.create!(authorize?: false)
+
+      drain_rounds(3)
+
+      # Depth 3 = the run's depth 2 + 1, and the chain names every workflow up to and including the writer.
+      assert [%{depth: 3}] = runs_for(org, nested_wf.id)
+      jobs = TestRepo.all(Ecto.Query.from(j in Oban.Job, where: j.worker == "Samen.Automation.DispatchWorker"))
+      assert [job] = Enum.filter(jobs, &(&1.args["resource_key"] =~ "Subject"))
+      assert job.args["chain"] == ["w0", parent]
     end
   end
 
