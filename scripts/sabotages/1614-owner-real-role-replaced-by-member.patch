@@ -1,0 +1,19 @@
+# SABOTAGE: The run's actor carries a hardcoded member role instead of the owner's real membership role.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/engine_guards_test.exs
+# MUST_FAIL: a run acts with the owner's real role: a member owner writes, a viewer owner cannot
+diff --git a/samen_core/lib/samen/automation/run_worker.ex b/samen_core/lib/samen/automation/run_worker.ex
+index 004a9116..1774e7c8 100644
+--- a/samen_core/lib/samen/automation/run_worker.ex
++++ b/samen_core/lib/samen/automation/run_worker.ex
+@@ -178,7 +178,7 @@ defmodule Samen.Automation.RunWorker do
+   defp owner_actor(%{owner_id: owner_id, org_id: org_id}) do
+     case Samen.AI.Agent.Approver.resolve(to_string(owner_id), to_string(org_id)) do
+       {:ok, %Samen.Scope{} = scope} ->
+-        {:ok, scope}
++        {:ok, %{scope | actor: %{scope.actor | role: :member}}}
+ 
+       {:error, :not_authorized} ->
+         {:skip, :owner_unavailable}

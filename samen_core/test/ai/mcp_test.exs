@@ -30,6 +30,7 @@ defmodule Samen.AI.McpTest do
       PENDING approval and changes nothing on the subject; only a human (distinct party)
       approving in the UI runs it (the positive control), as the requester.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   alias Samen.AI.{Chokepoint, Mcp, Provider}
@@ -183,7 +184,7 @@ defmodule Samen.AI.McpTest do
 
       dump = inspect(data)
       refute dump =~ @doc_canary, "the canary plaintext reached the MCP boundary"
-      refute dump =~ "vt_", "a vt_* token reached the MCP boundary"
+      refute_vault_token(dump, "a vt_* token reached the MCP boundary")
     end
 
     test "(c) org-scope: org B's browse never returns org A's records (positive control: A sees its own)" do
@@ -312,7 +313,7 @@ defmodule Samen.AI.McpTest do
         |> Enum.join(" ")
 
       refute recorded =~ @doc_canary
-      refute recorded =~ "vt_"
+      refute_vault_token(recorded)
     end
 
     test "an ungrounded draft still composes (keyless Fake) and routes through :mcp" do

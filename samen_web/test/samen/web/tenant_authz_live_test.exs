@@ -26,6 +26,7 @@ defmodule Samen.Web.TenantAuthzLiveTest do
   `full_name` in the CLEAR (`Samen.MaskingCase`'s tenant-plane green). A test that refuses
   everything proves nothing.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -111,6 +112,22 @@ defmodule Samen.Web.TenantAuthzLiveTest do
 
   # A conn carrying a REAL authenticated principal in the SIGNED session (the only thing
   # `Samen.Web.Auth.authenticated_user_id/1` accepts — never a param).
+  # The legacy BYO principal's ACTIVE `Identity.Membership` in `org_id` (with the `Identity.User` row it
+  # references): the tenant role is read from it (`Samen.Web.TenantActor`), and a principal without one is
+  # refused. Returns the user id the legacy session carries.
+  defp legacy_member!(org_id, role \\ :member) do
+    user =
+      Op.User
+      |> Ash.Changeset.for_create(:create, %{org_id: org_id}, authorize?: false)
+      |> Ash.create!()
+
+    Op.Membership
+    |> Ash.Changeset.for_create(:create, %{org_id: org_id, user_id: user.id, role: role, status: "active"}, authorize?: false)
+    |> Ash.create!()
+
+    user.id
+  end
+
   defp signed_in_conn(user_id) do
     build_conn()
     |> Plug.Test.init_test_session(%{})
@@ -136,7 +153,7 @@ defmodule Samen.Web.TenantAuthzLiveTest do
       refute body =~ @victim_name
       refute body =~ "VICTIM CONTACT"
       # Never a vault token either (the leak scan the masking discipline mandates).
-      refute body =~ "vt_"
+      refute_vault_token(body)
     end
 
     test "the LIVE mount is REFUSED", ctx do
@@ -159,16 +176,17 @@ defmodule Samen.Web.TenantAuthzLiveTest do
     # checks WHICH org. Before the fix, `handle_params/3` handed the caller the victim's org.
     test "an authenticated member of org A asking for org B gets A's data, never B's", ctx do
       SecurityHost.arm!()
-      SecurityHost.grant!("attacker-user", [ctx.attacker_org])
+      attacker = legacy_member!(ctx.attacker_org)
+      SecurityHost.grant!(attacker, [ctx.attacker_org])
 
       html =
-        signed_in_conn("attacker-user")
+        signed_in_conn(attacker)
         |> get("/crm/contacts?org=#{ctx.victim_org}")
         |> html_response(200)
 
       refute html =~ @victim_name, "cross-tenant vaulted PII rendered in the clear"
       refute html =~ "VICTIM CONTACT"
-      refute html =~ "vt_"
+      refute_vault_token(html)
 
       # POSITIVE CONTROL (anti-tautology): the caller's OWN org still renders, in the clear.
       # (The list renders the vault-routed `full_name` — the 🔒 sentinel that matters here.)
@@ -177,10 +195,11 @@ defmodule Samen.Web.TenantAuthzLiveTest do
 
     test "POSITIVE CONTROL — the legitimate same-org path still works end-to-end", ctx do
       SecurityHost.arm!()
-      SecurityHost.grant!("victim-user", [ctx.victim_org])
+      victim = legacy_member!(ctx.victim_org)
+      SecurityHost.grant!(victim, [ctx.victim_org])
 
       html =
-        signed_in_conn("victim-user")
+        signed_in_conn(victim)
         |> get("/crm/contacts?org=#{ctx.victim_org}")
         |> html_response(200)
 
@@ -191,16 +210,19 @@ defmodule Samen.Web.TenantAuthzLiveTest do
              "the tenant plane must still resolve its OWN vaulted full_name in the clear"
 
       refute html =~ "#{mask()}#{mask()}", "the owner's own row must not be mask-substituted"
-      refute html =~ "vt_"
+      refute_vault_token(html)
     end
 
     test "a `?org=` INSIDE the principal's authorized set is still honoured (multi-org switch)",
          ctx do
       SecurityHost.arm!()
-      SecurityHost.grant!("multi-user", [ctx.attacker_org, ctx.victim_org])
+      # one legacy principal, authorized for two orgs by the host's seam; the membership lookup is per
+      # TARGET org (a user row belongs to one org), so it holds one in the org it asks for
+      multi = legacy_member!(ctx.victim_org)
+      SecurityHost.grant!(multi, [ctx.attacker_org, ctx.victim_org])
 
       html =
-        signed_in_conn("multi-user")
+        signed_in_conn(multi)
         |> get("/crm/contacts?org=#{ctx.victim_org}")
         |> html_response(200)
 
@@ -557,6 +579,20 @@ defmodule Samen.Web.TenantAuthzLiveTest do
              "an armed member self-elevated to :admin and flipped org-wide identity disclosure (S1a)"
     end
 
+    test "a NON-admin member's toggle_disclosure is REFUSED at the context too (Chat.set_disclosure_setting/3 on its own)" do
+      SecurityHost.arm!()
+      host = register_owner!()
+      member = accept_into!(host, :member)
+      admin = accept_into!(host, :admin)
+
+      assert {:error, _} = context_flip(member.credential.id, host.org.id)
+      refute disclosure_on?(host.org.id), "the context's admin elevation handed an armed member :admin (S1a)"
+
+      # positive control: the same call carrying a real admin's principal writes
+      assert {:ok, _} = context_flip(admin.credential.id, host.org.id)
+      assert disclosure_on?(host.org.id)
+    end
+
     test "POSITIVE CONTROL — an actual ADMIN member's toggle_disclosure SUCCEEDS" do
       SecurityHost.arm!()
       host = register_owner!()
@@ -647,6 +683,8 @@ defmodule Samen.Web.TenantAuthzLiveTest do
     socket =
       %Phoenix.LiveView.Socket{}
       |> Phoenix.Component.assign(:samen_tenant_principal, principal)
+      # the principal reference `Samen.Web.TenantAuthz` pins for the shared actor resolver (`Samen.Web.TenantActor`)
+      |> Phoenix.Component.assign(:samen_principal_ref, {:credential, principal})
       |> Phoenix.Component.assign(:samen_acting_as, false)
       |> Phoenix.Component.assign(:return_to, nil)
       |> Samen.Web.Live.assign_mount(session)
@@ -665,9 +703,11 @@ defmodule Samen.Web.TenantAuthzLiveTest do
     socket =
       %Phoenix.LiveView.Socket{}
       |> Phoenix.Component.assign(:samen_tenant_principal, principal)
+      # the principal reference `Samen.Web.TenantAuthz` pins for the shared actor resolver (`Samen.Web.TenantActor`)
+      |> Phoenix.Component.assign(:samen_principal_ref, {:credential, principal})
       |> Phoenix.Component.assign(:samen_acting_as, false)
       |> Samen.Web.Live.assign_mount(session)
-      |> Phoenix.Component.assign(:org_id, org_id)
+      |> Samen.Web.Chat.ThreadsLive.load(org_id)
 
     raw = if expose?, do: "on", else: "off"
 
@@ -675,6 +715,19 @@ defmodule Samen.Web.TenantAuthzLiveTest do
       Samen.Web.Chat.ThreadsLive.handle_event("toggle_disclosure", %{"expose_identity" => raw}, socket)
 
     socket
+  end
+
+  # `Chat.set_disclosure_setting/3` itself, with the principal stashed on the mount as `Samen.Web.TenantAuthz` pins it.
+  defp context_flip(principal, org_id) do
+    session = %{"samen_mount" => Mount.to_session(armed_chat_mount())}
+
+    socket =
+      %Phoenix.LiveView.Socket{}
+      |> Phoenix.Component.assign(:samen_tenant_principal, principal)
+      |> Samen.Web.Live.assign_mount(session)
+
+    mount = socket.assigns.samen_mount
+    Samen.Web.Chat.set_disclosure_setting(mount, Mount.scope(mount, org_id), true)
   end
 
   # The org's persisted disclosure state, read through the framework's own OrgScope-gated read

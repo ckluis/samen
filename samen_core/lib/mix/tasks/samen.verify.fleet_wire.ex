@@ -79,7 +79,7 @@ defmodule Mix.Tasks.Samen.Verify.FleetWire do
   def run(args) do
     Mix.Task.run("app.start")
 
-    {opts, _rest, _} = OptionParser.parse(args, strict: [host: :string, router: :string])
+    opts = Samen.Gen.Args.parse!("samen.verify.fleet_wire", args, [host: :string, router: :string])
 
     host = host_from(opts)
     router = router_from(opts)

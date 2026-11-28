@@ -1,0 +1,33 @@
+# SABOTAGE: The Work timeline and task-tree lenses act on the fixed member scope again instead of the 
+#   signed-in person's role
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_crm_work_test.exs
+# MUST_FAIL: every page of the CRM remainder and Work acts with the RESOLVED role
+diff --git a/samen_web/lib/samen/web/work/task_tree_live.ex b/samen_web/lib/samen/web/work/task_tree_live.ex
+index 2e4f21e2..9c3b9fe2 100644
+--- a/samen_web/lib/samen/web/work/task_tree_live.ex
++++ b/samen_web/lib/samen/web/work/task_tree_live.ex
+@@ -81,7 +81,7 @@ defmodule Samen.Web.Work.TaskTreeLive do
+   # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+   # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read.
+   def load(socket, org_id, focus) do
+-    case TenantActor.assign_actor(socket, org_id) do
++    case {:ok, Phoenix.Component.assign(socket, acting_scope: Samen.Web.Mount.scope(socket.assigns.samen_mount, org_id), actor_state: :ok)} do
+       {:ok, socket} -> load_for(socket, org_id, focus, socket.assigns.acting_scope)
+       {:refused, socket} -> load_refused(socket, org_id, focus)
+     end
+diff --git a/samen_web/lib/samen/web/work/timeline_live.ex b/samen_web/lib/samen/web/work/timeline_live.ex
+index 82c736ac..81e0c371 100644
+--- a/samen_web/lib/samen/web/work/timeline_live.ex
++++ b/samen_web/lib/samen/web/work/timeline_live.ex
+@@ -94,7 +94,7 @@ defmodule Samen.Web.Work.TimelineLive do
+   # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+   # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read.
+   def load(socket, org_id, from) do
+-    case TenantActor.assign_actor(socket, org_id) do
++    case {:ok, Phoenix.Component.assign(socket, acting_scope: Samen.Web.Mount.scope(socket.assigns.samen_mount, org_id), actor_state: :ok)} do
+       {:ok, socket} -> load_for(socket, org_id, from, socket.assigns.acting_scope)
+       {:refused, socket} -> load_refused(socket, org_id, from)
+     end

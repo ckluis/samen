@@ -45,8 +45,7 @@ defmodule Mix.Tasks.Samen.Verify.TntBoundary do
   def run(args) do
     Mix.Task.run("app.start")
 
-    {opts, _rest, _} =
-      OptionParser.parse(args, strict: [domain: :keep, repo: :string])
+    opts = Samen.Gen.Args.parse!("samen.verify.tnt_boundary", args, [domain: :keep, repo: :string])
 
     violations = relationship_violations(opts) ++ fk_violations(opts)
 

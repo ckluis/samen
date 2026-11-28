@@ -15,7 +15,6 @@ defmodule DriftwoodWeb.BrokerDriverCrudTest do
   require Ash.Query
 
   alias Driftwood.Reads
-  alias DriftwoodWeb.BrokerLive
 
   @org "c1230000-0000-4000-8000-0000000000d1"
 
@@ -39,7 +38,7 @@ defmodule DriftwoodWeb.BrokerDriverCrudTest do
   end
 
   defp create_driver(org, params \\ %{}) do
-    scope = BrokerLive.broker_scope(org)
+    scope = broker_scope(org)
 
     Driftwood.Freight.Driver
     |> AshPhoenix.Form.for_create(:create, scope: scope)
@@ -64,7 +63,7 @@ defmodule DriftwoodWeb.BrokerDriverCrudTest do
   # -- CREATE --------------------------------------------------------------------
 
   test "GREEN: a real AshPhoenix.Form create persists a driver, visible on the roster" do
-    scope = BrokerLive.broker_scope(@org)
+    scope = broker_scope(@org)
     assert Reads.driver_roster(scope) == []
 
     assert {:ok, driver} = create_driver(@org)
@@ -81,11 +80,11 @@ defmodule DriftwoodWeb.BrokerDriverCrudTest do
 
   test "RED: a driver create with an invalid status enum value is refused by the real action" do
     assert {:error, _form} = create_driver(@org, %{"status" => "not_a_real_status"})
-    assert Reads.driver_roster(BrokerLive.broker_scope(@org)) == []
+    assert Reads.driver_roster(broker_scope(@org)) == []
   end
 
   test "org_id is a server-side fact — a client-forged org_id in the raw params cannot plant a driver in another org" do
-    scope = BrokerLive.broker_scope(@org)
+    scope = broker_scope(@org)
     other_org = Ecto.UUID.generate()
 
     # Even if a forged param tried to name a different org, `save_new_driver`'s
@@ -99,14 +98,14 @@ defmodule DriftwoodWeb.BrokerDriverCrudTest do
       |> AshPhoenix.Form.submit(params: Map.put(params, "org_id", @org))
 
     assert Enum.any?(Reads.driver_roster(scope), &(&1.id == driver.id)), "the driver did not land in @org's roster"
-    refute Enum.any?(Reads.driver_roster(BrokerLive.broker_scope(other_org)), &(&1.id == driver.id))
+    refute Enum.any?(Reads.driver_roster(broker_scope(other_org)), &(&1.id == driver.id))
   end
 
   # -- EDIT --------------------------------------------------------------------
 
   test "GREEN: a real AshPhoenix.Form edit persists — the roster reflects it" do
     {:ok, driver} = create_driver(@org)
-    scope = BrokerLive.broker_scope(@org)
+    scope = broker_scope(@org)
 
     {:ok, resolved} = Reads.get_driver(scope, driver.id)
 
@@ -131,7 +130,7 @@ defmodule DriftwoodWeb.BrokerDriverCrudTest do
   test "an edit that only changes status (leaving CDL/medical expired) does NOT bypass the gate — dispatch still refuses" do
     {:ok, driver} = create_driver(@org, %{"cdl_expiry" => iso(-30), "status" => "out_of_service"})
     l = load_for(@org)
-    scope = BrokerLive.broker_scope(@org)
+    scope = broker_scope(@org)
 
     # Control: blocked as expected (expired CDL + out_of_service).
     assert {:error, _} = dispatch(driver.id, l.id, @org)
@@ -154,7 +153,7 @@ defmodule DriftwoodWeb.BrokerDriverCrudTest do
   test "a LEGITIMATE compliant edit (fixing CDL/medical + status) makes dispatch succeed — proving the edit path is honest, not a blanket unlock" do
     {:ok, driver} = create_driver(@org, %{"cdl_expiry" => iso(-30), "status" => "out_of_service"})
     l = load_for(@org)
-    scope = BrokerLive.broker_scope(@org)
+    scope = broker_scope(@org)
 
     assert {:error, _} = dispatch(driver.id, l.id, @org)
 
@@ -176,7 +175,7 @@ defmodule DriftwoodWeb.BrokerDriverCrudTest do
   test "the driver update action has NO path to DispatchEvent and cannot inject a forced-dispatch attribute" do
     {:ok, driver} = create_driver(@org, %{"cdl_expiry" => iso(-30), "status" => "out_of_service"})
     l = load_for(@org)
-    scope = BrokerLive.broker_scope(@org)
+    scope = broker_scope(@org)
 
     {:ok, resolved} = Reads.get_driver(scope, driver.id)
 

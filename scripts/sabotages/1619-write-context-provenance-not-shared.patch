@@ -1,0 +1,26 @@
+# SABOTAGE: A run's provenance sits at the top of the changeset context instead of under shared, so a 
+#   nested write starts a fresh cascade.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/engine_guards_test.exs
+# MUST_FAIL: a write nested inside a run's write inherits the run's depth and chain
+diff --git a/samen_core/lib/samen/automation/actions/support.ex b/samen_core/lib/samen/automation/actions/support.ex
+index fb1575ec..6e15e56c 100644
+--- a/samen_core/lib/samen/automation/actions/support.ex
++++ b/samen_core/lib/samen/automation/actions/support.ex
+@@ -96,11 +96,9 @@ defmodule Samen.Automation.Actions.Support do
+   @spec write_context(Context.t()) :: map()
+   def write_context(%Context{depth: depth, chain: chain, workflow_id: workflow_id}) do
+     %{
+-      shared: %{
+-        automation: %{
+-          depth: (depth || 0) + 1,
+-          chain: List.wrap(chain) ++ if(is_nil(workflow_id), do: [], else: [to_string(workflow_id)])
+-        }
++      automation: %{
++        depth: (depth || 0) + 1,
++        chain: List.wrap(chain) ++ if(is_nil(workflow_id), do: [], else: [to_string(workflow_id)])
+       }
+     }
+   end

@@ -521,24 +521,9 @@ defmodule Samen.Scopes.Support.Blueprint do
           defaults([:read, :destroy, create: :*, update: :*])
 
           action :reveal_message, :map do
-            argument(:actor_id, :string, allow_nil?: false)
             argument(:subject_id, :string, allow_nil?: false)
 
-            run(fn input, _ctx ->
-              ctx = %Samen.Reveal.Context{
-                actor: input.arguments.actor_id,
-                subject_id: input.arguments.subject_id,
-                resource: __MODULE__,
-                action: :reveal_message,
-                label: :body
-              }
-
-              if Samen.Reveal.grant_checker().granted?(ctx) do
-                {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-              else
-                {:error, :denied}
-              end
-            end)
+            run({Samen.Reveal.GrantProbe, label: :body})
           end
         end
 
@@ -558,7 +543,7 @@ defmodule Samen.Scopes.Support.Blueprint do
           end
 
           policy action(:reveal_message) do
-            authorize_if(always())
+            authorize_if(actor_present())
           end
         end
       end
@@ -637,24 +622,9 @@ defmodule Samen.Scopes.Support.Blueprint do
           defaults([:read, :destroy, create: :*, update: :*])
 
           action :reveal_agent, :map do
-            argument(:actor_id, :string, allow_nil?: false)
             argument(:subject_id, :string, allow_nil?: false)
 
-            run(fn input, _ctx ->
-              ctx = %Samen.Reveal.Context{
-                actor: input.arguments.actor_id,
-                subject_id: input.arguments.subject_id,
-                resource: __MODULE__,
-                action: :reveal_agent,
-                label: :email
-              }
-
-              if Samen.Reveal.grant_checker().granted?(ctx) do
-                {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-              else
-                {:error, :denied}
-              end
-            end)
+            run({Samen.Reveal.GrantProbe, label: :email})
           end
         end
 
@@ -664,7 +634,7 @@ defmodule Samen.Scopes.Support.Blueprint do
           end
 
           policy action(:reveal_agent) do
-            authorize_if(always())
+            authorize_if(actor_present())
           end
         end
       end

@@ -1,0 +1,19 @@
+# SABOTAGE: the event guard refuses an open page but lets the event run on to the view's own handle_event
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_open_page_test.exs
+# MUST_FAIL: the guard HALTS a refused event
+diff --git a/samen_web/lib/samen/web/tenant_actor.ex b/samen_web/lib/samen/web/tenant_actor.ex
+index abe8e407..50c30ada 100644
+--- a/samen_web/lib/samen/web/tenant_actor.ex
++++ b/samen_web/lib/samen/web/tenant_actor.ex
+@@ -321,7 +321,7 @@ defmodule Samen.Web.TenantActor do
+       %{acting_scope: %Samen.Scope{} = held, acting_org_id: org_id} when is_binary(org_id) ->
+         case resolve_into(socket, org_id) do
+           {:ok, socket} -> {:cont, follow(socket, held, false)}
+-          {:refused, socket} -> {:halt, scrub(socket)}
++          {:refused, socket} -> {:cont, scrub(socket)}
+         end
+ 
+       _not_acting ->

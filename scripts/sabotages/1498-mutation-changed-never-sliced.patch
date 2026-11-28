@@ -1,0 +1,20 @@
+# SABOTAGE: a mutation selection whose estimate exceeds the per-job ceiling is planned as one job instead 
+#   of matrix slices, so a 3x selection gets a limit over the 60 min a job is allowed
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: MUTRATE a mutation job is sized from per-target measured rates
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 9af747f2..426f7da1 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1828,7 +1828,7 @@ def actions_plan(man, mode, selection=None):
+         for x in v:
+             if selection and x.id in selection and x.slice_max and not x.actions_slices:
+                 k = min(selection[x.id][0], int(math.ceil(selection[x.id][1] / x.slice_max)))
+-                if k >= 2:
++                if k >= 99:
+                     if len(v) > 1:
+                         raise UsageError("actions plan: %s needs %d slices but shares job %s with other steps" % (x.id, k, n))
+                     dyn.append((x, k))

@@ -24,6 +24,7 @@ defmodule Samen.Web.SearchMaskingTest do
       unprojected read of the SAME row DOES carry the plaintext the projected hit
       masks (so the `refute` is not a tautology).
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -90,7 +91,7 @@ defmodule Samen.Web.SearchMaskingTest do
       full = inspect(hit.record.full_name)
       assert full =~ @secret_first
       assert full =~ @secret_last
-      refute full =~ "vt_"
+      refute_vault_token(full)
     end
 
     test "RED: an operator search of the tenant org masks full_name — •••• , never plaintext (RP-SE-2)" do
@@ -112,7 +113,7 @@ defmodule Samen.Web.SearchMaskingTest do
       assert masked == mask()
       refute masked =~ @secret_first
       refute masked =~ @secret_last
-      refute masked =~ "vt_"
+      refute_vault_token(masked)
     end
 
     test "the same rows exported on the tenant plane go CLEAR — the plane is the gate (anti-tautology)" do

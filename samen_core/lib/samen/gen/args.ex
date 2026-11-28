@@ -1,7 +1,10 @@
 defmodule Samen.Gen.Args do
   @moduledoc """
-  Strict argv parsing shared by the generator / allocator mix tasks (`samen.gen.app|resource|scope|agent`,
-  `samen.abbrev.reserve`).
+  Strict argv parsing shared by the generator / allocator mix tasks (`samen.gen.app|resource|scope|agent|indexes|
+  reveal_requests|api_key_digest_unique|csat_token_digest_unique|api_key_scopes`, `samen.abbrev.reserve`) and by the verifier and audit
+  tasks that take flags (`samen.verify.*`, `samen.audit.freeform_projection`, `samen.ai.smoke`). Eight tasks
+  (`samen.verify.{migrations,read_scope,pii_classify,never_read_current,catalog_meaning,no_plaintext_pii,pii_reads}`,
+  `samen.catalog.dump`) refuse through `OptionParser.parse!/2` and raise `OptionParser.ParseError` instead.
 
   Every one of those tasks has a permanent side effect (files written, abbrevs reserved in an append-only,
   never-recycled registry), so a typo or a guessed flag (`--modlues`, `--dry-run`) must NOT quietly turn into a

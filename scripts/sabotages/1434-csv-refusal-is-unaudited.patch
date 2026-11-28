@@ -1,0 +1,19 @@
+# SABOTAGE: a 413 export refusal is not recorded in the audit
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/files_csv_router_test.exs
+# MUST_FAIL: an export is audited: who, which org
+diff --git a/samen_web/lib/samen/web/csv/export_controller.ex b/samen_web/lib/samen/web/csv/export_controller.ex
+index f6664c55..62d266b1 100644
+--- a/samen_web/lib/samen/web/csv/export_controller.ex
++++ b/samen_web/lib/samen/web/csv/export_controller.ex
+@@ -93,7 +93,7 @@ defmodule Samen.Web.Csv.ExportController do
+ 
+           # Fixed, value-free copy: the reason is for the log, never the body.
+           {:error, {:too_many_rows, max}} ->
+-            audit_refusal(mount, org_id, name, scope.actor.id, :too_large, limit: max)
++            _ = max
+             conn |> put_status(413) |> text("export too large")
+ 
+           {:error, _reason} ->

@@ -1,0 +1,19 @@
+# SABOTAGE: the calendar export is served to a person with no active membership
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_ics_test.exs
+# MUST_FAIL: no active membership is a 403 and nothing is exported
+diff --git a/samen_web/lib/samen/web/ics/export_controller.ex b/samen_web/lib/samen/web/ics/export_controller.ex
+index 6d489aec..290fec9e 100644
+--- a/samen_web/lib/samen/web/ics/export_controller.ex
++++ b/samen_web/lib/samen/web/ics/export_controller.ex
+@@ -38,7 +38,7 @@ defmodule Samen.Web.Ics.ExportController do
+ 
+   defp do_export(conn, nil, _org_id, _actor), do: conn |> put_status(503) |> text("no mount")
+   defp do_export(conn, _mount, nil, _actor), do: conn |> put_status(404) |> text("no org")
+-  defp do_export(conn, _mount, _org_id, :denied), do: conn |> put_status(403) |> text("no access")
++  defp do_export(conn, mount, org_id, :denied), do: do_export(conn, mount, org_id, {:ok, TenantActor.system_scope(mount, org_id)})
+   defp do_export(conn, _mount, _org_id, {:error, :unavailable}), do: conn |> put_status(503) |> text("unavailable")
+ 
+   defp do_export(conn, mount, _org_id, {:ok, scope}) do

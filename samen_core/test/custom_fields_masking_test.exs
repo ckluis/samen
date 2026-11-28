@@ -23,6 +23,7 @@ defmodule SamenCore.CustomFieldsMaskingTest do
       refutability: a modeled unresolved render (the raw bag serialized) DOES leak the
       plaintext and IS caught by the same scan the RED test relies on.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
   use Samen.MaskingCase
 
@@ -141,7 +142,7 @@ defmodule SamenCore.CustomFieldsMaskingTest do
       json = Jason.encode!(resolved.custom)
       assert json =~ Samen.MaskingCase.mask()
       refute json =~ @secret
-      refute json =~ "vt_"
+      refute_vault_token(json)
       # The plain key survives in the JSON (proving per-key, not blanket).
       assert json =~ @plain
     end
@@ -176,7 +177,7 @@ defmodule SamenCore.CustomFieldsMaskingTest do
       masked = bag_value(widget, operator_actor(org_id))
       assert %Masked{token: nil} = masked
       assert to_string(masked) == Samen.MaskingCase.mask()
-      refute to_string(masked) =~ "vt_"
+      refute_vault_token(to_string(masked))
     end
   end
 
@@ -203,7 +204,7 @@ defmodule SamenCore.CustomFieldsMaskingTest do
       refute json =~ @secret
       # Even the non-PII value is withheld when we cannot vet the bag.
       refute json =~ @plain
-      refute json =~ "vt_"
+      refute_vault_token(json)
     end
 
     test "POSITIVE CONTROL (a): the SAME indeterminate scenario on the TENANT plane stays CLEAR (no over-mask)" do

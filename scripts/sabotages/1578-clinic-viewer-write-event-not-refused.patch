@@ -1,0 +1,21 @@
+# SABOTAGE: The clinic page lets a viewer's crafted write event through to the write path
+#
+# Flips the named test(s).
+# APP: pawchart
+# TEST_FILES: test/clinic_role_test.exs
+# MUST_FAIL: a viewer's page renders no write control and refuses a crafted write event
+diff --git a/pawchart/lib/pawchart_web/clinic_live.ex b/pawchart/lib/pawchart_web/clinic_live.ex
+index d49c6e71..ac42c206 100644
+--- a/pawchart/lib/pawchart_web/clinic_live.ex
++++ b/pawchart/lib/pawchart_web/clinic_live.ex
+@@ -218,10 +218,6 @@ defmodule PawChartWeb.ClinicLive do
+ 
+   # Every event that opens a form or writes needs the `:member` role: a viewer's page renders none of those controls,
+   # and a crafted event is answered with the page's own flash (the role is re-resolved before every event).
+-  @write_events ~w(new_owner edit_owner save_owner new_pet edit_pet save_pet)
+-  def handle_event(event, _params, %{assigns: %{can_write: false}} = socket) when event in @write_events,
+-    do: {:noreply, put_flash(socket, :error, "Your role can view this clinic but not change it.")}
+-
+   def handle_event("new_owner", _params, socket) do
+     {:noreply, assign(socket, owner_modal: :new, owner_error: nil, owner_form: empty_owner_form())}
+   end

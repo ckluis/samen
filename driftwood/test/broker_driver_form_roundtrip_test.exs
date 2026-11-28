@@ -17,7 +17,7 @@ defmodule DriftwoodWeb.BrokerDriverFormRoundtripTest do
   @org "c1230000-0000-4000-8000-0000000000e3"
 
   defp render(assigns) do
-    %{no_org: false, org_id: @org, panel: "roster", summary: nil, loads: [], drivers: [], settlements: []}
+    %{no_org: false, org_id: @org, panel: "roster", summary: nil, loads: [], drivers: [], settlements: [], actor_state: :ok, can_write: true}
     |> Map.merge(assigns)
     |> Map.put(:__changed__, %{})
     |> BrokerLive.render()
@@ -35,11 +35,11 @@ defmodule DriftwoodWeb.BrokerDriverFormRoundtripTest do
   end
 
   test "new-driver modal: a failed validate re-renders the vaulted name + CDL; the resubmit stores them" do
-    scope = BrokerLive.broker_scope(@org)
+    scope = broker_scope(@org)
 
     socket =
       %Phoenix.LiveView.Socket{}
-      |> Phoenix.Component.assign(:org_id, @org)
+      |> Phoenix.Component.assign([org_id: @org] ++ acting_assigns(@org))
       |> Phoenix.Component.assign(:show_new_driver, true)
       |> Phoenix.Component.assign(:new_driver_form, Driftwood.Freight.Driver |> AshPhoenix.Form.for_create(:create, scope: scope) |> Phoenix.Component.to_form())
 

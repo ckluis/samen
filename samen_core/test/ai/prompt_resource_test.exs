@@ -198,7 +198,7 @@ defmodule Samen.AI.PromptResourceTest do
       assert V.prompt_body_vt_violations([Prompt]) == []
 
       assert [msg] = V.prompt_body_vt_violations([T68LeakySeedFixture])
-      assert msg =~ "vt_"
+      assert msg =~ "vt_" # bare-vt_-ok: the message names the vt_ marker; it is not a token in a page
       assert msg =~ "T68LeakySeedFixture"
     end
   end

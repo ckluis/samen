@@ -1,0 +1,21 @@
+# SABOTAGE: an editor opened as an admin stays open after the demotion
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_automation_test.exs
+# MUST_FAIL: an admin demoted while the page is open writes nothing
+diff --git a/samen_web/lib/samen/web/automation/builder_live.ex b/samen_web/lib/samen/web/automation/builder_live.ex
+index 36750282..1d0c2f52 100644
+--- a/samen_web/lib/samen/web/automation/builder_live.ex
++++ b/samen_web/lib/samen/web/automation/builder_live.ex
+@@ -104,6 +104,10 @@ defmodule Samen.Web.Automation.BuilderLive do
+   # The person's role or the organisation changed: whatever was open for editing was built for the old actor, so it closes.
+   @doc false
+   def actor_changed(socket) do
++    socket
++  end
++
++  defp unused_actor_changed(socket) do
+     assign(socket,
+       edit_workflow: nil,
+       wf_form: nil,

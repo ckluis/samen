@@ -36,6 +36,7 @@ defmodule Driftwood.GateA6AgentSliceTest do
   record carries the proposed owner, the audit chain names that human, and the run reaches
   `:succeeded`.
   """
+  import Samen.VaultTokenAssert
   use Driftwood.DataCase, async: false
   use Samen.AgentCase
 
@@ -132,8 +133,10 @@ defmodule Driftwood.GateA6AgentSliceTest do
     user.id
   end
 
+  # The run's OWNER is re-resolved each turn from the membership store with the role it holds there, so it is a real
+  # member of the org (an owner with no membership stops the run `:owner_unavailable`).
   defp tenant_scope(org_id) do
-    %Samen.Scope{actor: %{id: "u:#{org_id}", org_id: org_id, role: :member, plane: :tenant}}
+    %Samen.Scope{actor: %{id: member!(org_id, :member), org_id: org_id, role: :member, plane: :tenant}}
   end
 
   # THE full triage run: a read tool over a 🔒 person record, then the write PROPOSAL.
@@ -544,7 +547,7 @@ defmodule Driftwood.GateA6AgentSliceTest do
 
       # §7.3 on driftwood's own rows: the operator projection carries NO transcript.
       refute Map.has_key?(projected, :transcript)
-      refute inspect(summary ++ [projected], limit: :infinity) =~ "vt_"
+      refute_vault_token(inspect(summary ++ [projected], limit: :infinity))
     end
   end
 

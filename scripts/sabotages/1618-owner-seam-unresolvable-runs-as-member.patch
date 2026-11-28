@@ -1,0 +1,19 @@
+# SABOTAGE: An owner the membership seam cannot resolve runs as a synthesized member instead of retrying.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/engine_guards_test.exs
+# MUST_FAIL: an unwired or failing membership seam retries the run, and its last attempt skips it :internal_error
+diff --git a/samen_core/lib/samen/automation/run_worker.ex b/samen_core/lib/samen/automation/run_worker.ex
+index 004a9116..918a12e1 100644
+--- a/samen_core/lib/samen/automation/run_worker.ex
++++ b/samen_core/lib/samen/automation/run_worker.ex
+@@ -185,7 +185,7 @@ defmodule Samen.Automation.RunWorker do
+ 
+       {:error, _unresolvable} ->
+         Samen.Observability.Failure.report(:run_worker_owner_membership, org_id, :membership_unresolvable)
+-        {:retry, :unavailable}
++        {:ok, Samen.Scope.new(%{id: owner_id, org_id: org_id, role: :member})}
+     end
+   end
+ 

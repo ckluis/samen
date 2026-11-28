@@ -49,6 +49,8 @@ defmodule Samen.Web.Settings.SecurityLive do
   alias Samen.Web.Reads.Adoption
   alias Samen.Web.Reads.Guard
   alias Samen.Web.Settings.Reads
+  alias Samen.Web.TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   # The host-managed auth items the framework is HONEST it does NOT own, absent the
   # `spine_sessions:` opt-in. Rendered as static "managed by your identity provider"
@@ -86,7 +88,53 @@ defmodule Samen.Web.Settings.SecurityLive do
   end
 
   @doc false
+  def load(socket, nil, user_id) do
+    socket
+    |> assign(acting_scope: nil, actor_state: :ok, can_write: false, can_admin: false)
+    |> load_page(nil, user_id, nil)
+  end
+
+  # WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`); this page reads the person's own
+  # account (their login sessions, their 2FA enrolment) and the org's accountability ledgers, and writes nothing. A denial
+  # or a failed lookup is a STATE of the page: none of it is read.
   def load(socket, org_id, user_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_page(socket, org_id, user_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id, user_id)
+    end
+  end
+
+  # Acting again with no URL to patch to (the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _, user_id: _}} = socket), do: load(socket, socket.assigns.org_id, socket.assigns.user_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event: nothing the page loaded is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _, user_id: _}} = socket), do: load_refused(socket, socket.assigns.org_id, socket.assigns.user_id)
+
+  defp load_refused(socket, org_id, user_id) do
+    mount = socket.assigns.samen_mount
+    spine? = Mount.label(mount, :spine_sessions, false)
+
+    assign(socket,
+      org_id: org_id,
+      user_id: user_id,
+      sessions: [],
+      sessions_unavailable?: false,
+      login_sessions_unavailable?: false,
+      reveal_events: [],
+      reveal_ledger_unavailable?: false,
+      host_managed: if(spine?, do: @host_managed_spine, else: @host_managed_default),
+      spine_sessions?: spine?,
+      spine_totp?: false,
+      settings_path: Mount.label(mount, :settings_path, "/settings"),
+      totp_enroll_path: nil,
+      login_sessions: [],
+      csrf_token: safe_csrf_token()
+    )
+  end
+
+  defp load_page(socket, org_id, user_id, scope) do
     mount = socket.assigns.samen_mount
     spine? = Mount.label(mount, :spine_sessions, false)
     # ADR-035 §5 A7 — the EXPLICIT `spine_totp` opt-in (a host mounting the
@@ -99,10 +147,8 @@ defmodule Samen.Web.Settings.SecurityLive do
 
     {reveal_events, reveal_unavailable?} = reveal_events_for(mount, org_id)
 
-    # S6 — the org-resolved tenant scope every credential read on this page is governed by
-    # (`credential_id_for/3` below). No resolved org → no scope → the seam fails closed.
-    scope = if is_binary(org_id), do: Mount.scope(mount, org_id)
-
+    # S6 — the acting person's scope (the org-resolved scope every credential read on this page is governed by,
+    # `credential_id_for/3` below). No resolved org → no scope → the seam fails closed.
     {sessions, sessions_unavailable?} = sessions_for(mount, org_id)
     {login_sessions, login_sessions_unavailable?} = login_sessions_for(mount, scope, spine?, user_id)
 
@@ -299,9 +345,12 @@ defmodule Samen.Web.Settings.SecurityLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if is_nil(@org_id) do %>
+        <%= cond do %>
+        <% is_nil(@org_id) -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Security" nothing="there is nothing to show" />
+        <% true -> %>
           <div class="wrap">
             <div id="security-panel">
               <div class="gtitle">

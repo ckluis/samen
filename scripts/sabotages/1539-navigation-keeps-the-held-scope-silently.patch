@@ -1,0 +1,20 @@
+# SABOTAGE: assign_actor/2 on a navigation replaces the held scope without running the page's 
+#   actor_changed/1
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_navigation_test.exs
+# MUST_FAIL: a navigation that finds another role or another organisation runs actor_changed/1
+diff --git a/samen_web/lib/samen/web/tenant_actor.ex b/samen_web/lib/samen/web/tenant_actor.ex
+index abe8e407..66c4c98b 100644
+--- a/samen_web/lib/samen/web/tenant_actor.ex
++++ b/samen_web/lib/samen/web/tenant_actor.ex
+@@ -239,7 +239,7 @@ defmodule Samen.Web.TenantActor do
+   # event's recheck sees no change, and a form built before a demotion or an `?org=` switch is submitted with the
+   # authority it was built with. A page that was not acting (`held` is not a scope: first mount, refused before) has
+   # nothing built with a scope to follow, and a refusal is the view's own load (`actor_lost/1` is its refused branch).
+-  defp navigated({:ok, socket}, %Samen.Scope{} = held, org_changed?), do: {:ok, follow(socket, held, org_changed?)}
++  defp navigated({:ok, socket}, %Samen.Scope{} = _held, _org_changed?), do: {:ok, socket}
+   defp navigated(result, _held, _org_changed?), do: result
+ 
+   # `can_write` is what the page SHOWS (its write controls): computed here, with the scope, as a plain assign, so a page

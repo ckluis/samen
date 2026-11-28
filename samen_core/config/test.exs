@@ -33,7 +33,7 @@ config :logger, level: :warning
 # discovered domains so the built PII registry is empty. This lets the test prove
 # the task exits 1 (fail-closed) on a vacuous check rather than exit 0.
 if System.get_env("SAMEN_EMPTY_ASH_DOMAINS") == "1" do
-  config :samen_core, ash_domains: []
+  config :samen_core, ash_domains: [], host_domains: []
 end
 
 # test_helper.exs owns the Repo lifecycle (storage_up + migrate before connect).
@@ -75,29 +75,29 @@ config :samen_core, :catalog_parity_allow_list, [
 # Marketing scope under `sx*` abbrevs to prove the kernel suppression check is portable.
 # Its Subscriber declares the standard vault-routed `email` (column `pii_sxs_email`), so
 # the column is a real vault promise — but the fixture domain is deliberately NOT in
-# `:ash_domains` (kept out of the CI verifier/catalog sweeps), so `vault_declared_parity`
+# `:host_domains` (kept out of the CI verifier/catalog sweeps), so `vault_declared_parity`
 # cannot discover the route. Allow-list the pair: the route IS declared, just not on a
 # registered domain. (catalog_parity is satisfied because catalog_sync catalogs it.)
 config :samen_core, :vault_declared_parity_allow_list, [
   {"sxs_subscriber", "pii_sxs_email"},
   # WS-A A4 notifications engine fixture (test/support/notification_fixture.ex):
   # Notification.rendered_body is vault-routed (column pii_nen_rendered_body) but the
-  # fixture domain is NOT in :ash_domains, so vault_declared_parity cannot discover
+  # fixture domain is NOT in :host_domains, so vault_declared_parity cannot discover
   # the route. The route IS declared — allow-list the pair (same posture as sx*).
   {"nen_notification", "pii_nen_rendered_body"},
   # Same fixture, same posture: the Primitives blueprint's Webhook declares the
   # vault-routed signing_secret (column pii_nwh_signing_secret), but the fixture
-  # domain is NOT in :ash_domains so vault_declared_parity cannot discover the
+  # domain is NOT in :host_domains so vault_declared_parity cannot discover the
   # route. The route IS declared — allow-list the pair.
   {"nwh_webhook", "pii_nwh_signing_secret"},
   # T39 automation fixture (test/support/automation_fixture.ex): the Subject trigger
   # source declares a vault-routed email (column pii_asj_email) so the c2 red-path can
-  # prove a condition on it is refused. The fixture domain is NOT in :ash_domains, so
+  # prove a condition on it is refused. The fixture domain is NOT in :host_domains, so
   # vault_declared_parity cannot discover the route — allow-list the pair.
   {"asj_subject", "pii_asj_email"},
   # T34 E3 approvals fixture (test/support/approvals_fixture.ex): the Document Gate-client
   # declares a vault-routed secret (column pii_apd_secret) so the INV-1 no-persisted-inputs
-  # proof is non-vacuous. The fixture domain is NOT in :ash_domains — allow-list the pair.
+  # proof is non-vacuous. The fixture domain is NOT in :host_domains — allow-list the pair.
   {"apd_document", "pii_apd_secret"},
   # T41 E4 reminder (test/support/automation_fixture.ex, the SAME AutomationFixture
   # domain T39 mounts): Reminder.note is vault-routed (column pii_arm_note) so the
@@ -108,13 +108,13 @@ config :samen_core, :vault_declared_parity_allow_list, [
   # AutomationFixture domain T39/T41 mount): Target.email is vault-routed
   # (column pii_sat_email) so the webhook snapshot assert's negative control
   # (a vault field named in `include` still never reaches the payload) is
-  # non-vacuous. The fixture domain is NOT in :ash_domains — allow-list the pair.
+  # non-vacuous. The fixture domain is NOT in :host_domains — allow-list the pair.
   {"sat_target", "pii_sat_email"},
   # T45 F3 (Docs scope, test/support/docs_fixture.ex): Doc.secure_body /
   # Note.secure_body are vault-routed (columns pii_sdd_secure_body /
   # pii_sdn_secure_body — the "PII-classified routes to vault" path, see
   # Samen.Scopes.Docs.Blueprint) so the INV-1 masking three-proof is
-  # non-vacuous. The fixture domain is NOT in :ash_domains — allow-list the pair.
+  # non-vacuous. The fixture domain is NOT in :host_domains — allow-list the pair.
   {"sdd_doc", "pii_sdd_secure_body"},
   {"sdn_note", "pii_sdn_secure_body"},
   # T75 (spec §I2 CRM sequences): a SECOND materialization of the T74 Mailbox

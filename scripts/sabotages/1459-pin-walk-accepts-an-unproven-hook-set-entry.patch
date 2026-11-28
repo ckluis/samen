@@ -1,0 +1,19 @@
+# SABOTAGE: the org_id pin walk accepts a listed hook-set action without checking its named test
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/org_id_pinned_guard_test.exs
+# MUST_FAIL: a listed hook-set action needs a reason and a named test that exists
+diff --git a/samen_core/lib/samen/org_id_pinned_guard.ex b/samen_core/lib/samen/org_id_pinned_guard.ex
+index ae81d26e..f4492894 100644
+--- a/samen_core/lib/samen/org_id_pinned_guard.ex
++++ b/samen_core/lib/samen/org_id_pinned_guard.ex
+@@ -173,7 +173,7 @@ defmodule Samen.OrgIdPinnedGuard do
+ 
+     unproven =
+       for {{resource, action} = key, entry} <- listed,
+-          why = unproven_reason(resources, key, entry),
++          why = nil && unproven_reason(resources, key, entry),
+           do: {resource, action, why}
+ 
+     {unlisted, unproven}

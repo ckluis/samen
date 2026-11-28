@@ -1,0 +1,19 @@
+# SABOTAGE: Mailbox Connection writes are authorized for any tenant actor in the org again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/mailbox_authz_test.exs
+# MUST_FAIL: a tenant actor of ANY role cannot create, update or destroy a Connection
+diff --git a/samen_core/lib/samen/scopes/mailbox/blueprint.ex b/samen_core/lib/samen/scopes/mailbox/blueprint.ex
+index 92f18e09..2e141c79 100644
+--- a/samen_core/lib/samen/scopes/mailbox/blueprint.ex
++++ b/samen_core/lib/samen/scopes/mailbox/blueprint.ex
+@@ -140,7 +140,7 @@ defmodule Samen.Scopes.Mailbox.Blueprint do
+           # Written ONLY by `Samen.Mailbox.Sync`, which runs every write as an `authorize?: false` call: no person, role
+           # or surface creates, edits or deletes a mailbox row (the `File.promote` / `ApiKey.mark_used` precedent).
+           policy action_type([:create, :update, :destroy]) do
+-            forbid_if(always())
++            authorize_if(Samen.Policy.OrgScope)
+           end
+ 
+           policy action(:reveal_connection) do

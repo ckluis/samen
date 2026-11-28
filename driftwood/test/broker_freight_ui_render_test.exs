@@ -36,7 +36,9 @@ defmodule DriftwoodWeb.BrokerFreightUiRenderTest do
         summary: nil,
         loads: [],
         drivers: [],
-        settlements: []
+        settlements: [],
+        actor_state: :ok,
+        can_write: true
       },
       overrides
     )
@@ -139,7 +141,7 @@ defmodule DriftwoodWeb.BrokerFreightUiRenderTest do
   end
 
   test "the new/edit driver modals render with a real AshPhoenix.Form backing (no crash, no plaintext PII injected)" do
-    scope = BrokerLive.broker_scope(@org)
+    scope = broker_scope(@org)
 
     new_form =
       Driftwood.Freight.Driver
@@ -181,7 +183,7 @@ defmodule DriftwoodWeb.BrokerFreightUiRenderTest do
   end
 
   test "the new/edit settlement modals render with a real AshPhoenix.Form backing (no crash)" do
-    scope = BrokerLive.broker_scope(@org)
+    scope = broker_scope(@org)
 
     new_form =
       Driftwood.Freight.Settlement

@@ -3,6 +3,7 @@ defmodule Samen.Web.BillingRenderTest do
   Framework Billing render tests against the test-support host. The two-plane guarantee on the
   Billing customer PII (`billing_name` / `billing_email`): tenant clear vs operator ••••.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   setup do
@@ -127,6 +128,6 @@ defmodule Samen.Web.BillingRenderTest do
     assert html =~ "••••"
     refute html =~ Seeds.customer_name()
     refute html =~ Seeds.customer_email()
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 end

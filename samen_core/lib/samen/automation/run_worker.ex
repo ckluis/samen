@@ -169,8 +169,24 @@ defmodule Samen.Automation.RunWorker do
 
   defp owner_actor(%{owner_id: nil}), do: {:skip, :owner_unavailable}
 
+  # ADR-039 §4.5. The run acts AS the owner, with the role the owner holds in this org NOW: the host's real membership
+  # row, resolved through the one shared membership seam (`Samen.AI.Agent.Approver.resolve/2`: the same lookup that
+  # resolves who approves an agent's write, `Samen.Auth.OrgActor.active_membership/3`). An owner with no active
+  # membership here (removed, suspended, never a member) is `:owner_unavailable`, never re-attributed and never run as
+  # a default `:member`. A seam that is unwired or failed cannot say who the owner is: the run is retried, and on its
+  # last attempt finalizes skipped `:internal_error`, so nothing executes under a role nobody verified.
   defp owner_actor(%{owner_id: owner_id, org_id: org_id}) do
-    {:ok, Samen.Scope.new(%{id: owner_id, org_id: org_id, role: :member})}
+    case Samen.AI.Agent.Approver.resolve(to_string(owner_id), to_string(org_id)) do
+      {:ok, %Samen.Scope{} = scope} ->
+        {:ok, scope}
+
+      {:error, :not_authorized} ->
+        {:skip, :owner_unavailable}
+
+      {:error, _unresolvable} ->
+        Samen.Observability.Failure.report(:run_worker_owner_membership, org_id, :membership_unresolvable)
+        {:retry, :unavailable}
+    end
   end
 
   # Governed re-read, projected to condition-eligible attributes ONLY. A schedule /

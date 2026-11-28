@@ -1,0 +1,19 @@
+# SABOTAGE: the scope guard's walk visits no domain, so a host's guard passes without having looked
+#
+# Flips the named test(s).
+# APP: pawchart
+# TEST_FILES: test/api_key_scope_guard_test.exs
+# MUST_FAIL: the host compiles without JSON:API: the walk sees its resources and none is exposed
+diff --git a/samen_core/lib/samen/api_key_scope_guard.ex b/samen_core/lib/samen/api_key_scope_guard.ex
+index 96a255ae..ca72f7dc 100644
+--- a/samen_core/lib/samen/api_key_scope_guard.ex
++++ b/samen_core/lib/samen/api_key_scope_guard.ex
+@@ -20,7 +20,7 @@ defmodule Samen.ApiKeyScopeGuard do
+   @doc "Walk every resource of `domains`."
+   @spec report([module()]) :: report()
+   def report(domains) do
+-    resources = Enum.flat_map(domains, &Ash.Domain.Info.resources/1)
++    resources = Enum.flat_map(Enum.take(domains, 0), &Ash.Domain.Info.resources/1)
+     exposed = Enum.filter(resources, &(ApiKey.json_api_type(&1) != nil))
+ 
+     %{walked: length(resources), exposed: exposed, unguarded: Enum.reject(exposed, &guarded?/1)}

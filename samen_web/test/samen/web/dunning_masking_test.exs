@@ -22,6 +22,7 @@ defmodule Samen.Web.DunningMaskingTest do
   E4 search-projection plane-bypass sabotage (`10-e4-...`) already guards. The in-test
   `assert_leak_detected!` twin proves refutability without a redundant patch.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -104,7 +105,7 @@ defmodule Samen.Web.DunningMaskingTest do
     assert html =~ Seeds.customer_name()
     assert html =~ Seeds.customer_email()
     # … and no vault token leaks even on the clear plane (the resolver, not the raw column).
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   # ==========================================================================

@@ -184,7 +184,6 @@ defmodule Samen.Lint.KernelSwallow do
     "samen_core/lib/samen/identity/invite.ex" => 1,
     "samen_core/lib/samen/non_pii.ex" => 1,
     "samen_core/lib/samen/operator_plane.ex" => 3,
-    "samen_core/lib/samen/scopes/marketing/blueprint.ex" => 2,
     "samen_core/lib/samen/support/inbound/ingest.ex" => 2,
     "samen_core/lib/samen/support/inbound/threading.ex" => 2
   }
@@ -194,7 +193,7 @@ defmodule Samen.Lint.KernelSwallow do
   # it together with the baseline when a swallow is converted; never raise it.
   @ceilings %{
     rescue: %{"samen_core/lib" => 52},
-    error_arm: %{"samen_core/lib" => 15}
+    error_arm: %{"samen_core/lib" => 13}
   }
 
   def roots, do: @roots

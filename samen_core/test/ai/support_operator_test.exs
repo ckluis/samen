@@ -19,6 +19,7 @@ defmodule Samen.AI.SupportOperatorTest do
       (`:source_not_found`), with the same-org positive control. The sabotage twin
       (`scripts/sabotages/51-...`) drops the org filter and flips the named cross-org test.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
@@ -103,11 +104,11 @@ defmodule Samen.AI.SupportOperatorTest do
       assert payload =~ @mask
       # The crux: the canary plaintext and any vt_* token are absent from the provider payload.
       refute payload =~ @canary, "the 🔒 canary reached the AI provider payload"
-      refute payload =~ "vt_", "a vault token reached the AI provider payload"
+      refute_vault_token(payload, "a vault token reached the AI provider payload")
 
       # And the persisted draft body (what a human reviews / what will send) carries neither.
       refute reload(result.draft).body =~ @canary
-      refute reload(result.draft).body =~ "vt_"
+      refute_vault_token(reload(result.draft).body)
     end
   end
 

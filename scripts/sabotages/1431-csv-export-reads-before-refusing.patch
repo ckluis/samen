@@ -1,0 +1,20 @@
+# SABOTAGE: CSV export skips the up-front count, so an over-limit org is read and vault-resolved before the 
+#   413
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/files_csv_router_test.exs
+# MUST_FAIL: an export above the row limit is refused after a scoped COUNT
+diff --git a/samen_web/lib/samen/web/csv.ex b/samen_web/lib/samen/web/csv.ex
+index 611982bf..244ee1fa 100644
+--- a/samen_web/lib/samen/web/csv.ex
++++ b/samen_web/lib/samen/web/csv.ex
+@@ -149,7 +149,7 @@ defmodule Samen.Web.Csv do
+ 
+       # The limit is decided by a scoped COUNT (the same scope and base query as the read) BEFORE any row is read or
+       # resolved: an org above the limit costs one aggregate, not a full scan and a vault pass that ends in a 413.
+-      with :ok <- within_limit(base, scope, max_rows),
++      with :ok <- :ok,
+            {:ok, rows} <- export_rows(base, resource, scope, cols, page_size, opts, nil, [], 0, max_rows) do
+         # WS-F5 F5.2 — row-count histogram sample through the bounded Samen.Metrics
+         # machinery (`samen.csv.export.row_count`). The count is a measurement; the only

@@ -1,0 +1,20 @@
+# SABOTAGE: SettingsLive builds its billing actor with an admin role instead of the person's resolved role, 
+#   so a viewer subscribes and opens the payment portal
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_billing_test.exs
+# MUST_FAIL: a VIEWER and a MEMBER cannot start checkout or open the portal; an admin and an owner can
+diff --git a/samen_web/lib/samen/web/billing/settings_live.ex b/samen_web/lib/samen/web/billing/settings_live.ex
+index 8ce68cc4..b88571a9 100644
+--- a/samen_web/lib/samen/web/billing/settings_live.ex
++++ b/samen_web/lib/samen/web/billing/settings_live.ex
+@@ -173,7 +173,7 @@ defmodule Samen.Web.Billing.SettingsLive do
+         {nil, false}
+ 
+       CurrentOrg.tenant_gate_armed?(mount) ->
+-        {tenant_actor(acting.id, org_id, acting.role), false}
++        {tenant_actor(acting.id, org_id, :admin), false}
+ 
+       true ->
+         dev_actor(mount, org_id, socket.assigns[:user_id])

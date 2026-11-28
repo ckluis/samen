@@ -1,0 +1,23 @@
+# SABOTAGE: the guard detector finds no literal tenant actor map, so the host's hand-built broker actor is 
+#   not held to its baseline
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/tenant_actor_host_guard_test.exs
+# MUST_FAIL: the literal tenant actor maps are exactly the listed request-path sites
+diff --git a/samen_web/lib/samen/web/tenant_actor/guard.ex b/samen_web/lib/samen/web/tenant_actor/guard.ex
+index 985cf6f6..d2aad753 100644
+--- a/samen_web/lib/samen/web/tenant_actor/guard.ex
++++ b/samen_web/lib/samen/web/tenant_actor/guard.ex
+@@ -72,6 +72,11 @@ defmodule Samen.Web.TenantActor.Guard do
+   """
+   @spec literal_actors(String.t()) :: non_neg_integer()
+   def literal_actors(source) when is_binary(source) do
++    _ = source
++    0
++  end
++
++  def literal_actors_disabled(source) do
+     # Comments and heredoc text (a `@moduledoc` that SHOWS `Map.put(actor, :role, :admin)`) are not code.
+     code =
+       source

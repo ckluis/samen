@@ -1,0 +1,20 @@
+# SABOTAGE: ContactLive delete builds the fixed-member scope again, so a viewer's delete_contact archives
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_surfaces_test.exs
+# MUST_FAIL: a VIEWER cannot edit or delete a contact on its detail page
+diff --git a/samen_web/lib/samen/web/crm/contact_live.ex b/samen_web/lib/samen/web/crm/contact_live.ex
+index f49440f1..95c4ab6f 100644
+--- a/samen_web/lib/samen/web/crm/contact_live.ex
++++ b/samen_web/lib/samen/web/crm/contact_live.ex
+@@ -194,7 +194,8 @@ defmodule Samen.Web.CRM.ContactLive do
+   # is never refused on their account; any `{:error, _}` here is a genuine
+   # failure (e.g. an authorization denial), not the old FK-refusal case.
+   def handle_event("delete_contact", %{"id" => id}, socket) do
+-    %{samen_mount: mount, org_id: org_id, acting_scope: scope} = socket.assigns
++    %{samen_mount: mount, org_id: org_id} = socket.assigns
++    scope = Mount.scope(mount, org_id)
+ 
+     case Reads.delete_contact(mount, scope, id) do
+       :ok ->

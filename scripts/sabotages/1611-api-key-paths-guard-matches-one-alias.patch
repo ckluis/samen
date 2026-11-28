@@ -1,0 +1,20 @@
+# SABOTAGE: the key-path scan matches only the fully written ApiKey.active_query call, so an aliased or 
+#   imported key check is not scanned
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_key_scope_paths_guard_test.exs
+# MUST_FAIL: the key-check matcher sees a call under any alias or import
+diff --git a/demo/test/api_key_scope_paths_guard_test.exs b/demo/test/api_key_scope_paths_guard_test.exs
+index 30a0dc23..82f944eb 100644
+--- a/demo/test/api_key_scope_paths_guard_test.exs
++++ b/demo/test/api_key_scope_paths_guard_test.exs
+@@ -17,7 +17,7 @@ defmodule Demo.ApiKeyScopePathsGuardTest do
+   @outside %{"pawchart/lib/pawchart_web/api/mcp_key_resolver.ex" => "MCP"}
+ 
+   # a CALL of `active_query(`, whatever the alias or import: its own definition and `@spec` are not a call
+-  @call ~r/^(?!\s*(?:def|defp|@spec)\s).*\bactive_query\(/m
++  @call ~r/ApiKey\.active_query\(/
+ 
+   defp key_check?(source), do: source =~ @call
+ 

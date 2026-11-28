@@ -1,0 +1,21 @@
+# SABOTAGE: the event guard resolves the person again but keeps the scope the page already held, so a 
+#   demotion does not reach the next event
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_open_page_test.exs
+# MUST_FAIL: a member demoted to viewer while the pages are open
+# MUST_FAIL: a demotion takes effect on the very next event
+diff --git a/samen_web/lib/samen/web/tenant_actor.ex b/samen_web/lib/samen/web/tenant_actor.ex
+index abe8e407..4361e44e 100644
+--- a/samen_web/lib/samen/web/tenant_actor.ex
++++ b/samen_web/lib/samen/web/tenant_actor.ex
+@@ -320,7 +320,7 @@ defmodule Samen.Web.TenantActor do
+     case socket.assigns do
+       %{acting_scope: %Samen.Scope{} = held, acting_org_id: org_id} when is_binary(org_id) ->
+         case resolve_into(socket, org_id) do
+-          {:ok, socket} -> {:cont, follow(socket, held, false)}
++          {:ok, _fresh} -> {:cont, follow(socket, held, false)}
+           {:refused, socket} -> {:halt, scrub(socket)}
+         end
+ 

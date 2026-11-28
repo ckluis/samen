@@ -44,10 +44,13 @@ defmodule Samen.Web.Files.UploadLive do
 
   import Samen.UI
   import Samen.Web.Files.Live, only: [assign_mount: 2, files_sidebar: 1, writable?: 1, file_path: 3]
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
+  alias Samen.Web.TenantActor
+  require TenantActor
 
   use Samen.Web.ListLive,
     resource: File,
@@ -100,84 +103,118 @@ defmodule Samen.Web.Files.UploadLive do
   def load(socket, nil) do
     socket
     |> assign(no_org: no_org?(socket))
+    |> assign(acting_scope: nil, actor_state: :ok, can_write: false, can_admin: false)
     |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
   end
 
+  # WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never `Mount.scope/2`'s fixed
+  # `:member`. A denial or a failed lookup is a STATE of the page: nothing is listed, nothing can be uploaded.
   def load(socket, org_id) do
-    mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} ->
+        socket
+        |> assign(no_org: false)
+        |> init_list(socket.assigns.samen_mount, socket.assigns.acting_scope)
 
+      {:refused, socket} ->
+        load_refused(socket)
+    end
+  end
+
+  # Acting again with no URL to patch to (the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _}} = socket), do: load(socket, socket.assigns.org_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event: nothing the page loaded is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket)
+
+  defp load_refused(socket) do
     socket
-    |> assign(no_org: false)
-    |> init_list(mount, scope)
+    |> Samen.Web.ListLive.refuse()
+    |> assign(no_org: false, upload_result: nil, upload_error: nil)
+    |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
   end
 
   # -- events -------------------------------------------------------------------
 
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("validate", _params, socket) do
     {:noreply, socket}
   end
 
   def handle_event("upload", _params, socket) do
-    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    %{samen_mount: mount} = socket.assigns
 
-    if not writable?(mount) do
-      {:noreply, assign(socket, upload_error: "upload not permitted on this plane")}
-    else
-      scope = Mount.scope(mount, org_id)
-      # Resolve file_module + opts from the mount's host config. The chokepoint opts
-      # win over config; we pass scope-derived values and let the engine read the rest
-      # from config (file_module, storage, etc.). scope carries org_id for the create.
-      upload_opts = [
-        repo: mount.repo,
-        # The host's file_module is wired in app config by the operator; the engine
-        # reads it from config. Passing it explicitly here would hardcode a module —
-        # let the engine's opt/config resolution do its job.
-      ]
+    cond do
+      not writable?(mount) ->
+        {:noreply, assign(socket, upload_error: "upload not permitted on this plane")}
 
-      results =
-        consume_uploaded_entries(socket, @upload_ref, fn %{path: tmp_path}, entry ->
-          case Elixir.File.read(tmp_path) do
-            {:ok, binary} ->
-              payload = %{
-                filename: entry.client_name,
-                content_type: entry.client_type,
-                binary: binary
-              }
+      # Uploading is a member's (the kernel's `File` create is `RoleAtLeast :member`); the handler checks it itself.
+      not TenantActor.member?(socket) ->
+        {:noreply, assign(socket, upload_error: "your role can view files but not upload them", upload_result: nil)}
 
-              Samen.Files.upload(scope, payload, upload_opts)
-
-            {:error, reason} ->
-              {:error, reason}
-          end
-        end)
-
-      case results do
-        [{:ok, file}] ->
-          {:noreply,
-           socket
-           |> assign(upload_result: file, upload_error: nil)
-           |> load(org_id)}
-
-        [{:error, {:content_type_not_allowed, ct}}] ->
-          {:noreply, assign(socket, upload_error: "file type not permitted: #{ct}", upload_result: nil)}
-
-        [{:error, {:too_large, _size, max}}] ->
-          max_mb = div(max, 1_048_576)
-          {:noreply, assign(socket, upload_error: "file exceeds the #{max_mb} MB size limit", upload_result: nil)}
-
-        [{:error, :not_configured}] ->
-          {:noreply, assign(socket, upload_error: "file storage is not configured on this deployment — nothing was saved", upload_result: nil)}
-
-        [{:error, _reason}] ->
-          # Never `inspect(reason)`: a reason term can carry storage keys and values.
-          {:noreply, assign(socket, upload_error: "upload failed — nothing was saved. Try again.", upload_result: nil)}
-
-        _ ->
-          {:noreply, assign(socket, upload_error: "no file selected", upload_result: nil)}
-      end
+      true ->
+        do_upload(socket)
     end
+  end
+
+  defp do_upload(socket) do
+    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    scope = socket.assigns.acting_scope
+    # Resolve file_module + opts from the mount's host config. The chokepoint opts
+    # win over config; we pass scope-derived values and let the engine read the rest
+    # from config (file_module, storage, etc.). scope carries org_id for the create.
+    upload_opts = [
+      repo: mount.repo,
+      # The host's file_module is wired in app config by the operator; the engine
+      # reads it from config. Passing it explicitly here would hardcode a module —
+      # let the engine's opt/config resolution do its job.
+    ]
+
+    results =
+      consume_uploaded_entries(socket, @upload_ref, fn %{path: tmp_path}, entry ->
+        case Elixir.File.read(tmp_path) do
+          {:ok, binary} ->
+            payload = %{
+              filename: entry.client_name,
+              content_type: entry.client_type,
+              binary: binary
+            }
+
+            Samen.Files.upload(scope, payload, upload_opts)
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+      end)
+
+    case results do
+      [{:ok, file}] ->
+        {:noreply,
+         socket
+         |> assign(upload_result: file, upload_error: nil)
+         |> load(org_id)}
+
+      [{:error, {:content_type_not_allowed, ct}}] ->
+        {:noreply, assign(socket, upload_error: "file type not permitted: #{ct}", upload_result: nil)}
+
+      [{:error, {:too_large, _size, max}}] ->
+        max_mb = div(max, 1_048_576)
+        {:noreply, assign(socket, upload_error: "file exceeds the #{max_mb} MB size limit", upload_result: nil)}
+
+      [{:error, :not_configured}] ->
+        {:noreply, assign(socket, upload_error: "file storage is not configured on this deployment — nothing was saved", upload_result: nil)}
+
+      [{:error, _reason}] ->
+        # Never `inspect(reason)`: a reason term can carry storage keys and values.
+        {:noreply, assign(socket, upload_error: "upload failed — nothing was saved. Try again.", upload_result: nil)}
+
+      _ ->
+        {:noreply, assign(socket, upload_error: "no file selected", upload_result: nil)}
+  end
   end
 
   # -- render -------------------------------------------------------------------
@@ -197,9 +234,12 @@ defmodule Samen.Web.Files.UploadLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @no_org do %>
+        <%= cond do %>
+        <% @no_org -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Files" nothing="there are no files to show" />
+        <% true -> %>
           <span id="org-banner" style="display:none">Files org: {@org_id}</span>
 
           <div class="wrap">
@@ -209,7 +249,7 @@ defmodule Samen.Web.Files.UploadLive do
                 <span class="lane">files are held in quarantine until scanned</span>
               </div>
 
-              <%= if writable?(@samen_mount) do %>
+              <%= if @can_write do %>
                 <form id="upload-form" phx-submit="upload" phx-change="validate">
                   <.live_file_input upload={@uploads[@upload_ref]} id="upload-input" />
 

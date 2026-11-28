@@ -52,7 +52,7 @@ defmodule Mix.Tasks.Samen.Verify.VaultTokenBinding do
   def run(args) do
     Mix.Task.run("app.start")
 
-    {opts, _rest, _} = OptionParser.parse(args, strict: [repo: :string])
+    opts = Samen.Gen.Args.parse!("samen.verify.vault_token_binding", args, [repo: :string])
 
     resources = discover_resources()
     halt_if_vacuous!(resources)
@@ -89,7 +89,7 @@ defmodule Mix.Tasks.Samen.Verify.VaultTokenBinding do
 
     domains =
       Application.get_env(otp_app, :ash_domains, []) ++
-        Application.get_env(:samen_core, :ash_domains, []) ++
+        Samen.HostDomains.registry() ++
         Application.get_env(:ash, :domains, [])
 
     Samen.Catalog.resource_modules(Enum.uniq(domains))

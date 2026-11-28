@@ -17,6 +17,7 @@ defmodule Samen.Web.CRMContactsCrudTest do
       is the write path, not the hidden button (anti-tautology: the SAME submit on the
       tenant plane succeeds, so the rejection discriminates on the plane).
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.Web.CRM.ContactsLive
@@ -157,7 +158,7 @@ defmodule Samen.Web.CRMContactsCrudTest do
     refute rendered =~ ~s(phx-click="delete")
     refute rendered =~ "data-confirm"
     # And no PII/token leaks through the (hidden) form plumbing.
-    refute rendered =~ "vt_"
+    refute_vault_token(rendered)
   end
 
   test "RED PATH (MC-1 / RP-G1-7): an operator-plane create with plaintext full_name is REJECTED at the write path; DB unchanged" do
@@ -296,7 +297,7 @@ defmodule Samen.Web.CRMContactsCrudTest do
       assert rendered =~ "••••"
       refute rendered =~ Seeds.contact_full_name()
       refute rendered =~ Seeds.contact_email()
-      refute rendered =~ "vt_"
+      refute_vault_token(rendered)
     end
   end
 end

@@ -55,6 +55,7 @@ defmodule Samen.Web.Notifications.InboxLive do
   alias Samen.Web.Mount
   alias Samen.Web.Notifications.PubSub, as: NotificationsPubSub
   alias Samen.Web.Notifications.Reads
+  alias Samen.Web.TenantActor
   alias Samen.Web.ObjectRef
 
   use Samen.Web.ListLive,
@@ -98,6 +99,7 @@ defmodule Samen.Web.Notifications.InboxLive do
   defp assign_actor(socket, org_id) do
     mount = socket.assigns[:samen_mount]
     ref = socket.assigns[:principal_ref] || :none
+    socket = attach_recheck(socket)
 
     case Samen.Web.Settings.Reads.actor_in_org(mount, org_id, ref) do
       {:ok, %{id: id, role: role}} -> assign(socket, user_id: id, user_role: role, recipient_state: :ok)
@@ -106,6 +108,44 @@ defmodule Samen.Web.Notifications.InboxLive do
       {:error, :unavailable} -> assign(socket, user_id: nil, user_role: nil, recipient_state: :unavailable)
     end
   end
+
+  # An open inbox is the person's OWN, resolved at the last navigation: a member suspended while it is open must not keep
+  # reading it (nor marking anything read), and a role change must reach the list context. So the actor is resolved
+  # again before EVERY event and every realtime message (`TenantActor.attach_once/4`; the same lifecycle seam
+  # `TenantActor.assign_actor/2` uses on the other converted pages): still acting -> the context follows; not acting ->
+  # the refused state (the page is reset, the list context is taken away) and the event / message is halted.
+  @recheck_id :samen_inbox_actor_guard
+
+  defp attach_recheck(socket) do
+    socket
+    |> TenantActor.attach_once(@recheck_id, :handle_event, &__MODULE__.recheck_event/3)
+    |> TenantActor.attach_once(@recheck_id, :handle_info, &__MODULE__.recheck_info/2)
+  end
+
+  @doc false
+  def recheck_event(_event, _params, socket), do: recheck(socket)
+
+  @doc false
+  def recheck_info({:notification_created, _envelope}, socket), do: recheck(socket)
+  def recheck_info(_msg, socket), do: {:cont, socket}
+
+  defp recheck(%{assigns: %{recipient_state: :ok, org_id: org_id, user_id: user_id}} = socket)
+       when is_binary(org_id) and is_binary(user_id) do
+    socket = assign_actor(socket, org_id)
+
+    if recipient_state(socket) == :ok do
+      {:cont, follow_list_scope(socket, org_id)}
+    else
+      {:halt, socket |> Samen.Web.ListLive.refuse() |> load(org_id)}
+    end
+  end
+
+  defp recheck(socket), do: {:cont, socket}
+
+  defp follow_list_scope(%{assigns: %{samen_list_ctx: %{scope: scope} = ctx}} = socket, org_id) when not is_nil(scope),
+    do: assign(socket, :samen_list_ctx, %{ctx | scope: recipient_scope(socket, org_id)})
+
+  defp follow_list_scope(socket, _org_id), do: socket
 
   @doc false
   def load(socket, nil) do
@@ -326,7 +366,7 @@ defmodule Samen.Web.Notifications.InboxLive do
                   </td>
                   <td class="n-body-cell">
                     <span class="n-body">{n.rendered_body || "—"}</span>
-                    <.subject_card mount={@samen_mount} org_id={@org_id} notification={n} />
+                    <.subject_card mount={@samen_mount} scope={recipient_scope(%{assigns: assigns}, @org_id)} notification={n} />
                   </td>
                   <td class="n-channel" style="font-size:12px;color:var(--muted)">{n.channel}</td>
                   <td class="n-received" style="font-size:12px;color:var(--muted)">{received_at(n)}</td>
@@ -363,11 +403,11 @@ defmodule Samen.Web.Notifications.InboxLive do
   # render time so EVERY page (initial, sorted, filtered, realtime-refreshed) unfurls
   # per the CURRENT viewer — bounded by the page size. No ref → no card.
   attr :mount, Mount, required: true
-  attr :org_id, :string, required: true
+  attr :scope, Samen.Scope, required: true, doc: "the recipient's own scope (the user and role the session resolved)"
   attr :notification, :any, required: true
 
   defp subject_card(assigns) do
-    assigns = assign(assigns, :card, unfurl(assigns.mount, assigns.org_id, assigns.notification))
+    assigns = assign(assigns, :card, unfurl(assigns.mount, assigns.scope, assigns.notification))
 
     ~H"""
     <div :if={@card} class="n-subject" style="margin-top:4px">
@@ -378,11 +418,11 @@ defmodule Samen.Web.Notifications.InboxLive do
 
   # nil (no ref / malformed ref) | {:ok, card} → the card | {:error, _} → the inert
   # chip. NEVER plaintext on failure; never a raise.
-  defp unfurl(mount, org_id, notification) do
+  defp unfurl(mount, scope, notification) do
     with %{} = metadata <- notification.metadata,
          ref_string when is_binary(ref_string) <- Map.get(metadata, "subject_ref"),
          {:ok, ref} <- ObjectRef.from_string(ref_string) do
-      case ObjectRef.resolve(mount, Mount.scope(mount, org_id), ref) do
+      case ObjectRef.resolve(mount, scope, ref) do
         {:ok, card} -> card
         {:error, _} = error -> error
       end

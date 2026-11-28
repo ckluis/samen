@@ -1,0 +1,19 @@
+# SABOTAGE: a member's crafted wizard write reaches the org update
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_settings_test.exs
+# MUST_FAIL: the wizard: every write is an admin's
+diff --git a/samen_web/lib/samen/web/onboarding/wizard_live.ex b/samen_web/lib/samen/web/onboarding/wizard_live.ex
+index 0c5af98a..8cbf629c 100644
+--- a/samen_web/lib/samen/web/onboarding/wizard_live.ex
++++ b/samen_web/lib/samen/web/onboarding/wizard_live.ex
+@@ -198,7 +198,7 @@ defmodule Samen.Web.Onboarding.WizardLive do
+   # Every write of the wizard (name the workspace, choose a plan, invite a teammate, finish setup) is an ADMIN's (the kernel's
+   # `Org` update and `Invitation` create policies); the handler checks the role the guard resolved for THIS event.
+   def handle_event(event, params, socket) when event in ["name_org", "select_plan", "invite", "finish"] do
+-    if TenantActor.admin?(socket),
++    if TenantActor.admin?(socket) or true,
+       do: admin_event(event, params, socket),
+       else: {:noreply, refuse_admin(socket, event)}
+   end

@@ -15,6 +15,7 @@ defmodule Samen.Web.MarketingLeadsListTest do
     * **Read-only by design** — the lens offers no write affordance: the domain
       defines no lead-specific write action (leads ARE CRM people).
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.Web.ListLive
@@ -178,6 +179,6 @@ defmodule Samen.Web.MarketingLeadsListTest do
     refute rendered =~ Seeds.contact_full_name()
     refute rendered =~ Seeds.contact_email()
     refute rendered =~ Seeds.contact_phone()
-    refute rendered =~ "vt_"
+    refute_vault_token(rendered)
   end
 end

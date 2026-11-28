@@ -42,6 +42,9 @@ defmodule Samen.Web.Onboarding.WizardLive do
   alias Samen.Web.Onboarding
   alias Samen.Web.Settings.Invitations
   alias Samen.Web.Settings.Reads
+  alias Samen.Web.TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
+  require TenantActor
 
   @impl true
   def mount(params, session, socket) do
@@ -123,39 +126,59 @@ defmodule Samen.Web.Onboarding.WizardLive do
       |> assign(org_id: org_id, user_id: user_id, return_to: Map.get(socket.assigns, :return_to))
 
     if is_nil(org_id) do
-      assign(socket, complete?: false, org: nil, org_form: blank_org_form(), plan_choices: :not_configured, load_error: nil)
+      socket
+      |> assign(acting_scope: nil, actor_state: :ok, can_write: false, can_admin: false)
+      |> assign(complete?: false, org: nil, org_form: blank_org_form(), plan_choices: :not_configured, load_error: nil)
     else
-      scope = Mount.scope(mount, org_id)
-
-      # A FAILED org read is the error state (retry): it must never read as "You're all set".
-      # `complete?` is derived from THIS read — not from a second one (`Onboarding.needed?/3`
-      # fails safe to "not needed" on a read error, right for the offer probe but a false
-      # "complete" here, and a second read could fail on its own after this one succeeded).
-      case Onboarding.org_result(mount, scope, org_id) do
-        {:error, :unavailable} ->
-          assign(socket,
-            complete?: false,
-            org: nil,
-            org_form: blank_org_form(),
-            plan_choices: :not_configured,
-            load_error: Samen.Web.Reads.Guard.message()
-          )
-
-        result ->
-          org =
-            case result do
-              {:ok, org} -> org
-              {:error, _} -> nil
-            end
-
-          assign(socket,
-            complete?: complete?(org),
-            org: org,
-            org_form: org_form(org),
-            plan_choices: Onboarding.plan_choices(mount, org_id),
-            load_error: nil
-          )
+      # WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`). A denial or a failed lookup is
+      # a STATE of the page: the org is not read and nothing can be written.
+      case TenantActor.assign_actor(socket, org_id) do
+        {:ok, socket} -> load_org(socket, mount, org_id, socket.assigns.acting_scope)
+        {:refused, socket} -> load_refused(socket)
       end
+    end
+  end
+
+  # Acting again with no URL to patch to (the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _, user_id: _}} = socket), do: load(socket, socket.assigns.org_id, socket.assigns.user_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event: nothing the page loaded is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket)
+
+  defp load_refused(socket),
+    do: assign(socket, complete?: false, org: nil, org_form: blank_org_form(), plan_choices: :not_configured, load_error: nil, invited_raw_token: nil)
+
+  defp load_org(socket, mount, org_id, scope) do
+    # A FAILED org read is the error state (retry): it must never read as "You're all set".
+    # `complete?` is derived from THIS read — not from a second one (`Onboarding.needed?/3`
+    # fails safe to "not needed" on a read error, right for the offer probe but a false
+    # "complete" here, and a second read could fail on its own after this one succeeded).
+    case Onboarding.org_result(mount, scope, org_id) do
+      {:error, :unavailable} ->
+        assign(socket,
+          complete?: false,
+          org: nil,
+          org_form: blank_org_form(),
+          plan_choices: :not_configured,
+          load_error: Samen.Web.Reads.Guard.message()
+        )
+
+      result ->
+        org =
+          case result do
+            {:ok, org} -> org
+            {:error, _} -> nil
+          end
+
+        assign(socket,
+          complete?: complete?(org),
+          org: org,
+          org_form: org_form(org),
+          plan_choices: Onboarding.plan_choices(mount, org_id),
+          load_error: nil
+        )
     end
   end
 
@@ -167,16 +190,26 @@ defmodule Samen.Web.Onboarding.WizardLive do
   defp complete?(_org), do: true
 
   @impl true
+  TenantActor.refuse_events(["name_org", "select_plan", "invite", "finish"])
+
   def handle_event("retry_load", _params, socket),
     do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.user_id)}
 
+  # Every write of the wizard (name the workspace, choose a plan, invite a teammate, finish setup) is an ADMIN's (the kernel's
+  # `Org` update and `Invitation` create policies); the handler checks the role the guard resolved for THIS event.
+  def handle_event(event, params, socket) when event in ["name_org", "select_plan", "invite", "finish"] do
+    if TenantActor.admin?(socket),
+      do: admin_event(event, params, socket),
+      else: {:noreply, refuse_admin(socket, event)}
+  end
+
   # -- step 1: org naming ------------------------------------------------------
 
-  def handle_event("name_org", %{"org" => %{"name" => name}}, socket) do
+  defp admin_event("name_org", %{"org" => %{"name" => name}}, socket) do
     %{samen_mount: mount, org_id: org_id, user_id: user_id} = socket.assigns
     name = String.trim(name || "")
 
-    case Onboarding.name_org(mount, actor_scope(mount, org_id, user_id), org_id, name) do
+    case Onboarding.name_org(mount, actor_scope(socket), org_id, name) do
       {:ok, _org} ->
         {:noreply, socket |> assign(step: :plan, org_error: nil) |> load(org_id, user_id)}
 
@@ -192,10 +225,10 @@ defmodule Samen.Web.Onboarding.WizardLive do
 
   # -- step 2: plan selection (the WS-B hook) ----------------------------------
 
-  def handle_event("select_plan", %{"plan" => %{"key" => key}}, socket) do
+  defp admin_event("select_plan", %{"plan" => %{"key" => key}}, socket) do
     %{samen_mount: mount, org_id: org_id, user_id: user_id} = socket.assigns
 
-    case Onboarding.select_plan(mount, actor_scope(mount, org_id, user_id), org_id, key) do
+    case Onboarding.select_plan(mount, actor_scope(socket), org_id, key) do
       {:ok, _org} -> {:noreply, socket |> assign(step: :invite) |> load(org_id, user_id)}
       {:error, :forbidden} -> {:noreply, assign(socket, org_error: "Only the workspace owner can choose a plan.")}
       {:error, :already_onboarded} -> {:noreply, assign(socket, org_error: "Setup is already complete — plan changes are made in billing.")}
@@ -205,10 +238,10 @@ defmodule Samen.Web.Onboarding.WizardLive do
 
   # -- step 3: teammate invite (the A5 surface, embedded) ----------------------
 
-  def handle_event("invite", %{"invitation" => params}, socket) do
+  defp admin_event("invite", %{"invitation" => params}, socket) do
     %{samen_mount: mount, org_id: org_id, user_id: user_id, samen_session: session} = socket.assigns
 
-    with {:ok, membership} <- membership(mount, org_id, user_id),
+    with {:ok, membership} <- membership(mount, socket.assigns.acting_scope, org_id, user_id),
          scope <- invite_scope(user_id, org_id, membership.role, verified?(mount, session)),
          {:ok, _invitation, raw_token} <-
            Invitations.create(mount, scope, Map.get(params, "email", ""), Map.get(params, "role", "member")) do
@@ -226,10 +259,10 @@ defmodule Samen.Web.Onboarding.WizardLive do
     end
   end
 
-  def handle_event("finish", _params, socket) do
+  defp admin_event("finish", _params, socket) do
     %{samen_mount: mount, org_id: org_id, user_id: user_id} = socket.assigns
 
-    case Onboarding.complete!(mount, actor_scope(mount, org_id, user_id), org_id) do
+    case Onboarding.complete!(mount, actor_scope(socket), org_id) do
       {:ok, _org} -> {:noreply, load(socket, org_id, user_id)}
       {:error, _reason} -> {:noreply, assign(socket, invite_error: finish_refused_copy())}
     end
@@ -239,24 +272,30 @@ defmodule Samen.Web.Onboarding.WizardLive do
 
   defp finish_refused_copy, do: "Only a workspace admin can finish setup."
 
+  defp refuse_admin(socket, event) when event in ["invite", "finish"], do: assign(socket, invite_error: admin_required_copy(event))
+  defp refuse_admin(socket, event), do: assign(socket, org_error: admin_required_copy(event))
+
+  defp admin_required_copy("invite"), do: invite_refused_copy()
+  defp admin_required_copy("finish"), do: finish_refused_copy()
+  defp admin_required_copy(_event), do: "Only a workspace admin can set up the workspace."
+
   defp blank_org_form, do: to_form(%{"name" => ""}, as: :org)
   defp org_form(nil), do: blank_org_form()
   defp org_form(%{name: name}), do: to_form(%{"name" => name || ""}, as: :org)
 
-  defp membership(mount, org_id, user_id) when is_binary(org_id) and is_binary(user_id) do
-    scope = Mount.scope(mount, org_id)
-    Reads.current_membership_result(mount, scope, user_id, org_id)
-  end
+  # The person's own membership row, read with the acting scope.
+  defp membership(mount, scope, org_id, user_id) when is_binary(org_id) and is_binary(user_id),
+    do: Reads.current_membership_result(mount, scope, user_id, org_id)
 
-  defp membership(_mount, _org_id, _user_id), do: {:error, :not_found}
+  defp membership(_mount, _scope, _org_id, _user_id), do: {:error, :not_found}
 
   # The own-org actor for the org-naming/plan-selection/completion writes. `Org.:update` needs
   # an admin+ role (`Samen.Scopes.Identity.Blueprint.define_org/6`), so the scope carries the
   # caller's REAL membership role — a hardcoded `:member` would be refused for everyone. No
   # membership in context → no role → the policy refuses (fail closed).
-  defp actor_scope(mount, org_id, user_id) do
+  defp actor_scope(%{assigns: %{samen_mount: mount, org_id: org_id, user_id: user_id, acting_scope: acting}}) do
     role =
-      case membership(mount, org_id, user_id) do
+      case membership(mount, acting, org_id, user_id) do
         {:ok, %{role: role}} -> role
         _ -> nil
       end
@@ -309,6 +348,8 @@ defmodule Samen.Web.Onboarding.WizardLive do
       <%= cond do %>
         <% is_nil(@org_id) -> %>
           <.no_org_card mount={@samen_mount} />
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Setup" nothing="there is no setup to show" />
         <% @load_error != nil -> %>
           <.error_state class="onboarding-error" body={@load_error} retry_event="retry_load" />
         <% @complete? -> %>

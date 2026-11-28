@@ -32,6 +32,9 @@ defmodule Samen.Web.Chat.ThreadLive do
   alias Samen.Web.Mount
   alias Samen.Web.Operator.Impersonation
   alias Samen.Web.Reads.Guard
+  alias Samen.Web.TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
+  require TenantActor
 
   @impl true
   def mount(params, session, socket) do
@@ -64,11 +67,12 @@ defmodule Samen.Web.Chat.ThreadLive do
   end
 
   @doc false
-  def load(socket, nil, _thread_id), do: assign_empty(socket)
-  def load(socket, _org_id, nil), do: assign_empty(socket)
+  def load(socket, nil, _thread_id), do: socket |> assign_empty() |> assign_no_actor()
+  def load(socket, _org_id, nil), do: socket |> assign_empty() |> assign_no_actor()
 
   def load(socket, org_id, thread_id) do
     mount = socket.assigns.samen_mount
+    socket = ensure_actor_defaults(socket)
 
     # T153 — the room is tenant chat CONTENT (message bodies + participant identities). On the
     # OPERATOR desk-chat plane, resolving a SPECIFIC tenant's conversation is the per-tenant
@@ -91,46 +95,91 @@ defmodule Samen.Web.Chat.ThreadLive do
         |> assign(org_id: org_id, thread_id: thread_id, impersonation: :unavailable, session_info: nil, open_error: nil)
 
       {:ok, session_info} ->
-        scope = Mount.scope(mount, org_id)
-
-        # A FAILED thread read is the error state (retry), never "Conversation not available.";
-        # participants and messages each fail on their own (`section_errors`).
-        case Reads.get_thread_result(mount, scope, thread_id) do
-          {:ok, thread} ->
-            participants_result = Reads.participants_result(mount, scope, thread_id)
-            messages_result = Reads.messages_window_result(mount, scope, thread_id)
-            participants = Guard.value(participants_result, [])
-            resolved_participants = Identity.resolve_participants(mount, scope, thread, participants)
-            {messages, earlier_hidden} = Guard.value(messages_result, {[], false})
-
-            assign(socket,
-              no_thread: false,
-              load_error: nil,
-              section_errors:
-                for(
-                  {key, result} <- [participants: participants_result, messages: messages_result],
-                  Guard.unavailable?(result),
-                  do: key
-                ),
-              org_id: org_id,
-              thread_id: thread_id,
-              thread: thread,
-              participants: resolved_participants,
-              handles: handle_map(participants),
-              messages: attach_cards(mount, scope, messages),
-              earlier_hidden: earlier_hidden,
-              composer: "",
-              impersonation: ok_state(mount),
-              session_info: session_info,
-              open_error: nil
-            )
-
-          {:error, :not_found} ->
-            assign(assign_empty(socket), org_id: org_id, thread_id: thread_id)
-
-          {:error, :unavailable} ->
-            assign(assign_empty(socket), org_id: org_id, thread_id: thread_id, load_error: Guard.message())
+        case acting(socket, mount, org_id) do
+          {:ok, socket, scope} -> load_for(socket, mount, org_id, thread_id, scope, session_info)
+          {:refused, socket} -> load_refused(socket, org_id, thread_id)
         end
+    end
+  end
+
+  # WHO acts. On the TENANT plane: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`; a denial or a failed lookup is a STATE of the page and nothing is read. The
+  # OPERATOR desk plane has no membership: its reads run as the plane's own scope behind the impersonation gate above, and
+  # it offers no write control (`can_write` false).
+  defp acting(socket, mount, org_id) do
+    if operator_plane?(mount) do
+      {:ok, scope} = TenantActor.scope(mount, org_id, nil)
+      {:ok, assign(socket, acting_scope: scope, actor_state: :ok, can_write: false, can_admin: false), scope}
+    else
+      case TenantActor.assign_actor(socket, org_id) do
+        {:ok, socket} -> {:ok, socket, socket.assigns.acting_scope}
+        {:refused, socket} -> {:refused, socket}
+      end
+    end
+  end
+
+  defp ensure_actor_defaults(socket) do
+    socket
+    |> assign_new(:acting_scope, fn -> nil end)
+    |> assign_new(:actor_state, fn -> :ok end)
+    |> assign_new(:can_write, fn -> false end)
+    |> assign_new(:can_admin, fn -> false end)
+  end
+
+  defp assign_no_actor(socket), do: assign(socket, acting_scope: nil, actor_state: :ok, can_write: false, can_admin: false)
+
+  # Acting again with no URL to patch to (the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _, thread_id: _}} = socket), do: load(socket, socket.assigns.org_id, socket.assigns.thread_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event: nothing the page loaded is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _, thread_id: _}} = socket), do: load_refused(socket, socket.assigns.org_id, socket.assigns.thread_id)
+
+  defp load_refused(socket, org_id, thread_id) do
+    socket
+    |> assign_empty()
+    |> assign(org_id: org_id, thread_id: thread_id)
+  end
+
+  defp load_for(socket, mount, org_id, thread_id, scope, session_info) do
+    # A FAILED thread read is the error state (retry), never "Conversation not available.";
+    # participants and messages each fail on their own (`section_errors`).
+    case Reads.get_thread_result(mount, scope, thread_id) do
+      {:ok, thread} ->
+        participants_result = Reads.participants_result(mount, scope, thread_id)
+        messages_result = Reads.messages_window_result(mount, scope, thread_id)
+        participants = Guard.value(participants_result, [])
+        resolved_participants = Identity.resolve_participants(mount, scope, thread, participants)
+        {messages, earlier_hidden} = Guard.value(messages_result, {[], false})
+
+        assign(socket,
+          no_thread: false,
+          load_error: nil,
+          section_errors:
+            for(
+              {key, result} <- [participants: participants_result, messages: messages_result],
+              Guard.unavailable?(result),
+              do: key
+            ),
+          org_id: org_id,
+          thread_id: thread_id,
+          thread: thread,
+          participants: resolved_participants,
+          handles: handle_map(participants),
+          messages: attach_cards(mount, scope, messages),
+          earlier_hidden: earlier_hidden,
+          composer: "",
+          impersonation: ok_state(mount),
+          session_info: session_info,
+          open_error: nil
+        )
+
+      {:error, :not_found} ->
+        assign(assign_empty(socket), org_id: org_id, thread_id: thread_id)
+
+      {:error, :unavailable} ->
+        assign(assign_empty(socket), org_id: org_id, thread_id: thread_id, load_error: Guard.message())
     end
   end
 
@@ -159,7 +208,7 @@ defmodule Samen.Web.Chat.ThreadLive do
     mount = socket.assigns[:samen_mount]
 
     case gate(socket, mount, socket.assigns[:org_id]) do
-      {:ok, _info} -> true
+      {:ok, _info} -> socket.assigns[:actor_state] in [nil, :ok]
       _ -> false
     end
   end
@@ -178,12 +227,14 @@ defmodule Samen.Web.Chat.ThreadLive do
   # ---------------------------------------------------------------------------
   # The kit error state's "Try again" (a failed thread / messages / participants read).
   @impl true
+  TenantActor.refuse_events(["send"])
+
   def handle_event("retry_load", _params, socket),
     do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.thread_id)}
 
   def handle_event("send", %{"body" => body}, socket) when is_binary(body) and body != "" do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, socket.assigns.org_id)
+    scope = socket.assigns.acting_scope
     party = plane_party(mount)
 
     # S13 — the gate conjunct here is DEFENSE-IN-DEPTH behind `Samen.Pii.WriteGuard`: every
@@ -195,6 +246,7 @@ defmodule Samen.Web.Chat.ThreadLive do
     # red-path test asserting "a lapsed session cannot post" — it cannot go red while
     # WriteGuard stands (anti-tautology; see chat_thread_subscribe_gate_test.exs moduledoc).
     with true <- delivery_authorized?(socket),
+         {:member, true} <- {:member, TenantActor.member?(socket)},
          {:ok, participant_id} <- self_participant_id(socket, party),
          {:ok, message} <-
            Guard.write(:chat_post_message, scope, fn ->
@@ -213,6 +265,9 @@ defmodule Samen.Web.Chat.ThreadLive do
       # A refused / failed post tells the sender (flash group) — never a silently dropped message —
       # and each cause gets its OWN true copy: a lapsed gate, a participants outage, a genuine
       # non-participant, a write denial and a write outage are five different facts.
+      {:member, false} ->
+        {:noreply, put_flash(socket, :error, "Your role can read this conversation but not post in it, so your message wasn't sent.")}
+
       false ->
         {:noreply, put_flash(socket, :error, "This conversation is no longer open to you, so your message wasn't sent. Reload to continue.")}
 
@@ -280,8 +335,24 @@ defmodule Samen.Web.Chat.ThreadLive do
   @impl true
   def handle_info({:chat_message, envelope}, socket) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, socket.assigns.org_id)
 
+    # Who acts is resolved again on every delivery (tenant plane): a person suspended while the room is open is the
+    # refused state, and receives nothing.
+    case current_actor(socket, mount) do
+      {:ok, socket} -> deliver(envelope, mount, socket.assigns.acting_scope, socket)
+      {:refused, socket} -> {:noreply, actor_lost(socket)}
+    end
+  end
+
+  def handle_info(_msg, socket), do: {:noreply, socket}
+
+  defp current_actor(socket, mount) do
+    if operator_plane?(mount) or is_nil(socket.assigns[:acting_scope]),
+      do: {:ok, socket},
+      else: TenantActor.assign_actor(socket, socket.assigns.org_id)
+  end
+
+  defp deliver(envelope, mount, scope, socket) do
     # S13 — re-run the T153 gate on EVERY delivery (impersonation.ex: "Rebuild this on EVERY
     # request … so an expired session — or a revoked assignment — denies mid-flight"). A socket
     # whose operator session has lapsed drops the broadcast instead of streaming it.
@@ -302,8 +373,6 @@ defmodule Samen.Web.Chat.ThreadLive do
     end
   end
 
-  def handle_info(_msg, socket), do: {:noreply, socket}
-
   @impl true
   def render(assigns) do
     ~H"""
@@ -317,6 +386,9 @@ defmodule Samen.Web.Chat.ThreadLive do
         </:sidebar>
 
         <%= cond do %>
+          <% @actor_state in [:denied, :unavailable] -> %>
+            <.topbar title="Chat" crumbs={[CurrentOrg.name(@samen_mount, @org_id), "Chat"]} />
+            <.actor_refused state={@actor_state} title="Chat" nothing="there is no conversation to show" />
           <% @impersonation == :unavailable -> %>
             <.topbar title="Chat" crumbs={[CurrentOrg.name(@samen_mount, @org_id), "Chat"]} />
             <div class="wrap" id="gate-unavailable">
@@ -412,7 +484,7 @@ defmodule Samen.Web.Chat.ThreadLive do
                 />
               </div>
 
-              <form class="chat-composer" phx-submit="send" id="chat-composer">
+              <form :if={@can_write or @impersonation == :active} class="chat-composer" phx-submit="send" id="chat-composer">
                 <input type="text" name="body" placeholder="Message… (paste a samen:crm.person:<id> ref to unfurl)" autocomplete="off" />
                 <.button variant="primary" type="submit">Send</.button>
               </form>

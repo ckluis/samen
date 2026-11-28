@@ -1,0 +1,19 @@
+# SABOTAGE: a refused search page still handles the search event
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_reads_test.exs
+# MUST_FAIL: NAVIGATION: a suspended member's page is the denied state
+diff --git a/samen_web/lib/samen/web/search/search_live.ex b/samen_web/lib/samen/web/search/search_live.ex
+index 52ccf55c..f59bf2df 100644
+--- a/samen_web/lib/samen/web/search/search_live.ex
++++ b/samen_web/lib/samen/web/search/search_live.ex
+@@ -108,8 +108,6 @@ defmodule Samen.Web.Search.SearchLive do
+     do: Phoenix.Component.assign(socket, results: [], search_error: nil)
+ 
+   @impl true
+-  TenantActor.refuse_events()
+-
+   def handle_event("search", %{"q" => q}, socket) do
+     {:noreply, load(socket, socket.assigns.org_id, q)}
+   end

@@ -1,0 +1,20 @@
+# SABOTAGE: An agent run re-resolves its owner each turn with a fixed member role instead of the owner's 
+#   real membership role.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_tools_test.exs
+# MUST_FAIL: a durable run acts with its owner's real role: a viewer cannot read what a member reads, an admin reads more
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 4e075a4a..4947ad49 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1050,7 +1050,7 @@ defmodule Samen.AI.Agent do
+   defp owner_scope(%Run{owner_id: owner_id, org_id: org_id})
+        when is_binary(owner_id) and is_binary(org_id) do
+     case Approver.resolve(owner_id, org_id) do
+-      {:ok, %Samen.Scope{} = scope} -> {:ok, scope}
++      {:ok, %Samen.Scope{}} -> {:ok, Samen.Scope.new(%{id: owner_id, org_id: org_id, role: :member})}
+       {:error, _not_authorized_or_unresolvable} -> {:error, :owner_unavailable}
+     end
+   end

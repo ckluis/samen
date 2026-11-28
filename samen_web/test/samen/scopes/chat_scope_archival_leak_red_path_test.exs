@@ -40,6 +40,7 @@ defmodule Samen.Scopes.ChatScopeArchivalLeakRedPathTest do
   carry PII (message body) ... archived message STILL MASKS, 3-proof on an
   archived vaulted chat message").
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   require Ash.Query
@@ -572,7 +573,7 @@ defmodule Samen.Scopes.ChatScopeArchivalLeakRedPathTest do
       masked = resolve_on_plane(archived, ChatParticipant, :operator, grant: DenyAll).full_name
       assert_plane_masked!(masked)
       assert to_string(masked) == "••••"
-      refute to_string(masked) =~ "vt_"
+      refute_vault_token(to_string(masked))
       refute to_string(masked) =~ "Hopper"
 
       # SABOTAGE twin / anti-tautology.
@@ -622,7 +623,7 @@ defmodule Samen.Scopes.ChatScopeArchivalLeakRedPathTest do
       masked = resolve_on_plane(archived, ChatMessage, :operator, grant: DenyAll).body
       assert_plane_masked!(masked)
       assert to_string(masked) == "••••"
-      refute to_string(masked) =~ "vt_"
+      refute_vault_token(to_string(masked))
       refute to_string(masked) =~ "CHAT-BODY-ARCHIVED-SENTINEL"
 
       # SABOTAGE twin / anti-tautology.

@@ -26,6 +26,7 @@ defmodule Samen.Web.Settings.ApiKeys do
   require Ash.Query
 
   alias Samen.Scope.ApiKey, as: ApiKeyScope
+  alias Samen.Scope.ApiKey.Grammar
   alias Samen.Scope.Role
   alias Samen.Web.Mount
   alias Samen.Web.Reads.Guard
@@ -72,18 +73,53 @@ defmodule Samen.Web.Settings.ApiKeys do
     * `:membership_id` — REQUIRED. The minting membership (the actor ceiling / same-org FK).
     * `:minter_role`   — REQUIRED. The minting membership's role.
     * `:plane`         — `:tenant` (default) or `:operator`.
-    * `:scopes`        — requested `%{family => [:read | :write]}` (default `%{}`).
+    * `:scopes`        — REQUIRED, requested `%{scope => [:read | :write]}` where a scope is `all`, a family (`crm`) or
+      `family.type` (`crm.contact`). They must be inside `Samen.Scope.ApiKey.Grammar` and name families and types the
+      app exposes over JSON:API, else `{:error, {:invalid_scopes, reason}}`; they are trimmed to the minter's role, and a
+      key left with none is refused (`{:error, :no_scopes}`), because a key with no scopes authorizes nothing.
+    * `:known_scopes`  — optional `%{family => [type]}` overriding the families the app exposes (a host with a router
+      of its own).
     * `:expires_at`    — requested hard expiry. ALWAYS bounded into `(now, now + max_ttl]`
       via `Samen.Scope.ApiKey.bounded_expiry/2`; `nil` (the default) mints at
       `now + default_ttl`. A key is never minted unbounded (F3.4).
 
   Returns `{:ok, raw, key_row}` — `raw` shown once, `key_row` stores only the digest —
-  or `{:error, reason}`.
+  or `{:error, reason}` (`:no_scopes` when the requested scopes, trimmed to the minter's role, leave none;
+  `{:invalid_scopes, reason}` when they are outside the grammar or the app's families).
   """
   def mint(mount, scope, opts),
     do: Guard.write(:settings_api_key_mint, scope, fn -> do_mint(mount, scope, opts) end)
 
+  # A key with no scopes authorizes nothing: once the minter's role has trimmed the request, none left is refused
+  # and nothing is written. A non-empty request must be inside the grammar and name families and types this app
+  # exposes (`Samen.Scope.ApiKey.Grammar`): the resource's own `:create` can check the grammar but cannot know the
+  # host's families, so the membership check is made here.
   defp do_mint(mount, scope, opts) do
+    requested = Keyword.get(opts, :scopes, %{})
+
+    with false <- requested == %{},
+         :ok <- validate_requested(mount, requested, opts),
+         false <- effective_scopes(requested, Keyword.fetch!(opts, :minter_role)) == %{} do
+      mint_key(mount, scope, opts)
+    else
+      true -> {:error, :no_scopes}
+      {:error, reason} -> {:error, {:invalid_scopes, reason}}
+    end
+  end
+
+  defp validate_requested(mount, requested, opts) do
+    with :ok <- Grammar.validate(requested) do
+      Grammar.validate_membership(requested, Keyword.get_lazy(opts, :known_scopes, fn -> known_scopes(mount) end))
+    end
+  end
+
+  # The families and JSON:API types of the host app's resources (the repo's OTP app `:ash_domains`).
+  defp known_scopes(%{repo: repo}) do
+    otp_app = repo.config()[:otp_app]
+    Grammar.catalogue(Application.get_env(otp_app, :ash_domains, []))
+  end
+
+  defp mint_key(mount, scope, opts) do
     membership_id = Keyword.fetch!(opts, :membership_id)
     minter_role = Keyword.fetch!(opts, :minter_role)
     plane = Keyword.get(opts, :plane, :tenant)

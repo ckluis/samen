@@ -30,6 +30,7 @@ defmodule Samen.VersionedChangeLogTest do
   the vault type's dump face so a diff would carry plaintext — the INV-1 RED tests then
   fail — AND drops the version-resource guard so the tiers-disjoint RED sees two rows.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   import Samen.MaskingCase, only: [assert_leak_detected!: 2]
@@ -234,7 +235,7 @@ defmodule Samen.VersionedChangeLogTest do
     # every vault field uses (§6.3(4)): the token wraps to %Masked{} → "••••".
     {:ok, masked} = Samen.Type.VaultField.cast_stored(token, [])
     assert to_string(masked) == "••••"
-    refute to_string(masked) =~ "vt_"
+    refute_vault_token(to_string(masked))
     refute to_string(masked) =~ "Ada"
   end
 

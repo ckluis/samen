@@ -12,7 +12,7 @@
 #      target as the org anchor / RBAC subjects) into a project-local scratch dir, with
 #      FRESH registry-safe abbrevs; compile + dump baselines (Gen.compile_and_dump!/1).
 #   2. `mix samen.gen.scope --scope Crm` — emits the empty authored domain + registers it
-#      in BOTH :ash_domains lists.
+#      in BOTH domain lists (ash_domains + host_domains).
 #   3. `mix samen.gen.resource --scope Crm --resource Widget --abbrev <abc> --description "…"` — emits the
 #      Tier-0 resource + its migration + the abbrev reservation + the FOUR G26 test files
 #      + the per-resource anti-tautology probe, wired into the Crm domain.
@@ -190,10 +190,10 @@ try do
   config_src = File.read!(Path.join(app_dir, "config/config.exs"))
 
   unless String.contains?(config_src, "#{module}.Crm") do
-    halt.(1, "FAIL: gen.scope did not register #{module}.Crm in :ash_domains.")
+    halt.(1, "FAIL: gen.scope did not register #{module}.Crm in the domain lists.")
   end
 
-  IO.puts("D7a: gen.scope emitted #{module}.Crm + registered it in both :ash_domains lists.")
+  IO.puts("D7a: gen.scope emitted #{module}.Crm + registered it in both domain lists (ash_domains + host_domains).")
 
   # --- 2b. W4-H2 defense-in-depth: gen.scope's AUTHN ergonomics (guided + guarded) ------
   # gen.scope must EMIT the app-local failing-until-wired coverage guard, and PRINT an

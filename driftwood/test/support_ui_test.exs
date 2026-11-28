@@ -14,6 +14,7 @@ defmodule Driftwood.SupportUiTest do
        a. TENANT plane — agent full_name + message body render IN THE CLEAR.
        b. OPERATOR plane — the SAME render •••• and the plaintext is ABSENT.
   """
+  import Samen.VaultTokenAssert
   use Driftwood.DataCase, async: false
 
   alias Driftwood.Seeds
@@ -53,7 +54,7 @@ defmodule Driftwood.SupportUiTest do
     assert html =~ "Ticket Inbox"
     assert html =~ "ticket-row"
 
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   test "the mounted /support/tickets/:id renders the conversation thread", %{org_id: org_id} do
@@ -73,7 +74,7 @@ defmodule Driftwood.SupportUiTest do
     assert html =~ "Conversation"
     assert html =~ "Details"
 
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   # ==========================================================================
@@ -90,7 +91,7 @@ defmodule Driftwood.SupportUiTest do
       # Message body (conversation pane, default tab) IN THE CLEAR.
       conv_html = render_framework(Support.TicketLive, mount, [org_id, ticket.id])
       assert conv_html =~ "disputing the charge", "tenant plane did not render message body in the clear"
-      refute conv_html =~ "vt_"
+      refute_vault_token(conv_html)
 
       # Agent full_name (Details tab) IN THE CLEAR.
       details_html =
@@ -99,7 +100,7 @@ defmodule Driftwood.SupportUiTest do
       assert details_html =~ "claims-desk", "tenant plane did not render agent handle"
       assert details_html =~ "Sofia" or details_html =~ "Marchetti",
              "tenant plane did not render agent full_name in the clear"
-      refute details_html =~ "vt_"
+      refute_vault_token(details_html)
     end
 
     test "OPERATOR/impersonation plane: agent full_name + message body render •••• (no leak)", %{org_id: org_id} do
@@ -116,7 +117,7 @@ defmodule Driftwood.SupportUiTest do
       assert conv_html =~ "msg-row", "operator plane rendered no messages (vacuous)"
       assert conv_html =~ "••••", "operator plane did not mask the message body"
       refute conv_html =~ "disputing the charge", "operator plane leaked message body plaintext"
-      refute conv_html =~ "vt_"
+      refute_vault_token(conv_html)
 
       # Agent full_name masked on the Details tab.
       details_html =
@@ -125,7 +126,7 @@ defmodule Driftwood.SupportUiTest do
       assert details_html =~ "••••", "operator plane did not mask agent full_name"
       refute details_html =~ "Marchetti", "operator plane leaked agent full_name in plaintext"
       refute details_html =~ "sofia.marchetti", "operator plane leaked agent email in plaintext"
-      refute details_html =~ "vt_"
+      refute_vault_token(details_html)
     end
 
     test "CROSS-ORG: a tenant mount for a DIFFERENT org sees ZERO tickets (org-scope isolation)", %{org_id: _org_id} do
@@ -135,7 +136,7 @@ defmodule Driftwood.SupportUiTest do
 
       refute html =~ "disputing the charge"
       refute html =~ "Marchetti"
-      refute html =~ "vt_"
+      refute_vault_token(html)
     end
   end
 end

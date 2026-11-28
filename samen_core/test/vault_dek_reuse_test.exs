@@ -21,6 +21,7 @@ defmodule Samen.VaultDekReuseTest do
     * the memo holds key bytes only inside the call: redacting `Inspect`, nothing left in the
       process dictionary
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   alias Samen.Api.PiiResolution
@@ -372,7 +373,7 @@ defmodule Samen.VaultDekReuseTest do
       assert %Masked{} = out.phones
       refute inspect(out.full_name) =~ plain_of(s, :full_name)
       refute inspect(out.phones) =~ plain_of(s, :phones)
-      refute inspect(out.full_name) =~ "vt_"
+      refute_vault_token(inspect(out.full_name))
       # one unwrap for S, and Vault.reveal/3 was never asked for the denied values
       assert unwraps() == 1
       assert drain(:reveal) == [{:reveal, token_of(s, :emails)}]

@@ -1,0 +1,20 @@
+# SABOTAGE: the org_id pin recheck is prepended so it runs BEFORE the :create_checked hook copies the org 
+#   argument into the row
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/marketing_scope_policy_matrix_test.exs
+# MUST_FAIL: is refused and writes no row; the same actor sending in its OWN org succeeds
+diff --git a/samen_core/lib/samen/policy/org_id_pinned.ex b/samen_core/lib/samen/policy/org_id_pinned.ex
+index b62579a2..29e65d83 100644
+--- a/samen_core/lib/samen/policy/org_id_pinned.ex
++++ b/samen_core/lib/samen/policy/org_id_pinned.ex
+@@ -47,7 +47,7 @@ defmodule Samen.Policy.OrgIdPinned do
+   def change(changeset, _opts, context) do
+     changeset
+     |> then(&if(applies?(context), do: check(&1, context), else: &1))
+-    |> Changeset.before_action(&recheck/1)
++    |> Changeset.before_action(&recheck/1, prepend?: true)
+   end
+ 
+   @impl true

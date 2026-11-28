@@ -3,8 +3,10 @@ defmodule Driftwood.GateE2FilesE2ETest do
   GATE PROBE (WS-E E2.3) — end-to-end files lifecycle on a REAL host (Driftwood):
   upload → quarantine → (Noop scan) promote → preview render → byte-serve.
 
-  Exercises the full stack the `samen_files_routes` macro mounts, on a real vertical's
-  Primitives mount + repo. A gate artifact, not part of the shipped suites.
+  Exercises the governed stack behind the `samen_files_routes` macro (upload chokepoint, preview,
+  byte-serve controller) on a real vertical's Primitives mount + repo. The byte-serve controller is
+  called DIRECTLY with the `:samen_mount` assign set by hand: this test does not go through the router
+  or a real login (`Driftwood.FilesCsvRouterTest` does). A gate artifact, not part of the shipped suites.
   """
   use Driftwood.DataCase, async: false
 

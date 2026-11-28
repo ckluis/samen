@@ -16,6 +16,7 @@ defmodule Samen.Web.FleetPublicStatusTest do
     4. it fails CLOSED: an unreadable substrate is a 503 saying so, never an empty
        page that reads as all-clear, and it never sets a session cookie.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   import Plug.Test
@@ -237,7 +238,7 @@ defmodule Samen.Web.FleetPublicStatusTest do
       body = get_status().resp_body
 
       assert body =~ "••••"
-      refute body =~ "vt_"
+      refute_vault_token(body)
       refute body =~ "a1b2c3d4"
     end
 

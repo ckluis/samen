@@ -49,9 +49,11 @@ defmodule Samen.Web.Settings.RevealApprovalsLive do
 
   alias Samen.Reveal.Grants
   alias Samen.Web.CurrentOrg
-  alias Samen.Web.Mount
   alias Samen.Web.Reads.Guard
   alias Samen.Web.Settings.Reads
+  alias Samen.Web.TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
+  require TenantActor
 
   # `Grants.approve/2` / `deny/2` answers these when the request was decided before this decision got the lock
   @already_decided [:not_pending, :already_granted]
@@ -98,36 +100,56 @@ defmodule Samen.Web.Settings.RevealApprovalsLive do
       )
 
     if is_nil(org_id) do
-      socket
+      assign(socket, acting_scope: nil, actor_state: :ok, can_write: false, can_admin: false)
     else
-      {role, role_failed} = approver_role(mount, org_id, user_id)
-
-      # A FAILED pending read is the error state (retry), never "No pending reveal requests".
-      {pending, unrecovered, pending_failed} =
-        case Guard.run(:settings_reveal_pending, org_id, fn ->
-               case Grants.pending_for_org_result(org_id, repo: mount.repo) do
-                 {:ok, rows} -> {rows, 0}
-                 # a list that is real but incomplete: shown, with the count of the requests it could not surface
-                 {:partial, rows, n} -> {rows, n}
-                 {:error, :unavailable} -> raise "pending reveal read unavailable"
-               end
-             end) do
-          {:ok, {rows, n}} -> {rows, n, false}
-          {:error, _} -> {[], 0, true}
-        end
-
-      assign(socket,
-        pending: pending,
-        unrecovered: unrecovered,
-        pending_failed: pending_failed,
-        role_failed: role_failed,
-        approver_role: role,
-        can_approve?: can_approve?(mount, role)
-      )
+      # WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`). A denial or a failed lookup is
+      # a STATE of the page: the queue is not read and nothing can be decided.
+      case TenantActor.assign_actor(socket, org_id) do
+        {:ok, socket} -> load_queue(socket, mount, org_id, user_id)
+        {:refused, socket} -> socket
+      end
     end
   end
 
+  # Acting again with no URL to patch to (the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _, user_id: _}} = socket), do: load(socket, socket.assigns.org_id, socket.assigns.user_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event: nothing the page loaded is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket),
+    do: assign(socket, pending: [], unrecovered: 0, pending_failed: false, role_failed: false, can_approve?: false, approver_role: nil, decision_notice: nil)
+
+  defp load_queue(socket, mount, org_id, user_id) do
+    {role, role_failed} = approver_role(mount, socket.assigns.acting_scope, org_id, user_id)
+
+    # A FAILED pending read is the error state (retry), never "No pending reveal requests".
+    {pending, unrecovered, pending_failed} =
+      case Guard.run(:settings_reveal_pending, org_id, fn ->
+             case Grants.pending_for_org_result(org_id, repo: mount.repo) do
+               {:ok, rows} -> {rows, 0}
+               # a list that is real but incomplete: shown, with the count of the requests it could not surface
+               {:partial, rows, n} -> {rows, n}
+               {:error, :unavailable} -> raise "pending reveal read unavailable"
+             end
+           end) do
+        {:ok, {rows, n}} -> {rows, n, false}
+        {:error, _} -> {[], 0, true}
+      end
+
+    assign(socket,
+      pending: pending,
+      unrecovered: unrecovered,
+      pending_failed: pending_failed,
+      role_failed: role_failed,
+      approver_role: role,
+      can_approve?: can_approve?(mount, role)
+    )
+  end
+
   @impl true
+  TenantActor.refuse_events(["approve", "deny"])
+
   def handle_event("retry_load", _params, socket),
     do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.user_id)}
 
@@ -152,7 +174,8 @@ defmodule Samen.Web.Settings.RevealApprovalsLive do
       operator_plane?(mount) ->
         {:noreply, notice(socket, "Approving and denying are tenant-plane actions.")}
 
-      not can_approve? ->
+      # `can_approve?` is what the page loaded; `admin?/1` is the role the guard resolved again for THIS event.
+      not (can_approve? and TenantActor.admin?(socket)) ->
         {:noreply, notice(socket, "An admin role is required to decide reveal requests.")}
 
       is_nil(row) ->
@@ -216,9 +239,7 @@ defmodule Samen.Web.Settings.RevealApprovalsLive do
   # (the InvitationsLive precedent). Fail-closed: no membership → nil → not an approver. Returns
   # `{role, failed?}`: a FAILED lookup is still fail-closed (no approve buttons) but the screen
   # says "couldn't check your role" instead of claiming the role is too low.
-  defp approver_role(mount, org_id, user_id) when is_binary(org_id) and is_binary(user_id) do
-    scope = Mount.scope(mount, org_id)
-
+  defp approver_role(mount, scope, org_id, user_id) when is_binary(org_id) and is_binary(user_id) do
     case Reads.current_membership_result(mount, scope, user_id, org_id) do
       {:ok, %{role: role}} -> {role, false}
       {:error, :unavailable} -> {nil, true}
@@ -226,7 +247,7 @@ defmodule Samen.Web.Settings.RevealApprovalsLive do
     end
   end
 
-  defp approver_role(_mount, _org_id, _user_id), do: {nil, false}
+  defp approver_role(_mount, _scope, _org_id, _user_id), do: {nil, false}
 
   # Tenant plane + `:admin`+ rank. The operator (impersonation) plane is read-only, so an
   # operator can never approve their own requests here (they would also be blocked as
@@ -254,9 +275,12 @@ defmodule Samen.Web.Settings.RevealApprovalsLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if is_nil(@org_id) do %>
+        <%= cond do %>
+        <% is_nil(@org_id) -> %>
           <.no_org_card mount={@samen_mount} />
-        <% else %>
+        <% @actor_state in [:denied, :unavailable] -> %>
+          <.actor_refused state={@actor_state} title="Reveal approvals" nothing="there are no reveal requests to show" />
+        <% true -> %>
           <div class="wrap">
             <div id="reveal-approvals-panel">
               <div class="gtitle">

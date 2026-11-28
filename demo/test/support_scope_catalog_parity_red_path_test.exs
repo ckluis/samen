@@ -69,15 +69,15 @@ defmodule Demo.SupportScopeCatalogParityRedPathTest do
            "expected a 'ghost table: ssl_sla' violation, got: #{inspect(violations)}"
   end
 
-  test "support scope is registered in both :demo and :samen_core ash_domains configs" do
+  test "support scope is registered in both :demo ash_domains and :samen_core host_domains configs" do
     demo_domains = Application.get_env(:demo, :ash_domains, [])
-    core_domains = Application.get_env(:samen_core, :ash_domains, [])
+    core_domains = Application.get_env(:samen_core, :host_domains, [])
 
     assert Demo.SupportScope in demo_domains,
            "Demo.SupportScope must be in :demo :ash_domains config"
 
     assert Demo.SupportScope in core_domains,
-           "Demo.SupportScope must be in :samen_core :ash_domains config"
+           "Demo.SupportScope must be in :samen_core :host_domains config"
   end
 
   test "all support tables have correct abbrev-prefixed column names in the catalog" do

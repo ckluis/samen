@@ -257,10 +257,9 @@ defmodule Demo.PrimitivesScopeVaultRoutingTest do
     result =
       Notification
       |> Ash.ActionInput.for_action(:reveal_notification, %{
-        actor_id: Ash.UUID.generate(),
         subject_id: notification.id
       })
-      |> Ash.run_action(authorize?: false)
+      |> Ash.run_action(actor: %{id: Ash.UUID.generate()}, authorize?: false)
 
     assert {:error, _} = result
     # Ash wraps the :denied atom in Ash.Error.Unknown; either form is fail-closed.
@@ -287,10 +286,9 @@ defmodule Demo.PrimitivesScopeVaultRoutingTest do
     result =
       Webhook
       |> Ash.ActionInput.for_action(:reveal_webhook, %{
-        actor_id: Ash.UUID.generate(),
         subject_id: webhook.id
       })
-      |> Ash.run_action(authorize?: false)
+      |> Ash.run_action(actor: %{id: Ash.UUID.generate()}, authorize?: false)
 
     assert {:error, _} = result
     case result do

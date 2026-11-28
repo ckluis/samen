@@ -64,7 +64,7 @@ defmodule Mix.Tasks.Samen.Verify.TntCatalog do
   def run(args) do
     Mix.Task.run("app.start")
 
-    {opts, _rest, _} = OptionParser.parse(args, strict: [repo: :string])
+    opts = Samen.Gen.Args.parse!("samen.verify.tnt_catalog", args, [repo: :string])
     repos = resolve_repos(opts)
 
     violations =

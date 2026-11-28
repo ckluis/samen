@@ -25,6 +25,7 @@ defmodule Samen.Web.RichTypesRoundTripTest do
   per the ADR-028 mask-by-omission precedent `Samen.Web.CsvMaskingTest`
   already proves for `Person.full_name`.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -224,7 +225,7 @@ defmodule Samen.Web.RichTypesRoundTripTest do
 
         operator_csv = export!(operator_scope(org_id), org_id, [:name, field])
         assert cell_of(operator_csv, Atom.to_string(field)) == Samen.MaskingCase.mask()
-        refute operator_csv =~ "vt_"
+        refute_vault_token(operator_csv)
         refute_leaks(operator_csv, value)
 
         # CSV import round-trip (tenant plane, plaintext exported → plaintext imported).
@@ -312,7 +313,7 @@ defmodule Samen.Web.RichTypesRoundTripTest do
       csv = export!(tenant_scope(org_id), org_id, [:name, :address])
       assert csv =~ "999 Vault Blvd"
       assert csv =~ "Cipherton"
-      refute csv =~ "vt_"
+      refute_vault_token(csv)
     end
 
     test "RED: operator export cell is •••• — NEVER plaintext, NEVER a vt_ token (ADR-028 precedent)" do

@@ -1,0 +1,20 @@
+# SABOTAGE: the scope guard stops reporting a family that contains a dot, so a host whose compile-time 
+#   check was skipped passes
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/api_key_scope_guard_test.exs
+# MUST_FAIL: RED: a family containing a dot is reported
+diff --git a/samen_core/lib/samen/api_key_scope_guard.ex b/samen_core/lib/samen/api_key_scope_guard.ex
+index 406ef9ee..cdd9c1ab 100644
+--- a/samen_core/lib/samen/api_key_scope_guard.ex
++++ b/samen_core/lib/samen/api_key_scope_guard.ex
+@@ -59,7 +59,7 @@ defmodule Samen.ApiKeyScopeGuard do
+   """
+   @spec dotted_families(module()) :: [String.t()]
+   def dotted_families(router) do
+-    router |> families() |> Map.keys() |> Enum.filter(&String.contains?(&1, ".")) |> Enum.sort()
++    router |> families() |> Map.keys() |> Enum.reject(&is_binary/1) |> Enum.sort()
+   end
+ 
+   defp domain_family(domain) do
