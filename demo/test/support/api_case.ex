@@ -86,22 +86,39 @@ defmodule Demo.ApiCase do
     raw = "sk_" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
     digest = DemoWeb.Api.KeyAuthPlug.digest(raw)
 
-    {:ok, key} =
-      Demo.Identity.ApiKey
-      |> Ash.Changeset.for_create(:create, %{
-        plane: plane,
-        scopes: scopes,
-        minter_role: minter_role,
-        org_id: org_id,
-        membership_id: mbr.id,
-        # F3.4 — an explicit expiry may be passed (e.g. a past time to mint an
-        # already-expired key for the deny-on-read red path). `nil` = non-expiring.
-        expires_at: Keyword.get(opts, :expires_at)
-      })
-      # token_digest is public?: false (a credential digest, not tenant input), so it
-      # is not accepted by `create: :*`. Force-change it as the mint step would.
-      |> Ash.Changeset.force_change_attribute(:token_digest, digest)
-      |> Ash.create(authorize?: false)
+    key =
+      if Samen.Scope.ApiKey.Grammar.validate(scopes) != :ok do
+        # The resource's own create refuses scopes that are empty or outside the grammar, so a key that holds such
+        # scopes (a row stored before they were checked) is seeded: it bypasses the action, as a stored row does.
+        Ash.Seed.seed!(Demo.Identity.ApiKey, %{
+          plane: plane,
+          scopes: scopes,
+          minter_role: minter_role,
+          org_id: org_id,
+          membership_id: mbr.id,
+          expires_at: Keyword.get(opts, :expires_at) || DateTime.add(DateTime.utc_now(), 3600, :second),
+          token_digest: digest
+        })
+      else
+        {:ok, key} =
+          Demo.Identity.ApiKey
+          |> Ash.Changeset.for_create(:create, %{
+            plane: plane,
+            scopes: scopes,
+            minter_role: minter_role,
+            org_id: org_id,
+            membership_id: mbr.id,
+            # F3.4 — an explicit expiry may be passed (e.g. a past time to mint an
+            # already-expired key for the deny-on-read red path). `nil` = non-expiring.
+            expires_at: Keyword.get(opts, :expires_at)
+          })
+          # token_digest is public?: false (a credential digest, not tenant input), so it
+          # is not accepted by `create: :*`. Force-change it as the mint step would.
+          |> Ash.Changeset.force_change_attribute(:token_digest, digest)
+          |> Ash.create(authorize?: false)
+
+        key
+      end
 
     {raw, key}
   end

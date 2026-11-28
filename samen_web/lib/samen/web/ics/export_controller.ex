@@ -24,20 +24,24 @@ defmodule Samen.Web.Ics.ExportController do
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Ics
   alias Samen.Web.Mount
+  alias Samen.Web.TenantActor
 
   def export(conn, params) do
     mount = conn.assigns[:samen_mount]
     session = get_session(conn)
     org_id = CurrentOrg.resolve(mount, params, session)
 
-    do_export(conn, mount, org_id)
+    # WHO exports: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), not `Mount.scope/2`'s fixed
+    # `:member`. The export is a read open to every active member; denied -> 403, a failed lookup -> 503, never a default role.
+    do_export(conn, mount, org_id, TenantActor.scope(mount, org_id, TenantActor.conn_ref(mount, params, session)))
   end
 
-  defp do_export(conn, nil, _org_id), do: conn |> put_status(503) |> text("no mount")
-  defp do_export(conn, _mount, nil), do: conn |> put_status(404) |> text("no org")
+  defp do_export(conn, nil, _org_id, _actor), do: conn |> put_status(503) |> text("no mount")
+  defp do_export(conn, _mount, nil, _actor), do: conn |> put_status(404) |> text("no org")
+  defp do_export(conn, _mount, _org_id, :denied), do: conn |> put_status(403) |> text("no access")
+  defp do_export(conn, _mount, _org_id, {:error, :unavailable}), do: conn |> put_status(503) |> text("unavailable")
 
-  defp do_export(conn, mount, org_id) do
-    scope = Mount.scope(mount, org_id)
+  defp do_export(conn, mount, _org_id, {:ok, scope}) do
     # The ADR-004 naming convention (see Mount moduledoc): the Calendar
     # scope's blueprint always materializes its one resource at
     # `Module.concat(namespace, Event)` — no separate `:resource` route
@@ -50,6 +54,7 @@ defmodule Samen.Web.Ics.ExportController do
     {:ok, ics} = Ics.export(resource, scope, repo: mount.repo)
 
     conn
+    |> assign(:samen_acting_role, scope.actor.role)
     |> put_resp_content_type("text/calendar")
     |> put_resp_header("content-disposition", ~s(attachment; filename="calendar.ics"))
     |> send_resp(200, ics)

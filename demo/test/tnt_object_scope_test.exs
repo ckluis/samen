@@ -105,7 +105,7 @@ defmodule Demo.TntObjectScopeTest do
   end
 
   test "the one-way boundary holds on the demo (no scope resource references tnt_record)" do
-    # Sweep the demo's real scope domains (registered under :samen_core :ash_domains).
+    # Sweep the demo's real scope domains (registered under :samen_core :host_domains).
     assert Mix.Tasks.Samen.Verify.TntBoundary.relationship_violations([]) == []
     # Structural half: no FK targets a tenant-regime table on the demo DB.
     assert Mix.Tasks.Samen.Verify.TntBoundary.fk_violations(repo: "Demo.Repo") == []

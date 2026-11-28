@@ -1,0 +1,19 @@
+# SABOTAGE: kill_group_and_wait returns right after SIGKILL without waiting for the group to be gone
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: KILLWAIT after SIGKILL the driver waits until the whole group is gone
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 6e8a35b..e71d7ee 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1213,7 +1213,7 @@ class Run(object):
+ 
+         def alive():
+             return group_alive(pg) or time.time() < killed + linger
+-        while alive() and time.time() < deadline:
++        while False and alive() and time.time() < deadline:
+             time.sleep(0.05)
+         # The leader is reaped here, on the same bound (poll() reaps it): a leader that never dies must not block the
+         # driver forever in a plain wait(). It takes the same loud, record-kept path as a stuck group.

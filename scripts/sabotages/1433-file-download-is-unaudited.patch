@@ -1,0 +1,26 @@
+# SABOTAGE: the bytes controller delivers without writing the download's audit line
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/files_csv_router_test.exs
+# MUST_FAIL: a download is audited
+diff --git a/samen_web/lib/samen/web/files/bytes_controller.ex b/samen_web/lib/samen/web/files/bytes_controller.ex
+index d7364976..3b08dffb 100644
+--- a/samen_web/lib/samen/web/files/bytes_controller.ex
++++ b/samen_web/lib/samen/web/files/bytes_controller.ex
+@@ -139,12 +139,9 @@ defmodule Samen.Web.Files.BytesController do
+         content_type = content_type(file)
+ 
+         # The delivery is gated on its audit line: bytes whose download could not be recorded are not sent.
+-        case AccessAudit.record(mount, :file_download, org_id, %{
+-               actor_id: scope.actor.id,
+-               subject_id: file.id,
+-               bytes: byte_size(binary),
+-               outcome: :ok
+-             }) do
++        _ = {mount, org_id, scope}
++
++        case :ok do
+           :ok ->
+             conn
+             |> put_resp_content_type(content_type)

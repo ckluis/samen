@@ -9,13 +9,12 @@ defmodule DriftwoodWeb.BrokerSettlementCrudTest do
   use Driftwood.DataCase, async: false
 
   alias Driftwood.Reads
-  alias DriftwoodWeb.BrokerLive
 
   @org "c1230000-0000-4000-8000-0000000000e1"
   @other_org "c1230000-0000-4000-8000-0000000000e2"
 
   defp create_settlement(org, overrides \\ %{}) do
-    scope = BrokerLive.broker_scope(org)
+    scope = broker_scope(org)
 
     params =
       Map.merge(
@@ -39,7 +38,7 @@ defmodule DriftwoodWeb.BrokerSettlementCrudTest do
   end
 
   test "GREEN: a real AshPhoenix.Form create persists a settlement, visible on the panel read" do
-    scope = BrokerLive.broker_scope(@org)
+    scope = broker_scope(@org)
     assert Reads.settlements(scope) == []
 
     assert {:ok, settlement} = create_settlement(@org)
@@ -51,13 +50,13 @@ defmodule DriftwoodWeb.BrokerSettlementCrudTest do
   test "RED: cross-org read never surfaces the settlement (org-scope pin)" do
     {:ok, settlement} = create_settlement(@org)
 
-    other_scope = BrokerLive.broker_scope(@other_org)
+    other_scope = broker_scope(@other_org)
     refute Enum.any?(Reads.settlements(other_scope), &(&1.id == settlement.id))
   end
 
   test "GREEN: a real AshPhoenix.Form edit persists — the reshaped netting calc reflects it" do
     {:ok, settlement} = create_settlement(@org, %{"linehaul_cents" => "100000", "advances_cents" => "0", "factoring_rate_bps" => "0", "claim_deduction_cents" => "0", "fuel_surcharge_cents" => "0", "accessorial_cents" => "0"})
-    scope = BrokerLive.broker_scope(@org)
+    scope = broker_scope(@org)
 
     {:ok, resolved} = Reads.get_settlement(scope, settlement.id)
 
@@ -77,7 +76,7 @@ defmodule DriftwoodWeb.BrokerSettlementCrudTest do
 
   test "RED: editing another org's settlement id is a genuine :not_found" do
     {:ok, settlement} = create_settlement(@org)
-    other_scope = BrokerLive.broker_scope(@other_org)
+    other_scope = broker_scope(@other_org)
 
     assert :error = Reads.get_settlement(other_scope, settlement.id)
   end

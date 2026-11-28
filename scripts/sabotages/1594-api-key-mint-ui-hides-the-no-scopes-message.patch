@@ -1,0 +1,19 @@
+# SABOTAGE: the API-keys page answers a refused empty-scope mint with the admin-role message
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_settings_test.exs
+# MUST_FAIL: api keys: only an admin is offered the form
+diff --git a/samen_web/lib/samen/web/settings/api_keys_live.ex b/samen_web/lib/samen/web/settings/api_keys_live.ex
+index 892bca57..a9afffd7 100644
+--- a/samen_web/lib/samen/web/settings/api_keys_live.ex
++++ b/samen_web/lib/samen/web/settings/api_keys_live.ex
+@@ -286,7 +286,7 @@ defmodule Samen.Web.Settings.ApiKeysLive do
+       {:error, :unavailable} ->
+         {:noreply, assign(socket, mint_error: "Couldn't mint a key right now. Nothing was created — try again.")}
+ 
+-      {:error, :no_scopes} ->
++      {:error, :no_scopes_sabotaged} ->
+         {:noreply,
+          assign(socket,
+            mint_error: "Choose at least one scope (read or write): a key with no scopes cannot do anything. Nothing was created."

@@ -72,7 +72,7 @@ defmodule Mix.Tasks.Samen.Verify.Indexes do
   def run(args) do
     Mix.Task.run("app.start")
 
-    {opts, _rest, _} = OptionParser.parse(args, strict: [domain: :keep])
+    opts = Samen.Gen.Args.parse!("samen.verify.indexes", args, [domain: :keep])
 
     unmounted = unmounted()
 

@@ -1,0 +1,19 @@
+# SABOTAGE: foreign_write_scopes does not resolve alias TenantActor, as: X
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_guard_test.exs
+# MUST_FAIL: a write_scope call through an `alias … TenantActor, as: X` is counted
+diff --git a/samen_web/lib/samen/web/tenant_actor/guard.ex b/samen_web/lib/samen/web/tenant_actor/guard.ex
+index 166159a2..23ccf3e0 100644
+--- a/samen_web/lib/samen/web/tenant_actor/guard.ex
++++ b/samen_web/lib/samen/web/tenant_actor/guard.ex
+@@ -165,7 +165,7 @@ defmodule Samen.Web.TenantActor.Guard do
+       |> Enum.join("\n")
+ 
+     # the module is reached as `TenantActor` or as every name an `alias … TenantActor, as: X` gives it
+-    names = ["TenantActor" | for([_, n] <- Regex.scan(@tenant_actor_alias_as, code), do: n)] |> Enum.uniq()
++    names = ["TenantActor"]
+ 
+     args =
+       for name <- names, a <- calls_qualified(code, name <> ".write_scope"), do: Enum.map(a, &String.trim/1)

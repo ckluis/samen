@@ -1,0 +1,21 @@
+# SABOTAGE: the ApiKey resource's own create stops validating scopes, so an empty or malformed scope map 
+#   mints a key
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_key_scope_mint_validation_test.exs
+# MUST_FAIL: RED: the resource's :create refuses an empty scope map
+# MUST_FAIL: RED: :create refuses scope keys and values outside the grammar
+diff --git a/samen_core/lib/samen/scopes/identity/blueprint.ex b/samen_core/lib/samen/scopes/identity/blueprint.ex
+index b4563b3c..d17da6b3 100644
+--- a/samen_core/lib/samen/scopes/identity/blueprint.ex
++++ b/samen_core/lib/samen/scopes/identity/blueprint.ex
+@@ -788,7 +788,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
+ 
+         # A key is created only with scopes inside the grammar and at least one of them (`Samen.Scope.ApiKey.Grammar`).
+         validations do
+-          validate(Samen.Scope.ApiKey.ValidScopes, on: :create)
++          validate(present(:minter_role), on: :create)
+         end
+ 
+         actions do

@@ -21,6 +21,7 @@ defmodule Samen.Web.Auth.InvitationTest do
        `:authorized_orgs` `resolve/3` prod-path fallback); POSITIVE CONTROL:
        the accepted invitee's credential CAN.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -329,7 +330,7 @@ defmodule Samen.Web.Auth.InvitationTest do
       [listed] = Invitations.list(mount, scope)
       refute match?(%Samen.Masked{}, listed.email)
       assert inspect(listed.email) =~ email
-      refute inspect(listed.email) =~ "vt_"
+      refute_vault_token(inspect(listed.email))
     end
 
     test "RED: the operator-without-grant plane masks the invitee email — ••••, never plaintext, never vt_*",

@@ -193,7 +193,7 @@ defmodule Samen.NoPlaintextPii.Context do
   end
 
   defp configured_domains do
-    (Application.get_env(:samen_core, :ash_domains, []) ++
+    (Samen.HostDomains.registry() ++
        Application.get_env(:ash, :domains, []))
     |> Enum.uniq()
   end

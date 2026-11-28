@@ -52,8 +52,7 @@ defmodule Mix.Tasks.Samen.Verify.MetricLabels do
 
   @impl Mix.Task
   def run(argv) do
-    {opts, _rest, _invalid} =
-      OptionParser.parse(argv, strict: [module: :string])
+    opts = Samen.Gen.Args.parse!("samen.verify.metric_labels", argv, [module: :string])
 
     modules =
       case Keyword.get(opts, :module) do

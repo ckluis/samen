@@ -11,6 +11,7 @@ defmodule Samen.Web.CRMDetailRenderTest do
     4. The new `Reads` functions are covered, including `create_activity` respecting OrgScope +
        the kernel `SameOrgFk` (a cross-org FK is REFUSED — a negative test).
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.Web.CRM.Reads
@@ -75,7 +76,7 @@ defmodule Samen.Web.CRMDetailRenderTest do
     refute html =~ Seeds.contact_email()
     refute html =~ Seeds.contact_phone()
     # No vault token leaks.
-    refute html =~ "vt_"
+    refute_vault_token(html)
     refute html =~ "pii_"
   end
 

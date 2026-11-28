@@ -40,6 +40,9 @@ defmodule Samen.Web.Files.PreviewLive do
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Files.Reads
   alias Samen.Web.Mount
+  alias Samen.Web.TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
+  require TenantActor
 
   @impl true
   def mount(params, session, socket) do
@@ -47,36 +50,60 @@ defmodule Samen.Web.Files.PreviewLive do
     org_id = CurrentOrg.resolve(socket.assigns[:samen_mount], params, session)
     file_id = Map.get(params, "id")
 
-    {:ok, assign(socket, org_id: org_id, file_id: file_id, file: nil, not_found: false, load_error: nil)}
+    {:ok,
+     assign(socket,
+       org_id: org_id,
+       file_id: file_id,
+       file: nil,
+       not_found: false,
+       load_error: nil,
+       acting_scope: nil,
+       actor_state: :ok,
+       can_write: false,
+       can_admin: false
+     )}
   end
 
   @impl true
   def handle_params(params, uri, socket) do
     org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
     file_id = Map.get(params, "id")
-    mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
 
-    socket =
-      socket
-      |> assign(org_id: org_id, file_id: file_id, return_to: return_path(uri))
-      |> load_file(mount, scope, file_id)
-
-    {:noreply, socket}
+    {:noreply, load(assign(socket, return_to: return_path(uri)), org_id, file_id)}
   end
 
+  # WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never `Mount.scope/2`'s fixed
+  # `:member`. A denial or a failed lookup is a STATE of the page: the file is not read. Previewing is a read open to every
+  # active member (the per-plane masking of the filename and the byte gate are unchanged).
   @doc false
-  def load(socket, org_id, file_id) do
-    mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
-    load_file(assign(socket, org_id: org_id, file_id: file_id), mount, scope, file_id)
+  def load(socket, nil, file_id) do
+    assign(socket, org_id: nil, file_id: file_id, file: nil, not_found: true, load_error: nil, acting_scope: nil, actor_state: :ok)
   end
+
+  def load(socket, org_id, file_id) do
+    socket = assign(socket, org_id: org_id, file_id: file_id)
+
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_file(socket, socket.assigns.samen_mount, socket.assigns.acting_scope, file_id)
+      {:refused, socket} -> load_refused(socket)
+    end
+  end
+
+  # Acting again with no URL to patch to (the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _, file_id: _}} = socket), do: load(socket, socket.assigns.org_id, socket.assigns.file_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event: nothing the page loaded is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket)
+
+  defp load_refused(socket), do: assign(socket, file: nil, not_found: false, load_error: nil)
 
   # -- render ------------------------------------------------------------------
 
   @impl true
   def render(assigns) do
-    assigns = assign_new(assigns, :load_error, fn -> nil end)
+    assigns = assigns |> assign_new(:load_error, fn -> nil end) |> assign_new(:actor_state, fn -> :ok end)
 
     ~H"""
     <div id="files-preview">
@@ -91,6 +118,9 @@ defmodule Samen.Web.Files.PreviewLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
+        <%= if @actor_state in [:denied, :unavailable] do %>
+          <.actor_refused state={@actor_state} title="Files" nothing="there is no file to show" />
+        <% else %>
         <%= if @load_error do %>
           <div class="wrap">
             <.error_state class="file-error" body={@load_error} retry_event="retry_load" />
@@ -165,6 +195,7 @@ defmodule Samen.Web.Files.PreviewLive do
           </div>
         <% end %>
         <% end %>
+        <% end %>
       </.app_shell>
     </div>
     """
@@ -184,9 +215,10 @@ defmodule Samen.Web.Files.PreviewLive do
   end
 
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("retry_load", _params, socket) do
-    %{samen_mount: mount, org_id: org_id, file_id: file_id} = socket.assigns
-    {:noreply, load_file(socket, mount, Mount.scope(mount, org_id), file_id)}
+    {:noreply, load(socket, socket.assigns.org_id, socket.assigns.file_id)}
   end
 
   defp crumbs(mount, org_id, nil),

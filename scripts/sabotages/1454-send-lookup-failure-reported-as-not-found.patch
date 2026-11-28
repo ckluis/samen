@@ -1,0 +1,19 @@
+# SABOTAGE: a failed subscriber lookup in :create_checked is folded into 'subscriber not found'
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/marketing_scope_policy_matrix_test.exs
+# MUST_FAIL: an unreadable lookup is a distinct, reported error
+diff --git a/samen_core/lib/samen/scopes/marketing/blueprint.ex b/samen_core/lib/samen/scopes/marketing/blueprint.ex
+index 0fff216e..54c7a8c9 100644
+--- a/samen_core/lib/samen/scopes/marketing/blueprint.ex
++++ b/samen_core/lib/samen/scopes/marketing/blueprint.ex
+@@ -549,7 +549,7 @@ defmodule Samen.Scopes.Marketing.Blueprint do
+                   reason
+                 )
+ 
+-                :lookup_failed
++                nil
+             end
+ 
+           cond do

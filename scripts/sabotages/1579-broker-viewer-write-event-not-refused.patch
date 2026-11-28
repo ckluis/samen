@@ -1,0 +1,22 @@
+# SABOTAGE: The broker console lets a viewer's crafted write event through to the write path
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/broker_role_test.exs
+# MUST_FAIL: a viewer's page renders no write control and refuses a crafted write event
+diff --git a/driftwood/lib/driftwood_web/broker_live.ex b/driftwood/lib/driftwood_web/broker_live.ex
+index 9711d08a..d39cbfe2 100644
+--- a/driftwood/lib/driftwood_web/broker_live.ex
++++ b/driftwood/lib/driftwood_web/broker_live.ex
+@@ -896,11 +896,6 @@ defmodule DriftwoodWeb.BrokerLive do
+ 
+   # Every event that opens a form or writes needs the `:member` role: a viewer's page renders none of those controls, and
+   # a crafted event is answered with the page's own flash (the role is re-resolved before every event).
+-  @write_events ~w(new_load save_load edit_load save_edit_load delete_load new_driver save_new_driver edit_driver
+-                   save_edit_driver new_settlement save_new_settlement edit_settlement save_edit_settlement)
+-  def handle_event(event, _params, %{assigns: %{can_write: false}} = socket) when event in @write_events,
+-    do: {:noreply, put_flash(socket, :error, "Your role can view this brokerage but not change it.")}
+-
+   def handle_event("dispatch", %{"driver" => driver_id}, socket) do
+     case dispatch_decision(socket.assigns.acting_scope, driver_id) do
+       {:error, :not_found} -> {:noreply, put_flash(socket, :error, "driver not found")}

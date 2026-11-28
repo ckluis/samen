@@ -80,6 +80,7 @@ defmodule Samen.AI.AiPromptMaskingRedTeamTest do
   `test/meta/scripted_async_isolation_test.exs` fails any `async: true` module that
   references `Scripted`, so the trap cannot be re-armed here.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: true
   use Samen.MaskingCase
 
@@ -141,7 +142,7 @@ defmodule Samen.AI.AiPromptMaskingRedTeamTest do
       recorded = recorded_text()
 
       refute recorded =~ @canary, "EG1/EG2 canary PLAINTEXT reached the provider"
-      refute recorded =~ "vt_", "EG1/EG2 vt_ token reached the provider"
+      refute_vault_token(recorded, "EG1/EG2 vt_ token reached the provider")
       assert recorded =~ mask(), "the vault field must be present-but-masked (••••)"
 
       # Anti-tautology: the same refute WOULD catch a real leak (the scan is refutable).
@@ -330,7 +331,7 @@ defmodule Samen.AI.AiPromptMaskingRedTeamTest do
       assert recorded =~ "tool_call: account_lookup", "the tool call itself must transmit"
       assert recorded =~ mask(), "the tool-arg vault value must be present-but-masked (••••)"
       refute recorded =~ @canary, "EG2 tool-args canary PLAINTEXT reached the provider"
-      refute recorded =~ "vt_", "EG2 tool-args vt_ token reached the provider"
+      refute_vault_token(recorded, "EG2 tool-args vt_ token reached the provider")
     end
 
     test "hand-assembled tool args (tuple / keyword / map) are REFUSED fail-closed" do
@@ -422,7 +423,7 @@ defmodule Samen.AI.AiPromptMaskingRedTeamTest do
 
         assert mask() in payload.segments
         refute Enum.any?(payload.segments, &(to_string(&1) =~ @canary))
-        refute Enum.any?(payload.segments, &(to_string(&1) =~ "vt_"))
+        Enum.each(payload.segments, &refute_vault_token(to_string(&1)))
       end
     end
 
@@ -466,7 +467,7 @@ defmodule Samen.AI.AiPromptMaskingRedTeamTest do
              )
 
     refute Enum.any?(payload.segments, &(to_string(&1) =~ @canary))
-    refute Enum.any?(payload.segments, &(to_string(&1) =~ "vt_"))
+    Enum.each(payload.segments, &refute_vault_token(to_string(&1)))
     assert mask() in payload.segments
   end
 
@@ -644,7 +645,7 @@ defmodule Samen.AI.AiPromptMaskingRedTeamTest do
         end)
 
       refute log =~ @canary
-      refute log =~ "vt_"
+      refute_vault_token(log)
     end
 
     test "a telemetry event carrying the sealed payload as metadata cannot spill it",
@@ -666,7 +667,7 @@ defmodule Samen.AI.AiPromptMaskingRedTeamTest do
 
       assert_receive {:telemetry_meta, meta_str}
       refute meta_str =~ @canary
-      refute meta_str =~ "vt_"
+      refute_vault_token(meta_str)
     end
   end
 
@@ -727,7 +728,7 @@ defmodule Samen.AI.AiPromptMaskingRedTeamTest do
     assert is_binary(prompt) and prompt != "",
            "the summarizer prompt must be a non-empty compile-time binary (ADR-048 §5#2)"
 
-    refute prompt =~ "vt_", "EG5: the summarizer prompt commits a raw vault token"
+    refute_vault_token(prompt, "EG5: the summarizer prompt commits a raw vault token")
 
     # The span the summarizer reads is ORDINARY already-masked history (§5#1: "its input is
     # already-masked history, so no new egress class opens"), sealed through the SAME
@@ -762,8 +763,8 @@ defmodule Samen.AI.AiPromptMaskingRedTeamTest do
     refute recorded =~ @canary,
            "the canary PLAINTEXT reached the provider on ADR-048 §5's summarizer surface"
 
-    refute recorded =~ "vt_",
-           "a vault token reached the provider on ADR-048 §5's summarizer surface"
+    refute_vault_token(recorded,
+           "a vault token reached the provider on ADR-048 §5's summarizer surface")
   end
 
   # --------------------------------------------------------------------------------------

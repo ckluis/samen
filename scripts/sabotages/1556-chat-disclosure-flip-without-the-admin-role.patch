@@ -1,0 +1,31 @@
+# SABOTAGE: a member's crafted disclosure toggle flips the org-wide setting
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_chat_test.exs
+# MUST_FAIL: the org-wide disclosure flip is an admin's
+diff --git a/samen_web/lib/samen/web/chat.ex b/samen_web/lib/samen/web/chat.ex
+index 0adfaf09..ed3f79d3 100644
+--- a/samen_web/lib/samen/web/chat.ex
++++ b/samen_web/lib/samen/web/chat.ex
+@@ -142,6 +142,7 @@ defmodule Samen.Web.Chat do
+     # its `:admin`. Still `OrgScope`-confined.
+     org_id = org_id_of(acting)
+     admin_scope = TenantActor.write_scope(mount, org_id, acting)
++    admin_scope = %{admin_scope | actor: Map.put(admin_scope.actor, :role, :admin)}
+     resource = Mount.resource(mount, ChatDisclosureSetting)
+ 
+     case Reads.disclosure_setting(mount, admin_scope) do
+diff --git a/samen_web/lib/samen/web/chat/threads_live.ex b/samen_web/lib/samen/web/chat/threads_live.ex
+index 42042c4f..27c5e7a3 100644
+--- a/samen_web/lib/samen/web/chat/threads_live.ex
++++ b/samen_web/lib/samen/web/chat/threads_live.ex
+@@ -212,7 +212,7 @@ defmodule Samen.Web.Chat.ThreadsLive do
+       not tenant_plane?(socket) ->
+         {:noreply, socket}
+ 
+-      not TenantActor.admin?(socket) ->
++      not (TenantActor.admin?(socket) or true) ->
+         {:noreply, assign(socket, flash_note: disclosure_error_note(%Ash.Error.Forbidden{}))}
+ 
+       true ->

@@ -1,0 +1,20 @@
+# SABOTAGE: the settings mint stops checking that a scope names a family and type the app exposes, so an 
+#   unknown family mints a useless key
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/api_keys_hygiene_test.exs
+# MUST_FAIL: RED: a malformed scope, an unknown family and an unknown type are refused
+diff --git a/samen_web/lib/samen/web/settings/api_keys.ex b/samen_web/lib/samen/web/settings/api_keys.ex
+index 60137035..01d0272e 100644
+--- a/samen_web/lib/samen/web/settings/api_keys.ex
++++ b/samen_web/lib/samen/web/settings/api_keys.ex
+@@ -109,7 +109,7 @@ defmodule Samen.Web.Settings.ApiKeys do
+ 
+   defp validate_requested(mount, requested, opts) do
+     with :ok <- Grammar.validate(requested) do
+-      Grammar.validate_membership(requested, Keyword.get_lazy(opts, :known_scopes, fn -> known_scopes(mount) end))
++      Grammar.validate_membership(requested, %{"all" => []}) |> then(fn _ -> :ok end)
+     end
+   end
+ 

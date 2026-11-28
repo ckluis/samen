@@ -1,0 +1,45 @@
+# SABOTAGE: the API-key scope policy matches every request and authorizes, so an action no declared policy 
+#   covers is allowed
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_key_scope_uncovered_test.exs
+# MUST_FAIL: RED: a read, create, update, destroy and generic action are each forbidden for every actor
+# MUST_FAIL: RED: it is deny-all for every actor
+diff --git a/samen_core/lib/samen/transformers/api_key_scope_policy.ex b/samen_core/lib/samen/transformers/api_key_scope_policy.ex
+index a5312793..2b2cda15 100644
+--- a/samen_core/lib/samen/transformers/api_key_scope_policy.ex
++++ b/samen_core/lib/samen/transformers/api_key_scope_policy.ex
+@@ -25,6 +25,10 @@ defmodule Samen.Transformers.ApiKeyScopePolicy do
+ 
+   @json_api Module.concat(["AshJsonApi", "Resource"])
+ 
++  @impl true
++  def after?(Samen.Transformers.RevealActions), do: true
++  def after?(_), do: false
++
+   @impl true
+   def before?(_), do: false
+ 
+@@ -44,14 +48,17 @@ defmodule Samen.Transformers.ApiKeyScopePolicy do
+ 
+       always = Ash.Policy.Check.Builtins.always()
+ 
+-      {:ok, forbid} =
+-        Transformer.build_entity(Ash.Policy.Authorizer, [:policies, :policy], :forbid_if, check: always)
++      {:ok, forbid_unless} =
++        Transformer.build_entity(Ash.Policy.Authorizer, [:policies, :policy], :forbid_unless, check: {Samen.Policy.ApiKeyScope, []})
++
++      {:ok, allow} =
++        Transformer.build_entity(Ash.Policy.Authorizer, [:policies, :policy], :authorize_if, check: always)
+ 
+       {:ok, policy} =
+         Transformer.build_entity(Ash.Policy.Authorizer, [:policies], :policy,
+-          condition: {Samen.Policy.ApiKeyScopeRefused, []},
++          condition: always,
+           description: "an API key's declared scopes do not permit this action",
+-          policies: [forbid]
++          policies: [forbid_unless, allow]
+         )
+ 
+       {:ok, Transformer.add_entity(dsl_state, [:policies], policy)}

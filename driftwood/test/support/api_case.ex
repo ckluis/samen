@@ -69,17 +69,33 @@ defmodule Driftwood.ApiCase do
     # LOWER of `minter_role` and that membership's role — so the minter is a real user holding `membership_role`.
     {user_id, _mbr} = mk_minter(org_id, Keyword.get(opts, :membership_role, minter_role))
 
-    {:ok, key} =
-      Driftwood.Freight.ApiKey
-      |> Ash.Changeset.for_create(:create, %{
-        plane: plane,
-        scopes: scopes,
-        minter_role: minter_role,
-        minter_user_id: user_id,
-        org_id: org_id
-      })
-      |> Ash.Changeset.force_change_attribute(:token_digest, digest)
-      |> Ash.create(authorize?: false)
+    key =
+      if Samen.Scope.ApiKey.Grammar.validate(scopes) != :ok do
+        # The resource's own create refuses scopes that are empty or outside the grammar, so a key that holds such
+        # scopes (a row stored before they were checked) is seeded: it bypasses the action, as a stored row does.
+        Ash.Seed.seed!(Driftwood.Freight.ApiKey, %{
+          plane: plane,
+          scopes: scopes,
+          minter_role: minter_role,
+          minter_user_id: user_id,
+          org_id: org_id,
+          token_digest: digest
+        })
+      else
+        {:ok, key} =
+          Driftwood.Freight.ApiKey
+          |> Ash.Changeset.for_create(:create, %{
+            plane: plane,
+            scopes: scopes,
+            minter_role: minter_role,
+            minter_user_id: user_id,
+            org_id: org_id
+          })
+          |> Ash.Changeset.force_change_attribute(:token_digest, digest)
+          |> Ash.create(authorize?: false)
+
+        key
+      end
 
     {raw, key}
   end

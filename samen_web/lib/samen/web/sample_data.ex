@@ -58,22 +58,30 @@ defmodule Samen.Web.SampleData do
   @doc """
   Load sample records for `org_id` on this mount — guarded, idempotent, audited
   (AC-G5-3). Returns `{:ok, %{...counts}}`, `{:ok, :already_loaded}`, or a refusal:
-  `{:error, :operator_plane | :no_org | :disabled | {:no_sample_data, kind}}`.
+  `{:error, :operator_plane | :no_org | :forbidden | :disabled | {:no_sample_data, kind}}`.
+
+  `scope` is the ACTING person's own (`Samen.Web.TenantActor`): loading sample data is an admin's (an org-wide write
+  the kernel only checks the org of), so a scope below `:admin` is refused (`:forbidden`) before anything is written, and
+  the seed runs, and is audited, as that person.
   """
-  def load(%Mount{plane: %Plane{kind: :operator}}, _org_id), do: {:error, :operator_plane}
-  def load(_mount, nil), do: {:error, :no_org}
+  def load(%Mount{plane: %Plane{kind: :operator}}, _org_id, _scope), do: {:error, :operator_plane}
+  def load(_mount, nil, _scope), do: {:error, :no_org}
 
   # The kinds a per-kind seeder exists for (the offer?/1 render gate mirrors this).
   @sample_kinds [:crm]
 
-  def load(%Mount{} = mount, org_id) do
+  def load(%Mount{} = mount, org_id, %Samen.Scope{} = scope) do
     cond do
+      not Samen.Web.TenantActor.administrable?(mount, scope) -> {:error, :forbidden}
       not enabled?() -> {:error, :disabled}
       mount.scope_kind not in @sample_kinds -> {:error, {:no_sample_data, mount.scope_kind}}
-      not FirstRun.first_run?(mount, org_id) -> {:ok, :already_loaded}
-      true -> seed(mount.scope_kind, mount, org_id)
+      not FirstRun.first_run?(mount, org_id, scope) -> {:ok, :already_loaded}
+      true -> seed(mount.scope_kind, mount, org_id, scope)
     end
   end
+
+  # Nobody is acting (no scope): nothing is written.
+  def load(%Mount{}, _org_id, _no_scope), do: {:error, :forbidden}
 
   # -- per-kind synthetic seeds (all writes through the REAL Ash create actions) ----
 
@@ -91,9 +99,7 @@ defmodule Samen.Web.SampleData do
     {"Imri", "Solano", "Account Manager", "imri.solano@sample.invalid", "+1 555 0103", 1}
   ]
 
-  defp seed(:crm, mount, org_id) do
-    scope = Mount.scope(mount, org_id)
-
+  defp seed(:crm, mount, org_id, scope) do
     companies =
       for attrs <- @sample_companies do
         Mount.resource(mount, Company)

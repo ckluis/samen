@@ -18,6 +18,7 @@ defmodule Samen.Web.ReplayPlayerTest do
   stops the next batch), R10 (one token-only audit row per open), tenant authz (non-admin,
   cross-org), inert rendering (no phx- binding can run).
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -228,7 +229,7 @@ defmodule Samen.Web.ReplayPlayerTest do
 
       [name] = for r <- socket.assigns.refs, r.attribute == "full_name", do: r.outcome
       assert name == :clear
-      refute srcdoc =~ "vt_"
+      refute_vault_token(srcdoc)
       # The page labels the values as CURRENT.
       assert page(socket) =~ "values are CURRENT"
     end
@@ -244,7 +245,7 @@ defmodule Samen.Web.ReplayPlayerTest do
 
       assert srcdoc =~ @first
       assert Enum.all?(socket.assigns.refs, &(&1.outcome == :clear))
-      refute srcdoc =~ "vt_"
+      refute_vault_token(srcdoc)
     end
 
     test "RED operator WITHOUT a grant: •••• in the frame, never plaintext, never a vt_ token", ctx do
@@ -258,7 +259,7 @@ defmodule Samen.Web.ReplayPlayerTest do
       # The whole player page (srcdoc attribute included) carries no plaintext and no token.
       outer = page(socket)
       for s <- sentinels(), do: refute(outer =~ s)
-      refute outer =~ "vt_"
+      refute_vault_token(outer)
     end
 
     test "SABOTAGE twin: the mask scan is refutable — the same recording flipped to the tenant plane leaks",

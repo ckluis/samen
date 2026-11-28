@@ -91,6 +91,7 @@ defmodule Samen.AI.AgentToolsTest do
 
   Anti-tautology: every red assertion is paired with a positive control.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
   use Samen.AgentCase
 
@@ -420,7 +421,7 @@ defmodule Samen.AI.AgentToolsTest do
       text = all_sent_text()
       assert text =~ "email: " <> @mask, "the vault field must be present-but-masked"
       refute text =~ @email_canary, "EG2 leak: vault plaintext reached the provider"
-      refute text =~ "vt_", "EG2 leak: a vault token reached the provider"
+      refute_vault_token(text, "EG2 leak: a vault token reached the provider")
 
       # Mask-by-OMISSION for the plaintext-PII freeform column: `title` is not
       # condition-eligible, so it is not even present to render.
@@ -469,7 +470,7 @@ defmodule Samen.AI.AgentToolsTest do
       assert_history_accumulated!(2, ["tool_error: invalid_args"])
 
       # The token itself never egressed on ANY turn and never landed at rest.
-      refute all_sent_text() =~ "vt_"
+      refute_vault_token(all_sent_text())
       assert_no_text_at_rest!(run, [@vt_token])
       assert_transcript_vaulted_at_rest!(run, [String.slice(@vt_token, 3..-1//1)])
     end
@@ -847,7 +848,7 @@ defmodule Samen.AI.AgentToolsTest do
 
       # Nothing executed, nothing egressed, nothing at rest.
       assert Ash.get!(Run, run.id, authorize?: false).tool_calls_used == 0
-      refute all_sent_text() =~ "vt_"
+      refute_vault_token(all_sent_text())
       assert_no_text_at_rest!(run, [@vt_token])
       assert_transcript_vaulted_at_rest!(run, [String.slice(@vt_token, 3..-1//1)])
     end
@@ -880,16 +881,16 @@ defmodule Samen.AI.AgentToolsTest do
       joined = Enum.join(lines, "\n")
 
       assert joined =~ "[unrenderable:note]"
-      refute joined =~ "vt_"
+      refute_vault_token(joined)
       refute joined =~ poisoned
 
       # The call echo (§4.3#6: "rendered to a single vt_-FREE binary") and a poisoned KEY.
       echo = ToolResult.render_call("probe", %{"q" => poisoned})
       assert echo == "tool_call: probe q=[unrenderable:q]"
-      refute echo =~ "vt_"
+      refute_vault_token(echo)
 
       keyed = ToolResult.render({:ok, %{@vt_token => "x"}}, actor: %{})
-      refute Enum.join(keyed, "\n") =~ "vt_"
+      refute_vault_token(Enum.join(keyed, "\n"))
 
       # A sentinel hiding PAST the 500-byte truncation boundary is still caught (the scan
       # runs BEFORE truncation — a leak must not be prevented only by luck).
@@ -918,7 +919,7 @@ defmodule Samen.AI.AgentToolsTest do
         assert [%{error_kind: nil, tool_kind: "a4_sentinel_probe"}, _] = turn_rows(run)
 
         # THE EGRESS PROPERTY, undiminished: no sentinel reached the provider, on any turn.
-        refute all_sent_text() =~ "vt_"
+        refute_vault_token(all_sent_text())
         assert all_sent_text() =~ "note: [unrenderable:note]"
         assert_masked_only_payloads!()
         assert_no_text_at_rest!(run, [@vt_token])

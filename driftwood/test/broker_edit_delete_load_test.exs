@@ -20,7 +20,7 @@ defmodule DriftwoodWeb.BrokerEditDeleteLoadTest do
 
   defp seeded_load(org) do
     {:ok, load} =
-      BrokerLive.create_load(org, %{
+      BrokerLive.create_load(broker_scope(org), %{
         "name" => "BRL-9001 dry van",
         "lane" => "TX->CA",
         "rate" => "3200.00",
@@ -36,7 +36,7 @@ defmodule DriftwoodWeb.BrokerEditDeleteLoadTest do
     load = seeded_load(@org)
 
     assert {:ok, updated} =
-             BrokerLive.update_load(@org, load.id, %{
+             BrokerLive.update_load(broker_scope(@org), load.id, %{
                "name" => "BRL-9001 dry van (rebooked)",
                "lane" => "TX->AZ",
                "rate" => "3400.50",
@@ -49,7 +49,7 @@ defmodule DriftwoodWeb.BrokerEditDeleteLoadTest do
     assert Samen.Type.Money.cents(updated.value) == 340_050
 
     # The edit is visible on the SAME org-scoped read the loads panel renders.
-    scope = BrokerLive.broker_scope(@org)
+    scope = broker_scope(@org)
     board = Reads.load_board(scope)
     assert Enum.any?(board, &(&1.id == load.id and &1.name == "BRL-9001 dry van (rebooked)" and &1.__lane__ == "TX->AZ"))
   end
@@ -58,10 +58,10 @@ defmodule DriftwoodWeb.BrokerEditDeleteLoadTest do
     load = seeded_load(@org)
 
     assert {:error, _changeset} =
-             BrokerLive.update_load(@org, load.id, %{"name" => "", "status" => "open"})
+             BrokerLive.update_load(broker_scope(@org), load.id, %{"name" => "", "status" => "open"})
 
     # Unchanged — the refused edit did NOT persist.
-    scope = BrokerLive.broker_scope(@org)
+    scope = broker_scope(@org)
     board = Reads.load_board(scope)
     assert Enum.any?(board, &(&1.id == load.id and &1.name == "BRL-9001 dry van"))
   end
@@ -70,10 +70,10 @@ defmodule DriftwoodWeb.BrokerEditDeleteLoadTest do
     victim_load = seeded_load(@org)
 
     assert {:error, :not_found} =
-             BrokerLive.update_load(@other_org, victim_load.id, %{"name" => "STOLEN", "status" => "open"})
+             BrokerLive.update_load(broker_scope(@other_org), victim_load.id, %{"name" => "STOLEN", "status" => "open"})
 
     # The victim org's load is UNCHANGED.
-    scope = BrokerLive.broker_scope(@org)
+    scope = broker_scope(@org)
     board = Reads.load_board(scope)
     assert Enum.any?(board, &(&1.id == victim_load.id and &1.name == "BRL-9001 dry van"))
     refute Enum.any?(board, &(&1.name == "STOLEN"))
@@ -83,10 +83,10 @@ defmodule DriftwoodWeb.BrokerEditDeleteLoadTest do
 
   test "GREEN: delete_load/2 soft-deletes — the load disappears from the load board" do
     load = seeded_load(@org)
-    scope = BrokerLive.broker_scope(@org)
+    scope = broker_scope(@org)
     assert Enum.any?(Reads.load_board(scope), &(&1.id == load.id))
 
-    assert {:ok, destroyed} = BrokerLive.delete_load(@org, load.id)
+    assert {:ok, destroyed} = BrokerLive.delete_load(broker_scope(@org), load.id)
     assert destroyed.id == load.id
 
     refute Enum.any?(Reads.load_board(scope), &(&1.id == load.id))
@@ -106,14 +106,14 @@ defmodule DriftwoodWeb.BrokerEditDeleteLoadTest do
   test "RED: deleting another org's load id is a genuine :not_found — nothing destroyed" do
     victim_load = seeded_load(@org)
 
-    assert {:error, :not_found} = BrokerLive.delete_load(@other_org, victim_load.id)
+    assert {:error, :not_found} = BrokerLive.delete_load(broker_scope(@other_org), victim_load.id)
 
     # The victim org's load survives, undeleted.
-    scope = BrokerLive.broker_scope(@org)
+    scope = broker_scope(@org)
     assert Enum.any?(Reads.load_board(scope), &(&1.id == victim_load.id))
   end
 
   test "RED: deleting an unknown load id is a genuine :not_found" do
-    assert {:error, :not_found} = BrokerLive.delete_load(@org, Ecto.UUID.generate())
+    assert {:error, :not_found} = BrokerLive.delete_load(broker_scope(@org), Ecto.UUID.generate())
   end
 end

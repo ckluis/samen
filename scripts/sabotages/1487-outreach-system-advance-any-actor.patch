@@ -1,0 +1,21 @@
+# SABOTAGE: Outreach :system_advance (the internal state setter) is authorized for any actor again, so a 
+#   member can complete or stop another contact's enrollment
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/crm/sequence_send_test.exs
+# MUST_FAIL: a tenant actor of ANY role cannot run :system_advance or :advance_due
+# MUST_FAIL: a tenant actor of ANY role cannot run the cross-org :due_scan
+diff --git a/samen_core/lib/samen/scopes/outreach/blueprint.ex b/samen_core/lib/samen/scopes/outreach/blueprint.ex
+index 58fd6baa..8144bb07 100644
+--- a/samen_core/lib/samen/scopes/outreach/blueprint.ex
++++ b/samen_core/lib/samen/scopes/outreach/blueprint.ex
+@@ -372,7 +372,7 @@ defmodule Samen.Scopes.Outreach.Blueprint do
+           # internal state setter `Samen.Sequences.transition/2` runs as an `authorize?: false` call (the
+           # `ApiKey.mark_used` / `File.promote` precedent).
+           policy action([:advance_due, :due_scan, :system_advance]) do
+-            forbid_if(always())
++            authorize_if(always())
+           end
+ 
+           policy action_type(:read) do

@@ -422,24 +422,9 @@ defmodule Samen.Scopes.Identity.Blueprint do
 
           # The declared reveal action (operator-plane plaintext under a grant).
           action :reveal_user, :map do
-            argument(:actor_id, :string, allow_nil?: false)
             argument(:subject_id, :string, allow_nil?: false)
 
-            run(fn input, _ctx ->
-              ctx = %Samen.Reveal.Context{
-                actor: input.arguments.actor_id,
-                subject_id: input.arguments.subject_id,
-                resource: __MODULE__,
-                action: :reveal_user,
-                label: :emails
-              }
-
-              if Samen.Reveal.grant_checker().granted?(ctx) do
-                {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-              else
-                {:error, :denied}
-              end
-            end)
+            run({Samen.Reveal.GrantProbe, label: :emails})
           end
         end
 
@@ -466,7 +451,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
           # inside the run/2 is the real control. Allow it to run for any actor —
           # the grant check denies by default.
           policy action(:reveal_user) do
-            authorize_if(always())
+            authorize_if(actor_present())
           end
         end
       end
@@ -749,12 +734,12 @@ defmodule Samen.Scopes.Identity.Blueprint do
             description: "Kind of key, tenant by default: tenant or operator; no action changes it after creation. A host that authenticates keys from this table gives the request actor this plane; where PII is resolved through Samen.Api.PiiResolution an operator key gets a vault-routed field only under a reveal grant."
           )
 
-          # Declared scopes as a bounded map: %{family => [:read,:write]}. The
-          # effective authority is the intersection with the minter's role at use.
+          # Declared scopes as a bounded map: %{scope => [:read,:write]} (`all`, a family, or
+          # `family.type`). Over the JSON:API its authority is the lower of these scopes and the minter's role.
           attribute(:scopes, :map,
             public?: true,
             default: %{},
-            description: "Requested scopes as a map of resource family to read and write, empty by default; no action changes it after creation. Where a host mounts the settings surface, its mint trims them to the minter's role. A key's authority at use is its effective role (see minter_role)."
+            description: "Scopes: all, a family (crm) or family.type (crm.contact), each read, write or both. A request over the JSON:API needs a scope that covers the action and a role that allows it; no scopes authorizes nothing. MCP does not read them. No action changes it; create refuses an empty or malformed set."
           )
 
           # The role of the minting membership — the actor ceiling this key inherits.
@@ -799,6 +784,11 @@ defmodule Samen.Scopes.Identity.Blueprint do
         # F3.5 same-org FK: an api_key may only reference a same-org membership.
         changes do
           change({Samen.Policy.SameOrgFk, relationships: [:membership]})
+        end
+
+        # A key is created only with scopes inside the grammar and at least one of them (`Samen.Scope.ApiKey.Grammar`).
+        validations do
+          validate(Samen.Scope.ApiKey.ValidScopes, on: :create)
         end
 
         actions do
@@ -1023,24 +1013,9 @@ defmodule Samen.Scopes.Identity.Blueprint do
           end
 
           action :reveal_invitation, :map do
-            argument(:actor_id, :string, allow_nil?: false)
             argument(:subject_id, :string, allow_nil?: false)
 
-            run(fn input, _ctx ->
-              ctx = %Samen.Reveal.Context{
-                actor: input.arguments.actor_id,
-                subject_id: input.arguments.subject_id,
-                resource: __MODULE__,
-                action: :reveal_invitation,
-                label: :email
-              }
-
-              if Samen.Reveal.grant_checker().granted?(ctx) do
-                {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-              else
-                {:error, :denied}
-              end
-            end)
+            run({Samen.Reveal.GrantProbe, label: :email})
           end
 
           # ADR-035 §5 A5 — the ONE atomic single-use `pending -> accepted`
@@ -1154,7 +1129,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
           end
 
           policy action(:reveal_invitation) do
-            authorize_if(always())
+            authorize_if(actor_present())
           end
         end
       end

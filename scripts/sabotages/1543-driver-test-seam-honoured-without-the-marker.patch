@@ -1,0 +1,19 @@
+# SABOTAGE: check_test_seams honours a SAMEN_CI_TEST_* seam without the self-test marker
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: SEAMGUARD a test seam never changes a real run silently
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 6e8a35b5..52921d27 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -141,7 +141,7 @@ def check_test_seams():
+     set_ = [k for k in TEST_SEAMS if k != SELFTEST_MARKER[0] and k in os.environ]
+     if not set_:
+         return
+-    if os.environ.get(SELFTEST_MARKER[0]) != SELFTEST_MARKER[1]:
++    if False and os.environ.get(SELFTEST_MARKER[0]) != SELFTEST_MARKER[1]:
+         raise UsageError("%s is a test-only seam of scripts/ci_test.sh and is refused outside it (unset it) — it would "
+                          "change how this run stops and waits" % ", ".join(set_))
+     for k in NUMERIC_SEAMS:

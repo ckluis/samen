@@ -157,9 +157,15 @@ defmodule Samen.Web.ReadsHonestFailureReviewTest do
     end
 
     defp wizard_socket(ctx) do
+      mount = build_mount(:settings)
+      # who acts, as the page's own load resolves it (the disarmed dev posture here)
+      {:ok, acting} = Samen.Web.TenantActor.scope(mount, ctx.wiz_org, nil)
+
       %Phoenix.LiveView.Socket{}
       |> Phoenix.Component.assign(
-        samen_mount: build_mount(:settings),
+        samen_mount: mount,
+        acting_scope: acting,
+        actor_state: :ok,
         samen_acting_as: false,
         return_to: nil,
         org_id: ctx.wiz_org,

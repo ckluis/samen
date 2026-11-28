@@ -54,24 +54,9 @@ defmodule SamenCore.Support.AutomationFixture.Subject do
     defaults([:read, :destroy, create: :*, update: :*])
 
     action :reveal_subject, :map do
-      argument(:actor_id, :string, allow_nil?: false)
       argument(:subject_id, :string, allow_nil?: false)
 
-      run(fn input, _ctx ->
-        ctx = %Samen.Reveal.Context{
-          actor: input.arguments.actor_id,
-          subject_id: input.arguments.subject_id,
-          resource: __MODULE__,
-          action: :reveal_subject,
-          label: :email
-        }
-
-        if Samen.Reveal.grant_checker().granted?(ctx) do
-          {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-        else
-          {:error, :denied}
-        end
-      end)
+      run({Samen.Reveal.GrantProbe, label: :email})
     end
   end
 
@@ -81,7 +66,7 @@ defmodule SamenCore.Support.AutomationFixture.Subject do
     end
 
     policy action(:reveal_subject) do
-      authorize_if(always())
+      authorize_if(actor_present())
     end
   end
 end
@@ -144,24 +129,9 @@ defmodule SamenCore.Support.AutomationFixture.Target do
     defaults([:read, :destroy, create: :*, update: :*])
 
     action :reveal_target, :map do
-      argument(:actor_id, :string, allow_nil?: false)
       argument(:subject_id, :string, allow_nil?: false)
 
-      run(fn input, _ctx ->
-        ctx = %Samen.Reveal.Context{
-          actor: input.arguments.actor_id,
-          subject_id: input.arguments.subject_id,
-          resource: __MODULE__,
-          action: :reveal_target,
-          label: :email
-        }
-
-        if Samen.Reveal.grant_checker().granted?(ctx) do
-          {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
-        else
-          {:error, :denied}
-        end
-      end)
+      run({Samen.Reveal.GrantProbe, label: :email})
     end
   end
 
@@ -171,7 +141,7 @@ defmodule SamenCore.Support.AutomationFixture.Target do
     end
 
     policy action(:reveal_target) do
-      authorize_if(always())
+      authorize_if(actor_present())
     end
   end
 end
