@@ -11,6 +11,30 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Fixed: the Automation engine's guards, owner role, schedule scan, escalation advance and webhook delivery ids
+
+- **Loop and depth guards see the cascade.** A write made by a workflow's action (create, update, or the undo of a
+  create) carries the run's `{depth + 1, chain ++ [workflow id]}` in its changeset context
+  (`Samen.Automation.Actions.Support.write_context/1`). The event it captures is dispatched at that depth with the workflow
+  in its chain, so a workflow whose action re-triggers it is recorded as a skipped `:loop` run, and a chain deeper than
+  `:automation_max_depth` as `:depth_exceeded` (ADR-039 §4.7).
+- **A workflow runs with its owner's real role.** The run resolves its owner through the host's membership seam
+  (`Samen.AI.Agent.Approver.resolve/2`, config `approver_membership`) and acts with the role that membership holds now, so an
+  owner who is a viewer cannot make member-only writes and an admin keeps admin. A workflow whose owner has no active
+  membership in its org stops with `owner_unavailable`. Host-visible: check your workflow owners (a person who left the org,
+  or was suspended, owns workflows that now stop); a host that runs the engine must wire `approver_membership`, and one that
+  has not retries the run and ends it as an internal error instead of running it under an unchecked role (ADR-039 §4.5).
+- **A due scheduled workflow is dispatched once.** The schedule advance applies only while `next_fire_at` is the value the
+  scan read, so of two scans of one workflow one advances it and enqueues the dispatch and the other gets a stale-record
+  error. The dispatch `event_id` is derived from the workflow id and that fire time (ADR-039 §4.1).
+- **An escalation step is advanced once.** `:advance_step` is guarded in SQL on `current_step`, so two advances of one step
+  apply once and notify once (ADR-039 §7.3).
+- **Each webhook action of a run has its own `delivery_id`.** The first action keeps the id it always had; the action at
+  index `n > 0` appends `:n`. A retry of the run gives each action the same id again.
+- **Sabotages 1612 to 1617** name the tests that prove these.
+- **ADR text matches the code.** ADR-040 §4.6 states that approval expiry is enforced at decision time and that a host adds
+  its own expiry trigger; ADR-039 §4.2 states that capture queries active workflows in the write's transaction.
+
 ### Changed: an API key's scopes are enforced, and a key with no scopes is refused
 
 - **A key acts with the lower of its scopes and its role.** Every resource exposed over JSON:API (it carries

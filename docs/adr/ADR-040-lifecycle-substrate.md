@@ -56,7 +56,7 @@ fixes all three postures.
 | §5.4 ash_paper_trail **ADOPT** | E7 is a per-blueprint opt-in on ash_paper_trail. Default `change_tracking_mode` is **`:changes_only`** (atomic-safe; smallest stored surface); a per-resource **`:snapshot`** override exists for resources needing rollback semantics (CMS content, §6.5). `:full_diff` is refused substrate-wide (`require_atomic? false` — not acceptable). `store_action_inputs?` is **false forever** (§6.3). |
 | §5.5 ash_events **REJECT** | Honored twice: no event store, and — the same reasoning applied to E3 — the approvals engine **never persists action inputs**; approved work is re-derived from governed domain state (§4.4). |
 | §5.8 AshStateMachine **ADOPT (targeted)** | The `Approval` resource is the new state-bearing resource: `pending → approved \| rejected \| expired \| cancelled`, illegal transitions refused by the machine — the double-decide guard is the exactly-once mechanism (§4.3). No retrofit of reveal tables. |
-| §5.9 ash_oban **ADOPT** | The approval-expiry scan is an AshOban trigger with **explicit `scheduler_cron`**, queue `:automation_timers` (shared with ADR-039 §6.3/§7.3), ID-only job args (the §5.9 sink rule). |
+| §5.9 ash_oban **ADOPT** | An approval's expiry is enforced at decision time (§4.6). A host whose gated clients set a deadline adds an AshOban trigger of its own on its Approval resource, with **explicit `scheduler_cron`**, queue `:automation_timers` (shared with ADR-039 §6.3/§7.3) and ID-only job args (the §5.9 sink rule); the approvals test fixture carries one such `:expire_scan`. |
 
 ## 3 · Architecture overview
 
@@ -99,7 +99,7 @@ Org-scoped blueprint resource in the primitives scope; logical columns:
 | `decided_by` | Opaque actor id, NULL until decided. |
 | `reason` | Freeform, **PiiReasonScan-gated at write** (the `AuditChain.Writer` detail precedent) — refused if PII-shaped, never vault-routed, because the approver on either plane must read it to decide (§12 records the rejected vault-routing alternative). |
 | `state` | AshStateMachine: `pending → approved \| rejected \| expired \| cancelled`. All decided states are terminal. |
-| `deadline_at` | Optional; pending past deadline ⇒ `expired` via the §4.6 scan. |
+| `deadline_at` | Optional; an approval past its deadline can no longer be approved (§4.6). |
 | `requested_at`, `decided_at` | Timestamps. |
 
 **Pending-uniqueness:** partial unique index on `{org_id, kind, subject_ref}` `WHERE state
@@ -208,11 +208,17 @@ apply wherever a subject preview is unfurled; the approval row itself contains n
 
 ### 4.6 Expiry
 
-Optional `deadline_at`; one AshOban trigger on Approval (predicate `state == :pending and
-deadline_at <= now`, **explicit `scheduler_cron`**, queue `:automation_timers`, per-record
-`max_attempts 3`, ID-only args) transitions to `expired` + audit. Approval timeouts as
-escalation clients (ADR-039 §7.4's anticipated future client) are a seam note — no code
-owed this run.
+Optional `deadline_at`. Expiry is checked at decision time: `Samen.Approvals.approve/3` refuses
+`{:error, :expired}` for a pending approval past its `deadline_at`, before any handler or gated
+action runs, unless the handler owns the deadline check itself (the agent write proposal does,
+with its own error and run expiry). Rejecting a late request stays possible. The approval
+blueprint (`Samen.Approvals.Blueprint`) ships no expiry trigger, because the reveal client never
+sets a deadline. A host whose gated clients set one adds an AshOban trigger on its Approval
+resource (predicate `state == :pending and deadline_at <= now`, **explicit `scheduler_cron`**,
+queue `:automation_timers`, per-record `max_attempts 3`, ID-only args) that transitions to
+`expired` + audit; the approvals test fixture carries that `:expire_scan` and proves the
+`:expired` path with it. Approval timeouts as escalation clients (ADR-039 §7.4's anticipated
+future client) are a seam note — no code owed this run.
 
 ### 4.7 Reveal-grant migration plan (T35 — behavior-preservation is the criterion)
 
@@ -689,7 +695,7 @@ depend on `versioned` and ships now.
    and the freeform-projection audit (§6.3).
 4. No surface renders a raw token: approval subject previews and version diffs go through
    the masked-render path (watch-list discipline).
-5. Job args (approval-expiry scan) are ID-only per the ADR-037 §5.9 sink rule.
+5. Job args of an approval-expiry trigger (the fixture's `:expire_scan`) are ID-only per the ADR-037 §5.9 sink rule.
 
 ## 10 · Verifier + sabotage duties (INV-3 — owed by the implementing tasks)
 
