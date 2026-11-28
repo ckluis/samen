@@ -1,7 +1,7 @@
 defmodule Demo.ApiKeyScopeMintValidationTest do
   @moduledoc """
-  The `ApiKey` resource's own `:create` refuses a key whose scopes are empty or outside the grammar, so no write path
-  mints one; and a family name containing a dot is refused when the resource compiles. Each refusal is paired with a
+  The `ApiKey` resource's own `:create` refuses a key whose scopes are empty or outside the grammar, and a row written
+  with `Ash.Seed` bypasses it, as a stored row does; and a family name containing a dot is refused when the resource compiles. Each refusal is paired with a
   create that differs only in its scopes.
   """
   use Demo.ApiCase, async: false

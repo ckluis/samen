@@ -25,7 +25,7 @@ defmodule Driftwood.FreightApiKeyAuthzTest do
   defp create_with(s, org_id, minter_role) do
 
     Driftwood.Freight.ApiKey
-    |> Ash.Changeset.for_create(:create, %{org_id: org_id, minter_role: minter_role, scopes: %{}}, scope: s)
+    |> Ash.Changeset.for_create(:create, %{org_id: org_id, minter_role: minter_role, scopes: %{"all" => ["read"]}}, scope: s)
     |> Ash.Changeset.force_change_attribute(:token_digest, "d-#{System.unique_integer([:positive])}")
     |> Ash.create(scope: s)
   end
@@ -83,7 +83,7 @@ defmodule Driftwood.FreightApiKeyAuthzTest do
 
     build = fn ->
       Driftwood.Freight.ApiKey
-      |> Ash.Changeset.for_create(:create, %{org_id: org_a, minter_role: :admin, scopes: %{}}, scope: s)
+      |> Ash.Changeset.for_create(:create, %{org_id: org_a, minter_role: :admin, scopes: %{"all" => ["read"]}}, scope: s)
       |> Ash.Changeset.force_change_attribute(:token_digest, "d-#{System.unique_integer([:positive])}")
     end
 
@@ -104,7 +104,7 @@ defmodule Driftwood.FreightApiKeyAuthzTest do
 
     assert {:ok, key} =
              Driftwood.Freight.ApiKey
-             |> Ash.Changeset.for_create(:create, %{org_id: org_a, minter_role: :admin, scopes: %{}}, scope: sb)
+             |> Ash.Changeset.for_create(:create, %{org_id: org_a, minter_role: :admin, scopes: %{"all" => ["read"]}}, scope: sb)
              |> Ash.Changeset.force_change_attribute(:token_digest, "d-#{System.unique_integer([:positive])}")
              |> Ash.Changeset.force_change_attribute(:org_id, org_b)
              |> Ash.create(authorize?: false)
@@ -164,7 +164,7 @@ defmodule Driftwood.FreightApiKeyAuthzTest do
       Driftwood.Freight.ApiKey
       |> Ash.Changeset.for_create(
         :create,
-        %{org_id: org, minter_role: :admin, scopes: %{}, minter_user_id: "the-owners-user-id"},
+        %{org_id: org, minter_role: :admin, scopes: %{"all" => ["read"]}, minter_user_id: "the-owners-user-id"},
         scope: s
       )
       |> Ash.Changeset.force_change_attribute(:token_digest, "d-#{System.unique_integer([:positive])}")

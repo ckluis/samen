@@ -441,6 +441,8 @@ defmodule Driftwood.Freight.ApiKey do
       primary?(true)
       accept([:org_id, :plane, :scopes, :minter_role, :minter_user_id])
       validate(present(:minter_role))
+      # A key is created only with scopes inside the grammar and at least one of them (`Samen.Scope.ApiKey.Grammar`).
+      validate(Samen.Scope.ApiKey.ValidScopes)
 
       # A key minted through an authorized actor is attributed to THAT actor: the supplied
       # `minter_user_id` is overridden, because at use time it becomes the key's `actor.id`

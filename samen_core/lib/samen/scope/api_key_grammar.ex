@@ -106,7 +106,7 @@ end
 defmodule Samen.Scope.ApiKey.ValidScopes do
   @moduledoc """
   Resource validation: a key is created only with scopes inside `Samen.Scope.ApiKey.Grammar` and at least one of them.
-  It runs on the resource's own `:create`, so it holds for every write path, not just the settings mint.
+  It runs on the resource's own `:create`, so it holds for every create action, not just the settings mint (a row written with `Ash.Seed` bypasses actions).
   """
   use Ash.Resource.Validation
 
