@@ -94,6 +94,39 @@ Upgrading an app built on `v0.1.0`: [docs/upgrade/from-v0.1.0.md](docs/upgrade/f
   samen_core, `scope_api_key_permits_test.exs`, `api_key_scopes_gen_test.exs` (the migration run against a scratch database),
   and sabotages 1584, 1586 to 1592, 1594 to 1601 and 1603 to 1611. ADR-029 records the amendment.
 
+### Added: `/api/help`, what a key can do, and hints on API errors
+
+- **`GET /api/help` describes the caller.** `Samen.Api.Help.Endpoint` answers, for the key that made the request (or a
+  signed-in person), which resources it can use over the JSON:API, with each resource's actions (route, method, path, the scope
+  it needs, required arguments), its fields (name, label, type, `required`, `read_only`, `pii` and `delivery`), its relations,
+  and who the caller is (plane, role, scopes). `GET /api/help/<type>` describes one resource. The answer is JSON, or HTML on
+  `Accept: text/html` or `?format=html`. A request with no valid key gets `401` with `WWW-Authenticate: Bearer` and no
+  description; a key lookup that could not be checked gets the key plug's `503`.
+- **It shows only what the caller can do, from the policies that enforce it.** For each JSON:API route the description asks Ash
+  the question the request itself would meet (`Ash.can?` over the resource's policies, including the key-scope policy, with no
+  row read). An action Ash does not allow is not listed; a resource with no allowed action is not listed; an update or destroy
+  route is listed only when the read that loads its record is allowed too; a relation is listed only when both ends are listed.
+  A question that raises is reported and answers "not allowed". There is no second list to keep in step.
+- **A type the caller cannot use looks like a type that does not exist.** `/api/help/<hidden>` and `/api/help/<unknown>` answer
+  the same `404` body, byte for byte. Help never says what would unlock an omitted action and never names another role.
+- **No value reaches it.** A PII field appears by name, type and `pii: true`, with `delivery` `"clear"` (a tenant key over its own
+  org) or `"omitted_without_grant"` (an operator-plane key: the HTML page shows `••••` and says the value is withheld). No row
+  is read, so no field value, vault token or tenant custom object can be in the body. Every help response is
+  `Cache-Control: private, no-store` and `Vary: Authorization, Accept`.
+- **API errors point at `/help`.** `Samen.Api.Help.ErrorHints` adds `meta._hint` (a fixed sentence chosen by the error's `code`,
+  never built from its `detail`), `meta.help` and `links.about` to each error of a `4xx` or `5xx` JSON:API response, and leaves
+  every other response untouched. The link names a resource only when the caller may use it, otherwise it is `/api/help`. A key
+  with no scopes is told so, and that refusal is reported once without values (`api_key_no_scopes`).
+- **`plug` is now a dependency of samen_core** (`~> 1.18`; the hosts already lock 1.20.3).
+- **Mounting.** The generated app mounts both. A host adds `plug(Samen.Api.Help.ErrorHints, router: MyWeb.Api.Router)` as the
+  first plug of its API endpoint and `forward("/api/help", Samen.Api.Help.Endpoint, router: MyWeb.Api.Router, key_auth:
+  MyWeb.Api.KeyAuthPlug)` beside its `/api/v1` forward ([docs/upgrade/from-v0.1.0.md](docs/upgrade/from-v0.1.0.md), D18). Demo and
+  driftwood have them; pawchart has no JSON:API.
+- Proven by `api_help_test.exs` and `api_help_endpoint_test.exs` in demo and driftwood (through the real router and key plug,
+  with a fixture domain for the write route, the relation and the `bypass`; masking per plane with seeded canaries; the guards
+  that an owner key's help types are the contract's routed types and that help lists a route exactly when a real request is not
+  refused, over every role, plane and scope set), the generated-app flagship probe, and sabotages 1621 to 1639.
+
 ### Fixed: the flag-taking mix tasks refuse an unknown flag
 
 - **A guessed or misspelled flag on a generator or verifier is refused, not dropped.** The generated `AGENTS.md` says every

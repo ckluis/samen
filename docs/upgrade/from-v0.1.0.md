@@ -696,6 +696,29 @@ Why: each closed a way to write across tenants or skip a check. If skipped: the 
 "Kernel review fixes (samen_core, samen_web, demo, driftwood, pawchart)"; "Kernel honest reads (samen_core)";
 "Security: authorization and erasure, round 4"; "Fixed: an erasure that failed after the key shred is resumable (AI derived context is withdrawn on the retry)")
 
+### D18. Mount `/api/help` and the error hints
+
+A host with a JSON:API adds two lines. In the API endpoint (`lib/<app>_web/api/endpoint.ex`), as the FIRST plug:
+
+    plug(Samen.Api.Help.ErrorHints, router: <App>Web.Api.Router)
+
+and in the router, beside the `/api/v1` forward (a Phoenix router; in a `Plug.Router` write `forward("/api/help", to: Samen.Api.Help.Endpoint, router: ..., key_auth: ...)`):
+
+    forward("/api/help", Samen.Api.Help.Endpoint,
+      router: <App>Web.Api.Router,
+      key_auth: <App>Web.Api.KeyAuthPlug
+    )
+
+`key_auth` is the same key plug the API endpoint runs. `/api/help` then describes, for the key that asks, the resources, actions, fields and
+relations it can use (JSON, or HTML on `Accept: text/html`), and each API error carries `meta._hint` and `links.about`. A generated app already has both.
+Nothing else changes: no migration, no config. `plug` becomes a dependency of `samen_core` (your app already locks it).
+
+Find it: `rg -n 'forward\(|Api.Router|Api.KeyAuthPlug' lib`
+
+Why: without the mount the description is not served and errors carry no hint; with it a key learns its own authority and nothing it cannot use.
+If skipped: `/api/help` answers 404 from your router and errors are the plain AshJsonApi bodies; nothing else breaks.
+(CHANGELOG: "Added: `/api/help`, what a key can do, and hints on API errors")
+
 ## E. Test changes
 
 ### E1. Fixtures need active memberships
@@ -904,6 +927,8 @@ lines; it answers a plain `ready` when there is nothing to advise.
 D7, D8, E4, F1 to F4 and F6 to F8 (F1, F2, F3 and F6 against rows planted for them; F4 and the invitation query returned no rows), G1 to G3.
 The key-scopes backfill (C7) was run on planted keys: empty scopes became read and write for an admin key and read for a viewer key, a key that
 already had scopes was left alone, and a key with no minter role stayed empty.
+
+**Not run by the upgrade test:** D18 (mount `/api/help`) comes from the CHANGELOG and the build, not from the upgrade test, which was run before `/api/help` existed.
 
 **Not applicable to the test app, so not exercised:** B5, B6, B8, B10, B11, D2, D4, D6, D9 to D12, D14 to D17, E1 to E3, E5 (for E1 and E2 the
 generated test helpers already create a user with an active membership and mint keys with scopes), F5.
