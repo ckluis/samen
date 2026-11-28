@@ -16,10 +16,22 @@ defmodule Demo.ApiKeyScopePathsGuardTest do
   # path => the word the description and the ADR must use for it
   @outside %{"pawchart/lib/pawchart_web/api/mcp_key_resolver.ex" => "MCP"}
 
+  # a CALL of `active_query(`, whatever the alias or import: its own definition and `@spec` are not a call
+  @call ~r/^(?!\s*(?:def|defp|@spec)\s).*\bactive_query\(/m
+
+  defp key_check?(source), do: source =~ @call
+
   defp sites do
-    ["samen_web/lib/**/*.ex", "demo/lib/**/*.ex", "driftwood/lib/**/*.ex", "pawchart/lib/**/*.ex", "samen_core/priv/templates/*.eex"]
+    [
+      "samen_core/lib/**/*.ex",
+      "samen_web/lib/**/*.ex",
+      "demo/lib/**/*.ex",
+      "driftwood/lib/**/*.ex",
+      "pawchart/lib/**/*.ex",
+      "samen_core/priv/templates/*.eex"
+    ]
     |> Enum.flat_map(&Path.wildcard(Path.join(@root, &1)))
-    |> Enum.filter(&(File.read!(&1) =~ "ApiKey.active_query("))
+    |> Enum.filter(&key_check?(File.read!(&1)))
     |> Enum.map(&Path.relative_to(&1, @root))
   end
 
@@ -77,6 +89,15 @@ defmodule Demo.ApiKeyScopePathsGuardTest do
       assert description =~ word, "the `scopes` description does not name #{word}"
       assert adr =~ word, "ADR-029 does not name #{word}"
     end
+  end
+
+  test "the key-check matcher sees a call under any alias or import, and not the definition" do
+    assert key_check?("Samen.Scope.ApiKey.active_query(R, d)")
+    assert key_check?("alias Samen.Scope.ApiKey, as: K\n  K.active_query(R, d)")
+    assert key_check?("import Samen.Scope.ApiKey\n  active_query(R, d)")
+    refute key_check?("  def active_query(resource, digest) do")
+    refute key_check?("  @spec active_query(module(), String.t()) :: term()")
+    refute key_check?("Samen.Scope.ApiKey.active_query_other")
   end
 
   test "the guard is refutable: a key-check site that carries no key and is not listed is reported" do
