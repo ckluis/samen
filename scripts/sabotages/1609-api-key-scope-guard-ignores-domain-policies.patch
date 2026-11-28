@@ -1,0 +1,20 @@
+# SABOTAGE: the scope guard reads only the resource's policies, so a domain-level bypass ahead of the scope 
+#   policy still reads as guarded
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/api_key_scope_guard_test.exs
+# MUST_FAIL: RED: a domain-level bypass ahead of the scope policy is not guarded
+diff --git a/samen_core/lib/samen/api_key_scope_guard.ex b/samen_core/lib/samen/api_key_scope_guard.ex
+index 17d5c0c3..6039dad7 100644
+--- a/samen_core/lib/samen/api_key_scope_guard.ex
++++ b/samen_core/lib/samen/api_key_scope_guard.ex
+@@ -34,7 +34,7 @@ defmodule Samen.ApiKeyScopeGuard do
+   """
+   @spec guarded?(module()) :: boolean()
+   def guarded?(resource) do
+-    case Ash.Policy.Info.policies(Ash.Resource.Info.domain(resource), resource) do
++    case Ash.Policy.Info.policies(resource) do
+       [%{condition: [{Samen.Policy.ApiKeyScopeRefused, _}], policies: [%{type: :forbid_if}]} | _] -> true
+       _ -> false
+     end

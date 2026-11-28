@@ -26,10 +26,15 @@ defmodule Samen.ApiKeyScopeGuard do
     %{walked: length(resources), exposed: exposed, unguarded: Enum.reject(exposed, &guarded?/1)}
   end
 
-  @doc "Is the resource's first policy the API-key scope policy: a forbid under the `ApiKeyScopeRefused` condition?"
+  @doc """
+  Is the resource's first policy the API-key scope policy: a forbid under the `ApiKeyScopeRefused` condition? The list
+  read is the one Ash authorizes with, `Ash.Policy.Info.policies(domain, resource)`, in which the domain's own
+  policies come first: a domain-level `bypass` would precede the resource's scope policy, so such a resource is not
+  guarded.
+  """
   @spec guarded?(module()) :: boolean()
   def guarded?(resource) do
-    case Ash.Policy.Info.policies(resource) do
+    case Ash.Policy.Info.policies(Ash.Resource.Info.domain(resource), resource) do
       [%{condition: [{Samen.Policy.ApiKeyScopeRefused, _}], policies: [%{type: :forbid_if}]} | _] -> true
       _ -> false
     end
