@@ -1,0 +1,18 @@
+# SABOTAGE: The help endpoint stops sending Cache-Control private, no-store
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_endpoint_test.exs
+# MUST_FAIL: RED: every help response is private, no-store
+diff --git a/samen_core/lib/samen/api/help/endpoint.ex b/samen_core/lib/samen/api/help/endpoint.ex
+index 1537bc17..84d59230 100644
+--- a/samen_core/lib/samen/api/help/endpoint.ex
++++ b/samen_core/lib/samen/api/help/endpoint.ex
+@@ -107,7 +107,6 @@ defmodule Samen.Api.Help.Endpoint do
+ 
+   defp private_headers(conn) do
+     conn
+-    |> put_resp_header("cache-control", "private, no-store")
+     |> put_resp_header("vary", "Authorization, Accept")
+     |> put_resp_header("x-content-type-options", "nosniff")
+   end

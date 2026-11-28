@@ -7,6 +7,8 @@ defmodule AcmeWeb.Api.Endpoint do
 
   Pipeline order:
 
+    0. `Samen.Api.Help.ErrorHints` — adds `meta._hint` and `links.about` (pointing at `/api/help`)
+       to each error of an error response; a response that is not an error is untouched.
     1. `AcmeWeb.Api.KeyAuthPlug` — resolve the `Authorization: Bearer <key>`
        into a plane-bearing actor (the two key classes), or set no actor (fail closed).
     2. `Samen.Web.Api.PageLimitClamp` — clamp `page[limit]` to max_page_size BEFORE
@@ -23,6 +25,7 @@ defmodule AcmeWeb.Api.Endpoint do
   """
   use Plug.Builder
 
+  plug(Samen.Api.Help.ErrorHints, router: AcmeWeb.Api.Router)
   plug(AcmeWeb.Api.KeyAuthPlug)
   plug(Samen.Web.Api.PageLimitClamp)
   plug(AcmeWeb.Api.Router)

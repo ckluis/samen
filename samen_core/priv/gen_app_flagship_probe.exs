@@ -702,6 +702,42 @@ try do
 
   IO.puts("FLAGSHIP: /api/v1/records payload omits the un-allowlisted secret/org_id (deny-by-default)")
 
+  # 2c. `/api/help` (Samen.Api.Help) over real HTTP, mounted by the generator with ZERO hand-edits: no key is 401, the
+  # tenant key is described its one resource, an unknown type is a 404, a key with no scopes is described nothing, and
+  # an API error carries the hint and the link. Only names and classes: no row value, no un-allowlisted field.
+  {help_keyless_code, help_keyless_body} = get.("/api/help")
+  {help_code, help_body} = auth_get.("/api/help")
+  {help_type_code, help_type_body} = auth_get.("/api/help/record")
+  {help_none_code, _help_none_body} = auth_get.("/api/help/no_such_type")
+
+  {help_empty_code, help_empty_body} =
+    case :httpc.request(:get, {~c"http://127.0.0.1:#{http_port}/api/help", empty_headers}, [], body_format: :binary) do
+      {:ok, {{_, code, _}, _hdrs, body}} -> {code, body}
+      other -> raise "HTTP GET /api/help (empty-scope key) failed: \#{inspect(other)}"
+    end
+
+  help_leaks? =
+    Enum.any?([help_body, help_type_body, help_empty_body], fn body ->
+      String.contains?(body, "FlagshipRecord") or String.contains?(body, api_secret) or
+        String.contains?(body, "\\"secret\\"") or String.contains?(body, api_org)
+    end)
+
+  help_error_hinted? =
+    String.contains?(empty_body, "\\"_hint\\"") and String.contains?(empty_body, "\\"about\\":\\"/api/help\\"")
+
+  if help_keyless_code == 401 and not String.contains?(help_keyless_body, "record") and
+       help_code == 200 and String.contains?(help_body, "\\"type\\":\\"record\\"") and
+       help_type_code == 200 and String.contains?(help_type_body, "\\"name\\":\\"segment\\"") and
+       help_none_code == 404 and
+       help_empty_code == 200 and String.contains?(help_empty_body, "\\"resources\\":[]") and
+       help_error_hinted? and not help_leaks? do
+    IO.puts("FLAGSHIP: GET /api/help → 401 without a key, the tenant key is described `record`, no-scope key nothing, errors carry a hint, no value leaks")
+  else
+    IO.puts("FLAGSHIP FAIL: /api/help keyless=\#{help_keyless_code} key=\#{help_code} type=\#{help_type_code} unknown=\#{help_none_code} empty=\#{help_empty_code} hinted=\#{help_error_hinted?} leaks=\#{help_leaks?}")
+    IO.puts(String.slice(help_body, 0, 1500))
+    System.halt(1)
+  end
+
   # =========================================================================
   # A9 — the FULL AUTH SPINE, emitted by `mix samen.gen.app` with ZERO hand-edits
   # (spec A9 + T10 addenda 1-4). The generated app is the FIRST host to serve the

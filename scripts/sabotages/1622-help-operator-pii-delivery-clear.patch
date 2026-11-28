@@ -5,11 +5,11 @@
 # TEST_FILES: test/api_help_test.exs
 # MUST_FAIL: RED: operator-key help says the PII fields are omitted without a grant
 diff --git a/samen_core/lib/samen/api/help.ex b/samen_core/lib/samen/api/help.ex
-index 6e6b6e92..3e6c9986 100644
+index f6b3a0f..7e1f7b8 100644
 --- a/samen_core/lib/samen/api/help.ex
 +++ b/samen_core/lib/samen/api/help.ex
 @@ -263,7 +263,7 @@ defmodule Samen.Api.Help do
-          :clear <- ApiKey.masking_for(%{plane: plane, org_id: org_id}, org_id) do
+          :clear <- ApiKey.masking_for(%{org_id: org_id, plane: plane, scopes: %{}, minter_role: nil, expires_at: nil}, org_id) do
        "clear"
      else
 -      _ -> "omitted_without_grant"

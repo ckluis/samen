@@ -1,0 +1,21 @@
+# SABOTAGE: The generated router stops mounting /api/help
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/gen_app_test.exs
+# MUST_FAIL: the host router forwards /api/v1 to the api endpoint
+diff --git a/samen_core/priv/templates/router_ex_api.eex b/samen_core/priv/templates/router_ex_api.eex
+index aa77d878..efe09f2f 100644
+--- a/samen_core/priv/templates/router_ex_api.eex
++++ b/samen_core/priv/templates/router_ex_api.eex
+@@ -94,10 +94,6 @@ defmodule <%= module %>Web.Router do
+ 
+   # `GET /api/help` — what THIS key can do over the API (`Samen.Api.Help`: only what the key's
+   # scopes and role allow, never a value); the API endpoint's `ErrorHints` link errors to it.
+-  forward("/api/help", Samen.Api.Help.Endpoint,
+-    router: <%= module %>Web.Api.Router,
+-    key_auth: <%= module %>Web.Api.KeyAuthPlug
+-  )
+ 
+   scope "/", <%= module %>Web do
+     pipe_through(:browser)

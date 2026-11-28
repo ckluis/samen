@@ -126,6 +126,12 @@ defmodule DriftwoodWeb.Router do
   # "explicitly versioned, URL-namespaced, e.g. /api/v1").
   forward("/api/v1", DriftwoodWeb.Api.Endpoint)
 
+  # `GET /api/help`: what THIS key can do over the API (`Samen.Api.Help`); the API endpoint's `ErrorHints` link errors to it.
+  forward("/api/help", Samen.Api.Help.Endpoint,
+    router: DriftwoodWeb.Api.Router,
+    key_auth: DriftwoodWeb.Api.KeyAuthPlug
+  )
+
   scope "/", DriftwoodWeb do
     pipe_through(:browser)
 

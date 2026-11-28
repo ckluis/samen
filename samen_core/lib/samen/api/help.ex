@@ -260,7 +260,7 @@ defmodule Samen.Api.Help do
 
     # No org to be "own" of, or a plane that is not the tenant's: the field is not promised.
     with true <- is_binary(org_id),
-         :clear <- ApiKey.masking_for(%{plane: plane, org_id: org_id}, org_id) do
+         :clear <- ApiKey.masking_for(%{org_id: org_id, plane: plane, scopes: %{}, minter_role: nil, expires_at: nil}, org_id) do
       "clear"
     else
       _ -> "omitted_without_grant"

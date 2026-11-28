@@ -1,0 +1,19 @@
+# SABOTAGE: Error hints append the error detail, which can carry a request value, to the hint
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_endpoint_test.exs
+# MUST_FAIL: the hint is a fixed sentence
+diff --git a/samen_core/lib/samen/api/help/error_hints.ex b/samen_core/lib/samen/api/help/error_hints.ex
+index c3d260d8..34f4305e 100644
+--- a/samen_core/lib/samen/api/help/error_hints.ex
++++ b/samen_core/lib/samen/api/help/error_hints.ex
+@@ -62,7 +62,7 @@ defmodule Samen.Api.Help.ErrorHints do
+   defp annotate(%{} = error, link, index, no_scopes?) do
+     code = error["code"]
+     key = if no_scopes? and code == "forbidden", do: "key_has_no_scopes", else: code
+-    meta = Map.merge(%{"_hint" => text(key, index), "help" => link}, meta_of(error))
++    meta = Map.merge(%{"_hint" => text(key, index) <> " " <> to_string(error["detail"]), "help" => link}, meta_of(error))
+     links = Map.put_new(links_of(error), "about", link)
+     error |> Map.put("meta", meta) |> Map.put("links", links)
+   end

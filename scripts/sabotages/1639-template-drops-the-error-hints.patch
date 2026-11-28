@@ -1,0 +1,18 @@
+# SABOTAGE: The generated API endpoint stops running the error hints plug
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/gen_app_test.exs
+# MUST_FAIL: the api endpoint pipeline is ErrorHints
+diff --git a/samen_core/priv/templates/api_endpoint_ex.eex b/samen_core/priv/templates/api_endpoint_ex.eex
+index a5a7dc2a..aa3ba550 100644
+--- a/samen_core/priv/templates/api_endpoint_ex.eex
++++ b/samen_core/priv/templates/api_endpoint_ex.eex
+@@ -25,7 +25,6 @@ defmodule <%= module %>Web.Api.Endpoint do
+   """
+   use Plug.Builder
+ 
+-  plug(Samen.Api.Help.ErrorHints, router: <%= module %>Web.Api.Router)
+   plug(<%= module %>Web.Api.KeyAuthPlug)
+   plug(Samen.Web.Api.PageLimitClamp)
+   plug(<%= module %>Web.Api.Router)

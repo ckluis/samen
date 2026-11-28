@@ -1,0 +1,18 @@
+# SABOTAGE: The HTML help page stops escaping what it renders
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_endpoint_test.exs
+# MUST_FAIL: HTML escapes what it renders
+diff --git a/samen_core/lib/samen/api/help/html.ex b/samen_core/lib/samen/api/help/html.ex
+index 68ccb3de..86da3290 100644
+--- a/samen_core/lib/samen/api/help/html.ex
++++ b/samen_core/lib/samen/api/help/html.ex
+@@ -81,6 +81,6 @@ defmodule Samen.Api.Help.Html do
+   end
+ 
+   defp e(nil), do: ""
+-  defp e(value), do: value |> to_string() |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
++  defp e(value), do: to_string(value)
+   defp attr(value), do: e(value)
+ end

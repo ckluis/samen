@@ -1,0 +1,19 @@
+# SABOTAGE: Error hints link an error to a type the caller may not use
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_endpoint_test.exs
+# MUST_FAIL: RED: an error on a hidden resource links to /api/help
+diff --git a/samen_core/lib/samen/api/help/error_hints.ex b/samen_core/lib/samen/api/help/error_hints.ex
+index c3d260d8..d7373aa2 100644
+--- a/samen_core/lib/samen/api/help/error_hints.ex
++++ b/samen_core/lib/samen/api/help/error_hints.ex
+@@ -90,7 +90,7 @@ defmodule Samen.Api.Help.ErrorHints do
+     with %{} <- actor,
+          [segment | _] <- conn.path_info,
+          type when is_binary(type) <- type_for(router, segment),
+-         true <- MapSet.member?(Help.visible_types(actor, router), type) do
++         true <- is_binary(type) do
+       "#{help}/#{type}"
+     else
+       _ -> help

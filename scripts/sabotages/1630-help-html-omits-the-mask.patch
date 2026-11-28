@@ -1,0 +1,19 @@
+# SABOTAGE: The HTML help page stops showing the mask for a field withheld without a grant
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_endpoint_test.exs
+# MUST_FAIL: RED: the operator page shows the mask
+diff --git a/samen_core/lib/samen/api/help/html.ex b/samen_core/lib/samen/api/help/html.ex
+index 68ccb3de..b168af52 100644
+--- a/samen_core/lib/samen/api/help/html.ex
++++ b/samen_core/lib/samen/api/help/html.ex
+@@ -62,7 +62,7 @@ defmodule Samen.Api.Help.Html do
+   end
+ 
+   defp delivery("clear"), do: "clear"
+-  defp delivery("omitted_without_grant"), do: "#{@mask} omitted without a reveal grant"
++  defp delivery("omitted_without_grant"), do: String.replace("#{@mask} omitted without a reveal grant", @mask <> " ", "")
+   defp delivery(other), do: e(other)
+ 
+   defp yes(true), do: "yes"

@@ -16,6 +16,9 @@ defmodule DemoWeb.Router do
 
   forward("/api/v1", to: DemoWeb.Api.Endpoint)
 
+  # `GET /api/help`: what THIS key can do over the API (`Samen.Api.Help`); the API endpoint's `ErrorHints` link errors to it.
+  forward("/api/help", to: Samen.Api.Help.Endpoint, router: DemoWeb.Api.Router, key_auth: DemoWeb.Api.KeyAuthPlug)
+
   match _ do
     send_resp(conn, 404, "not found")
   end

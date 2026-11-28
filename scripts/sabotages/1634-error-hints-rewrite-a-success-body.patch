@@ -1,0 +1,18 @@
+# SABOTAGE: Error hints rewrite a response that is not an error
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_endpoint_test.exs
+# MUST_FAIL: a 200 body is byte-identical with the plug
+diff --git a/samen_core/lib/samen/api/help/error_hints.ex b/samen_core/lib/samen/api/help/error_hints.ex
+index c3d260d8..d7d073ba 100644
+--- a/samen_core/lib/samen/api/help/error_hints.ex
++++ b/samen_core/lib/samen/api/help/error_hints.ex
+@@ -57,6 +57,7 @@ defmodule Samen.Api.Help.ErrorHints do
+     end
+   end
+ 
++  defp hint(%{resp_body: body} = conn, _opts) when is_binary(body), do: %{conn | resp_body: String.replace(body, "\"jsonapi\"", "\"hinted\":true,\"jsonapi\"")}
+   defp hint(conn, _opts), do: conn
+ 
+   defp annotate(%{} = error, link, index, no_scopes?) do
