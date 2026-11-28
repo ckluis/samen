@@ -116,7 +116,8 @@ defmodule Samen.Automation.EngineGuardsTest do
       [scan_a, scan_b] = [due_copy!(wf), due_copy!(wf)]
 
       assert {:ok, advanced} = dispatch_due(scan_a)
-      assert {:error, _stale} = dispatch_due(scan_b)
+      assert {:error, error} = dispatch_due(scan_b)
+      assert Enum.any?(List.wrap(error.errors), &match?(%Ash.Error.Changes.StaleRecord{}, &1))
       drain_rounds(3)
 
       assert DateTime.compare(advanced.next_fire_at, fire_at) == :gt
@@ -228,6 +229,41 @@ defmodule Samen.Automation.EngineGuardsTest do
         assert Enum.all?(runs, &(&1.state == :skipped and &1.error_kind == :owner_unavailable))
       end
     end
+
+    test "an unwired or failing membership seam retries the run, and its last attempt skips it :internal_error" do
+      org = Ash.UUID.generate()
+      owner = member!(org, :member)
+      prior = Application.get_env(:samen_core, Samen.AI.Agent, [])
+
+      # The positive control: with the seam wired the same job runs and writes.
+      wired_wf = create_workflow!(org, owner, when: "low", actions: [raise_priority_action()])
+      wired = create_target!(org, "wired", :low)
+      assert :ok = perform_run(org, wired_wf, wired, 1)
+      assert reload!(wired).priority == :urgent
+
+      for seam <- [nil, {__MODULE__, :failing_seam}] do
+        wf = create_workflow!(org, owner, when: "low", actions: [raise_priority_action()])
+        target = create_target!(org, "seam #{inspect(seam)}", :low)
+
+        try do
+          Application.put_env(:samen_core, Samen.AI.Agent, Keyword.put(prior, :approver_membership, seam))
+
+          # An early attempt errors the job for a retry; nothing is written and the run stays queued.
+          {early, _log} = ExUnit.CaptureLog.with_log(fn -> perform_run(org, wf, target, 1) end)
+          assert early == {:error, :unavailable}
+          assert reload!(target).priority == :low
+          assert [%{state: :queued}] = runs_for(org, wf.id)
+
+          # The last attempt finalizes the run skipped :internal_error; still nothing is written.
+          {last, _log} = ExUnit.CaptureLog.with_log(fn -> perform_run(org, wf, target, 3) end)
+          assert last == :ok
+          assert reload!(target).priority == :low
+          assert [%{state: :skipped, error_kind: :internal_error}] = runs_for(org, wf.id)
+        after
+          Application.put_env(:samen_core, Samen.AI.Agent, prior)
+        end
+      end
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -290,6 +326,25 @@ defmodule Samen.Automation.EngineGuardsTest do
     |> filter(event_type == "escalation_step")
     |> Ash.read!(authorize?: false)
     |> length()
+  end
+
+  @doc false
+  def failing_seam(_user, _org), do: raise("membership store down")
+
+  defp perform_run(org, wf, target, attempt) do
+    Samen.Automation.RunWorker.perform(%Oban.Job{
+      args: %{
+        "workflow_id" => wf.id,
+        "org_id" => org,
+        "event_id" => target.id,
+        "record_id" => target.id,
+        "resource_key" => @target_key,
+        "event" => "created",
+        "trigger_kind" => "resource_event"
+      },
+      attempt: attempt,
+      max_attempts: 3
+    })
   end
 
   defp member!(org, role \\ :member) do
