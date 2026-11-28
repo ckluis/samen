@@ -4,6 +4,8 @@ defmodule Samen.Automation.EngineGuardsTest do
   each proven against a REAL Postgres DB through the `SamenCore.Support.AutomationFixture`
   mount. Every guarantee carries a positive control beside its refusal.
 
+    * **Schedule scan (§4.1)** — two scans of one due workflow produce one run and advance
+      `next_fire_at` once.
     * **Loop / depth guards (§4.7)** — a write made by a run carries `{depth, chain}`, so the
       event it captures inherits `depth + 1` and `chain ++ [workflow_id]`.
   """
@@ -24,11 +26,23 @@ defmodule Samen.Automation.EngineGuardsTest do
     prev_auto = Application.get_env(:samen_core, Samen.Automation)
     Application.put_env(:samen_core, Samen.Automation, workflow_module: Workflow, run_module: Run, repo: TestRepo)
 
+    prev_engine = Application.get_env(:samen_core, Samen.Notifications.Engine)
+
+    Application.put_env(:samen_core, Samen.Notifications.Engine,
+      notification_module: SamenCore.Support.NotificationFixture.Notification,
+      preference_module: SamenCore.Support.NotificationFixture.NotificationPreference,
+      repo: TestRepo
+    )
+
     # The owner's real membership is resolved through the host seam (ADR-039 §4.5).
     prev_agent = AgentMembershipFixture.install!()
     AgentMembershipFixture.reset()
 
     on_exit(fn ->
+      if prev_engine,
+        do: Application.put_env(:samen_core, Samen.Notifications.Engine, prev_engine),
+        else: Application.delete_env(:samen_core, Samen.Notifications.Engine)
+
       AgentMembershipFixture.restore!(prev_agent)
       AgentMembershipFixture.reset()
 
@@ -82,6 +96,58 @@ defmodule Samen.Automation.EngineGuardsTest do
     end
   end
 
+  describe "schedule scan idempotency (ADR-039 §4.1)" do
+    test "two scans of the same due workflow produce one run and advance next_fire_at once" do
+      org = Ash.UUID.generate()
+      fire_at = DateTime.utc_now() |> DateTime.add(-120, :second) |> DateTime.truncate(:second)
+      wf = create_schedule_workflow!(org, member!(org), fire_at)
+
+      # Both scans read the workflow while it is due: each holds the same stale copy.
+      [scan_a, scan_b] = [due_copy!(wf), due_copy!(wf)]
+
+      assert {:ok, advanced} = dispatch_due(scan_a)
+      assert {:error, _stale} = dispatch_due(scan_b)
+      drain_rounds(3)
+
+      assert DateTime.compare(advanced.next_fire_at, fire_at) == :gt
+      assert DateTime.compare(Ash.get!(Workflow, wf.id, authorize?: false).next_fire_at, advanced.next_fire_at) == :eq
+      assert [%{trigger_kind: :schedule}] = runs_for(org, wf.id)
+    end
+
+    test "a duplicate dispatch of one fire time is the same event, the next fire time is a new one" do
+      fire_at = DateTime.utc_now() |> DateTime.truncate(:second)
+      later = DateTime.add(fire_at, 60, :second)
+      wid = Ash.UUID.generate()
+
+      assert Samen.Automation.ScheduleAdvance.event_id(wid, fire_at) ==
+               Samen.Automation.ScheduleAdvance.event_id(wid, fire_at)
+
+      refute Samen.Automation.ScheduleAdvance.event_id(wid, fire_at) ==
+               Samen.Automation.ScheduleAdvance.event_id(wid, later)
+
+      refute Samen.Automation.ScheduleAdvance.event_id(wid, fire_at) ==
+               Samen.Automation.ScheduleAdvance.event_id(Ash.UUID.generate(), fire_at)
+    end
+
+    test "the same workflow due again at its next fire time runs again" do
+      org = Ash.UUID.generate()
+      fire_at = DateTime.utc_now() |> DateTime.add(-120, :second) |> DateTime.truncate(:second)
+      wf = create_schedule_workflow!(org, member!(org), fire_at)
+
+      assert {:ok, _} = dispatch_due(due_copy!(wf))
+
+      # Time passes: the advanced fire time is due in its turn.
+      wf
+      |> Ash.Changeset.for_update(:update, %{next_fire_at: DateTime.add(fire_at, 30, :second)})
+      |> Ash.update!(authorize?: false)
+
+      assert {:ok, _} = dispatch_due(due_copy!(wf))
+      drain_rounds(3)
+
+      assert [_, _] = runs_for(org, wf.id)
+    end
+  end
+
   describe "owner actor (ADR-039 §4.5)" do
     test "a run acts with the owner's real role: a member owner writes, a viewer owner cannot" do
       org = Ash.UUID.generate()
@@ -128,6 +194,36 @@ defmodule Samen.Automation.EngineGuardsTest do
   end
 
   # ---------------------------------------------------------------------------
+
+  defp create_schedule_workflow!(org, owner, fire_at) do
+    Workflow
+    |> Ash.Changeset.for_create(:create, %{
+      org_id: org,
+      name: "wf-#{System.unique_integer([:positive])}",
+      status: :active,
+      trigger_kind: :schedule,
+      resource_key: @target_key,
+      schedule_cron: "* * * * *",
+      next_fire_at: fire_at,
+      conditions: [],
+      actions: [%{"kind" => "notify", "recipient" => "owner", "event_type" => "workflow.fired"}],
+      owner_id: owner
+    })
+    |> Ash.create!(authorize?: false)
+  end
+
+  # The copy of a due workflow a scan holds: read through the scan's own read action.
+  defp due_copy!(wf) do
+    Workflow
+    |> Ash.Query.for_read(:scan_due)
+    |> filter(id == ^wf.id)
+    |> Ash.read!(authorize?: false)
+    |> hd()
+  end
+
+  defp dispatch_due(copy) do
+    copy |> Ash.Changeset.for_update(:dispatch_due, %{}) |> Ash.update(authorize?: false)
+  end
 
   defp member!(org, role \\ :member) do
     user = Ash.UUID.generate()
