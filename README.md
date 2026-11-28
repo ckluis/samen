@@ -267,6 +267,7 @@ command in this README and that tutorial is verified against the CI probes' exec
 
 - [Docs index](docs/README.md) — the front door to everything under `docs/`, grouped
 - [Getting started — zero to first feature](docs/guides/getting-started.md)
+- [Upgrading an app built on samen](docs/upgrade/README.md) — how upgrading works today, the guide from `v0.1.0`, and a prompt for your AI agent
 - [Cookbook](docs/guides/cookbook.md) — task recipes
 - [Gate-failure index](docs/guides/gate-failures.md) — what each gate step means when it goes red
 - [Generators](docs/guides/generators.md) · [Scope authoring](docs/guides/scope-authoring.md)

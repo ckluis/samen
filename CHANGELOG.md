@@ -11,6 +11,9 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+Upgrading an app built on `v0.1.0`: [docs/upgrade/from-v0.1.0.md](docs/upgrade/from-v0.1.0.md), with a prompt for an AI coding agent in
+[docs/upgrade/prompts/from-v0.1.0.md](docs/upgrade/prompts/from-v0.1.0.md).
+
 ### Fixed: the Automation engine's guards, owner role, schedule scan, escalation advance and webhook delivery ids
 
 - **Loop and depth guards see the cascade.** A write made by a workflow's action (create, update, or the undo of a
