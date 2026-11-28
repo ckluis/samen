@@ -136,9 +136,10 @@ defmodule SamenCore.Support.AutomationFixture.Target do
   end
 
   policies do
-    # Writes need at least the member role: a viewer owner's workflow cannot write (ADR-039 §4.5).
+    # A viewer cannot write: a viewer owner's workflow cannot write (ADR-039 §4.5). Any other role, and no role,
+    # is left to the org scope below, as the agent write tests rely on.
     policy action_type([:create, :update, :destroy]) do
-      forbid_unless({Samen.Policy.RoleAtLeast, role: :member})
+      forbid_if(expr(^actor(:role) == :viewer))
       authorize_if(always())
     end
 
