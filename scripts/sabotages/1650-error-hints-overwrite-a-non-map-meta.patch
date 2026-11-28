@@ -1,0 +1,19 @@
+# SABOTAGE: An error hint replaces a meta or links that is not an object
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_shapes_test.exs
+# MUST_FAIL: RED: a non-map meta and a non-map links are left as they are
+diff --git a/samen_core/lib/samen/api/help/error_hints.ex b/samen_core/lib/samen/api/help/error_hints.ex
+index 864f9102..2d63abc5 100644
+--- a/samen_core/lib/samen/api/help/error_hints.ex
++++ b/samen_core/lib/samen/api/help/error_hints.ex
+@@ -89,7 +89,7 @@ defmodule Samen.Api.Help.ErrorHints do
+       :error -> Map.put(error, field, fresh)
+       {:ok, nil} -> Map.put(error, field, fresh)
+       {:ok, %{} = existing} -> Map.put(error, field, merge.(existing))
+-      {:ok, _other} -> error
++      {:ok, _other} -> Map.put(error, field, fresh)
+     end
+   end
+ 

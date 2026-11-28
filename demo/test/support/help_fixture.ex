@@ -43,6 +43,23 @@ defmodule Demo.HelpFixture.Counted do
   end
 end
 
+defmodule Demo.HelpFixture.NeedsRow do
+  @moduledoc "A policy check Ash cannot decide before it has the record: strict check answers unknown, the record check passes."
+  use Ash.Policy.Check
+
+  @impl true
+  def describe(_opts), do: "needs the record to decide"
+
+  @impl true
+  def strict_check(_actor, _context, _opts), do: {:ok, :unknown}
+
+  @impl true
+  def check(_actor, records, _context, _opts), do: records
+
+  @impl true
+  def type, do: :manual
+end
+
 defmodule Demo.HelpFixture.Ext do
   @moduledoc "Applies the framework's key-scope policy transformer to a plain fixture resource (see `Demo.ScopeFixture.Ext`)."
   use Spark.Dsl.Extension, transformers: [Samen.Transformers.ApiKeyScopePolicy]
@@ -58,6 +75,7 @@ defmodule Demo.HelpFixture.Domain do
   resources do
     resource(Demo.HelpFixture.Filtered)
     resource(Demo.HelpFixture.RowWrite)
+    resource(Demo.HelpFixture.Runtime)
     resource(Demo.HelpFixture.StrictOnly)
     resource(Demo.HelpFixture.Raiser)
     resource(Demo.HelpFixture.Holder)
@@ -159,6 +177,53 @@ defmodule Demo.HelpFixture.RowWrite do
 
     policy action_type(:update) do
       authorize_if(expr(name == "visible"))
+    end
+  end
+end
+
+defmodule Demo.HelpFixture.Runtime do
+  @moduledoc "A read open to all and an update whose policy needs the record (`NeedsRow`): allowed for some records, decided at the request."
+  use Ash.Resource,
+    domain: Demo.HelpFixture.Domain,
+    data_layer: Ash.DataLayer.Ets,
+    authorizers: [Ash.Policy.Authorizer],
+    extensions: [Demo.HelpFixture.Ext, AshJsonApi.Resource]
+
+  ets do
+    private?(false)
+  end
+
+  json_api do
+    type("runtime")
+
+    routes do
+      base("/runtime")
+      index(:read)
+      patch(:update)
+    end
+  end
+
+  attributes do
+    uuid_primary_key(:id)
+    attribute(:name, :string, public?: true)
+  end
+
+  actions do
+    defaults([:read])
+
+    update :update do
+      accept([:name])
+      primary?(true)
+    end
+  end
+
+  policies do
+    policy action_type(:read) do
+      authorize_if(always())
+    end
+
+    policy action_type(:update) do
+      authorize_if(Demo.HelpFixture.NeedsRow)
     end
   end
 end

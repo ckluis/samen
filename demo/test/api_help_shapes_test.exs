@@ -43,6 +43,14 @@ defmodule Demo.ApiHelpShapesTest do
       assert %{"conditional" => false} = action(holder, "read", "index")
     end
 
+    test "RED: a write that Ash can only decide with the record is listed as conditional; CONTROL: a filter on a write that Ash refuses without it is not listed" do
+      actor = fx_actor(key(:admin))
+
+      {:ok, runtime} = Samen.Api.Help.resource(actor, @router, "runtime")
+      assert %{"conditional" => true, "class" => "write"} = action(runtime, "update", "patch")
+      assert %{"conditional" => false} = action(runtime, "read", "index")
+    end
+
     test "RED: a write whose policy needs the row is not listed (the read is); a strict policy over a filter lists nothing" do
       actor = fx_actor(key(:admin))
 

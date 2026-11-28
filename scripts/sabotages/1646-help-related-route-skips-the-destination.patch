@@ -1,0 +1,19 @@
+# SABOTAGE: Help lists a route to a relationship without asking whether the destination may be read
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_shapes_test.exs
+# MUST_FAIL: RED: a related route to a destination the caller may not read is not listed
+diff --git a/samen_core/lib/samen/api/help.ex b/samen_core/lib/samen/api/help.ex
+index 7db4f603..56382921 100644
+--- a/samen_core/lib/samen/api/help.ex
++++ b/samen_core/lib/samen/api/help.ex
+@@ -184,7 +184,7 @@ defmodule Samen.Api.Help do
+   # A route that names a relationship reaches the destination resource: the destination must be served over the
+   # JSON:API (it has a type) and the caller must be allowed to read it, else the route is not listed.
+   defp destination_question(actor, resource, route, memo) do
+-    case Map.get(route, :relationship) do
++    case Map.get(route, :nope) do
+       nil ->
+         {:ok, :yes, [], memo}
+ 

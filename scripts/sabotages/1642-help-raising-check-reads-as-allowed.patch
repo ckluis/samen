@@ -1,0 +1,19 @@
+# SABOTAGE: Help lists an action whose policy check raised
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_shapes_test.exs
+# MUST_FAIL: RED: the resource is omitted and the failure is reported once
+diff --git a/samen_core/lib/samen/api/help.ex b/samen_core/lib/samen/api/help.ex
+index 7db4f603..87ecc14b 100644
+--- a/samen_core/lib/samen/api/help.ex
++++ b/samen_core/lib/samen/api/help.ex
+@@ -244,7 +244,7 @@ defmodule Samen.Api.Help do
+ 
+   defp report_can(reason) do
+     Failure.report(:api_help_can, nil, reason)
+-    :no
++    :yes
+   end
+ 
+   # --- the caller ----------------------------------------------------------------------------------------------

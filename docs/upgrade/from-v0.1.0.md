@@ -709,8 +709,11 @@ and in the router, beside the `/api/v1` forward (a Phoenix router; in a `Plug.Ro
       key_auth: <App>Web.Api.KeyAuthPlug
     )
 
-`key_auth` is the same key plug the API endpoint runs. `/api/help` then describes, for the key that asks, the resources, actions, fields and
-relations it can use (JSON, or HTML on `Accept: text/html`), and each API error carries `meta._hint` and `links.about`. A generated app already has both.
+`key_auth` is the same key plug the API endpoint runs, and it must put the actor with its `:api_key` map on the conn (the demo, driftwood and
+generated plugs do): an actor without the key map is answered `401`. `/api/help` then describes, for the key that asks, the resources, actions, fields and
+relations it can use (JSON, or HTML on `Accept: text/html`). Each action carries `scope`, a scope map you can mint a key with
+(`{"crm.contact": ["read"]}`), `also_granted_by` (the wider scope names that grant it) and `conditional` (allowed for some records only).
+Each API error carries `meta._hint` and `links.about`. A generated app already has both.
 Nothing else changes: no migration, no config. `plug` becomes a dependency of `samen_core` (your app already locks it).
 
 Find it: `rg -n 'forward\(|Api.Router|Api.KeyAuthPlug' lib`

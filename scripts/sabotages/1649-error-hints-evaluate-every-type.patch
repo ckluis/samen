@@ -1,0 +1,19 @@
+# SABOTAGE: An error hint evaluates the policies of every type, not only the addressed one
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_shapes_test.exs
+# MUST_FAIL: RED: an error on one type does not evaluate another type's policies
+diff --git a/samen_core/lib/samen/api/help/error_hints.ex b/samen_core/lib/samen/api/help/error_hints.ex
+index 864f9102..c91754af 100644
+--- a/samen_core/lib/samen/api/help/error_hints.ex
++++ b/samen_core/lib/samen/api/help/error_hints.ex
+@@ -98,7 +98,7 @@ defmodule Samen.Api.Help.ErrorHints do
+     with %{} <- actor,
+          [segment | _] <- conn.path_info,
+          type when is_binary(type) <- type_for(router, segment),
+-         true <- Help.visible?(actor, router, type) do
++         true <- MapSet.member?(Help.visible_types(actor, router), type) do
+       "#{help}/#{type}"
+     else
+       _ -> help

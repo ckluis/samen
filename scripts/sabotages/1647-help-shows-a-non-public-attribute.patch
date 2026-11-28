@@ -1,0 +1,18 @@
+# SABOTAGE: Help shows an attribute that is not public when show_fields names it
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_shapes_test.exs
+# MUST_FAIL: RED: show_fields naming a non-public attribute does not show it
+diff --git a/samen_core/lib/samen/api/help.ex b/samen_core/lib/samen/api/help.ex
+index 7db4f603..6a129c37 100644
+--- a/samen_core/lib/samen/api/help.ex
++++ b/samen_core/lib/samen/api/help.ex
+@@ -368,7 +368,6 @@ defmodule Samen.Api.Help do
+     resource
+     |> Ash.Resource.Info.attributes()
+     |> Enum.filter(&apply(@json_api_info, :show_field?, [resource, &1.name]))
+-    |> Enum.filter(& &1.public?)
+     |> Enum.sort_by(&to_string(&1.name))
+   end
+ 

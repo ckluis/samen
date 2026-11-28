@@ -1,0 +1,18 @@
+# SABOTAGE: A help response no longer varies by Authorization and Accept
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_endpoint_test.exs
+# MUST_FAIL: RED: every help response is private, no-store and varies by Authorization
+diff --git a/samen_core/lib/samen/api/help/endpoint.ex b/samen_core/lib/samen/api/help/endpoint.ex
+index b145b57d..1bb5def5 100644
+--- a/samen_core/lib/samen/api/help/endpoint.ex
++++ b/samen_core/lib/samen/api/help/endpoint.ex
+@@ -116,7 +116,6 @@ defmodule Samen.Api.Help.Endpoint do
+   defp private_headers(conn) do
+     conn
+     |> put_resp_header("cache-control", "private, no-store")
+-    |> put_resp_header("vary", "Authorization, Accept")
+     |> put_resp_header("x-content-type-options", "nosniff")
+   end
+ 

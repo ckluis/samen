@@ -96,27 +96,37 @@ Upgrading an app built on `v0.1.0`: [docs/upgrade/from-v0.1.0.md](docs/upgrade/f
 
 ### Added: `/api/help`, what a key can do, and hints on API errors
 
-- **`GET /api/help` describes the caller.** `Samen.Api.Help.Endpoint` answers, for the key that made the request (or a
-  signed-in person), which resources it can use over the JSON:API, with each resource's actions (route, method, path, the scope
-  it needs, required arguments), its fields (name, label, type, `required`, `read_only`, `pii` and `delivery`), its relations,
+- **`GET /api/help` describes the caller.** `Samen.Api.Help.Endpoint` answers, for the key that made the request, which resources it can use over the JSON:API, with each resource's actions (route, method, path, the scope
+  it needs, whether it is conditional, required arguments), its fields (name, label, type, `required`, `read_only`, `pii` and `delivery`), its relations,
   and who the caller is (plane, role, scopes). `GET /api/help/<type>` describes one resource. The answer is JSON, or HTML on
   `Accept: text/html` or `?format=html`. A request with no valid key gets `401` with `WWW-Authenticate: Bearer` and no
-  description; a key lookup that could not be checked gets the key plug's `503`.
+  description, and so does an actor that something other than the key plug assigned (the answer is the key's, so
+  an actor without the key map is not described); a key lookup that could not be checked gets the key plug's `503`.
 - **It shows only what the caller can do, from the policies that enforce it.** For each JSON:API route the description asks Ash
-  the question the request itself would meet (`Ash.can?` over the resource's policies, including the key-scope policy, with no
-  row read). An action Ash does not allow is not listed; a resource with no allowed action is not listed; an update or destroy
-  route is listed only when the read that loads its record is allowed too; a relation is listed only when both ends are listed.
-  A question that raises is reported and answers "not allowed". There is no second list to keep in step.
+  the question the request itself would meet (`Ash.can` over the resource's policies, including the key-scope policy, with no
+  tenant row read). An action Ash does not allow is not listed; a resource with no allowed action is not listed; an update or
+  destroy route is listed only when the read that loads its record is allowed too; a route that names a relationship is listed
+  only when the caller may read the destination too; a relation is listed only when both ends are listed. "Listed" means Ash
+  answered "allowed" or "allowed for some records" (`"conditional": true`: a filter, the caller's own org included, or a row-dependent policy narrows which
+  records) to every question the route meets; an action Ash refuses (including a filter on a write, which Ash cannot check without the record) and one whose
+  check raises are not listed (a raise is also reported once per description). Only a public attribute is shown as a field.
+- **`scope` is the key grammar.** Each action's `scope` is the narrowest grant that permits it, as a map you can mint a key
+  with (`{"crm.contact": ["read"]}`; an update or destroy needs `["read", "write"]` because the request loads the record first),
+  and `also_granted_by` lists the wider names that grant it when they list the same classes (`["crm", "all"]`). Both come from
+  `Samen.Scope.ApiKey` (`scope_names/2`, `grant_for/3`), the code `permits?/4` enforces with, so there is no second list.
 - **A type the caller cannot use looks like a type that does not exist.** `/api/help/<hidden>` and `/api/help/<unknown>` answer
   the same `404` body, byte for byte. Help never says what would unlock an omitted action and never names another role.
 - **No value reaches it.** A PII field appears by name, type and `pii: true`, with `delivery` `"clear"` (a tenant key over its own
-  org) or `"omitted_without_grant"` (an operator-plane key: the HTML page shows `••••` and says the value is withheld). No row
-  is read, so no field value, vault token or tenant custom object can be in the body. Every help response is
+  org) or `"omitted_without_grant"` (an operator-plane key: the HTML page shows `••••` and says the value is withheld). No tenant
+  row is read, so no field value, vault token or tenant custom object can be in the body. The HTML page also carries
+  `frame-ancestors 'none'; base-uri 'none'; form-action 'none'`. Every help response is
   `Cache-Control: private, no-store` and `Vary: Authorization, Accept`.
 - **API errors point at `/help`.** `Samen.Api.Help.ErrorHints` adds `meta._hint` (a fixed sentence chosen by the error's `code`,
   never built from its `detail`), `meta.help` and `links.about` to each error of a `4xx` or `5xx` JSON:API response, and leaves
-  every other response untouched. The link names a resource only when the caller may use it, otherwise it is `/api/help`. A key
-  with no scopes is told so, and that refusal is reported once without values (`api_key_no_scopes`).
+  every other response untouched. The link names a resource only when the caller may use it, otherwise it is `/api/help`. An error
+  hint asks about the one resource the request addressed. A key with no scopes is told so; that refusal is counted
+  (telemetry `[:samen, :api, :help, :key_has_no_scopes]`) and not logged, since such a key meets it on every request. An error
+  whose `meta` or `links` is not an object keeps it as it is.
 - **`plug` is now a dependency of samen_core** (`~> 1.18`; the hosts already lock 1.20.3).
 - **Mounting.** The generated app mounts both. A host adds `plug(Samen.Api.Help.ErrorHints, router: MyWeb.Api.Router)` as the
   first plug of its API endpoint and `forward("/api/help", Samen.Api.Help.Endpoint, router: MyWeb.Api.Router, key_auth:
@@ -125,7 +135,9 @@ Upgrading an app built on `v0.1.0`: [docs/upgrade/from-v0.1.0.md](docs/upgrade/f
 - Proven by `api_help_test.exs` and `api_help_endpoint_test.exs` in demo and driftwood (through the real router and key plug,
   with a fixture domain for the write route, the relation and the `bypass`; masking per plane with seeded canaries; the guards
   that an owner key's help types are the contract's routed types and that help lists a route exactly when a real request is not
-  refused, over every role, plane and scope set), the generated-app flagship probe, and sabotages 1621 to 1639.
+  refused, over every role, plane and scope set, for reads and for the write route), fixture resources for each shape (filter
+  policy, strict policy, a check that raises, a related route to an unreadable destination, an attribute that is not public),
+  the generated-app flagship probe, and sabotages 1621 to 1652.
 
 ### Fixed: the flag-taking mix tasks refuse an unknown flag
 
