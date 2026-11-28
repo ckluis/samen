@@ -136,6 +136,12 @@ defmodule SamenCore.Support.AutomationFixture.Target do
   end
 
   policies do
+    # Writes need at least the member role: a viewer owner's workflow cannot write (ADR-039 §4.5).
+    policy action_type([:create, :update, :destroy]) do
+      forbid_unless({Samen.Policy.RoleAtLeast, role: :member})
+      authorize_if(always())
+    end
+
     policy action_type([:read, :create, :update, :destroy]) do
       authorize_if(Samen.Policy.OrgScope)
     end

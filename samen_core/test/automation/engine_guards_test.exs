@@ -13,6 +13,7 @@ defmodule Samen.Automation.EngineGuardsTest do
   import Ash.Query
 
   alias SamenCore.TestRepo
+  alias SamenCore.Support.AgentMembershipFixture
   alias SamenCore.Support.AutomationFixture.{Run, Target, Workflow}
 
   @target_key "SamenCore.Support.AutomationFixture.Target"
@@ -23,7 +24,14 @@ defmodule Samen.Automation.EngineGuardsTest do
     prev_auto = Application.get_env(:samen_core, Samen.Automation)
     Application.put_env(:samen_core, Samen.Automation, workflow_module: Workflow, run_module: Run, repo: TestRepo)
 
+    # The owner's real membership is resolved through the host seam (ADR-039 §4.5).
+    prev_agent = AgentMembershipFixture.install!()
+    AgentMembershipFixture.reset()
+
     on_exit(fn ->
+      AgentMembershipFixture.restore!(prev_agent)
+      AgentMembershipFixture.reset()
+
       if prev_auto,
         do: Application.put_env(:samen_core, Samen.Automation, prev_auto),
         else: Application.delete_env(:samen_core, Samen.Automation)
@@ -35,7 +43,7 @@ defmodule Samen.Automation.EngineGuardsTest do
   describe "loop and depth guards (ADR-039 §4.7)" do
     test "a workflow whose action writes a record that re-triggers it is refused as :loop" do
       org = Ash.UUID.generate()
-      wf = create_workflow!(org, Ash.UUID.generate(), actions: [create_target_action()])
+      wf = create_workflow!(org, member!(org), actions: [create_target_action()])
 
       create_target!(org, "seed", :normal)
       drain_rounds(6)
@@ -60,9 +68,9 @@ defmodule Samen.Automation.EngineGuardsTest do
 
       # Each workflow reacts to one priority and writes the next: low -> normal -> high -> urgent.
       # Event depths: the seed 0, the normal record 1, the high record 2 (> cap 1 => refused).
-      w1 = create_workflow!(org, Ash.UUID.generate(), when: "low", actions: [create_target_action("normal")])
-      w2 = create_workflow!(org, Ash.UUID.generate(), when: "normal", actions: [create_target_action("high")])
-      w3 = create_workflow!(org, Ash.UUID.generate(), when: "high", actions: [create_target_action("urgent")])
+      w1 = create_workflow!(org, member!(org), when: "low", actions: [create_target_action("normal")])
+      w2 = create_workflow!(org, member!(org), when: "normal", actions: [create_target_action("high")])
+      w3 = create_workflow!(org, member!(org), when: "high", actions: [create_target_action("urgent")])
 
       create_target!(org, "seed", :low)
       drain_rounds(8)
@@ -74,7 +82,64 @@ defmodule Samen.Automation.EngineGuardsTest do
     end
   end
 
+  describe "owner actor (ADR-039 §4.5)" do
+    test "a run acts with the owner's real role: a member owner writes, a viewer owner cannot" do
+      org = Ash.UUID.generate()
+      member_owner = member!(org, :member)
+      viewer_owner = member!(org, :viewer)
+
+      member_wf = create_workflow!(org, member_owner, when: "low", actions: [raise_priority_action()])
+      viewer_wf = create_workflow!(org, viewer_owner, when: "normal", actions: [raise_priority_action()])
+
+      low = create_target!(org, "low", :low)
+      normal = create_target!(org, "normal", :normal)
+      drain_rounds(3)
+
+      # The positive control: the same write by a member owner lands.
+      assert reload!(low).priority == :urgent
+      assert [%{state: :succeeded}] = Enum.filter(runs_for(org, member_wf.id), &(&1.state != :skipped))
+
+      assert reload!(normal).priority == :normal
+      assert [%{state: :failed, error_kind: :unauthorized}] = Enum.filter(runs_for(org, viewer_wf.id), &(&1.state != :skipped))
+    end
+
+    test "an owner with no membership in the org stops the run as :owner_unavailable" do
+      org = Ash.UUID.generate()
+      removed = Ash.UUID.generate()
+      other_org_member = member!(Ash.UUID.generate(), :admin)
+
+      removed_wf = create_workflow!(org, removed, when: "low", actions: [raise_priority_action()])
+      foreign_wf = create_workflow!(org, other_org_member, when: "normal", actions: [raise_priority_action()])
+
+      low = create_target!(org, "low", :low)
+      normal = create_target!(org, "normal", :normal)
+      drain_rounds(3)
+
+      assert reload!(low).priority == :low
+      assert reload!(normal).priority == :normal
+
+      for wf <- [removed_wf, foreign_wf] do
+        # The owner is resolved before the conditions are judged, so every event's run stops here.
+        runs = runs_for(org, wf.id)
+        assert runs != []
+        assert Enum.all?(runs, &(&1.state == :skipped and &1.error_kind == :owner_unavailable))
+      end
+    end
+  end
+
   # ---------------------------------------------------------------------------
+
+  defp member!(org, role \\ :member) do
+    user = Ash.UUID.generate()
+    AgentMembershipFixture.register(user, org, role)
+    user
+  end
+
+  defp raise_priority_action do
+    %{"kind" => "mutate_record", "mode" => "update", "attrs" => %{"priority" => "urgent"}}
+  end
+
+  defp reload!(target), do: Ash.get!(Target, target.id, authorize?: false)
 
   defp create_target_action(priority \\ "normal") do
     %{

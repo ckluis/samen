@@ -56,6 +56,15 @@ defmodule Samen.Automation.RunDefinitionPinTest do
   setup do
     Samen.TestSandbox.shared!(TestRepo)
 
+    # ADR-039 §4.5: the run owner's role is read from the host's membership seam.
+    prev_membership = SamenCore.Support.AgentMembershipFixture.install!()
+    SamenCore.Support.AgentMembershipFixture.reset()
+
+    on_exit(fn ->
+      SamenCore.Support.AgentMembershipFixture.restore!(prev_membership)
+      SamenCore.Support.AgentMembershipFixture.reset()
+    end)
+
     prev = %{
       engine: Application.get_env(:samen_core, Samen.Notifications.Engine),
       auto: Application.get_env(:samen_core, Samen.Automation)
@@ -314,6 +323,7 @@ defmodule Samen.Automation.RunDefinitionPinTest do
   end
 
   defp create_workflow!(org, owner, opts) do
+    SamenCore.Support.AgentMembershipFixture.register_owner(org, owner)
     Workflow
     |> Ash.Changeset.for_create(:create, %{
       org_id: org,

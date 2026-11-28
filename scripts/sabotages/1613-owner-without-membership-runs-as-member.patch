@@ -1,0 +1,20 @@
+# SABOTAGE: An owner with no membership in the org is run as a synthesized member instead of stopping the 
+#   run owner_unavailable.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/engine_guards_test.exs
+# MUST_FAIL: an owner with no membership in the org stops the run as :owner_unavailable
+diff --git a/samen_core/lib/samen/automation/run_worker.ex b/samen_core/lib/samen/automation/run_worker.ex
+index 004a9116..95fc6b42 100644
+--- a/samen_core/lib/samen/automation/run_worker.ex
++++ b/samen_core/lib/samen/automation/run_worker.ex
+@@ -181,7 +181,7 @@ defmodule Samen.Automation.RunWorker do
+         {:ok, scope}
+ 
+       {:error, :not_authorized} ->
+-        {:skip, :owner_unavailable}
++        {:ok, Samen.Scope.new(%{id: owner_id, org_id: org_id, role: :member})}
+ 
+       {:error, _unresolvable} ->
+         Samen.Observability.Failure.report(:run_worker_owner_membership, org_id, :membership_unresolvable)
