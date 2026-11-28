@@ -130,6 +130,32 @@ defmodule Samen.Web.ApiKeysHygieneTest do
       assert ApiKeys.effective_scopes(%{all: [:delete]}, :owner) == %{}
     end
 
+    test "RED: minting with no scopes is refused; CONTROL: a key with a scope mints" do
+      org_id = Ash.UUID.generate()
+      {user, membership} = seed_membership!(org_id)
+      base = [membership_id: membership.id, minter_role: :admin]
+      count = fn -> Ash.count!(Samen.WebTest.Operator.ApiKey, authorize?: false) end
+
+      # no scopes asked for, or only ones the minter's role trims away (a viewer asking for write only)
+      assert {:error, :no_scopes} = ApiKeys.mint(mount(), admin_scope(user.id, org_id), base ++ [scopes: %{}])
+      assert {:error, :no_scopes} = ApiKeys.mint(mount(), admin_scope(user.id, org_id), base)
+
+      assert {:error, :no_scopes} =
+               ApiKeys.mint(mount(), admin_scope(user.id, org_id),
+                 membership_id: membership.id,
+                 minter_role: :viewer,
+                 scopes: %{all: [:write]}
+               )
+
+      assert count.() == 0
+
+      assert {:ok, _raw, row} =
+               ApiKeys.mint(mount(), admin_scope(user.id, org_id), base ++ [scopes: %{"crm.contact" => [:read]}])
+
+      assert row.scopes == %{"crm.contact" => ["read"]} or row.scopes == %{"crm.contact" => [:read]}
+      assert count.() == 1
+    end
+
     test "the STORED row carries only the ceiling-bounded scopes (a viewer key is read-only at rest)" do
       org_id = Ash.UUID.generate()
       {user, membership} = seed_membership!(org_id)

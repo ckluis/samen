@@ -1,0 +1,20 @@
+# SABOTAGE: the generator does not recognise a table its own earlier migration backfilled, so a re-run 
+#   writes a second one
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/api_key_scopes_gen_test.exs
+# MUST_FAIL: a re-run writes nothing (the table is already backfilled by a migration there)
+diff --git a/samen_core/lib/mix/tasks/samen.gen.api_key_scopes.ex b/samen_core/lib/mix/tasks/samen.gen.api_key_scopes.ex
+index 7a15fbac..95a5b4c1 100644
+--- a/samen_core/lib/mix/tasks/samen.gen.api_key_scopes.ex
++++ b/samen_core/lib/mix/tasks/samen.gen.api_key_scopes.ex
+@@ -130,7 +130,7 @@ defmodule Mix.Tasks.Samen.Gen.ApiKeyScopes do
+ 
+   # a migration of this task's output that names the table
+   defp present?(sources, table),
+-    do: Enum.any?(sources, &(String.contains?(&1, ".Migrations.ApiKeyScopes") and String.contains?(&1, ~s|"#{table}"|)))
++    do: Enum.any?(sources, &(String.contains?(&1, ".Migrations.NoSuchMarker") and String.contains?(&1, ~s|"#{table}"|)))
+ 
+   defp parse_key!(triple) do
+     case String.split(triple, ":") do

@@ -103,6 +103,12 @@ defmodule Samen.Web.TenantRoleSettingsTest do
 
     admin = page(H.log_in(ctx.admin), ApiKeysLive, path, ctx.org_id)
     assert html(ApiKeysLive, admin) =~ ~s(id="api-key-mint-form")
+    # an admin who ticks neither box is told so, and nothing is created
+    refused = H.event(ApiKeysLive, "mint", %{"key" => %{}}, admin)
+    assert refused.assigns.mint_error =~ "Choose at least one scope"
+    assert refused.assigns.minted_key == nil
+    assert refused.assigns.keys == []
+
     admin = H.event(ApiKeysLive, "mint", %{"key" => %{"read" => "1"}}, admin)
     assert admin.assigns.mint_error == nil
     assert admin.assigns.minted_key != nil

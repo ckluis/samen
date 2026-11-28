@@ -286,6 +286,12 @@ defmodule Samen.Web.Settings.ApiKeysLive do
       {:error, :unavailable} ->
         {:noreply, assign(socket, mint_error: "Couldn't mint a key right now. Nothing was created — try again.")}
 
+      {:error, :no_scopes} ->
+        {:noreply,
+         assign(socket,
+           mint_error: "Choose at least one scope (read or write): a key with no scopes cannot do anything. Nothing was created."
+         )}
+
       {:error, _reason} ->
         {:noreply, assign(socket, mint_error: "Mint refused (admin role required).")}
     end

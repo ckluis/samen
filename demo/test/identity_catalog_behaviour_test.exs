@@ -135,7 +135,8 @@ defmodule Demo.IdentityCatalogBehaviourTest do
     assert described("key_api_key", "expires_at") =~ "an update that sets it can only shorten it and refuses a revoked or expired key"
     assert described("key_api_key", "revoked_at") =~ "the revoke action sets it once and keeps the original instant on a repeat"
     assert described("key_api_key", "last_used_at") =~ "through the system-only mark_used action"
-    assert described("key_api_key", "scopes") =~ "A key's authority at use is its effective role (see minter_role)"
+    # a key acts with the lower of its scopes and its role; the scopes are enforced (api_key_scope_enforcement_test.exs)
+    assert described("key_api_key", "scopes") =~ "needs a scope that covers the action and a role that allows it, the lower of the two"
 
     org = mk_org()
     admin_member = mk_member(org, :admin)

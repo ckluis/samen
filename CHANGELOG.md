@@ -11,6 +11,39 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
+### Changed: an API key's scopes are enforced, and a key with no scopes is refused
+
+- **A key acts with the lower of its scopes and its role.** Every resource exposed over JSON:API (it carries
+  `AshJsonApi.Resource`) gets `Samen.Policy.ApiKeyScope` as the FIRST policy in its list, added by
+  `Samen.Transformers.ApiKeyScopePolicy`, so a `bypass` the resource declares cannot skip it. Ash requires every policy to
+  authorize, so the key's scopes and the resource's own role and org policies must both allow the request; a request the scopes
+  do not cover is answered with the API's ordinary 403. A resource with `AshJsonApi.Resource` and no `Ash.Policy.Authorizer`
+  no longer compiles. A signed-in person, a system actor and any actor with no `:api_key` are not affected. A host with no
+  JSON:API (pawchart) is unchanged; its MCP endpoint builds an actor with no `api_key` map, so scopes are not enforced there.
+- **The scope grammar.** A scope key is `"all"`, `"<family>"` or `"<family>.<type>"` (atoms or strings), its value a list of
+  `"read"` and `"write"`. The family is the underscored last segment of the resource's domain (`Demo.Crm` is `crm`,
+  `Driftwood.Freight` is `freight`), or what the domain's `samen_api_family/0` returns; the type is the resource's JSON:API
+  type (`contact`, `driver`). A read action needs `read`; a create, update, destroy or generic action needs `write`, and an
+  update or destroy by id reads the row first, so it needs `read` as well. `Samen.Scope.ApiKey.permits?/4` is the predicate.
+  An empty scope map authorizes nothing.
+- **Minting a key with no scopes is refused.** `Samen.Web.Settings.ApiKeys.mint/3` returns `{:error, :no_scopes}` when the
+  requested scopes, after the trim to the minter's role (a viewer's `write` is dropped), leave none, and the API-keys page
+  says "Choose at least one scope". Scopes may now be a family or `family.type`, not only `all`.
+- **`mix samen.gen.api_key_scopes`** writes the data migration for keys that already exist with empty scopes: an owner,
+  admin or member key gets `{"all": ["read", "write"]}`, a viewer key `{"all": ["read"]}` (what their minter's role already
+  allowed), in batches of 5,000 rows. A key with scopes, or with no known role, is not touched; the statements only match
+  rows that are still empty, so a second run changes nothing and the generator itself skips a table a migration already
+  backfills. Committed for demo, driftwood (both key tables), pawchart and samen_web.
+- **Upgrading a host.** (1) Run `mix samen.gen.api_key_scopes` in the app and commit the migration; (2) run
+  `mix ecto.migrate`, before or with the deploy; (3) re-mint, or edit the scopes of, any key that should be narrower than its
+  minter's role; (4) a script or test that mints a key with `%{}` scopes now gets a key that is refused everywhere: give it
+  `%{"all" => ["read"]}` or the family it uses (`%{"crm" => ["read"]}`); (5) a resource of your own with
+  `extensions: [AshJsonApi.Resource]` needs `authorizers: [Ash.Policy.Authorizer]`.
+- Proven by `api_key_scope_enforcement_test.exs` in demo and driftwood (through the real router and key plug, with a fixture
+  domain for the write route and a `bypass`), the guards `api_key_scope_guard_test.exs` in demo, driftwood, pawchart and
+  samen_core, `scope_api_key_permits_test.exs`, `api_key_scopes_gen_test.exs` (the migration run against a scratch database),
+  and sabotages 1584 to 1597. ADR-029 records the amendment.
+
 ### Fixed: the flag-taking mix tasks refuse an unknown flag
 
 - **A guessed or misspelled flag on a generator or verifier is refused, not dropped.** The generated `AGENTS.md` says every

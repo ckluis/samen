@@ -168,6 +168,7 @@ defmodule Demo.AiGroundingCatalogTest do
     assert_witness!(scope_witness, "RED: a key scoped identity:read is refused /api/v1/contacts; CONTROL: crm:read reads them")
     assert_witness!(scope_witness, "RED: a key with no declared scopes authorizes nothing on the API; CONTROL: the same org reads with scopes")
     assert_witness!(scope_witness, "RED: the scope policy precedes a bypass; CONTROL: the same role writes once its scope says write")
+    assert_witness!("samen_web/test/samen/web/api_keys_hygiene_test.exs", "RED: minting with no scopes is refused; CONTROL: a key with a scope mints")
 
     # --- mark_used is system-only
     assert key["last_used_at"]["description"] =~ "through the system-only mark_used action"

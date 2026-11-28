@@ -1,0 +1,19 @@
+# SABOTAGE: minting a key with no scopes writes the row instead of refusing it
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/api_keys_hygiene_test.exs
+# MUST_FAIL: RED: minting with no scopes is refused
+diff --git a/samen_web/lib/samen/web/settings/api_keys.ex b/samen_web/lib/samen/web/settings/api_keys.ex
+index b1366312..856d1991 100644
+--- a/samen_web/lib/samen/web/settings/api_keys.ex
++++ b/samen_web/lib/samen/web/settings/api_keys.ex
+@@ -90,7 +90,7 @@ defmodule Samen.Web.Settings.ApiKeys do
+   defp do_mint(mount, scope, opts) do
+     requested = Keyword.get(opts, :scopes, %{})
+ 
+-    if effective_scopes(requested, Keyword.fetch!(opts, :minter_role)) == %{},
++    if false and effective_scopes(requested, Keyword.fetch!(opts, :minter_role)) == %{},
+       do: {:error, :no_scopes},
+       else: mint_key(mount, scope, opts)
+   end

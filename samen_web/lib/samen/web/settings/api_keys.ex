@@ -72,18 +72,30 @@ defmodule Samen.Web.Settings.ApiKeys do
     * `:membership_id` — REQUIRED. The minting membership (the actor ceiling / same-org FK).
     * `:minter_role`   — REQUIRED. The minting membership's role.
     * `:plane`         — `:tenant` (default) or `:operator`.
-    * `:scopes`        — requested `%{family => [:read | :write]}` (default `%{}`).
+    * `:scopes`        — REQUIRED, requested `%{scope => [:read | :write]}` where a scope is `all`, a family (`crm`) or
+      `family.type` (`crm.contact`). They are trimmed to the minter's role; a key left with none is refused
+      (`{:error, :no_scopes}`), because a key with no scopes authorizes nothing.
     * `:expires_at`    — requested hard expiry. ALWAYS bounded into `(now, now + max_ttl]`
       via `Samen.Scope.ApiKey.bounded_expiry/2`; `nil` (the default) mints at
       `now + default_ttl`. A key is never minted unbounded (F3.4).
 
   Returns `{:ok, raw, key_row}` — `raw` shown once, `key_row` stores only the digest —
-  or `{:error, reason}`.
+  or `{:error, reason}` (`:no_scopes` when the requested scopes, trimmed to the minter's role, leave none).
   """
   def mint(mount, scope, opts),
     do: Guard.write(:settings_api_key_mint, scope, fn -> do_mint(mount, scope, opts) end)
 
+  # A key with no scopes authorizes nothing: once the minter's role has trimmed the request, none left is refused
+  # and nothing is written.
   defp do_mint(mount, scope, opts) do
+    requested = Keyword.get(opts, :scopes, %{})
+
+    if effective_scopes(requested, Keyword.fetch!(opts, :minter_role)) == %{},
+      do: {:error, :no_scopes},
+      else: mint_key(mount, scope, opts)
+  end
+
+  defp mint_key(mount, scope, opts) do
     membership_id = Keyword.fetch!(opts, :membership_id)
     minter_role = Keyword.fetch!(opts, :minter_role)
     plane = Keyword.get(opts, :plane, :tenant)

@@ -9,7 +9,7 @@ defmodule Samen.MixTaskUnknownFlagsTest do
 
   Three families, each proven through the task's own `run/1`:
 
-    * generators (`samen.gen.indexes`, `reveal_requests`, `api_key_digest_unique`, `csat_token_digest_unique`)
+    * generators (`samen.gen.indexes`, `reveal_requests`, `api_key_digest_unique`, `csat_token_digest_unique`, `api_key_scopes`)
     * verifiers (`samen.verify.*` that take flags)
     * the other flag-taking tasks (`samen.audit.freeform_projection`, `samen.ai.smoke`)
 
@@ -23,7 +23,7 @@ defmodule Samen.MixTaskUnknownFlagsTest do
 
   @project_dir Path.expand("../", __DIR__)
 
-  @generators ~w(samen.gen.indexes samen.gen.reveal_requests samen.gen.api_key_digest_unique samen.gen.csat_token_digest_unique)
+  @generators ~w(samen.gen.indexes samen.gen.reveal_requests samen.gen.api_key_digest_unique samen.gen.csat_token_digest_unique samen.gen.api_key_scopes)
   @verifiers ~w(samen.verify.fleet_wire samen.verify.signals_no_pii samen.verify.vault_declared_parity
                 samen.verify.agent_coverage samen.verify.catalog_parity samen.verify.metric_labels
                 samen.verify.vault_token_binding samen.verify.tnt_catalog samen.verify.no_pii_columns
