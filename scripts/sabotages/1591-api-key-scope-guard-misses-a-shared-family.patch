@@ -5,10 +5,10 @@
 # TEST_FILES: test/api_key_scope_guard_test.exs
 # MUST_FAIL: two domains of one router that share a scope family are reported; distinct families are not
 diff --git a/samen_core/lib/samen/api_key_scope_guard.ex b/samen_core/lib/samen/api_key_scope_guard.ex
-index 96a255ae..359cb643 100644
+index 406ef9e..978122d 100644
 --- a/samen_core/lib/samen/api_key_scope_guard.ex
 +++ b/samen_core/lib/samen/api_key_scope_guard.ex
-@@ -45,7 +45,7 @@ defmodule Samen.ApiKeyScopeGuard do
+@@ -50,7 +50,7 @@ defmodule Samen.ApiKeyScopeGuard do
    @doc "Families shared by more than one domain of `router`."
    @spec duplicate_families(module()) :: [String.t()]
    def duplicate_families(router) do
@@ -16,4 +16,4 @@ index 96a255ae..359cb643 100644
 +    for {family, [_, _ | _]} <- families(router), family == :none, do: family
    end
  
-   defp domain_family(domain) do
+   @doc """
