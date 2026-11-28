@@ -296,9 +296,12 @@ defmodule Samen.Automation.ActionsTest do
     assert [first, second] = Enum.map(WebhookHttpAdapter.Test.calls(), fn {_url, body, _h} -> Jason.decode!(body)["delivery_id"] end)
     assert first != second
 
-    # The positive control: the first action keeps the id a single-webhook workflow always had.
-    [{_, first_body, _}] = Enum.take(WebhookHttpAdapter.Test.calls(), 1)
-    assert Jason.decode!(first_body)["delivery_id"] == first
+    # The positive control: the first action keeps the id a single-webhook workflow always had, `sha256(workflow_id <>
+    # ":" <> event_id)`, computed here independently from the event id the run's own job carries.
+    import Ecto.Query, only: [from: 2]
+    [run_job] = SamenCore.TestRepo.all(from(j in Oban.Job, where: j.worker == "Samen.Automation.RunWorker"))
+    legacy = :crypto.hash(:sha256, to_string(wf.id) <> ":" <> run_job.args["event_id"]) |> Base.encode16(case: :lower)
+    assert first == legacy
 
     # A retry of the same run re-runs each action with its own index: the same ids come back.
     ctx = %Samen.Automation.Context{

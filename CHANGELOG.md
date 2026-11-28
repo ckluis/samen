@@ -26,9 +26,11 @@ All notable changes to Samen are recorded here. The format follows
   has not retries the run and ends it as an internal error instead of running it under an unchecked role (ADR-039 §4.5).
 - **A due scheduled workflow is dispatched once.** The schedule advance applies only while `next_fire_at` is the value the
   scan read, so of two scans of one workflow one advances it and enqueues the dispatch and the other gets a stale-record
-  error. The dispatch `event_id` is derived from the workflow id and that fire time (ADR-039 §4.1).
+  error and its job ends cancelled (`:trigger_no_longer_applies`, AshOban's mapping), without a retry. A scan that did not
+  read the fire time is refused rather than advanced unguarded. The dispatch `event_id` is derived from the workflow id and that fire time (ADR-039 §4.1).
 - **An escalation step is advanced once.** `:advance_step` is guarded in SQL on `current_step`, so two advances of one step
-  apply once and notify once (ADR-039 §7.3).
+  apply once and notify once; the losing advance ends as a cancelled job too, and one that did not read the step is refused
+  (ADR-039 §7.3).
 - **Each webhook action of a run has its own `delivery_id`.** The first action keeps the id it always had; the action at
   index `n > 0` appends `:n`. A retry of the run gives each action the same id again.
 - **Sabotages 1612 to 1617** name the tests that prove these.

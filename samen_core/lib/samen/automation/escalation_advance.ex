@@ -24,9 +24,10 @@ defmodule Samen.Automation.EscalationAdvance do
 
   The update is guarded in SQL on `current_step`: it applies only while the row is still at
   the step this advance was read at (`filter(current_step == ^step)`). Of two advances of the
-  same step, one applies and the other matches no row and is refused as a stale record, so a
-  step is notified once. The step is the one on the record the scan handed over; a record that
-  arrives without it falls back to the reloaded snapshot.
+  same step, one applies and the other matches no row and is refused as a stale record (AshOban
+  maps it to a cancelled job, `:trigger_no_longer_applies`, which is not retried), so a step is
+  notified once. The step is the one on the record the scan handed over; a record that arrives
+  without it is refused, never advanced against a freshly reloaded value.
   """
   use Ash.Resource.Change
 
@@ -47,18 +48,18 @@ defmodule Samen.Automation.EscalationAdvance do
     advance(changeset, escalation)
   end
 
-  # The step the caller read: the record's own `current_step`, else the reloaded snapshot's.
-  defp read_step(changeset, escalation) do
+  defp advance(changeset, nil), do: changeset
+
+  # The step is the one on the record the scan handed over. A record that arrives without it has no step to compare
+  # against, and a reloaded value would be compared with itself: refuse instead of advancing unguarded.
+  defp advance(changeset, escalation) do
     case Ash.Changeset.get_data(changeset, :current_step) do
-      step when is_integer(step) -> step
-      _not_loaded -> escalation.current_step || 0
+      step_idx when is_integer(step_idx) -> advance_from(changeset, escalation, step_idx)
+      _unread -> Ash.Changeset.add_error(changeset, field: :current_step, message: "the step this advance read is unknown")
     end
   end
 
-  defp advance(changeset, nil), do: changeset
-
-  defp advance(changeset, escalation) do
-    step_idx = read_step(changeset, escalation)
+  defp advance_from(changeset, escalation, step_idx) do
     changeset = Ash.Changeset.filter(changeset, Ash.Expr.expr(current_step == ^step_idx))
     chain = escalation.chain || []
     deadline_at = escalation.deadline_at

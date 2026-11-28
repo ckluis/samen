@@ -140,6 +140,39 @@ defmodule Samen.Automation.EngineGuardsTest do
       assert [job] = Enum.filter(jobs, &(&1.args["resource_key"] =~ "Subject"))
       assert job.args["chain"] == ["w0", parent]
     end
+
+    test "the agent's assign_record_owner write carries the loop provenance too" do
+      org = Ash.UUID.generate()
+      actor_user = member!(org)
+      {:ok, scope} = Samen.AI.Agent.Approver.resolve(actor_user, org)
+      target = create_target!(org, "to assign", :normal)
+
+      # A workflow on Target UPDATES, so the write below is captured and enqueues a dispatch.
+      Workflow
+      |> Ash.Changeset.for_create(:create, %{
+        org_id: org,
+        name: "assigned-#{System.unique_integer([:positive])}",
+        status: :active,
+        trigger_kind: :resource_event,
+        resource_key: @target_key,
+        event: :updated,
+        conditions: [],
+        actions: [%{"kind" => "notify", "recipient" => "owner", "event_type" => "workflow.fired"}],
+        owner_id: actor_user
+      })
+      |> Ash.create!(authorize?: false)
+
+      parent = Ash.UUID.generate()
+      ctx = %Samen.Automation.Context{org_id: org, workflow_id: parent, subject_ref: "samen:target:x", depth: 1, chain: ["w0"], actor: scope}
+      config = %{"resource" => @target_key, "id" => target.id, "user_id" => Ash.UUID.generate()}
+
+      assert {:ok, %{assigned: true}} = Samen.Automation.Actions.AssignRecordOwner.run(config, ctx)
+
+      jobs = TestRepo.all(Ecto.Query.from(j in Oban.Job, where: j.worker == "Samen.Automation.DispatchWorker"))
+      assert [job] = Enum.filter(jobs, &(&1.args["event"] == "updated"))
+      assert job.args["depth"] == 2
+      assert job.args["chain"] == ["w0", parent]
+    end
   end
 
   describe "schedule scan idempotency (ADR-039 §4.1)" do
@@ -193,6 +226,27 @@ defmodule Samen.Automation.EngineGuardsTest do
 
       assert [_, _] = runs_for(org, wf.id)
     end
+
+    test "a scan that did not read the fire time refuses to advance: nothing is advanced or dispatched" do
+      org = Ash.UUID.generate()
+      fire_at = DateTime.utc_now() |> DateTime.add(-120, :second) |> DateTime.truncate(:second)
+      wf = create_schedule_workflow!(org, member!(org), fire_at)
+
+      # The control: a scan holding the fire time it read advances.
+      assert {:ok, _} = dispatch_due(due_copy!(wf))
+      drain_rounds(3)
+      assert [_] = runs_for(org, wf.id)
+
+      for copy <- [unread_copy!(wf), %{due_copy!(wf) | next_fire_at: nil}] do
+        before = Ash.get!(Workflow, wf.id, authorize?: false).next_fire_at
+        assert {:error, error} = dispatch_due(copy)
+        assert Enum.any?(List.wrap(error.errors), &match?(%Ash.Error.Changes.InvalidAttribute{field: :next_fire_at}, &1))
+        drain_rounds(3)
+
+        assert Ash.get!(Workflow, wf.id, authorize?: false).next_fire_at == before
+        assert [_] = runs_for(org, wf.id)
+      end
+    end
   end
 
   describe "escalation advance (ADR-039 §7.3)" do
@@ -219,6 +273,20 @@ defmodule Samen.Automation.EngineGuardsTest do
       assert {:ok, %{current_step: 1}} = advance_step(escalation)
       assert {:ok, %{current_step: 2}} = advance_step(Ash.get!(Escalation, escalation.id, authorize?: false))
       assert step_notifications(org) == 2
+    end
+
+    test "an advance that did not read the step refuses: the step is never taken from a reload" do
+      org = Ash.UUID.generate()
+      escalation = open_escalation!(org, "advance-unread")
+
+      unread = Escalation |> Ash.Query.select([:id]) |> filter(id == ^escalation.id) |> Ash.read!(authorize?: false) |> hd()
+      assert {:error, error} = advance_step(unread)
+      assert Enum.any?(List.wrap(error.errors), &match?(%Ash.Error.Changes.InvalidAttribute{field: :current_step}, &1))
+
+      assert Ash.get!(Escalation, escalation.id, authorize?: false).current_step == 0
+      assert step_notifications(org) == 0
+      # The control: the same advance from a copy that carries its step applies.
+      assert {:ok, %{current_step: 1}} = advance_step(Ash.get!(Escalation, escalation.id, authorize?: false))
     end
   end
 
@@ -328,6 +396,11 @@ defmodule Samen.Automation.EngineGuardsTest do
     |> filter(id == ^wf.id)
     |> Ash.read!(authorize?: false)
     |> hd()
+  end
+
+  # A scan copy that carries only its primary key: no fire time read.
+  defp unread_copy!(wf) do
+    Workflow |> Ash.Query.for_read(:scan_due) |> Ash.Query.select([:id]) |> filter(id == ^wf.id) |> Ash.read!(authorize?: false) |> hd()
   end
 
   defp dispatch_due(copy) do

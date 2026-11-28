@@ -6,10 +6,10 @@
 # TEST_FILES: test/automation/engine_guards_test.exs
 # MUST_FAIL: two scans of the same due workflow produce one run and advance next_fire_at once
 diff --git a/samen_core/lib/samen/automation/schedule_advance.ex b/samen_core/lib/samen/automation/schedule_advance.ex
-index 22ee42e5..174f46e8 100644
+index 2a6ce7d..45196ee 100644
 --- a/samen_core/lib/samen/automation/schedule_advance.ex
 +++ b/samen_core/lib/samen/automation/schedule_advance.ex
-@@ -80,8 +80,8 @@ defmodule Samen.Automation.ScheduleAdvance do
+@@ -61,8 +61,8 @@ defmodule Samen.Automation.ScheduleAdvance do
    end
  
    # The compare-and-set: the update applies only while `next_fire_at` is still the value the scan read.
@@ -18,5 +18,5 @@ index 22ee42e5..174f46e8 100644
 +  defp guard_fire_at(changeset, %DateTime{} = _fire_at),
 +    do: changeset
  
-   defp guard_fire_at(changeset, _no_fire_at), do: changeset
- 
+   @doc false
+   # Deterministic per (workflow, fire time): the same fire time is always the same event.

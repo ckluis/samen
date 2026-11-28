@@ -14,7 +14,9 @@ defmodule Samen.Automation.ScheduleAdvance do
   Two scans can read the same due workflow. The update is a compare-and-set on the
   `next_fire_at` the scan read: it matches no row once another scan has advanced it, so only
   one scan advances the workflow and enqueues its dispatch; the other gets a stale-record
-  error and enqueues nothing. The dispatch's `event_id` is also derived from
+  error and enqueues nothing (AshOban maps it to a cancelled job, `:trigger_no_longer_applies`,
+  which is not retried). A scan that did not read the fire time at all is refused the same way: with
+  nothing to compare against, the advance is never applied unguarded. The dispatch's `event_id` is also derived from
   `(workflow id, the fire time it was read at)`, so even a dispatch enqueued twice for one
   fire time is one run (Oban uniqueness on `{workflow_id, event_id}` and the Run's
   `dispatch_key`). The next fire time has a different `event_id`.
@@ -30,8 +32,15 @@ defmodule Samen.Automation.ScheduleAdvance do
 
   @impl true
   def change(changeset, _opts, _context) do
-    fire_at = fire_at(changeset)
+    case Ash.Changeset.get_data(changeset, :next_fire_at) do
+      %DateTime{} = fire_at -> advance_from(changeset, fire_at)
+      # A scan that did not hand over the fire time it read has nothing to compare against: advancing would be an
+      # unguarded write (two scans could both apply it). Refuse; the workflow stays due and the next scan reads it whole.
+      _unread -> Ash.Changeset.add_error(changeset, field: :next_fire_at, message: "the fire time this scan read is unknown")
+    end
+  end
 
+  defp advance_from(changeset, fire_at) do
     changeset
     |> guard_fire_at(fire_at)
     |> advance()
@@ -51,39 +60,9 @@ defmodule Samen.Automation.ScheduleAdvance do
     end)
   end
 
-  # The `next_fire_at` this scan read (the scan's `where` selects it; a record that arrives without it is reloaded).
-  defp fire_at(changeset) do
-    case Ash.Changeset.get_data(changeset, :next_fire_at) do
-      %DateTime{} = at -> at
-      nil -> nil
-      _not_loaded -> reload_fire_at(changeset.resource, Ash.Changeset.get_data(changeset, :id))
-    end
-  end
-
-  defp reload_fire_at(_resource, nil), do: nil
-
-  defp reload_fire_at(resource, id) do
-    import Ash.Query
-
-    resource
-    |> filter(id == ^id)
-    |> Ash.Query.ensure_selected([:next_fire_at])
-    |> Ash.read!(authorize?: false)
-    |> case do
-      [r | _] -> Map.get(r, :next_fire_at)
-      [] -> nil
-    end
-  rescue
-    e ->
-      Samen.Observability.Failure.report(:schedule_advance_reload_fire_at, nil, e)
-      nil
-  end
-
   # The compare-and-set: the update applies only while `next_fire_at` is still the value the scan read.
   defp guard_fire_at(changeset, %DateTime{} = fire_at),
     do: Ash.Changeset.filter(changeset, Ash.Expr.expr(next_fire_at == ^fire_at))
-
-  defp guard_fire_at(changeset, _no_fire_at), do: changeset
 
   @doc false
   # Deterministic per (workflow, fire time): the same fire time is always the same event.

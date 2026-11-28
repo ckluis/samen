@@ -6,13 +6,13 @@
 # TEST_FILES: test/automation/engine_guards_test.exs
 # MUST_FAIL: two advances of the same step apply once: the second matches no row
 diff --git a/samen_core/lib/samen/automation/escalation_advance.ex b/samen_core/lib/samen/automation/escalation_advance.ex
-index 20517bd7..dafce204 100644
+index 31c41c9a..b3d9f449 100644
 --- a/samen_core/lib/samen/automation/escalation_advance.ex
 +++ b/samen_core/lib/samen/automation/escalation_advance.ex
-@@ -59,7 +59,6 @@ defmodule Samen.Automation.EscalationAdvance do
+@@ -60,7 +60,6 @@ defmodule Samen.Automation.EscalationAdvance do
+   end
  
-   defp advance(changeset, escalation) do
-     step_idx = read_step(changeset, escalation)
+   defp advance_from(changeset, escalation, step_idx) do
 -    changeset = Ash.Changeset.filter(changeset, Ash.Expr.expr(current_step == ^step_idx))
      chain = escalation.chain || []
      deadline_at = escalation.deadline_at
