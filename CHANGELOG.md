@@ -44,7 +44,7 @@ All notable changes to Samen are recorded here. The format follows
 - Proven by `api_key_scope_enforcement_test.exs` in demo and driftwood (through the real router and key plug, with a fixture
   domain for the write route and a `bypass`), the guards `api_key_scope_guard_test.exs` in demo, driftwood, pawchart and
   samen_core, `scope_api_key_permits_test.exs`, `api_key_scopes_gen_test.exs` (the migration run against a scratch database),
-  and sabotages 1584 to 1600. ADR-029 records the amendment.
+  and sabotages 1584 to 1601. ADR-029 records the amendment.
 
 ### Fixed: the flag-taking mix tasks refuse an unknown flag
 

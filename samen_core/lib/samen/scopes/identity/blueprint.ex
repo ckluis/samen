@@ -735,11 +735,11 @@ defmodule Samen.Scopes.Identity.Blueprint do
           )
 
           # Declared scopes as a bounded map: %{scope => [:read,:write]} (`all`, a family, or
-          # `family.type`). The effective authority is the intersection with the minter's role at use.
+          # `family.type`). Over the JSON:API its authority is the lower of these scopes and the minter's role.
           attribute(:scopes, :map,
             public?: true,
             default: %{},
-            description: "Scopes: all, a family (crm) or family.type (crm.contact), each read, write or both. Every request made with the key needs a scope that covers the action and a role that allows it, the lower of the two; a key with no scopes authorizes nothing. No action changes it; mint refuses a key left with none."
+            description: "Scopes: all, a family (crm) or family.type (crm.contact), each read, write or both. A request over the JSON:API needs a scope that covers the action and a role that allows it; no scopes authorizes nothing. The MCP endpoint does not read them. No action changes it; mint refuses a key left with none."
           )
 
           # The role of the minting membership — the actor ceiling this key inherits.

@@ -156,10 +156,12 @@ defmodule Demo.AiGroundingCatalogTest do
 
     # --- key scopes: the wording says the scopes ARE enforced on every API request (the lower of scope and role) and that
     # an empty set authorizes nothing; each claim has a witness through the real router, and the policy that does it is
-    # on the exposed resources
+    # on the exposed resources; `api_key_scope_paths_guard_test.exs` proves every key-authenticated path either enforces them or is named
+    # in this wording as outside them
     scopes = key["scopes"]["description"]
-    assert scopes =~ "Every request made with the key needs a scope that covers the action and a role that allows it, the lower of the two"
-    assert scopes =~ "a key with no scopes authorizes nothing"
+    assert scopes =~ "A request over the JSON:API needs a scope that covers the action and a role that allows it"
+    assert scopes =~ "no scopes authorizes nothing"
+    assert scopes =~ "The MCP endpoint does not read them"
     assert scopes =~ "mint refuses a key left with none"
     refute scopes =~ "A key's authority at use is its effective role"
 
