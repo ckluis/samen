@@ -275,6 +275,51 @@ defmodule Samen.Automation.ActionsTest do
     assert {:ok, _timestamp} = Signer.verify(body, signature, wf.webhook_secret)
   end
 
+  test "two webhook actions of one run carry distinct delivery ids; a retried action reuses its own" do
+    org = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+
+    {:ok, _pid} = start_supervised(WebhookHttpAdapter.Test)
+
+    Application.put_env(:samen_core, Samen.Automation.Actions.Webhook,
+      http_adapter: WebhookHttpAdapter.Test,
+      resolver: Resolver.Test,
+      resolver_map: %{"webhook.example.test" => {93, 184, 216, 34}}
+    )
+
+    hook = %{"kind" => "webhook", "url" => "https://webhook.example.test/hook", "include" => []}
+    wf = create_workflow!(org, owner, actions: [hook, hook])
+
+    create_target!(org)
+    drain()
+
+    assert [first, second] = Enum.map(WebhookHttpAdapter.Test.calls(), fn {_url, body, _h} -> Jason.decode!(body)["delivery_id"] end)
+    assert first != second
+
+    # The positive control: the first action keeps the id a single-webhook workflow always had.
+    [{_, first_body, _}] = Enum.take(WebhookHttpAdapter.Test.calls(), 1)
+    assert Jason.decode!(first_body)["delivery_id"] == first
+
+    # A retry of the same run re-runs each action with its own index: the same ids come back.
+    ctx = %Samen.Automation.Context{
+      org_id: org,
+      workflow_id: to_string(wf.id),
+      subject_ref: "samen:target:x",
+      event_id: "event-1",
+      webhook_secret: wf.webhook_secret
+    }
+
+    ids =
+      for index <- [0, 1, 0, 1] do
+        assert {:ok, _} = Webhook.run(hook, %{ctx | action_index: index})
+        {_url, body, _headers} = List.last(WebhookHttpAdapter.Test.calls())
+        Jason.decode!(body)["delivery_id"]
+      end
+
+    assert [a, b, a2, b2] = ids
+    assert a == a2 and b == b2 and a != b
+  end
+
   test "row 8 — enqueue_reminder: schedules a T41 Reminder via the primitive" do
     org = Ash.UUID.generate()
     owner = Ash.UUID.generate()

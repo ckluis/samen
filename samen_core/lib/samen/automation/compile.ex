@@ -24,7 +24,7 @@ defmodule Samen.Automation.ActionStep do
 
       module ->
         try do
-          case module.run(config(action), ctx) do
+          case module.run(config(action), %{ctx | action_index: index}) do
             {:ok, meta} ->
               {:ok, %{index: index, kind: kind, status: :succeeded, meta: bounded(meta)}}
 

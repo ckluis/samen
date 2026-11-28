@@ -49,9 +49,12 @@ defmodule Samen.Automation.Actions.Webhook do
   ## Idempotency (§4.6 / §5.3)
 
   `delivery_id` is a stable `sha256(workflow_id <> ":" <> event_id)` (falling
-  back to `subject_ref` when no `event_id` — a manual/schedule trigger) — the
-  SAME value across Oban retries of the same run, so a receiver dedupes a
-  redelivered attempt on it (at-least-once, receiver-side dedupe, ADR-039 §4.6).
+  back to `subject_ref` when no `event_id` — a manual/schedule trigger) for the
+  workflow's first action, and `sha256(workflow_id <> ":" <> event_id <> ":" <> index)`
+  for the action at `index > 0`: unique per (run, action) and the SAME value
+  across Oban retries of the same run, so a receiver dedupes a redelivered
+  attempt on it without taking two webhook actions of one run for one delivery
+  (at-least-once, receiver-side dedupe, ADR-039 §4.6).
   """
 
   @behaviour Samen.Automation.Action
@@ -147,10 +150,13 @@ defmodule Samen.Automation.Actions.Webhook do
   defp serialize(v) when is_atom(v) and not is_boolean(v) and not is_nil(v), do: to_string(v)
   defp serialize(v), do: v
 
-  defp delivery_id(%Context{workflow_id: wid, event_id: eid, subject_ref: sref}) do
-    basis = to_string(wid) <> ":" <> to_string(eid || sref || "")
+  defp delivery_id(%Context{workflow_id: wid, event_id: eid, subject_ref: sref, action_index: index}) do
+    basis = to_string(wid) <> ":" <> to_string(eid || sref || "") <> index_suffix(index)
     :crypto.hash(:sha256, basis) |> Base.encode16(case: :lower)
   end
+
+  defp index_suffix(index) when is_integer(index) and index > 0, do: ":" <> Integer.to_string(index)
+  defp index_suffix(_first_or_unknown), do: ""
 
   defp webhook_secret(%Context{webhook_secret: secret}) when is_binary(secret) and secret != "",
     do: {:ok, secret}
