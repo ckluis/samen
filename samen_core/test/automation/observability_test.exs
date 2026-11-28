@@ -1261,6 +1261,8 @@ defmodule Samen.Automation.ObservabilityTest do
     assert dispatches.() == []
 
     # POSITIVE CONTROL: the org is on the row -> one dispatch under that org
+    # (a scan hands over the fire time it read; the guard refuses an advance without one)
+    wf = %{wf | next_fire_at: DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.truncate(:second)}
     changeset = Ash.Changeset.for_update(wf, :dispatch_due, %{})
     advance.(changeset, wf)
     assert [%{args: %{"org_id" => ^org}}] = dispatches.()
@@ -1363,7 +1365,8 @@ defmodule Samen.Automation.ObservabilityTest do
       end
     end
 
-    # POSITIVE CONTROL: the org is on the row -> the hook answers ok
+    # POSITIVE CONTROL: the org is on the row -> the hook answers ok (the scan's read fire time is on the record)
+    wf = %{wf | next_fire_at: DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.truncate(:second)}
     changeset = Ash.Changeset.for_update(wf, :dispatch_due, %{})
     assert [{:ok, _}] = advance.(changeset, wf)
 
