@@ -12,7 +12,9 @@ defmodule Samen.Api.Help.ErrorHints do
 
   The link names a type only when the caller may use it (`Samen.Api.Help.visible_types/2`); otherwise, for an unknown
   caller or a hidden type, it is the index, so an error never says a hidden type exists. A key that holds no scope at
-  all is told so (`key_has_no_scopes`) and that is reported once, value-free.
+  all is told so (`key_has_no_scopes`); that refusal is counted (telemetry `[:samen, :api, :help, :key_has_no_scopes]`),
+  not logged, because a key without scopes meets it on every request. Only the resource the request addressed is asked
+  about; no other type is evaluated. An error whose `meta` or `links` is not a map keeps it as it is.
 
   (AshJsonApi's per-domain `error_handler` is not used: it sees neither the conn nor the actor, so it cannot tell a
   hidden type from a visible one.)
@@ -22,7 +24,6 @@ defmodule Samen.Api.Help.ErrorHints do
   import Plug.Conn
 
   alias Samen.Api.Help
-  alias Samen.Observability.Failure
 
   @hints %{
     "forbidden" => "Not permitted for this key. GET %{help} lists the actions it may run.",
@@ -47,7 +48,8 @@ defmodule Samen.Api.Help.ErrorHints do
       actor = Ash.PlugHelpers.get_actor(conn)
       link = link(conn, actor, opts)
       no_scopes? = no_scopes?(actor)
-      if no_scopes? and Enum.any?(errors, &(is_map(&1) and &1["code"] == "forbidden")), do: Failure.report(:api_key_no_scopes, nil, :no_scopes)
+      if no_scopes? and Enum.any?(errors, &(is_map(&1) and &1["code"] == "forbidden")),
+        do: :telemetry.execute([:samen, :api, :help, :key_has_no_scopes], %{count: 1}, %{})
 
       errors = Enum.map(errors, &annotate(&1, link, opts.help, no_scopes?))
       %{conn | resp_body: Jason.encode!(Map.put(body, "errors", errors))}
@@ -61,9 +63,11 @@ defmodule Samen.Api.Help.ErrorHints do
   defp annotate(%{} = error, link, index, no_scopes?) do
     code = error["code"]
     key = if no_scopes? and code == "forbidden", do: "key_has_no_scopes", else: code
-    meta = Map.merge(%{"_hint" => text(key, index), "help" => link}, meta_of(error))
-    links = Map.put_new(links_of(error), "about", link)
-    error |> Map.put("meta", meta) |> Map.put("links", links)
+    defaults = %{"_hint" => text(key, index), "help" => link}
+
+    error
+    |> put_map("meta", fn meta -> Map.merge(defaults, meta) end, defaults)
+    |> put_map("links", &Map.put_new(&1, "about", link), %{"about" => link})
   end
 
   defp annotate(other, _link, _index, _no_scopes?), do: other
@@ -79,17 +83,22 @@ defmodule Samen.Api.Help.ErrorHints do
     String.replace(template, "%{help}", index)
   end
 
-  defp meta_of(%{"meta" => %{} = meta}), do: meta
-  defp meta_of(_), do: %{}
-  defp links_of(%{"links" => %{} = links}), do: links
-  defp links_of(_), do: %{}
+  # Absent: the new map. A map: merged (what the error already carries wins). Anything else: left as it is.
+  defp put_map(error, field, merge, fresh) do
+    case Map.fetch(error, field) do
+      :error -> Map.put(error, field, fresh)
+      {:ok, nil} -> Map.put(error, field, fresh)
+      {:ok, %{} = existing} -> Map.put(error, field, merge.(existing))
+      {:ok, _other} -> error
+    end
+  end
 
   # The first path segment names a type only if the router serves it AND the caller may use it.
   defp link(conn, actor, %{router: router, help: help}) do
     with %{} <- actor,
          [segment | _] <- conn.path_info,
          type when is_binary(type) <- type_for(router, segment),
-         true <- MapSet.member?(Help.visible_types(actor, router), type) do
+         true <- Help.visible?(actor, router, type) do
       "#{help}/#{type}"
     else
       _ -> help

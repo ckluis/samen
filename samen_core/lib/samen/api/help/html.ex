@@ -43,7 +43,7 @@ defmodule Samen.Api.Help.Html do
     actions =
       for a <- map["actions"] do
         "<tr><td><code>#{e(a["name"])}</code></td><td>#{e(a["class"])}</td><td>#{e(a["method"])}</td>" <>
-          "<td><code>#{e(a["path"])}</code></td><td><code>#{e(a["scope"])}</code></td><td>#{e(Enum.join(a["required_args"], ", "))}</td></tr>"
+          "<td><code>#{e(a["path"])}</code></td><td>#{scope_cell(a)}</td><td>#{e(Enum.join(a["required_args"], ", "))}</td></tr>"
       end
 
     relations =
@@ -59,6 +59,16 @@ defmodule Samen.Api.Help.Html do
       "<h2>Fields</h2>" <>
       table(["Name", "Label", "Type", "Required", "Read only", "PII", "Delivery"], fields) <>
       "<h2>Relations</h2>" <> table(["Name", "Kind", "Field", "Target"], relations)
+  end
+
+  # `{"crm.contact": ["read"]}` as `crm.contact: read`, then the wider names, then whether the action is conditional.
+  defp scope_cell(a) do
+    scope = for {name, classes} <- Enum.sort(a["scope"] || %{}), do: "<code>#{e(name)}</code>: #{e(Enum.join(classes, ", "))}"
+    also = Enum.map(a["also_granted_by"] || [], &"<code>#{e(&1)}</code>")
+
+    Enum.join(scope, "; ") <>
+      if(also == [], do: "", else: " (also granted by #{Enum.join(also, ", ")})") <>
+      if(a["conditional"], do: " (only for some records)", else: "")
   end
 
   defp delivery("clear"), do: "clear"

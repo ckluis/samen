@@ -7,13 +7,16 @@ defmodule Samen.Api.Help.Endpoint do
 
   (in a `Plug.Router`: `forward("/api/help", to: Samen.Api.Help.Endpoint, router: …, key_auth: …)`).
 
-    * The host's key plug runs first and resolves the actor exactly as for the API. No actor answers `401` with
-      `WWW-Authenticate: Bearer` and nothing else; a key lookup that could not be checked answers the plug's own `503`.
+    * The host's key plug runs first and resolves the actor exactly as for the API. Only an actor that carries the
+      key (`:api_key`, which the key plug sets) is described: no actor, or an actor that something other than the key
+      plug assigned, answers `401` with `WWW-Authenticate: Bearer` and nothing else; a key lookup that could not be
+      checked answers the plug's own `503`.
     * The answer is JSON, or the same map as HTML (`Samen.Api.Help.Html`) on `Accept: text/html` or `?format=html`.
     * A type the caller may not use and a type that does not exist answer the SAME `404` body, byte for byte.
     * Every answer, errors included, is `Cache-Control: private, no-store` and `Vary: Authorization, Accept`: a
       description is per caller and is never stored or shared.
-    * Only `GET` and `HEAD` are served; the endpoint reads no row and writes nothing.
+    * Only `GET` and `HEAD` are served. Describing reads no tenant row and writes none; the host's key plug does what
+      it does for any API request (the demo's stamps the key's `last_used_at`).
 
   Options: `:router` (the host's `AshJsonApi.Router`) and `:key_auth` (the host's key plug) are required; `:prefix`
   (where the API is mounted, default `"/api/v1"`) and `:help` (where this is mounted, default `"/api/help"`) only
@@ -57,7 +60,7 @@ defmodule Samen.Api.Help.Endpoint do
 
         cond do
           conn.halted -> conn
-          actor = Ash.PlugHelpers.get_actor(conn) -> serve(conn, actor, opts)
+          key_actor?(actor = Ash.PlugHelpers.get_actor(conn)) -> serve(conn, actor, opts)
           true -> unauthorized(conn)
         end
 
@@ -65,6 +68,11 @@ defmodule Samen.Api.Help.Endpoint do
         conn |> put_resp_header("allow", "GET, HEAD") |> send_resp(405, "") |> halt()
     end
   end
+
+  # The description is the key's: an actor that does not carry the key map is not a key request, and the key-scope
+  # policy would let it through, so it is refused here rather than described.
+  defp key_actor?(%{api_key: %{}}), do: true
+  defp key_actor?(_actor), do: false
 
   defp serve(conn, actor, opts) do
     help_opts = [prefix: opts.prefix, help: opts.help]
@@ -87,7 +95,7 @@ defmodule Samen.Api.Help.Endpoint do
     if html?(conn) do
       conn
       |> put_resp_content_type("text/html")
-      |> put_resp_header("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'")
+      |> put_resp_header("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
       |> send_resp(200, Samen.Api.Help.Html.render(map, kind))
     else
       conn |> put_resp_content_type("application/json") |> send_resp(200, Jason.encode!(map))

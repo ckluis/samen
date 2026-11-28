@@ -74,7 +74,7 @@ defmodule Samen.Observability.FailureTest do
     subject_in_org_resource subject_in_org_lookup search_index_pii_read
     action_effect action_tool_schema agent_cancel_load agent_fetch_turn agent_health_probe agent_health_repo_running
     agent_load_approval agent_pending_turn agent_refuse_vt_args agent_run_tool agent_transcript_reveal agent_transcript_views agent_validate_args
-    api_help_can api_key_no_scopes
+    api_help_can
     catalog_meaning_introspect ai_catalog_custom_objects ai_catalog_grounding ai_catalog_object_fields ai_catalog_schema ai_catalog_table_entry
     ai_native_tools approval_existing_pending approval_fetch approval_res_repo approval_subject_refs approver_castable_key approver_read_membership approver_resolve_wired assign_owner_attribute
     assign_owner_fetch audit_chain_probe audit_chain_reveal_events audit_default_landing_probe audit_partition_runway

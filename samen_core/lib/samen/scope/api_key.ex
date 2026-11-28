@@ -408,7 +408,7 @@ defmodule Samen.Scope.ApiKey do
   """
   @spec permits?(map(), :read | :write, String.t() | atom() | nil, String.t() | atom() | nil) :: boolean()
   def permits?(%{scopes: scopes}, class, family, type) when is_map(scopes) and class in [:read, :write] do
-    wanted = ["all", string_or_nil(family), qualified(family, type)] |> Enum.reject(&is_nil/1)
+    wanted = scope_names(family, type)
     class = Atom.to_string(class)
 
     Enum.any?(scopes, fn {key, actions} ->
@@ -417,6 +417,29 @@ defmodule Samen.Scope.ApiKey do
   end
 
   def permits?(_key, _class, _family, _type), do: false
+
+  @doc """
+  The scope names that grant an action on `type` in `family`, narrowest first: `"<family>.<type>"`, `"<family>"`,
+  `"all"` (a name that needs a family or a type the resource lacks is left out). This is the list `permits?/4` checks,
+  so what `/api/help` tells a caller to mint is what the request is checked against.
+  """
+  @spec scope_names(String.t() | atom() | nil, String.t() | atom() | nil) :: [String.t()]
+  def scope_names(family, type), do: Enum.reject([qualified(family, type), string_or_nil(family), "all"], &is_nil/1)
+
+  @doc """
+  The narrowest scope map that permits an action needing `classes` on `type` in `family` (for example
+  `%{"crm.contact" => ["read"]}`) and the wider scope names that would also permit it (`["crm", "all"]`). A key minted
+  with exactly `scope` passes `permits?/4` for every class in `classes`.
+  """
+  @spec grant_for(String.t() | atom() | nil, String.t() | atom() | nil, [:read | :write]) :: %{
+          scope: %{String.t() => [String.t()]},
+          also_granted_by: [String.t()]
+        }
+  def grant_for(family, type, classes) do
+    [narrowest | wider] = scope_names(family, type)
+    names = classes |> Enum.uniq() |> Enum.sort() |> Enum.map(&Atom.to_string/1)
+    %{scope: %{narrowest => names}, also_granted_by: wider}
+  end
 
   defp qualified(nil, _type), do: nil
   defp qualified(_family, nil), do: nil

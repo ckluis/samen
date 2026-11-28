@@ -146,21 +146,82 @@ defmodule Demo.ApiHelpEndpointTest do
       assert Enum.all?(json(conn)["errors"], &is_binary(&1["meta"]["_hint"]))
     end
 
-    test "RED: a key with no scopes is told so and the refusal is reported once, value-free; CONTROL: a scoped key's 403 is the plain hint" do
+    test "RED: a key with no scopes is told so; the refusal is counted per request and never logged as an error; CONTROL: a scoped key's 403 is the plain hint" do
       org = mk_org("NoScopes")
       {empty, _} = mk_api_key(org.id, scopes: %{})
       {narrow, _} = mk_api_key(org.id, scopes: %{"identity" => ["read"]})
 
-      log = capture_log(fn -> assert api_get("/contacts", empty).status == 403 end)
-      assert log =~ "api_key_no_scopes"
-      assert length(Regex.scan(~r/read=api_key_no_scopes/, log)) == 1
+      ref = make_ref()
+      test = self()
+      handler = "no-scopes-#{inspect(ref)}"
+      :telemetry.attach(handler, [:samen, :api, :help, :key_has_no_scopes], fn _e, m, _meta, _c -> send(test, {ref, m}) end, nil)
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      log =
+        capture_log(fn ->
+          assert api_get("/contacts", empty).status == 403
+          assert api_get("/contacts", empty).status == 403
+        end)
+
+      assert_received {^ref, %{count: 1}}
+      assert_received {^ref, %{count: 1}}
+      refute log =~ "api_key_no_scopes"
+      refute log =~ "[error]"
       refute log =~ "sk_"
 
       [%{"meta" => %{"_hint" => hint}}] = json(api_get("/contacts", empty))["errors"]
       assert hint =~ "no scopes"
+      assert_received {^ref, %{count: 1}}
 
       [%{"meta" => %{"_hint" => plain}}] = json(api_get("/contacts", narrow))["errors"]
       refute plain =~ "no scopes"
+      refute_received {^ref, _}
+    end
+  end
+
+  describe "only a key's actor is described" do
+    defmodule AssignsAnActor do
+      @moduledoc "A key plug stand-in that assigns an actor the way something other than the key plug would: no `:api_key`."
+      @behaviour Plug
+      def init(opts), do: opts
+      def call(conn, _opts), do: Ash.PlugHelpers.set_actor(conn, %{plane: :operator, role: :owner, org_id: Ecto.UUID.generate()})
+    end
+
+    defmodule AssignsAKeyActor do
+      @moduledoc "The control: the same actor carrying an `:api_key` map."
+      @behaviour Plug
+      def init(opts), do: opts
+
+      def call(conn, _opts) do
+        key = %{org_id: nil, plane: :tenant, scopes: %{"all" => ["read"]}, minter_role: :admin}
+        Ash.PlugHelpers.set_actor(conn, %{plane: :tenant, role: :admin, org_id: Ecto.UUID.generate(), api_key: key})
+      end
+    end
+
+    defp via(key_auth, path) do
+      opts = Samen.Api.Help.Endpoint.init(router: DemoWeb.Api.Router, key_auth: key_auth)
+      Samen.Api.Help.Endpoint.call(Plug.Test.conn(:get, path), opts)
+    end
+
+    test "RED: an actor that is not the key plug's answers 401 and no description; CONTROL: the same actor with a key map is described" do
+      refuted = via(AssignsAnActor, "/")
+      assert refuted.status == 401
+      assert header(refuted, "www-authenticate") == "Bearer"
+      refute refuted.resp_body =~ "resources"
+      assert via(AssignsAnActor, "/contact").status == 401
+
+      assert via(AssignsAKeyActor, "/").status == 200
+    end
+  end
+
+  describe "the HTML view's content security policy" do
+    test "RED: the HTML page cannot be framed, has no base and posts nowhere; CONTROL: the JSON answer has none" do
+      org = mk_org("Csp")
+      {raw, _} = mk_api_key(org.id, scopes: %{"crm" => ["read"]})
+
+      csp = header(help_get("?format=html", raw), "content-security-policy")
+      assert csp == "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+      assert header(help_get("", raw), "content-security-policy") == nil
     end
   end
 
@@ -171,7 +232,7 @@ defmodule Demo.ApiHelpEndpointTest do
 
       for conn <- [help_get("", raw), help_get("/contact", raw), help_get("/nope", raw), help_get(""), help_get("", raw, [{"accept", "text/html"}])] do
         assert header(conn, "cache-control") == "private, no-store"
-        assert header(conn, "vary") =~ "Authorization"
+        assert header(conn, "vary") == "Authorization, Accept"
       end
     end
   end

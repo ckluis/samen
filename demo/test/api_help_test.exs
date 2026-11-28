@@ -80,7 +80,14 @@ defmodule Demo.ApiHelpTest do
       {:ok, detail} = Samen.Api.Help.resource(actor(writer), @fixture, "gadget", prefix: "/fx")
 
       destroy = Enum.find(detail["actions"], &(&1["name"] == "destroy"))
-      assert %{"route" => "delete", "path" => "/fx/gadgets/:id", "scope" => "fixture:write", "required_args" => []} = destroy
+      assert %{
+               "route" => "delete",
+               "path" => "/fx/gadgets/:id",
+               "scope" => %{"fixture.gadget" => ["read", "write"]},
+               "also_granted_by" => ["fixture", "all"],
+               "conditional" => false,
+               "required_args" => []
+             } = destroy
       assert detail["family"] == "fixture"
       assert detail["links"] == %{"self" => "/api/help/gadget", "index" => "/api/help"}
     end
@@ -234,11 +241,11 @@ defmodule Demo.ApiHelpTest do
       assert true in answers and false in answers
     end
 
-    test "(c) the same iff holds for a write route (fixture domain, role x scope set)" do
+    test "(c) the same iff holds for a write route (fixture domain, role x plane x scope set)" do
       org = mk_org("MatrixWrite")
 
-      for role <- @roles, scopes <- [%{"all" => ["read", "write"]}, %{"fixture" => ["read", "write"]}, %{"fixture.gadget" => ["read"]}, %{"fixture" => ["write"]}, %{}] do
-        {raw, _} = mk_api_key(org.id, minter_role: role, plane: :tenant, scopes: scopes)
+      for role <- @roles, plane <- @planes, scopes <- [%{"all" => ["read", "write"]}, %{"fixture" => ["read", "write"]}, %{"fixture.gadget" => ["read"]}, %{"fixture" => ["write"]}, %{}] do
+        {raw, _} = mk_api_key(org.id, minter_role: role, plane: plane, scopes: scopes)
         gadget = mk_gadget("g")
         actor = Plug.Test.conn(:get, "/gadgets") |> put_req_header("authorization", "Bearer " <> raw) |> Demo.ScopeFixture.Endpoint.call([]) |> then(& &1.private.samen_api_actor)
 
@@ -255,8 +262,82 @@ defmodule Demo.ApiHelpTest do
           |> Demo.ScopeFixture.Endpoint.call([])
           |> Map.fetch!(:status)
 
-        assert listed? == (status != 403), "role=#{role} scopes=#{inspect(scopes)}: help lists destroy=#{listed?}, request answered #{status}"
+        assert listed? == (status != 403), "role=#{role} plane=#{plane} scopes=#{inspect(scopes)}: help lists destroy=#{listed?}, request answered #{status}"
       end
+    end
+  end
+
+  describe "the scope an action shows is the key grammar's narrowest grant" do
+    defp grammar_ok?(scope), do: Samen.Scope.ApiKey.Grammar.validate(scope) == :ok
+
+    defp route_status(%{"method" => "GET", "path" => path}, type, ids, raw) do
+      api_get(String.replace(path, "/api/v1", "") |> String.replace(":id", ids[type]), raw).status
+    end
+
+    test "minting a key with exactly the shown scope allows every listed route (role x plane); a route needing read+write shows both" do
+      org = mk_org("Grant")
+      ids = ids_by_type(org)
+      seen = for role <- @roles, plane <- @planes do
+        {all, _} = mk_api_key(org.id, minter_role: role, plane: plane, scopes: %{"all" => ["read", "write"]})
+        actor = actor(all)
+
+        for type <- types(Samen.Api.Help.index(actor, @router)),
+            {:ok, detail} = Samen.Api.Help.resource(actor, @router, type),
+            action <- detail["actions"] do
+          scope = action["scope"]
+          assert grammar_ok?(scope), "scope #{inspect(scope)} is not in the key grammar"
+          assert [name] = Map.keys(scope)
+          assert name == "#{detail["family"]}.#{type}"
+          assert action["also_granted_by"] == [detail["family"], "all"]
+
+          {exact, _} = mk_api_key(org.id, minter_role: role, plane: plane, scopes: scope)
+          assert route_status(action, type, ids, exact) != 403, "role=#{role} plane=#{plane} #{action["path"]} refused for exactly #{inspect(scope)}"
+          {:ok, own} = Samen.Api.Help.resource(actor(exact), @router, type)
+          assert Enum.any?(own["actions"], &(&1["path"] == action["path"])), "help does not list #{action["path"]} to the key it told you to mint"
+
+          # the wider names that also grant it: each lists the same classes
+          for wider <- action["also_granted_by"] do
+            {wide, _} = mk_api_key(org.id, minter_role: role, plane: plane, scopes: %{wider => scope[name]})
+            assert route_status(action, type, ids, wide) != 403
+          end
+
+          {action["path"], role, plane}
+        end
+      end
+
+      assert seen |> List.flatten() |> length() > 8
+    end
+
+    test "RED: a write route shows read AND write (it loads the record first); a key with only one of them is refused. CONTROL: both allow it" do
+      org = mk_org("GrantWrite")
+      {writer, _} = mk_api_key(org.id, minter_role: :admin, scopes: %{"fixture" => ["read", "write"]})
+      {:ok, detail} = Samen.Api.Help.resource(actor(writer), @fixture, "gadget", prefix: "/fx")
+      destroy = Enum.find(detail["actions"], &(&1["name"] == "destroy"))
+      assert destroy["scope"] == %{"fixture.gadget" => ["read", "write"]}
+
+      delete = fn raw ->
+        gadget = mk_gadget("g")
+
+        Plug.Test.conn(:delete, "/gadgets/#{gadget.id}")
+        |> put_req_header("accept", "application/vnd.api+json")
+        |> put_req_header("authorization", "Bearer " <> raw)
+        |> Demo.ScopeFixture.Endpoint.call([])
+        |> Map.fetch!(:status)
+      end
+
+      {exact, _} = mk_api_key(org.id, minter_role: :admin, scopes: destroy["scope"])
+      {write_only, _} = mk_api_key(org.id, minter_role: :admin, scopes: %{"fixture.gadget" => ["write"]})
+      {read_only, _} = mk_api_key(org.id, minter_role: :admin, scopes: %{"fixture.gadget" => ["read"]})
+
+      assert delete.(exact) != 403
+      assert delete.(write_only) == 403
+      assert delete.(read_only) == 403
+    end
+
+    test "a resource with no family renders only the all grant" do
+      assert Samen.Scope.ApiKey.grant_for(nil, "thing", [:read]) == %{scope: %{"all" => ["read"]}, also_granted_by: []}
+      assert Samen.Scope.ApiKey.grant_for("crm", "contact", [:write, :read]) ==
+               %{scope: %{"crm.contact" => ["read", "write"]}, also_granted_by: ["crm", "all"]}
     end
   end
 
