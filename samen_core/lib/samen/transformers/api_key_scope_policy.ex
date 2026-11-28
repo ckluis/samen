@@ -5,14 +5,16 @@ defmodule Samen.Transformers.ApiKeyScopePolicy do
   For a resource that carries the `AshJsonApi.Resource` extension this prepends, ahead of every policy the
   resource declares:
 
-      policy always() do
-        forbid_unless Samen.Policy.ApiKeyScope
-        authorize_if always()
+      policy Samen.Policy.ApiKeyScopeRefused do
+        forbid_if always()
       end
 
-  Ash requires every applicable policy to authorize, so the key's scopes and the resource's own policies (its
-  role and org rules) are both conjuncts: a key can do what BOTH allow. It is the first policy, so a `bypass`
-  the resource declares after it cannot skip it. A resource not exposed over JSON:API is untouched.
+  The condition is true only for a key request whose scopes do not permit the action, so for that request the
+  policy forbids, and for every other request (a person, a system actor, `nil`, a key whose scopes cover the
+  action) it does not apply. It never authorizes: whether an action is allowed is decided by the policies the
+  resource declares alone, an action none of them covers stays forbidden, and a key can do what BOTH its scopes and
+  those policies allow. It is the first policy, so a `bypass` the resource declares after it cannot skip it. A
+  resource not exposed over JSON:API is untouched.
 
   The resource must use `Ash.Policy.Authorizer`: an exposed resource without one would serve a key's request
   with no policy at all, so compilation raises instead.
@@ -22,13 +24,6 @@ defmodule Samen.Transformers.ApiKeyScopePolicy do
   alias Spark.Dsl.Transformer
 
   @json_api Module.concat(["AshJsonApi", "Resource"])
-
-  # Runs after `Samen.Transformers.RevealActions`, whose probe rule inspects the policies a resource DECLARES for
-  # a reveal action. The policy added here only ever narrows (it authorizes everything but a key request the
-  # key's scopes do not cover, and every other policy must still authorize), so it is not one of those.
-  @impl true
-  def after?(Samen.Transformers.RevealActions), do: true
-  def after?(_), do: false
 
   @impl true
   def before?(_), do: false
@@ -49,19 +44,14 @@ defmodule Samen.Transformers.ApiKeyScopePolicy do
 
       always = Ash.Policy.Check.Builtins.always()
 
-      {:ok, check} =
-        Transformer.build_entity(Ash.Policy.Authorizer, [:policies, :policy], :forbid_unless,
-          check: {Samen.Policy.ApiKeyScope, []}
-        )
-
-      {:ok, allow} =
-        Transformer.build_entity(Ash.Policy.Authorizer, [:policies, :policy], :authorize_if, check: always)
+      {:ok, forbid} =
+        Transformer.build_entity(Ash.Policy.Authorizer, [:policies, :policy], :forbid_if, check: always)
 
       {:ok, policy} =
         Transformer.build_entity(Ash.Policy.Authorizer, [:policies], :policy,
-          condition: always,
-          description: "an API key's declared scopes permit this action",
-          policies: [check, allow]
+          condition: {Samen.Policy.ApiKeyScopeRefused, []},
+          description: "an API key's declared scopes do not permit this action",
+          policies: [forbid]
         )
 
       {:ok, Transformer.add_entity(dsl_state, [:policies], policy)}

@@ -17,6 +17,8 @@ defmodule Demo.ScopeFixture.Domain do
 
   resources do
     resource(Demo.ScopeFixture.Gadget)
+    resource(Demo.ScopeFixture.Widget)
+    resource(Demo.ScopeFixture.Bare)
   end
 
   @doc "The scope family of this domain's resources."
@@ -77,6 +79,91 @@ defmodule Demo.ScopeFixture.Gadget do
 
     policy action_type([:create, :destroy]) do
       authorize_if(actor_attribute_equals(:role, :admin))
+    end
+  end
+end
+
+defmodule Demo.ScopeFixture.Widget do
+  @moduledoc """
+  A JSON:API resource that declares policies for ONE read action (`:covered_read`, open to any actor) and for nothing
+  else. Its other actions (a read, a create, an update, a destroy and a generic action) have no covering policy, so
+  Ash's rule "no policy applies: forbidden" must hold for them whoever asks, a key included.
+  """
+  use Ash.Resource,
+    domain: Demo.ScopeFixture.Domain,
+    data_layer: Ash.DataLayer.Ets,
+    authorizers: [Ash.Policy.Authorizer],
+    extensions: [Demo.ScopeFixture.Ext, AshJsonApi.Resource]
+
+  ets do
+    private?(false)
+  end
+
+  json_api do
+    type("widget")
+  end
+
+  attributes do
+    uuid_primary_key(:id)
+    attribute(:name, :string, public?: true)
+  end
+
+  actions do
+    defaults([:read, :destroy])
+
+    read :covered_read
+
+    update :update do
+      accept([:name])
+      primary?(true)
+    end
+
+    create :create do
+      accept([:name])
+      primary?(true)
+    end
+
+    action :ping, :string do
+      run(fn _input, _ctx -> {:ok, "pong"} end)
+    end
+  end
+
+  policies do
+    policy action(:covered_read) do
+      authorize_if(always())
+    end
+  end
+end
+
+defmodule Demo.ScopeFixture.Bare do
+  @moduledoc """
+  A JSON:API resource with the policy authorizer and NO declared policy: deny-all for every actor, a key included.
+  """
+  use Ash.Resource,
+    domain: Demo.ScopeFixture.Domain,
+    data_layer: Ash.DataLayer.Ets,
+    authorizers: [Ash.Policy.Authorizer],
+    extensions: [Demo.ScopeFixture.Ext, AshJsonApi.Resource]
+
+  ets do
+    private?(false)
+  end
+
+  json_api do
+    type("bare")
+  end
+
+  attributes do
+    uuid_primary_key(:id)
+    attribute(:name, :string, public?: true)
+  end
+
+  actions do
+    defaults([:read, :destroy])
+
+    create :create do
+      accept([:name])
+      primary?(true)
     end
   end
 end

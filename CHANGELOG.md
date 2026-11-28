@@ -14,12 +14,14 @@ All notable changes to Samen are recorded here. The format follows
 ### Changed: an API key's scopes are enforced, and a key with no scopes is refused
 
 - **A key acts with the lower of its scopes and its role.** Every resource exposed over JSON:API (it carries
-  `AshJsonApi.Resource`) gets `Samen.Policy.ApiKeyScope` as the FIRST policy in its list, added by
-  `Samen.Transformers.ApiKeyScopePolicy`, so a `bypass` the resource declares cannot skip it. Ash requires every policy to
-  authorize, so the key's scopes and the resource's own role and org policies must both allow the request; a request the scopes
-  do not cover is answered with the API's ordinary 403. A resource with `AshJsonApi.Resource` and no `Ash.Policy.Authorizer`
-  no longer compiles. A signed-in person, a system actor and any actor with no `:api_key` are not affected. A host with no
-  JSON:API (pawchart) is unchanged; its MCP endpoint builds an actor with no `api_key` map, so scopes are not enforced there.
+  `AshJsonApi.Resource`) gets a policy added FIRST by `Samen.Transformers.ApiKeyScopePolicy`, so a `bypass` the resource
+  declares cannot skip it: `policy Samen.Policy.ApiKeyScopeRefused do forbid_if always() end`. The condition is true only
+  for a key request whose scopes do not permit the action, so that request is answered with the API's ordinary 403, and for
+  every other request the policy does not apply. It never authorizes: the resource's own policies alone decide whether an
+  action is allowed, an action none of them covers stays forbidden, and a key can do what both its scopes and those policies
+  allow. A resource with `AshJsonApi.Resource` and no `Ash.Policy.Authorizer` no longer compiles. A signed-in person, a system
+  actor and any actor with no `:api_key` are not affected. A host with no JSON:API (pawchart) is unchanged; its MCP endpoint
+  builds an actor with no `api_key` map, so scopes are not enforced there.
 - **The scope grammar.** A scope key is `"all"`, `"<family>"` or `"<family>.<type>"` (atoms or strings), its value a list of
   `"read"` and `"write"`. The family is the underscored last segment of the resource's domain (`Demo.Crm` is `crm`,
   `Driftwood.Freight` is `freight`), or what the domain's `samen_api_family/0` returns; the type is the resource's JSON:API
@@ -42,7 +44,7 @@ All notable changes to Samen are recorded here. The format follows
 - Proven by `api_key_scope_enforcement_test.exs` in demo and driftwood (through the real router and key plug, with a fixture
   domain for the write route and a `bypass`), the guards `api_key_scope_guard_test.exs` in demo, driftwood, pawchart and
   samen_core, `scope_api_key_permits_test.exs`, `api_key_scopes_gen_test.exs` (the migration run against a scratch database),
-  and sabotages 1584 to 1597. ADR-029 records the amendment.
+  and sabotages 1584 to 1600. ADR-029 records the amendment.
 
 ### Fixed: the flag-taking mix tasks refuse an unknown flag
 

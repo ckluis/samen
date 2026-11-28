@@ -178,7 +178,7 @@ defmodule Samen.Scope.ApiKey do
   generated plug) calls this and REFUSES to authenticate on `:error` — it never substitutes a
   default role, because an actor with `role: nil` would pass OrgScope-only resources. (The pure
   `authorized?/4` predicate would also deny such a key. A key's declared `scopes` are enforced per request by
-  `Samen.Policy.ApiKeyScope`, a policy every JSON:API resource carries.)
+  `Samen.Policy.ApiKeyScope`, through the policy every JSON:API resource carries.)
   """
   @spec acting_role(%{optional(:minter_role) => term(), optional(atom()) => term()}) ::
           {:ok, atom()} | :error
