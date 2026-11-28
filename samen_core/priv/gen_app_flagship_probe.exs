@@ -662,6 +662,41 @@ try do
     System.halt(1)
   end
 
+  # 2b. A key minted with NO scopes authorizes nothing (scopes are enforced): refused, no row leaked. The SAME
+  # org, role and route as the tenant key above, which was served: only the scopes differ.
+  raw_empty_key = "sk_" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
+
+  {:ok, _empty_key} =
+    #{module}.Operator.ApiKey
+    |> Ash.Changeset.for_create(:create, %{
+      plane: :tenant,
+      scopes: %{},
+      minter_role: :admin,
+      org_id: api_org,
+      membership_id: api_mbr.id
+    })
+    |> Ash.Changeset.force_change_attribute(
+      :token_digest,
+      #{module}Web.Api.KeyAuthPlug.digest(raw_empty_key)
+    )
+    |> Ash.create(authorize?: false)
+
+  empty_headers = [{~c"authorization", String.to_charlist("Bearer " <> raw_empty_key)}]
+
+  {empty_code, empty_body} =
+    case :httpc.request(:get, {~c"http://127.0.0.1:#{http_port}/api/v1/records", empty_headers}, [], body_format: :binary) do
+      {:ok, {{_, code, _}, _hdrs, body}} -> {code, body}
+      other -> raise "HTTP GET /api/v1/records (empty-scope key) failed: \#{inspect(other)}"
+    end
+
+  if empty_code == 403 and not String.contains?(empty_body, "FlagshipRecord") do
+    IO.puts("FLAGSHIP: GET /api/v1/records (key with no scopes) → 403, no row (an empty scope set authorizes nothing)")
+  else
+    IO.puts("FLAGSHIP FAIL: GET /api/v1/records (key with no scopes) → \#{empty_code}")
+    IO.puts(String.slice(empty_body, 0, 2000))
+    System.halt(1)
+  end
+
   if String.contains?(api_body, api_secret) or String.contains?(api_body, api_org) do
     IO.puts("FLAGSHIP FAIL: an un-allowlisted field value leaked into the /api/v1 payload")
     System.halt(1)
