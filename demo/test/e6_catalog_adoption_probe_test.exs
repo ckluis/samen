@@ -17,7 +17,7 @@ defmodule Demo.E6CatalogAdoptionProbeTest do
   `Demo.DocsScope`, `Demo.Tags`, `Demo.LocationsScope`, `Demo.SalesOps`,
   `Demo.Aggregate`) — those are deliberately NOT scanned here: §5.9's table does not
   classify them (they are separate, later-landed BATON scopes outside the E6 sweep's
-  charter), so holding THIS probe to "every resource in `:samen_core, :ash_domains`"
+  charter), so holding THIS probe to "every resource in `:samen_core, :host_domains`"
   would force a classification call this task has no authority to make. Chat
   (`samen_web`'s T37e rider) is proven separately in
   `samen_web/test/samen/scopes/chat_catalog_adoption_probe_test.exs` — demo does not

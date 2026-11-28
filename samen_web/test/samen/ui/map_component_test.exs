@@ -14,6 +14,7 @@ defmodule Samen.UI.MapComponentTest do
     * MASKING — a dumb renderer: a `%Samen.Masked{}` marker label renders `••••`, never plaintext.
     * NO-JS TABLE — an accessible data table mirrors every marker.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: true
 
   import Phoenix.LiveViewTest, only: [render_component: 2]
@@ -117,7 +118,7 @@ defmodule Samen.UI.MapComponentTest do
 
     assert html =~ "••••"
     refute html =~ "vt_secret_token"
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   test "NO-JS TABLE: an accessible data table mirrors every marker (sr-only by default)" do

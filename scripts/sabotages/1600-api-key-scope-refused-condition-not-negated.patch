@@ -1,0 +1,20 @@
+# SABOTAGE: the refusal condition is true for the actors it must not apply to, so the policy forbids a 
+#   covered action for them and lets a refused key through
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_key_scope_uncovered_test.exs
+# MUST_FAIL: CONTROL: the one covered read is allowed for the same actors
+# MUST_FAIL: CONTROL: a key whose scopes do not cover even the covered read is still refused
+diff --git a/samen_core/lib/samen/policy/api_key_scope_refused.ex b/samen_core/lib/samen/policy/api_key_scope_refused.ex
+index 291e1d7c..ed1776f8 100644
+--- a/samen_core/lib/samen/policy/api_key_scope_refused.ex
++++ b/samen_core/lib/samen/policy/api_key_scope_refused.ex
+@@ -15,6 +15,6 @@ defmodule Samen.Policy.ApiKeyScopeRefused do
+   @impl true
+   def match?(actor, context, opts) do
+     {:ok, permitted?} = Samen.Policy.ApiKeyScope.match?(actor, context, opts)
+-    {:ok, not permitted?}
++    {:ok, permitted?}
+   end
+ end

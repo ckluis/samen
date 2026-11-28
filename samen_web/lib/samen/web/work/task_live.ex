@@ -15,13 +15,14 @@ defmodule Samen.Web.Work.TaskLive do
   use Phoenix.LiveView
 
   import Samen.UI
-  import Samen.Web.Work.Live, only: [assign_mount: 2, work_sidebar: 1, work_path: 1, writable?: 1]
+  import Samen.Web.Work.Live, only: [assign_mount: 2, work_sidebar: 1, work_path: 1]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
-  alias Samen.Web.Mount
-
   alias Samen.Web.Work.Reads
+  alias Samen.Web.TenantActor
+  require TenantActor
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
 
   @impl true
   def mount(params, session, socket) do
@@ -48,11 +49,42 @@ defmodule Samen.Web.Work.TaskLive do
       load_error: nil,
       subtasks_failed: false
     )
+    |> assign(acting_scope: nil, actor_state: :ok, can_write: false)
   end
 
+  # ADR-045 §4.4 - WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never
+  # `Mount.scope/2`'s fixed `:member`. A denial or a failed lookup is a STATE of the page: nothing is read, nothing
+  # can be written, and the page is re-resolved on every `handle_params`.
   def load(socket, org_id, task_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, task_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id)
+    end
+  end
+
+  # Acting again with no URL to patch to (`Samen.Web.TenantActor`, the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _}} = socket), do: load(socket, socket.assigns.org_id, socket.assigns[:task_id])
+
+  # The refused state an OPEN page falls into when the guard stops an event (`Samen.Web.TenantActor.recheck_event/3`): the
+  # same load a refused navigation does, so nothing the page loaded for the person it acted for is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket, socket.assigns.org_id)
+
+  defp load_refused(socket, org_id) do
+    assign(socket,
+      no_org: false,
+      org_id: org_id,
+      task: nil,
+      subtasks: [],
+      load_error: nil,
+      subtasks_failed: false,
+      status_error: nil
+    )
+  end
+
+  defp load_for(socket, task_id, scope) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
 
     # A FAILED read is the error state (retry), never "Task not found."; the subtasks read
     # fails on its own and blanks only its own list.
@@ -85,12 +117,13 @@ defmodule Samen.Web.Work.TaskLive do
   end
 
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("retry_load", _params, socket),
     do: {:noreply, load(socket, socket.assigns.org_id, socket.assigns.task_id)}
 
   def handle_event("update_status", %{"status" => status}, socket) do
-    %{samen_mount: mount, org_id: org_id, task_id: task_id} = socket.assigns
-    scope = Mount.scope(mount, org_id)
+    %{samen_mount: mount, org_id: org_id, task_id: task_id, acting_scope: scope} = socket.assigns
 
     case Reads.update_task_status(mount, scope, task_id, status) do
       {:ok, _task} -> {:noreply, load(socket, org_id, task_id)}
@@ -118,6 +151,8 @@ defmodule Samen.Web.Work.TaskLive do
         <%= cond do %>
           <% @no_org -> %>
             <.no_org_card mount={@samen_mount} />
+          <% @actor_state in [:denied, :unavailable] -> %>
+            <.actor_refused state={@actor_state} title="Task" nothing="there is no task to show" />
           <% is_nil(@task) and @load_error != nil -> %>
             <div class="wrap">
               <.error_state class="task-error" body={@load_error} retry_event="retry_load" />
@@ -143,7 +178,7 @@ defmodule Samen.Web.Work.TaskLive do
                   </div>
                   <div>
                     <span style="font-size:11px;color:var(--muted);display:block">Status</span>
-                    <%= if writable?(@samen_mount) do %>
+                    <%= if @can_write do %>
                       <form phx-change="update_status" id="status-form">
                         <select name="status">
                           <option :for={s <- Reads.task_statuses()} value={s} selected={s == @task.status}>

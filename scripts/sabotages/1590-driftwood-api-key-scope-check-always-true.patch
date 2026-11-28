@@ -1,0 +1,20 @@
+# SABOTAGE: the API-key scope check answers true for every key, so a freight key reads a family its scopes 
+#   do not name
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/api_key_scope_enforcement_test.exs
+# MUST_FAIL: RED: a key scoped to another family is refused /api/v1/drivers
+diff --git a/samen_core/lib/samen/policy/api_key_scope.ex b/samen_core/lib/samen/policy/api_key_scope.ex
+index d37fafe8..31d96a64 100644
+--- a/samen_core/lib/samen/policy/api_key_scope.ex
++++ b/samen_core/lib/samen/policy/api_key_scope.ex
+@@ -22,7 +22,7 @@ defmodule Samen.Policy.ApiKeyScope do
+ 
+   @impl true
+   def match?(%{api_key: %{} = key}, %{resource: resource, action: %{type: type}}, _opts) do
+-    {:ok, ApiKey.permits?(key, ApiKey.action_class(type), ApiKey.family(resource), ApiKey.json_api_type(resource))}
++    {:ok, ApiKey.permits?(key, ApiKey.action_class(type), ApiKey.family(resource), ApiKey.json_api_type(resource)) or true}
+   end
+ 
+   def match?(%{api_key: _other}, _context, _opts), do: {:ok, false}

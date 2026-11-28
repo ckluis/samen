@@ -1,0 +1,19 @@
+# SABOTAGE: ImportLive imports under the fixed-member scope again, so a viewer's CSV creates rows
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_surfaces_test.exs
+# MUST_FAIL: a VIEWER cannot import Person rows or Company rows
+diff --git a/samen_web/lib/samen/web/csv/import_live.ex b/samen_web/lib/samen/web/csv/import_live.ex
+index 6f92faf2..1072edf2 100644
+--- a/samen_web/lib/samen/web/csv/import_live.ex
++++ b/samen_web/lib/samen/web/csv/import_live.ex
+@@ -115,7 +115,7 @@ defmodule Samen.Web.Csv.ImportLive do
+       result =
+         case binary do
+           nil -> {:error, :no_file}
+-          binary -> Csv.import(resource, scope, csv: binary)
++          binary -> Csv.import(resource, Mount.scope(mount, socket.assigns.org_id), csv: binary)
+         end
+ 
+       case result do

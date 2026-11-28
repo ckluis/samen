@@ -75,6 +75,7 @@ defmodule PawChart.McpAuthTest do
         org_id: org_id,
         membership_id: membership.id,
         plane: :tenant,
+        scopes: %{"all" => ["read"]},
         minter_role: Keyword.get(opts, :minter_role, :admin),
         expires_at: Keyword.get(opts, :expires_at)
       })

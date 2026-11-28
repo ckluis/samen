@@ -5,6 +5,7 @@ defmodule Samen.Web.BillingInvoiceTaxLinksTest do
   links or customer PII (INV-2 — token-blind operator view; ADR-038 §3.5 "hosted
   links surfaced tenant-side").
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.WebTest.Billing.{Customer, Invoice}
@@ -117,6 +118,6 @@ defmodule Samen.Web.BillingInvoiceTaxLinksTest do
     assert html =~ "••••"
     refute html =~ "Tax Links Fixture Co"
     refute html =~ "taxlinks@example.test"
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 end

@@ -1,0 +1,20 @@
+# SABOTAGE: The onboarding wizard controller stops checking that the person is an admin and leaves the 
+#   refusal to the kernel
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_settings_test.exs
+# MUST_FAIL: the wizard controller refuses a member itself
+diff --git a/samen_web/lib/samen/web/onboarding/wizard_controller.ex b/samen_web/lib/samen/web/onboarding/wizard_controller.ex
+index 0f28f03b..b1456d98 100644
+--- a/samen_web/lib/samen/web/onboarding/wizard_controller.ex
++++ b/samen_web/lib/samen/web/onboarding/wizard_controller.ex
+@@ -165,7 +165,7 @@ defmodule Samen.Web.Onboarding.WizardController do
+   defp authorized_scope(mount, conn, org_id, user_id, acting) when is_binary(org_id) and is_binary(user_id) do
+     # `Org.:update` needs admin+, and every wizard write is an admin's: a person who is not an admin gets no scope, so the
+     # handler refuses before `Onboarding.*` is reached. The role carried is the one the acting person resolved to now.
+-    with true <- admin?(mount, acting),
++    with true <- admin?(mount, acting) or true,
+          {:ok, %{role: role}} <- membership(mount, acting, org_id, user_id) do
+       %Samen.Scope{
+         actor: %{

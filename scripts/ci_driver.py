@@ -66,7 +66,7 @@ usage: scripts/ci quick|fast|pr|full [--budget S] [-j N] [--only STEP|GROUP[,…
                                                        step in no job, in two, or excluded without a reason;
                                                        --selection sizes the --changed jobs' timeouts from
                                                        the real selection vs --base)
-       scripts/ci actions verify MODE --results DIR --expect-head SHA [--expect-base SHA]
+       scripts/ci actions verify MODE --results DIR --expect-head SHA [--expect-base SHA] [--from-plan plan.json]
                                                       (every planned step ran, once, PASS, on commit SHA)
        scripts/ci actions summary [--last FILE]       (markdown verdict + failure digest for $GITHUB_STEP_SUMMARY)
 
@@ -124,7 +124,51 @@ def atomic_write_json(path, data):
 
 # Self-test seams (scripts/ci_test.sh LAUNCHREC) — test-only, documented in docs/ci.md, and stripped from every step's
 # environment (step_base_env) so a step can never make a nested driver hold.
-TEST_SEAMS = ("SAMEN_CI_TEST_HOLD_LAUNCH", "SAMEN_CI_TEST_HOLD_KIND", "SAMEN_CI_TEST_HOLD_LIMIT_S")
+TEST_SEAMS = ("SAMEN_CI_TEST_HOLD_LAUNCH", "SAMEN_CI_TEST_HOLD_KIND", "SAMEN_CI_TEST_HOLD_LIMIT_S",
+              "SAMEN_CI_TEST_TERM_GRACE_S", "SAMEN_CI_TEST_KILL_LINGER_S", "SAMEN_CI_TEST_KILL_WAIT_S",
+              "SAMEN_CI_SELFTEST")
+# The seams that carry a number of seconds, and the marker only scripts/ci_test.sh sets: no seam is honoured without it.
+NUMERIC_SEAMS = ("SAMEN_CI_TEST_HOLD_LIMIT_S", "SAMEN_CI_TEST_TERM_GRACE_S", "SAMEN_CI_TEST_KILL_LINGER_S",
+                 "SAMEN_CI_TEST_KILL_WAIT_S")
+SELFTEST_MARKER = ("SAMEN_CI_SELFTEST", "ci_test.sh")
+
+
+def check_test_seams():
+    """A SAMEN_CI_TEST_* seam changes how the driver launches, stops and waits (a zero SIGTERM grace skips the traps that
+    restore the tree), so it must never alter a real run silently: set without the self-test marker, or with a value that
+    is not a finite number of seconds >= 0 (or an unknown HOLD_KIND), it is REFUSED here, at startup, before any step runs
+    and naming the variable — never raised from inside terminate_all, which would orphan the groups."""
+    set_ = [k for k in TEST_SEAMS if k != SELFTEST_MARKER[0] and k in os.environ]
+    if not set_:
+        return
+    if os.environ.get(SELFTEST_MARKER[0]) != SELFTEST_MARKER[1]:
+        raise UsageError("%s is a test-only seam of scripts/ci_test.sh and is refused outside it (unset it) — it would "
+                         "change how this run stops and waits" % ", ".join(set_))
+    for k in NUMERIC_SEAMS:
+        v = os.environ.get(k)
+        if v is None:
+            continue
+        try:
+            ok = math.isfinite(float(v)) and float(v) >= 0
+        except ValueError:
+            ok = False
+        if not ok:
+            raise UsageError("%s=%r is not a number of seconds >= 0" % (k, v))
+    if os.environ.get("SAMEN_CI_TEST_HOLD_KIND", "step") not in ("step", "rerun"):
+        raise UsageError("SAMEN_CI_TEST_HOLD_KIND=%r is not step or rerun" % os.environ["SAMEN_CI_TEST_HOLD_KIND"])
+
+# After SIGKILL the group is waited on until it is GONE (not merely until the leader is reaped): a SIGKILLed grandchild is
+# a zombie until launchd/init reaps it, and under load that is long enough for "the driver exited, nothing of mine is
+# running" to be false. SIGKILL cannot be handled, so this converges as soon as the kernel has torn the members down; 10 s
+# only ever expires for a process stuck in uninterruptible sleep (it would survive any signal), and then the driver says so.
+KILL_WAIT_S = 10.0
+TERM_GRACE_S = 20.0
+
+
+def seam_float(name, default):
+    """A test-only numeric seam (docs/ci.md): unset -> the production value."""
+    v = os.environ.get(name)
+    return float(v) if v else default
 
 
 def group_alive(pg):
@@ -179,7 +223,8 @@ def fmt_s(x):
 STEP_KEYS = {"cmd", "cwd", "modes", "inputs", "reads", "always", "serial", "locks", "est_s", "group",
              "marker", "marker_if", "skip_marker", "echo_log", "exunit_dir", "superseded_by",
              "shard_list", "shard_kind", "shard_item", "shard_total", "shard_each_s", "shard_target_s",
-             "shard_check", "shard_cost", "unsharded_cmd", "desc", "actions_job", "actions_skip", "actions_dirs", "actions_slices"}
+             "shard_check", "shard_cost", "unsharded_cmd", "desc", "actions_job", "actions_skip", "actions_dirs", "actions_slices",
+             "shard_rates", "shard_rate_item", "actions_slice_max_s", "shard_overhead_s"}
 
 
 class Step(object):
@@ -218,6 +263,20 @@ class Step(object):
         self.shard_each = float(d.get("shard_each_s", "30"))
         self.shard_target = float(d.get("shard_target_s", "300"))
         self.shard_check = d.get("shard_check", "").strip() or None
+        # the FIXED cost of one invocation of the step's command (a mutate.sh run: lint, compile, baseline ~50 s), paid once
+        # per chunk, not per item: a chunk of n items costs overhead + n x per-item. Without it a one-item chunk "teaches"
+        # a per-item rate of overhead + each, the rate ratchets up (it never comes down within a factor of 4) and a small
+        # selection is planned as single-item chunks that each pay the overhead again.
+        self.shard_overhead = float(d.get("shard_overhead_s", "0"))
+        # (rates) a SELECTION is sized per item kind, not at one flat rate: `shard_rates` is a committed TSV
+        # (item path, seconds per item, measurement source) and `shard_rate_item` a regex over the lister's output with two
+        # groups (item path, count). `actions plan --selection` then sizes the job as the sum of count x rate (the flat
+        # `shard_each_s` for a path with no row) and, past `actions_slice_max_s` of work per job, splits it into slices.
+        self.shard_rates = d.get("shard_rates", "").strip() or None
+        self.shard_rate_item = d.get("shard_rate_item", "").strip() or None
+        self.slice_max = float(d["actions_slice_max_s"]) if d.get("actions_slice_max_s", "").strip() else None
+        if bool(self.shard_rates) != bool(self.shard_rate_item) or (self.slice_max and not self.shard_rates):
+            raise UsageError("manifest: step %s: shard_rates and shard_rate_item go together, and actions_slice_max_s needs them" % sid)
         # (P5) how to read a per-item wall-clock out of a sub-step's log: ONE regex, two groups (item name, seconds).
         # With it, `ranges` chunks are cost-weighted by what each item last cost on this machine.
         self.shard_cost = d.get("shard_cost", "").strip() or None
@@ -692,6 +751,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
     seen = read_json(os.path.join(HOME, "timings.json")) or {}
     learned = float(seen.get(step.id + "#per_item", 0))
     each = max(step.shard_each, learned)
+    room = step.shard_target - step.shard_overhead if step.shard_target > step.shard_overhead else step.shard_target  # per-chunk time left for items once the fixed cost is paid
     # (P5) cost-weighted ranges: what each item LAST cost (lane-seconds, read from the sub-step logs through
     # `shard_cost`) and what a chunk of that many lane-seconds really took (cost_model).
     costs = seen.get(step.id + "#item_cost") or {} if step.shard_cost else {}
@@ -782,28 +842,37 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
             # classes keep their key, the classes still partition the selection exactly
             classes = []
             for m_, r_ in stored["classes"]:
+                if size_of(m_, r_) == 0:
+                    # a class that holds no mutant (a partition stored by a driver that split a small class into more
+                    # sub-classes than it has members) is no step: `mutate.sh --shard r/m` refuses an empty selection,
+                    # and the remaining classes still partition the selection exactly (the sum check below)
+                    continue
                 probe = clone_step(step, step.id + "#probe")
                 probe.shard_args = "--shard %d/%d" % (r_, m_)
                 probe.shard_items = ["%d mutants of %d" % (size_of(m_, r_), count)]
                 probe.key = ctx.key(probe, apps)
                 est = size_of(m_, r_) * each
-                if done(probe) or est <= step.shard_target:
+                if done(probe) or est <= room:
                     classes.append((m_, r_))
                 else:
-                    k = int(math.ceil(est / step.shard_target))
+                    # never more sub-classes than the class has members: its members are x = r-1 + t*m, t < size, and
+                    # sub-class j takes t % k == j, so k <= size leaves every sub-class non-empty
+                    k = min(int(math.ceil(est / room)), size_of(m_, r_))
                     classes.extend((m_ * k, r_ + j * m_) for j in range(k))
         else:
-            n = max(1, int(math.ceil(count * each / step.shard_target))) if count else 0
+            n = min(count, max(1, int(math.ceil(count * each / room)))) if count else 0  # never a class past the last mutant
             classes = [(n, i) for i in range(1, n + 1)]
         specs = [("--shard %d/%d" % (r_, m_), ["%d mutants of %d" % (size_of(m_, r_), count)], size_of(m_, r_))
                  for m_, r_ in classes]
+        if not slice_ and any(sp[2] == 0 for sp in specs):
+            raise UsageError("shard accounting: %s planned a shard that holds no mutant" % step.id)
         if sum(sp[2] for sp in specs) != count:
             raise UsageError("shard accounting: %s shards hold %d of %d mutants" % (step.id, sum(sp[2] for sp in specs), count))
         if persist:
             save_partition(step.id, sel, {"kind": "modulo", "count": count, "classes": [list(c) for c in classes]})
     if slice_:
         i, n = slice_
-        if i <= len(specs):
+        if i <= len(specs) and (len(specs[i - 1]) < 3 or specs[i - 1][2] > 0):
             specs = [specs[i - 1]]
         else:  # fewer chunks than slices (a tiny selection): this slice is genuinely empty
             s = clone_step(step, "%s[%d/%d]" % (step.id, i, n))
@@ -967,6 +1036,7 @@ class Run(object):
         self.results = {}    # id -> dict
         self.groups_done = set()
         self.interrupted = False
+        self.stuck = {}  # groups that outlived SIGKILL + KILL_WAIT_S: still recorded so the next invocation refuses to overlap
         self.reruns = {}  # flaky-rerun processes by "<step>#rerun": recorded in state.json like a running step
         self.running = {}    # id -> dict(proc, step, start, log)
 
@@ -1015,7 +1085,7 @@ class Run(object):
     def save_state(self):
         self.state["steps"] = self.state.get("steps", {})
         self.state["running"] = dict({sid: r["proc"].pid for sid, r in self.running.items()},
-                                     **{rid: p.pid for rid, p in self.reruns.items()})
+                                     **{rid: p.pid for rid, p in self.reruns.items()}, **self.stuck)
         atomic_write_json(os.path.join(HOME, "state.json"), self.state)
 
     def record(self, step, status, duration, log=None, digest=None, note=None, key=None):
@@ -1128,27 +1198,65 @@ class Run(object):
                 self.save_state()
         return p.returncode == 0
 
+    def kill_group_and_wait(self, name, pg, proc=None):
+        """SIGKILL group `pg` and wait on the STATE: the group no longer exists. Returns True when it is gone. When it is
+        still there after KILL_WAIT_S the driver says so on stderr, names the group, and KEEPS a record of it (self.stuck ->
+        state.json running) so the next invocation refuses to overlap with it; it never pretends the group is gone."""
+        try:
+            os.killpg(pg, signal.SIGKILL)
+        except OSError:
+            pass
+        linger = seam_float("SAMEN_CI_TEST_KILL_LINGER_S", 0.0)  # test-only: report the group alive this long after SIGKILL
+        killed = time.time()
+        wait = seam_float("SAMEN_CI_TEST_KILL_WAIT_S", KILL_WAIT_S)
+        deadline = killed + wait
+
+        def alive():
+            return group_alive(pg) or time.time() < killed + linger
+        while alive() and time.time() < deadline:
+            time.sleep(0.05)
+        # The leader is reaped here, on the same bound (poll() reaps it): a leader that never dies must not block the
+        # driver forever in a plain wait(). It takes the same loud, record-kept path as a stuck group.
+        def leader_alive():
+            return proc is not None and (proc.poll() is None or time.time() < killed + linger)
+        while leader_alive() and time.time() < deadline:
+            time.sleep(0.05)
+        leader_stuck = leader_alive()
+        if not alive() and not leader_stuck:
+            self.stuck.pop(name, None)
+            return True
+        self.stuck[name] = pg
+        self.save_state()
+        if alive():
+            sys.stderr.write("ci: process group %d (%s) is STILL ALIVE %gs after SIGKILL — it is recorded as running in "
+                             "state.json; the next scripts/ci refuses to overlap with it until it is gone\n" % (pg, name, wait))
+        if leader_stuck:
+            sys.stderr.write("ci: leader of process group %d (%s) did not exit within %gs after SIGKILL — the group is "
+                             "recorded as running in state.json; the next scripts/ci refuses to overlap with it until "
+                             "it is gone\n" % (pg, name, wait))
+        sys.stderr.flush()
+        return False
+
     def stop_group(self, proc):
-        """SIGTERM then (after 20 s) SIGKILL a process group this driver started, and reap it. The deadline covers the
-        WHOLE group: a member that handles SIGTERM can outlive the leader, and the record is dropped once this returns."""
+        """SIGTERM then (after the 20 s grace) SIGKILL a process group this driver started, reap it, and wait until the
+        whole group is gone. The deadline covers the WHOLE group: a member that handles SIGTERM can outlive the leader, and
+        the record is dropped once this returns."""
         pg = proc.pid
+        name = next((rid for rid, p in self.reruns.items() if p is proc), "rerun")
         try:
             os.killpg(pg, signal.SIGTERM)
         except OSError:
             pass
-        deadline = time.time() + 20
+        grace = seam_float("SAMEN_CI_TEST_TERM_GRACE_S", TERM_GRACE_S)
+        deadline = time.time() + grace
         try:
-            proc.wait(timeout=20)
+            proc.wait(timeout=grace)
         except subprocess.TimeoutExpired:
             pass
         while group_alive(pg) and time.time() < deadline:
             time.sleep(0.1)
         if proc.poll() is None or group_alive(pg):
-            try:
-                os.killpg(pg, signal.SIGKILL)
-            except OSError:
-                pass
-            proc.wait()
+            self.kill_group_and_wait(name, pg, proc)
 
     def finish(self, sid, rc):
         r = self.running.pop(sid)
@@ -1179,7 +1287,8 @@ class Run(object):
             seen = read_json(tp) or {}
             seen[step.id] = round(dur, 1)
             if rc == 0 and step.parent and step.expected:
-                seen[step.parent + "#per_item"] = per_item_bucket(seen.get(step.parent + "#per_item", 0), dur / step.expected)
+                seen[step.parent + "#per_item"] = per_item_bucket(seen.get(step.parent + "#per_item", 0),
+                                                                  max(dur - step.shard_overhead, 0.0) / step.expected)
             if rc == 0 and step.parent and step.shard_cost:
                 learn_costs(seen, step, text, dur)
             atomic_write_json(tp, seen)
@@ -1314,7 +1423,7 @@ class Run(object):
                 os.killpg(r["proc"].pid, signal.SIGTERM)  # SIGTERM first: gen-probe/sabotage traps restore
             except OSError:
                 pass
-        deadline = time.time() + 20
+        deadline = time.time() + seam_float("SAMEN_CI_TEST_TERM_GRACE_S", TERM_GRACE_S)
         # the deadline covers every member of every group, not just each leader: a member that handles SIGTERM outlives it
         while time.time() < deadline:
             for sid in list(self.running):
@@ -1325,18 +1434,12 @@ class Run(object):
                 break
             time.sleep(0.2)
         for sid in list(self.running):
-            try:
-                os.killpg(self.running[sid]["proc"].pid, signal.SIGKILL)
-            except OSError:
-                pass
-            self.running[sid]["proc"].wait()
+            pg = self.running[sid]["proc"].pid
+            self.kill_group_and_wait(sid, pg, self.running[sid]["proc"])
             self.finish(sid, -9)
-        for pg in pgs.values():
-            if group_alive(pg):
-                try:
-                    os.killpg(pg, signal.SIGKILL)
-                except OSError:
-                    pass
+        for sid, pg in pgs.items():
+            if group_alive(pg) and sid not in self.stuck:  # a member that outlived its leader (the leader exited in time)
+                self.kill_group_and_wait(sid, pg)
 
 
 def final_line(mode, opts, plan, status, elapsed, first_fail):
@@ -1681,10 +1784,37 @@ def selection_timeout(history_min, items):
     return min(MAX_TIMEOUT_MIN, max(history_min, 5 * int(math.ceil(2.0 * need / 60.0 / 5.0))))
 
 
+def load_rates(path):
+    """Committed per-item rates: {item path: seconds per item}. A malformed row, a non-positive rate, a duplicate or a row
+    with no measurement source is an error: a rate nobody can trace is folklore."""
+    full = os.path.join(REPO, path)
+    if not os.path.isfile(full):
+        raise UsageError("shard_rates: %s does not exist" % path)
+    rates = {}
+    with open(full) as f:
+        for n, line in enumerate(f, 1):
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            c = line.rstrip("\n").split("\t")
+            try:
+                if len(c) != 3 or len(c[2].strip()) < 20:
+                    raise ValueError("want 3 tab-separated columns (path, seconds per item, measurement source of 20+ chars)")
+                rate = float(c[1])
+                if not rate > 0 or c[0].strip() in rates:
+                    raise ValueError("rate must be > 0 and each path appears once")
+            except ValueError as e:
+                raise UsageError("%s:%d: %s" % (path, n, e))
+            rates[c[0].strip()] = rate
+    return rates
+
+
 def selection_counts(man, mode, base):
-    """(P6) {step id: selected item count} for every sharded step of `mode` that is not sliced into fixed Actions
-    jobs — read from the step's OWN lister (`shard_list`) vs `base`, exactly as the job will list it. A lister that
-    fails or whose count line is missing raises: the job it sizes would fail the same way."""
+    """(P6) {step id: (selected item count, estimated lane-seconds)} for every sharded step of `mode` that is not sliced
+    into fixed Actions jobs — read from the step's OWN lister (`shard_list`) vs `base`, exactly as the job will list it.
+    The estimate is count x `shard_each_s`, or, for a step with `shard_rates`, the sum over the lister's per-item-path
+    counts of count x that path's committed rate (the flat rate for a path with no row). A lister that fails or whose
+    count line is missing raises: the job it sizes would fail the same way; so does a rated step whose per-path counts do
+    not add up to its total (a rate model over a partial listing would under-size the job)."""
     ctx = Context(base, True)
     counts = {}
     for s in mode_steps(man, mode):
@@ -1695,11 +1825,21 @@ def selection_counts(man, mode, base):
         if rc != 0 or len(totals) != 1 or not totals[0].isdigit():
             raise UsageError("actions plan --selection: cannot size %s: its lister exited %d and matched shard_total /%s/ "
                              "%d time(s):\n%s" % (s.id, rc, s.shard_total, len(totals), text[-1500:]))
-        counts[s.id] = int(totals[0])
+        n = int(totals[0])
+        est = n * s.shard_each
+        if s.shard_rates:
+            rates = load_rates(s.shard_rates)
+            per = [(m.group(1), int(m.group(2))) for m in re.finditer(s.shard_rate_item, text, re.M)]
+            if sum(c for _p, c in per) != n:
+                raise UsageError("actions plan --selection: %s: the per-path counts matched by shard_rate_item /%s/ add up to %d, "
+                                 "but the lister selected %d — refusing to size the job from a partial listing\n%s"
+                                 % (s.id, s.shard_rate_item, sum(c for _p, c in per), n, text[-1500:]))
+            est = sum(c * rates.get(p, s.shard_each) for p, c in per)
+        counts[s.id] = (n, est)
     return counts
 
 
-def job_entry(man, name, steps, slice_, cache=None, timeouts=(), selection=None):
+def job_entry(man, name, steps, slice_, cache=None, timeouts=(), selection=None, history_name=None):
     dirs = []
     for x in steps:
         for d in step_dirs(man, x):
@@ -1710,11 +1850,18 @@ def job_entry(man, name, steps, slice_, cache=None, timeouts=(), selection=None)
         paths += [d + "/deps", d + "/_build"]
         if any(x.id.startswith("dialyzer_") for x in steps):
             paths.append(d + "/priv/plts")
-    tmo, basis = job_timeout(name, timeouts)
-    sized = [(selection[x.id], x.shard_each) for x in steps if selection and x.id in selection]
+    tmo, basis = job_timeout(history_name or name, timeouts)
+    sized = [(selection[x.id][0], x.shard_each) for x in steps if selection and x.id in selection and not x.shard_rates]
+    rated = [(x, selection[x.id]) for x in steps if selection and x.id in selection and x.shard_rates]
     if sized:  # (P6) the work scales with the selection, the history does not
         scaled = selection_timeout(tmo, sized)
         basis += "; selection %s -> %d min" % (", ".join("%d x %gs" % z for z in sized), scaled)
+        tmo = scaled
+    for x, (n, est) in rated:  # per-item rates: this job's share of the estimate, twice that, like the flat rule
+        share = est / float(slice_[1]) if slice_ else est
+        scaled = selection_timeout(tmo, [(share, 1.0)])
+        basis += "; selection %d items, est %ds by rate (%s)%s -> %d min" % (
+            n, round(est), x.shard_rates, ", %d slices of ~%ds" % (slice_[1], round(share)) if slice_ else "", scaled)
         tmo = scaled
     return {"name": name, "steps": [x.id for x in steps], "only": ",".join(x.id for x in steps),
             "slice": "%d/%d" % slice_ if slice_ else "", "est_s": round(sum(x.est for x in steps)),
@@ -1754,9 +1901,21 @@ def actions_plan(man, mode, selection=None):
     out_jobs = []
     timeouts = load_timeouts()
     for n, v in jobs.items():
-        plain = [x for x in v if not x.actions_slices]
+        dyn = []  # a rated step whose selection outgrows one job: the selection's own slices (never a fixed N)
+        for x in v:
+            if selection and x.id in selection and x.slice_max and not x.actions_slices:
+                k = min(selection[x.id][0], int(math.ceil(selection[x.id][1] / x.slice_max)))
+                if k >= 2:
+                    if len(v) > 1:
+                        raise UsageError("actions plan: %s needs %d slices but shares job %s with other steps" % (x.id, k, n))
+                    dyn.append((x, k))
+        plain = [x for x in v if not x.actions_slices and x not in [d[0] for d in dyn]]
         if plain:
             out_jobs.append(job_entry(man, n, plain, None, timeouts=timeouts, selection=selection))
+        for x, k in dyn:  # one job per slice: `--slice i/k` = mutate.sh --shard i/k, a round-robin share of every target
+            for i in range(1, k + 1):
+                out_jobs.append(job_entry(man, "%s_%02d" % (x.id, i), [x], (i, k), cache=x.id, timeouts=timeouts,
+                                          selection=selection, history_name=n))
         for x in v:
             if x.actions_slices:  # one job per slice: name_NN, `--slice i/N`
                 for i in range(1, x.actions_slices + 1):
@@ -1780,6 +1939,12 @@ def cmd_actions(pos, opts):
     if sub == "plan" and opts.get("selection"):
         selection = selection_counts(man, rest[0], opts["base"])
     plan = actions_plan(man, rest[0], selection)
+    if sub == "verify" and opts.get("from_plan"):
+        # the plan the `plan` job PUBLISHED (selection-sized jobs, with the slices this diff needed): the verifier cannot
+        # recompute it - it has no toolchain to list the selection - and must not guess how many slices ran
+        plan = read_json(opts["from_plan"])
+        if not isinstance(plan, dict) or plan.get("mode") != rest[0] or not plan.get("jobs"):
+            raise UsageError("--from-plan %s is not a %s plan" % (opts["from_plan"], rest[0]))
     if sub == "plan":
         if opts.get("json"):
             out(json.dumps(plan, indent=1))
@@ -2072,7 +2237,7 @@ def parse(argv):
         elif a == "--expect-total":
             opts["expect_total"] = (opts.get("expect_total") or []) + [val()]
             i += 2
-        elif a in ("--results", "--expect-base", "--expect-head", "--last"):
+        elif a in ("--results", "--expect-base", "--expect-head", "--last", "--from-plan"):
             opts[a[2:].replace("-", "_")] = val()
             i += 2
         elif a == "--apps":
@@ -2088,6 +2253,7 @@ def parse(argv):
 
 def main(argv):
     try:
+        check_test_seams()
         cmd, pos, opts = parse(argv)
         if cmd == "help":
             sys.stdout.write(USAGE)

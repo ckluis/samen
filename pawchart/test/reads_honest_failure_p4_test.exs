@@ -13,6 +13,7 @@ defmodule PawChart.ReadsHonestFailureP4Test do
 
   The operator plane stays masked: an error state carries no name, no email and no `vt_` token.
   """
+  import Samen.VaultTokenAssert
   use PawChart.DataCase, async: false
 
   import ExUnit.CaptureLog
@@ -70,12 +71,12 @@ defmodule PawChart.ReadsHonestFailureP4Test do
     assert rendered =~ "error-state"
     assert rendered =~ ~s(role="alert")
     assert rendered =~ "Nothing was lost"
-    refute rendered =~ "vt_"
+    refute_vault_token(rendered)
   end
 
   defp create_owner!(org \\ @org, first \\ "Alice", opts \\ []) do
     {:ok, owner} =
-      Reads.create_owner(org, %{
+      Reads.create_owner(clinic_scope(org), %{
         "first" => first,
         "last" => "Owner",
         "email" => Keyword.get(opts, :email, "#{String.downcase(first)}@example.test"),
@@ -86,7 +87,7 @@ defmodule PawChart.ReadsHonestFailureP4Test do
   end
 
   defp create_pet!(org \\ @org, name \\ "Rex", owner_id \\ nil) do
-    {:ok, pet} = Reads.create_pet(org, %{"name" => name, "species" => "canine", "owner_id" => owner_id || ""})
+    {:ok, pet} = Reads.create_pet(clinic_scope(org), %{"name" => name, "species" => "canine", "owner_id" => owner_id || ""})
     pet
   end
 
@@ -204,7 +205,7 @@ defmodule PawChart.ReadsHonestFailureP4Test do
   describe "get_owner_result" do
     test "an outage is :unavailable, a missing or malformed id is :not_found (and logs nothing)" do
       owner = create_owner!()
-      scope = Reads.tenant_scope(@org)
+      scope = clinic_scope(@org)
 
       assert {:ok, %{id: id}} = Reads.get_owner_result(scope, owner.id)
       assert id == owner.id
@@ -252,7 +253,7 @@ defmodule PawChart.ReadsHonestFailureP4Test do
     test "create_owner on a failing table is {:error, :unavailable}, not a validation changeset" do
       break_writes!("own_patient")
 
-      log = capture_log(fn -> assert {:error, :unavailable} = Reads.create_owner(@org, %{"first" => "Zed", "last" => "Z"}) end)
+      log = capture_log(fn -> assert {:error, :unavailable} = Reads.create_owner(clinic_scope(@org), %{"first" => "Zed", "last" => "Z"}) end)
       assert log =~ "write failed write=pawchart_create_owner"
       refute log =~ "Zed"
 
@@ -288,11 +289,11 @@ defmodule PawChart.ReadsHonestFailureP4Test do
     # pawchart_fetch_owner). It proves what it can: an outage there is :unavailable (never :not_found), nothing is written.
     test "update_owner on a failing table writes nothing and is :unavailable, never :not_found; the stored contacts survive (first read fails)" do
       owner = create_owner!(@org, "Edie")
-      scope = Reads.tenant_scope(@org)
+      scope = clinic_scope(@org)
       {:ok, before} = Reads.get_owner_result(scope, owner.id)
 
       break_select!("own_patient", "own_marketing_opt_in")
-      log = capture_log(fn -> assert {:error, :unavailable} = Reads.update_owner(@org, owner.id, %{"first" => "Edie", "last" => "Owner", "email" => "new@example.test"}) end)
+      log = capture_log(fn -> assert {:error, :unavailable} = Reads.update_owner(clinic_scope(@org), owner.id, %{"first" => "Edie", "last" => "Owner", "email" => "new@example.test"}) end)
       assert log =~ "read=pawchart_fetch_owner"
 
       ddl!("ALTER TABLE own_patient RENAME COLUMN own_marketing_opt_in_renamed TO own_marketing_opt_in")
@@ -301,15 +302,15 @@ defmodule PawChart.ReadsHonestFailureP4Test do
       assert after_.phones == before.phones
 
       # POSITIVE CONTROL: with the table healthy the same update applies
-      assert {:ok, _} = Reads.update_owner(@org, owner.id, %{"first" => "Edie", "last" => "Owner", "email" => "new@example.test"})
+      assert {:ok, _} = Reads.update_owner(clinic_scope(@org), owner.id, %{"first" => "Edie", "last" => "Owner", "email" => "new@example.test"})
     end
 
     test "update_owner / update_pet with a malformed id are :not_found with no failure logged" do
       log =
         capture_log(fn ->
-          assert {:error, :not_found} = Reads.update_owner(@org, "not-a-uuid", %{"first" => "A", "last" => "B"})
-          assert {:error, :not_found} = Reads.update_pet(@org, "not-a-uuid", %{"name" => "A"})
-          assert {:error, :not_found} = Reads.update_owner(@other_org, Ecto.UUID.generate(), %{"first" => "A", "last" => "B"})
+          assert {:error, :not_found} = Reads.update_owner(clinic_scope(@org), "not-a-uuid", %{"first" => "A", "last" => "B"})
+          assert {:error, :not_found} = Reads.update_pet(clinic_scope(@org), "not-a-uuid", %{"name" => "A"})
+          assert {:error, :not_found} = Reads.update_owner(clinic_scope(@other_org), Ecto.UUID.generate(), %{"first" => "A", "last" => "B"})
         end)
 
       refute log =~ "failed"
@@ -319,8 +320,8 @@ defmodule PawChart.ReadsHonestFailureP4Test do
       pet = create_pet!()
       break_writes!("pet_pet")
 
-      assert {:error, :unavailable} = quiet(fn -> Reads.create_pet(@org, %{"name" => "Fido", "species" => "canine"}) end)
-      assert {:error, :unavailable} = quiet(fn -> Reads.update_pet(@org, pet.id, %{"name" => "Renamed"}) end)
+      assert {:error, :unavailable} = quiet(fn -> Reads.create_pet(clinic_scope(@org), %{"name" => "Fido", "species" => "canine"}) end)
+      assert {:error, :unavailable} = quiet(fn -> Reads.update_pet(clinic_scope(@org), pet.id, %{"name" => "Renamed"}) end)
 
       socket = clinic_socket(@org, %{}, pet_modal: :new, pet_form: %{})
       failed = quiet(fn -> clinic_event(socket, "save_pet", %{"pet" => %{"name" => "Fido", "species" => "canine"}}) end)
@@ -332,7 +333,7 @@ defmodule PawChart.ReadsHonestFailureP4Test do
     test "POSITIVE CONTROL: a cross-org owner is still refused as a refusal, not an outage" do
       other_owner = create_owner!(@other_org, "Boris")
 
-      assert {:error, refusal} = Reads.create_pet(@org, %{"name" => "CrossPet", "species" => "feline", "owner_id" => other_owner.id})
+      assert {:error, refusal} = Reads.create_pet(clinic_scope(@org), %{"name" => "CrossPet", "species" => "feline", "owner_id" => other_owner.id})
       refute refusal in [:unavailable, :forbidden]
     end
   end
@@ -375,7 +376,7 @@ defmodule PawChart.ReadsHonestFailureP4Test do
       refute rendered =~ "<table"
       refute rendered =~ "Olivia"
       refute rendered =~ "olivia@example.com"
-      refute rendered =~ "vt_"
+      refute_vault_token(rendered)
     end
 
     test "POSITIVE CONTROL: the same console over a healthy table renders the masked roster and no error" do
@@ -387,7 +388,7 @@ defmodule PawChart.ReadsHonestFailureP4Test do
       assert rendered =~ "patient-row"
       assert rendered =~ "••••"
       refute rendered =~ "Olivia"
-      refute rendered =~ "vt_"
+      refute_vault_token(rendered)
     end
 
     test "a failing directory read shows the org id it was given and is reported, never a name it could not look up" do

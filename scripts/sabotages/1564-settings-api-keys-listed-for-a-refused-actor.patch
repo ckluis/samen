@@ -1,0 +1,19 @@
+# SABOTAGE: the API keys page lists the keys for a person with no active membership
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_settings_test.exs
+# MUST_FAIL: NAVIGATION: a suspended admin's pages are the denied state
+diff --git a/samen_web/lib/samen/web/settings/api_keys_live.ex b/samen_web/lib/samen/web/settings/api_keys_live.ex
+index cc496103..63589f9a 100644
+--- a/samen_web/lib/samen/web/settings/api_keys_live.ex
++++ b/samen_web/lib/samen/web/settings/api_keys_live.ex
+@@ -58,7 +58,7 @@ defmodule Samen.Web.Settings.ApiKeysLive do
+       # a STATE of the page: no key is listed, none can be minted or revoked.
+       case TenantActor.assign_actor(socket, org_id) do
+         {:ok, socket} -> load_keys(socket, socket.assigns.samen_mount, socket.assigns.acting_scope)
+-        {:refused, socket} -> socket
++        {:refused, socket} -> load_keys(socket, socket.assigns.samen_mount, TenantActor.system_scope(socket.assigns.samen_mount, org_id))
+       end
+     end
+   end

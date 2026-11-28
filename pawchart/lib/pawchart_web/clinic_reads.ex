@@ -42,19 +42,6 @@ defmodule PawChartWeb.ClinicReads do
   # A3 read-bounding: every read on this surface carries an explicit hard cap.
   @limit 200
 
-  @doc """
-  The tenant-plane read/write scope for a clinic `org_id` — `plane: :tenant`, so the
-  clinic resolves its OWN patients'/pets' vault fields CLEAR (no reveal grant needed).
-  Mirrors `Driftwood.Reads`' `broker_scope/1`. `OrgScope` keys only on `org_id`, so the
-  plane never affects isolation.
-  """
-  @spec tenant_scope(binary()) :: Samen.Scope.t()
-  def tenant_scope(org_id) do
-    %Samen.Scope{
-      actor: %{id: "clinic:#{org_id}", org_id: org_id, role: :member, kind: :tenant, plane: :tenant}
-    }
-  end
-
   # ---------------------------------------------------------------------------
   # Reads — org-scoped by construction (Ash `scope: scope` ⇒ OrgScope narrows),
   # PII-resolved on the actor's plane (`Samen.Api.PiiResolution`).
@@ -173,10 +160,8 @@ defmodule PawChartWeb.ClinicReads do
   Create ONE patient (owner) for `org_id` from the raw form params via `Patient`'s real
   `:create` action on the tenant scope. `{:ok, patient}` or `{:error, changeset | term}`.
   """
-  @spec create_owner(binary(), map()) :: {:ok, struct()} | {:error, term()}
-  def create_owner(org_id, params) when is_binary(org_id) and is_map(params) do
-    scope = tenant_scope(org_id)
-
+  @spec create_owner(Samen.Scope.t(), map()) :: {:ok, struct()} | {:error, term()}
+  def create_owner(%Samen.Scope{actor: %{org_id: org_id}} = scope, params) when is_binary(org_id) and is_map(params) do
     # WP6 phase 4: `Guard.write/3` — a raise or a RETURNED `Ash.Error.Unknown` is `{:error, :unavailable}`
     # (reported by name), a real refusal (`Invalid`) passes through untouched, so the screen can tell a
     # missing name from an outage.
@@ -193,10 +178,8 @@ defmodule PawChartWeb.ClinicReads do
   (OrgScope makes it not-exist for this actor) — never a cross-org update. `{:ok, patient}`
   or `{:error, :not_found | changeset | term}`.
   """
-  @spec update_owner(binary(), binary(), map()) :: {:ok, struct()} | {:error, term()}
-  def update_owner(org_id, id, params) when is_binary(org_id) and is_binary(id) and is_map(params) do
-    scope = tenant_scope(org_id)
-
+  @spec update_owner(Samen.Scope.t(), binary(), map()) :: {:ok, struct()} | {:error, term()}
+  def update_owner(%Samen.Scope{actor: %{org_id: org_id}} = scope, id, params) when is_binary(org_id) and is_binary(id) and is_map(params) do
     # Both reads must SUCCEED before anything is written: the form edits only the FIRST email/phone and
     # merges it into the stored lists (F06), so a failed read of the stored lists must never degrade into
     # "no stored lists" (that would overwrite the owner's other emails/phones with just the one typed).
@@ -215,10 +198,8 @@ defmodule PawChartWeb.ClinicReads do
   Create ONE pet for `org_id` via `Pet`'s real `:create` action on the tenant scope. A
   cross-org `owner_id` is REFUSED by `Samen.Policy.SameOrgFk`. `{:ok, pet}` or `{:error, _}`.
   """
-  @spec create_pet(binary(), map()) :: {:ok, struct()} | {:error, term()}
-  def create_pet(org_id, params) when is_binary(org_id) and is_map(params) do
-    scope = tenant_scope(org_id)
-
+  @spec create_pet(Samen.Scope.t(), map()) :: {:ok, struct()} | {:error, term()}
+  def create_pet(%Samen.Scope{actor: %{org_id: org_id}} = scope, params) when is_binary(org_id) and is_map(params) do
     Guard.write(:pawchart_create_pet, scope, fn ->
       Pet
       |> Ash.Changeset.for_create(:create, pet_attrs(params, org_id), scope: scope)
@@ -230,10 +211,8 @@ defmodule PawChartWeb.ClinicReads do
   Update ONE pet via `Pet`'s real `:update` action on the tenant scope. Org-scoped fetch
   (a cross-org id is `:not_found`). `{:ok, pet}` or `{:error, :not_found | term}`.
   """
-  @spec update_pet(binary(), binary(), map()) :: {:ok, struct()} | {:error, term()}
-  def update_pet(org_id, id, params) when is_binary(org_id) and is_binary(id) and is_map(params) do
-    scope = tenant_scope(org_id)
-
+  @spec update_pet(Samen.Scope.t(), binary(), map()) :: {:ok, struct()} | {:error, term()}
+  def update_pet(%Samen.Scope{actor: %{org_id: org_id}} = scope, id, params) when is_binary(org_id) and is_binary(id) and is_map(params) do
     with {:ok, id} <- Guard.cast_id(id),
          {:ok, pet} <- fetch_result(Pet, scope, id, :pawchart_fetch_pet) do
       Guard.write(:pawchart_update_pet, scope, fn ->

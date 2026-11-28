@@ -37,8 +37,7 @@ defmodule Mix.Tasks.Samen.Gen.Indexes do
 
   @impl Mix.Task
   def run(argv) do
-    {opts, _rest, _} =
-      OptionParser.parse(argv, strict: [out: :string, timestamp: :string, domain: :keep])
+    opts = Samen.Gen.Args.parse!("samen.gen.indexes", argv, [out: :string, timestamp: :string, domain: :keep])
     Mix.Task.run("app.config")
     Mix.Task.run("compile")
 

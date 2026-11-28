@@ -1,0 +1,19 @@
+# SABOTAGE: the shared reveal probe answers a call that has no actor
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/reveal_probe_authz_test.exs
+# MUST_FAIL: no actor at all gets no answer, even from a checker that approves everything
+diff --git a/samen_core/lib/samen/reveal/grant_probe.ex b/samen_core/lib/samen/reveal/grant_probe.ex
+index fe8337f9..d1dfff0c 100644
+--- a/samen_core/lib/samen/reveal/grant_probe.ex
++++ b/samen_core/lib/samen/reveal/grant_probe.ex
+@@ -37,7 +37,7 @@ defmodule Samen.Reveal.GrantProbe do
+       label: Keyword.fetch!(opts, :label)
+     }
+ 
+-    if not is_nil(actor) and Samen.Reveal.grant_checker().granted?(ctx) do
++    if Samen.Reveal.grant_checker().granted?(ctx) do
+       {:ok, %{status: "granted", subject_id: subject_id}}
+     else
+       {:error, :denied}

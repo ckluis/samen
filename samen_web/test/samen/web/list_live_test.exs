@@ -21,6 +21,7 @@ defmodule Samen.Web.ListLiveTest do
       renders the seeded contact's PII CLEAR on the tenant plane and `••••` (plaintext
       + vault token ABSENT) on the operator plane.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.Web.ListLive
@@ -322,6 +323,6 @@ defmodule Samen.Web.ListLiveTest do
     refute rendered =~ Seeds.contact_email()
     refute rendered =~ Seeds.contact_phone()
     # RED PATH: no vault token leaks into the DOM.
-    refute rendered =~ "vt_"
+    refute_vault_token(rendered)
   end
 end

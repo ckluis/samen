@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P5: an empty class in a stored partition is kept and planned as a step that fails 
+#   selection is empty
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: RECHUNK a resume never discards a finished chunk when the learned per-item rate rises
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index d00162f6..1ad1461b 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -782,7 +782,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
+             # classes keep their key, the classes still partition the selection exactly
+             classes = []
+             for m_, r_ in stored["classes"]:
+-                if size_of(m_, r_) == 0:
++                if False:
+                     # a class that holds no mutant (a partition stored by a driver that split a small class into more
+                     # sub-classes than it has members) is no step: `mutate.sh --shard r/m` refuses an empty selection,
+                     # and the remaining classes still partition the selection exactly (the sum check below)

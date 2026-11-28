@@ -101,7 +101,7 @@ defmodule Samen.MaskingCase do
 
     if plaintext != nil, do: refute(value == plaintext)
     assert to_string(value) == @mask
-    refute to_string(value) =~ "vt_"
+    Samen.VaultTokenAssert.refute_vault_token(to_string(value))
     value
   end
 
@@ -131,7 +131,7 @@ defmodule Samen.MaskingCase do
              "mask-by-omission FAILED: plaintext #{inspect(plaintext)} leaked into the DOM"
     end)
 
-    refute html =~ "vt_", "a vt_* vault token leaked into the DOM"
+    Samen.VaultTokenAssert.refute_vault_token(html, "a vt_* vault token leaked into the DOM")
     html
   end
 

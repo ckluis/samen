@@ -13,6 +13,7 @@ defmodule Demo.OperatorImpersonationLiveTest do
   Red path: a view mounted with an EXPIRED / never-opened session renders the
   access-denied state and NO tenant data.
   """
+  import Samen.VaultTokenAssert
   use Demo.DataCase, async: false
 
   alias Samen.Impersonation
@@ -71,7 +72,7 @@ defmodule Demo.OperatorImpersonationLiveTest do
     assert html =~ "••••"
     refute html =~ "alice@acme.com"
     refute html =~ "bob@acme.com"
-    refute html =~ "vt_"
+    refute_vault_token(html)
 
     # Accountability line: reason is shown (bounded, no PII).
     assert html =~ "reviewing their onboarding"

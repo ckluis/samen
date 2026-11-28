@@ -32,5 +32,9 @@ welcome, since those are the load-bearing claims:
 Please note what is **by design, not a vulnerability**: several adapters ship as documented
 **fail-honest stubs** (SMTP/ESP delivery, S3 storage, Stripe billing sync). An unconfigured
 stub deliberately does no real work — it returns `{:error, :not_configured}` or a clearly
-labeled no-op rather than a false success. Auth is likewise **host-owned** by design: Samen
-governs the identity you bring; it does not ship a login/password/2FA system.
+labeled no-op rather than a false success. Samen ships a
+self-serve identity spine (registration, email verification, password sign-in, password reset,
+sessions, team invitations, TOTP two-factor with recovery codes, and OIDC sign-in that honors
+TOTP step-up), emitted into a generated app; it is in scope here. What stays with the host is
+the choice of identity provider for OIDC and the email delivery adapter that sends verification
+and reset mail (an unconfigured adapter answers `{:error, :not_configured}`).

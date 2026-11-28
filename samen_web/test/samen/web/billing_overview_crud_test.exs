@@ -21,6 +21,7 @@ defmodule Samen.Web.BillingOverviewCrudTest do
     * **Bounded read (AC-G1-5)** — `subscriptions_page/3` passes `bounded!/4`
       non-vacuously; keyset pagination walks the set on the real page.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.Web.Billing.OverviewLive
@@ -175,7 +176,7 @@ defmodule Samen.Web.BillingOverviewCrudTest do
     refute rendered =~ ~s(phx-click="new_customer")
     refute rendered =~ ~s(phx-click="delete")
     refute rendered =~ "data-confirm"
-    refute rendered =~ "vt_"
+    refute_vault_token(rendered)
   end
 
   test "RED PATH (MC-1 / RP-G1-7): an operator-plane create with plaintext billing PII is REJECTED; DB unchanged" do

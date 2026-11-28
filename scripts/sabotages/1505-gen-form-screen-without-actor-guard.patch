@@ -1,0 +1,20 @@
+# SABOTAGE: the generated form screen no longer attaches the shared actor guard, so an open form saves with 
+#   the role of its last navigation
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/gen_live_actor_role_test.exs
+# MUST_FAIL: the generated form screen attaches the shared actor guard
+diff --git a/samen_core/lib/samen/gen/post_templates.ex b/samen_core/lib/samen/gen/post_templates.ex
+index b6c44cd9..565ecd82 100644
+--- a/samen_core/lib/samen/gen/post_templates.ex
++++ b/samen_core/lib/samen/gen/post_templates.ex
+@@ -1255,7 +1255,7 @@ defmodule Samen.Gen.PostTemplates do
+           )
+ 
+         socket =
+-          Samen.Web.TenantActor.attach_once(socket, :samen_gen_actor_guard, :handle_event, &__MODULE__.recheck_event/3)
++          socket
+ 
+         org_id = Samen.Web.CurrentOrg.resolve(@samen_authn_mount, params, session)
+         id = params["id"]

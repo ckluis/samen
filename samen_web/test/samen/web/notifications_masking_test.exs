@@ -17,6 +17,7 @@ defmodule Samen.Web.NotificationsMaskingTest do
   masked on the same record), so neither a mask-everything nor a clear-everything
   regression can pass. Cross-org refs resolve to the inert chip (no existence oracle).
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
   use Samen.MaskingCase
 
@@ -74,7 +75,7 @@ defmodule Samen.Web.NotificationsMaskingTest do
     assert html =~ "obj-card"
     assert html =~ Seeds.contact_full_name()
     # No vault token in the tenant DOM either (the resolver, not the raw column).
-    refute html =~ "vt_"
+    refute_vault_token(html)
   end
 
   test "OPERATOR plane: the SAME notification renders •••• — body masked, card masked, DOM leak scan = 0",
@@ -92,7 +93,7 @@ defmodule Samen.Web.NotificationsMaskingTest do
     refute html =~ Seeds.contact_email()
     refute html =~ Seeds.contact_phone()
     # No vault token / raw pii column string leaks (the ADR-009/010 red-path scan).
-    refute html =~ "vt_"
+    refute_vault_token(html)
     # Write affordances are not offered on the operator plane (posture; kernel enforces).
     refute html =~ ~s(phx-click="mark_read")
     refute html =~ ~s(id="mark-all-read")

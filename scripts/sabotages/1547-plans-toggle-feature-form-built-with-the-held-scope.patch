@@ -1,0 +1,20 @@
+# SABOTAGE: toggle_feature builds the edit form with the scope it captured before its own load
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_navigation_test.exs
+# MUST_FAIL: the edit form it leaves open is built with the scope the page acts with after its own load
+diff --git a/samen_web/lib/samen/web/billing/plans_live.ex b/samen_web/lib/samen/web/billing/plans_live.ex
+index 2ad984ee..aecb75eb 100644
+--- a/samen_web/lib/samen/web/billing/plans_live.ex
++++ b/samen_web/lib/samen/web/billing/plans_live.ex
+@@ -245,7 +245,8 @@ defmodule Samen.Web.Billing.PlansLive do
+       {:ok, _plan} ->
+         # The form is never built here: this handler holds the scope it began with, and its own load may resolve another.
+         # Naming the plan is enough - `load/2` builds the form from the page it reads now, with the scope acting now.
+-        {:noreply, load(assign(socket, delete_error: nil, edit_plan_id: id, show_edit: true), org_id)}
++        socket = load(assign(socket, delete_error: nil), org_id)
++        {:noreply, assign(socket, edit_form: edit_plan_form(mount, org_id, acting, find_plan(socket, id)), edit_plan_id: id, show_edit: true)}
+ 
+       {:error, _} ->
+         {:noreply, assign(socket, delete_error: "Could not update plan features.")}

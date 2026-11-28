@@ -1,0 +1,20 @@
+# SABOTAGE: TicketLive no longer requires a member to send a reply, so a viewer's reply is written (the 
+#   message resource only checks the org)
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_support_test.exs
+# MUST_FAIL: a VIEWER cannot change the status, start a conversation or reply; a member can
+diff --git a/samen_web/lib/samen/web/support/ticket_live.ex b/samen_web/lib/samen/web/support/ticket_live.ex
+index b5609f09..6147c8bf 100644
+--- a/samen_web/lib/samen/web/support/ticket_live.ex
++++ b/samen_web/lib/samen/web/support/ticket_live.ex
+@@ -134,7 +134,7 @@ defmodule Samen.Web.Support.TicketLive do
+   # `Samen.Pii.WriteGuard` REJECTS the plaintext at the Ash write path (MC-1) and
+   # the error renders inline — this LiveView adds no policy of its own.
+   def handle_event("save_reply", %{"form" => params}, socket) do
+-    if TenantActor.member?(socket),
++    if true,
+       do: save_reply(params, socket),
+       else: {:noreply, put_flash(socket, :error, Guard.write_copy(:forbidden, "send that reply"))}
+   end

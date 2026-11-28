@@ -15,6 +15,7 @@ defmodule Samen.Web.ReadsHonestFailureTest do
   A detail screen keeps 404 semantics for a genuinely missing record. The masking suites stay
   green because the error state is value-free (asserted: no vault token in any error DOM).
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   import ExUnit.CaptureLog
@@ -74,7 +75,7 @@ defmodule Samen.Web.ReadsHonestFailureTest do
     assert html =~ "error-state"
     assert html =~ ~s(role="alert")
     assert html =~ "Nothing was lost"
-    refute html =~ "vt_"
+    refute_vault_token(html)
 
     if scope == :page do
       refute html =~ Seeds.contact_email()

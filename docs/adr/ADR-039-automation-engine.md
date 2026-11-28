@@ -133,9 +133,10 @@ after-commit gap can lose it. The envelope (job args) is non-PII **by constructi
 
 Attribute *names* are catalog metadata, not data. Values are never serialized into
 `oban_jobs.args` (the ADR-037 §5.9 sink rule; red-tested). Guard for write-amplification:
-capture consults a per-org active-trigger index (cached; invalidated on Workflow writes) and
-inserts **nothing** when no active workflow matches org+resource+event — correctness never
-depends on the cache, only cost does.
+capture queries the host Workflow resource, in the write's transaction, for an active workflow
+matching org+resource+event (`status == :active`, not operator-killed, `limit 1`) and inserts
+**nothing** when none matches. There is no cached index: the query is the authority, and a
+query error degrades to "no match" so a broken scan never rolls back the tenant write.
 
 ### 4.3 Schedule dispatch
 

@@ -362,6 +362,8 @@ defmodule Samen.Gen.AppTest do
         assert out =~ "mix samen.abbrev.reserve --host widgetco"
         assert out =~ "NEVER add or edit rows"
         assert out =~ "schema.dict.json"
+        assert out =~ "## Upgrading samen"
+        assert out =~ "github.com/ckluis/samen/tree/main/docs/upgrade/"
         assert length(String.split(out, "\n")) <= 80
       end
     end

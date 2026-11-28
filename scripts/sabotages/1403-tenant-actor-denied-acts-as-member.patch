@@ -1,0 +1,19 @@
+# SABOTAGE: a principal with no active membership is treated as a member instead of refused
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_surfaces_test.exs
+# MUST_FAIL: armed: no principal, or no active membership
+diff --git a/samen_web/lib/samen/web/tenant_actor.ex b/samen_web/lib/samen/web/tenant_actor.ex
+index 5f4542fa..91809251 100644
+--- a/samen_web/lib/samen/web/tenant_actor.ex
++++ b/samen_web/lib/samen/web/tenant_actor.ex
+@@ -60,7 +60,7 @@ defmodule Samen.Web.TenantActor do
+     case Reads.actor_in_org(mount, org_id, ref) do
+       {:ok, %{id: id, role: role}} -> {:ok, resolved(mount, org_id, id, role)}
+       :none -> :denied
+-      :denied -> :denied
++      :denied -> {:ok, system_scope(mount, org_id)}
+       {:error, :unavailable} -> {:error, :unavailable}
+     end
+   end

@@ -18,8 +18,11 @@ defmodule Samen.Web.Tenant.AnalyticsLive do
   import Samen.UI, only: [error_state: 1]
 
   alias Samen.Aggregate.Suppressed
-  alias Samen.Web.{CurrentOrg, Mount}
+  alias Samen.Web.CurrentOrg
+  alias Samen.Web.TenantActor
   alias Samen.Web.Tenant.AnalyticsReads
+  import Samen.Web.TenantActor.Components, only: [actor_refused: 1]
+  require TenantActor
 
   @impl true
   def mount(params, session, socket) do
@@ -36,12 +39,32 @@ defmodule Samen.Web.Tenant.AnalyticsLive do
 
   @doc false
   def load(socket, nil) do
-    assign(socket, funnel: [], suppressed_count: 0, org_id: nil, load_error: nil)
+    assign(socket, funnel: [], suppressed_count: 0, org_id: nil, load_error: nil, acting_scope: nil, actor_state: :ok)
   end
 
+  # WHO acts: the signed-in person's resolved membership role (`Samen.Web.TenantActor`), never `Mount.scope/2`'s fixed
+  # `:member`. A denial or a failed lookup is a STATE of the page: nothing is read. (The read's own role gate,
+  # `AnalyticsReads.can_query?/1`, then judges the REAL role: a viewer sees the empty state.)
   def load(socket, org_id) do
+    case TenantActor.assign_actor(socket, org_id) do
+      {:ok, socket} -> load_for(socket, org_id, socket.assigns.acting_scope)
+      {:refused, socket} -> load_refused(socket, org_id)
+    end
+  end
+
+  # Acting again with no URL to patch to (the "Check again" button): the same load a navigation does.
+  @doc false
+  def actor_regained(%{assigns: %{org_id: _}} = socket), do: load(socket, socket.assigns.org_id)
+
+  # The refused state an OPEN page falls into when the guard stops an event: nothing the page loaded is kept.
+  @doc false
+  def actor_lost(%{assigns: %{org_id: _}} = socket), do: load_refused(socket, socket.assigns.org_id)
+
+  defp load_refused(socket, org_id),
+    do: assign(socket, funnel: [], suppressed_count: 0, org_id: org_id, load_error: nil)
+
+  defp load_for(socket, org_id, scope) do
     mount = socket.assigns[:samen_mount]
-    scope = Mount.scope(mount, org_id)
     # A FAILED rollup read is the error state (retry), never "No own-org activation data yet".
     {funnel, load_error} =
       case AnalyticsReads.funnel_result(mount, scope) do
@@ -58,6 +81,8 @@ defmodule Samen.Web.Tenant.AnalyticsLive do
   end
 
   @impl true
+  TenantActor.refuse_events()
+
   def handle_event("retry_load", _params, socket), do: {:noreply, load(socket, socket.assigns.org_id)}
 
   @impl true
@@ -71,9 +96,11 @@ defmodule Samen.Web.Tenant.AnalyticsLive do
         re-identified — the framework never un-suppresses, and never exposes an individual.
       </p>
 
+      <.actor_refused :if={@actor_state in [:denied, :unavailable]} state={@actor_state} title="Analytics" nothing="there is no analytics to show" />
+
       <.error_state :if={@load_error} class="analytics-error" body={@load_error} retry_event="retry_load" />
 
-      <p :if={@funnel == [] and is_nil(@load_error)} id="analytics-empty" class="empty">
+      <p :if={@funnel == [] and is_nil(@load_error) and @actor_state == :ok} id="analytics-empty" class="empty">
         No own-org activation data yet, or analytics is not available for your role.
       </p>
 

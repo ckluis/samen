@@ -125,7 +125,15 @@ defmodule Samen.Web.Operator.FleetDirectivesLive do
             <span class="n">{length(@directives)}</span>
           </div>
 
-          <button :if={@fleet_ctx.admin?} phx-click="publish_kill" phx-value-target="all" id="publish-kill-all" class="btn">
+          <button
+            :if={@fleet_ctx.admin?}
+            phx-click="publish_kill"
+            phx-value-target="all"
+            phx-disable-with="Publishing kill switch…"
+            data-confirm="Publish the kill switch to every product? It takes effect on each product's next fleet sync."
+            id="publish-kill-all"
+            class="btn"
+          >
             ⛔ Kill switch — all products
           </button>
 

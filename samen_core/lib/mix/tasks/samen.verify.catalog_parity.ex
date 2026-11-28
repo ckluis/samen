@@ -66,8 +66,7 @@ defmodule Mix.Tasks.Samen.Verify.CatalogParity do
   def run(args) do
     Mix.Task.run("app.start")
 
-    {opts, _rest, _} =
-      OptionParser.parse(args, strict: [repo: :string])
+    opts = Samen.Gen.Args.parse!("samen.verify.catalog_parity", args, [repo: :string])
 
     repos = resolve_repos(opts)
 

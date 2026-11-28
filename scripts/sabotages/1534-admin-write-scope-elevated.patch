@@ -1,0 +1,20 @@
+# SABOTAGE: TenantActor.write_scope/3 raises the acting person's scope to admin instead of running the 
+#   admin-ranked write as them, so a viewer deletes a segment
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_marketing_test.exs
+# MUST_FAIL: a VIEWER and a MEMBER cannot create or delete a segment; an admin can
+diff --git a/samen_web/lib/samen/web/tenant_actor.ex b/samen_web/lib/samen/web/tenant_actor.ex
+index abe8e407..a3cd0ae3 100644
+--- a/samen_web/lib/samen/web/tenant_actor.ex
++++ b/samen_web/lib/samen/web/tenant_actor.ex
+@@ -166,7 +166,7 @@ defmodule Samen.Web.TenantActor do
+   def write_scope(%Mount{plane: %{kind: :tenant}} = mount, org_id, acting) do
+     cond do
+       not CurrentOrg.tenant_gate_armed?(mount) -> Samen.Web.TenantRole.admin_scope(mount, org_id)
+-      match?(%Samen.Scope{}, acting) -> acting
++      match?(%Samen.Scope{}, acting) -> %{acting | actor: Map.put(acting.actor, :role, :admin)}
+       true -> raise ArgumentError, "write_scope/3 on an armed tenant mount needs the acting %Samen.Scope{}, got: #{inspect(acting)}"
+     end
+   end

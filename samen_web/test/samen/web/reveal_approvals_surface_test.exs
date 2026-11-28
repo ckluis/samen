@@ -11,6 +11,7 @@ defmodule Samen.Web.RevealApprovalsSurfaceTest do
   (`reveal_approver_live_test.exs`). Here we pin the route/mount, the role-gated render shell,
   the operator-plane read-only posture, and no vault-token leak.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   alias Samen.Web.Router
@@ -56,7 +57,7 @@ defmodule Samen.Web.RevealApprovalsSurfaceTest do
       assert html =~ ~s(id="reveal-approvals-empty")
       # Admin can decide → the "read-only, admin required" note is absent.
       refute html =~ ~s(id="reveal-approvals-role-note")
-      refute html =~ "vt_"
+      refute_vault_token(html)
     end
 
     test "RED: a non-admin MEMBER gets a read-only view (admin role required to decide)" do
@@ -67,7 +68,7 @@ defmodule Samen.Web.RevealApprovalsSurfaceTest do
 
       # The member sees the honest read-only note — deciding requires an admin role.
       assert html =~ ~s(id="reveal-approvals-role-note")
-      refute html =~ "vt_"
+      refute_vault_token(html)
     end
 
     test "OPERATOR plane is read-only — an honest tenant-plane-only note, no decide affordance" do
@@ -82,7 +83,7 @@ defmodule Samen.Web.RevealApprovalsSurfaceTest do
         )
 
       assert html =~ ~s(id="reveal-approvals-operator-note")
-      refute html =~ "vt_"
+      refute_vault_token(html)
     end
   end
 end

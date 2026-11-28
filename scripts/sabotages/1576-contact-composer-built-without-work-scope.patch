@@ -1,0 +1,29 @@
+# SABOTAGE: The contact page builds its Work task form on a host with no Work scope
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_detail_without_work_test.exs
+# MUST_FAIL: the contact page without the Work scope renders with no composer form
+diff --git a/samen_web/lib/samen/web/crm/contact_live.ex b/samen_web/lib/samen/web/crm/contact_live.ex
+index 1abf6a31..04b4009a 100644
+--- a/samen_web/lib/samen/web/crm/contact_live.ex
++++ b/samen_web/lib/samen/web/crm/contact_live.ex
+@@ -364,15 +364,9 @@ defmodule Samen.Web.CRM.ContactLive do
+   # Task resource is derived from this CRM mount's host root (Reads.work_task_resource/1).
+   # A host without the Work scope has no Task resource: no composer form is built (nil), the page renders without it.
+   defp activity_form(mount, scope) do
+-    case Reads.work_task_resource(mount) do
+-      nil ->
+-        nil
+-
+-      task ->
+-        task
+-        |> AshPhoenix.Form.for_create(:create, scope: scope, as: "activity")
+-        |> to_form()
+-    end
++    Reads.work_task_resource(mount)
++    |> AshPhoenix.Form.for_create(:create, scope: scope, as: "activity")
++    |> to_form()
+   end
+ 
+   defp ensure_return_to(socket) do

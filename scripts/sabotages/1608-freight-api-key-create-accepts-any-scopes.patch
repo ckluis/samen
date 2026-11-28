@@ -1,0 +1,20 @@
+# SABOTAGE: the Freight ApiKey create stops validating scopes, so an empty or malformed scope map mints a 
+#   key
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/api_key_scope_mint_validation_test.exs
+# MUST_FAIL: RED: the freight key's :create refuses an empty scope map
+# MUST_FAIL: RED: :create refuses scope keys and values outside the grammar
+diff --git a/driftwood/lib/driftwood/freight.ex b/driftwood/lib/driftwood/freight.ex
+index f8cefc59..6557a1c8 100644
+--- a/driftwood/lib/driftwood/freight.ex
++++ b/driftwood/lib/driftwood/freight.ex
+@@ -442,7 +442,6 @@ defmodule Driftwood.Freight.ApiKey do
+       accept([:org_id, :plane, :scopes, :minter_role, :minter_user_id])
+       validate(present(:minter_role))
+       # A key is created only with scopes inside the grammar and at least one of them (`Samen.Scope.ApiKey.Grammar`).
+-      validate(Samen.Scope.ApiKey.ValidScopes)
+ 
+       # A key minted through an authorized actor is attributed to THAT actor: the supplied
+       # `minter_user_id` is overridden, because at use time it becomes the key's `actor.id`

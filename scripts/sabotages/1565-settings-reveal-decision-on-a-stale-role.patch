@@ -1,0 +1,19 @@
+# SABOTAGE: a demoted admin's open page still decides a reveal request
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_settings_test.exs
+# MUST_FAIL: an admin demoted while the page is open decides nothing
+diff --git a/samen_web/lib/samen/web/settings/reveal_approvals_live.ex b/samen_web/lib/samen/web/settings/reveal_approvals_live.ex
+index efbdf4ab..3b0ef5ef 100644
+--- a/samen_web/lib/samen/web/settings/reveal_approvals_live.ex
++++ b/samen_web/lib/samen/web/settings/reveal_approvals_live.ex
+@@ -175,7 +175,7 @@ defmodule Samen.Web.Settings.RevealApprovalsLive do
+         {:noreply, notice(socket, "Approving and denying are tenant-plane actions.")}
+ 
+       # `can_approve?` is what the page loaded; `admin?/1` is the role the guard resolved again for THIS event.
+-      not (can_approve? and TenantActor.admin?(socket)) ->
++      not can_approve? ->
+         {:noreply, notice(socket, "An admin role is required to decide reveal requests.")}
+ 
+       is_nil(row) ->

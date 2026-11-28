@@ -1,0 +1,19 @@
+# SABOTAGE: the Escalation create, update and destroy are open to every actor again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/system_actions_authz_test.exs
+# MUST_FAIL: cannot open, refresh, resolve or cancel an escalation
+diff --git a/samen_core/lib/samen/scopes/automation/blueprint.ex b/samen_core/lib/samen/scopes/automation/blueprint.ex
+index 7130ade2..8847994c 100644
+--- a/samen_core/lib/samen/scopes/automation/blueprint.ex
++++ b/samen_core/lib/samen/scopes/automation/blueprint.ex
+@@ -632,7 +632,7 @@ defmodule Samen.Scopes.Automation.Blueprint do
+           end
+ 
+           policy action_type([:create, :update, :destroy]) do
+-            forbid_if(always())
++            authorize_if(always())
+           end
+         end
+       end

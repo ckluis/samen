@@ -1,0 +1,20 @@
+# SABOTAGE: the API-key scope policy is appended after the resource's policies, so a bypass declared by the 
+#   resource skips it
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_key_scope_enforcement_test.exs
+# MUST_FAIL: RED: the scope policy precedes a bypass
+diff --git a/samen_core/lib/samen/transformers/api_key_scope_policy.ex b/samen_core/lib/samen/transformers/api_key_scope_policy.ex
+index a5312793..da02f587 100644
+--- a/samen_core/lib/samen/transformers/api_key_scope_policy.ex
++++ b/samen_core/lib/samen/transformers/api_key_scope_policy.ex
+@@ -54,7 +54,7 @@ defmodule Samen.Transformers.ApiKeyScopePolicy do
+           policies: [forbid]
+         )
+ 
+-      {:ok, Transformer.add_entity(dsl_state, [:policies], policy)}
++      {:ok, Transformer.add_entity(dsl_state, [:policies], policy, type: :append)}
+     else
+       {:ok, dsl_state}
+     end

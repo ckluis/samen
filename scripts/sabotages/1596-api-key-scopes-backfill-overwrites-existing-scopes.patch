@@ -1,0 +1,19 @@
+# SABOTAGE: the backfill rewrites a key that already has scopes
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/api_key_scopes_gen_test.exs
+# MUST_FAIL: a key that has scopes, or no known minter role, is not touched; a second run changes nothing
+diff --git a/samen_core/lib/mix/tasks/samen.gen.api_key_scopes.ex b/samen_core/lib/mix/tasks/samen.gen.api_key_scopes.ex
+index 7a15fbac..84b56e74 100644
+--- a/samen_core/lib/mix/tasks/samen.gen.api_key_scopes.ex
++++ b/samen_core/lib/mix/tasks/samen.gen.api_key_scopes.ex
+@@ -87,7 +87,7 @@ defmodule Mix.Tasks.Samen.Gen.ApiKeyScopes do
+       Enum.map_join(keys, "\n\n", fn {t, s, r} ->
+         """
+             chunked_backfill(repo(), "#{t}", ~s|#{s} = '{"all":["read","write"]}'::jsonb|,
+-              where: "(#{s} IS NULL OR #{s} = '#{@empty}'::jsonb) AND #{r} IN ('owner', 'admin', 'member')"
++              where: "#{s} IS NOT NULL AND #{r} IN ('owner', 'admin', 'member')"
+             )
+ 
+             chunked_backfill(repo(), "#{t}", ~s|#{s} = '{"all":["read"]}'::jsonb|,

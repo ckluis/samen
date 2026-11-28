@@ -71,6 +71,7 @@ defmodule Samen.Automation.ActionsTest do
   ERROR VALUE, never raises — the calling process survives, proving the engine
   never crashes on an action failure.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   require Ash.Query
@@ -90,6 +91,15 @@ defmodule Samen.Automation.ActionsTest do
 
   setup do
     Samen.TestSandbox.shared!(TestRepo)
+
+    # ADR-039 §4.5: the run owner's role is read from the host's membership seam.
+    prev_membership = SamenCore.Support.AgentMembershipFixture.install!()
+    SamenCore.Support.AgentMembershipFixture.reset()
+
+    on_exit(fn ->
+      SamenCore.Support.AgentMembershipFixture.restore!(prev_membership)
+      SamenCore.Support.AgentMembershipFixture.reset()
+    end)
 
     prev = %{
       engine: Application.get_env(:samen_core, Samen.Notifications.Engine),
@@ -257,12 +267,60 @@ defmodule Samen.Automation.ActionsTest do
     # carried it in the first place (INV-1, structural, not a filter).
     refute Map.has_key?(decoded["data"], "email")
     refute body =~ "leak@example.com"
-    refute body =~ "vt_"
+    refute_vault_token(body)
 
     assert {"Samen-Signature", signature} = List.keyfind(headers, "Samen-Signature", 0)
     wf = only_workflow(org)
     assert is_binary(wf.webhook_secret)
     assert {:ok, _timestamp} = Signer.verify(body, signature, wf.webhook_secret)
+  end
+
+  test "two webhook actions of one run carry distinct delivery ids; a retried action reuses its own" do
+    org = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+
+    {:ok, _pid} = start_supervised(WebhookHttpAdapter.Test)
+
+    Application.put_env(:samen_core, Samen.Automation.Actions.Webhook,
+      http_adapter: WebhookHttpAdapter.Test,
+      resolver: Resolver.Test,
+      resolver_map: %{"webhook.example.test" => {93, 184, 216, 34}}
+    )
+
+    hook = %{"kind" => "webhook", "url" => "https://webhook.example.test/hook", "include" => []}
+    wf = create_workflow!(org, owner, actions: [hook, hook])
+
+    create_target!(org)
+    drain()
+
+    assert [first, second] = Enum.map(WebhookHttpAdapter.Test.calls(), fn {_url, body, _h} -> Jason.decode!(body)["delivery_id"] end)
+    assert first != second
+
+    # The positive control: the first action keeps the id a single-webhook workflow always had, `sha256(workflow_id <>
+    # ":" <> event_id)`, computed here independently from the event id the run's own job carries.
+    import Ecto.Query, only: [from: 2]
+    [run_job] = SamenCore.TestRepo.all(from(j in Oban.Job, where: j.worker == "Samen.Automation.RunWorker"))
+    legacy = :crypto.hash(:sha256, to_string(wf.id) <> ":" <> run_job.args["event_id"]) |> Base.encode16(case: :lower)
+    assert first == legacy
+
+    # A retry of the same run re-runs each action with its own index: the same ids come back.
+    ctx = %Samen.Automation.Context{
+      org_id: org,
+      workflow_id: to_string(wf.id),
+      subject_ref: "samen:target:x",
+      event_id: "event-1",
+      webhook_secret: wf.webhook_secret
+    }
+
+    ids =
+      for index <- [0, 1, 0, 1] do
+        assert {:ok, _} = Webhook.run(hook, %{ctx | action_index: index})
+        {_url, body, _headers} = List.last(WebhookHttpAdapter.Test.calls())
+        Jason.decode!(body)["delivery_id"]
+      end
+
+    assert [a, b, a2, b2] = ids
+    assert a == a2 and b == b2 and a != b
   end
 
   test "row 8 — enqueue_reminder: schedules a T41 Reminder via the primitive" do
@@ -370,7 +428,7 @@ defmodule Samen.Automation.ActionsTest do
     refute Map.has_key?(payload["data"], "email")
 
     encoded = Jason.encode!(payload)
-    refute encoded =~ "vt_"
+    refute_vault_token(encoded)
   end
 
   test "webhook SSRF guard refuses a loopback-resolving target (defense-in-depth, §5.3)" do
@@ -523,6 +581,7 @@ defmodule Samen.Automation.ActionsTest do
   # Helpers
 
   defp create_workflow!(org, owner, opts) do
+    SamenCore.Support.AgentMembershipFixture.register_owner(org, owner)
     attrs =
       %{
         org_id: org,

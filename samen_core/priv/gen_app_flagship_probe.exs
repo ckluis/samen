@@ -242,7 +242,7 @@ try do
   agents_text = File.read!(agents_md)
 
   for needle <- ["MIX_ENV=test bash ci.sh", "#{otp_app} CI gate: ALL PASSED", "NEVER add or edit rows",
-                 "mix samen.abbrev.reserve --host #{otp_app}", "schema.dict.json"] do
+                 "mix samen.abbrev.reserve --host #{otp_app}", "schema.dict.json", "docs/upgrade/"] do
     unless String.contains?(agents_text, needle) do
       halt.(1, "FAIL (AX-3): the generated AGENTS.md lacks #{inspect(needle)}.")
     end
@@ -659,6 +659,39 @@ try do
   else
     IO.puts("FLAGSHIP FAIL: GET /api/v1/records (tenant key) → \#{api_code}")
     IO.puts(String.slice(api_body, 0, 2000))
+    System.halt(1)
+  end
+
+  # 2b. A key minted with NO scopes authorizes nothing (scopes are enforced): refused, no row leaked. The SAME
+  # org, role and route as the tenant key above, which was served: only the scopes differ.
+  raw_empty_key = "sk_" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
+
+  # the resource's own create refuses a key with no scopes, so the row is seeded (as a key stored before scopes
+  # were required is): it bypasses the action
+  _empty_key =
+    Ash.Seed.seed!(#{module}.Operator.ApiKey, %{
+      plane: :tenant,
+      scopes: %{},
+      minter_role: :admin,
+      org_id: api_org,
+      membership_id: api_mbr.id,
+      expires_at: DateTime.add(DateTime.utc_now(), 3600, :second),
+      token_digest: #{module}Web.Api.KeyAuthPlug.digest(raw_empty_key)
+    })
+
+  empty_headers = [{~c"authorization", String.to_charlist("Bearer " <> raw_empty_key)}]
+
+  {empty_code, empty_body} =
+    case :httpc.request(:get, {~c"http://127.0.0.1:#{http_port}/api/v1/records", empty_headers}, [], body_format: :binary) do
+      {:ok, {{_, code, _}, _hdrs, body}} -> {code, body}
+      other -> raise "HTTP GET /api/v1/records (empty-scope key) failed: \#{inspect(other)}"
+    end
+
+  if empty_code == 403 and not String.contains?(empty_body, "FlagshipRecord") do
+    IO.puts("FLAGSHIP: GET /api/v1/records (key with no scopes) → 403, no row (an empty scope set authorizes nothing)")
+  else
+    IO.puts("FLAGSHIP FAIL: GET /api/v1/records (key with no scopes) → \#{empty_code}")
+    IO.puts(String.slice(empty_body, 0, 2000))
     System.halt(1)
   end
 

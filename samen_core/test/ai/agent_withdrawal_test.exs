@@ -51,6 +51,7 @@ defmodule Samen.AI.AgentWithdrawalTest do
   use ExUnit.Case, async: false
   use Samen.AgentCase
 
+  alias SamenCore.Support.AgentMembershipFixture, as: Membership
   alias C4RTestAgents.Durable
   alias Samen.AI.Agent
   alias Samen.AI.Agent.Breaker
@@ -79,6 +80,16 @@ defmodule Samen.AI.AgentWithdrawalTest do
   setup do
     Samen.TestSandbox.shared!(TestRepo)
 
+    # The agent re-resolves its owner's real membership each turn (ADR-047), so the suite wires the seam and
+    # registers every owner it creates as a genuine member.
+    Membership.reset()
+    prior_membership_seam = Membership.install!()
+
+    on_exit(fn ->
+      Membership.reset()
+      Membership.restore!(prior_membership_seam)
+    end)
+
     previous_kms = Application.get_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
     Samen.Kms.FileBacked.simulate_outage(false)
     Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
@@ -101,6 +112,7 @@ defmodule Samen.AI.AgentWithdrawalTest do
   # ======================================================================
 
   defp scope(org_id) do
+    Membership.register("u:#{org_id}", org_id, :member)
     %Samen.Scope{actor: %{id: "u:#{org_id}", org_id: org_id, role: :member, plane: :tenant}}
   end
 

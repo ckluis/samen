@@ -1,0 +1,20 @@
+# SABOTAGE: the org_id pin walk silently watches nothing for a Postgres resource whose repo cannot be 
+#   resolved
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/org_id_pinned_guard_test.exs
+# MUST_FAIL: a Postgres-backed resource whose repo cannot be resolved fails the walk by name
+diff --git a/samen_core/lib/samen/org_id_pinned_guard.ex b/samen_core/lib/samen/org_id_pinned_guard.ex
+index ae81d26e..580e8fb5 100644
+--- a/samen_core/lib/samen/org_id_pinned_guard.ex
++++ b/samen_core/lib/samen/org_id_pinned_guard.ex
+@@ -97,7 +97,7 @@ defmodule Samen.OrgIdPinnedGuard do
+         for type <- [:read, :mutate], repo = AshPostgres.DataLayer.Info.repo(resource, type), is_atom(repo), repo != nil,
+             do: repo
+ 
+-      if found == [] do
++      if false and found == [] do
+         raise ArgumentError,
+               "Samen.OrgIdPinnedGuard: #{inspect(resource)} is Postgres-backed but no repo could be resolved " <>
+                 "for it, so the walk would not watch its queries"

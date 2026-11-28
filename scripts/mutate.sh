@@ -568,11 +568,22 @@ current_target=""
 snapshot=""
 baseline_sha=""
 
+# Per-target wall clock (seconds per mutant), so a slow or CANCELLED Actions log carries the evidence that
+# `scripts/mutation/rates.tsv` is updated from. Each mutant's slice is the time since the previous mutant ended, so a
+# target's baseline run lands on its first mutant. The line is printed when a target is done (a job cancelled for time
+# never reaches the report) and again for every target in the report.
+TIMING="$WORK/timing"; : > "$TIMING"
+timing_mark=$SECONDS
+timing_line() {
+  awk -F'\t' -v t="$1" '$1 == t { n++; s += $2 } END { if (n) printf "%s %.1f (%d mutants, %ds)\n", t, s / n, n, s }' "$TIMING"
+}
+
 while IFS=$'\t' read -r relpath line col family from to lsha app tests; do
   [[ -n "$relpath" ]] || continue
 
   # New target → snapshot it and prove its owning suite is GREEN unmutated.
   if [[ "$relpath" != "$current_target" ]]; then
+    [[ -z "$current_target" ]] || echo "    seconds per mutant: $(timing_line "$current_target")"
     current_target="$relpath"
     snapshot="$WORK/snapshot.$(echo "$relpath" | tr '/' '_')"
     cp "$REPO_ROOT/$relpath" "$snapshot"
@@ -611,6 +622,7 @@ while IFS=$'\t' read -r relpath line col family from to lsha app tests; do
 
   # Restore BEFORE judging, so a failed assertion never strands a mutated tree.
   cp "$snapshot" "$REPO_ROOT/$relpath"
+  printf '%s\t%d\n' "$relpath" $((SECONDS - timing_mark)) >> "$TIMING"; timing_mark=$SECONDS
   INFLIGHT_TARGET=""; INFLIGHT_SNAPSHOT=""
 
   after_sha="$(shasum -a 256 "$REPO_ROOT/$relpath" | cut -d' ' -f1)"
@@ -686,6 +698,12 @@ echo "  killed            : $killed"
 echo "  survived (unexempt): $survived"
 echo "  survived (ledger) : $exempted"
 echo "  build-refused     : $build_refused   [compiler rejects the mutant — not scored as kills, contract 2]"
+if [[ -s "$TIMING" ]]; then
+  # one line per target, in the column order of scripts/mutation/rates.tsv: path, seconds per mutant
+  while IFS= read -r t; do
+    echo "  seconds per mutant: $(timing_line "$t")"
+  done < <(cut -f1 "$TIMING" | awk '!seen[$0]++')
+fi
 if [[ $scored -gt 0 ]]; then
   echo "  mutation score    : $((killed * 100 / scored))% of scored mutants killed by their OWNING tests"
 fi

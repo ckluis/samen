@@ -55,6 +55,7 @@ defmodule Samen.Automation.ObservabilityTest do
   ("an already-queued run of a killed workflow finalizes :skipped/:killed")
   must fail.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   require Ash.Query
@@ -71,6 +72,15 @@ defmodule Samen.Automation.ObservabilityTest do
 
   setup do
     Samen.TestSandbox.shared!(TestRepo)
+
+    # ADR-039 §4.5: the run owner's role is read from the host's membership seam.
+    prev_membership = SamenCore.Support.AgentMembershipFixture.install!()
+    SamenCore.Support.AgentMembershipFixture.reset()
+
+    on_exit(fn ->
+      SamenCore.Support.AgentMembershipFixture.restore!(prev_membership)
+      SamenCore.Support.AgentMembershipFixture.reset()
+    end)
 
     prev = %{
       engine: Application.get_env(:samen_core, Samen.Notifications.Engine),
@@ -623,7 +633,7 @@ defmodule Samen.Automation.ObservabilityTest do
       |> Jason.encode!()
     refute encoded =~ wf.webhook_secret
     refute encoded =~ "victim@example.com"
-    refute encoded =~ "vt_"
+    refute_vault_token(encoded)
   end
 
   # ---------------------------------------------------------------------------
@@ -1251,6 +1261,8 @@ defmodule Samen.Automation.ObservabilityTest do
     assert dispatches.() == []
 
     # POSITIVE CONTROL: the org is on the row -> one dispatch under that org
+    # (a scan hands over the fire time it read; the guard refuses an advance without one)
+    wf = %{wf | next_fire_at: DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.truncate(:second)}
     changeset = Ash.Changeset.for_update(wf, :dispatch_due, %{})
     advance.(changeset, wf)
     assert [%{args: %{"org_id" => ^org}}] = dispatches.()
@@ -1353,7 +1365,8 @@ defmodule Samen.Automation.ObservabilityTest do
       end
     end
 
-    # POSITIVE CONTROL: the org is on the row -> the hook answers ok
+    # POSITIVE CONTROL: the org is on the row -> the hook answers ok (the scan's read fire time is on the record)
+    wf = %{wf | next_fire_at: DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.truncate(:second)}
     changeset = Ash.Changeset.for_update(wf, :dispatch_due, %{})
     assert [{:ok, _}] = advance.(changeset, wf)
 
@@ -1397,6 +1410,7 @@ defmodule Samen.Automation.ObservabilityTest do
   end
 
   defp create_workflow!(org, owner, opts) do
+    SamenCore.Support.AgentMembershipFixture.register_owner(org, owner)
     attrs = %{
       org_id: org,
       name: "wf-#{System.unique_integer([:positive])}",

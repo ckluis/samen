@@ -13,6 +13,7 @@ defmodule Samen.VaultChangeIntegrationTest do
     (c) `Ash.read` returns `%Masked{}` as the field's normal value;
     (d) raw SQL / JSON of the row shows NO plaintext.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   require Ash.Query
@@ -346,7 +347,7 @@ defmodule Samen.VaultChangeIntegrationTest do
 
       assert {:error, _} = set_mrn(reload!(b), a_masked)
       assert_receive {:failure, %{write: :vault_token_unbound, cause: "foreign_subject"} = meta}
-      refute inspect(meta) =~ "vt_"
+      refute_vault_token(inspect(meta))
       refute_receive {:failure, %{write: :vault_token_unbound}}, 50
     end
 

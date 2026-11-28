@@ -1,0 +1,20 @@
+# SABOTAGE: write_scope/3 on an armed tenant mount hands a non-scope to the dev elevation instead of 
+#   refusing it
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_write_scope_test.exs
+# MUST_FAIL: armed tenant mount: the acting scope itself; nil or anything else is refused
+diff --git a/samen_web/lib/samen/web/tenant_actor.ex b/samen_web/lib/samen/web/tenant_actor.ex
+index abe8e407..cdab9421 100644
+--- a/samen_web/lib/samen/web/tenant_actor.ex
++++ b/samen_web/lib/samen/web/tenant_actor.ex
+@@ -167,7 +167,7 @@ defmodule Samen.Web.TenantActor do
+     cond do
+       not CurrentOrg.tenant_gate_armed?(mount) -> Samen.Web.TenantRole.admin_scope(mount, org_id)
+       match?(%Samen.Scope{}, acting) -> acting
+-      true -> raise ArgumentError, "write_scope/3 on an armed tenant mount needs the acting %Samen.Scope{}, got: #{inspect(acting)}"
++      true -> Samen.Web.TenantRole.admin_scope(mount, org_id)
+     end
+   end
+ 

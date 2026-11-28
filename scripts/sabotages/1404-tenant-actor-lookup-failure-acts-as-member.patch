@@ -1,0 +1,19 @@
+# SABOTAGE: a failed membership lookup is treated as the fixed member role instead of an error state
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_surfaces_test.exs
+# MUST_FAIL: armed: a failed lookup is {:error, :unavailable}
+diff --git a/samen_web/lib/samen/web/tenant_actor.ex b/samen_web/lib/samen/web/tenant_actor.ex
+index 5f4542fa..0070139e 100644
+--- a/samen_web/lib/samen/web/tenant_actor.ex
++++ b/samen_web/lib/samen/web/tenant_actor.ex
+@@ -61,7 +61,7 @@ defmodule Samen.Web.TenantActor do
+       {:ok, %{id: id, role: role}} -> {:ok, resolved(mount, org_id, id, role)}
+       :none -> :denied
+       :denied -> :denied
+-      {:error, :unavailable} -> {:error, :unavailable}
++      {:error, :unavailable} -> {:ok, system_scope(mount, org_id)}
+     end
+   end
+ 

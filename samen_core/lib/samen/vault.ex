@@ -660,7 +660,11 @@ defmodule Samen.Vault do
     "vt_" <> (:crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower))
   end
 
-  @token_shape ~r/\Avt_[0-9a-f]{32}\z/
+  # The grammar `generate_token/0` mints: `"vt_"` + 32 lowercase hex. ONE definition: `token?/1` anchors it,
+  # `tokens_in/1` scans for it, and `Samen.VaultTokenAssert` builds on `tokens_in/1`.
+  @token_body "vt_[0-9a-f]{32}"
+  @token_shape Regex.compile!("\\A" <> @token_body <> "\\z")
+  @token_scan Regex.compile!(@token_body)
 
   @doc """
   Is `value` shaped like a token `generate_token/0` mints (`"vt_"` + 32 lowercase hex)?
@@ -673,4 +677,11 @@ defmodule Samen.Vault do
   @spec token?(term()) :: boolean()
   def token?(value) when is_binary(value), do: Regex.match?(@token_shape, value)
   def token?(_other), do: false
+
+  @doc """
+  Every vault-token-shaped substring of `text` (`"vt_"` + 32 lowercase hex), in order. Unanchored:
+  a token inside an attribute value, a JSON string or a log line is found.
+  """
+  @spec tokens_in(binary()) :: [String.t()]
+  def tokens_in(text) when is_binary(text), do: @token_scan |> Regex.scan(text) |> List.flatten()
 end

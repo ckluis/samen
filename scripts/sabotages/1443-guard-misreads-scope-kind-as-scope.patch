@@ -1,0 +1,20 @@
+# SABOTAGE: the import check matches any text containing scope, so except: [scope_kind: 1] reads as 
+#   excluding scope
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_actor_guard_test.exs
+# MUST_FAIL: an import that excludes another function named like scope
+diff --git a/samen_web/lib/samen/web/tenant_actor/guard.ex b/samen_web/lib/samen/web/tenant_actor/guard.ex
+index 985cf6f6..1f1c852b 100644
+--- a/samen_web/lib/samen/web/tenant_actor/guard.ex
++++ b/samen_web/lib/samen/web/tenant_actor/guard.ex
+@@ -56,7 +56,7 @@ defmodule Samen.Web.TenantActor.Guard do
+   @scope_key ~r/\bscope:/
+ 
+   defp import_excludes_scope?(rest) do
+-    named? = Regex.match?(@scope_key, rest)
++    named? = String.contains?(rest, "scope")
+ 
+     cond do
+       String.contains?(rest, "only:") -> not named?

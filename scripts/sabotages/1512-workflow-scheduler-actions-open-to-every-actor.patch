@@ -1,0 +1,20 @@
+# SABOTAGE: the Workflow scheduler bypass is authorize_if(always()) again, so any actor runs the cross-org 
+#   scan
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/system_actions_authz_test.exs
+# MUST_FAIL: a tenant actor of any role is refused; the ordinary read stays org-scoped
+diff --git a/samen_core/lib/samen/scopes/automation/blueprint.ex b/samen_core/lib/samen/scopes/automation/blueprint.ex
+index ee273027..3ac07454 100644
+--- a/samen_core/lib/samen/scopes/automation/blueprint.ex
++++ b/samen_core/lib/samen/scopes/automation/blueprint.ex
+@@ -257,7 +257,7 @@ defmodule Samen.Scopes.Automation.Blueprint do
+           # (advances next_fire_at + enqueues, streamed per-record by AshOban, never crossing orgs) with no actor, and
+           # says so (`AshOban.Checks.AshObanInteraction`); an actor of any role, an owner included, is refused below.
+           bypass action([:dispatch_due, :scan_due]) do
+-            authorize_if(AshOban.Checks.AshObanInteraction)
++            authorize_if(always())
+           end
+ 
+           # ADR-039 §8.4 operator kill/re-arm: the real actor is CROSS-ORG (the SaaS operator, not a tenant member of

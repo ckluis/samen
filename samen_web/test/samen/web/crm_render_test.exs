@@ -10,6 +10,7 @@ defmodule Samen.Web.CRMRenderTest do
   This is the reusable proof: the masking guarantee is a framework-local test, independent of
   any vertical.
   """
+  import Samen.VaultTokenAssert
   use Samen.WebTest.DataCase, async: false
 
   setup do
@@ -70,7 +71,7 @@ defmodule Samen.Web.CRMRenderTest do
     html = render_live(Samen.Web.CRM.ContactsLive, mount, [org_id])
 
     # No vault token prefix leaks into the DOM on the operator plane.
-    refute html =~ "vt_"
+    refute_vault_token(html)
     refute html =~ "pii_"
     refute html =~ Seeds.contact_email()
   end

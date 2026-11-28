@@ -30,6 +30,30 @@
     }
   }, true);
 
+  // (a3) The `data-confirm` interlock. The kit renders `data-confirm="<question>"` on every
+  //      destructive control (delete_confirm, kill/stop/approve buttons, link or form). Nothing
+  //      else in the served client reads it, so this does: a capture listener on `document`
+  //      runs before LiveView's own `window` listeners, asks `window.confirm`, and on refusal
+  //      stops the event dead (preventDefault + stopImmediatePropagation) so no `phx-click`,
+  //      link navigation or form submit follows. Delegated, so elements patched in later are
+  //      covered. A form is confirmed on its submit event only (a click on one of its buttons
+  //      is not asked twice). Reads no field value.
+  function confirmGuard(e, ask, wantForm) {
+    var t = e && e.target;
+    if (!t || !t.closest) return;
+    var el = t.closest("[data-confirm]");
+    if (!el) return;
+    var isForm = el.tagName === "FORM";
+    if (isForm !== wantForm) return;
+    if (!ask(el.getAttribute("data-confirm") || "")) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }
+  }
+  var askUser = function (text) { return window.confirm(text); };
+  document.addEventListener("click", function (e) { confirmGuard(e, askUser, false); }, true);
+  document.addEventListener("submit", function (e) { confirmGuard(e, askUser, true); }, true);
+
   // (b) Construct the LiveSocket against the "/live" websocket every host endpoint
   //     declares, authenticating with the same CSRF token via connect params (C7). If a
   //     vendored client script failed to load (blocked / network), leave the server-rendered

@@ -48,6 +48,7 @@ defmodule Samen.AI.AgentSummaryIngressTest do
   `safe_segment?` = 26, `max_turns` = 39
   (`_orch-runs/adr048-c1-c4-20260907/nodes/C3I2/work/counts.txt`).
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
   use Samen.AgentCase
 
@@ -292,11 +293,8 @@ defmodule Samen.AI.AgentSummaryIngressTest do
              "append, so a `vt_` token reached the governed transcript and would only have " <>
              "refused on its RE-ENTRY, after it was already at rest"
 
-    refute Enum.any?(views.llm_view, &String.contains?(&1, "vt_")),
-           "a `vt_` token is in the persisted llm_view (INV-7)"
-
-    refute Enum.any?(views.ui_view, &String.contains?(&1, "vt_")),
-           "a `vt_` token is in the persisted ui_view (INV-7)"
+    Enum.each(views.llm_view, &refute_vault_token(&1, "a `vt_` token is in the persisted llm_view (INV-7)"))
+    Enum.each(views.ui_view, &refute_vault_token(&1, "a `vt_` token is in the persisted ui_view (INV-7)"))
 
     assert_no_text_at_rest!(run, ["vt_" <> "deadbeefcafe0123"])
 

@@ -28,6 +28,12 @@ defmodule Samen.Automation.Context do
       once by `RunWorker` from the Workflow row — never re-fetched by the action,
       never logged, never placed in any outcome meta.
 
+  ## `:action_index`
+
+  The position of the action being run in its workflow's `actions` list, set by
+  `Samen.Automation.ActionStep` for the one action it runs (`nil` outside a run). An action
+  that must tell its siblings apart, such as `webhook`'s per-action `delivery_id`, reads it.
+
   ## A3 addition (ADR-047 §5.1): `:origin`
 
   An AGENT tool call also fires a governed action, but an agent run is not a
@@ -56,6 +62,7 @@ defmodule Samen.Automation.Context do
     :event_id,
     :webhook_secret,
     :origin,
+    :action_index,
     depth: 0,
     chain: []
   ]
@@ -73,6 +80,7 @@ defmodule Samen.Automation.Context do
           event_id: String.t() | nil,
           webhook_secret: String.t() | nil,
           origin: {:workflow, String.t()} | {:agent, String.t()} | nil,
+          action_index: non_neg_integer() | nil,
           depth: non_neg_integer(),
           chain: [String.t()]
         }

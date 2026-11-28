@@ -1,0 +1,19 @@
+# SABOTAGE: check_test_seams lets a non-numeric or negative seam value through to terminate_all
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: SEAMGUARD a test seam never changes a real run silently
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 6e8a35b5..191f9a71 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -152,7 +152,7 @@ def check_test_seams():
+             ok = math.isfinite(float(v)) and float(v) >= 0
+         except ValueError:
+             ok = False
+-        if not ok:
++        if False and not ok:
+             raise UsageError("%s=%r is not a number of seconds >= 0" % (k, v))
+     if os.environ.get("SAMEN_CI_TEST_HOLD_KIND", "step") not in ("step", "rerun"):
+         raise UsageError("SAMEN_CI_TEST_HOLD_KIND=%r is not step or rerun" % os.environ["SAMEN_CI_TEST_HOLD_KIND"])

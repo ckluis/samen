@@ -415,6 +415,112 @@ defmodule Demo.MarketingScopePolicyMatrixTest do
     assert send_record.status == :queued
   end
 
+  # An AUTHORIZED actor of org A who passes `org_id: B` for a subscriber that really lives in B.
+  # The same-org lookup in :create_checked agrees (subscriber org == argument org), so the ONLY
+  # thing standing between this send and org B's queue is the pinned-org recheck that runs AFTER
+  # the hook has copied the argument into the row (it depends on before_action hook ORDER). The
+  # earlier cross-org tests use `authorize?: false` and an own-org argument, so none of them
+  # reaches this path.
+  describe "authorized actor of org A passing org_id: B (hook-order red path)" do
+    test "is refused and writes no row; the same actor sending in its OWN org succeeds (control)" do
+      import Ecto.Query
+      org_a = mk_org("hook-order-a")
+      org_b = mk_org("hook-order-b")
+      scope_a = mk_actor(org_a.id, :admin)
+
+      sub_a = mk_subscriber(org_a.id, "own@orga.example")
+      sub_b = mk_subscriber(org_b.id, "foreign@orgb.example")
+
+      # Positive control: the actor can send in its own org through the authorized path.
+      assert {:ok, ok_send} =
+               Send
+               |> Ash.Changeset.for_create(
+                 :create_checked,
+                 %{subscriber_id: sub_a.id, org_id: org_a.id},
+                 actor: scope_a.actor
+               )
+               |> Ash.create(actor: scope_a.actor, authorize?: true)
+
+      assert ok_send.subscriber_id == sub_a.id
+
+      result =
+        Send
+        |> Ash.Changeset.for_create(
+          :create_checked,
+          %{subscriber_id: sub_b.id, org_id: org_b.id},
+          actor: scope_a.actor
+        )
+        |> Ash.create(actor: scope_a.actor, authorize?: true)
+
+      assert {:error, %Ash.Error.Invalid{errors: errors}} = result,
+             "an org-A actor must not file a send under org B, got: #{inspect(result)}"
+
+      # WHICH check refused: the pinned-org recheck (it runs after the hook copied the argument
+      # into the row). A different layer (the post-insert policy) refusing instead would mean
+      # the recheck ran before the hook, i.e. the hook order changed.
+      assert Enum.any?(errors, fn e ->
+               Map.get(e, :field) == :org_id and
+                 (Map.get(e, :message) || "") =~ "acting organisation's own"
+             end),
+             "expected the org_id pin to refuse, got: #{inspect(errors)}"
+
+      count =
+        Repo.aggregate(
+          from(s in "msn_send", where: s.msn_subscriber_id == ^Ecto.UUID.dump!(sub_b.id)),
+          :count
+        )
+
+      assert count == 0, "no send row may exist under org B, found #{count}"
+    end
+  end
+
+  describe "the subscriber lookup in :create_checked" do
+    test "a genuine miss keeps the not-found message" do
+      org = mk_org("lookup-miss")
+
+      assert {:error, %Ash.Error.Invalid{errors: errors}} =
+               Send
+               |> Ash.Changeset.for_create(:create_checked, %{
+                 subscriber_id: Ecto.UUID.generate(),
+                 org_id: org.id
+               })
+               |> Ash.create(authorize?: false)
+
+      messages = Enum.map(errors, &Map.get(&1, :message))
+      assert Enum.any?(messages, &(&1 =~ "subscriber not found"))
+      refute Enum.any?(messages, &(&1 =~ "lookup failed"))
+    end
+
+    test "an unreadable lookup is a distinct, reported error, not 'not found'" do
+      import ExUnit.CaptureLog
+      org = mk_org("lookup-fail")
+      sub = mk_subscriber(org.id, "present@lookup.example")
+
+      # The subscriber EXISTS; make its table unreadable inside this sandbox transaction (DDL is
+      # transactional, rolled back at the end of the test).
+      table = AshPostgres.DataLayer.Info.table(Subscriber)
+      Repo.query!("SAVEPOINT before_rename")
+      Repo.query!("ALTER TABLE #{table} RENAME TO #{table}_gone")
+
+      log =
+        capture_log(fn ->
+          result =
+            Send
+            |> Ash.Changeset.for_create(:create_checked, %{subscriber_id: sub.id, org_id: org.id})
+            |> Ash.create(authorize?: false)
+
+          send(self(), {:result, result})
+        end)
+
+      assert_received {:result, {:error, %Ash.Error.Invalid{errors: errors}}}
+      messages = Enum.map(errors, &Map.get(&1, :message))
+
+      assert Enum.any?(messages, &(&1 =~ "lookup failed")), inspect(messages)
+      refute Enum.any?(messages, &(&1 =~ "subscriber not found")), inspect(messages)
+      assert log =~ "marketing_send_subscriber_lookup"
+    end
+  end
+
   # =========================================================================
   # Smoke: segments, email_events, suppressions are all org-scoped.
   # =========================================================================

@@ -1,0 +1,20 @@
+# SABOTAGE: OverviewLive no longer requires a member to create a customer, so a viewer writes a 
+#   vault-routed customer (the customer resource only checks the org)
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_billing_test.exs
+# MUST_FAIL: a VIEWER cannot create a customer; a MEMBER can but cannot delete a subscription; an admin can
+diff --git a/samen_web/lib/samen/web/billing/overview_live.ex b/samen_web/lib/samen/web/billing/overview_live.ex
+index 55cf8fd0..05f3c521 100644
+--- a/samen_web/lib/samen/web/billing/overview_live.ex
++++ b/samen_web/lib/samen/web/billing/overview_live.ex
+@@ -155,7 +155,7 @@ defmodule Samen.Web.Billing.OverviewLive do
+   # (MC-2); on the operator plane `Samen.Pii.WriteGuard` REJECTS the plaintext at the
+   # write path (MC-1) and the error renders inline — no LiveView policy.
+   def handle_event("save_new", %{"form" => params}, socket) do
+-    if TenantActor.member?(socket),
++    if true,
+       do: save_customer(params, socket),
+       else: {:noreply, put_flash(socket, :error, Guard.write_copy(:forbidden, "save that customer"))}
+   end

@@ -464,6 +464,9 @@ defmodule Samen.Web.Auth.SessionController do
 
         conn
         |> configure_session(renew: true)
+        # A new sign-in IS the person now: a legacy `samen_current_user` left by a previous sign-in must not outrank it
+        # (the legacy key is read first), so it goes with the old session.
+        |> Auth.clear_current_user()
         |> Auth.put_session_token(raw_token)
         |> maybe_remember(remember?, raw_token)
         |> Auth.clear_totp_pending_token()

@@ -1,0 +1,28 @@
+# SABOTAGE: the scope-policy transformer stops checking the domain's family, so a family containing a dot 
+#   compiles and shadows a family.type scope
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_key_scope_mint_validation_test.exs
+# MUST_FAIL: RED: a JSON:API resource whose domain family contains a dot does not compile
+diff --git a/samen_core/lib/samen/transformers/api_key_scope_policy.ex b/samen_core/lib/samen/transformers/api_key_scope_policy.ex
+index 451b08f2..7a25fcbc 100644
+--- a/samen_core/lib/samen/transformers/api_key_scope_policy.ex
++++ b/samen_core/lib/samen/transformers/api_key_scope_policy.ex
+@@ -42,8 +42,6 @@ defmodule Samen.Transformers.ApiKeyScopePolicy do
+               "an API key's scopes are enforced by a policy, and a resource with no policies would serve its requests unchecked"
+       end
+ 
+-      check_family!(dsl_state)
+-
+       always = Ash.Policy.Check.Builtins.always()
+ 
+       {:ok, forbid} =
+@@ -64,6 +62,7 @@ defmodule Samen.Transformers.ApiKeyScopePolicy do
+ 
+   # A scope `family.type` is read by splitting on the dot, so a family that contains one would be taken for a
+   # family and a type: a domain's `samen_api_family/0` may not return one.
++  @dialyzer {:nowarn_function, check_family!: 1}
+   defp check_family!(dsl_state) do
+     domain = Transformer.get_persisted(dsl_state, :domain)
+ 

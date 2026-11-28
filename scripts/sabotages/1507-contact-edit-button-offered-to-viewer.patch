@@ -1,0 +1,19 @@
+# SABOTAGE: the contact page offers Edit contact to a viewer
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_crm_work_test.exs
+# MUST_FAIL: a viewer's render carries no write control on the Work and CRM pages
+diff --git a/samen_web/lib/samen/web/crm/contact_live.ex b/samen_web/lib/samen/web/crm/contact_live.ex
+index eaa910bf..da93717d 100644
+--- a/samen_web/lib/samen/web/crm/contact_live.ex
++++ b/samen_web/lib/samen/web/crm/contact_live.ex
+@@ -404,7 +404,7 @@ defmodule Samen.Web.CRM.ContactLive do
+               </span>
+               Back to contacts
+             </a>
+-            <.button :if={@can_write and @contact != nil} phx-click="edit_contact" id="edit-contact">
++            <.button :if={@contact != nil} phx-click="edit_contact" id="edit-contact">
+               Edit contact
+             </.button>
+             <.delete_confirm

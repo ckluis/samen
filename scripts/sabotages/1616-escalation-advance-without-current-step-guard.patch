@@ -1,0 +1,19 @@
+# SABOTAGE: The escalation advance has no SQL guard on current_step, so two advances of one step both apply 
+#   and both notify.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/automation/engine_guards_test.exs
+# MUST_FAIL: two advances of the same step apply once: the second matches no row
+diff --git a/samen_core/lib/samen/automation/escalation_advance.ex b/samen_core/lib/samen/automation/escalation_advance.ex
+index 31c41c9a..b3d9f449 100644
+--- a/samen_core/lib/samen/automation/escalation_advance.ex
++++ b/samen_core/lib/samen/automation/escalation_advance.ex
+@@ -60,7 +60,6 @@ defmodule Samen.Automation.EscalationAdvance do
+   end
+ 
+   defp advance_from(changeset, escalation, step_idx) do
+-    changeset = Ash.Changeset.filter(changeset, Ash.Expr.expr(current_step == ^step_idx))
+     chain = escalation.chain || []
+     deadline_at = escalation.deadline_at
+ 

@@ -25,6 +25,9 @@ repo, your product lives in the fork):
 - **The `pgvector` extension** (`brew install pgvector`, or the `pgvector/pgvector:0.8.0-pg16` image CI uses). The
   framework's own suites (`samen_core`, the repo gate) fail at setup with "pgvector not installed" without it; a
   generated app's migrations do not create the extension.
+- **`node` on `PATH`** (any current release; `brew install node`). One framework test,
+  `samen_web/test/samen/web/confirm_interlock_test.exs`, runs the served client script's `data-confirm` handler under node
+  and fails with "node is required" without it. Generated apps do not need node to run.
 
 ```bash operator-todo
 asdf install

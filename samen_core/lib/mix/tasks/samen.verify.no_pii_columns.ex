@@ -43,8 +43,7 @@ defmodule Mix.Tasks.Samen.Verify.NoPiiColumns do
   def run(args) do
     Mix.Task.run("app.start")
 
-    {opts, _rest, _} =
-      OptionParser.parse(args, strict: [domain: :keep, repo: :string])
+    opts = Samen.Gen.Args.parse!("samen.verify.no_pii_columns", args, [domain: :keep, repo: :string])
 
     violations = dsl_violations(opts) ++ physical_column_violations(opts)
 

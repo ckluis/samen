@@ -36,9 +36,10 @@ defmodule Samen.Automation.EventCapture do
 
   ## Loop provenance (ADR-039 §4.7)
 
-  A write performed BY a run carries `changeset.context[:automation] = %{depth, chain}`;
-  the captured event inherits `depth + 1` and `chain ++ [workflow_id]`, so the cycle
-  and depth guards downstream can refuse self-triggering cascades.
+  A write performed BY a run carries `changeset.context[:automation] = %{depth, chain}`
+  (`Samen.Automation.Actions.Support.write_context/1`): the provenance its events inherit,
+  already `depth + 1` and `chain ++ [workflow_id]`. The captured event copies it into its
+  envelope, so the cycle and depth guards downstream can refuse self-triggering cascades.
   """
   use Ash.Resource.Change
 

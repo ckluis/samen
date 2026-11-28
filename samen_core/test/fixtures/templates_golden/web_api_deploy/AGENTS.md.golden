@@ -56,3 +56,9 @@ Every failure message is indexed (error string -> verifier -> meaning -> fix) in
 - Public API contract (apps with the default JSON:API surface): `api_contract.v1.json`, the `/api/v1`
   surface, deny-by-default.
 - Framework docs: `../samen_core/../docs/` (guides, ADRs, `docs/guides/llm-grounding.md`).
+
+## Upgrading samen
+
+To move this app to a newer samen tree, read the upgrade guide for the version this app was generated on in the samen
+repository, `https://github.com/ckluis/samen/tree/main/docs/upgrade/`. It lists the steps in order and has a prompt to follow.
+Do one step at a time, never loosen a gate to get green, and ask before migrating real data or choosing a role.

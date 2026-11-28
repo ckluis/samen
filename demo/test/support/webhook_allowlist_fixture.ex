@@ -34,6 +34,7 @@ defmodule Demo.WebhookAllowlist.Widget do
     otp_app: :demo,
     domain: Demo.WebhookAllowlist.Domain,
     data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer],
     extensions: [AshJsonApi.Resource],
     abbrev: "waw"
 

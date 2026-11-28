@@ -11,7 +11,519 @@ All notable changes to Samen are recorded here. The format follows
 > There is no version or tag for them: nothing here has been released, and no number is invented. The detailed
 > older entries follow unchanged under "Added" and onward.
 
-### Fixed: authorization and honesty round 5 (evaluation 2026-11-24)
+Upgrading an app built on `v0.1.0`: [docs/upgrade/from-v0.1.0.md](docs/upgrade/from-v0.1.0.md), with a prompt for an AI coding agent in
+[docs/upgrade/prompts/from-v0.1.0.md](docs/upgrade/prompts/from-v0.1.0.md).
+
+### Fixed: the Automation engine's guards, owner role, schedule scan, escalation advance and webhook delivery ids
+
+- **Loop and depth guards see the cascade.** A write made by a workflow's action (create, update, or the undo of a
+  create) carries the run's `{depth + 1, chain ++ [workflow id]}` in its changeset context
+  (`Samen.Automation.Actions.Support.write_context/1`). The event it captures is dispatched at that depth with the workflow
+  in its chain, so a workflow whose action re-triggers it is recorded as a skipped `:loop` run, and a chain deeper than
+  `:automation_max_depth` as `:depth_exceeded` (ADR-039 §4.7).
+- **A workflow runs with its owner's real role.** The run resolves its owner through the host's membership seam
+  (`Samen.AI.Agent.Approver.resolve/2`, config `approver_membership`) and acts with the role that membership holds now, so an
+  owner who is a viewer cannot make member-only writes and an admin keeps admin. A workflow whose owner has no active
+  membership in its org stops with `owner_unavailable`. Host-visible: check your workflow owners (a person who left the org,
+  or was suspended, owns workflows that now stop); a host that runs the engine must wire `approver_membership`, and one that
+  has not retries the run and ends it as an internal error instead of running it under an unchecked role (ADR-039 §4.5).
+- **A due scheduled workflow is dispatched once.** The schedule advance applies only while `next_fire_at` is the value the
+  scan read, so of two scans of one workflow one advances it and enqueues the dispatch and the other gets a stale-record
+  error and its job ends cancelled (`:trigger_no_longer_applies`, AshOban's mapping), without a retry. A scan that did not
+  read the fire time is refused rather than advanced unguarded. The dispatch `event_id` is derived from the workflow id and that fire time (ADR-039 §4.1).
+- **An escalation step is advanced once.** `:advance_step` is guarded in SQL on `current_step`, so two advances of one step
+  apply once and notify once; the losing advance ends as a cancelled job too, and one that did not read the step is refused
+  (ADR-039 §7.3).
+- **Each webhook action of a run has its own `delivery_id`.** The first action keeps the id it always had; the action at
+  index `n > 0` appends `:n`. A retry of the run gives each action the same id again.
+- **A write nested inside a run's write keeps the run's provenance.** The `{depth + 1, chain}` provenance is set under the
+  changeset's `shared` context, the part Ash hands on to nested actions, so a second captured record written from a host
+  action's `after_action` is dispatched at the same depth and chain and the loop and depth guards still see the cascade. The
+  agent's `assign_record_owner` write carries it too.
+- **An agent run acts with its owner's real role.** Each turn re-resolves the run's owner through the same membership seam
+  (`Samen.AI.Agent.Approver.resolve/2`) and acts with the role that membership holds now: a viewer's run cannot read or write
+  what only a member can, and an admin's run keeps admin. An owner who left the org, was suspended or never belonged stops the
+  run with `owner_unavailable`, as does a host whose seam is unwired or failing. Host-visible: a host that runs agents must
+  wire `approver_membership`, and check that the people who start agent runs hold an active membership.
+- **Sabotages 1612 to 1620** name the tests that prove these.
+- **ADR text matches the code.** ADR-040 §4.6 states that approval expiry is enforced at decision time and that a host adds
+  its own expiry trigger; ADR-039 §4.2 states that capture queries active workflows in the write's transaction.
+
+### Changed: an API key's scopes are enforced, and a key with no scopes is refused
+
+- **A key acts with the lower of its scopes and its role.** Every resource exposed over JSON:API (it carries
+  `AshJsonApi.Resource`) gets a policy added FIRST by `Samen.Transformers.ApiKeyScopePolicy`, so a `bypass` the resource
+  declares cannot skip it: `policy Samen.Policy.ApiKeyScopeRefused do forbid_if always() end`. The condition is true only
+  for a key request whose scopes do not permit the action, so that request is answered with the API's ordinary 403, and for
+  every other request the policy does not apply. It never authorizes: the resource's own policies alone decide whether an
+  action is allowed, an action none of them covers stays forbidden, and a key can do what both its scopes and those policies
+  allow. A resource with `AshJsonApi.Resource` and no `Ash.Policy.Authorizer` no longer compiles. A signed-in person, a system
+  actor and any actor with no `:api_key` are not affected. A host with no JSON:API (pawchart) is unchanged; its MCP endpoint
+  builds an actor with no `api_key` map, so scopes are not enforced there.
+- **The scope grammar.** A scope key is `"all"`, `"<family>"` or `"<family>.<type>"` (atoms or strings), its value a list of
+  `"read"` and `"write"`. The family is the underscored last segment of the resource's domain (`Demo.Crm` is `crm`,
+  `Driftwood.Freight` is `freight`), or what the domain's `samen_api_family/0` returns; the type is the resource's JSON:API
+  type (`contact`, `driver`). A read action needs `read`; a create, update, destroy or generic action needs `write`, and an
+  update or destroy by id reads the row first, so it needs `read` as well. `Samen.Scope.ApiKey.permits?/4` is the predicate.
+  An empty scope map authorizes nothing.
+- **A key that already holds scopes acts within them.** Before, the scopes of a key were stored and never consulted, so it acted
+  on its minter's role alone. The API-keys page used to tick `read` only by default, so a key minted there with that default
+  reads and no longer writes until it is re-minted. A write route that reads the row before it writes
+  (an update or destroy by id) needs both `read` and `write`.
+- **Minting a key with no scopes is refused.** `Samen.Web.Settings.ApiKeys.mint/3` returns `{:error, :no_scopes}` when the
+  requested scopes, after the trim to the minter's role (a viewer's `write` is dropped), leave none, and the API-keys page
+  says "Choose at least one scope". Scopes may now be a family or `family.type`, not only `all`.
+- **The scopes a key is created with are checked.** The `ApiKey` resource's own `:create` refuses an empty scope map and any
+  scope key or value outside the grammar (`Samen.Scope.ApiKey.Grammar`: lowercase names, one optional dot, `read` and
+  `write`). The resource cannot know a host's router, so `Samen.Web.Settings.ApiKeys.mint/3` also refuses a family or
+  `family.type` the app does not expose over JSON:API, returning `{:error, {:invalid_scopes, reason}}` (`known_scopes:`
+  overrides the families it derives from the app's domains). A domain whose `samen_api_family/0` returns a name containing a
+  dot makes its JSON:API resources fail to compile, because `family.type` is split on the dot.
+- **`mix samen.gen.api_key_scopes`** writes the data migration for keys that already exist with empty scopes: an owner,
+  admin or member key gets `{"all": ["read", "write"]}`, a viewer key `{"all": ["read"]}` (what their minter's role already
+  allowed), in batches of 5,000 rows. A key with scopes, or with no known role, is not touched; the statements only match
+  rows that are still empty, so a second run changes nothing and the generator itself skips a table a migration already
+  backfills. Committed for demo, driftwood (both key tables), pawchart and samen_web.
+- **Upgrading a host.** (1) Run `mix samen.gen.api_key_scopes` in the app and commit the migration; (2) run
+  `mix ecto.migrate`, before or with the deploy; (3) re-mint any key that should be narrower or wider than its
+  minter's role allows, including a key minted with the page's former default of `read` only that needs to write; (4) a script or test that creates a key with `%{}` scopes now gets an error: give it
+  `%{"all" => ["read"]}` or the family it uses (`%{"crm" => ["read"]}`); (5) a resource of your own with
+  `extensions: [AshJsonApi.Resource]` needs `authorizers: [Ash.Policy.Authorizer]`.
+- Proven by `api_key_scope_enforcement_test.exs` in demo and driftwood (through the real router and key plug, with a fixture
+  domain for the write route and a `bypass`), the guards `api_key_scope_guard_test.exs` in demo, driftwood, pawchart and
+  samen_core, `scope_api_key_permits_test.exs`, `api_key_scopes_gen_test.exs` (the migration run against a scratch database),
+  and sabotages 1584, 1586 to 1592, 1594 to 1601 and 1603 to 1611. ADR-029 records the amendment.
+
+### Fixed: the flag-taking mix tasks refuse an unknown flag
+
+- **A guessed or misspelled flag on a generator or verifier is refused, not dropped.** The generated `AGENTS.md` says every
+  generator refuses unknown flags; `samen.gen.indexes`, `samen.gen.reveal_requests`, `samen.gen.api_key_digest_unique` and
+  `samen.gen.csat_token_digest_unique` did not, and neither did 18 other tasks: `samen.verify.{fleet_wire, signals_no_pii,
+  vault_declared_parity, agent_coverage, catalog_parity, metric_labels, vault_token_binding, tnt_catalog, no_pii_columns,
+  aggregate_privacy, indexes, prefixes, no_pan_columns, same_org_fk, ai_prompt_masking, tnt_boundary, api_contract}`,
+  `samen.audit.freeform_projection` and `samen.ai.smoke`. They now parse through `Samen.Gen.Args.parse!/3`, which raises
+  `Mix.Error` ("mix <task>: unknown flag --x ... Valid switches: ...", a non-zero exit) before the task does anything; a
+  positional argument is refused too. Every flag the repo's own CI steps, templates and probes pass is a declared switch. The
+  eight tasks that already refused through `OptionParser.parse!/2` (`samen.verify.{migrations, read_scope, pii_classify,
+  never_read_current, catalog_meaning, no_plaintext_pii, pii_reads}` and `samen.catalog.dump`) are unchanged. Proven by
+  `mix_task_unknown_flags_test.exs` (each family through the task's `run/1`, with a child-process positive control) and
+  sabotages 1581 to 1583.
+
+### Fixed: the broker console acts as the signed-in person
+
+- **Driftwood's `/broker` page resolves who acts through `Samen.Web.TenantActor`.** The console built its actor with a fixed
+  `:member` role (`BrokerLive.broker_scope/1`), so a signed-in viewer wrote like a member. The page now acts with the role of
+  the person's active membership, re-resolved before every event; a viewer's page renders no write control and a crafted
+  write event is answered with a flash and writes nothing; a person with no membership gets the denied state, and an open
+  form is closed when the role changes. `BrokerLive.dispatch_decision/2`, `create_load/2`, `update_load/3` and
+  `delete_load/2` take the acting scope in place of an org id, and `broker_scope/1` is gone. Sabotage 1579 removes the viewer
+  refusal and flips the broker role test.
+
+### Fixed: the clinic page acts as the signed-in person
+
+- **PawChart's clinic page resolves who acts through `Samen.Web.TenantActor`.** The page and `PawChartWeb.ClinicReads` used a
+  synthetic actor with a fixed `:member` role, so a signed-in viewer wrote like a member. The page now acts with the role of the
+  person's active membership, re-resolved before every event; a viewer's page renders no write control and a crafted write
+  event is answered with a flash and writes nothing; a person with no membership in the clinic gets the denied state.
+  `ClinicReads.create_owner/2`, `update_owner/3`, `create_pet/2` and `update_pet/3` take the acting scope in place of an org
+  id, and `ClinicReads.tenant_scope/1` is gone. Sabotage 1578 removes the viewer refusal and flips the clinic role test.
+
+### Fixed: the operator joins read every row
+
+- **Accounts, platform billing and the help desk read their joins to the end.** The tenant-admin, membership, user, customer,
+  subscription, plan, price, invoice, ticket, agent and conversation reads behind the Accounts header, the per-account health
+  rows, platform MRR and the desk used to stop at their first 200 rows, oldest first, so the numbers were wrong from the 201st
+  tenant. `Samen.Web.Operator.Reads` now reads each in keyset pages on `id` until the end (the page bounds a read, not the set)
+  and orders the result in memory where order matters. Sabotage 1577 proves the account count, the platform billing
+  rows and the desk list past one page.
+
+### Fixed: the contact and company pages render on a host without the Work scope
+
+- **The log-activity composer is built only when the host mounts the Work scope.** The contact and company detail pages wrote a
+  logged activity through a Work task form built on every load; on a host with no Work scope that form was built over no
+  resource. They now build no composer there, render without it, and answer a composer event with a flash naming the Work scope.
+  Sabotage 1576 restores the unconditional build and flips the contact-page test.
+
+### Fixed: the fleet kill switch asks before it publishes
+
+- **`FleetDirectivesLive`'s "Kill switch — all products" carries the confirm interlock and a disabled-while-running state.** The
+  button renders `data-confirm` and `phx-disable-with` (and still only for a fleet admin); the handler publishes one directive
+  for an admin and none for a read-only role. Sabotage 1575 removes the interlock and flips the render test.
+
+### Fixed: a `data-confirm` control asks before it acts
+
+- **The served client script confirms every control that carries `data-confirm`.** The kit renders the attribute on each
+  destructive control (delete, workflow kill, agent stop, approve an AI write), and `app.js` now asks the attribute's text with
+  `window.confirm` from a capture-phase `click` and `submit` listener on `document`, so it runs before LiveView's own listeners:
+  on refusal the event is stopped (`preventDefault` and `stopImmediatePropagation`) and no `phx-click`, link or form submit
+  follows. The listeners are delegated, so elements patched in later are covered, and a form is asked once on submit. Hosts and
+  generated apps serve the same file at no authored code. `Samen.Web.ConfirmInterlockTest` runs the file against a DOM stub under
+  node and checks that every layout and host endpoint that serves the LiveView client serves `app.js` with it, and
+  `Samen.EndpointTemplateServesAppJsTest` checks the generator's endpoint template the same way; sabotages 1573, 1574 and 1580
+  prove them.
+
+### Changed: loading sample data is an admin's and runs as the person
+
+- **`SampleData.load/3` takes the acting person's scope.** Loading the sample records is an admin's (it writes org-wide through
+  resources whose kernel policy only checks the org): a scope below `:admin` is refused before anything is written, and the
+  seed and its audit line run as that person. The Contacts page offers it to an admin only (`:can_admin`), and the first-run
+  probe (`FirstRun.first_run?/3`) reads with the acting person's scope. **Upgrade note:** a member no longer loads sample
+  data, and host code calling `SampleData.load/2` or `FirstRun.first_run?/2` passes the acting scope as a third argument.
+  Sabotage 1419 (which removed the earlier member check on the Contacts page) now removes this admin check and flips the
+  same test; sabotage 1569 proves it through the page.
+
+### Changed: no write helper hands an admin role to the operator plane
+
+- **The tenant-admin write helpers answer a read-only scope where the elevation is not theirs.** `Billing.Reads.write_scope/3`,
+  `Marketing.Reads.write_scope/3` and `Support.KbReads.write_scope/3` answer `TenantActor.read_only_scope/2` (the plane's actor
+  with the lowest role and `read_only: true`) on an operator-plane mount; `Flags.Reads.write_scope/3` elevates only the
+  operator workspace's own mount (`Samen.Web.Operator.FlagAdminLive`) and answers the read-only scope on every other mount. A
+  tenant page writes with `TenantActor.write_scope/3`. `close_edit`, `dismiss_key` and `dismiss_token` join the read events an
+  operator-plane mount of a tenant page may send (they persist nothing).
+
+### Changed: the settings pages and the onboarding wizard act as the signed-in person
+
+- **The API keys, invitations, reveal approvals and security pages and the onboarding wizard resolve their actor** through
+  `Samen.Web.TenantActor`: no active membership is the denied state (a failed lookup the unavailable state) and reads
+  nothing, an open page re-resolves before every event, and their lists read as that person. The pages
+  are readable by every active member; minting and revoking a key, inviting and revoking an invitation, deciding a reveal
+  request and every write of the onboarding wizard (including its no-JS form posts) are an admin's, checked by the handler
+  against the role resolved for that event and offered to an admin only. The security page reads the person's own account and
+  writes nothing.
+
+### Changed: the automation builder acts as the signed-in person; every write is an admin's
+
+- **The automation builder resolves its actor** through `Samen.Web.TenantActor`: the role comes from the person's active
+  membership, no active membership is the denied state (a failed lookup the unavailable state) and reads nothing, and an open
+  page re-resolves before every event, closing an editor opened under a role the person no longer holds. The workflows are
+  readable by every active member; every write (author, edit, pause or resume, run now, add or remove a condition or an action)
+  is an admin's, checked by the handler itself, offered to an admin only, and run as the person (`TenantActor.write_scope/3`).
+
+### Changed: the file upload and preview pages act as the signed-in person
+
+- **The file upload page and the file preview page resolve their actor** through `Samen.Web.TenantActor`: the role comes from
+  the person's active membership, no active membership is the denied state (a failed lookup the unavailable state) and reads
+  nothing, and an open page re-resolves before every event. Listing and previewing files is a read open to every active
+  member; uploading is a member's, checked by the handler and offered to a member only. The per-plane masking of the filename
+  and the byte gate of the preview are unchanged.
+
+### Changed: the chat inbox and room act as the signed-in person
+
+- **The chat inbox and the chat room resolve their actor** through `Samen.Web.TenantActor`: the role comes from the
+  person's active membership, no active membership is the denied state (a failed lookup the unavailable state) and reads
+  nothing, and an open page re-resolves before every event and before every realtime delivery, so a person suspended while the
+  room is open receives no further message. Reading the inbox and a room is open to every active member; starting a
+  conversation and posting a message are a member's, checked by the handler and offered to a member only; flipping the
+  org-wide identity disclosure is an admin's and `Chat.set_disclosure_setting_as/3` runs it with `TenantActor.write_scope/3`, so
+  the person's own role is what the kernel judges. The operator desk keeps its impersonation gate and masked reads.
+
+### Changed: the feature-flags settings page and the calendar export act as the signed-in person
+
+- **The feature-flags settings page and the `.ics` export resolve their actor** through `Samen.Web.TenantActor`: the role
+  comes from the person's active membership, no active membership is the denied state (an export answers 403, a failed lookup
+  503), and an open page re-resolves before every event. The flags page is readable by every active member; every flag write
+  (enable or disable, ramp, add or remove a rule) is an admin's, checked by the handler itself, offered to an admin only, and
+  run as the person (`TenantActor.write_scope/3`). The export is a read open to every active member and records the role it
+  ran as.
+
+### Changed: the analytics and search pages act as the signed-in person
+
+- **The own-org analytics page and the ⌘K search page resolve their actor** through `Samen.Web.TenantActor`, as the earlier
+  families do: the role comes from the person's active membership; no active membership renders the denied state (a failed
+  lookup the unavailable state) and reads nothing; an open page re-resolves before every event, and a navigation (`?org=`)
+  reloads. Both are reads open to every active member; the analytics read keeps its own rank gate, which now judges the real
+  role and admits an owner (it used to see every signed-in person as a member). The notification inbox unfurls a subject with
+  the recipient's own scope. `TenantActor.user_scope/4` is the scope of a user a page already resolved (the inbox,
+  preferences, profile).
+
+### Changed: a tenant page on the operator plane is read-only
+
+- **A tenant page on the operator plane is read-only; impersonation is the route for acting in a tenant.** An operator who
+  opens a tenant's pages reads them, masked per the plane's masking rules, and offers no write control (`:can_write` and
+  `:can_admin` are false). For a page that calls `TenantActor.assign_actor/2`, the refusal is the default:
+  `TenantActor.recheck_event/3` halts, on an operator-plane mount, every event that is not a read event (the list's own sort,
+  filter, paginate, select and archived toggle, a retry, a tab, a form validation or cancel) and puts the page's own flash on
+  the socket. The onboarding wizard's no-JS POSTs are checked by the handler itself: it refuses a person who is not an admin
+  before `Onboarding.*` is reached. `TenantActor.write_scope/3` on the operator plane returns the plane's actor with the lowest
+  role and `read_only: true`, never an admin elevation. Operator-plane pages proper (`Samen.Web.Operator*`) and the disarmed
+  dev posture are unchanged. Proven by `tenant_actor_operator_read_only_test.exs` (plans toggle and delete, invoice, segment
+  and campaign delete, a ticket status change and a list restore, each with a tenant admin's positive control) and by
+  sabotages 1548 and 1549, the wizard controller's own check by sabotage 1570 and the chat disclosure context by sabotage 1571.
+
+### Fixed: a form built before a demotion or an organisation switch is never submitted with the authority it was built with
+
+- **A navigation on an open page now follows the person acting, as an event does.** `Samen.Web.TenantActor.assign_actor/2`
+  used to replace the held scope silently when `handle_params` ran again (a `live_patch`, back/forward, an `?org=` switch), so
+  the next event's recheck saw no change and the page's `actor_changed/1` never ran. It now runs when the person acting is
+  another id or role, or the organisation changed, exactly as on the event path. **Billing plans:** the edit form was kept
+  across loads, so an admin demoted to member (or switched to another organisation where they are a member) could still save
+  it with the admin scope it was built with, including into the organisation it was opened in; it is now built again on every
+  load from the plan the page reads, with the scope of the person acting, and closed when the plan is not on the page. The
+  other converted pages already built their forms again on every load; a test per family (Work, Support) and for the
+  two-organisation case pins it. The earlier entry's claim that a demotion takes effect while a page is open held for events
+  only until this fix.
+
+- **`TenantActor.write_scope/3` fails closed.** On an armed tenant mount anything that is not a `%Samen.Scope{}` (a `nil`, a
+  map) raises `ArgumentError`; it used to be handed to the dev elevation, which on an armed host with no principal answers a
+  `:member` scope. It accepts any `%Samen.Scope{}`: that the scope is the page's own acting one is what the guard ratchet
+  below checks at the call sites. Only the disarmed dev posture and the operator plane keep the posture's admin elevation, as
+  before. (Superseded: the operator plane now answers a read-only scope there; see
+  "Changed: a tenant page on the operator plane is read-only" above.)
+
+- **`admin?/1` is false on the operator plane.** It was true there, so the campaign page's send handler, whose page-level
+  check is `admin?/1`, accepted a forged send event on an operator socket (the composer was already hidden); the send control
+  and that check now refuse there. The disarmed dev posture keeps `admin?/1` open. `member?/1` is left a rank check on
+  purpose: the operator's synthetic scope carries `:member`, and an operator's reply is refused by the kernel's
+  plaintext-PII `WriteGuard`, which the operator red paths drive the write through to.
+- **The guard ratchet sees `write_scope`.** `Samen.Web.TenantActor.Guard.foreign_write_scopes/1` counts a
+  `TenantActor.write_scope(` call whose third argument is not the page's own acting scope (a literal `nil`, another scope,
+  a capture, `apply`, an `import`); the baseline is empty and `Billing.Reads.restore_admin_scope/2` passes the socket's
+  acting scope instead of the list's. The by-name non-vacuity check names the Billing, Marketing and Support pages too.
+- **Flake: the abbrev prefix property generated an attribute name the catalog refuses (`:ct26vt_454`).** The generator's domain
+  now excludes a name carrying the vault-token sentinel, asking the same `Samen.AI.VtSentinel.in_string?/1` the meaning
+  transformer calls; the prefix assertions are unchanged and a deterministic test pins both sides of the generator's boundary.
+  A second test compiles a resource whose attribute NAME carries the sentinel and pins that `MeaningDeclarations` refuses it
+  with its message (a pin of existing behaviour: it passed before the round).
+- **The guard ratchet resolves `alias … TenantActor, as: X`.** `foreign_write_scopes/1` counts `X.write_scope(…)`, a
+  `&X.write_scope/3` capture and `apply(X, :write_scope, …)` like the unaliased spellings. **Billing plans:** `toggle_feature`
+  no longer builds the edit form itself; it names the plan and lets `load/2` build the form from the current acting scope,
+  so a role that changed between the event guard and the handler's own load cannot leave a form with the earlier scope.
+- Sabotages 1539 to 1542 (a navigation that does not follow the person acting, the Plans edit form kept for a plan that is not on
+  the page, `write_scope/3` falling back on an armed mount, `admin?/1` open on the operator plane) and 1543 to 1547 (the
+  driver honouring a test seam without the self-test marker or with a malformed value, a leader that outlives SIGKILL not
+  reported, the guard ratchet not resolving `alias … TenantActor, as: X`, `toggle_feature` building the form with the held
+  scope). No migration.
+
+### Tooling: the driver waits for a killed process group to be gone
+
+- **After SIGKILL the driver waits until the whole group no longer exists before it returns or exits.** It used to reap
+  only the leader (and, in `terminate_all`'s last loop, nothing): a SIGKILLed grandchild is a zombie until launchd reaps
+  it, so under load an interrupted driver exited with a group member still visible (the `GROUPKILL` flake). The wait is
+  bounded (10 s); past it the driver says so on stderr naming the group and keeps it recorded in `state.json`, so the
+  next invocation still refuses to overlap. The leader is reaped on the same bound (a leader that never dies is reported
+  and recorded, not waited on forever). The `KILLWAIT` case proves both through test-only seams (docs/ci.md).
+- **No test seam reaches a real run silently.** Every `SAMEN_CI_TEST_*` variable is honoured only with the marker
+  `scripts/ci_test.sh` sets (`SAMEN_CI_SELFTEST`, stripped from every step); set without it, or with a value that is not
+  a finite number of seconds >= 0, the driver exits 2 at startup naming the variable (`SEAMGUARD`). docs/ci.md says
+  what to check and remove when a "still running" refusal is a reused process-group id.
+
+### Tooling: a sabotage refused at build time is killed by that refusal
+
+- **A sabotage whose mutation a named compile-time rule refuses is recorded as killed by that refusal, and only when it
+  is listed.** `scripts/sabotages/BUILD_REFUSED.tsv` lists the patch, the required substring of the compiler output (the
+  rule's own message) and the reason; `scripts/sabotage.sh` reports a listed patch whose build is refused with that
+  message as `KILLED (build refused: …)` and counts it as a pass. Refused without the message, or built successfully (a
+  stale entry), fails; an unlisted patch whose build is refused fails as before; a bad entry fails the preflight.
+  Sabotages 1491 and 1492 (a reveal probe taking a caller-supplied `actor_id`, refused by `Samen.Reveal.ProbeGuard`) are
+  back to their original mutation and listed; 1522-1527 prove the ledger rules.
+
+### Fixed: flakes and guards round 5 (review of the flakes round, 2026-11-25; includes the `:host_domains` rename)
+
+- **Upgrade: rename `config :samen_core, :ash_domains, [...]` to `config :samen_core, :host_domains, [...]`.** samen reused
+  Ash's own key for the `:samen_core` application as its host-domain registry, so `Ash.Resource.verify` read the host's
+  not-yet-compiled domains while samen_core compiled as a dependency and printed `Demo.Crm is not a Spark DSL module` (nine
+  warning blocks per host build, and the inclusion check skipped there). Every reader (catalog, MCP, data map,
+  no_plaintext_pii, pii_reads, `samen.verify.*`, erasure) now goes through `Samen.HostDomains.registry/0`. Your own
+  `config :my_app, ash_domains: [...]` is unchanged, and so is Ash's check on samen_core's own build. For this release the
+  old key is still read when `:host_domains` is not configured, with a deprecation warning, so an un-renamed host never
+  sees an empty registry (the verifiers that fail on zero resources still do). `mix samen.gen.app` / `samen.gen.scope`
+  emit and edit the new key; the five config goldens moved with it. Measured: demo `MIX_ENV=test mix deps.compile samen_core
+  --force` went from 9 such warnings to 0.
+- **`Samen.OrgIdPinnedGuard.walk/3` (host-visible).** `repos:` is no longer what turns the query watch on: the watched repos
+  are derived from the walked resources (read and mutate repo), united with any you pass, and a Postgres-backed resource
+  whose repo cannot be resolved fails the walk by name. A query issued by a process the build started (`$callers`, a `Task`)
+  counts. An action that takes `org_id` as an argument and sets it in a `before_action` hook (`Marketing`'s `Send`) is no
+  longer counted as exercised: the report has `hook_set`, `hook_set_unlisted` and `hook_set_unproven`, and a host lists each
+  such action in `hook_set:` with a reason and the named behavioural test that proves a foreign org is refused (the walk
+  checks the test is in the file). The three host guards assert both lists are empty. Hosts that pass `repos:` keep working.
+- **`Samen.VaultTokenAssert` takes only text (host-visible).** `refute_vault_token/3`, `assert_vault_token/2` and `leaks/2`
+  accept a binary or iodata and flunk, naming the input, on `nil` or anything else (they used to `to_string/1` it, so
+  `refute_vault_token(nil)` passed). No call site in the five suites passed one. The `phx-` blanking is anchored to an
+  `id="phx-..."` attribute.
+- **Marketing `Send :create_checked`:** an authorized org-A actor passing `org_id: B` for a subscriber in B is a tested
+  refusal that names the pin that refused it (it depended on `before_action` hook order only); a subscriber lookup that
+  FAILS is reported (`Samen.Observability.Failure`, `marketing_send_subscriber_lookup`) and refused with its own message
+  instead of "subscriber not found". **Freight `ApiKey :create`:** the minter is checked against the org the row is created
+  in, not the one the changeset was built with.
+- **Vault-token bare guard** now sees assertions that span lines, pipes, captures, `Regex.match?` / `String.match?`, every
+  regex delimiter, `String.contains?` with a list and module-attribute patterns; an exemption is a trailing
+  `# bare-vt_-ok: <why>` and the exact set is pinned per file. The generated `record_api_test` checks the body with
+  `refute_vault_token(boundary: true)`.
+
+### Fixed: authorization and honesty round 5 (evaluation 2026-11-24; tenant roles, authorization and honest reads)
+
+- **Fixed: a signed-in `:viewer` acted as a `:member` on the tenant list surfaces, CSV export, file bytes and the profile
+  page.** `Samen.Web.Plane.scope/2` (through `Mount.scope/2`) gave every tenant actor a fixed `role: :member`; since a real
+  spine login can pass an armed host, a viewer could create and delete companies and contacts (and, where a policy reserves
+  it, anything else a member may) through the generic CRM list screens, and CSV export and file bytes ran as a member. A
+  new shared resolver, `Samen.Web.TenantActor.scope/3` (over the same `Settings.Reads.actor_in_org/3` +
+  `Samen.Auth.OrgActor` the notification pages use), builds the scope from the person's ACTIVE membership: the role and the
+  per-org user id. On an armed host a person with no active membership is refused (the denied card, or 403 on CSV and
+  bytes) and a failed lookup is an error state (the unavailable card, or 503). A refused list page takes its list context
+  away (`Samen.Web.ListLive.refuse/1`): a later `toggle_archived`, `restore` or any other list event reads nothing and
+  writes nothing, including after a suspension or after `?org=` moves to an org the person holds no membership in. Nothing
+  ever falls back to a default role: on an armed mount a socket that never ran the tenant gate (no pinned principal) and a
+  `{:dev, _}` principal are refused too. The disarmed dev posture and the operator plane are unchanged
+  (`TenantActor.system_scope/2` names the fixed `:member` scope where it is really meant). Converted:
+  `CRM.ContactsLive`, `CRM.CompaniesLive`, `CRM.ContactLive` (the detail page: edit and delete), `Csv.ImportLive`,
+  `Marketing.LeadsLive` (the list scope its restore runs under), `Csv.ExportController`, `Files.BytesController` and
+  `Settings.ProfileLive` (CSV and bytes expose the role they acted with as the `:samen_acting_role` conn assign;
+  `ProfileLive` refuses a save when nobody is acting instead of rebuilding a scope from a nil role). A session carrying
+  both the legacy `samen_current_user` key and the spine token acts as ONE person everywhere: `CurrentOrg.principal_key/2`
+  is the single order (the legacy key when the host's `:authorized_orgs` seam grants it an org, the spine credential
+  otherwise) and `principal_id/2`, `Settings.Reads.principal_ref/3` and `authorized_orgs/2` all follow it, so CRM, files,
+  CSV and profile, Billing elevation, AI agent consent and audit attribution name the same person. **A new framework
+  sign-in drops the legacy `samen_current_user` key** (it used to survive `finish_login`, so signing in over another
+  person's legacy session kept acting as them); logout clears both keys.
+  **Generated `--live` screens** (index, show, form) read the role from the same resolver instead of
+  `TenantRole.membership_role/3` (whose fallback for "no membership" was `:member`) and show the same two states. The shared
+  pieces the remaining conversions use are `TenantActor.assign_actor/2`, `TenantActor.Components.actor_refused/1` and
+  `TenantActor.refuse_events/0,1`. `Samen.Web.TenantActorGuardTest` holds per-file ratchets over the `Mount.scope/2` /
+  `Plane.scope/2` calls in samen_web that are not converted yet (every spelling: the `&Mount.scope/2` capture, an `as:`
+  alias, an `import`, `apply/3`), over literal tenant actor maps, and over callers of `system_scope`, `admin_scope` and a
+  role-less `user_scope` (a literal `nil` role included); its baseline total is pinned, and driftwood and pawchart ratchet
+  their own request-path sites. The literal-role detector counts an id-less `%{org_id: o, role: :admin}`, a nested map, a
+  `%{actor | role: :admin}` update and `Map.put`/`Map.merge` of a literal role; `except: [scope_kind: 1]` no longer reads as
+  excluding `scope`, and an `alias ...,` split over two lines is seen. The hosts' seeds, workers and game days that spell a
+  role are listed by file and count.
+  **Upgrade notes:** (1) an ARMED host whose signed-in users have no active `Identity.Membership` row in the org they act in
+  (a legacy `samen_current_user` host that never created one) now gets the denied state on those screens, and 403 on CSV
+  export and file bytes, instead of acting as a member; create the membership rows. (2) A CRM, CSV or files mount now
+  needs the `:identity_namespace` label (the host's Identity namespace, as driftwood and pawchart set it): without it the
+  membership lookup cannot resolve `<namespace>.User`, so every armed user sees the unavailable state (or 503) and the
+  failure is logged on each request. (3) `socket_scope/2` on an armed mount refuses a socket the tenant gate never ran on:
+  mount `ContactsLive`, `CompaniesLive` and `ProfileLive` only in a `live_session` carrying
+  `{Samen.Web.TenantAuthz, :require_tenant}` (the router macros do). Sabotages 1402 to 1430 and 1436 to 1446.
+
+- **Fixed: the file-bytes and CSV-export routes answered 503 "no mount" on every host.** `samen_files_routes/3` and
+  `samen_csv_routes/3` emitted `GET <path>/:id/bytes` and `GET <path>/export/:resource` without
+  `assigns: %{samen_mount: mount}` (the ICS route has it) and no host pipeline sets it, so through any real router every
+  request was a 503, including the `/files/<id>/bytes` links the files UI renders; the tests that said "via the mounted
+  route" set the assign by hand. Both routes now carry the mount and work: a member downloads an active file's bytes and
+  exports a CSV, a viewer gets what the policies give a viewer, a person with no active membership gets 403, and a
+  quarantined file is not served (tests drive the real router with a real login, in samen_web, driftwood and pawchart). Now that
+  they are reachable they are hardened: uploaded bytes are sent with `X-Content-Type-Options: nosniff` and, unless the
+  type is a safe inline one (png, jpeg, gif, webp, pdf, plain text), as an attachment under `Content-Security-Policy:
+  default-src 'none'; sandbox; frame-ancestors 'none'`, so an uploaded HTML file can neither run as a page on the app's origin
+  nor be framed; a CSV export is refused with 413 above `Samen.Web.Csv.max_export_rows/0` rows (`config :samen_web,
+  Samen.Web.Csv, max_export_rows: n`, default 100,000) by a scoped count BEFORE any row is read or vault-resolved (an
+  org above the limit costs one aggregate, not a full scan; a count that fails refuses too), and an export that fails
+  answers with fixed copy rather than the reason term. **Both are audited** (`Samen.Web.AccessAudit`, through
+  `Samen.AuditChain.Writer`, the sink the sample-data load and the DSAR export use): a `csv_export` line (actor, org,
+  resource, row count, outcome) and a `file_download` line (actor, org, file id, byte size, outcome), refusals
+  (403, 413, 422, quarantined) included. Like the DSAR export, a delivery is gated on its line: if the line cannot be
+  written the response is 503 and nothing is sent. Sabotages 1414 to 1417 and 1431 to 1435.
+
+- **Fixed: a `:viewer` could create, edit and delete CRM contacts.** `CRM.Person` create, update and destroy (archive and
+  restore included) were `OrgScope` only; they now carry the member-or-above gate `Company` has. Reads and `reveal_person`
+  are unchanged. The in-app sample-data offer is pinned to the same bar by a test. Every screen that writes a Person now
+  acts as the signed-in person, so the gate holds end to end: the contacts list, the contact detail page (edit, delete),
+  the CSV import (Person and any other member-gated resource of the mounted domain) and the leads lens. Tests log in
+  as a real viewer and a real member and assert the database. Sabotages 1418, 1419 and 1427 to 1430.
+
+- **Fixed: the Support, Billing and Marketing pages acted as a fixed `:member` (so a `:viewer` created and changed tickets,
+  authored knowledge-base articles and created customers), and a billing page opened by an admin kept its admin actor after a
+  demotion.** These pages now act as the signed-in person (their membership role), show the denied or the unavailable state,
+  reading nothing, when there is no active membership or the lookup fails, and re-resolve who acts before every event, so a
+  member suspended or demoted while a page is open is judged by the membership as it is now: the ticket inbox, ticket page
+  (status, conversation, reply) and knowledge base; billing overview, invoices, plans, dunning, usage and settings; marketing
+  campaigns, campaign (compose and send) and segments. **Roles:** ticket, conversation and status writes are member-or-above
+  (the kernel already said so); a reply, authoring or editing a KB article and creating a billing customer are member-or-above
+  (the message, article and customer resources only check the org, so the page now checks the role); publishing a KB article,
+  every subscription, plan, price, invoice and entitlement write, every campaign and segment write, subscribing and opening
+  the payment portal are admin-or-above, and so is sending a campaign to a segment (consent and suppression are still
+  enforced). The pages offer a write control only to a role that can use it (`:can_write` for member-ranked controls, the new
+  `:can_admin` for admin-ranked ones); reads stay open to every active member. **Upgrade notes:** host code and tests that
+  drove these pages without a signed-in person on an armed host now get the denied state; log in as a real person with the
+  right role. A host that called `Samen.Web.Support.KbReads.publish_article/3` with an org id is unchanged; it also takes a
+  `%Samen.Scope{}` now, which the page passes so a member's publish is refused. `Samen.Web.TenantActor` gains
+  `write_scope/3` (the acting scope on an armed tenant plane and nothing else: anything that is not a `%Samen.Scope{}` raises there; only the disarmed dev posture and the operator plane get the posture's admin elevation (superseded: the operator plane now
+  answers a read-only scope; see "Changed: a tenant page on the operator plane is read-only")),
+  `administrable?/2`, `admin?/1` and `member?/1`. No migration. Sabotages 1528 to 1536.
+
+- **Fixed: the rest of the CRM pages and the Work pages acted as a fixed `:member`, and a `:viewer` could enroll contacts into
+  email sequences.** These pages now act as the signed-in person (their membership role), and show the denied or the
+  unavailable state, reading nothing, when there is no active membership or the lookup fails: the CRM company detail page
+  (edit, delete, billing link, log activity), pipeline, calendar, dashboard, mailbox, contacts gallery and sequences (enroll),
+  and the Work tasks list, task detail (status), projects (create, archive), timeline and task tree. A viewer could create and
+  archive tasks and projects and edit and archive companies through them; they now get a refusal. **Policy gate added:**
+  Outreach `Enrollment` `:enroll`, `:pause`, `:resume` and `:stop` had no role rule (org scope only) and are now
+  member-or-above, like the other CRM and Work writes (`Sequence` writes and `Enrollment` destroy stay admin; reads are
+  unchanged; the system actions are closed to actors in the next entry). **Upgrade note:** a host that enrolls or pauses enrollments with a `:viewer` actor (or with
+  an actor carrying no role) now gets a forbidden error; run those as a member or above, or with `authorize?: false` in a job.
+  No migration. Sabotages 1470 to 1478.
+
+- **Fixed: an open page kept the role it had at its last navigation.** A member suspended or demoted while a converted page was
+  open could keep sending write events (create, delete, enroll, status change, restore, CSV import) and they ran with the old
+  role: every handler reused the scope resolved at the last `handle_params`, and so did the list context and any form built at
+  load. `Samen.Web.TenantActor.assign_actor/2` now attaches a `:handle_event` lifecycle hook (once, ahead of the `ListLive` hook
+  and the view's own `handle_event/3`) that resolves the person again for the page's org before EVERY event. Still acting:
+  `acting_scope`, the list context and the forms built at load follow the current role, so a demotion takes effect on the very
+  next event. Denied or unavailable: the page switches to the refused state and the event is halted. The refused state carries
+  no data: the list context and page are cleared and the view runs the same load a refused navigation does (an optional
+  `actor_lost/1`), so a record's name in a topbar (the company, the contact's full name, the task title), the forms, the tiles
+  and the profile are dropped, and the profile shows the refused card for the unavailable state too. This covers the tasks, task, projects, company, contact, contacts, companies, sequences and CSV import pages and the
+  other converted pages through the same call; the notification inbox (events and realtime messages) and preferences resolve the
+  recipient their own way and carry the same guard. Cost: two identity queries per event (the user, then the membership),
+  re-read every time, never cached across events. The refused card gains a "Check again" button (`retry_actor`) that resolves
+  the person again and reloads the page when they act; a page with no URL to go back to (an embedded view, or one whose org
+  resolved late) reloads in place (`actor_regained/1`) instead of doing nothing. A view that builds something from the scope
+  exports `actor_changed/1`. The Edit contact button follows the write role like the other pages' controls. The generated
+  `--live` index and form screens had the same bug (they submitted a form built at load with the role of that moment) and now
+  attach the same guard; **upgrade note:** re-generate (`mix samen.gen.resource --live`) to get it, an already generated
+  screen keeps the old behavior. No migration. Sabotages 1479 to 1483 and 1502 to 1507.
+- **Fixed: viewers were offered write controls, a refused request still wrote, and a missing company crashed its page.**
+  The create, edit, delete, enroll and status controls of the company, contact, companies, contacts, tasks, task, projects,
+  sequences and import pages are shown only to a person who may write (`Samen.Web.TenantActor.writable?/2`: the plane AND at
+  least the member role, assigned as `can_write` so a replay shows the controls its person saw); what the pages allow is
+  still the kernel policy. A viewer's billing-link request no longer registers
+  the org's custom field before the update policy refuses it (`link_billing_customer` asks the policy first). `edit_company`,
+  `validate_edit` and `save_edit` (and the contact twins) for a record that was not found are no-ops instead of a crash.
+  Sabotages 1493 to 1495 and the viewer tests for the forms built at load (1484, 1485; 1473 is the event-time mutation alone).
+- **Fixed: Outreach system actions were open to every actor, and Mailbox rows to every tenant actor.** `Enrollment`
+  `:advance_due`, `:due_scan` (an unfiltered cross-org read) and `:system_advance`, and `StepSend` `:queue`, `:mark` and
+  `:requeue`, were `authorize_if(always())`. The four internal ones (`:system_advance`, `:queue`, `:mark`, `:requeue`) are forbidden to every actor and keep working as the
+  `authorize?: false` calls `Samen.Sequences` and the send worker make; `:due_scan` and `:advance_due` are authorized only for
+  AshOban's own interaction (the `:sequence_step_due` trigger). Mailbox `Connection` and `MailMessage` writes were org scope
+  only; the sole writer is `Samen.Mailbox.Sync` (`authorize?: false`), so create, update and destroy are now forbidden to every
+  actor. `reveal_connection` and `reveal_mail_message` checked the reveal grant for a caller-supplied `actor_id`, so any actor
+  could name an operator who holds a grant and ride it: the argument is gone and the grant is checked for the actor that runs
+  the action. **Upgrade note:** a host that wrote Outreach system actions or mailbox rows with a tenant actor, or passed
+  `actor_id` to a Mailbox reveal action, gets a forbidden or an unknown-argument error; run those as the system
+  (`authorize?: false`) or as the actor that holds the grant. No migration. Sabotages 1486 to 1492.
+
+- **Fixed: every generic `reveal_*` probe action trusted a caller-supplied identity and answered anyone.** The 19 probes
+  ("does that id hold a live reveal grant on this subject?": CRM `reveal_person`, Identity `reveal_user` and
+  `reveal_invitation`, Billing, Marketing, Support (2), Automation, Primitives (2), AI `reveal_agent_run`, Chat (2), the
+  `demo`, `driftwood` and `pawchart` hosts, and the three generator templates) took an `actor_id` argument and were
+  `authorize_if(always())`, so any code path, with any actor or none, could ask about anyone's grants. They are now one
+  implementation, `Samen.Reveal.GrantProbe` (the Mailbox pair uses it too): the grant is checked for the actor that RUNS the
+  action, a missing actor is denied, there is no identity argument, and the policy is `authorize_if(actor_present())`. A
+  declared reveal action (`reveal :name` in `pii do`) now fails the build unless it has exactly this shape:
+  `run({Samen.Reveal.GrantProbe, _})`, arguments exactly `[:subject_id]`, and a `policy action(:name)` whose only check
+  is `authorize_if(actor_present())`; any other `authorize_if` or `authorize_unless` that can apply to it (`always()`,
+  `expr(true)`, a custom check, in a `policy`, a `policy_group` or a `bypass`) and any `bypass` other than AshOban's own
+  interaction are refused. `Samen.Transformers.RevealActions` enforces it at compile time on every resource that
+  declares a reveal action, so hosts and
+  generated apps get it with no CI step (`Samen.Pii.Info.reveal_probes_examined/1` records what it examined). **Upgrade
+  note:** drop `actor_id:` from any call to a reveal probe action (it is now an unknown-argument error) and run it with the
+  actor that is asking; a reveal action of your own that is not of that shape stops compiling,
+  so give it `run({Samen.Reveal.GrantProbe, label: :field})`, the one argument `subject_id`, and `authorize_if(actor_present())`; **re-generate** (or
+  copy) the `vertical.ex` / `--api` / `--live` resource templates. No migration. Sabotages 1508 to 1511 and 1517.
+
+- **Fixed: the Automation and AI-agent system actions were open to every actor.** Workflow `:scan_due` and `:dispatch_due`,
+  Reminder `:due_scan` and `:fire`, Escalation `:due_scan` and `:advance_step`, and the agent Run `:due_scan` and
+  `:resume_due` were `bypass … authorize_if(always())`, and each `due_scan` is a read with no org filter, so any actor could
+  read every org's due rows and run the trigger's write. They are now authorized only for AshOban's own interaction (the
+  triggers keep working) and forbidden to every actor. Workflow `:operator_kill` and `:operator_rearm` were open to every
+  actor too; they are forbidden, and both callers (`Samen.Automation.Health`, after its operator-role gate, and the rate
+  breaker) already run `authorize?: false`. The automation Run log's `:create` and `:update` bypass is forbidden to actors
+  (the kernel pipeline writes it as `authorize?: false`). The agent Run's `:expire_due` (the `:agent_proposal_expiry`
+  trigger) is the scheduler's like its siblings, and every other agent Run write (`:advance`, `:park`, `:cancel`, …) is
+  forbidden to actors: `Samen.AI.Agent` runs them all as `authorize?: false`. Escalation's `:open`, `:refresh`, `:resolve` and `:cancel` were open to every actor with
+  no org check; they are forbidden too (`Samen.Automation.Escalate` runs them as `authorize?: false`). **Upgrade note:** a host that ran these actions, or wrote Run rows,
+  with a tenant actor gets a forbidden error; run them as the system (`authorize?: false`) or let the trigger run them.
+  No migration. Sabotages 1512 to 1516 and 1518 to 1521.
 
 - **Fixed: `Samen.Webhook.deliver/4` raised `FunctionClauseError` on any non-empty endpoint list, discarded the `:multi` it
   was given, and answered `{:ok, 0}` when no `:endpoints` were passed.** It now enqueues one job per active, subscribed
@@ -104,7 +616,7 @@ All notable changes to Samen are recorded here. The format follows
   moduledocs now say exactly what is stored: the filter-box text of a surface whose filter fields are all non-vaulted, and
   structured predicate values on non-vaulted fields, are stored as typed; no PII detection is attempted on them. Sabotage 1383.
 
-### Security: identity authorization, round 3
+### Security: identity authorization, round 3 (role management, sessions, invitations, org slugs and API keys)
 
 - **Fixed: an admin could demote, suspend or re-role an owner or a peer admin.** `Samen.Policy.ManageRole` judged only the
   role a membership write was SETTING, so `%{role: :member}` (or `status: "suspended"` together with a lower role)
@@ -339,7 +851,7 @@ red test through the real authorization path (a `scope:`/actor, never `authorize
 - Resource changes only; there is no migration. Test helpers that seed a driftwood Freight key need a real user and
   membership for `minter_user_id` (see `Driftwood.ApiCase.mk_minter/2`); an Identity key's membership must be active.
 
-### Security: identity authorization, round 3 (second read-only review of round 2)
+### Security: identity authorization, round 3 (second read-only review of round 2: one contract regression and holes round 2 assumed closed)
 
 A second read-only review found no bypass introduced by round 2, but one contract regression and several holes round 2's
 wording assumed closed. Each finding was reproduced with a red test through the real path before it was fixed; one did not
@@ -846,7 +1358,7 @@ directory and diff, or apply by hand:
    `20260925100000` rollup `subject_id` becomes text (host-named, e.g. driftwood's `…_driver_load_rollup_subject_id_text.exs`) ·
    `20260925110000` usage-event ledger · `20260926100000` usage tally `reported_quantity` ·
    `20261005100000` entitlement usage limit · `20261006100000` agent cached-input bucket (hosts running the agent loop) ·
-   `20261009100000` `samen_replay` (also register `Samen.Replay.Domain` in **both** `:ash_domains` lists) ·
+   `20261009100000` `samen_replay` (also register `Samen.Replay.Domain` in the host's domain registry: `config :samen_core, :host_domains` and the host app's own `config :my_app, ash_domains`) ·
    `20261114100000` the tenant keyset indexes (**ARCH-4** — run `mix samen.gen.indexes` in the host; it writes a
    `CREATE INDEX CONCURRENTLY` migration of literal `{table, columns, name}` tuples over every org-scoped resource, safe on populated tables, no write lock; copy the
    `driftwood/priv/repo/migrations/` file as the reference) · `20261114110000` the Work `Task` `crm_refs` expression indexes
@@ -870,12 +1382,12 @@ directory and diff, or apply by hand:
 7. **Oban hosts that do not call `Samen.Jobs.install_defaults/1`** must add `{Samen.Jobs.BootRun, workers:
    Samen.Jobs.default_boot_workers()}` so the `aud_event` partition rolls forward at boot (a fresh deploy could not
    write audit events from its first request otherwise). Hosts using `install_defaults/1` get it automatically.
-9. **One instance per database (ADR-054).** Hosts that call `Samen.Observability.child_specs/2` get the guard for free. Generated apps
+8. **One instance per database (ADR-054).** Hosts that call `Samen.Observability.child_specs/2` get the guard for free. Generated apps
    made before this change: run ONE machine (`fly deploy --ha=false`, `fly scale count 1`; copy the comment and `strategy = "rolling"` from
    `samen_core/priv/templates/fly_toml.eex`), remove `dns_cluster`/`libcluster` if present (the app now refuses to boot with them), and
    use `Samen.Web.Readiness.report/1` for `/readyz` so the `single_node:` line appears. Behind PgBouncer in transaction mode set
    `config :samen_core, Samen.SingleNode, lease_url: <direct URL>`.
-8. **Seed tasks** should boot through `Samen.SeedBoot.start!/2` instead of `@requirements ["app.start"]`, or
+9. **Seed tasks** should boot through `Samen.SeedBoot.start!/2` instead of `@requirements ["app.start"]`, or
    `mix <app>.seed` dies with `:eaddrinuse` while the dev server runs.
 
 ### Reads that lie (WP6 phase 1)

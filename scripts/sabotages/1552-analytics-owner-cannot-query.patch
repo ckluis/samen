@@ -1,0 +1,19 @@
+# SABOTAGE: the own-org analytics gate refuses the owner role
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_role_reads_test.exs
+# MUST_FAIL: the analytics role gate: an owner, an admin and a member may query
+diff --git a/samen_web/lib/samen/web/tenant/analytics_reads.ex b/samen_web/lib/samen/web/tenant/analytics_reads.ex
+index 17a90c0e..59b9d50a 100644
+--- a/samen_web/lib/samen/web/tenant/analytics_reads.ex
++++ b/samen_web/lib/samen/web/tenant/analytics_reads.ex
+@@ -68,7 +68,7 @@ defmodule Samen.Web.Tenant.AnalyticsReads do
+     value_columns: [:actor_count]
+   }
+ 
+-  @queryable_roles [:owner, :admin, :member]
++  @queryable_roles [:admin, :member]
+ 
+   @doc "The tenant roles that may query own-org analytics (P17 Q3)."
+   @spec queryable_roles() :: [atom()]

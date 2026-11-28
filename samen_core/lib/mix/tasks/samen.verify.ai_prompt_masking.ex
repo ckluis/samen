@@ -44,7 +44,7 @@ defmodule Mix.Tasks.Samen.Verify.AiPromptMasking do
   @impl Mix.Task
   def run(args) do
     Mix.Task.run("app.start")
-    {opts, _rest, _} = OptionParser.parse(args, strict: [domain: :keep])
+    opts = Samen.Gen.Args.parse!("samen.verify.ai_prompt_masking", args, [domain: :keep])
     Samen.Verifier.halt_if_violations(@task_name, violations(opts))
   end
 

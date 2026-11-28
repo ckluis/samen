@@ -21,6 +21,7 @@ defmodule Samen.Automation.EscalationTest do
       SLA/dunning test still passes (verified by the full suite, not re-derived
       here — `billing_dunning_test.exs` is unmodified and green).
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: false
 
   require Ash.Query
@@ -395,7 +396,7 @@ defmodule Samen.Automation.EscalationTest do
     # "ids/enums/names only" rule covers refs, not raw attribute VALUES); the
     # SENTINEL here stands in for what a leaked subject VALUE would look like —
     # it must never appear verbatim as a job arg payload field.
-    refute dump =~ "vt_", "a vault token must never land in oban_jobs.args"
+    refute_vault_token(dump, "a vault token must never land in oban_jobs.args")
   end
 
   # ---------------------------------------------------------------------------

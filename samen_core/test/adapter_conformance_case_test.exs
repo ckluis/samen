@@ -49,6 +49,7 @@ defmodule Samen.AdapterConformanceCaseTest do
       surgical redaction and FLUNKS on a PII leak, a dropped retained key, and a
       wipe-everything no-op.
   """
+  import Samen.VaultTokenAssert
   use ExUnit.Case, async: true
 
   alias Samen.AdapterConformanceCase, as: Harness
@@ -696,7 +697,7 @@ defmodule Samen.AdapterConformanceCaseTest do
         contact: "vt_rogue_token"
       }
 
-      refute inspect(leaky, limit: :infinity, printable_limit: :infinity) =~ "vt_"
+      refute_vault_token(inspect(leaky, limit: :infinity, printable_limit: :infinity))
 
       assert_raise ExUnit.AssertionError, ~r/vault token/, fn ->
         Samen.AdapterConformanceCase.assert_capture_no_leak!(fn capture ->
