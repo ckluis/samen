@@ -292,6 +292,9 @@ defmodule Samen.Web.Settings.ApiKeysLive do
            mint_error: "Choose at least one scope (read or write): a key with no scopes cannot do anything. Nothing was created."
          )}
 
+      {:error, {:invalid_scopes, _reason}} ->
+        {:noreply, assign(socket, mint_error: "Those scopes are not valid for this app. Nothing was created.")}
+
       {:error, _reason} ->
         {:noreply, assign(socket, mint_error: "Mint refused (admin role required).")}
     end

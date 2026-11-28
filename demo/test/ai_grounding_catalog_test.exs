@@ -161,8 +161,8 @@ defmodule Demo.AiGroundingCatalogTest do
     scopes = key["scopes"]["description"]
     assert scopes =~ "A request over the JSON:API needs a scope that covers the action and a role that allows it"
     assert scopes =~ "no scopes authorizes nothing"
-    assert scopes =~ "The MCP endpoint does not read them"
-    assert scopes =~ "mint refuses a key left with none"
+    assert scopes =~ "MCP does not read them"
+    assert scopes =~ "create refuses an empty or malformed set"
     refute scopes =~ "A key's authority at use is its effective role"
 
     assert Samen.ApiKeyScopeGuard.guarded?(Demo.Crm.Contact)

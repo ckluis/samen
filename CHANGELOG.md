@@ -35,6 +35,12 @@ All notable changes to Samen are recorded here. The format follows
 - **Minting a key with no scopes is refused.** `Samen.Web.Settings.ApiKeys.mint/3` returns `{:error, :no_scopes}` when the
   requested scopes, after the trim to the minter's role (a viewer's `write` is dropped), leave none, and the API-keys page
   says "Choose at least one scope". Scopes may now be a family or `family.type`, not only `all`.
+- **The scopes a key is created with are checked.** The `ApiKey` resource's own `:create` refuses an empty scope map and any
+  scope key or value outside the grammar (`Samen.Scope.ApiKey.Grammar`: lowercase names, one optional dot, `read` and
+  `write`). The resource cannot know a host's router, so `Samen.Web.Settings.ApiKeys.mint/3` also refuses a family or
+  `family.type` the app does not expose over JSON:API, returning `{:error, {:invalid_scopes, reason}}` (`known_scopes:`
+  overrides the families it derives from the app's domains). A domain whose `samen_api_family/0` returns a name containing a
+  dot makes its JSON:API resources fail to compile, because `family.type` is split on the dot.
 - **`mix samen.gen.api_key_scopes`** writes the data migration for keys that already exist with empty scopes: an owner,
   admin or member key gets `{"all": ["read", "write"]}`, a viewer key `{"all": ["read"]}` (what their minter's role already
   allowed), in batches of 5,000 rows. A key with scopes, or with no known role, is not touched; the statements only match
@@ -42,13 +48,13 @@ All notable changes to Samen are recorded here. The format follows
   backfills. Committed for demo, driftwood (both key tables), pawchart and samen_web.
 - **Upgrading a host.** (1) Run `mix samen.gen.api_key_scopes` in the app and commit the migration; (2) run
   `mix ecto.migrate`, before or with the deploy; (3) re-mint, or edit the scopes of, any key that should be narrower or wider than its
-  minter's role allows, including a key minted with the page's former default of `read` only that needs to write; (4) a script or test that mints a key with `%{}` scopes now gets a key that is refused everywhere: give it
+  minter's role allows, including a key minted with the page's former default of `read` only that needs to write; (4) a script or test that creates a key with `%{}` scopes now gets an error: give it
   `%{"all" => ["read"]}` or the family it uses (`%{"crm" => ["read"]}`); (5) a resource of your own with
   `extensions: [AshJsonApi.Resource]` needs `authorizers: [Ash.Policy.Authorizer]`.
 - Proven by `api_key_scope_enforcement_test.exs` in demo and driftwood (through the real router and key plug, with a fixture
   domain for the write route and a `bypass`), the guards `api_key_scope_guard_test.exs` in demo, driftwood, pawchart and
   samen_core, `scope_api_key_permits_test.exs`, `api_key_scopes_gen_test.exs` (the migration run against a scratch database),
-  and sabotages 1584 to 1601. ADR-029 records the amendment.
+  and sabotages 1584 to 1607. ADR-029 records the amendment.
 
 ### Fixed: the flag-taking mix tasks refuse an unknown flag
 

@@ -739,7 +739,7 @@ defmodule Samen.Scopes.Identity.Blueprint do
           attribute(:scopes, :map,
             public?: true,
             default: %{},
-            description: "Scopes: all, a family (crm) or family.type (crm.contact), each read, write or both. A request over the JSON:API needs a scope that covers the action and a role that allows it; no scopes authorizes nothing. The MCP endpoint does not read them. No action changes it; mint refuses a key left with none."
+            description: "Scopes: all, a family (crm) or family.type (crm.contact), each read, write or both. A request over the JSON:API needs a scope that covers the action and a role that allows it; no scopes authorizes nothing. MCP does not read them. No action changes it; create refuses an empty or malformed set."
           )
 
           # The role of the minting membership — the actor ceiling this key inherits.
@@ -784,6 +784,11 @@ defmodule Samen.Scopes.Identity.Blueprint do
         # F3.5 same-org FK: an api_key may only reference a same-org membership.
         changes do
           change({Samen.Policy.SameOrgFk, relationships: [:membership]})
+        end
+
+        # A key is created only with scopes inside the grammar and at least one of them (`Samen.Scope.ApiKey.Grammar`).
+        validations do
+          validate(Samen.Scope.ApiKey.ValidScopes, on: :create)
         end
 
         actions do

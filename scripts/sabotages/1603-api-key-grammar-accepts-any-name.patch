@@ -1,0 +1,20 @@
+# SABOTAGE: the scope grammar accepts any text as a family or type name, so an upper-case, blank or 
+#   dotted-out scope key is taken
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/scope_api_key_grammar_test.exs
+# MUST_FAIL: RED: a scope key outside the grammar is refused
+diff --git a/samen_core/lib/samen/scope/api_key_grammar.ex b/samen_core/lib/samen/scope/api_key_grammar.ex
+index 114b0fbf..c47496bc 100644
+--- a/samen_core/lib/samen/scope/api_key_grammar.ex
++++ b/samen_core/lib/samen/scope/api_key_grammar.ex
+@@ -11,7 +11,7 @@ defmodule Samen.Scope.ApiKey.Grammar do
+   host's `catalogue/1` (the families and JSON:API types of its resources); the settings mint wrapper does that.
+   """
+ 
+-  @name ~r/\A[a-z][a-z0-9_]*\z/
++  @name ~r/./
+   @classes ["read", "write"]
+ 
+   @doc "`:ok`, or `{:error, reason}` (a sentence naming the first thing outside the grammar)."

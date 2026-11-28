@@ -42,6 +42,8 @@ defmodule Samen.Transformers.ApiKeyScopePolicy do
               "an API key's scopes are enforced by a policy, and a resource with no policies would serve its requests unchecked"
       end
 
+      check_family!(dsl_state)
+
       always = Ash.Policy.Check.Builtins.always()
 
       {:ok, forbid} =
@@ -57,6 +59,26 @@ defmodule Samen.Transformers.ApiKeyScopePolicy do
       {:ok, Transformer.add_entity(dsl_state, [:policies], policy)}
     else
       {:ok, dsl_state}
+    end
+  end
+
+  # A scope `family.type` is read by splitting on the dot, so a family that contains one would be taken for a
+  # family and a type: a domain's `samen_api_family/0` may not return one.
+  defp check_family!(dsl_state) do
+    domain = Transformer.get_persisted(dsl_state, :domain)
+
+    if is_atom(domain) and not is_nil(domain) and Code.ensure_compiled(domain) == {:module, domain} and
+         function_exported?(domain, :samen_api_family, 0) do
+      family = to_string(domain.samen_api_family())
+
+      if String.contains?(family, ".") do
+        raise Spark.Error.DslError,
+          module: Transformer.get_persisted(dsl_state, :module),
+          path: [:json_api],
+          message:
+            "the API scope family #{inspect(family)} of #{inspect(domain)} (its `samen_api_family/0`) contains a dot: " <>
+              "a scope `family.type` is split on the dot, so a family may not contain one"
+      end
     end
   end
 end

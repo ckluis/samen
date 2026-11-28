@@ -150,7 +150,7 @@ defmodule Samen.Web.ApiKeysHygieneTest do
       assert count.() == 0
 
       assert {:ok, _raw, row} =
-               ApiKeys.mint(mount(), admin_scope(user.id, org_id), base ++ [scopes: %{"crm.contact" => [:read]}])
+               ApiKeys.mint(mount(), admin_scope(user.id, org_id), base ++ [scopes: %{"crm.contact" => [:read]}, known_scopes: %{"crm" => ["contact"]}])
 
       assert row.scopes == %{"crm.contact" => ["read"]} or row.scopes == %{"crm.contact" => [:read]}
       assert count.() == 1
@@ -176,6 +176,27 @@ defmodule Samen.Web.ApiKeysHygieneTest do
   # ==========================================================================
   # F3.4 — bounded expiry at mint + safe-view exposure
   # ==========================================================================
+
+  describe "mint refuses scopes outside the grammar or the app's families" do
+    test "RED: a malformed scope, an unknown family and an unknown type are refused and nothing is written; CONTROL: known ones mint" do
+      org_id = Ash.UUID.generate()
+      {user, membership} = seed_membership!(org_id)
+      base = [membership_id: membership.id, minter_role: :admin, known_scopes: %{"crm" => ["contact"]}]
+      count = fn -> Ash.count!(Samen.WebTest.Operator.ApiKey, authorize?: false) end
+
+      for scopes <- [%{"CRM" => [:read]}, %{"crm.contact.x" => [:read]}, %{all: [:delete]}, %{all: []}, %{"nope" => [:read]}, %{"crm.nope" => [:read]}, %{"billing" => [:read]}] do
+        assert {:error, {:invalid_scopes, _}} = ApiKeys.mint(mount(), admin_scope(user.id, org_id), base ++ [scopes: scopes]), inspect(scopes)
+      end
+
+      assert count.() == 0
+
+      for scopes <- [%{all: [:read]}, %{"crm" => [:read]}, %{"crm.contact" => [:read, :write]}] do
+        assert {:ok, _raw, _row} = ApiKeys.mint(mount(), admin_scope(user.id, org_id), base ++ [scopes: scopes]), inspect(scopes)
+      end
+
+      assert count.() == 3
+    end
+  end
 
   describe "minted keys are ALWAYS bounded (F3.4)" do
     test "a key minted with no requested expiry defaults to now + default_ttl — never unbounded" do

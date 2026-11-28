@@ -666,20 +666,18 @@ try do
   # org, role and route as the tenant key above, which was served: only the scopes differ.
   raw_empty_key = "sk_" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
 
-  {:ok, _empty_key} =
-    #{module}.Operator.ApiKey
-    |> Ash.Changeset.for_create(:create, %{
+  # the resource's own create refuses a key with no scopes, so the row is seeded (as a key stored before scopes
+  # were required is): it bypasses the action
+  _empty_key =
+    Ash.Seed.seed!(#{module}.Operator.ApiKey, %{
       plane: :tenant,
       scopes: %{},
       minter_role: :admin,
       org_id: api_org,
-      membership_id: api_mbr.id
+      membership_id: api_mbr.id,
+      expires_at: DateTime.add(DateTime.utc_now(), 3600, :second),
+      token_digest: #{module}Web.Api.KeyAuthPlug.digest(raw_empty_key)
     })
-    |> Ash.Changeset.force_change_attribute(
-      :token_digest,
-      #{module}Web.Api.KeyAuthPlug.digest(raw_empty_key)
-    )
-    |> Ash.create(authorize?: false)
 
   empty_headers = [{~c"authorization", String.to_charlist("Bearer " <> raw_empty_key)}]
 

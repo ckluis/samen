@@ -147,7 +147,7 @@ defmodule Demo.IdentityCatalogBehaviourTest do
       ApiKey
       |> Ash.Changeset.for_create(
         :create,
-        Map.merge(%{org_id: org.id, membership_id: admin_member.membership.id, minter_role: :admin}, attrs),
+        Map.merge(%{org_id: org.id, membership_id: admin_member.membership.id, minter_role: :admin, scopes: %{"all" => ["read"]}}, attrs),
         actor: admin
       )
       |> Ash.Changeset.force_change_attribute(:token_digest, "b1-#{n()}")
