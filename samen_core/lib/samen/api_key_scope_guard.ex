@@ -53,6 +53,15 @@ defmodule Samen.ApiKeyScopeGuard do
     for {family, [_, _ | _]} <- families(router), do: family
   end
 
+  @doc """
+  Families of `router` that contain a dot. The transformer refuses one at compile time only when the domain is already
+  compiled; this reads the loaded domains, so a host guard test fails on one the compile-time check skipped.
+  """
+  @spec dotted_families(module()) :: [String.t()]
+  def dotted_families(router) do
+    router |> families() |> Map.keys() |> Enum.filter(&String.contains?(&1, ".")) |> Enum.sort()
+  end
+
   defp domain_family(domain) do
     if Code.ensure_loaded?(domain) and function_exported?(domain, :samen_api_family, 0),
       do: to_string(domain.samen_api_family()),

@@ -24,5 +24,6 @@ defmodule Driftwood.ApiKeyScopeGuardTest do
   test "scope families are unique per router" do
     assert Samen.ApiKeyScopeGuard.families(@router) != %{}
     assert Samen.ApiKeyScopeGuard.duplicate_families(@router) == []
+    assert Samen.ApiKeyScopeGuard.dotted_families(@router) == []
   end
 end

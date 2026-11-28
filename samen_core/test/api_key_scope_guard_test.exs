@@ -104,6 +104,15 @@ defmodule Samen.ApiKeyScopeGuardTest do
     end
   end
 
+  defmodule Dotted.Crm do
+    use Ash.Domain, validate_config_inclusion?: false
+    def samen_api_family, do: "crm.contact"
+  end
+
+  defmodule DottedFamilyRouter do
+    def domains, do: [Samen.ApiKeyScopeGuardTest.Dotted.Crm, Samen.ApiKeyScopeGuardTest.Two.Billing]
+  end
+
   defmodule SharedFamilyRouter do
     def domains, do: [Samen.ApiKeyScopeGuardTest.One.Crm, Samen.ApiKeyScopeGuardTest.Two.Crm]
   end
@@ -124,6 +133,11 @@ defmodule Samen.ApiKeyScopeGuardTest do
     assert report.exposed == []
     assert report.unguarded == []
     refute Samen.ApiKeyScopeGuard.guarded?(Thing)
+  end
+
+  test "RED: a family containing a dot is reported; CONTROL: dotless families are not" do
+    assert Samen.ApiKeyScopeGuard.dotted_families(DottedFamilyRouter) == ["crm.contact"]
+    assert Samen.ApiKeyScopeGuard.dotted_families(DistinctFamilyRouter) == []
   end
 
   test "RED: a domain-level bypass ahead of the scope policy is not guarded; CONTROL: the same policy under a plain domain is" do
