@@ -113,9 +113,7 @@ defmodule Samen.Api.Help.ErrorHints do
 
   defp vnd_api?(conn), do: conn |> get_resp_header("content-type") |> Enum.any?(&String.starts_with?(&1, "application/vnd.api+json"))
 
-  defp decode(body) do
-    Jason.decode(IO.iodata_to_binary(body))
-  rescue
-    _ -> :error
-  end
+  # `resp_body` is iodata for a response sent with a body; a file or chunked response has none to rewrite.
+  defp decode(body) when is_binary(body) or is_list(body), do: Jason.decode(IO.iodata_to_binary(body))
+  defp decode(_body), do: :error
 end
