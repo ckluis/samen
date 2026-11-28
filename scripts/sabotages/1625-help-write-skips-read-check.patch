@@ -6,15 +6,17 @@
 # TEST_FILES: test/api_help_test.exs
 # MUST_FAIL: (c) the same iff holds for a write route
 diff --git a/samen_core/lib/samen/api/help.ex b/samen_core/lib/samen/api/help.ex
-index 6e6b6e92..9a2910db 100644
+index 7db4f603..7e7cb5f5 100644
 --- a/samen_core/lib/samen/api/help.ex
 +++ b/samen_core/lib/samen/api/help.ex
-@@ -125,7 +125,7 @@ defmodule Samen.Api.Help do
-         name -> Ash.Resource.Info.action(resource, name)
+@@ -171,8 +171,8 @@ defmodule Samen.Api.Help do
        end
  
--    read != nil and can?(actor, resource, read, domain)
-+    read != nil
-   end
- 
-   defp loadable?(_actor, _resource, _route, _action, _domain), do: true
+     with %{} <- read,
+-         {answer, memo} when answer != :no <- ask(memo, actor, resource, read, domain) do
+-      {:ok, answer, [{resource, [:read]}], memo}
++         {_answer, memo} <- ask(memo, actor, resource, read, domain) do
++      {:ok, :yes, [{resource, [:read]}], memo}
+     else
+       {:no, memo} -> {:no, memo}
+       _ -> {:no, memo}
