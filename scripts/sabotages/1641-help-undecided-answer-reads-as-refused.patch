@@ -1,0 +1,19 @@
+# SABOTAGE: Help treats Ash's maybe answer as refused, so an action allowed for some records only is dropped
+#
+# Flips the named test(s).
+# APP: demo
+# TEST_FILES: test/api_help_shapes_test.exs
+# MUST_FAIL: RED: a write that Ash can only decide with the record is listed as conditional
+diff --git a/samen_core/lib/samen/api/help.ex b/samen_core/lib/samen/api/help.ex
+index 7db4f603..06bc0a8e 100644
+--- a/samen_core/lib/samen/api/help.ex
++++ b/samen_core/lib/samen/api/help.ex
+@@ -232,7 +232,7 @@ defmodule Samen.Api.Help do
+       {:ok, true} -> :yes
+       {:ok, true, %Ash.Query{filter: nil}} -> :yes
+       {:ok, true, %Ash.Query{}} -> :maybe
+-      {:ok, :maybe} -> :maybe
++      {:ok, :maybe} -> :no
+       {:error, error} -> report_can(error)
+       _ -> :no
+     end
