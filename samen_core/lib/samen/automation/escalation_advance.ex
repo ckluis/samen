@@ -19,6 +19,14 @@ defmodule Samen.Automation.EscalationAdvance do
        An illegal target (neither declared `to`) is refused by the machine
        (`NoMatchingTransition`) — a resolved/exhausted/cancelled escalation can
        never be re-advanced (§7.1: "never walks further steps").
+
+  ## One advance per step (ADR-039 §7.3)
+
+  The update is guarded in SQL on `current_step`: it applies only while the row is still at
+  the step this advance was read at (`filter(current_step == ^step)`). Of two advances of the
+  same step, one applies and the other matches no row and is refused as a stale record, so a
+  step is notified once. The step is the one on the record the scan handed over; a record that
+  arrives without it falls back to the reloaded snapshot.
   """
   use Ash.Resource.Change
 
@@ -39,10 +47,19 @@ defmodule Samen.Automation.EscalationAdvance do
     advance(changeset, escalation)
   end
 
+  # The step the caller read: the record's own `current_step`, else the reloaded snapshot's.
+  defp read_step(changeset, escalation) do
+    case Ash.Changeset.get_data(changeset, :current_step) do
+      step when is_integer(step) -> step
+      _not_loaded -> escalation.current_step || 0
+    end
+  end
+
   defp advance(changeset, nil), do: changeset
 
   defp advance(changeset, escalation) do
-    step_idx = escalation.current_step || 0
+    step_idx = read_step(changeset, escalation)
+    changeset = Ash.Changeset.filter(changeset, Ash.Expr.expr(current_step == ^step_idx))
     chain = escalation.chain || []
     deadline_at = escalation.deadline_at
 

@@ -6,6 +6,7 @@ defmodule Samen.Automation.EngineGuardsTest do
 
     * **Schedule scan (§4.1)** — two scans of one due workflow produce one run and advance
       `next_fire_at` once.
+    * **Escalation advance (§7.3)** — two advances of the same step notify and advance once.
     * **Loop / depth guards (§4.7)** — a write made by a run carries `{depth, chain}`, so the
       event it captures inherits `depth + 1` and `chain ++ [workflow_id]`.
   """
@@ -16,7 +17,9 @@ defmodule Samen.Automation.EngineGuardsTest do
 
   alias SamenCore.TestRepo
   alias SamenCore.Support.AgentMembershipFixture
-  alias SamenCore.Support.AutomationFixture.{Run, Target, Workflow}
+  alias Samen.Automation.Escalate
+  alias SamenCore.Support.AutomationFixture.{Escalation, Run, Target, Workflow}
+  alias SamenCore.Support.NotificationFixture.Notification
 
   @target_key "SamenCore.Support.AutomationFixture.Target"
 
@@ -34,11 +37,18 @@ defmodule Samen.Automation.EngineGuardsTest do
       repo: TestRepo
     )
 
+    prev_escalate = Application.get_env(:samen_core, Samen.Automation.Escalate)
+    Application.put_env(:samen_core, Samen.Automation.Escalate, escalation_module: Escalation, repo: TestRepo)
+
     # The owner's real membership is resolved through the host seam (ADR-039 §4.5).
     prev_agent = AgentMembershipFixture.install!()
     AgentMembershipFixture.reset()
 
     on_exit(fn ->
+      if prev_escalate,
+        do: Application.put_env(:samen_core, Samen.Automation.Escalate, prev_escalate),
+        else: Application.delete_env(:samen_core, Samen.Automation.Escalate)
+
       if prev_engine,
         do: Application.put_env(:samen_core, Samen.Notifications.Engine, prev_engine),
         else: Application.delete_env(:samen_core, Samen.Notifications.Engine)
@@ -148,6 +158,33 @@ defmodule Samen.Automation.EngineGuardsTest do
     end
   end
 
+  describe "escalation advance (ADR-039 §7.3)" do
+    test "two advances of the same step apply once: the second matches no row" do
+      org = Ash.UUID.generate()
+      escalation = open_escalation!(org, "advance-twice")
+
+      # Two timer jobs hold the same copy of the escalation, both at step 0.
+      stale_a = Ash.get!(Escalation, escalation.id, authorize?: false)
+      stale_b = Ash.get!(Escalation, escalation.id, authorize?: false)
+
+      assert {:ok, %{current_step: 1}} = advance_step(stale_a)
+      assert {:error, error} = advance_step(stale_b)
+      assert Enum.any?(List.wrap(error.errors), &match?(%Ash.Error.Changes.StaleRecord{}, &1))
+
+      assert Ash.get!(Escalation, escalation.id, authorize?: false).current_step == 1
+      assert step_notifications(org) == 1
+    end
+
+    test "the next step still advances from a current copy (the control)" do
+      org = Ash.UUID.generate()
+      escalation = open_escalation!(org, "advance-in-order")
+
+      assert {:ok, %{current_step: 1}} = advance_step(escalation)
+      assert {:ok, %{current_step: 2}} = advance_step(Ash.get!(Escalation, escalation.id, authorize?: false))
+      assert step_notifications(org) == 2
+    end
+  end
+
   describe "owner actor (ADR-039 §4.5)" do
     test "a run acts with the owner's real role: a member owner writes, a viewer owner cannot" do
       org = Ash.UUID.generate()
@@ -223,6 +260,36 @@ defmodule Samen.Automation.EngineGuardsTest do
 
   defp dispatch_due(copy) do
     copy |> Ash.Changeset.for_update(:dispatch_due, %{}) |> Ash.update(authorize?: false)
+  end
+
+  defp open_escalation!(org, key) do
+    past = DateTime.utc_now() |> DateTime.add(-120, :second) |> DateTime.truncate(:second)
+
+    chain =
+      for minutes <- [0, 1, 2],
+          do: %{"after_minutes" => minutes, "recipient" => "org", "channel" => "in_app"}
+
+    {:ok, escalation} =
+      Escalate.open(%{
+        org_id: org,
+        kind: "test.guard",
+        dedupe_key: key,
+        subject_ref: "samen:crm.opportunity:#{key}",
+        deadline_at: past,
+        chain: chain
+      })
+
+    escalation
+  end
+
+  defp advance_step(copy), do: copy |> Ash.Changeset.for_update(:advance_step, %{}) |> Ash.update(authorize?: false)
+
+  defp step_notifications(org) do
+    Notification
+    |> filter(org_id == ^org)
+    |> filter(event_type == "escalation_step")
+    |> Ash.read!(authorize?: false)
+    |> length()
   end
 
   defp member!(org, role \\ :member) do
